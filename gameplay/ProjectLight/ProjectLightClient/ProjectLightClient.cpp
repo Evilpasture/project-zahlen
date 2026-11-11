@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
@@ -823,13 +824,13 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
 
         const auto& data = value.arrayVal;
         auto scaled = [](const MsgPackValue& component) { return component.AsFloat() / VEC3_SCALE; };
-        const JPH::Vec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
+        const FVec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
         const JPH::Quat rotation = JPH::Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
         object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
-        object->linearVelocity   = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
+        object->linearVelocity   = FVec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
         object->hasPhysicsSample = true;
         object->transformDirty = true;
     }
@@ -843,7 +844,7 @@ void ClientSession::ApplyControllerState(const MsgPackValue& packet) {
 
     NetworkTransformHistory& history = m_playerControllerStates[userId];
     history.Push(NetworkTransformSample {
-        .position = JPH::Vec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
+        .position = FVec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
         .rotation = JPH::Quat(
             state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()
         ).Normalized(),
@@ -1276,12 +1277,12 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         const auto movement = registry.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
-            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : static_cast<JPH::Quat>(state.currentRotation).Normalized();
-            const JPH::Vec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
+            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : JPH::Quat(state.currentRotation.x, state.currentRotation.y, state.currentRotation.z, state.currentRotation.w).Normalized();
+            const FVec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
-                rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW(),
-                velocity.GetX(), velocity.GetY(), velocity.GetZ()
+                rotation.x, rotation.y, rotation.z, rotation.w,
+                velocity.x, velocity.y, velocity.z
             }));
             HumanoidState humanoidState = HumanoidState::Idle;
             if (movement) {
@@ -1329,9 +1330,9 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
         MsgPackValue key = MsgPackValue::UInt(uid);
         MsgPackValue value = FloatArray({
-            transform.position.GetX(), transform.position.GetY(), transform.position.GetZ(),
-            transform.rotation.GetX(), transform.rotation.GetY(), transform.rotation.GetZ(), transform.rotation.GetW(),
-            transform.linearVelocity.GetX(), transform.linearVelocity.GetY(), transform.linearVelocity.GetZ()
+            transform.position.x, transform.position.y, transform.position.z,
+            transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w,
+            transform.linearVelocity.x, transform.linearVelocity.y, transform.linearVelocity.z
         });
         ownedTransforms.mapVal.emplace_back(std::move(key), std::move(value));
     }
@@ -1364,7 +1365,7 @@ void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
         // definition; the mirror keeps its records and re-spawns from them.
         object.materialId = InvalidMaterialID;
         object.hasPhysicsBody = false;
-        object.spawnedSize = JPH::Vec3::sZero();
+        object.spawnedSize = FVec3::sZero();
         object.visualDirty = true;
         object.transformDirty = true;
     }

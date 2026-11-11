@@ -3,6 +3,7 @@
 
 // File: utils/zcook/Transform.cpp
 #include "Transform.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -143,8 +144,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         result.primitives.push_back(outPrim);
     }
 
-    std::vector<JPH::Vec3> tangents(rawVerts.size(), JPH::Vec3::sZero());
-    std::vector<JPH::Vec3> bitangents(rawVerts.size(), JPH::Vec3::sZero());
+    std::vector<FVec3> tangents(rawVerts.size(), FVec3::sZero());
+    std::vector<FVec3> bitangents(rawVerts.size(), FVec3::sZero());
 
     for (size_t i = 0; i + 2 < result.indices.size(); i += 3) {
         uint32_t i0 = result.indices[i + 0];
@@ -158,12 +159,12 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         auto& v1 = rawVerts[i1];
         auto& v2 = rawVerts[i2];
 
-        JPH::Vec3 p0(v0.px, v0.py, v0.pz);
-        JPH::Vec3 p1(v1.px, v1.py, v1.pz);
-        JPH::Vec3 p2(v2.px, v2.py, v2.pz);
+        FVec3 p0(v0.px, v0.py, v0.pz);
+        FVec3 p1(v1.px, v1.py, v1.pz);
+        FVec3 p2(v2.px, v2.py, v2.pz);
 
-        JPH::Vec3 e1 = p1 - p0;
-        JPH::Vec3 e2 = p2 - p0;
+        FVec3 e1 = p1 - p0;
+        FVec3 e2 = p2 - p0;
 
         float du1 = v1.u - v0.u;
         float dv1 = v1.v - v0.v;
@@ -173,8 +174,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         float det = du1 * dv2 - dv1 * du2;
         float r   = (det != 0.0f) ? 1.0f / det : 0.0f;
 
-        JPH::Vec3 t = (e1 * dv2 - e2 * dv1) * r;
-        JPH::Vec3 b = (e2 * du1 - e1 * du2) * r;
+        FVec3 t = (e1 * dv2 - e2 * dv1) * r;
+        FVec3 b = (e2 * du1 - e1 * du2) * r;
 
         tangents[i0] += t;
         tangents[i1] += t;
@@ -198,22 +199,22 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
         result.positions[i] = {.position = {rv.px, rv.py, rv.pz}};
 
         // 2. Compute and pack the tangent frame and surface streams
-        JPH::Vec3 n(rv.nx, rv.ny, rv.nz);
-        JPH::Vec3 t = tangents[i];
-        JPH::Vec3 tangentVec;
+        FVec3 n(rv.nx, rv.ny, rv.nz);
+        FVec3 t = tangents[i];
+        FVec3 tangentVec;
         float     sign = 1.0f;
 
-        if (t.LengthSq() > 1e-6f) {
-            tangentVec = (t - n * n.Dot(t)).Normalized();
-            sign       = n.Cross(t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+        if (t.LengthSquared() > 1e-6f) {
+            tangentVec = (t - n * Dot(n, t)).Normalized();
+            sign       = Cross(n, t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
         } else {
-            JPH::Vec3 absN(std::abs(n.GetX()), std::abs(n.GetY()), std::abs(n.GetZ()));
-            JPH::Vec3 fallbackT = (absN.GetX() < 0.999f) ? JPH::Vec3(1.0f, 0.0f, 0.0f) : JPH::Vec3(0.0f, 1.0f, 0.0f);
-            tangentVec          = (fallbackT - n * n.Dot(fallbackT)).Normalized();
+            FVec3 absN(std::abs(n.x), std::abs(n.y), std::abs(n.z));
+            FVec3 fallbackT = (absN.x < 0.999f) ? FVec3(1.0f, 0.0f, 0.0f) : FVec3(0.0f, 1.0f, 0.0f);
+            tangentVec          = (fallbackT - n * Dot(n, fallbackT)).Normalized();
         }
 
         result.tangentFrames[i] = {
-            .normal = Math::PackNormal(rv.nx, rv.ny, rv.nz), .tangent = Math::PackNormal(tangentVec.GetX(), tangentVec.GetY(), tangentVec.GetZ(), sign)
+            .normal = Math::PackNormal(rv.nx, rv.ny, rv.nz), .tangent = Math::PackNormal(tangentVec.x, tangentVec.y, tangentVec.z, sign)
         };
         result.surfaces[i] = {.uv = Math::PackUV(rv.u, rv.v), .color = Math::PackColor(rv.r, rv.g, rv.b, rv.a)};
 

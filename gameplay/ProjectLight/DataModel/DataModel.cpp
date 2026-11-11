@@ -4,6 +4,7 @@
 // gameplay/ProjectLight/DataModel/DataModel.cpp
 
 #include <DataModel/DataModel.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
@@ -31,8 +32,8 @@ consteval auto ReflectedClassName() noexcept -> std::string_view {
     return ZHLN::Reflect::TypeName<T>();
 }
 
-auto SameVec3(const JPH::Vec3& lhs, const JPH::Vec3& rhs) noexcept -> bool {
-    return lhs.GetX() == rhs.GetX() && lhs.GetY() == rhs.GetY() && lhs.GetZ() == rhs.GetZ();
+auto SameVec3(const FVec3& lhs, const FVec3& rhs) noexcept -> bool {
+    return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
 auto WithDefaultName(std::string name, std::string_view fallback) -> std::string {
@@ -560,7 +561,7 @@ auto BasePart::NetworkOwner() const noexcept -> JPH::Ref<Player> {
     return StaticRefCast<Player>(ResolveInstance(m_networkOwnerId));
 }
 
-void BasePart::SetPosition(const JPH::Vec3& value) {
+void BasePart::SetPosition(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_position, value)) {
         return;
     }
@@ -568,7 +569,7 @@ void BasePart::SetPosition(const JPH::Vec3& value) {
     NotifyChanged("Position");
 }
 
-void BasePart::SetRotation(const JPH::Vec3& value) {
+void BasePart::SetRotation(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_rotationEuler, value)) {
         return;
     }
@@ -576,7 +577,7 @@ void BasePart::SetRotation(const JPH::Vec3& value) {
     NotifyChanged("Rotation");
 }
 
-void BasePart::SetSize(const JPH::Vec3& value) {
+void BasePart::SetSize(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_size, value)) {
         return;
     }
@@ -584,7 +585,7 @@ void BasePart::SetSize(const JPH::Vec3& value) {
     NotifyChanged("Size");
 }
 
-void BasePart::SetColor(const JPH::Vec3& value) {
+void BasePart::SetColor(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_color, value)) {
         return;
     }
@@ -720,7 +721,7 @@ SpawnPoint::SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std
     Instance(state, id, std::string(ReflectedClassName<SpawnPoint>()), std::move(name)) {
 }
 
-void SpawnPoint::SetPosition(const JPH::Vec3& value) {
+void SpawnPoint::SetPosition(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_position, value)) {
         return;
     }
@@ -728,7 +729,7 @@ void SpawnPoint::SetPosition(const JPH::Vec3& value) {
     NotifyChanged("Position");
 }
 
-void SpawnPoint::SetRotation(const JPH::Vec3& value) {
+void SpawnPoint::SetRotation(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_rotation, value)) {
         return;
     }
@@ -748,7 +749,7 @@ void Decal::SetTextureID(std::string value) {
     NotifyChanged("TextureId");
 }
 
-void Decal::SetColor(const JPH::Vec3& value) {
+void Decal::SetColor(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_color, value)) {
         return;
     }
@@ -892,7 +893,7 @@ auto Motor::SetPart2(const JPH::Ref<BasePart>& part) -> std::expected<void, Data
     return {};
 }
 
-void Motor::SetOffset1(const JPH::Vec3& value) {
+void Motor::SetOffset1(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_offset1, value)) {
         return;
     }
@@ -900,7 +901,7 @@ void Motor::SetOffset1(const JPH::Vec3& value) {
     NotifyChanged("Offset1");
 }
 
-void Motor::SetOffset2(const JPH::Vec3& value) {
+void Motor::SetOffset2(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_offset2, value)) {
         return;
     }

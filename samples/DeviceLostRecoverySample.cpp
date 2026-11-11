@@ -26,6 +26,8 @@
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -78,11 +80,11 @@ void InstallProvokeSignal() {
 
 inline constexpr float     kAmbientExposure = 10.0f;
 inline constexpr float     kSunIntensity    = 28.0f;
-inline const JPH::Vec3     kSunPosition {25.0f, 60.0f, 25.0f};
-inline const JPH::Vec3     kSunColor {1.00f, 0.96f, 0.90f};
-inline const JPH::Vec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
-inline const JPH::Vec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
-inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
+inline const FVec3     kSunPosition {25.0f, 60.0f, 25.0f};
+inline const FVec3     kSunColor {1.00f, 0.96f, 0.90f};
+inline const FVec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
+inline const FVec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
+inline const FVec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 
 [[nodiscard]] auto EnvironmentU32(const char* name) -> uint32_t {
     const char* value = std::getenv(name);
@@ -160,7 +162,7 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
     entities.push_back(registry.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = JPH::Vec3(0.45f, 1.00f, 0.30f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = FVec3(0.45f, 1.00f, 0.30f).Normalized()
         }
     ));
     return entities;

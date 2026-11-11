@@ -3,6 +3,7 @@
 
 // extensions/Camera/TargetCamera.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "TargetCamera.hpp"
 
@@ -27,11 +28,11 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
     }
     testsRun = true;
 
-    if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) || !std::isfinite(cam.position.GetZ())) {
+    if (!std::isfinite(cam.position.x) || !std::isfinite(cam.position.y) || !std::isfinite(cam.position.z)) {
         ZHLN::Log(
             "[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
             "({:.3f}, {:.3f}, {:.3f})",
-            cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()
+            cam.position.x, cam.position.y, cam.position.z
         );
     }
     if (cam.fov < 1.0f || cam.fov > 180.0f) {
@@ -67,7 +68,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
             return;
         }
 
-        JPH::Vec3 targetPos = JPH::Vec3::sZero();
+        FVec3 targetPos = FVec3::sZero();
 
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
         bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
@@ -109,14 +110,14 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         // 5. EXPONENTIAL SMOOTHING & FINAL POSITION
         float     yawRad   = JPH::DegreesToRadians(camComp.yaw);
         float     pitchRad = JPH::DegreesToRadians(camComp.pitch);
-        JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+        FVec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
 
         if (camComp.hasInitSmoothTarget == 0) {
             camComp.smoothTargetPos     = targetPos;
             camComp.hasInitSmoothTarget = 1;
         }
 
-        if ((targetPos - camComp.smoothTargetPos).LengthSq() > 100.0f) {
+        if ((targetPos - camComp.smoothTargetPos).LengthSquared() > 100.0f) {
             camComp.smoothTargetPos = targetPos; // Teleport instantly on large displacements
         } else if (camComp.stiffness > 0.0f) {
             float factor = 1.0f - std::exp(-camComp.stiffness * dt);

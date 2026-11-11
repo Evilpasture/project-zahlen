@@ -4,6 +4,7 @@
 // gameplay/Interaction/InteractionComponents.hpp
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
@@ -76,7 +77,7 @@ enum class TriggerFlags : uint32_t {
 struct TriggerComponent {
     float        radius      = 2.0f;
     TriggerFlags flags       = TriggerFlags::Active;
-    JPH::Vec3    halfExtents = JPH::Vec3::sZero(); // If > 0, evaluated as an AABB trigger volume
+    FVec3    halfExtents = FVec3::sZero(); // If > 0, evaluated as an AABB trigger volume
     float        wait        = 0.2f;
     float        waitTimer   = 0.0f;
 
@@ -112,13 +113,13 @@ struct DoorComponent {
     DoorFlags flags = DoorFlags::None;
 
     // Linear motion (func_door)
-    JPH::Vec3 closedPosition = JPH::Vec3::sZero();
-    JPH::Vec3 openPosition   = JPH::Vec3::sZero();
+    FVec3 closedPosition = FVec3::sZero();
+    FVec3 openPosition   = FVec3::sZero();
 
     // Angular motion (func_door_rotating, prop_door_rotating)
     JPH::Quat closedRotation = JPH::Quat::sIdentity();
     JPH::Quat openRotation   = JPH::Quat::sIdentity();
-    JPH::Vec3 rotationAxis   = JPH::Vec3::sAxisY();
+    FVec3 rotationAxis   = FVec3::sAxisY();
     float     rotationAngle  = 90.0f; // degrees
 
     float speed     = 2.0f; // travel progress speed (1.0 / duration)
@@ -150,8 +151,8 @@ struct ButtonComponent {
     ButtonState state = ButtonState::Off;
     ButtonFlags flags = ButtonFlags::UseActivates;
 
-    JPH::Vec3 unpressedPosition = JPH::Vec3::sZero();
-    JPH::Vec3 pressedPosition   = JPH::Vec3::sZero();
+    FVec3 unpressedPosition = FVec3::sZero();
+    FVec3 pressedPosition   = FVec3::sZero();
 
     float speed     = 2.0f;
     float progress  = 0.0f; // 0.0 (unpressed) -> 1.0 (pressed)

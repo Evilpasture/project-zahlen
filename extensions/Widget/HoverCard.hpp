@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
 // ===========================================================================
 // The card that appears when the pointer is over something.
 //
@@ -59,8 +60,8 @@ struct HoverCardStyle {
     float cornerRadius = 4.0f;
     float maxWidth     = 0.0f; // 0 leaves the width to the longest line
 
-    JPH::Vec4 ink     = {0.10f, 0.11f, 0.14f, 0.98f};
-    JPH::Vec4 textInk = {0.78f, 0.84f, 0.92f, 1.00f};
+    FVec4 ink     = {0.10f, 0.11f, 0.14f, 0.98f};
+    FVec4 textInk = {0.78f, 0.84f, 0.92f, 1.00f};
 };
 
 // What the pointer is over, if anything, while a panel is being drawn.

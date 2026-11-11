@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -102,13 +104,13 @@ struct PBRTestSuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({20.0f, 0.0f, 0.0f})
+                    .position = FVec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({20.0f, 0.0f, 0.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
-                    .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                    .color     = FVec3(1.0f, 1.0f, 1.0f),
                     .intensity = 40.0f,
-                    .direction = JPH::Vec3(0.0f, 0.35f, 0.93f).Normalized() // Direction TO the sun
+                    .direction = FVec3(0.0f, 0.35f, 0.93f).Normalized() // Direction TO the sun
                 }
             );
 
@@ -118,7 +120,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
@@ -247,16 +249,16 @@ struct PBRTestSuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 0.0f, 0.0f})
+                    .position = FVec3(0.0f, 10.0f, 10.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 0.0f, 0.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
-                    .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                    .color     = FVec3(1.0f, 1.0f, 1.0f),
                     .intensity = 220.0f,
                     // Exactly behind the camera: N=V=L on the +Z face so the
                     // GGX peak is on-screen. A few degrees of elevation puts
                     // r=0.05's lobe between texels (maxL≈15, warm=0).
-                    .direction = JPH::Vec3(0.0f, 0.0f, 1.0f)
+                    .direction = FVec3(0.0f, 0.0f, 1.0f)
                 }
             );
 
@@ -265,7 +267,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
@@ -441,7 +443,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw = -90.0f;
             cam.pitch = 0.0f;
             ZHLN::PrefabFactory::CreateBox(
@@ -531,8 +533,8 @@ struct PBRTestSuite {
             // light. Keeping the conditioned IBL removes the HDR disk from
             // both specular and diffuse; it is NOT added as a second sun.
             const ZHLN::Entity authored = reg.Create(ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                .intensity = 0.0f, .direction = JPH::Vec3(0.0f, 0.0f, 1.0f)
+                .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f),
+                .intensity = 0.0f, .direction = FVec3(0.0f, 0.0f, 1.0f)
             });
             ZHLN::Test::Headless::TickFrames(*engine, 3, 1.0f / 60.0f);
             if (!reg.GetEntitiesWith<ZHLN::Components::EnvironmentSunTagComponent>().empty())
@@ -583,7 +585,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw = -90.0f;
             cam.pitch = 0.0f;
 
@@ -671,9 +673,9 @@ struct PBRTestSuite {
                 gfx.post.bloomStrength           = 0.0f;
                 gfx.post.glowIntensity           = 0.0f;
                 gfx.post.vignetteIntensity       = 0.0f;
-                gfx.environment.skyZenith        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                gfx.environment.skyHorizon       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-                gfx.environment.skyGround        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyZenith        = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyHorizon       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                gfx.environment.skyGround        = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
             });
             ZHLN::EnvironmentImage env {.width = 64, .height = 32};
             env.rgba.resize(64u * 32u * 4u);
@@ -705,7 +707,7 @@ struct PBRTestSuite {
             const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>();
             if (!camComp) return std::unexpected(PBRTestError::EngineInitFailed);
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw = -90.0f;
             cam.pitch = 0.0f;
             cam.fov = 60.0f;
@@ -751,7 +753,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 3.0f);
+            cam.position = FVec3(0.0f, 1.0f, 3.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
 

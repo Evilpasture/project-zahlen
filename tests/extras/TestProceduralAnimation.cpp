@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
@@ -56,8 +58,8 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
         outPrefab.nodes[node].parentIndex    = source.parent != nullptr ? static_cast<int32_t>(source.parent - data.nodes) : -1;
         outPrefab.nodes[node].hasMesh        = source.mesh != nullptr;
         outPrefab.nodes[node].localTransform = JPH::Mat44(
-            JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
-            JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+            FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+            FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15])
         );
     }
 
@@ -82,8 +84,8 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
                 float raw[16] {};
                 cgltf_accessor_read_float(skin.inverse_bind_matrices, jointIndex, raw, 16);
                 inverseBind = JPH::Mat44(
-                    JPH::Vec4(raw[0], raw[1], raw[2], raw[3]), JPH::Vec4(raw[4], raw[5], raw[6], raw[7]), JPH::Vec4(raw[8], raw[9], raw[10], raw[11]),
-                    JPH::Vec4(raw[12], raw[13], raw[14], raw[15])
+                    FVec4(raw[0], raw[1], raw[2], raw[3]), FVec4(raw[4], raw[5], raw[6], raw[7]), FVec4(raw[8], raw[9], raw[10], raw[11]),
+                    FVec4(raw[12], raw[13], raw[14], raw[15])
                 );
             }
 
@@ -108,8 +110,8 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
     float matrix[16] {};
     cgltf_node_transform_world(&node, matrix);
     return JPH::Mat44(
-        JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
-        JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+        FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+        FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15])
     );
 }
 
@@ -145,14 +147,14 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> imported_bounds_fit_virtual_character_hull() {
             ZHLN::ModelPrefab prefab;
-            prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 1.0f, 0.0f))});
+            prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = JPH::Mat44::sTranslation(FVec3(0.0f, 1.0f, 0.0f))});
             prefab.nodes.push_back(
-                {.name = ZHLN::String64("Nested"), .parentIndex = 0, .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, -1.0f))}
+                {.name = ZHLN::String64("Nested"), .parentIndex = 0, .localTransform = JPH::Mat44::sTranslation(FVec3(1.0f, 2.0f, -1.0f))}
             );
 
             ZHLN::ModelPart nested;
             nested.nodeIndex      = 1;
-            nested.localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.5f, 0.0f, 0.25f));
+            nested.localTransform = JPH::Mat44::sTranslation(FVec3(0.5f, 0.0f, 0.25f));
             // Whole-pod assignments: JPH::Float3's operator[] is const-only, so
             // the lanes are write-only through .x/.y/.z or not at all.
             nested.localMin      = JPH::Float3 {-1.0f, -2.0f, -0.5f};
@@ -170,8 +172,8 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::Physics::DualShapeConfig            hull = ZHLN::Locomotion::FitDualShapeToBounds(bounds, ZHLN::Physics::DualShapeConfig {}, options);
             const float                                     horizontalExtent = std::max(2.5f * options.lateralCoverage, 1.25f) * options.horizontalPadding;
             const float                                     hullTop          = hull.GetBumperOffsetY() + hull.bumperRadiusY;
-            if (!bounds.valid || !JPH::Vec3(bounds.min).IsClose(JPH::Vec3(-2.0f, 1.0f, -1.25f), 0.0001f) ||
-                !JPH::Vec3(bounds.max).IsClose(JPH::Vec3(2.5f, 5.0f, 1.0f), 0.0001f) || std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f ||
+            if (!bounds.valid || !FVec3(bounds.min).IsClose(FVec3(-2.0f, 1.0f, -1.25f), 0.0001f) ||
+                !FVec3(bounds.max).IsClose(FVec3(2.5f, 5.0f, 1.0f), 0.0001f) || std::abs(hull.bumperRadiusXZ - horizontalExtent) > 0.0001f ||
                 hull.lifterRadius >= hull.bumperRadiusXZ || hull.bumperRadiusY <= hull.bumperRadiusXZ || hullTop < 5.0f * options.verticalPadding - 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
@@ -180,20 +182,20 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> def_only_rig_filters_control_bones_and_maps_24_hair_strands() {
             ZHLN::ModelPrefab prefab;
-            auto              addNode = [&](std::string_view name, int32_t parent, JPH::Vec3Arg translation) {
+            auto              addNode = [&](std::string_view name, int32_t parent, FVec3 translation) {
                 const size_t index = prefab.nodes.size();
                 prefab.nodes.push_back({.name = ZHLN::String64(name), .parentIndex = parent, .localTransform = JPH::Mat44::sTranslation(translation)});
                 return index;
             };
-            const size_t root = addNode("Root", -1, JPH::Vec3::sZero());
-            static_cast<void>(addNode("CTR-Hand.L", static_cast<int32_t>(root), JPH::Vec3(0.2f, 1.0f, 0.0f)));
-            const size_t hand = addNode("DEF-Hand.L", static_cast<int32_t>(root), JPH::Vec3(0.3f, 1.0f, 0.0f));
-            static_cast<void>(addNode("CTR-Index_1.L", static_cast<int32_t>(hand), JPH::Vec3(0.04f, 0.0f, 0.0f)));
-            const size_t finger1 = addNode("DEF-Index_1.L", static_cast<int32_t>(hand), JPH::Vec3(0.05f, 0.0f, 0.0f));
-            static_cast<void>(addNode("CTR-Index_2.L", static_cast<int32_t>(finger1), JPH::Vec3(0.03f, 0.0f, 0.0f)));
-            const size_t finger2 = addNode("DEF-Index_2.L", static_cast<int32_t>(finger1), JPH::Vec3(0.03f, 0.0f, 0.0f));
-            const size_t finger3 = addNode("DEF-Index_3.L", static_cast<int32_t>(finger2), JPH::Vec3(0.02f, 0.0f, 0.0f));
-            const size_t hair24  = addNode("DEF-Hair_S24_04", static_cast<int32_t>(root), JPH::Vec3(0.0f, 1.5f, 0.0f));
+            const size_t root = addNode("Root", -1, FVec3::sZero());
+            static_cast<void>(addNode("CTR-Hand.L", static_cast<int32_t>(root), FVec3(0.2f, 1.0f, 0.0f)));
+            const size_t hand = addNode("DEF-Hand.L", static_cast<int32_t>(root), FVec3(0.3f, 1.0f, 0.0f));
+            static_cast<void>(addNode("CTR-Index_1.L", static_cast<int32_t>(hand), FVec3(0.04f, 0.0f, 0.0f)));
+            const size_t finger1 = addNode("DEF-Index_1.L", static_cast<int32_t>(hand), FVec3(0.05f, 0.0f, 0.0f));
+            static_cast<void>(addNode("CTR-Index_2.L", static_cast<int32_t>(finger1), FVec3(0.03f, 0.0f, 0.0f)));
+            const size_t finger2 = addNode("DEF-Index_2.L", static_cast<int32_t>(finger1), FVec3(0.03f, 0.0f, 0.0f));
+            const size_t finger3 = addNode("DEF-Index_3.L", static_cast<int32_t>(finger2), FVec3(0.02f, 0.0f, 0.0f));
+            const size_t hair24  = addNode("DEF-Hair_S24_04", static_cast<int32_t>(root), FVec3(0.0f, 1.5f, 0.0f));
 
             ZHLN::Skeleton skeleton;
             for (size_t node = 0; node < prefab.nodes.size(); ++node) {
@@ -218,10 +220,10 @@ struct ProceduralAnimationTestSuite {
         std::expected<void, ZHLN::ErrorCode> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
             map.nodeCount          = 7;
-            map.modelTransforms[0] = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, 3.0f));
+            map.modelTransforms[0] = JPH::Mat44::sTranslation(FVec3(1.0f, 2.0f, 3.0f));
             map.Reset();
             if (map.nodeCount != 0 || map.nodeIndices[0] != ZHLN::InvalidRigNode || !map.modelTransforms[0].IsClose(JPH::Mat44::sIdentity(), 0.0001f) ||
-                !map.poseRotations[0].IsClose(JPH::Quat::sIdentity(), 0.0001f) || !map.poseScales[0].IsClose(JPH::Vec3::sReplicate(1.0f), 0.0001f)) {
+                !map.poseRotations[0].IsClose(JPH::Quat::sIdentity(), 0.0001f) || !map.poseScales[0].IsClose(FVec3::sReplicate(1.0f), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             ZHLN::BuildStandardProceduralRig(map);
@@ -240,13 +242,13 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
-            const JPH::Vec3 thighPosition = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)]].GetTranslation();
-            const JPH::Vec3 shinPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ShinL)]].GetTranslation();
-            const JPH::Vec3 footPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)]].GetTranslation();
-            const JPH::Vec3 headPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)]].GetTranslation();
-            const JPH::Vec3 hairRoot = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)]].GetTranslation() - headPosition;
-            if (!(shinPosition.GetZ() > thighPosition.GetZ() && shinPosition.GetZ() > footPosition.GetZ()) || hairRoot.GetY() < 0.15f ||
-                JPH::Vec3(hairRoot.GetX(), 0.0f, hairRoot.GetZ()).Length() < 0.08f) {
+            const FVec3 thighPosition = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)]].GetTranslation();
+            const FVec3 shinPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ShinL)]].GetTranslation();
+            const FVec3 footPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)]].GetTranslation();
+            const FVec3 headPosition  = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)]].GetTranslation();
+            const FVec3 hairRoot = map.modelTransforms[map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart)]].GetTranslation() - headPosition;
+            if (!(shinPosition.z > thighPosition.z && shinPosition.z > footPosition.z) || hairRoot.y < 0.15f ||
+                FVec3(hairRoot.x, 0.0f, hairRoot.z).Length() < 0.08f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
 
@@ -331,7 +333,7 @@ struct ProceduralAnimationTestSuite {
             auto addRigidFootPart = [&](ZHLN::CharacterBone footBone, std::string_view opaqueName, bool skinned = false, float extentScale = 1.0f,
                                         bool detachedContainer = true) {
                 const ZHLN::RigNodeIndex footNode     = map.nodeIndices[ZHLN::BoneSlot(footBone)];
-                const JPH::Mat44         targetModel  = map.modelTransforms[footNode] * JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -0.035f, 0.065f));
+                const JPH::Mat44         targetModel  = map.modelTransforms[footNode] * JPH::Mat44::sTranslation(FVec3(0.0f, -0.035f, 0.065f));
                 const size_t             shoeRootNode = prefab.nodes.size();
                 prefab.nodes.push_back({
                     .name           = ZHLN::String64(opaqueName),
@@ -420,10 +422,10 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigNodeIndex footL            = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootL)];
             const ZHLN::RigNodeIndex footR            = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::FootR)];
             const ZHLN::RigNodeIndex toeR             = importedMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ToeR)];
-            const JPH::Vec3          handBefore       = importedMap.modelTransforms[handL].GetTranslation();
-            const JPH::Vec3          chestBefore      = importedMap.modelTransforms[chest].GetTranslation();
-            const JPH::Vec3          neckBefore       = importedMap.modelTransforms[neck].GetTranslation();
-            const JPH::Vec3          headBefore       = importedMap.modelTransforms[head].GetTranslation();
+            const FVec3          handBefore       = importedMap.modelTransforms[handL].GetTranslation();
+            const FVec3          chestBefore      = importedMap.modelTransforms[chest].GetTranslation();
+            const FVec3          neckBefore       = importedMap.modelTransforms[neck].GetTranslation();
+            const FVec3          headBefore       = importedMap.modelTransforms[head].GetTranslation();
             const JPH::Mat44         rigidFootLBefore = importedMap.modelTransforms[rigidFootL.root];
             const JPH::Mat44         rigidFootRBefore = importedMap.modelTransforms[rigidFootR.root];
             const JPH::Mat44 rigidFootLPartRelative   = importedMap.modelTransforms[rigidFootL.root].Inversed() * importedMap.modelTransforms[rigidFootL.part];
@@ -431,11 +433,11 @@ struct ProceduralAnimationTestSuite {
             const JPH::Mat44 secondaryFootLBefore     = importedMap.modelTransforms[secondaryFootLNode];
             const JPH::Mat44 secondaryFootRBefore     = importedMap.modelTransforms[secondaryFootRNode];
             importedMap.localTransforms[forearmL]     = importedMap.localTransforms[forearmL] *
-                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.45f));
+                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(FVec3::sAxisY(), 0.45f));
             importedMap.localTransforms[supSpine]     = importedMap.localTransforms[supSpine] *
-                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.25f));
-            importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.30f));
-            importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.25f));
+                                                        JPH::Mat44::sRotation(JPH::Quat::sRotation(FVec3::sAxisZ(), 0.25f));
+            importedMap.localTransforms[footL] = importedMap.localTransforms[footL] * JPH::Mat44::sRotation(JPH::Quat::sRotation(FVec3::sAxisX(), 0.30f));
+            importedMap.localTransforms[footR] = importedMap.localTransforms[footR] * JPH::Mat44::sRotation(JPH::Quat::sRotation(FVec3::sAxisX(), -0.25f));
             ZHLN::ProceduralAnimation::CaptureChildOfPoseDeltas(importedMap);
 
             // Applying an upstream correction after a leaf correction detaches
@@ -471,13 +473,13 @@ struct ProceduralAnimationTestSuite {
             }
             // Baked control rigs may author a knee anchor that is not the bind
             // translation. Capture that evaluated model relation verbatim.
-            auto offsetAuthoredShin = [&](ZHLN::RigNodeIndex shin, JPH::Vec3Arg offset) {
+            auto offsetAuthoredShin = [&](ZHLN::RigNodeIndex shin, FVec3 offset) {
                 JPH::Mat44 authored = importedMap.modelTransforms[shin];
                 authored.SetTranslation(authored.GetTranslation() + offset);
                 ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, shin, authored);
             };
-            offsetAuthoredShin(shinL, JPH::Vec3(0.025f, 0.010f, 0.0f));
-            offsetAuthoredShin(shinR, JPH::Vec3(-0.025f, 0.010f, 0.0f));
+            offsetAuthoredShin(shinL, FVec3(0.025f, 0.010f, 0.0f));
+            offsetAuthoredShin(shinR, FVec3(-0.025f, 0.010f, 0.0f));
             ZHLN::ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(importedMap);
 
             // Simulate a model-space procedural thigh correction after the
@@ -487,7 +489,7 @@ struct ProceduralAnimationTestSuite {
             auto rotateDetachedThigh = [&](ZHLN::RigNodeIndex thigh, float angle) {
                 const JPH::Mat44 current = importedMap.modelTransforms[thigh];
                 const JPH::Mat44 target  = JPH::Mat44::sRotationTranslation(
-                    (JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), angle) * current.GetQuaternion()).Normalized(), current.GetTranslation()
+                    (JPH::Quat::sRotation(FVec3::sAxisZ(), angle) * current.GetQuaternion()).Normalized(), current.GetTranslation()
                 );
                 ZHLN::Animation::SetModelTransformAndCarrySubtree(importedMap.modelTransforms.data(), importedMap, thigh, target);
             };
@@ -498,16 +500,16 @@ struct ProceduralAnimationTestSuite {
             const JPH::Mat44 detachedShinR = importedMap.modelTransforms[shinR];
             const JPH::Mat44 detachedFootL = importedMap.modelTransforms[footL];
             const JPH::Mat44 detachedFootR = importedMap.modelTransforms[footR];
-            const JPH::Vec3  expectedKneeL =
+            const FVec3  expectedKneeL =
                 (importedMap.modelTransforms[thighL] * kneeLConstraint->bindRelative * kneeLConstraint->localPoseDelta).GetTranslation();
-            const JPH::Vec3 expectedKneeR =
+            const FVec3 expectedKneeR =
                 (importedMap.modelTransforms[thighR] * kneeRConstraint->bindRelative * kneeRConstraint->localPoseDelta).GetTranslation();
             // Ankle constraints use the shin positions after knee constraints are applied.
             // Knee constraints pin shin translation but preserve rotation.
             const JPH::Mat44 pinnedShinL    = JPH::Mat44::sRotationTranslation(detachedShinL.GetQuaternion(), expectedKneeL);
             const JPH::Mat44 pinnedShinR    = JPH::Mat44::sRotationTranslation(detachedShinR.GetQuaternion(), expectedKneeR);
-            const JPH::Vec3  expectedAnkleL = (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
-            const JPH::Vec3  expectedAnkleR = (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
+            const FVec3  expectedAnkleL = (pinnedShinL * ankleLConstraint->bindRelative * ankleLConstraint->localPoseDelta).GetTranslation();
+            const FVec3  expectedAnkleR = (pinnedShinR * ankleRConstraint->bindRelative * ankleRConstraint->localPoseDelta).GetTranslation();
 
             // Knee and ankle joints are structural and remain active even when
             // every optional child-of relationship is disabled. They pin position
@@ -517,10 +519,10 @@ struct ProceduralAnimationTestSuite {
                 !importedMap.modelTransforms[shinR].GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
                 !importedMap.modelTransforms[footL].GetTranslation().IsClose(expectedAnkleL, 0.0001f) ||
                 !importedMap.modelTransforms[footR].GetTranslation().IsClose(expectedAnkleR, 0.0001f) ||
-                !importedMap.modelTransforms[shinL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
-                !importedMap.modelTransforms[shinR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedShinR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
-                !importedMap.modelTransforms[footL].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootL.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
-                !importedMap.modelTransforms[footR].Multiply3x3(JPH::Vec3::sAxisZ()).IsClose(detachedFootR.Multiply3x3(JPH::Vec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[shinL].Multiply3x3(FVec3::sAxisZ()).IsClose(detachedShinL.Multiply3x3(FVec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[shinR].Multiply3x3(FVec3::sAxisZ()).IsClose(detachedShinR.Multiply3x3(FVec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[footL].Multiply3x3(FVec3::sAxisZ()).IsClose(detachedFootL.Multiply3x3(FVec3::sAxisZ()), 0.0001f) ||
+                !importedMap.modelTransforms[footR].Multiply3x3(FVec3::sAxisZ()).IsClose(detachedFootR.Multiply3x3(FVec3::sAxisZ()), 0.0001f) ||
                 detachedShinL.GetTranslation().IsClose(expectedKneeL, 0.0001f) || detachedShinR.GetTranslation().IsClose(expectedKneeR, 0.0001f) ||
                 detachedFootL.GetTranslation().IsClose(expectedAnkleL, 0.0001f) || detachedFootR.GetTranslation().IsClose(expectedAnkleR, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
@@ -556,10 +558,10 @@ struct ProceduralAnimationTestSuite {
                 importedMap.modelTransforms[rigidFootR.root].IsClose(rigidFootRBefore, 0.0001f) ||
                 importedMap.modelTransforms[secondaryFootLNode].IsClose(secondaryFootLBefore, 0.0001f) ||
                 importedMap.modelTransforms[secondaryFootRNode].IsClose(secondaryFootRBefore, 0.0001f) ||
-                (importedMap.modelTransforms[handL].GetTranslation() - handBefore).LengthSq() < 0.0001f ||
-                (importedMap.modelTransforms[chest].GetTranslation() - chestBefore).LengthSq() < 0.0001f ||
-                (importedMap.modelTransforms[neck].GetTranslation() - neckBefore).LengthSq() < 0.0001f ||
-                (importedMap.modelTransforms[head].GetTranslation() - headBefore).LengthSq() < 0.0001f) {
+                (importedMap.modelTransforms[handL].GetTranslation() - handBefore).LengthSquared() < 0.0001f ||
+                (importedMap.modelTransforms[chest].GetTranslation() - chestBefore).LengthSquared() < 0.0001f ||
+                (importedMap.modelTransforms[neck].GetTranslation() - neckBefore).LengthSquared() < 0.0001f ||
+                (importedMap.modelTransforms[head].GetTranslation() - headBefore).LengthSquared() < 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -576,8 +578,8 @@ struct ProceduralAnimationTestSuite {
             skeleton.joints.push_back({.name = ZHLN::String64("DEF-Hair_S01_01"), .nodeIndex = static_cast<int32_t>(hair)});
             skeleton.joints.push_back({.name = ZHLN::String64("DEF-Hand.L"), .nodeIndex = static_cast<int32_t>(hand)});
             std::array<JPH::Mat44, 3> palette {JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity()};
-            if (ZHLN::ProceduralAnimation::MaskFirstPersonPalette(skeleton, map, palette, true, true) != 2 || palette[0].GetColumn3(0).LengthSq() > 1.0e-8f ||
-                palette[1].GetColumn3(1).LengthSq() > 1.0e-8f || !palette[2].IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
+            if (ZHLN::ProceduralAnimation::MaskFirstPersonPalette(skeleton, map, palette, true, true) != 2 || palette[0].GetColumn3(0).LengthSquared() > 1.0e-8f ||
+                palette[1].GetColumn3(1).LengthSquared() > 1.0e-8f || !palette[2].IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -587,7 +589,7 @@ struct ProceduralAnimationTestSuite {
             ZHLN::ProceduralLocomotionComponent gait;
             gait.strideLength = 1.60f;
 
-            ZHLN::Animation::EvaluateGait(gait, JPH::Vec3(0.0f, 0.0f, 4.0f), 0.25f);
+            ZHLN::Animation::EvaluateGait(gait, FVec3(0.0f, 0.0f, 4.0f), 0.25f);
             const bool phaseIsDistanceDriven  = std::abs(gait.phase - 0.625f) < 0.0001f;
             const bool feetAreOpposed         = gait.plantWeightL != gait.plantWeightR;
             const bool authoredSwingPreserved = gait.plantWeightR < 0.001f && gait.plantWeightL > 0.99f;
@@ -640,36 +642,36 @@ struct ProceduralAnimationTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> model_space_ik_and_ankle_alignment() {
-            const JPH::Vec3  down(0.0f, -1.0f, 0.0f);
-            const JPH::Vec3  solvedDirection = JPH::Vec3(0.18f, -0.97f, 0.12f).Normalized();
+            const FVec3  down(0.0f, -1.0f, 0.0f);
+            const FVec3  solvedDirection = FVec3(0.18f, -0.97f, 0.12f).Normalized();
             const JPH::Mat44 authoredBone    = JPH::Mat44::sIdentity();
-            const JPH::Vec3  solvedPosition(0.1f, 0.7f, -0.2f);
+            const FVec3  solvedPosition(0.1f, 0.7f, -0.2f);
             const JPH::Mat44 corrected = ZHLN::Animation::CorrectBoneDirection(authoredBone, down, solvedDirection, solvedPosition);
             if (!corrected.Multiply3x3(down).Normalized().IsClose(solvedDirection, 0.0001f) || !corrected.GetTranslation().IsClose(solvedPosition, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const JPH::Quat  authoredYaw  = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.4f);
-            const JPH::Mat44 authoredFoot = JPH::Mat44::sRotationTranslation(authoredYaw, JPH::Vec3::sZero());
-            const JPH::Vec3  footTarget(0.2f, 0.05f, 0.3f);
-            const JPH::Mat44 flatFoot = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, JPH::Vec3::sAxisY());
+            const JPH::Quat  authoredYaw  = JPH::Quat::sRotation(FVec3::sAxisY(), 0.4f);
+            const JPH::Mat44 authoredFoot = JPH::Mat44::sRotationTranslation(authoredYaw, FVec3::sZero());
+            const FVec3  footTarget(0.2f, 0.05f, 0.3f);
+            const JPH::Mat44 flatFoot = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, FVec3::sAxisY());
             if (!flatFoot.GetTranslation().IsClose(footTarget, 0.0001f) ||
-                !flatFoot.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized().IsClose(authoredFoot.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized(), 0.0001f)) {
+                !flatFoot.Multiply3x3(FVec3::sAxisZ()).Normalized().IsClose(authoredFoot.Multiply3x3(FVec3::sAxisZ()).Normalized(), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const JPH::Vec3  slopeNormal = JPH::Vec3(0.25f, 0.95f, 0.18f).Normalized();
+            const FVec3  slopeNormal = FVec3(0.25f, 0.95f, 0.18f).Normalized();
             const JPH::Mat44 slopeFoot   = ZHLN::Animation::AlignFootToGround(authoredFoot, footTarget, slopeNormal);
-            if (!slopeFoot.Multiply3x3(JPH::Vec3::sAxisY()).Normalized().IsClose(slopeNormal, 0.0001f)) {
+            if (!slopeFoot.Multiply3x3(FVec3::sAxisY()).Normalized().IsClose(slopeNormal, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
             constexpr float maxSideways     = 0.20f;
             constexpr float maxForward      = 0.50f;
-            const JPH::Vec3 extremeNormal   = JPH::Vec3(0.82f, 0.45f, 0.35f).Normalized();
-            const JPH::Vec3 limitedNormal   = ZHLN::Animation::LimitGroundNormal(extremeNormal, maxSideways, maxForward);
-            const float     limitedSideways = std::abs(std::atan2(-limitedNormal.GetX(), limitedNormal.GetY()));
-            const float     limitedForward  = std::abs(std::asin(std::clamp(limitedNormal.GetZ(), -1.0f, 1.0f)));
+            const FVec3 extremeNormal   = FVec3(0.82f, 0.45f, 0.35f).Normalized();
+            const FVec3 limitedNormal   = ZHLN::Animation::LimitGroundNormal(extremeNormal, maxSideways, maxForward);
+            const float     limitedSideways = std::abs(std::atan2(-limitedNormal.x, limitedNormal.y));
+            const float     limitedForward  = std::abs(std::asin(std::clamp(limitedNormal.z, -1.0f, 1.0f)));
             if (limitedSideways > maxSideways + 0.0001f || limitedForward > maxForward + 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
@@ -680,12 +682,12 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigNodeIndex toeNode         = subtreeMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ToeL)];
             const ZHLN::RigNodeIndex meshPartNode    = subtreeMap.nodeCount++;
             subtreeMap.parentIndices[meshPartNode]   = footNode;
-            subtreeMap.modelTransforms[meshPartNode] = subtreeMap.modelTransforms[footNode] * JPH::Mat44::sTranslation(JPH::Vec3(0.04f, -0.02f, 0.08f));
+            subtreeMap.modelTransforms[meshPartNode] = subtreeMap.modelTransforms[footNode] * JPH::Mat44::sTranslation(FVec3(0.04f, -0.02f, 0.08f));
             const JPH::Mat44 oldFoot                 = subtreeMap.modelTransforms[footNode];
             const JPH::Mat44 oldToe                  = subtreeMap.modelTransforms[toeNode];
             const JPH::Mat44 oldMeshPart             = subtreeMap.modelTransforms[meshPartNode];
             const JPH::Mat44 carriedFoot             = JPH::Mat44::sRotationTranslation(
-                JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.35f) * oldFoot.GetQuaternion(), oldFoot.GetTranslation() + JPH::Vec3(0.0f, 0.04f, 0.0f)
+                JPH::Quat::sRotation(FVec3::sAxisX(), 0.35f) * oldFoot.GetQuaternion(), oldFoot.GetTranslation() + FVec3(0.0f, 0.04f, 0.0f)
             );
             const JPH::Mat44 correction = carriedFoot * oldFoot.Inversed();
             if (ZHLN::Animation::SetModelTransformAndCarrySubtree(subtreeMap.modelTransforms.data(), subtreeMap, footNode, carriedFoot) < 3 ||
@@ -701,13 +703,13 @@ struct ProceduralAnimationTestSuite {
             const ZHLN::RigNodeIndex            tiltThigh         = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::ThighL)];
             const ZHLN::RigNodeIndex            tiltHips          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Hips)];
             const ZHLN::RigNodeIndex            tiltHead          = tiltMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3                     unreachableTarget = tiltMap.modelTransforms[tiltThigh].GetTranslation() + JPH::Vec3(1.5f, -0.35f, 0.0f);
+            const FVec3                     unreachableTarget = tiltMap.modelTransforms[tiltThigh].GetTranslation() + FVec3(1.5f, -0.35f, 0.0f);
             constexpr float                     maxBodyTilt       = 0.14f;
             ZHLN::ProceduralLocomotionComponent tiltGait;
             for (uint32_t frame = 0; frame < 120; ++frame) {
                 tiltMap.modelTransforms = baseTransforms;
                 ZHLN::Animation::ApplyIKReachTilt(
-                    tiltGait, tiltMap.modelTransforms.data(), tiltMap, unreachableTarget, JPH::Vec3::sZero(), 1.0f, 0.0f, 0.96f, maxBodyTilt, 1.0f / 60.0f
+                    tiltGait, tiltMap.modelTransforms.data(), tiltMap, unreachableTarget, FVec3::sZero(), 1.0f, 0.0f, 0.96f, maxBodyTilt, 1.0f / 60.0f
                 );
             }
             const float appliedTilt = std::sqrt(tiltGait.ikBodyTiltPitch * tiltGait.ikBodyTiltPitch + tiltGait.ikBodyTiltRoll * tiltGait.ikBodyTiltRoll);
@@ -725,21 +727,21 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Animation::ItemHandlingComponent handling;
             handling.driverMode           = ZHLN::Animation::ItemDriverMode::AimGuided;
             handling.aimProgress          = 1.0f;
-            const JPH::Vec3  aimDirection = JPH::Vec3(1.0f, 0.1f, 0.2f).Normalized();
+            const FVec3  aimDirection = FVec3(1.0f, 0.1f, 0.2f).Normalized();
             const JPH::Mat44 aimPose      = ZHLN::Animation::SolveItemBasePose(
-                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Vec3(0.0f, 1.6f, 0.0f), aimDirection,
+                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), FVec3(0.0f, 1.6f, 0.0f), aimDirection,
                 JPH::Mat44::sIdentity()
             );
-            if (!aimPose.Multiply3x3(JPH::Vec3::sAxisZ()).Normalized().IsClose(aimDirection, 0.0001f)) {
+            if (!aimPose.Multiply3x3(FVec3::sAxisZ()).Normalized().IsClose(aimDirection, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
             handling.driverMode        = ZHLN::Animation::ItemDriverMode::WorldAnchored;
             const JPH::Mat44 worldPose = ZHLN::Animation::SolveItemBasePose(
-                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sTranslation(JPH::Vec3(-1.0f, 0.0f, 0.0f)), JPH::Vec3::sZero(),
-                JPH::Vec3::sAxisZ(), JPH::Mat44::sTranslation(JPH::Vec3(3.0f, 0.0f, 0.0f))
+                handling, JPH::Mat44::sIdentity(), JPH::Mat44::sIdentity(), JPH::Mat44::sTranslation(FVec3(-1.0f, 0.0f, 0.0f)), FVec3::sZero(),
+                FVec3::sAxisZ(), JPH::Mat44::sTranslation(FVec3(3.0f, 0.0f, 0.0f))
             );
-            if (!worldPose.GetTranslation().IsClose(JPH::Vec3(2.0f, 0.0f, 0.0f), 0.0001f)) {
+            if (!worldPose.GetTranslation().IsClose(FVec3(2.0f, 0.0f, 0.0f), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -756,9 +758,9 @@ struct ProceduralAnimationTestSuite {
             }
 
             const JPH::Quat limitedWrist = ZHLN::Animation::ConstrainWristRotation(
-                JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 1.2f), JPH::Quat::sIdentity(), JPH::Vec3::sAxisZ(), 0.30f, 0.45f
+                JPH::Quat::sRotation(FVec3::sAxisZ(), 1.2f), JPH::Quat::sIdentity(), FVec3::sAxisZ(), 0.30f, 0.45f
             );
-            JPH::Vec3 wristAxis;
+            FVec3 wristAxis;
             float     wristAngle = 0.0f;
             limitedWrist.GetAxisAngle(wristAxis, wristAngle);
             if (std::abs(wristAngle) > 0.3001f) {
@@ -773,7 +775,7 @@ struct ProceduralAnimationTestSuite {
             const float              upperLength = (map.modelTransforms[fore].GetTranslation() - map.modelTransforms[upper].GetTranslation()).Length();
             const float              lowerLength = (map.modelTransforms[hand].GetTranslation() - map.modelTransforms[fore].GetTranslation()).Length();
             const JPH::Quat rightBindPalmFrame   = (map.modelTransforms[hand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[1]).Normalized();
-            const JPH::Vec3 gripPosition         = map.modelTransforms[upper].GetTranslation() + JPH::Vec3(-0.38f, -0.05f, 0.12f);
+            const FVec3 gripPosition         = map.modelTransforms[upper].GetTranslation() + FVec3(-0.38f, -0.05f, 0.12f);
             ZHLN::Animation::GripPoint grip;
             grip.assignedLimb      = ZHLN::CharacterBone::HandR;
             grip.evaluatedIKWeight = 1.0f;
@@ -791,8 +793,8 @@ struct ProceduralAnimationTestSuite {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             const JPH::Quat solvedPalmFrame = (map.modelTransforms[hand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[1]).Normalized();
-            if ((solvedPalmFrame * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.99f ||
-                (solvedPalmFrame * JPH::Vec3::sAxisX()).Dot(JPH::Vec3::sAxisX()) < 0.99f) {
+            if ((solvedPalmFrame * FVec3::sAxisZ()).Dot(FVec3::sAxisZ()) < 0.99f ||
+                (solvedPalmFrame * FVec3::sAxisX()).Dot(FVec3::sAxisX()) < 0.99f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -803,15 +805,15 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Animation::GripPoint leftGrip;
             leftGrip.assignedLimb            = ZHLN::CharacterBone::HandL;
             leftGrip.evaluatedIKWeight       = 1.0f;
-            const JPH::Vec3 leftGripPosition = leftGripMap.modelTransforms[leftUpper].GetTranslation() + JPH::Vec3(0.38f, -0.05f, 0.12f);
+            const FVec3 leftGripPosition = leftGripMap.modelTransforms[leftUpper].GetTranslation() + FVec3(0.38f, -0.05f, 0.12f);
             ZHLN::Animation::SolveLimbIK(
                 leftGripMap.modelTransforms.data(), leftGripMap, ZHLN::CharacterBone::UpperArmL, ZHLN::CharacterBone::ForearmL, ZHLN::CharacterBone::HandL,
                 JPH::Mat44::sTranslation(leftGripPosition), leftGrip
             );
             const JPH::Quat solvedLeftPalm =
                 (leftGripMap.modelTransforms[leftGripHand].GetQuaternion().Normalized() * leftGripMap.handBoneToPalmRotations[0]).Normalized();
-            if ((solvedLeftPalm * JPH::Vec3::sAxisZ()).Dot(JPH::Vec3::sAxisZ()) < 0.80f ||
-                (solvedLeftPalm * JPH::Vec3::sAxisX()).Dot(-JPH::Vec3::sAxisX()) < 0.80f) {
+            if ((solvedLeftPalm * FVec3::sAxisZ()).Dot(FVec3::sAxisZ()) < 0.80f ||
+                (solvedLeftPalm * FVec3::sAxisX()).Dot(-FVec3::sAxisX()) < 0.80f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -820,7 +822,7 @@ struct ProceduralAnimationTestSuite {
             }
             const ZHLN::RigNodeIndex leftHand      = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)];
             const JPH::Quat          leftPalmFrame = (map.modelTransforms[leftHand].GetQuaternion().Normalized() * map.handBoneToPalmRotations[0]).Normalized();
-            if ((leftPalmFrame * JPH::Vec3::sAxisX()).GetY() > -0.5f || (rightBindPalmFrame * JPH::Vec3::sAxisX()).GetY() > -0.5f) {
+            if ((leftPalmFrame * FVec3::sAxisX()).y > -0.5f || (rightBindPalmFrame * FVec3::sAxisX()).y > -0.5f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
@@ -828,13 +830,13 @@ struct ProceduralAnimationTestSuite {
             ZHLN::BuildStandardProceduralRig(reachMap);
             ZHLN::Animation::ItemHandlingComponent reachHandling;
             reachHandling.driverMode                 = ZHLN::Animation::ItemDriverMode::AimGuided;
-            reachHandling.itemModelTransform         = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 1.4f, 4.0f));
+            reachHandling.itemModelTransform         = JPH::Mat44::sTranslation(FVec3(0.0f, 1.4f, 4.0f));
             reachHandling.grips[0].assignedLimb      = ZHLN::CharacterBone::HandR;
-            reachHandling.grips[0].localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(-0.05f, 0.0f, 0.0f));
+            reachHandling.grips[0].localTransform    = JPH::Mat44::sTranslation(FVec3(-0.05f, 0.0f, 0.0f));
             reachHandling.grips[0].evaluatedIKWeight = 1.0f;
             reachHandling.grips[0].maxArmExtension   = 0.96f;
             reachHandling.grips[1].assignedLimb      = ZHLN::CharacterBone::HandL;
-            reachHandling.grips[1].localTransform    = JPH::Mat44::sTranslation(JPH::Vec3(0.05f, 0.0f, 0.0f));
+            reachHandling.grips[1].localTransform    = JPH::Mat44::sTranslation(FVec3(0.05f, 0.0f, 0.0f));
             reachHandling.grips[1].evaluatedIKWeight = 1.0f;
             reachHandling.grips[1].maxArmExtension   = 0.96f;
             reachHandling.gripCount                  = 2;
@@ -866,9 +868,9 @@ struct ProceduralAnimationTestSuite {
             fingerMap.nodeCount                                               = 4;
             fingerMap.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::HandL)] = 0;
             fingerMap.modelTransforms[0]                                      = JPH::Mat44::sIdentity();
-            fingerMap.modelTransforms[1]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.10f, 0.0f, 0.0f));
-            fingerMap.modelTransforms[2]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.18f, 0.0f, 0.0f));
-            fingerMap.modelTransforms[3]                                      = JPH::Mat44::sTranslation(JPH::Vec3(0.24f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[1]                                      = JPH::Mat44::sTranslation(FVec3(0.10f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[2]                                      = JPH::Mat44::sTranslation(FVec3(0.18f, 0.0f, 0.0f));
+            fingerMap.modelTransforms[3]                                      = JPH::Mat44::sTranslation(FVec3(0.24f, 0.0f, 0.0f));
             fingerMap.fingerJointConstraintCount                              = 3;
             for (size_t segment = 0; segment < 3; ++segment) {
                 auto& constraint          = fingerMap.fingerJointConstraints[segment];
@@ -880,24 +882,24 @@ struct ProceduralAnimationTestSuite {
                 constraint.repairRelation = true;
                 constraint.bindRelative   = fingerMap.modelTransforms[segment].Inversed() * fingerMap.modelTransforms[segment + 1];
             }
-            fingerMap.modelTransforms[0] = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), 0.4f), JPH::Vec3(0.3f, 1.0f, -0.2f));
+            fingerMap.modelTransforms[0] = JPH::Mat44::sRotationTranslation(JPH::Quat::sRotation(FVec3::sAxisZ(), 0.4f), FVec3(0.3f, 1.0f, -0.2f));
             if (ZHLN::ProceduralAnimation::ApplyFingerRelationConstraints(fingerMap) != 3 ||
                 !fingerMap.modelTransforms[3].IsClose(fingerMap.modelTransforms[2] * fingerMap.fingerJointConstraints[2].bindRelative, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            const JPH::Quat hingeTarget = (JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.5f) * JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 1.2f)).Normalized();
-            const JPH::Quat hinge = ZHLN::Animation::ConstrainFingerHingeRotation(JPH::Quat::sIdentity(), hingeTarget, JPH::Vec3::sAxisX(), 1.0f, 0.70f, 0.10f);
-            JPH::Vec3       hingeAxis;
+            const JPH::Quat hingeTarget = (JPH::Quat::sRotation(FVec3::sAxisY(), 0.5f) * JPH::Quat::sRotation(FVec3::sAxisX(), 1.2f)).Normalized();
+            const JPH::Quat hinge = ZHLN::Animation::ConstrainFingerHingeRotation(JPH::Quat::sIdentity(), hingeTarget, FVec3::sAxisX(), 1.0f, 0.70f, 0.10f);
+            FVec3       hingeAxis;
             float           hingeAngle = 0.0f;
             hinge.GetAxisAngle(hingeAxis, hingeAngle);
-            if (std::abs(hingeAngle - 0.70f) > 0.001f || std::abs(std::abs(hingeAxis.Dot(JPH::Vec3::sAxisX())) - 1.0f) > 0.001f) {
+            if (std::abs(hingeAngle - 0.70f) > 0.001f || std::abs(std::abs(hingeAxis.Dot(FVec3::sAxisX())) - 1.0f) > 0.001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             const JPH::Quat backwards = ZHLN::Animation::ConstrainFingerHingeRotation(
-                JPH::Quat::sIdentity(), JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.5f), JPH::Vec3::sAxisX(), 1.0f, 0.70f, 0.0f
+                JPH::Quat::sIdentity(), JPH::Quat::sRotation(FVec3::sAxisX(), -0.5f), FVec3::sAxisX(), 1.0f, 0.70f, 0.0f
             );
-            JPH::Vec3 backwardsAxis;
+            FVec3 backwardsAxis;
             float     backwardsAngle = 0.0f;
             backwards.GetAxisAngle(backwardsAxis, backwardsAngle);
             if (std::abs(backwardsAngle) > 0.0001f) {
@@ -914,24 +916,24 @@ struct ProceduralAnimationTestSuite {
                 ZHLN::Components::TransformComponent {}, ZHLN::Components::MeshComponent {.nodeIndex = 2}, ZHLN::Components::HierarchyComponent {.parent = root}
             );
             const ZHLN::Entity skinned = registry.Create(
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3(9.0f, 9.0f, 9.0f)}, ZHLN::Components::MeshComponent {.nodeIndex = 2},
+                ZHLN::Components::TransformComponent {.position = FVec3(9.0f, 9.0f, 9.0f)}, ZHLN::Components::MeshComponent {.nodeIndex = 2},
                 ZHLN::Components::SkeletalMeshComponent {.skeletonIndex = 0}, ZHLN::Components::HierarchyComponent {.parent = root}
             );
 
             ZHLN::RigBoneMap map;
             map.nodeCount = 3;
-            const JPH::Vec3 expectedPosition(0.3f, 1.4f, -0.2f);
-            const JPH::Vec3 expectedScale(1.2f, 0.8f, 1.1f);
-            const JPH::Quat expectedRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.35f);
+            const FVec3 expectedPosition(0.3f, 1.4f, -0.2f);
+            const FVec3 expectedScale(1.2f, 0.8f, 1.1f);
+            const JPH::Quat expectedRotation = JPH::Quat::sRotation(FVec3::sAxisY(), 0.35f);
             map.modelTransforms[2]           = JPH::Mat44::sRotationTranslation(expectedRotation, expectedPosition).PreScaled(expectedScale);
 
             const size_t synchronizedCount   = ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
             const auto   attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
             const auto   skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
-            if (synchronizedCount != 1 || !attachmentTransform || !JPH::Vec3(attachmentTransform->position).IsClose(expectedPosition, 0.0001f) ||
-                !JPH::Vec3(attachmentTransform->scale).IsClose(expectedScale, 0.0001f) ||
-                !(JPH::Quat(attachmentTransform->rotation) * JPH::Vec3::sAxisZ()).IsClose(expectedRotation * JPH::Vec3::sAxisZ(), 0.0001f) ||
-                !skinnedTransform || !JPH::Vec3(skinnedTransform->position).IsClose(JPH::Vec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
+            if (synchronizedCount != 1 || !attachmentTransform || !FVec3(attachmentTransform->position).IsClose(expectedPosition, 0.0001f) ||
+                !FVec3(attachmentTransform->scale).IsClose(expectedScale, 0.0001f) ||
+                !(JPH::Quat(attachmentTransform->rotation) * FVec3::sAxisZ()).IsClose(expectedRotation * FVec3::sAxisZ(), 0.0001f) ||
+                !skinnedTransform || !FVec3(skinnedTransform->position).IsClose(FVec3(9.0f, 9.0f, 9.0f), 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             return {};
@@ -1102,8 +1104,8 @@ struct ProceduralAnimationTestSuite {
                 prefab.nodes[node].name           = data->nodes[node].name != nullptr ? ZHLN::String64(data->nodes[node].name) : ZHLN::String64("Node");
                 prefab.nodes[node].parentIndex    = data->nodes[node].parent != nullptr ? static_cast<int32_t>(data->nodes[node].parent - data->nodes) : -1;
                 prefab.nodes[node].localTransform = JPH::Mat44(
-                    JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
-                    JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
+                    FVec4(matrix[0], matrix[1], matrix[2], matrix[3]), FVec4(matrix[4], matrix[5], matrix[6], matrix[7]),
+                    FVec4(matrix[8], matrix[9], matrix[10], matrix[11]), FVec4(matrix[12], matrix[13], matrix[14], matrix[15])
                 );
             }
 
@@ -1213,7 +1215,7 @@ struct ProceduralAnimationTestSuite {
             }
 
             for (ZHLN::RigNodeIndex footNode: footNodes) {
-                map.localTransforms[footNode] = map.localTransforms[footNode] * JPH::Mat44::sRotation(JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.3f));
+                map.localTransforms[footNode] = map.localTransforms[footNode] * JPH::Mat44::sRotation(JPH::Quat::sRotation(FVec3::sAxisX(), 0.3f));
             }
             ZHLN::ProceduralAnimation::ResolveModelTransforms(map);
             for (const SkinPaletteCheck& check: paletteChecks) {
@@ -1242,7 +1244,7 @@ struct ProceduralAnimationTestSuite {
             }
             for (const Descendant& descendant: descendants) {
                 const auto transform = registry.Get<ZHLN::Components::TransformComponent>(descendant.entity);
-                if (!transform || !JPH::Vec3(transform->position).IsClose(map.modelTransforms[descendant.node].GetTranslation(), 0.0001f)) {
+                if (!transform || !FVec3(transform->position).IsClose(map.modelTransforms[descendant.node].GetTranslation(), 0.0001f)) {
                     return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
                 }
             }
@@ -1259,18 +1261,18 @@ struct ProceduralAnimationTestSuite {
 
             ZHLN::ProceduralLocomotionComponent gait;
             gait.phase            = 0.25f;
-            gait.previousVelocity = JPH::Vec3(0.0f, 0.0f, 2.0f);
+            gait.previousVelocity = FVec3(0.0f, 0.0f, 2.0f);
             ZHLN::ProceduralLookAtComponent lookAt {
-                .targetWorldPos = headBefore.GetTranslation() + JPH::Vec3(1.0f, 0.2f, 2.0f),
+                .targetWorldPos = headBefore.GetTranslation() + FVec3(1.0f, 0.2f, 2.0f),
                 .weight         = 1.0f,
             };
 
-            ZHLN::Animation::SolveUpperBody(gait, &lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, false, false);
+            ZHLN::Animation::SolveUpperBody(gait, &lookAt, FVec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, false, false);
             if (!map.modelTransforms[armNode].IsClose(armBefore, 0.0001f) || !map.modelTransforms[headNode].IsClose(headBefore, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
 
-            ZHLN::Animation::SolveUpperBody(gait, &lookAt, JPH::Vec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, true, true);
+            ZHLN::Animation::SolveUpperBody(gait, &lookAt, FVec3::sZero(), JPH::Quat::sIdentity(), map.modelTransforms.data(), map, true, true);
             if (map.modelTransforms[armNode].IsClose(armBefore, 0.0001f) || map.modelTransforms[headNode].IsClose(headBefore, 0.0001f)) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
@@ -1281,17 +1283,17 @@ struct ProceduralAnimationTestSuite {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex headNode   = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3          headBefore = map.modelTransforms[headNode].GetTranslation();
+            const FVec3          headBefore = map.modelTransforms[headNode].GetTranslation();
 
             ZHLN::ProceduralLocomotionComponent gait;
             gait.forwardLean = 0.18f;
             gait.lateralBank = -0.11f;
             ZHLN::Animation::ApplyAccelerationTilt(gait, map.modelTransforms.data(), map);
 
-            const JPH::Vec3 headAfter    = map.modelTransforms[headNode].GetTranslation();
+            const FVec3 headAfter    = map.modelTransforms[headNode].GetTranslation();
             const float     beforeRadius = (headBefore - gait.centerOfMassModel).Length();
             const float     afterRadius  = (headAfter - gait.centerOfMassModel).Length();
-            if ((headAfter - headBefore).LengthSq() < 1.0e-6f || std::abs(beforeRadius - afterRadius) > 0.0001f) {
+            if ((headAfter - headBefore).LengthSquared() < 1.0e-6f || std::abs(beforeRadius - afterRadius) > 0.0001f) {
                 return std::unexpected(ProceduralAnimationTestError::GaitInvariantFailed);
             }
             return {};
@@ -1299,7 +1301,7 @@ struct ProceduralAnimationTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> xpbd_hair_preserves_segment_lengths() {
             ZHLN::HairStrandsComponent hair;
-            ZHLN::Animation::StepHairSimulation(hair, JPH::Vec3(0.0f, 2.0f, 0.0f), JPH::Quat::sIdentity(), JPH::Vec3(3.0f, 0.0f, 0.0f), 1.0f / 60.0f);
+            ZHLN::Animation::StepHairSimulation(hair, FVec3(0.0f, 2.0f, 0.0f), JPH::Quat::sIdentity(), FVec3(3.0f, 0.0f, 0.0f), 1.0f / 60.0f);
 
             if (!hair.initialized) {
                 return std::unexpected(ProceduralAnimationTestError::HairConstraintFailed);
@@ -1321,24 +1323,24 @@ struct ProceduralAnimationTestSuite {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex headNode     = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
-            const JPH::Vec3          headPosition = map.modelTransforms[headNode].GetTranslation();
+            const FVec3          headPosition = map.modelTransforms[headNode].GetTranslation();
 
             // Author a deliberately horizontal first strand. A gravity-only
             // rope would collapse; shape and bend constraints must retain it.
             for (size_t link = 0; link < ZHLN::HairStrandsComponent::kLinksPerStrand; ++link) {
                 const size_t             semantic = ZHLN::BoneSlot(ZHLN::CharacterBone::HairStart) + link;
                 const ZHLN::RigNodeIndex node     = map.nodeIndices[semantic];
-                map.modelTransforms[node]         = JPH::Mat44::sTranslation(headPosition + JPH::Vec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
+                map.modelTransforms[node]         = JPH::Mat44::sTranslation(headPosition + FVec3(0.15f + static_cast<float>(link) * 0.08f, 0.08f, 0.0f));
             }
 
             ZHLN::HairStrandsComponent hair;
             ZHLN::Animation::ConfigureHairBindPose(hair, map.modelTransforms.data(), map);
             for (uint32_t frame = 0; frame < 120; ++frame) {
-                ZHLN::Animation::StepHairSimulation(hair, headPosition, JPH::Quat::sIdentity(), JPH::Vec3::sZero(), 1.0f / 60.0f);
+                ZHLN::Animation::StepHairSimulation(hair, headPosition, JPH::Quat::sIdentity(), FVec3::sZero(), 1.0f / 60.0f);
             }
 
             constexpr size_t tip         = ZHLN::HairStrandsComponent::kLinksPerStrand - 1;
-            const JPH::Vec3  authoredTip = headPosition + hair.restLocalPositions[tip];
+            const FVec3  authoredTip = headPosition + hair.restLocalPositions[tip];
             if ((hair.positions[tip] - authoredTip).Length() > 0.04f) {
                 return std::unexpected(ProceduralAnimationTestError::HairConstraintFailed);
             }

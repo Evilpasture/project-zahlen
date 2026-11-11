@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/lua/ReflectLua.hpp
 //
 // Reflection-driven Lua state evaluation and transactional patching.
@@ -84,7 +86,7 @@ template <typename T>
 struct LuaVector : std::false_type {};
 
 // Customization point for non-aggregate value types with private/SIMD storage
-// (e.g. JPH::Vec3, JPH::Vec4, JPH::Quat in SceneLua.hpp).
+// (e.g. FVec3, FVec4, JPH::Quat in SceneLua.hpp).
 template <typename T>
 struct LuaValueTrait {
     static constexpr bool specialized = false;

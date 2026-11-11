@@ -3,15 +3,19 @@
 
 module;
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 // --- Global Module Fragment: Implementation Dependencies ---
 // clang-format off
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
@@ -50,8 +54,8 @@ namespace ZHLN {
 namespace {
 
 struct LightningSegment {
-    JPH::Vec3 start;
-    JPH::Vec3 end;
+    FVec3 start;
+    FVec3 end;
     float     width;
     float     branchLevel;
 };
@@ -63,7 +67,7 @@ struct GeneratedRibbon {
     uint32_t                        maxVertices = 0;
 };
 
-auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWidth, const LightningConfig& config, std::mt19937& rng)
+auto GenerateFractalSegments(FVec3 start, FVec3 end, float startWidth, const LightningConfig& config, std::mt19937& rng)
     -> std::vector<LightningSegment> {
     std::vector<LightningSegment> queue;
     queue.push_back({.start = start, .end = end, .width = startWidth, .branchLevel = 0.0f});
@@ -76,31 +80,31 @@ auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWi
         const float                   scale = std::pow(0.55f, static_cast<float>(step)) * (end - start).Length() * 0.18f;
 
         for (const auto& seg: queue) {
-            const JPH::Vec3 mid = (seg.start + seg.end) * 0.5f;
-            const JPH::Vec3 dir = (seg.end - seg.start);
+            const FVec3 mid = (seg.start + seg.end) * 0.5f;
+            const FVec3 dir = (seg.end - seg.start);
             const float     len = dir.Length();
 
             if (len < 0.1f) {
                 nextQueue.push_back(seg);
                 continue;
             }
-            const JPH::Vec3 dirNorm = dir / len;
+            const FVec3 dirNorm = dir / len;
 
-            JPH::Vec3 side     = dirNorm.Cross(JPH::Vec3::sAxisY());
-            side               = (side.LengthSq() < 1e-4f) ? JPH::Vec3::sAxisX() : side.Normalized();
-            const JPH::Vec3 up = dirNorm.Cross(side).Normalized();
+            FVec3 side     = dirNorm.Cross(FVec3::sAxisY());
+            side               = (side.LengthSquared() < 1e-4f) ? FVec3::sAxisX() : side.Normalized();
+            const FVec3 up = Cross(dirNorm, side).Normalized();
 
-            const JPH::Vec3 offset      = (side * dist(rng) + up * dist(rng)) * scale;
-            const JPH::Vec3 jitteredMid = mid + offset;
+            const FVec3 offset      = (side * dist(rng) + up * dist(rng)) * scale;
+            const FVec3 jitteredMid = mid + offset;
 
             nextQueue.push_back({.start = seg.start, .end = jitteredMid, .width = seg.width, .branchLevel = seg.branchLevel});
             nextQueue.push_back({.start = jitteredMid, .end = seg.end, .width = seg.width, .branchLevel = seg.branchLevel});
 
             const float branchProb = (0.35f * config.eta / 2.0f) / (1.0f + seg.branchLevel * 0.8f);
             if (prob(rng) < branchProb) {
-                const JPH::Vec3 branchDir = (dirNorm + (side * dist(rng) + up * dist(rng)) * 0.7f).Normalized();
+                const FVec3 branchDir = (dirNorm + (side * dist(rng) + up * dist(rng)) * 0.7f).Normalized();
                 const float     branchLen = len * (0.4f + prob(rng) * 0.3f);
-                const JPH::Vec3 branchEnd = jitteredMid + branchDir * branchLen;
+                const FVec3 branchEnd = jitteredMid + branchDir * branchLen;
 
                 nextQueue.push_back({.start = jitteredMid, .end = branchEnd, .width = seg.width * 0.5f, .branchLevel = seg.branchLevel + 1.0f});
             }
@@ -110,7 +114,7 @@ auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWi
     return queue;
 }
 
-auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Vec3Arg cameraPos) -> GeneratedRibbon {
+auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, FVec3 cameraPos) -> GeneratedRibbon {
     GeneratedRibbon ribbon;
     ribbon.positions.reserve(segments.size() * 6);
     ribbon.frames.reserve(segments.size() * 6);
@@ -125,45 +129,45 @@ auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Ve
     const auto uv11 = Math::PackUV(1.0f, 1.0f);
 
     for (const auto& seg: segments) {
-        const JPH::Vec3 p0 = seg.start;
-        const JPH::Vec3 p1 = seg.end;
+        const FVec3 p0 = seg.start;
+        const FVec3 p1 = seg.end;
 
-        const JPH::Vec3 dir = (p1 - p0);
+        const FVec3 dir = (p1 - p0);
         const float     len = dir.Length();
         if (len < 1e-4f) {
             continue;
         }
-        const JPH::Vec3 dirNorm = dir / len;
+        const FVec3 dirNorm = dir / len;
 
-        const JPH::Vec3 toCamDiff = cameraPos - p0;
-        const JPH::Vec3 toCam     = (toCamDiff.LengthSq() < 1e-4f) ? JPH::Vec3::sAxisZ() : toCamDiff.Normalized();
+        const FVec3 toCamDiff = cameraPos - p0;
+        const FVec3 toCam     = (toCamDiff.LengthSquared() < 1e-4f) ? FVec3::sAxisZ() : toCamDiff.Normalized();
 
-        JPH::Vec3 side = dirNorm.Cross(toCam);
-        side           = (side.LengthSq() < 1e-4f) ? JPH::Vec3::sAxisX() : side.Normalized();
+        FVec3 side = Cross(dirNorm, toCam);
+        side           = (side.LengthSquared() < 1e-4f) ? FVec3::sAxisX() : side.Normalized();
 
         const float     width = seg.width;
-        const JPH::Vec3 v0    = p0 - side * width;
-        const JPH::Vec3 v1    = p0 + side * width;
-        const JPH::Vec3 v2    = p1 - side * width;
-        const JPH::Vec3 v3    = p1 + side * width;
+        const FVec3 v0    = p0 - side * width;
+        const FVec3 v1    = p0 + side * width;
+        const FVec3 v2    = p1 - side * width;
+        const FVec3 v3    = p1 + side * width;
 
-        ribbon.positions.push_back({{v0.GetX(), v0.GetY(), v0.GetZ()}});
+        ribbon.positions.push_back({{v0.x, v0.y, v0.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv00, .color = c});
-        ribbon.positions.push_back({{v1.GetX(), v1.GetY(), v1.GetZ()}});
+        ribbon.positions.push_back({{v1.x, v1.y, v1.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv10, .color = c});
-        ribbon.positions.push_back({{v2.GetX(), v2.GetY(), v2.GetZ()}});
+        ribbon.positions.push_back({{v2.x, v2.y, v2.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv01, .color = c});
 
-        ribbon.positions.push_back({{v2.GetX(), v2.GetY(), v2.GetZ()}});
+        ribbon.positions.push_back({{v2.x, v2.y, v2.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv01, .color = c});
-        ribbon.positions.push_back({{v1.GetX(), v1.GetY(), v1.GetZ()}});
+        ribbon.positions.push_back({{v1.x, v1.y, v1.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv10, .color = c});
-        ribbon.positions.push_back({{v3.GetX(), v3.GetY(), v3.GetZ()}});
+        ribbon.positions.push_back({{v3.x, v3.y, v3.z}});
         ribbon.frames.push_back({.normal = n, .tangent = t});
         ribbon.surfaces.push_back({.uv = uv11, .color = c});
     }
@@ -245,7 +249,7 @@ void Attach(Engine& engine, Entity entity, LightningComponent component) {
     ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
 }
 
-auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg) -> Entity {
+auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const LightningConfig& cfg) -> Entity {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     auto rc = engine.Graphics();
 
@@ -263,8 +267,8 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
 
     static thread_local std::mt19937 s_rng(std::random_device {}());
 
-    const JPH::Vec3 cloudOrigin(static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z));
-    const JPH::Vec3 groundTarget(static_cast<JPH::RVec3>(groundPos));
+    const FVec3 cloudOrigin(static_cast<float>(groundPos.x), static_cast<float>(cloudPos.y), static_cast<float>(groundPos.z));
+    const FVec3 groundTarget(JPH::RVec3(groundPos.x, groundPos.y, groundPos.z));
 
     // The ribbon faces the view, and the flash is placed relative to it: a world
     // with no main camera has no view to face and nothing to flash, so there is no
@@ -277,7 +281,7 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
     }
 
     const auto segments = GenerateFractalSegments(cloudOrigin, groundTarget, cfg.ribbonWidth, cfg, s_rng);
-    const JPH::Vec3 cameraPosition = camComp->camera.position;
+    const FVec3 cameraPosition = camComp->camera.position;
     const auto      ribbon         = BuildCameraFacingRibbon(segments, cameraPosition);
 
     const BufferID vboPos     = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
@@ -297,17 +301,17 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
         rc.RegisterMaterial(matAssetId, *matRes);
     }
 
-    const JPH::Vec3 flashPos  = cameraPosition + JPH::Vec3(0.0f, 25.0f, 0.0f);
-    const JPH::Vec3 impactPos = groundTarget + JPH::Vec3(0.0f, 20.0f, 0.0f);
+    const FVec3 flashPos  = cameraPosition + FVec3(0.0f, 25.0f, 0.0f);
+    const FVec3 impactPos = groundTarget + FVec3(0.0f, 20.0f, 0.0f);
 
     const Entity flashLight = reg.Create(
         Components::TransformComponent {.position = flashPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
-            .color       = JPH::Vec3(0.88f, 0.95f, 1.0f),
+            .color       = FVec3(0.88f, 0.95f, 1.0f),
             .intensity   = 0.0f,
             .radius      = 12.0f,
-            .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
+            .direction   = FVec3(0.0f, -1.0f, 0.0f),
             .range       = 2000.0f
         }
     );
@@ -316,10 +320,10 @@ auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, cons
         Components::TransformComponent {.position = impactPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
-            .color       = JPH::Vec3(1.0f, 1.0f, 1.0f),
+            .color       = FVec3(1.0f, 1.0f, 1.0f),
             .intensity   = 0.0f,
             .radius      = 8.0f,
-            .direction   = JPH::Vec3(0.0f, 1.0f, 0.0f),
+            .direction   = FVec3(0.0f, 1.0f, 0.0f),
             .range       = 500.0f
         }
     );
@@ -385,7 +389,7 @@ auto Update(Engine& engine, float dt) -> void {
             }
             static thread_local std::mt19937 rng(std::random_device {}());
             const auto                       segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
-            const JPH::Vec3                  cameraPosition = camComp->camera.position;
+            const FVec3                  cameraPosition = camComp->camera.position;
             const auto                       ribbon   = BuildCameraFacingRibbon(segments, cameraPosition);
             if (bolt.vboPos == BufferID::Invalid) {
                 bolt.vboPos = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});

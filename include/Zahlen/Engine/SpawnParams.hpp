@@ -13,7 +13,10 @@
 // A fixed layout of scalars, which is what lets ZHLN::COM::IAssetLibrary take
 // it by const reference across the shared-library boundary.
 
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 #include <type_traits>
@@ -21,9 +24,9 @@
 namespace ZHLN::PrefabFactory {
 
 struct SpawnParams {
-    ZHLN::Double3 position {};
-    ZHLN::Float4  rotation {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3  scale {1.0f, 1.0f, 1.0f};
+    ZHLN::DVec3 position {};
+    ZHLN::FVec4  rotation {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3  scale {1.0f, 1.0f, 1.0f};
 
     bool     createPhysics   = false;
     bool     useBoxColliders = false;
@@ -51,7 +54,7 @@ struct SpawnParams {
 
     float        roughness = 0.5f;
     float        metallic  = 0.0f;
-    ZHLN::Float4 color {0.8f, 0.4f, 0.2f, -1.0f};
+    ZHLN::FVec4 color {0.8f, 0.4f, 0.2f, -1.0f};
 
     Material materialOverride = {.pipeline = PipelineID::Invalid};
 };

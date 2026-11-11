@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AudioSystem.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -35,9 +36,9 @@ ZHLN_API void AudioSystem(
     for (Entity e: query.Entities<Components::AudioListenerComponent>()) {
         auto listener = query.Get<Components::AudioListenerComponent>(e);
         if (listener && listener->isPrimary) {
-            JPH::Vec3 pos = JPH::Vec3::sZero();
-            JPH::Vec3 dir = JPH::Vec3::sAxisZ();
-            JPH::Vec3 up  = JPH::Vec3::sAxisY();
+            FVec3 pos = FVec3::sZero();
+            FVec3 dir = FVec3::sAxisZ();
+            FVec3 up  = FVec3::sAxisY();
 
             if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
                 const JPH::Mat44 world = wt->world;
@@ -47,8 +48,8 @@ ZHLN_API void AudioSystem(
             } else if (auto t = query.Get<Components::TransformComponent>(e)) {
                 const JPH::Quat rotation = t->rotation;
                 pos                      = t->position;
-                dir                      = rotation * JPH::Vec3::sAxisZ();
-                up                       = rotation * JPH::Vec3::sAxisY();
+                dir                      = rotation * FVec3::sAxisZ();
+                up                       = rotation * FVec3::sAxisY();
             }
 
             device.UpdateListener(pos, dir, up, listener->velocity);
@@ -64,7 +65,7 @@ ZHLN_API void AudioSystem(
             const auto& cam      = camComp->camera;
             const float yawRad   = JPH::DegreesToRadians(cam.yaw);
             const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-            const JPH::Vec3 dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+            const FVec3 dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
             device.UpdateListener(cam.position, dir.Normalized(), {0.0f, 1.0f, 0.0f});
         }
     }
@@ -76,8 +77,8 @@ ZHLN_API void AudioSystem(
         const Entity                      e   = srcEntities[i];
         Components::AudioSourceComponent& src = sources[i];
 
-        JPH::Vec3 pos = JPH::Vec3::sZero();
-        JPH::Vec3 dir = JPH::Vec3(0.0f, 0.0f, -1.0f);
+        FVec3 pos = FVec3::sZero();
+        FVec3 dir = FVec3(0.0f, 0.0f, -1.0f);
         if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
             const JPH::Mat44 world = wt->world;
             pos                    = world.GetTranslation();
@@ -85,7 +86,7 @@ ZHLN_API void AudioSystem(
         } else if (auto t = query.Get<Components::TransformComponent>(e)) {
             const JPH::Quat rotation = t->rotation;
             pos                      = t->position;
-            dir                      = rotation * JPH::Vec3(0.0f, 0.0f, -1.0f);
+            dir                      = rotation * FVec3(0.0f, 0.0f, -1.0f);
         }
 
         if (src.voiceID != VoiceID::Invalid && !device.IsVoiceValid(src.voiceID)) {

@@ -7,6 +7,7 @@
 // tree operations, typed wrappers, reference validation and destruction.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <DataModel/DataModel.hpp>
 #include <Jolt/Math/Vec3.h>
@@ -277,19 +278,19 @@ struct TestDataModelSuite {
             size_t propertyChangedCount = 0;
             auto propertyConnection = (*rootPart)->PropertyChanged.Connect([&](std::string) { ++propertyChangedCount; });
 
-            (*rootPart)->SetPosition(JPH::Vec3(1.0f, 2.0f, 3.0f));
-            (*rootPart)->SetSize(JPH::Vec3(2.0f, 3.0f, 4.0f));
-            (*rootPart)->SetRotation(JPH::Vec3(0.0f, 90.0f, 0.0f));
+            (*rootPart)->SetPosition(FVec3(1.0f, 2.0f, 3.0f));
+            (*rootPart)->SetSize(FVec3(2.0f, 3.0f, 4.0f));
+            (*rootPart)->SetRotation(FVec3(0.0f, 90.0f, 0.0f));
             (*rootPart)->SetAnchored(true);
             ZHLN::Test::ExpectTrue((*rootPart)->SetNetworkOwner(*player).has_value());
             ZHLN::Test::ExpectTrue(!(*rootPart)->SetParent(*foreignPart).has_value());
             (*player)->SetUserId(8);
             (*humanoid)->SetWalkSpeed(18.0f);
 
-            ZHLN::Test::ExpectTrue((*rootPart)->Position().GetY() == 2.0f);
-            ZHLN::Test::ExpectTrue((*rootPart)->Size().GetZ() == 4.0f);
+            ZHLN::Test::ExpectTrue((*rootPart)->Position().y == 2.0f);
+            ZHLN::Test::ExpectTrue((*rootPart)->Size().z == 4.0f);
             ZHLN::Test::ExpectTrue((*rootPart)->Anchored());
-            ZHLN::Test::ExpectTrue((*rootPart)->Rotation().GetY() == 90.0f);
+            ZHLN::Test::ExpectTrue((*rootPart)->Rotation().y == 90.0f);
             ZHLN::Test::ExpectEq(propertyChangedCount, size_t {5});
             ZHLN::Test::ExpectTrue(propertyConnection.IsConnected());
             ZHLN::Test::ExpectTrue((*rootPart)->NetworkOwner() == *player);

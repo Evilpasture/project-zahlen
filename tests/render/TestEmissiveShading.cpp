@@ -16,6 +16,8 @@
 // frame can only have come from the emissive term.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -83,7 +85,7 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // 3.0 has always been at this exposure: 13/255, a dim lamp. Expressing the
 // emitter the way the importer does keeps the test measuring a neon material
 // rather than the accounting error that used to inflate one.
-// Not constexpr: Jolt's Float4 constructor is not constexpr, so a lane
+// Not constexpr: Jolt's FVec4 constructor is not constexpr, so a lane
 // constant is `const` at namespace scope. It is still one object, not a
 // spelling that has to be converted at the crossing.
 const JPH::Float4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
@@ -146,9 +148,9 @@ constexpr float kHaloBloomStrength = 0.003f;
         gfx.post.giIntensity     = 0.0f;
         gfx.post.enableSSR       = 0;
         gfx.rayTracing.enableReflections       = false;
-        gfx.environment.skyZenith       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyHorizon      = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        gfx.environment.skyGround       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyZenith       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyHorizon      = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        gfx.environment.skyGround       = FVec4(0.0f, 0.0f, 0.0f, 1.0f);
     });
 
     const auto material =
@@ -166,7 +168,7 @@ constexpr float kHaloBloomStrength = 0.003f;
         return false;
     }
     ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = JPH::Vec3(0.0f, 0.0f, 6.0f);
+    camera.position = FVec3(0.0f, 0.0f, 6.0f);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
     camera.fov      = 60.0f;

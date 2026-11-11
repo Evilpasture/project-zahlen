@@ -6,7 +6,7 @@ module;
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
@@ -99,8 +99,8 @@ struct RigChildOfConstraint {
     RigNodeIndex   parent         = InvalidRigNode;
     RigNodeIndex   child          = InvalidRigNode;
     RigChildOfKind kind           = RigChildOfKind::Hand;
-    ZHLN::Mat44    bindRelative   = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44    localPoseDelta = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4    bindRelative   = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4    localPoseDelta = ZHLN::Mat4x4::Identity();
 };
 
 enum class FingerDigit : uint8_t {
@@ -120,8 +120,8 @@ struct RigFingerJointConstraint {
     uint8_t      segment        = 0;
     bool         repairRelation = false;
     float        hingeFlexSign  = -1.0f;
-    ZHLN::Mat44  bindRelative   = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  localPoseDelta = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4  bindRelative   = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  localPoseDelta = ZHLN::Mat4x4::Identity();
 };
 
 /**
@@ -166,20 +166,20 @@ struct alignas(64) RigBoneMap {
 
     // Spring-damper keyframe state for the 21 semantic controls. Authored clip
     // samples become physical targets; procedural passes then layer on top.
-    std::array<JPH::Vec3, kCoreBoneCount> poseTranslations {};
-    std::array<JPH::Vec3, kCoreBoneCount> poseTranslationVelocities {};
+    std::array<FVec3, kCoreBoneCount> poseTranslations {};
+    std::array<FVec3, kCoreBoneCount> poseTranslationVelocities {};
     std::array<JPH::Quat, kCoreBoneCount> poseRotations = [] {
         std::array<JPH::Quat, kCoreBoneCount> values;
         values.fill(JPH::Quat::sIdentity());
         return values;
     }();
-    std::array<JPH::Vec3, kCoreBoneCount> poseAngularVelocities {};
-    std::array<JPH::Vec3, kCoreBoneCount> poseScales = [] {
-        std::array<JPH::Vec3, kCoreBoneCount> values;
-        values.fill(JPH::Vec3::sReplicate(1.0f));
+    std::array<FVec3, kCoreBoneCount> poseAngularVelocities {};
+    std::array<FVec3, kCoreBoneCount> poseScales = [] {
+        std::array<FVec3, kCoreBoneCount> values;
+        values.fill(FVec3::sReplicate(1.0f));
         return values;
     }();
-    std::array<JPH::Vec3, kCoreBoneCount> poseScaleVelocities {};
+    std::array<FVec3, kCoreBoneCount> poseScaleVelocities {};
     float                                 poseSpringStiffness     = 2500.0f;
     float                                 poseSpringDampingFactor = 0.90f;
     int32_t                               springPoseTrack         = -1;
@@ -246,10 +246,10 @@ struct ProceduralLocomotionComponent {
     float      forwardLeanScale = 1.0f;
     float      lateralBankScale = 1.0f;
 
-    ZHLN::Float3 localFootTargetL = {};
-    ZHLN::Float3 localFootTargetR = {};
-    ZHLN::Float3 footNormalL      = {0.0f, 1.0f, 0.0f};
-    ZHLN::Float3 footNormalR      = {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 localFootTargetL = {};
+    ZHLN::FVec3 localFootTargetR = {};
+    ZHLN::FVec3 footNormalL      = {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 footNormalR      = {0.0f, 1.0f, 0.0f};
     float        plantWeightL     = 1.0f;
     float        plantWeightR     = 1.0f;
     bool         ikReachClampedL  = false;
@@ -280,15 +280,15 @@ struct ProceduralLocomotionComponent {
     float        passWeightR       = 0.0f;
     float        reachWeightL      = 0.0f;
     float        reachWeightR      = 0.0f;
-    ZHLN::Float3 centerOfMassModel = {0.0f, 1.12f, 0.0f};
+    ZHLN::FVec3 centerOfMassModel = {0.0f, 1.12f, 0.0f};
 
-    ZHLN::Float3 previousVelocity        = {};
-    ZHLN::Float3 directionalAcceleration = {};
-    ZHLN::Float4 previousRootRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 previousVelocity        = {};
+    ZHLN::FVec3 directionalAcceleration = {};
+    ZHLN::FVec4 previousRootRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
     bool         orientationInitialized  = false;
 
-    ZHLN::Float3 plantedFootWorldL = {};
-    ZHLN::Float3 plantedFootWorldR = {};
+    ZHLN::FVec3 plantedFootWorldL = {};
+    ZHLN::FVec3 plantedFootWorldR = {};
     bool         footLockValidL    = false;
     bool         footLockValidR    = false;
     bool         wasPlantedL       = true;
@@ -302,18 +302,18 @@ struct alignas(64) HairStrandsComponent {
     static constexpr size_t kLinksPerStrand     = 6;
     static constexpr size_t kTotalParticles     = kStrandCount * kLinksPerStrand;
 
-    std::array<JPH::Vec3, kTotalParticles> positions {};
-    std::array<JPH::Vec3, kTotalParticles> prevPositions {};
+    std::array<FVec3, kTotalParticles> positions {};
+    std::array<FVec3, kTotalParticles> prevPositions {};
 
     // Rest state is stored in head-local space and populated directly from the
     // imported GLB bind pose. This lets every mapped bone return to its authored
     // silhouette instead of treating all strands as gravity-only ropes.
-    std::array<JPH::Vec3, kTotalParticles> restLocalPositions {};
+    std::array<FVec3, kTotalParticles> restLocalPositions {};
     std::array<JPH::Quat, kTotalParticles> restLocalRotations {};
-    std::array<JPH::Vec3, kTotalParticles> restLocalDirections {};
+    std::array<FVec3, kTotalParticles> restLocalDirections {};
     std::array<float, kTotalParticles>     segmentLengths {};
     std::array<float, kTotalParticles>     bendLengths {};
-    std::array<JPH::Vec3, kStrandCount>    rootBindOffsets {};
+    std::array<FVec3, kStrandCount>    rootBindOffsets {};
 
     float damping                = 0.94f;
     float gravity                = -9.81f;
@@ -329,17 +329,17 @@ struct alignas(64) HairStrandsComponent {
 };
 
 struct ProceduralLookAtComponent {
-    ZHLN::Float3 targetWorldPos = {};
+    ZHLN::FVec3 targetWorldPos = {};
     float        weight         = 1.0f;
     float        maxAngleDeg    = 75.0f;
 };
 
 struct FirstPersonVisibilityComponent {
-    ZHLN::Float3 eyeOffsetModel      = {0.0f, 0.07f, 0.08f};
-    ZHLN::Float3 smoothedEyeModel    = {};
-    ZHLN::Float3 eyeVelocity         = {};
-    ZHLN::Float4 smoothedViewModel   = {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3 viewAngularVelocity = {};
+    ZHLN::FVec3 eyeOffsetModel      = {0.0f, 0.07f, 0.08f};
+    ZHLN::FVec3 smoothedEyeModel    = {};
+    ZHLN::FVec3 eyeVelocity         = {};
+    ZHLN::FVec4 smoothedViewModel   = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 viewAngularVelocity = {};
     float        lookYawDegrees      = 0.0f;
     float        lookPitchDegrees    = 0.0f;
     float        positionStiffness   = 120.0f;
@@ -392,8 +392,8 @@ struct GraspDesc {
 struct GripPoint {
     CharacterBone       assignedLimb       = CharacterBone::HandR;
     GripOrientationMode orientationMode    = GripOrientationMode::AutomaticHanded;
-    ZHLN::Mat44         localTransform     = ZHLN::Mat44::sIdentity();
-    ZHLN::Float3        poleHintOffset     = {0.0f, -1.0f, -0.5f};
+    ZHLN::Mat4x4         localTransform     = ZHLN::Mat4x4::Identity();
+    ZHLN::FVec3        poleHintOffset     = {0.0f, -1.0f, -0.5f};
     float               ikWeight           = 1.0f;
     float               ikWeightVelocity   = 0.0f;
     float               evaluatedIKWeight  = 1.0f;
@@ -414,12 +414,12 @@ struct ItemObstacleAvoidance {
 };
 
 struct ItemSwayState {
-    ZHLN::Float3 positionOffset         = {};
-    ZHLN::Float3 positionVelocity       = {};
-    ZHLN::Float4 rotationOffset         = {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3 angularVelocity        = {};
-    ZHLN::Float3 previousDriverPosition = {};
-    ZHLN::Float4 previousDriverRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 positionOffset         = {};
+    ZHLN::FVec3 positionVelocity       = {};
+    ZHLN::FVec4 rotationOffset         = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 angularVelocity        = {};
+    ZHLN::FVec3 previousDriverPosition = {};
+    ZHLN::FVec4 previousDriverRotation = {0.0f, 0.0f, 0.0f, 1.0f};
     float        massKg                 = 2.5f;
     float        stiffness              = 130.0f;
     float        damping                = 0.84f;
@@ -431,9 +431,9 @@ struct ItemHandlingComponent {
     ItemDriverMode driverMode = ItemDriverMode::HandAnchored;
     Entity         itemEntity {};
 
-    ZHLN::Mat44 hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.20f, -0.16f, 0.40f));
-    ZHLN::Mat44 aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.00f, -0.05f, 0.22f));
-    ZHLN::Mat44 worldAnchor    = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4 hipLocalOffset = JPH::Mat44::sTranslation(FVec3(0.20f, -0.16f, 0.40f));
+    ZHLN::Mat4x4 aimLocalOffset = JPH::Mat44::sTranslation(FVec3(0.00f, -0.05f, 0.22f));
+    ZHLN::Mat4x4 worldAnchor    = ZHLN::Mat4x4::Identity();
     float       aimProgress    = 0.0f;
     float       aimVelocity    = 0.0f;
 
@@ -441,7 +441,7 @@ struct ItemHandlingComponent {
     size_t                   gripCount = 0;
     ItemObstacleAvoidance    avoidance {};
     ItemSwayState            sway {};
-    ZHLN::Mat44              itemModelTransform = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4              itemModelTransform = ZHLN::Mat4x4::Identity();
     float                    shoulderLeadWeight = 0.20f;
     float                    torsoReachWeight   = 0.25f;
 };
@@ -527,20 +527,20 @@ namespace Animation {
 float      EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
 float      EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
 void       BlendGaitParameters(ProceduralLocomotionComponent& gait, float dt) noexcept;
-void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
-void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
+void       EvaluateGait(ProceduralLocomotionComponent& gait, FVec3 velocity, float angularVelocity, float dt) noexcept;
+void       EvaluateGait(ProceduralLocomotionComponent& gait, FVec3 velocity, float dt) noexcept;
 void       ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
 JPH::Mat44 CorrectBoneDirection(
     const JPH::Mat44& authoredTransform,
-    JPH::Vec3Arg      currentDirection,
-    JPH::Vec3Arg      solvedDirection,
-    JPH::Vec3Arg      solvedPosition
+    FVec3      currentDirection,
+    FVec3      solvedDirection,
+    FVec3      solvedPosition
 ) noexcept;
-JPH::Vec3  LimitGroundNormal(JPH::Vec3Arg modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept;
+FVec3  LimitGroundNormal(FVec3 modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept;
 JPH::Mat44 AlignFootToGround(
     const JPH::Mat44& authoredFoot,
-    JPH::Vec3Arg      target,
-    JPH::Vec3Arg      modelNormal,
+    FVec3      target,
+    FVec3      modelNormal,
     float             maxSidewaysRadians = JPH::DegreesToRadians(15.0f),
     float             maxForwardRadians  = JPH::DegreesToRadians(35.0f)
 ) noexcept;
@@ -549,8 +549,8 @@ void   ApplyIKReachTilt(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    JPH::Vec3Arg                   targetL,
-    JPH::Vec3Arg                   targetR,
+    FVec3                   targetL,
+    FVec3                   targetR,
     float                          weightL,
     float                          weightR,
     float                          maxLegExtension,
@@ -560,7 +560,7 @@ void   ApplyIKReachTilt(
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
     const PhysicsContext&          physics,
-    JPH::Vec3Arg                   rootPosition,
+    FVec3                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
@@ -580,7 +580,7 @@ void SolveLegGrounding(
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
-    JPH::Vec3Arg                         rootPosition,
+    FVec3                         rootPosition,
     JPH::QuatArg                         rootRotation,
     JPH::Mat44*                          nodeTransforms,
     const RigBoneMap&                    map,
@@ -599,8 +599,8 @@ void SolveUpperBody(
     const JPH::Mat44&            primaryHandModel,
     const JPH::Mat44&            chestModel,
     const JPH::Mat44&            worldToModel,
-    JPH::Vec3Arg                 headPosModel,
-    JPH::Vec3Arg                 aimDirModel,
+    FVec3                 headPosModel,
+    FVec3                 aimDirModel,
     const JPH::Mat44&            worldAnchor
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
@@ -609,25 +609,25 @@ void  UpdateItemDynamics(
     const PhysicsContext&  physics,
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
-    JPH::Vec3Arg           rootPosition,
+    FVec3           rootPosition,
     JPH::QuatArg           rootRotation,
     float                  dt
 ) noexcept;
 void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept;
+void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, FVec3 targetGripPos, float weight) noexcept;
 void ApplyTorsoReachCompensation(
     JPH::Mat44*       nodeTransforms,
     const RigBoneMap& map,
     CharacterBone     upperArmBone,
     CharacterBone     forearmBone,
     CharacterBone     handBone,
-    JPH::Vec3Arg      targetGripPos,
+    FVec3      targetGripPos,
     float             weight
 ) noexcept;
 [[nodiscard]] JPH::Quat ConstrainWristRotation(
     JPH::QuatArg targetRotation,
     JPH::QuatArg authoredRotation,
-    JPH::Vec3Arg twistAxis,
+    FVec3 twistAxis,
     float        maxTwistRadians,
     float        maxSwingRadians
 ) noexcept;
@@ -644,7 +644,7 @@ void SolveLimbIK(
 [[nodiscard]] JPH::Quat      ConstrainFingerHingeRotation(
     JPH::QuatArg authoredRotation,
     JPH::QuatArg desiredRotation,
-    JPH::Vec3Arg hingeAxis,
+    FVec3 hingeAxis,
     float        flexSign,
     float        maxFlexRadians,
     float        maxExtensionRadians
@@ -661,9 +661,9 @@ void ApplyKinematicFingers(
 void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
 void StepHairSimulation(
     HairStrandsComponent& hair,
-    JPH::Vec3Arg          headWorldPosition,
+    FVec3          headWorldPosition,
     JPH::QuatArg          headWorldRotation,
-    JPH::Vec3Arg          characterVelocity,
+    FVec3          characterVelocity,
     float                 dt
 ) noexcept;
 void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
@@ -686,7 +686,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept;
 /** Draws the most recently evaluated pose, including contact normals and hair. */
 void DrawProceduralDebugRig(
     RenderContext&                       renderContext,
-    JPH::Vec3Arg                         rootPosition,
+    FVec3                         rootPosition,
     JPH::QuatArg                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr
@@ -722,7 +722,7 @@ size_t MaskFirstPersonPalette(
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     SceneData&                           scene,
-    JPH::Vec3Arg                         rootPosition,
+    FVec3                         rootPosition,
     JPH::QuatArg                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr

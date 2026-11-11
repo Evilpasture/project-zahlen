@@ -19,7 +19,7 @@
 //     on an existing one) shows up in the inspector without touching this
 //     file. Field dispatch: float -> Slider, bool -> Checkbox, int -> Slider
 //     with step 1, enum -> Dropdown (via ZHLN::Reflect::EnumNames), String64/
-//     String256 -> TextInput stub, JPH::Vec4 -> four sliders. Handles,
+//     String256 -> TextInput stub, FVec4 -> four sliders. Handles,
 //     textures and padding fields (leading '_') get no row in this version.
 //
 //   * The reflection iteration lives in extensions/editor/GUIEditor.cpp, not here.
@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags, for the editor's own input flag set
 #include <Zahlen/ECS/Entity.hpp>
@@ -97,15 +99,15 @@ struct EditorState {
     ZHLN::Entity transformEntity = ZHLN::Entity::Null();
 
     // Captures taken at mode entry; cancel writes them back.
-    JPH::Vec3 transformStartPosition = JPH::Vec3::sZero();
+    FVec3 transformStartPosition = FVec3::sZero();
     JPH::Quat transformStartRotation = JPH::Quat::sIdentity();
-    JPH::Vec3 transformStartScale    = JPH::Vec3::sReplicate(1.0f);
+    FVec3 transformStartScale    = FVec3::sReplicate(1.0f);
 
     // Anchors for the running mode: Move intersects the mouse ray with a plane
     // through the start position (normal = camera forward at entry); Rotate and
     // Scale measure screen-space angle / distance around the projected object.
-    JPH::Vec3 transformPlaneNormal = JPH::Vec3::sAxisY();
-    JPH::Vec3 transformAnchor      = JPH::Vec3::sZero();
+    FVec3 transformPlaneNormal = FVec3::sAxisY();
+    FVec3 transformAnchor      = FVec3::sZero();
     float     transformStartAngle  = 0.0f;
     float     transformStartDist   = 1.0f;
 

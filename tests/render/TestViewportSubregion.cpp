@@ -20,6 +20,7 @@
 // colour test and every background/tone-map concern cancels out.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -190,8 +191,8 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
             const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3::sReplicate(0.5f),
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::Vec3::sZero(), .createPhysics = false, .materialOverride = *matRes}
+                *engine, FVec3::sReplicate(0.5f),
+                ZHLN::PrefabFactory::SpawnParams {.position = FVec3::sZero(), .createPhysics = false, .materialOverride = *matRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 

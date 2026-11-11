@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "render/RenderInternal.hpp"
@@ -48,7 +50,7 @@ class IBLProcessor {
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
         constexpr uint32_t kMipLevels = 6;
-        constexpr size_t   kSHBytes   = sizeof(JPH::Vec4) * 9;
+        constexpr size_t   kSHBytes   = sizeof(FVec4) * 9;
 
         const bool hasRadiance   = radiance.rgba != nullptr && radiance.width > 0 && radiance.height > 0;
         const bool hasPreparedSH = radiance.diffuseSH.size() == 9;
@@ -134,8 +136,8 @@ class IBLProcessor {
         defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
 
         // 4. Descriptor Heap Setups
-        const JPH::Vec3   sunDir3  = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
-        const ZHLN::Float4 sunDir4 {sunDir3.GetX(), sunDir3.GetY(), sunDir3.GetZ(), 0.0f};
+        const FVec3   sunDir3  = FVec3(0.5f, 1.0f, 0.2f).Normalized();
+        const ZHLN::FVec4 sunDir4 {sunDir3.x, sunDir3.y, sunDir3.z, 0.0f};
         const IBLBakePush basePush {
             .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
             .sampleCount = 16384,
@@ -230,7 +232,7 @@ class IBLProcessor {
         } else {
             for (size_t c = 0; c < payload.shCoeffs.size(); ++c) {
                 const auto& rgb     = radiance.diffuseSH[c];
-                payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
+                payload.shCoeffs[c] = FVec4(rgb[0], rgb[1], rgb[2], 0.0f);
             }
         }
 

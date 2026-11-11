@@ -9,7 +9,10 @@
 // same namespace. CharacterParams needs Jolt shapes and stays in Physics.hpp.
 
 #include <Zahlen/Physics/PhysicsIDs.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstddef>
 #include <cstdint>
 
@@ -28,18 +31,18 @@ struct DebugDrawData {
 };
 
 struct BodyStateSnapshot {
-    ZHLN::Float3 previousPosition {0.0f, 0.0f, 0.0f};
-    ZHLN::Float3 currentPosition {0.0f, 0.0f, 0.0f};
-    ZHLN::Quat   previousRotation {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Quat   currentRotation {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 previousPosition {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec3 currentPosition {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4   previousRotation {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4   currentRotation {0.0f, 0.0f, 0.0f, 1.0f};
     bool         isCharacter = false;
     bool         valid       = false;
 };
 
 struct RaycastResult {
     BodyID        bodyID;
-    ZHLN::Float3  normal;
-    ZHLN::Double3 position;
+    ZHLN::FVec3  normal;
+    ZHLN::DVec3 position;
     float         fraction;
     bool          hasHit;
 };

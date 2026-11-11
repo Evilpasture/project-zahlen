@@ -3,6 +3,7 @@
 
 // extensions/Benchmark/Viewer/BenchmarkViewer.cpp
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Log.hpp>
@@ -151,36 +152,36 @@ using ZHLN::GUI::Widget::FitsWidth;
 }
 
 // Ink. Muted enough to sit over a running scene, opaque enough to read.
-const JPH::Vec4 kPanelInk   = {0.05f, 0.06f, 0.09f, 0.92f};
-const JPH::Vec4 kChartInk   = {0.02f, 0.03f, 0.05f, 0.85f};
-const JPH::Vec4 kTitleInk   = {0.92f, 0.96f, 1.00f, 1.00f};
-const JPH::Vec4 kBodyInk    = {0.78f, 0.84f, 0.92f, 1.00f};
-const JPH::Vec4 kFastBarInk = {0.35f, 0.82f, 0.55f, 1.00f};
-const JPH::Vec4 kSlowBarInk = {1.00f, 0.55f, 0.30f, 1.00f};
+const FVec4 kPanelInk   = {0.05f, 0.06f, 0.09f, 0.92f};
+const FVec4 kChartInk   = {0.02f, 0.03f, 0.05f, 0.85f};
+const FVec4 kTitleInk   = {0.92f, 0.96f, 1.00f, 1.00f};
+const FVec4 kBodyInk    = {0.78f, 0.84f, 0.92f, 1.00f};
+const FVec4 kFastBarInk = {0.35f, 0.82f, 0.55f, 1.00f};
+const FVec4 kSlowBarInk = {1.00f, 0.55f, 0.30f, 1.00f};
 
 // The telemetry table: a GPU stage's sparkline, a CPU scope's, and the dimmer
 // body ink a CPU scope's name is drawn in.
-const JPH::Vec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
-const JPH::Vec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
-const JPH::Vec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
+const FVec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
+const FVec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
+const FVec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
 
 // A stage row the profiler has stopped hearing from: dimmer than the body ink,
 // so a frozen number reads as a number that is not about now.
-const JPH::Vec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
+const FVec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
 
 // The machine section: a core cell's history bar, and the red a core at its
 // ceiling is drawn in.
-const JPH::Vec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
-const JPH::Vec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
+const FVec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
+const FVec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
 
 // A hovered line's card: a shade apart from the panel it floats over, so it
 // reads as a card on top of the panel rather than as more panel.
-const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
+const FVec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 
 // The colour a usage reading is drawn in: a level, not a duration, so the same
 // value is always the same colour wherever it appears (a core cell, the
 // machine-wide line, the GPU line).
-[[nodiscard]] auto LoadInk(float percent) -> JPH::Vec4 {
+[[nodiscard]] auto LoadInk(float percent) -> FVec4 {
     if (percent >= kCoreLoadHot) {
         return kHotInk;
     }
@@ -190,7 +191,7 @@ const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 // A core cell's history bars read by the same ramp as its percentage, and the
 // bars before the core's first sample are an absence rather than a reading --
 // which is the one thing a bar strip cannot decide for itself, so it asks.
-[[nodiscard]] auto CoreBarInk(void* /*user*/, [[maybe_unused]] size_t bar, float value, bool absent) -> JPH::Vec4 {
+[[nodiscard]] auto CoreBarInk(void* /*user*/, [[maybe_unused]] size_t bar, float value, bool absent) -> FVec4 {
     return absent ? kChartInk : LoadInk(value);
 }
 
@@ -199,13 +200,13 @@ const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 // top. The ramp is the bar's share of the scale the strip is drawing with, which
 // the caller passes by pointer -- the policy is told a bar's value, and the scale
 // is the caller's own number.
-[[nodiscard]] auto TickBarInk(void* user, [[maybe_unused]] size_t bar, float value, [[maybe_unused]] bool absent) -> JPH::Vec4 {
+[[nodiscard]] auto TickBarInk(void* user, [[maybe_unused]] size_t bar, float value, [[maybe_unused]] bool absent) -> FVec4 {
     const float peak = *static_cast<const float*>(user);
     const float fill = peak > 0.0f ? std::clamp(value / peak, 0.0f, 1.0f) : 0.0f;
-    return JPH::Vec4 {
-        kFastBarInk.GetX() + ((kSlowBarInk.GetX() - kFastBarInk.GetX()) * fill),
-        kFastBarInk.GetY() + ((kSlowBarInk.GetY() - kFastBarInk.GetY()) * fill),
-        kFastBarInk.GetZ() + ((kSlowBarInk.GetZ() - kFastBarInk.GetZ()) * fill),
+    return FVec4 {
+        kFastBarInk.x + ((kSlowBarInk.x - kFastBarInk.x) * fill),
+        kFastBarInk.y + ((kSlowBarInk.y - kFastBarInk.y) * fill),
+        kFastBarInk.z + ((kSlowBarInk.z - kFastBarInk.z) * fill),
         1.0f
     };
 }
@@ -604,8 +605,8 @@ void BenchmarkViewer::Impl::DrawStageRow(
     // and its number dimmed, because that number is the last one it had rather
     // than what the frame is paying now (see FrameStageRow::IsStale).
     const bool      stale    = row.IsStale();
-    const JPH::Vec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
-    const JPH::Vec4 valueInk = stale ? kStaleInk : kBodyInk;
+    const FVec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
+    const FVec4 valueInk = stale ? kStaleInk : kBodyInk;
 
     // The row is one hover target, so its card opens wherever on it the pointer
     // is rather than only over its number or its bars. Its id is past the bars'
@@ -761,7 +762,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
 
         const std::string      all     = std::format("GPU  {}{}", name, readings);
         const float            advance = AdvanceAt(12.0f);
-        const JPH::Vec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
+        const FVec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
         const std::string_view id      = TableId("hw", 0, 2, 0);
 
         ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {

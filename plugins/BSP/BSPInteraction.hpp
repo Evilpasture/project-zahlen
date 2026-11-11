@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPInteraction.hpp
 //
 // What the map says about its interactive entities, decoded.
@@ -73,7 +74,7 @@ struct EntityOutput {
 // The entity's "movedir" as an engine-space direction. Source spells it as
 // pitch/yaw degrees and overloads the first component with two sentinels
 // instead of an angle: -1 is up, -2 is down. An absent key is +X forward.
-[[nodiscard]] auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> JPH::Vec3;
+[[nodiscard]] auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3;
 
 // The numeric reading of a keyvalue or of an output's parameter field.
 // Absent or unparseable yields @p fallback, the field's own default: reading a
@@ -148,12 +149,12 @@ struct EntityRecord {
     // Engine space, sentinels resolved, and +X forward when the lump has no
     // movedir key -- the absent case is a format default, so it is decided here
     // rather than by every consumer.
-    JPH::Vec3 moveDirection = JPH::Vec3::sAxisX();
+    FVec3 moveDirection = FVec3::sAxisX();
 
     // Only for TeleportDestination, and already in engine space: the landing
     // point and the facing. The degree convention and the axis remap are the
     // asset's, so they are resolved before the record exists.
-    std::optional<JPH::Vec3> origin;
+    std::optional<FVec3> origin;
     JPH::Quat               orientation = JPH::Quat::sIdentity();
 
     std::optional<DoorFlags>   door;

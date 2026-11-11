@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "StudioModelLoader.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPRead.hpp"
 #include <algorithm>
 #include <cstring>
@@ -100,10 +101,10 @@ auto ParseStudioModel(
     modelData.version  = hdr.version;
     modelData.checksum = hdr.checksum;
 
-    const JPH::Vec3 minEngine = ConvertPosition(options, JPH::Vec3(hdr.hull_min[0], hdr.hull_min[1], hdr.hull_min[2]));
-    const JPH::Vec3 maxEngine = ConvertPosition(options, JPH::Vec3(hdr.hull_max[0], hdr.hull_max[1], hdr.hull_max[2]));
-    modelData.hullMin = {std::min(minEngine.GetX(), maxEngine.GetX()), std::min(minEngine.GetY(), maxEngine.GetY()), std::min(minEngine.GetZ(), maxEngine.GetZ())};
-    modelData.hullMax = {std::max(minEngine.GetX(), maxEngine.GetX()), std::max(minEngine.GetY(), maxEngine.GetY()), std::max(minEngine.GetZ(), maxEngine.GetZ())};
+    const FVec3 minEngine = ConvertPosition(options, FVec3(hdr.hull_min[0], hdr.hull_min[1], hdr.hull_min[2]));
+    const FVec3 maxEngine = ConvertPosition(options, FVec3(hdr.hull_max[0], hdr.hull_max[1], hdr.hull_max[2]));
+    modelData.hullMin = {std::min(minEngine.x, maxEngine.x), std::min(minEngine.y, maxEngine.y), std::min(minEngine.z, maxEngine.z)};
+    modelData.hullMax = {std::max(minEngine.x, maxEngine.x), std::max(minEngine.y, maxEngine.y), std::max(minEngine.z, maxEngine.z)};
 
     // Extract cdtextures (material search directories)
     if (hdr.numcdtextures > 0 && hdr.cdtextureindex > 0 && static_cast<size_t>(hdr.cdtextureindex) < mdlBytes.size()) {
@@ -250,17 +251,17 @@ auto ParseStudioModel(
                                 sv = lod0Vertices[globalVvdIdx];
                             }
 
-                            const JPH::Vec3 rawPos(sv.pos[0], sv.pos[1], sv.pos[2]);
-                            const JPH::Vec3 rawNorm(sv.normal[0], sv.normal[1], sv.normal[2]);
+                            const FVec3 rawPos(sv.pos[0], sv.pos[1], sv.pos[2]);
+                            const FVec3 rawNorm(sv.normal[0], sv.normal[1], sv.normal[2]);
 
-                            const JPH::Vec3 engPos  = ConvertPosition(options, rawPos);
-                            const JPH::Vec3 engNorm = ConvertDirection(options, rawNorm);
+                            const FVec3 engPos  = ConvertPosition(options, rawPos);
+                            const FVec3 engNorm = ConvertDirection(options, rawNorm);
 
                             const uint32_t newIndex = static_cast<uint32_t>(part.positions.size());
 
-                            part.positions.push_back(VertexPosition {{engPos.GetX(), engPos.GetY(), engPos.GetZ()}});
+                            part.positions.push_back(VertexPosition {{engPos.x, engPos.y, engPos.z}});
                             part.tangentFrames.push_back(VertexTangentFrame {
-                                Math::PackNormal(engNorm.GetX(), engNorm.GetY(), engNorm.GetZ()),
+                                Math::PackNormal(engNorm.x, engNorm.y, engNorm.z),
                                 Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)
                             });
                             part.surfaces.push_back(VertexSurface {
@@ -278,16 +279,16 @@ auto ParseStudioModel(
                             part.skinWeights.push_back(skin);
 
                             if (boundsFirst) {
-                                part.boundsMin = {engPos.GetX(), engPos.GetY(), engPos.GetZ()};
-                                part.boundsMax = {engPos.GetX(), engPos.GetY(), engPos.GetZ()};
+                                part.boundsMin = {engPos.x, engPos.y, engPos.z};
+                                part.boundsMax = {engPos.x, engPos.y, engPos.z};
                                 boundsFirst    = false;
                             } else {
-                                part.boundsMin.x = std::min(part.boundsMin.x, engPos.GetX());
-                                part.boundsMin.y = std::min(part.boundsMin.y, engPos.GetY());
-                                part.boundsMin.z = std::min(part.boundsMin.z, engPos.GetZ());
-                                part.boundsMax.x = std::max(part.boundsMax.x, engPos.GetX());
-                                part.boundsMax.y = std::max(part.boundsMax.y, engPos.GetY());
-                                part.boundsMax.z = std::max(part.boundsMax.z, engPos.GetZ());
+                                part.boundsMin.x = std::min(part.boundsMin.x, engPos.x);
+                                part.boundsMin.y = std::min(part.boundsMin.y, engPos.y);
+                                part.boundsMin.z = std::min(part.boundsMin.z, engPos.z);
+                                part.boundsMax.x = std::max(part.boundsMax.x, engPos.x);
+                                part.boundsMax.y = std::max(part.boundsMax.y, engPos.y);
+                                part.boundsMax.z = std::max(part.boundsMax.z, engPos.z);
                             }
 
                             sgToPartVert[sgVertIdx] = newIndex;
@@ -376,8 +377,8 @@ auto ParseStudioModel(
 
                     // If compact surface has vertices, transform them
                     // Fallback to bounding box corners for this solid
-                    hull.vertices.push_back(JPH::Vec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
-                    hull.vertices.push_back(JPH::Vec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
+                    hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
+                    hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
 
                     solid.convexHulls.push_back(std::move(hull));
                     modelData.physicsSolids.push_back(std::move(solid));
@@ -393,14 +394,14 @@ auto ParseStudioModel(
     if (modelData.physicsSolids.empty()) {
         StudioPhysicsSolid  solid;
         StudioPhysicsConvex hull;
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMin.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMin.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMin.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMax.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMax.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
-        hull.vertices.push_back(JPH::Vec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMax.z));
+        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMin.z));
+        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMin.z));
+        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMin.z));
+        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMin.z));
+        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMin.y, modelData.hullMax.z));
+        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMin.y, modelData.hullMax.z));
+        hull.vertices.push_back(FVec3(modelData.hullMax.x, modelData.hullMax.y, modelData.hullMax.z));
+        hull.vertices.push_back(FVec3(modelData.hullMin.x, modelData.hullMax.y, modelData.hullMax.z));
         solid.convexHulls.push_back(std::move(hull));
         modelData.physicsSolids.push_back(std::move(solid));
     }

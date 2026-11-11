@@ -9,6 +9,8 @@
 // reflection calls by translation-unit source offset) sees and flattens it.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
@@ -156,28 +158,28 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
             std::array<char, 64> buf {};
             auto                 sv = ZHLN::FormatTo(buf, "{}: Texture({})", name, static_cast<uint64_t>(field));
             gui.Text(sv, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});
-        } else if constexpr (std::is_same_v<FT, JPH::Vec4>) {
-            float v[4] = {field.GetX(), field.GetY(), field.GetZ(), field.GetW()};
+        } else if constexpr (std::is_same_v<FT, FVec4>) {
+            float v[4] = {field.x, field.y, field.z, field.w};
             for (int axis = 0; axis < 4; ++axis) {
                 std::array<char, 136> axisIdBuf {};
                 auto                  axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZW"[axis]);
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
-            field.SetX(v[0]);
-            field.SetY(v[1]);
-            field.SetZ(v[2]);
+            field.x = v[0];
+            field.y = v[1];
+            field.z = v[2];
             field.SetW(v[3]);
-        } else if constexpr (std::is_same_v<FT, JPH::Vec3>) {
-            float v[3] = {field.GetX(), field.GetY(), field.GetZ()};
+        } else if constexpr (std::is_same_v<FT, FVec3>) {
+            float v[3] = {field.x, field.y, field.z};
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 136> axisIdBuf {};
                 auto                  axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZ"[axis]);
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
-            field = JPH::Vec3(v[0], v[1], v[2]);
+            field = FVec3(v[0], v[1], v[2]);
         } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
-            float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
+            const FVec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
+            float           deg[3]  = {euler.x, euler.y, euler.z};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 96> axisLabelBuf {};
@@ -286,15 +288,15 @@ auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) 
     return bits;
 }
 
-auto CameraForward(const Camera& camera) noexcept -> JPH::Vec3 {
+auto CameraForward(const Camera& camera) noexcept -> FVec3 {
     const float yaw   = JPH::DegreesToRadians(camera.yaw);
     const float pitch = JPH::DegreesToRadians(camera.pitch);
-    return JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
+    return FVec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
 }
 
 // Unprojects the mouse exactly like the host's picking ray: same NDC
 // convention, same inverse view-projection.
-auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, JPH::Vec3& origin, JPH::Vec3& dir) noexcept -> bool {
+auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, FVec3& origin, FVec3& dir) noexcept -> bool {
     const float w = static_cast<float>(vp.width);
     const float h = static_cast<float>(vp.height);
     if (w <= 0.0f || h <= 0.0f) {
@@ -310,19 +312,19 @@ auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp,
     const float aspect = w / h;
 
     const JPH::Mat44 invVP = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
-    const JPH::Vec4  nearW = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
-    const JPH::Vec4  farW  = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
-    if (nearW.GetW() <= 0.0f || farW.GetW() <= 0.0f) {
+    const FVec4  nearW = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
+    const FVec4  farW  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
+    if (nearW.w <= 0.0f || farW.w <= 0.0f) {
         return false;
     }
-    origin               = JPH::Vec3(nearW.GetX() / nearW.GetW(), nearW.GetY() / nearW.GetW(), nearW.GetZ() / nearW.GetW());
-    const JPH::Vec3 farP = JPH::Vec3(farW.GetX() / farW.GetW(), farW.GetY() / farW.GetW(), farW.GetZ() / farW.GetW());
+    origin               = FVec3(nearW.x / nearW.w, nearW.y / nearW.w, nearW.z / nearW.w);
+    const FVec3 farP = FVec3(farW.x / farW.w, farW.y / farW.w, farW.z / farW.w);
     dir                  = (farP - origin).Normalized();
     return true;
 }
 
-auto RayPlane(const JPH::Vec3& origin, const JPH::Vec3& dir, const JPH::Vec3& normal, const JPH::Vec3& planePoint, JPH::Vec3& hit) noexcept -> bool {
-    const float d = dir.Dot(normal);
+auto RayPlane(const FVec3& origin, const FVec3& dir, const FVec3& normal, const FVec3& planePoint, FVec3& hit) noexcept -> bool {
+    const float d = Dot(dir, normal);
     if (std::fabs(d) < 1e-6f) {
         return false;
     }
@@ -331,7 +333,7 @@ auto RayPlane(const JPH::Vec3& origin, const JPH::Vec3& dir, const JPH::Vec3& no
     return true;
 }
 
-auto WorldToScreen(const Camera& camera, const SceneViewport& r, const JPH::Vec3& world, float& sx, float& sy) noexcept -> bool {
+auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& world, float& sx, float& sy) noexcept -> bool {
     const float w = static_cast<float>(r.width);
     const float h = static_cast<float>(r.height);
     if (w <= 0.0f || h <= 0.0f) {
@@ -339,28 +341,28 @@ auto WorldToScreen(const Camera& camera, const SceneViewport& r, const JPH::Vec3
     }
     const float      aspect = w / h;
     const JPH::Mat44 vp     = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
-    const JPH::Vec4  clip   = vp * JPH::Vec4(world.GetX(), world.GetY(), world.GetZ(), 1.0f);
-    if (clip.GetW() <= 0.0f) {
+    const FVec4  clip   = vp * FVec4(world.x, world.y, world.z, 1.0f);
+    if (clip.w <= 0.0f) {
         return false;
     }
     // NDC -> window pixels inside the scene rectangle (see MouseRay).
-    sx = (clip.GetX() / clip.GetW() + 1.0f) * 0.5f * w + static_cast<float>(r.x);
-    sy = (clip.GetY() / clip.GetW() + 1.0f) * 0.5f * h + static_cast<float>(r.y);
+    sx = (clip.x / clip.w + 1.0f) * 0.5f * w + static_cast<float>(r.x);
+    sy = (clip.y / clip.w + 1.0f) * 0.5f * h + static_cast<float>(r.y);
     return true;
 }
 
-auto AxisVector(EditorState::TransformAxis axis) noexcept -> JPH::Vec3 {
+auto AxisVector(EditorState::TransformAxis axis) noexcept -> FVec3 {
     switch (axis) {
         case EditorState::TransformAxis::X:
-            return JPH::Vec3::sAxisX();
+            return FVec3::sAxisX();
         case EditorState::TransformAxis::Y:
-            return JPH::Vec3::sAxisY();
+            return FVec3::sAxisY();
         case EditorState::TransformAxis::Z:
-            return JPH::Vec3::sAxisZ();
+            return FVec3::sAxisZ();
         case EditorState::TransformAxis::None:
             break;
     }
-    return JPH::Vec3::sZero();
+    return FVec3::sZero();
 }
 
 } // namespace
@@ -408,7 +410,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                 state.transformStartScale    = t->scale;
 
                 state.transformPlaneNormal = CameraForward(camera);
-                JPH::Vec3 origin {}, dir {};
+                FVec3 origin {}, dir {};
                 if (!MouseRay(camera, mx, my, viewport, origin, dir) ||
                     !RayPlane(origin, dir, state.transformPlaneNormal, t->position, state.transformAnchor)) {
                     state.transformAnchor = t->position;
@@ -449,15 +451,15 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
 
             switch (state.transformMode) {
                 case EditorState::TransformMode::Move: {
-                    JPH::Vec3 origin {}, dir {}, hit {};
+                    FVec3 origin {}, dir {}, hit {};
                     if (MouseRay(camera, mx, my, viewport, origin, dir) &&
                         RayPlane(origin, dir, state.transformPlaneNormal, state.transformStartPosition, hit)) {
-                        JPH::Vec3 delta = hit - state.transformAnchor;
+                        FVec3 delta = hit - state.transformAnchor;
                         if (state.transformAxis != EditorState::TransformAxis::None) {
-                            const JPH::Vec3 axis = AxisVector(state.transformAxis);
-                            delta                = axis * delta.Dot(axis);
+                            const FVec3 axis = AxisVector(state.transformAxis);
+                            delta                = axis * Dot(delta, axis);
                         }
-                        const JPH::Vec3 newPos = state.transformStartPosition + delta;
+                        const FVec3 newPos = state.transformStartPosition + delta;
                         reg.Patch<Comp::TransformComponent>(e, [&newPos](Comp::TransformComponent& t) -> void { t.position = newPos; });
                     }
                     break;
@@ -472,7 +474,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                         // camera forward), making a positive seen delta a
                         // positive right-handed turn about it.
                         const float     angle  = std::atan2(oy - my, mx - ox);
-                        const JPH::Vec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
+                        const FVec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
                                                                                                              state.transformPlaneNormal * -1.0f;
                         const JPH::Quat turn   = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
                         const JPH::Quat newRot = turn * state.transformStartRotation;
@@ -487,25 +489,25 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                         // scale: pull away from the object and it grows.
                         const float     dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
                         const float     factor = std::max(dist / state.transformStartDist, 1e-3f);
-                        const JPH::Vec3 start  = state.transformStartScale;
-                        JPH::Vec3       next   = start * factor;
+                        const FVec3 start  = state.transformStartScale;
+                        FVec3       next   = start * factor;
                         if (state.transformAxis != EditorState::TransformAxis::None) {
                             next               = start;
-                            const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.GetX() * factor :
-                                                 (state.transformAxis == EditorState::TransformAxis::Y) ? start.GetY() * factor :
-                                                                                                          start.GetZ() * factor;
+                            const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.x * factor :
+                                                 (state.transformAxis == EditorState::TransformAxis::Y) ? start.y * factor :
+                                                                                                          start.z * factor;
                             if (state.transformAxis == EditorState::TransformAxis::X) {
-                                next = JPH::Vec3(scaled, start.GetY(), start.GetZ());
+                                next = FVec3(scaled, start.y, start.z);
                             } else if (state.transformAxis == EditorState::TransformAxis::Y) {
-                                next = JPH::Vec3(start.GetX(), scaled, start.GetZ());
+                                next = FVec3(start.x, scaled, start.z);
                             } else {
-                                next = JPH::Vec3(start.GetX(), start.GetY(), scaled);
+                                next = FVec3(start.x, start.y, scaled);
                             }
                         }
                         // A flipped or zero scale would turn the mesh inside
                         // out or collapse it; the mouse can get arbitrarily
                         // close to the projected center.
-                        next = JPH::Vec3(std::max(next.GetX(), 1e-4f), std::max(next.GetY(), 1e-4f), std::max(next.GetZ(), 1e-4f));
+                        next = FVec3(std::max(next.x, 1e-4f), std::max(next.y, 1e-4f), std::max(next.z, 1e-4f));
                         reg.Patch<Comp::TransformComponent>(e, [&next](Comp::TransformComponent& t) -> void { t.scale = next; });
                     }
                     break;
@@ -607,7 +609,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
         }
 
         bool      isSelected = (state.selectedEntity == row.entity);
-        JPH::Vec4 color      = isSelected ? JPH::Vec4(0.20f, 0.35f, 0.55f, 0.9f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.7f);
+        FVec4 color      = isSelected ? FVec4(0.20f, 0.35f, 0.55f, 0.9f) : FVec4(0.10f, 0.12f, 0.16f, 0.7f);
 
         // Indent by depth
         if (row.depth > 0) {

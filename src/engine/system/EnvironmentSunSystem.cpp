@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "EnvironmentSunSystem.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
@@ -63,9 +64,9 @@ void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& e
     const auto& energy = sun->irradiance;
     const Components::LightComponent baked {
         .type = LightType::Sun,
-        .color = JPH::Vec3(energy[0], energy[1], energy[2]) * std::numbers::pi_v<float>,
+        .color = FVec3(energy[0], energy[1], energy[2]) * std::numbers::pi_v<float>,
         .intensity = 1.0f,
-        .direction = JPH::Vec3(dir[0], dir[1], dir[2]).Normalized(),
+        .direction = FVec3(dir[0], dir[1], dir[2]).Normalized(),
     };
     if (owned == Entity::Null()) {
         ecb.CreateEntity(EnvironmentSunTagComponent {}, baked);

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "Factions.hpp"
 #include "Graph.hpp"
 #include "SpatialGrid.hpp"
@@ -39,7 +40,7 @@ class ZHLN_STATIC_API Simulator {
     explicit Simulator(const SimConfig& config = SimConfig {});
 
     // Subsystem update hook
-    void Update(ZHLN::Engine& engine, float dt, JPH::RVec3Arg observer_pos);
+    void Update(ZHLN::Engine& engine, float dt, DVec3 observer_pos);
 
     void SetRelation(uint32_t a, uint32_t b, float value);
     void BroadcastEvent(const Event& event);

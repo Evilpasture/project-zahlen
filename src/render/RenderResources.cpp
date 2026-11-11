@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/GpuPack.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "render/RenderInternal.hpp"
 #include "render/Resources.hpp"
 #include "Zahlen/Core/AssetID.hpp"
@@ -313,14 +315,14 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
             if (static_cast<uint32_t>(quad.facing) != alignment) {
                 continue;
             }
-            const JPH::Vec3 position = quad.position;
-            const JPH::Vec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? JPH::Vec3(quad.velocity) : JPH::Vec3::sZero();
+            const FVec3 position = quad.position;
+            const FVec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? FVec3(quad.velocity) : FVec3::sZero();
 
             Particle packed {};
-            packed.position = ZHLN::Float4(JPH::Vec4(position, 1.0f));
-            packed.velocity = ZHLN::Float4(JPH::Vec4(velocity, 0.0f));
+            packed.position = ZHLN::FVec4(FVec4(position, 1.0f));
+            packed.velocity = ZHLN::FVec4(FVec4(velocity, 0.0f));
             packed.color    = quad.color;
-            packed.params   = ZHLN::Float4(0.0f, 0.0f, quad.size, quad.rotation);
+            packed.params   = ZHLN::FVec4(0.0f, 0.0f, quad.size, quad.rotation);
             _impl->billboardStaging.push_back(packed);
         }
 
@@ -857,7 +859,7 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
     Draw(material, debugMesh, {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f});
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices) {
+void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) {
     if (matrices.empty()) {
         return;
     }

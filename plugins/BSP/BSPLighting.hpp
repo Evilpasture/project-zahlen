@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPLighting.hpp
 //
 // The lighting half of the BSP workflow: every rule that turns a compiled
@@ -264,7 +265,7 @@ struct SourceLightValue {
 
 // The light_environment sun direction in Source space (pitch positive down),
 // or a zero vector when the map has none.
-[[nodiscard]] auto EnvironmentSunDirection(const BSPMap& map) noexcept -> JPH::Vec3;
+[[nodiscard]] auto EnvironmentSunDirection(const BSPMap& map) noexcept -> FVec3;
 
 // ---------------------------------------------------------------------------
 // Emissive surfaces
@@ -274,7 +275,7 @@ struct SourceLightValue {
 struct EmissiveMaterialProbe {
     bool      isEmissive = false;
     float     strength   = 0.0f; // authored self-illumination, 0..1
-    JPH::Vec3 tint {1.0f, 1.0f, 1.0f};
+    FVec3 tint {1.0f, 1.0f, 1.0f};
 };
 
 // Name-only emissive test, used by the geometry pass (which has no VFS). A

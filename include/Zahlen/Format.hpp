@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Core/Reference.h>
-#include <Jolt/Math/Double3.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
+#include <Jolt/Math/DVec3.h>
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Vec4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
@@ -25,16 +26,16 @@ struct CustomFormatter<ZHLN::Entity> {
 };
 
 template <>
-struct CustomFormatter<JPH::Vec3> {
-    static void format(const JPH::Vec3& v, std::string& out) {
-        out += std::format("({}, {}, {})", v.GetX(), v.GetY(), v.GetZ());
+struct CustomFormatter<FVec3> {
+    static void format(const FVec3& v, std::string& out) {
+        out += std::format("({}, {}, {})", v.x, v.y, v.z);
     }
 };
 
 template <>
-struct CustomFormatter<JPH::DVec3> {
-    static void format(const JPH::DVec3& v, std::string& out) {
-        out += std::format("({}, {}, {})", v.GetX(), v.GetY(), v.GetZ());
+struct CustomFormatter<DVec3> {
+    static void format(const DVec3& v, std::string& out) {
+        out += std::format("({}, {}, {})", v.x, v.y, v.z);
     }
 };
 
@@ -64,7 +65,7 @@ struct CustomFormatter<JPH::Double3> {
 template <>
 struct CustomFormatter<JPH::Quat> {
     static void format(const JPH::Quat& q, std::string& out) {
-        out += std::format("({}, {}, {}, {})", q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+        out += std::format("({}, {}, {}, {})", q.x, q.y, q.z, q.w);
     }
 };
 

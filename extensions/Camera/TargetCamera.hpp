@@ -12,6 +12,7 @@
 // the rig as a frame step through the engine's extension seams.
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
@@ -39,7 +40,7 @@ struct TargetCameraComponent {
     float     targetDistance = 4.5f;
     float     yaw            = -90.0f;
     float     pitch          = -10.0f;
-    JPH::Vec3 targetOffset   = JPH::Vec3(0.0f, 1.3f, 0.0f);
+    FVec3 targetOffset   = FVec3(0.0f, 1.3f, 0.0f);
     float     stiffness      = 15.0f;
 
     // The renderer's vignette reads PostProcessSettingsComponent; these two
@@ -50,7 +51,7 @@ struct TargetCameraComponent {
     float fov               = 45.0f;
     float targetFov         = 45.0f;
 
-    JPH::Vec3 smoothTargetPos     = JPH::Vec3::sZero();
+    FVec3 smoothTargetPos     = FVec3::sZero();
     uint32_t  hasInitSmoothTarget = 0;
 };
 

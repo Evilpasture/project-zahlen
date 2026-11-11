@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "VMTParser.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -177,8 +178,8 @@ auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
     return 0.0f;
 }
 
-auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
-    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
+auto Rec709Luma(const FVec3& rgb) noexcept -> float {
+    return rgb.x * 0.2126f + rgb.y * 0.7152f + rgb.z * 0.0722f;
 }
 
 namespace {

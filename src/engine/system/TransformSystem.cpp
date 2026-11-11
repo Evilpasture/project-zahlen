@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TransformSystem.hpp"
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -56,12 +57,12 @@ auto TransformSystem::LocalTransformBits(const Components::TransformComponent& t
 auto TransformSystem::WorldMatrixBits(const JPH::Mat44& matrix) noexcept -> std::array<uint32_t, 16> {
     std::array<uint32_t, 16> bits {};
     for (uint32_t column = 0; column < 4; ++column) {
-        const JPH::Vec4 value = matrix.GetColumn4(column);
+        const FVec4 value = matrix.GetColumn4(column);
         const size_t    base  = static_cast<size_t>(column) * 4;
-        bits[base + 0]        = std::bit_cast<uint32_t>(value.GetX());
-        bits[base + 1]        = std::bit_cast<uint32_t>(value.GetY());
-        bits[base + 2]        = std::bit_cast<uint32_t>(value.GetZ());
-        bits[base + 3]        = std::bit_cast<uint32_t>(value.GetW());
+        bits[base + 0]        = std::bit_cast<uint32_t>(value.x);
+        bits[base + 1]        = std::bit_cast<uint32_t>(value.y);
+        bits[base + 2]        = std::bit_cast<uint32_t>(value.z);
+        bits[base + 3]        = std::bit_cast<uint32_t>(value.w);
     }
     return bits;
 }

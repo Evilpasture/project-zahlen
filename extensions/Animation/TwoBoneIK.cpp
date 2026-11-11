@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IK.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "AnimationContext.hpp"
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -52,7 +53,7 @@ void TwoBoneIKSystem::Update(
             if (count >= translated.size()) {
                 break;
             }
-            JPH::Vec3 targetPosModel = src.targetPosition;
+            FVec3 targetPosModel = src.targetPosition;
             JPH::Quat targetRotModel = src.targetRotation;
 
             if (src.targetEntity != Entity::Null()) {

@@ -5,7 +5,10 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <array>
 #include <concepts>
@@ -74,12 +77,12 @@ using MaterialSamplerAddresses                         = std::array<TextureSampl
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
 //
-// The two 2-component fields are ZHLN::Float2: eight bytes, the storage a
-// ZHLN::Float2 holds, and the only 2D type in the engine's vocabulary -- a
+// The two 2-component fields are ZHLN::FVec2: eight bytes, the storage a
+// ZHLN::FVec2 holds, and the only 2D type in the engine's vocabulary -- a
 // std::array<float, 2> would be a second spelling of the same eight bytes.
 struct MaterialTextureTransform {
-    ZHLN::Float2   offset {0.0f, 0.0f};
-    ZHLN::Float2   scale {1.0f, 1.0f};
+    ZHLN::FVec2   offset {0.0f, 0.0f};
+    ZHLN::FVec2   scale {1.0f, 1.0f};
     float          rotation                                                   = 0.0f; // Radians, counter-clockwise in glTF UV space.
     uint32_t       texCoord                                                   = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
@@ -125,8 +128,8 @@ struct Material {
     // AO and not material emission. It is sampled with the mesh's UV1.
     TextureID    bakedIrradianceMap       = TextureID::Invalid;
     float        bakedIrradianceScale     = 1.0f;
-    ZHLN::Float4 baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
-    ZHLN::Float4 emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4 baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
     float        metallicFactor           = 1.0f;
     float        roughnessFactor          = 1.0f;
     float        alphaCutoff              = 0.5f;
@@ -153,7 +156,7 @@ struct Material {
     float        anisotropyStrength       = 0.0f;
     float        anisotropyRotation       = 0.0f; // Radians about the surface normal, from the tangent.
     TextureID    anisotropyMap            = TextureID::Invalid;
-    ZHLN::Float3 sheenColorFactor {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec3 sheenColorFactor {0.0f, 0.0f, 0.0f};
     float        sheenRoughnessFactor = 0.0f;
     TextureID    sheenColorMap        = TextureID::Invalid;
     TextureID    sheenRoughnessMap    = TextureID::Invalid;
@@ -173,7 +176,7 @@ struct Material {
     bool         environmentReflectionAlphaMask = false;
     float        environmentReflectionFactor    = 1.0f;
     float        specularFactor                 = 1.0f;
-    ZHLN::Float3 specularColorFactor {1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3 specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureID    specularMap = TextureID::Invalid;
     // Which half of the single KHR_materials_specular texture slot this
     // material's image carries: 0 = specularColorTexture.rgb and
@@ -192,8 +195,8 @@ struct Material {
 // same size and alignment as the Jolt pods they stand in for, so this changes no
 // struct's layout.
 static_assert(
-    sizeof(ZHLN::Float2) == 8 && alignof(ZHLN::Float2) == 4 && sizeof(ZHLN::Float3) == 12 && alignof(ZHLN::Float3) == 4 && sizeof(ZHLN::Float4) == 16 &&
-        alignof(ZHLN::Float4) == 4,
+    sizeof(ZHLN::FVec2) == 8 && alignof(ZHLN::FVec2) == 4 && sizeof(ZHLN::FVec3) == 12 && alignof(ZHLN::FVec3) == 4 && sizeof(ZHLN::FVec4) == 16 &&
+        alignof(ZHLN::FVec4) == 4,
     "the lane pods are the storage spelling; their geometry is the ABI"
 );
 
@@ -231,8 +234,8 @@ struct MaterialDesc {
     float        alphaCutoff        = 0.5f;
     float        metallic           = 1.0f;
     float        roughness          = 1.0f;
-    ZHLN::Float4 baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
-    ZHLN::Float4 emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4 baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
     float        transmissionFactor = 0.0f;
     TextureID    transmissionMap    = TextureID::Invalid;
     float        iridescenceFactor  = 0.0f;
@@ -263,7 +266,7 @@ struct MaterialDesc {
     float        anisotropyStrength       = 0.0f;
     float        anisotropyRotation       = 0.0f; // KHR_materials_anisotropy radians.
     TextureID    anisotropyMap            = TextureID::Invalid;
-    ZHLN::Float3 sheenColorFactor {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec3 sheenColorFactor {0.0f, 0.0f, 0.0f};
     float        sheenRoughnessFactor = 0.0f;
     TextureID    sheenColorMap        = TextureID::Invalid;
     TextureID    sheenRoughnessMap    = TextureID::Invalid;
@@ -278,32 +281,32 @@ struct MaterialDesc {
     bool                      environmentReflectionAlphaMask = false;
     float                     environmentReflectionFactor    = 1.0f;
     float                     specularFactor                 = 1.0f;
-    ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3              specularColorFactor {1.0f, 1.0f, 1.0f};
     TextureID                 specularMap     = TextureID::Invalid;
     uint32_t                  specularTexMode = 0;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 
-    static MaterialDesc Basic(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.5f, float metallic = 0.0f, bool twoSided = false) {
+    static MaterialDesc Basic(ZHLN::FVec4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.5f, float metallic = 0.0f, bool twoSided = false) {
         return MaterialDesc {.doubleSided = twoSided, .metallic = metallic, .roughness = roughness, .baseColor = color};
     }
-    static MaterialDesc Transparent(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.1f, bool twoSided = false) {
+    static MaterialDesc Transparent(ZHLN::FVec4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.1f, bool twoSided = false) {
         return MaterialDesc {.doubleSided = twoSided, .alphaBlend = true, .alphaMode = 2, .metallic = 0.0f, .roughness = roughness, .baseColor = color};
     }
-    static MaterialDesc Unlit(ZHLN::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}) {
+    static MaterialDesc Unlit(ZHLN::FVec4 color = {1.0f, 1.0f, 1.0f, 1.0f}) {
         return MaterialDesc {.unlit = true, .baseColor = color};
     }
 };
 
 struct DrawParams {
-    ZHLN::Mat44  transform        = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  prevTransform    = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4  transform        = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  prevTransform    = ZHLN::Mat4x4::Identity();
     float        cullRadius       = 1.0f;
-    ZHLN::Float3 localCenter      = {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec3 localCenter      = {0.0f, 0.0f, 0.0f};
     uint32_t     jointOffset      = 0;
     uint32_t     morphOffset      = 0;
     uint32_t     activeMorphCount = 0;
-    ZHLN::Float4 morphWeights     = {};
+    ZHLN::FVec4 morphWeights     = {};
     DrawFlags    flags            = DrawFlags::None;
 
     BufferID skinnedVertexBuffer = BufferID::Invalid;
@@ -311,20 +314,20 @@ struct DrawParams {
     float roughness = -1.0f;
     float metallic  = -1.0f;
 
-    ZHLN::Float4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
-    ZHLN::Float4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+    ZHLN::FVec4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
+    ZHLN::FVec4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
 
     // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) for meshes without
     // baked lightmaps. Only read when hasAmbientCube is set.
     bool                        hasAmbientCube = false;
-    std::array<ZHLN::Float4, 6> ambientCube {};
+    std::array<ZHLN::FVec4, 6> ambientCube {};
 };
 
 struct CSGCutterParams {
     Mesh         mesh;
     Material     material;
-    ZHLN::Mat44  transform           = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  prevTransform       = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4  transform           = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  prevTransform       = ZHLN::Mat4x4::Identity();
     float        cullRadius          = 1.0f;
     CSGOperation operation           = CSGOperation::Difference;
     uint32_t     jointOffset         = 0;
@@ -338,8 +341,8 @@ struct CSGDrawParams {
 };
 
 struct DecalParams {
-    ZHLN::Mat44 transform    = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44 invTransform = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4 transform    = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4 invTransform = ZHLN::Mat4x4::Identity();
     TextureID   albedoMap    = TextureID::Invalid;
     TextureID   normalMap    = TextureID::Invalid;
     float       roughness    = 0.5f;

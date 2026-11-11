@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -18,7 +19,10 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <string>
@@ -31,7 +35,7 @@ void Release(PhysicsContext&, Components::PhysicsComponent&) {
 } // namespace SceneResources
 void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
-void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::Double3) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::DVec3) {
 }
 auto Engine::GetInternalRegistry() noexcept -> ECS::Registry& {
     static ECS::Registry reg;
@@ -250,7 +254,7 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(sceneEnt.transform.position), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                        .position = FVec3(sceneEnt.transform.position), .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)
                     }
                 );
                 reg.Add<ZHLN::Components::SceneSourceComponent>(
@@ -278,7 +282,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectTrue((door->flags & ZHLN::Interaction::DoorFlags::UseOpens) != ZHLN::Interaction::DoorFlags::None);
             ZHLN::Test::ExpectGt(door->speed, 0.0f);
             ZHLN::Test::ExpectEq(door->wait, 2.0f);
-            ZHLN::Test::ExpectGt((door->openPosition - door->closedPosition).LengthSq(), 0.0f);
+            ZHLN::Test::ExpectGt((door->openPosition - door->closedPosition).LengthSquared(), 0.0f);
             ZHLN::Test::ExpectEq(doorMeta->className, ZHLN::String64("func_door"));
             ZHLN::Test::ExpectEq(doorConn->outputCount, uint32_t {1});
             ZHLN::Test::ExpectEq(doorConn->outputs[0].event, ZHLN::String64("OnOpen"));
@@ -387,9 +391,9 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2});
 
             const auto& gateDesc   = scene.entities[1];
-            const JPH::Vec3 pivot {gateDesc.transform.position.x, gateDesc.transform.position.y, gateDesc.transform.position.z};
+            const FVec3 pivot {gateDesc.transform.position.x, gateDesc.transform.position.y, gateDesc.transform.position.z};
             // The gate sits well off the origin in this synthetic map.
-            ZHLN::Test::ExpectGt((pivot - JPH::Vec3::sZero()).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((pivot - FVec3::sZero()).Length(), 1e-3f);
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
@@ -409,9 +413,9 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(sceneEnt.transform.position),
+                        .position = FVec3(sceneEnt.transform.position),
                         .rotation = JPH::Quat::sIdentity(),
-                        .scale    = JPH::Vec3::sReplicate(1.0f),
+                        .scale    = FVec3::sReplicate(1.0f),
                     }
                 );
                 reg.Add<ZHLN::Components::SceneSourceComponent>(
@@ -448,7 +452,7 @@ struct BSPInteractionTestSuite {
             // measures the 2.5 m use radius from, and the value the movement
             // system interpolates from -- a zero here is the regression.
             ZHLN::Test::ExpectLt((door.closedPosition - pivot).Length(), 1e-3f);
-            ZHLN::Test::ExpectGt((door.closedPosition - JPH::Vec3::sZero()).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((door.closedPosition - FVec3::sZero()).Length(), 1e-3f);
             ZHLN::Test::ExpectGt((door.openPosition - door.closedPosition).Length(), 0.0f);
 
             // The door actually slides: opening moves it, in place, along movedir.
@@ -465,7 +469,7 @@ struct BSPInteractionTestSuite {
             }
             // Half a speed-step of travel away from the gate, still nowhere near
             // the origin.
-            const JPH::Vec3 movedPos = moved->position;
+            const FVec3 movedPos = moved->position;
             ZHLN::Test::ExpectGt((movedPos - pivot).Length(), 0.0f);
             ZHLN::Test::ExpectGt(movedPos.Length(), 0.0f);
 
@@ -485,7 +489,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 doorEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                    .position = FVec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)
                 }
             );
             reg.Add<ZHLN::Interaction::DoorComponent>(
@@ -493,8 +497,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::None,
-                    .closedPosition = JPH::Vec3(0.0f, 0.0f, 0.0f),
-                    .openPosition   = JPH::Vec3(0.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3(0.0f, 0.0f, 0.0f),
+                    .openPosition   = FVec3(0.0f, 2.0f, 0.0f),
                     .speed          = 2.0f, // 0.5s to open
                     .progress       = 0.0f,
                     .wait           = 1.0f, // 1s wait before auto-closing
@@ -558,11 +562,11 @@ struct BSPInteractionTestSuite {
             reg.Add(rotDoorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("rot_door")});
             reg.Add<ZHLN::Components::TransformComponent>(
                 rotDoorEnt,
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)}
+                ZHLN::Components::TransformComponent {.position = FVec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)}
             );
 
             const JPH::Quat closedQ = JPH::Quat::sIdentity();
-            const JPH::Quat openQ   = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(90.0f));
+            const JPH::Quat openQ   = JPH::Quat::sRotation(FVec3::sAxisY(), JPH::DegreesToRadians(90.0f));
 
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 rotDoorEnt,
@@ -571,7 +575,7 @@ struct BSPInteractionTestSuite {
                     .flags          = ZHLN::Interaction::DoorFlags::Rotating,
                     .closedRotation = closedQ,
                     .openRotation   = openQ,
-                    .rotationAxis   = JPH::Vec3::sAxisY(),
+                    .rotationAxis   = FVec3::sAxisY(),
                     .rotationAngle  = 90.0f,
                     .speed          = 1.0f, // 1s to open
                     .progress       = 0.0f,
@@ -602,7 +606,7 @@ struct BSPInteractionTestSuite {
             trans = reg.Get<ZHLN::Components::TransformComponent>(rotDoorEnt);
             door  = reg.Get<ZHLN::Interaction::DoorComponent>(rotDoorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Open);
-            ZHLN::Test::ExpectLt(std::abs((trans->rotation.y - openQ.GetY())), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs((trans->rotation.y - openQ.y)), 1e-3f);
 
             return {};
         }
@@ -625,8 +629,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::Toggle,
-                    .closedPosition = JPH::Vec3::sZero(),
-                    .openPosition   = JPH::Vec3(0.0f, 3.0f, 0.0f),
+                    .closedPosition = FVec3::sZero(),
+                    .openPosition   = FVec3(0.0f, 3.0f, 0.0f),
                     .speed          = 2.0f,
                     .wait           = -1.0f,
                     .targetname     = ZHLN::String64("secure_vault"),
@@ -695,7 +699,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 playerEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                    .position = FVec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)
                 }
             );
 
@@ -707,7 +711,7 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::TriggerComponent {
                     .radius      = 2.0f,
                     .flags       = ZHLN::Interaction::TriggerFlags::Active | ZHLN::Interaction::TriggerFlags::TriggerOnce,
-                    .halfExtents = JPH::Vec3(2.0f, 2.0f, 2.0f),
+                    .halfExtents = FVec3(2.0f, 2.0f, 2.0f),
                 }
             );
 
@@ -759,14 +763,14 @@ struct BSPInteractionTestSuite {
             // Create unlocked door near player
             const auto doorEnt = reg.Create();
             reg.Add(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("interact_door")});
-            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(1.0f, 0.0f, 0.0f)});
+            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = FVec3(1.0f, 0.0f, 0.0f)});
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 doorEnt,
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::UseOpens | ZHLN::Interaction::DoorFlags::Toggle,
-                    .closedPosition = JPH::Vec3(1.0f, 0.0f, 0.0f),
-                    .openPosition   = JPH::Vec3(1.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3(1.0f, 0.0f, 0.0f),
+                    .openPosition   = FVec3(1.0f, 2.0f, 0.0f),
                     .targetname     = ZHLN::String64("interact_door"),
                 }
             );

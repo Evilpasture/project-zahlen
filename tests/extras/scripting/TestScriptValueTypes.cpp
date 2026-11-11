@@ -10,7 +10,7 @@
 // These are the conversions the monolithic ZHLN_DispatchCommand table exists to
 // work around. Every argument blob in Scripting.cpp -- SetCharVelArgs,
 // RaycastArgs, AddImpulseAtArgs and the rest -- is a hand-flattened spelling of
-// a call that takes an Entity and a Vec3 or two. If they round-trip here, the
+// a call that takes an Entity and a FVec3 or two. If they round-trip here, the
 // table stops being load-bearing and the Lua side can call PhysicsContext
 // directly through ZHLN_InvokeMethod.
 //
@@ -20,6 +20,8 @@
 // compiler's reflection support is off.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -100,7 +102,7 @@ struct ScriptValueTypesTestSuite {
     }
 
     std::expected<void, ZHLN::ErrorCode> vec3_crosses_as_three_numbers() {
-        const JPH::Vec3 v(1.5f, -2.25f, 3.0f);
+        const FVec3 v(1.5f, -2.25f, 3.0f);
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(v);
 
@@ -110,40 +112,40 @@ struct ScriptValueTypesTestSuite {
         }
         ZHLN::Test::ExpectEq(arr->elements.size(), static_cast<size_t>(3));
 
-        auto back = ZHLN::FromScriptVal<JPH::Vec3>(val);
+        auto back = ZHLN::FromScriptVal<FVec3>(val);
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(back->GetX(), 1.5f);
-        ZHLN::Test::ExpectEq(back->GetY(), -2.25f);
-        ZHLN::Test::ExpectEq(back->GetZ(), 3.0f);
+        ZHLN::Test::ExpectEq(back->x, 1.5f);
+        ZHLN::Test::ExpectEq(back->y, -2.25f);
+        ZHLN::Test::ExpectEq(back->z, 3.0f);
 
         // And the literal form a script would actually write.
-        auto fromLiteral = ZHLN::FromScriptVal<JPH::Vec3>(Numbers({7.0, 8.0, 9.0}));
+        auto fromLiteral = ZHLN::FromScriptVal<FVec3>(Numbers({7.0, 8.0, 9.0}));
         if (!ZHLN::Test::ExpectTrue(fromLiteral.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(fromLiteral->GetX(), 7.0f);
-        ZHLN::Test::ExpectEq(fromLiteral->GetZ(), 9.0f);
+        ZHLN::Test::ExpectEq(fromLiteral->x, 7.0f);
+        ZHLN::Test::ExpectEq(fromLiteral->z, 9.0f);
 
         return {};
     }
 
     std::expected<void, ZHLN::ErrorCode> dvec3_keeps_double_precision() {
-        // Physics origins are RVec3, which is DVec3 under JPH_DOUBLE_PRECISION.
-        // A round-trip through double must not truncate the way Vec3's float
+        // Physics origins are DVec3, which is DVec3 under JPH_DOUBLE_PRECISION.
+        // A round-trip through double must not truncate the way FVec3's float
         // path would -- these magnitudes are ordinary world coordinates.
-        const JPH::DVec3 v(123456.789012, -987654.321098, 0.000001);
+        const DVec3 v(123456.789012, -987654.321098, 0.000001);
 
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(v);
-        auto            back = ZHLN::FromScriptVal<JPH::DVec3>(val);
+        auto            back = ZHLN::FromScriptVal<DVec3>(val);
 
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(back->GetX(), 123456.789012);
-        ZHLN::Test::ExpectEq(back->GetY(), -987654.321098);
-        ZHLN::Test::ExpectEq(back->GetZ(), 0.000001);
+        ZHLN::Test::ExpectEq(back->x, 123456.789012);
+        ZHLN::Test::ExpectEq(back->y, -987654.321098);
+        ZHLN::Test::ExpectEq(back->z, 0.000001);
 
         return {};
     }
@@ -163,26 +165,26 @@ struct ScriptValueTypesTestSuite {
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(back->GetX(), 0.1f);
-        ZHLN::Test::ExpectEq(back->GetY(), 0.2f);
-        ZHLN::Test::ExpectEq(back->GetZ(), 0.3f);
-        ZHLN::Test::ExpectEq(back->GetW(), 0.9f);
+        ZHLN::Test::ExpectEq(back->x, 0.1f);
+        ZHLN::Test::ExpectEq(back->y, 0.2f);
+        ZHLN::Test::ExpectEq(back->z, 0.3f);
+        ZHLN::Test::ExpectEq(back->w, 0.9f);
 
         return {};
     }
 
     std::expected<void, ZHLN::ErrorCode> vec4_crosses_as_four_numbers() {
         // Colours reach scripts this way: DrawLine's endpoints, Material.baseColorFactor.
-        const JPH::Vec4 c(0.25f, 0.5f, 0.75f, 1.0f);
+        const FVec4 c(0.25f, 0.5f, 0.75f, 1.0f);
 
         ZHLN::ScriptVal val  = ZHLN::ToScriptVal(c);
-        auto            back = ZHLN::FromScriptVal<JPH::Vec4>(val);
+        auto            back = ZHLN::FromScriptVal<FVec4>(val);
 
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(back->GetX(), 0.25f);
-        ZHLN::Test::ExpectEq(back->GetW(), 1.0f);
+        ZHLN::Test::ExpectEq(back->x, 0.25f);
+        ZHLN::Test::ExpectEq(back->w, 1.0f);
 
         return {};
     }
@@ -190,16 +192,16 @@ struct ScriptValueTypesTestSuite {
     // A vector read off a component arrives boxed; a script should be able to
     // pass it straight back without unpacking it into a literal.
     std::expected<void, ZHLN::ErrorCode> vectors_accept_boxed_instances() {
-        JPH::Vec3       source(4.0f, 5.0f, 6.0f);
+        FVec3       source(4.0f, 5.0f, 6.0f);
         ZHLN::ScriptVal boxed = BoxOf(&source);
 
-        auto back = ZHLN::FromScriptVal<JPH::Vec3>(boxed);
+        auto back = ZHLN::FromScriptVal<FVec3>(boxed);
         if (!ZHLN::Test::ExpectTrue(back.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(back->GetX(), 4.0f);
-        ZHLN::Test::ExpectEq(back->GetY(), 5.0f);
-        ZHLN::Test::ExpectEq(back->GetZ(), 6.0f);
+        ZHLN::Test::ExpectEq(back->x, 4.0f);
+        ZHLN::Test::ExpectEq(back->y, 5.0f);
+        ZHLN::Test::ExpectEq(back->z, 6.0f);
 
         return {};
     }
@@ -211,7 +213,7 @@ struct ScriptValueTypesTestSuite {
         JPH::Quat       quat(1.0f, 0.0f, 0.0f, 0.0f);
         ZHLN::ScriptVal boxedQuat = BoxOf(&quat);
 
-        auto res = ZHLN::FromScriptVal<JPH::Vec3>(boxedQuat);
+        auto res = ZHLN::FromScriptVal<FVec3>(boxedQuat);
 
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
@@ -221,7 +223,7 @@ struct ScriptValueTypesTestSuite {
     }
 
     std::expected<void, ZHLN::ErrorCode> wrong_length_array_is_rejected() {
-        auto res = ZHLN::FromScriptVal<JPH::Vec3>(Numbers({1.0, 2.0}));
+        auto res = ZHLN::FromScriptVal<FVec3>(Numbers({1.0, 2.0}));
 
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
@@ -238,7 +240,7 @@ struct ScriptValueTypesTestSuite {
         mixed.elements.push_back(std::string {"y"});
         mixed.elements.push_back(3.0);
 
-        auto res = ZHLN::FromScriptVal<JPH::Vec3>(ZHLN::ScriptVal {std::move(mixed)});
+        auto res = ZHLN::FromScriptVal<FVec3>(ZHLN::ScriptVal {std::move(mixed)});
 
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
@@ -248,18 +250,18 @@ struct ScriptValueTypesTestSuite {
     }
 
     // The Jolt *Arg parameter types are aliases for const T (MathTypes.h), so a
-    // method declared to take Vec3Arg must accept what Vec3 produces. This is
+    // method declared to take FVec3 must accept what FVec3 produces. This is
     // the case that decides whether PhysicsContext can be registered at all.
     std::expected<void, ZHLN::ErrorCode> arg_aliases_accept_the_underlying_type() {
-        static_assert(std::is_same_v<std::decay_t<JPH::Vec3Arg>, JPH::Vec3>, "Vec3Arg stopped being an alias for Vec3");
+        static_assert(std::is_same_v<std::decay_t<FVec3>, FVec3>, "FVec3 stopped being an alias for FVec3");
         static_assert(std::is_same_v<std::decay_t<JPH::QuatArg>, JPH::Quat>, "QuatArg stopped being an alias for Quat");
 
-        auto res = ZHLN::FromScriptVal<JPH::Vec3Arg>(Numbers({1.0, 2.0, 3.0}));
+        auto res = ZHLN::FromScriptVal<FVec3>(Numbers({1.0, 2.0, 3.0}));
 
         if (!ZHLN::Test::ExpectTrue(res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::ValueConversionFailed);
         }
-        ZHLN::Test::ExpectEq(res->GetX(), 1.0f);
+        ZHLN::Test::ExpectEq(res->x, 1.0f);
         return {};
     }
 };

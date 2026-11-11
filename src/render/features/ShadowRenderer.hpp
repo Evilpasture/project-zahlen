@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "vulkan/Rendering.hpp"
@@ -51,7 +52,7 @@ class ShadowRenderer {
     [[nodiscard]] static auto ComputeCascadeLightSpaceMatrix(
         const Camera&     cam,
         const JPH::Mat44& lightView,
-        const JPH::Vec3&  sunDir,
+        const FVec3&  sunDir,
         float             nearDist,
         float             farDist,
         float             aspect,

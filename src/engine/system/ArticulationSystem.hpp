@@ -6,7 +6,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Engine/EngineServices.hpp>

@@ -12,6 +12,7 @@
 // geometry of how far a door travels.
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -257,9 +258,9 @@ constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brus
     return flags;
 }
 
-[[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> JPH::Vec3 {
+[[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> FVec3 {
     const auto source = registry.Get<Components::SceneSourceComponent>(e);
-    return source ? JPH::Vec3(source->halfExtents) : JPH::Vec3::sZero();
+    return source ? FVec3(source->halfExtents) : FVec3::sZero();
 }
 
 void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
@@ -296,15 +297,15 @@ void AttachDoor(
     const float wait     = record.wait.value_or(kDefaultDoorWait);
     const float lip      = record.lip.value_or(0.0f);
 
-    JPH::Vec3 closedPos = JPH::Vec3::sZero();
+    FVec3 closedPos = FVec3::sZero();
     JPH::Quat closedRot = JPH::Quat::sIdentity();
     if (transform) {
         closedPos = transform->position;
         closedRot = transform->rotation;
     }
-    JPH::Vec3       openPos   = closedPos;
+    FVec3       openPos   = closedPos;
     JPH::Quat       openRot   = closedRot;
-    JPH::Vec3       rotAxis   = JPH::Vec3::sAxisY();
+    FVec3       rotAxis   = FVec3::sAxisY();
     float           rotAngle  = record.distance.value_or(kDefaultDoorRotation);
     float           speedNorm = 1.0f;
 
@@ -312,7 +313,7 @@ void AttachDoor(
         if (record.door->rotateBack) {
             rotAngle = -rotAngle;
         }
-        const JPH::Vec3 sourceAxis = record.door->axisX ? JPH::Vec3::sAxisX() : (record.door->axisY ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ());
+        const FVec3 sourceAxis = record.door->axisX ? FVec3::sAxisX() : (record.door->axisY ? FVec3::sAxisY() : FVec3::sAxisZ());
         rotAxis                    = BSP::ConvertDirection(options, sourceAxis);
         openRot                    = closedRot * JPH::Quat::sRotation(rotAxis, JPH::DegreesToRadians(rotAngle));
         speedNorm                  = std::abs(speed / std::max(std::abs(rotAngle), 1.0f));
@@ -320,9 +321,9 @@ void AttachDoor(
         // Travel is the brush's own extent along the direction it moves, minus
         // the lip; a door that has to open past its frame does not go further
         // than its own thickness.
-        const JPH::Vec3 half           = HalfExtentsOf(registry, record.entity);
-        const JPH::Vec3 moveDir        = record.moveDirection;
-        const float     extentAlongDir = std::abs(half.GetX() * moveDir.GetX()) + std::abs(half.GetY() * moveDir.GetY()) + std::abs(half.GetZ() * moveDir.GetZ());
+        const FVec3 half           = HalfExtentsOf(registry, record.entity);
+        const FVec3 moveDir        = record.moveDirection;
+        const float     extentAlongDir = std::abs(half.x * moveDir.x) + std::abs(half.y * moveDir.y) + std::abs(half.z * moveDir.z);
         const float     travelDist     = std::max(2.0f * extentAlongDir - lip * options.unitScale, kMinLinearTravel);
         openPos                        = closedPos + moveDir * travelDist;
         speedNorm                      = (speed * options.unitScale) / std::max(travelDist, 0.01f);
@@ -375,12 +376,12 @@ void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, cons
     const float wait  = record.wait.value_or(kDefaultButtonWait);
     const float lip   = record.lip.value_or(0.0f);
 
-    JPH::Vec3 unpressed = JPH::Vec3::sZero();
+    FVec3 unpressed = FVec3::sZero();
     if (transform) {
         unpressed = transform->position;
     }
     const float     travel    = (lip > 0.0f) ? (lip * options.unitScale) : kDefaultButtonTravel;
-    const JPH::Vec3 pressed =
+    const FVec3 pressed =
         ((flags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + record.moveDirection * travel);
 
     registry.Add<ButtonComponent>(
@@ -404,8 +405,8 @@ void AttachTrigger(ECS::Registry& registry, const BSP::EntityRecord& record, Com
     const float     wait  = record.wait.value_or(kDefaultTriggerWait);
     const TriggerFlags flags = TriggerFlagsFrom(record.kind);
 
-    const JPH::Vec3 half   = HalfExtentsOf(registry, record.entity);
-    const float     radius = (half.LengthSq() > 0.0f) ? half.Length() : 2.0f;
+    const FVec3 half   = HalfExtentsOf(registry, record.entity);
+    const float     radius = (half.LengthSquared() > 0.0f) ? half.Length() : 2.0f;
 
     registry.Add<TriggerComponent>(
         record.entity,
@@ -437,9 +438,9 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             registry.Create(
                 Components::NameComponent {.name = String64(record.targetName)},
                 Components::TransformComponent {
-                    .position = record.origin.value_or(JPH::Vec3::sZero()),
+                    .position = record.origin.value_or(FVec3::sZero()),
                     .rotation = record.orientation,
-                    .scale    = JPH::Vec3::sReplicate(1.0f)
+                    .scale    = FVec3::sReplicate(1.0f)
                 },
                 TeleportDestinationComponent {}
             );

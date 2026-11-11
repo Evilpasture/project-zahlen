@@ -4,6 +4,8 @@
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <SceneDocument.hpp>
@@ -133,12 +135,12 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
     JPH::Mat44 invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
-    JPH::Vec4 nearWorld = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
-    JPH::Vec4 farWorld  = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
+    FVec4 nearWorld = invVP * FVec4(ndcX, ndcY, 0.0f, 1.0f);
+    FVec4 farWorld  = invVP * FVec4(ndcX, ndcY, 1.0f, 1.0f);
 
-    JPH::Vec3 pNear = JPH::Vec3(nearWorld.GetX() / nearWorld.GetW(), nearWorld.GetY() / nearWorld.GetW(), nearWorld.GetZ() / nearWorld.GetW());
-    JPH::Vec3 pFar  = JPH::Vec3(farWorld.GetX() / farWorld.GetW(), farWorld.GetY() / farWorld.GetW(), farWorld.GetZ() / farWorld.GetW());
-    JPH::Vec3 dir   = (pFar - pNear).Normalized();
+    FVec3 pNear = FVec3(nearWorld.x / nearWorld.w, nearWorld.y / nearWorld.w, nearWorld.z / nearWorld.w);
+    FVec3 pFar  = FVec3(farWorld.x / farWorld.w, farWorld.y / farWorld.w, farWorld.z / farWorld.w);
+    FVec3 dir   = (pFar - pNear).Normalized();
 
     return engine.Physics().Raycast(pNear, dir, 1000.0f);
 }
@@ -393,7 +395,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
 
             const float     yawRad   = JPH::DegreesToRadians(cam.yaw);
             const float     pitchRad = JPH::DegreesToRadians(cam.pitch);
-            const JPH::Vec3 forward  = JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+            const FVec3 forward  = FVec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
 
             ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = cam.position + forward * 8.0f;

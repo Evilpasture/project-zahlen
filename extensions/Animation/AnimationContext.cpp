@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AnimationContext.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "IK.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
@@ -47,9 +48,9 @@ constexpr size_t kMaxIKChains       = 4;
 }
 
 struct SampledTRS {
-    JPH::Vec3 translation = JPH::Vec3::sZero();
+    FVec3 translation = FVec3::sZero();
     JPH::Quat rotation    = JPH::Quat::sIdentity();
-    JPH::Vec3 scale       = JPH::Vec3::sReplicate(1.0f);
+    FVec3 scale       = FVec3::sReplicate(1.0f);
 };
 
 void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& target) noexcept {
@@ -71,7 +72,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float* v0    = &channel.keyValues[idx0 * 3];
         const float* v1    = &channel.keyValues[idx1 * 3];
-        target.translation = JPH::Vec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2]));
+        target.translation = FVec3(v0[0] + factor * (v1[0] - v0[0]), v0[1] + factor * (v1[1] - v0[1]), v0[2] + factor * (v1[2] - v0[2]));
     } else if (channel.path == AnimationPathType::Rotation) {
         if (channel.keyValues.size() < (idx1 + 1) * 4) {
             return;
@@ -87,7 +88,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float* s0 = &channel.keyValues[idx0 * 3];
         const float* s1 = &channel.keyValues[idx1 * 3];
-        target.scale    = JPH::Vec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
+        target.scale    = FVec3(s0[0] + factor * (s1[0] - s0[0]), s0[1] + factor * (s1[1] - s0[1]), s0[2] + factor * (s1[2] - s0[2]));
     }
 }
 
@@ -118,7 +119,7 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
     }
     return MorphSample {
         .activeCount = count,
-        .weights     = ZHLN::Float4 {lanes[0], lanes[1], lanes[2], lanes[3]},
+        .weights     = ZHLN::FVec4 {lanes[0], lanes[1], lanes[2], lanes[3]},
     };
 }
 
@@ -362,9 +363,9 @@ void ApplyIKAndPropagateDescendantFK(
         const JPH::Mat44 lowerModel = model[lowerIdx];
         const JPH::Mat44 endModel   = model[endIdx];
 
-        const JPH::Vec3 pUpper = upperModel.GetTranslation();
-        const JPH::Vec3 pLower = lowerModel.GetTranslation();
-        const JPH::Vec3 pEnd   = endModel.GetTranslation();
+        const FVec3 pUpper = upperModel.GetTranslation();
+        const FVec3 pLower = lowerModel.GetTranslation();
+        const FVec3 pEnd   = endModel.GetTranslation();
 
         const IK::TwoBoneIKSolverOutput solved = IK::SolveTwoBoneIK(
             IK::TwoBoneIKSolverInput {
@@ -379,9 +380,9 @@ void ApplyIKAndPropagateDescendantFK(
             continue;
         }
 
-        const JPH::Vec3 localUpperVec = local[lowerIdx].GetTranslation();
-        const JPH::Vec3 localLowerVec = local[endIdx].GetTranslation();
-        if (localUpperVec.LengthSq() <= 1.0e-10f || localLowerVec.LengthSq() <= 1.0e-10f) {
+        const FVec3 localUpperVec = local[lowerIdx].GetTranslation();
+        const FVec3 localLowerVec = local[endIdx].GetTranslation();
+        if (localUpperVec.LengthSquared() <= 1.0e-10f || localLowerVec.LengthSquared() <= 1.0e-10f) {
             continue;
         }
 
@@ -397,8 +398,8 @@ void ApplyIKAndPropagateDescendantFK(
 
         const float w     = std::clamp(chain.weight, 0.0f, 1.0f);
         auto        blend = [](const JPH::Mat44& a, const JPH::Mat44& b, float t) noexcept -> JPH::Mat44 {
-            const JPH::Vec3 tA = a.GetTranslation();
-            const JPH::Vec3 tB = b.GetTranslation();
+            const FVec3 tA = a.GetTranslation();
+            const FVec3 tB = b.GetTranslation();
             const JPH::Quat rA = a.GetQuaternion().Normalized();
             const JPH::Quat rB = b.GetQuaternion().Normalized();
             return JPH::Mat44::sRotationTranslation(rA.SLERP(rB, t).Normalized(), tA + t * (tB - tA));
@@ -804,9 +805,9 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
                     const NodeEvalScratch& state = scratch[n];
                     if (inst.prevTrack >= 0 && inst.blendFactor < 1.0f) {
                         const float     t        = inst.blendFactor;
-                        const JPH::Vec3 blendedT = state.prev.translation + t * (state.curr.translation - state.prev.translation);
+                        const FVec3 blendedT = state.prev.translation + t * (state.curr.translation - state.prev.translation);
                         const JPH::Quat blendedR = state.prev.rotation.SLERP(state.curr.rotation, t).Normalized();
-                        const JPH::Vec3 blendedS = state.prev.scale + t * (state.curr.scale - state.prev.scale);
+                        const FVec3 blendedS = state.prev.scale + t * (state.curr.scale - state.prev.scale);
                         clipLocal[n]             = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
                     } else {
                         clipLocal[n] = JPH::Mat44::sRotationTranslation(state.curr.rotation, state.curr.translation).PreScaled(state.curr.scale);

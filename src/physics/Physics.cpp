@@ -27,7 +27,10 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
@@ -356,8 +359,8 @@ auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p
 
 auto PhysicsContext::CreateRigidBody(
     const JPH::ShapeRefC& shape,
-    ZHLN::Double3         pos,
-    ZHLN::Float4          rot,
+    ZHLN::DVec3         pos,
+    ZHLN::FVec4          rot,
     JPH::EMotionType      motion,
     Layers::ID            layer,
     uint32_t              materialID,
@@ -372,12 +375,12 @@ auto PhysicsContext::CreateRigidBody(
     auto&                     world  = _impl->world;
     auto&                     bt     = world.bodyTable;
     const Physics::BodyID handle =
-        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, static_cast<JPH::RVec3>(pos), static_cast<JPH::Quat>(rot));
+        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
     if (world.TryEnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
-        JPH::BodyCreationSettings   settings(shape, static_cast<JPH::RVec3>(pos), static_cast<JPH::Quat>(rot), motion, static_cast<JPH::ObjectLayer>(layer));
+        JPH::BodyCreationSettings   settings(shape, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
@@ -517,8 +520,8 @@ auto PhysicsContext::CreateMeshBody(
     uint32_t              vertexCount,
     const uint32_t*       indices,
     uint32_t              indexCount,
-    ZHLN::Double3         pos,
-    ZHLN::Float4          rot,
+    ZHLN::DVec3         pos,
+    ZHLN::FVec4          rot,
     uint32_t              category,
     uint32_t              mask
 ) -> Physics::BodyID {
@@ -529,7 +532,7 @@ auto PhysicsContext::CreateMeshBody(
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
 }
 
-auto PhysicsContext::CreateCharacter(ZHLN::Double3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
+auto PhysicsContext::CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
@@ -546,7 +549,7 @@ auto PhysicsContext::CreateCharacter(ZHLN::Double3 position, const Physics::Char
     const float groundOffset = charShape->GetLocalBounds().mMax.GetY();
 
     const Physics::BodyID handle = world.bodyTable.ReserveSlot(
-        Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, static_cast<JPH::RVec3>(position), JPH::Quat::sIdentity()
+        Physics::SlotState::PendingCreateChar, JPH::EMotionType::Kinematic, JPH::RVec3(position.x, position.y, position.z), JPH::Quat::sIdentity()
     );
     impl->characters.InitReservedSlot(handle, groundOffset);
 
@@ -615,8 +618,8 @@ auto PhysicsContext::GetDebugDrawData(bool drawShapes, bool drawConstraints, boo
     };
 }
 
-void PhysicsContext::SetCharacterVelocity(Physics::BodyID handle, ZHLN::Float3 velocity) {
-    if (!_impl->characters.RecordDesiredVelocity(handle, static_cast<JPH::Vec3>(velocity))) {
+void PhysicsContext::SetCharacterVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity) {
+    if (!_impl->characters.RecordDesiredVelocity(handle, JPH::Vec3(velocity.x, velocity.y, velocity.z))) {
         return;
     }
     Physics::Command cmd {};
@@ -630,7 +633,7 @@ void PhysicsContext::SetCharacterVelocity(Physics::BodyID handle, ZHLN::Float3 v
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetCharacterPosition(Physics::BodyID handle, ZHLN::Double3 position) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyID handle, ZHLN::DVec3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -646,7 +649,7 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyID handle, ZHLN::Double3 
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetKinematicPose(Physics::BodyID handle, ZHLN::Double3 position, ZHLN::Float4 rotation) {
+void PhysicsContext::SetKinematicPose(Physics::BodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -666,7 +669,7 @@ void PhysicsContext::SetKinematicPose(Physics::BodyID handle, ZHLN::Double3 posi
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetLinearVelocity(Physics::BodyID handle, ZHLN::Float3 velocity) {
+void PhysicsContext::SetLinearVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -773,8 +776,8 @@ auto PhysicsContext::GetRagdoll(Physics::RagdollID handle) const noexcept -> ZHL
     return _impl->ragdolls.GetRagdoll(handle);
 }
 
-void PhysicsContext::ActivateRagdoll(Physics::RagdollID handle, const JPH::SkeletonPose& pose, ZHLN::Float3 initialVelocity) noexcept {
-    _impl->ragdolls.ActivateRagdoll(handle, pose, static_cast<JPH::Vec3>(initialVelocity));
+void PhysicsContext::ActivateRagdoll(Physics::RagdollID handle, const JPH::SkeletonPose& pose, ZHLN::FVec3 initialVelocity) noexcept {
+    _impl->ragdolls.ActivateRagdoll(handle, pose, JPH::Vec3(initialVelocity.x, initialVelocity.y, initialVelocity.z));
 }
 
 void PhysicsContext::RemoveRagdoll(Physics::RagdollID handle) noexcept {
@@ -785,8 +788,8 @@ void PhysicsContext::DriveRagdollPose(Physics::RagdollID handle, const JPH::Skel
     _impl->ragdolls.DriveRagdollPose(handle, pose);
 }
 
-void PhysicsContext::AddRagdollImpulse(Physics::RagdollID handle, uint32_t jointIndex, ZHLN::Float3 impulse) noexcept {
-    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, static_cast<JPH::Vec3>(impulse), *_impl->world.bodyInterface);
+void PhysicsContext::AddRagdollImpulse(Physics::RagdollID handle, uint32_t jointIndex, ZHLN::FVec3 impulse) noexcept {
+    _impl->ragdolls.AddRagdollImpulse(handle, jointIndex, JPH::Vec3(impulse.x, impulse.y, impulse.z), *_impl->world.bodyInterface);
 }
 
 auto PhysicsContext::GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept -> bool {
@@ -882,7 +885,7 @@ void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitu
     _impl->world.RegisterMaterial(id, friction, restitution);
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse) {
+void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -898,7 +901,7 @@ void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse) {
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse, ZHLN::Double3 position) {
+void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse, ZHLN::DVec3 position) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
@@ -917,7 +920,7 @@ void PhysicsContext::AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse, ZH
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::AddRadialImpulse(ZHLN::Double3 center, float radius, float maxImpulse) {
+void PhysicsContext::AddRadialImpulse(ZHLN::DVec3 center, float radius, float maxImpulse) {
     const std::vector<Physics::BodyID> overlapped = OverlapSphere(center, radius);
 
     for (const Physics::BodyID physID: overlapped) {
@@ -926,7 +929,7 @@ void PhysicsContext::AddRadialImpulse(ZHLN::Double3 center, float radius, float 
             continue;
         }
 
-        const JPH::RVec3 diff    = *bodyPos - static_cast<JPH::RVec3>(center);
+        const JPH::RVec3 diff    = *bodyPos - JPH::RVec3(center.x, center.y, center.z);
         const auto       dist    = static_cast<float>(diff.Length());
         const float      falloff = 1.0f - std::clamp(dist / radius, 0.0f, 1.0f);
 

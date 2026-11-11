@@ -12,6 +12,7 @@
 // (`configure/check_layer_dag.py`) never points upward.
 
 #include <LuaBindings/DataModelBindings.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <DataModel/DataModel.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
@@ -170,8 +171,8 @@ void PushVector3(lua_State* state, float x, float y, float z) {
     lua_setmetatable(state, -2);
 }
 
-void PushVector3(lua_State* state, const JPH::Vec3& value) {
-    PushVector3(state, value.GetX(), value.GetY(), value.GetZ());
+void PushVector3(lua_State* state, const FVec3& value) {
+    PushVector3(state, value.x, value.y, value.z);
 }
 
 void PushColor3(lua_State* state, float r, float g, float b) {
@@ -239,9 +240,9 @@ void PushConnection(lua_State* state, std::shared_ptr<LuaConnectionRecord> conne
     lua_setmetatable(state, -2);
 }
 
-auto ReadVector3(lua_State* state, int index, JPH::Vec3& out) -> bool {
+auto ReadVector3(lua_State* state, int index, FVec3& out) -> bool {
     if (const auto* value = TestVector3(state, index)) {
-        out = JPH::Vec3(value->x, value->y, value->z);
+        out = FVec3(value->x, value->y, value->z);
         return true;
     }
     if (lua_type(state, index) != LUA_TTABLE) return false;
@@ -260,13 +261,13 @@ auto ReadVector3(lua_State* state, int index, JPH::Vec3& out) -> bool {
     const float z = static_cast<float>(lua_tonumber(state, -1));
     lua_pop(state, 1);
     if (!hasX || !hasY || !hasZ) return false;
-    out = JPH::Vec3(x, y, z);
+    out = FVec3(x, y, z);
     return true;
 }
 
-auto ReadColor3(lua_State* state, int index, JPH::Vec3& out) -> bool {
+auto ReadColor3(lua_State* state, int index, FVec3& out) -> bool {
     if (const auto* value = TestColor3(state, index)) {
-        out = JPH::Vec3(value->r, value->g, value->b);
+        out = FVec3(value->r, value->g, value->b);
         return true;
     }
     return ReadVector3(state, index, out);
@@ -904,8 +905,8 @@ int InstanceIndex(lua_State* state) {
     else if (instance->IsA("BasePart") && property == "Rotation") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Rotation());
     else if (instance->IsA("BasePart") && property == "Size") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Size());
     else if (instance->IsA("BasePart") && property == "Color") {
-        const JPH::Vec3& color = static_cast<BasePart*>(instance.GetPtr())->Color();
-        PushColor3(state, color.GetX(), color.GetY(), color.GetZ());
+        const FVec3& color = static_cast<BasePart*>(instance.GetPtr())->Color();
+        PushColor3(state, color.x, color.y, color.z);
     } else if (instance->IsA("BasePart") && property == "Anchored") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->Anchored());
     else if (instance->IsA("BasePart") && property == "CanCollide") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->CanCollide());
     else if (instance->IsA("BasePart") && property == "Transparency") lua_pushnumber(state, static_cast<BasePart*>(instance.GetPtr())->Transparency());
@@ -944,8 +945,8 @@ int InstanceIndex(lua_State* state) {
         const std::string_view textureID = static_cast<Decal*>(instance.GetPtr())->GetTextureID();
         lua_pushlstring(state, textureID.data(), textureID.size());
     } else if (instance->IsA("Decal") && property == "Color") {
-        const JPH::Vec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
-        PushColor3(state, color.GetX(), color.GetY(), color.GetZ());
+        const FVec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
+        PushColor3(state, color.x, color.y, color.z);
     } else if (instance->IsA("Decal") && property == "Face") PushDecalFace(state, static_cast<Decal*>(instance.GetPtr())->Face());
     else if (instance->IsA("Decal") && property == "WrapMode") PushDecalWrapMode(state, static_cast<Decal*>(instance.GetPtr())->WrapMode());
     else if (instance->IsA("Decal") && property == "Scale") lua_pushnumber(state, static_cast<Decal*>(instance.GetPtr())->Scale());
@@ -993,16 +994,16 @@ int InstanceNewIndex(lua_State* state) {
             if (ReadInstance(state, 3, parent)) [[maybe_unused]] const auto result = instance.SetParent(parent);
         }
     } else if (instance.IsA("BasePart") && property == "Position") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetPosition(vector);
     } else if (instance.IsA("BasePart") && property == "Rotation") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetRotation(vector);
     } else if (instance.IsA("BasePart") && property == "Size") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<BasePart&>(instance).SetSize(vector);
     } else if (instance.IsA("BasePart") && property == "Color") {
-        JPH::Vec3 color;
+        FVec3 color;
         if (ReadColor3(state, 3, color)) static_cast<BasePart&>(instance).SetColor(color);
     } else if (instance.IsA("BasePart") && property == "Anchored") static_cast<BasePart&>(instance).SetAnchored(lua_toboolean(state, 3) != 0);
     else if (instance.IsA("BasePart") && property == "CanCollide") static_cast<BasePart&>(instance).SetCanCollide(lua_toboolean(state, 3) != 0);
@@ -1039,10 +1040,10 @@ int InstanceNewIndex(lua_State* state) {
     } else if (instance.IsA("MeshPart") && property == "MeshId") {
         if (auto meshId = ReadString(state, 3)) static_cast<MeshPart&>(instance).SetMeshId(std::move(*meshId));
     } else if (instance.IsA("SpawnPoint") && property == "Position") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<SpawnPoint&>(instance).SetPosition(vector);
     } else if (instance.IsA("SpawnPoint") && property == "Rotation") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<SpawnPoint&>(instance).SetRotation(vector);
     } else if (instance.IsA("Model") && property == "PrimaryPart") {
         InstancePtr part;
@@ -1102,7 +1103,7 @@ int InstanceNewIndex(lua_State* state) {
     else if (instance.IsA("Decal") && property == "TextureId") {
         if (auto textureID = ReadString(state, 3)) static_cast<Decal&>(instance).SetTextureID(std::move(*textureID));
     } else if (instance.IsA("Decal") && property == "Color") {
-        JPH::Vec3 color;
+        FVec3 color;
         if (ReadColor3(state, 3, color)) static_cast<Decal&>(instance).SetColor(color);
     } else if (instance.IsA("Decal") && property == "Face") {
         DecalFace face {};
@@ -1129,10 +1130,10 @@ int InstanceNewIndex(lua_State* state) {
             [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2(StaticRefCast<BasePart>(part));
         }
     } else if (instance.IsA("Motor") && property == "Offset1") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<Motor&>(instance).SetOffset1(vector);
     } else if (instance.IsA("Motor") && property == "Offset2") {
-        JPH::Vec3 vector;
+        FVec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<Motor&>(instance).SetOffset2(vector);
     } else if (instance.IsA("Motor") && property == "CurrentAngle") {
         float number = 0.0f;

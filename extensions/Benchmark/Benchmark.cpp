@@ -3,6 +3,7 @@
 
 // extensions/Benchmark/Benchmark.cpp
 #include <Benchmark/Benchmark.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -42,7 +43,7 @@ inline constexpr float  kFloorHalfHeight = 0.5f;
 // Where body `index` of the workload starts, in metres. The lattice is
 // continuous across SpawnWorkload() calls -- each batch continues where the
 // last stopped -- so growing a run does not restack it.
-[[nodiscard]] auto LatticePosition(size_t index) noexcept -> JPH::Vec3 {
+[[nodiscard]] auto LatticePosition(size_t index) noexcept -> FVec3 {
     const auto  width  = static_cast<float>(kLatticeWidth);
     const float column = static_cast<float>(index % kLatticeWidth) - (width * 0.5f);
     const float row    = static_cast<float>((index / kLatticeWidth) % kLatticeWidth) - (width * 0.5f);
@@ -50,7 +51,7 @@ inline constexpr float  kFloorHalfHeight = 0.5f;
 
     // The first layer sits one spacing up, i.e. clear of the floor slab whose
     // top face is the origin plane.
-    return JPH::Vec3 {column * kLatticeSpacing, (layer + 1.0f) * kLatticeSpacing, row * kLatticeSpacing};
+    return FVec3 {column * kLatticeSpacing, (layer + 1.0f) * kLatticeSpacing, row * kLatticeSpacing};
 }
 
 // The config a workload of this size needs, never smaller than what the caller
@@ -165,7 +166,7 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
             break;
         }
 
-        const JPH::Vec3 position = LatticePosition(m_spawnedCubes);
+        const FVec3 position = LatticePosition(m_spawnedCubes);
         const auto      handle   = physics.CreateRigidBody(cube, position, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
 
         const Entity entity = registry.Create();
@@ -210,7 +211,7 @@ void LogicBenchmark::Step(float fixedDt) {
             continue;
         }
         if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = static_cast<JPH::Vec3>(*position);
+            transform->position = JPH::Vec3(*position.x, *position.y, *position.z);
         }
     }
 

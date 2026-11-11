@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
@@ -205,7 +207,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        const ZHLN::Float4         morphWeights     = morphComp ? morphComp->weights : ZHLN::Float4 {};
+        const ZHLN::FVec4         morphWeights     = morphComp ? morphComp->weights : ZHLN::FVec4 {};
 
         BufferID scratchVbo = BufferID::Invalid;
         if (isSkinned) {
@@ -461,24 +463,24 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             sun.intensity = 0.0f;
         }
     }
-    const JPH::Vec3 sunDirection = sun.direction;
+    const FVec3 sunDirection = sun.direction;
     // The extracted emitter used to live in EvaluateSH and inherited the
     // environment exposure. Convert its irradiance/pi to directional radiance
     // (pi * irradiance), then apply that same exposure only to cooked suns.
     const float sunIntensity = sun.intensity * (sun.fromEnvironment ? gfx.environment.ambientExposure : 1.0f);
-    const JPH::Vec3 sunRadiance = sun.color * sunIntensity;
+    const FVec3 sunRadiance = sun.color * sunIntensity;
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
 
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
-    JPH::Vec3 shadowCenter = cam.position;
-    shadowCenter.SetX(std::round(shadowCenter.GetX() / textelSize) * textelSize);
-    shadowCenter.SetY(std::round(shadowCenter.GetY() / textelSize) * textelSize);
-    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / textelSize) * textelSize);
+    FVec3 shadowCenter = cam.position;
+    shadowCenter.SetX(std::round(shadowCenter.x / textelSize) * textelSize);
+    shadowCenter.SetY(std::round(shadowCenter.y / textelSize) * textelSize);
+    shadowCenter.SetZ(std::round(shadowCenter.z / textelSize) * textelSize);
 
-    JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
+    FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
     JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
     float      halfWidth = shadowWidth * 0.5f;
@@ -619,7 +621,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
                 float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
                 float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
-                return JPH::Vec4(r, g, b, a);
+                return FVec4(r, g, b, a);
             };
 
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {

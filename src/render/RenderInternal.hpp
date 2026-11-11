@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "render/ComputePassResources.hpp"
@@ -377,7 +378,7 @@ struct RenderContext::Impl: Renderer {
     [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
 
     void UploadSubmittedLights(const Camera& cam) noexcept;
-    void AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept;
+    void AllocateShadowTiles(const FVec3& viewPos) noexcept;
 
     [[nodiscard]] auto ProvokeDeviceLostInternal() const -> std::expected<void, ErrorCode>;
 

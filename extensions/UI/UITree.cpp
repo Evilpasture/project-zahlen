@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <UI/UITree.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <cstddef>
 #include <utility>
@@ -257,7 +258,7 @@ namespace {
 }
 
 void ApplySelectionTint(BoxConfig& cfg) {
-    cfg.color = static_cast<JPH::Vec4>(cfg.color) + JPH::Vec4(0.15f, 0.25f, 0.40f, 0.25f);
+    cfg.color = JPH::Vec4(cfg.color.x, cfg.color.y, cfg.color.z, cfg.color.w) + FVec4(0.15f, 0.25f, 0.40f, 0.25f);
 }
 
 void NoteDesignClick(Frame& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {

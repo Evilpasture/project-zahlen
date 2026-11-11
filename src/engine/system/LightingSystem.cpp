@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "LightingSystem.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "Zahlen/Math/Camera.hpp"
 #include "Zahlen/ECS/Components.hpp"
 #include "Zahlen/ECS/Entity.hpp"
@@ -18,8 +19,8 @@ namespace ZHLN {
 
 auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     SunLight sun {
-        .direction = JPH::Vec3(0.5f, 1.0f, 0.2f),
-        .color = JPH::Vec3::sReplicate(1.0f),
+        .direction = FVec3(0.5f, 1.0f, 0.2f),
+        .color = FVec3::sReplicate(1.0f),
         .intensity = 180.0f,
         .fromEnvironment = false,
     };
@@ -28,8 +29,8 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
             if (light.type != LightType::Sun) return;
-            const JPH::Vec3 direction = light.direction;
-            if (direction.LengthSq() > 1e-4f) {
+            const FVec3 direction = light.direction;
+            if (direction.LengthSquared() > 1e-4f) {
                 sun.direction = direction;
             } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                            const JPH::Mat44 world = worldTrans.world;
@@ -39,8 +40,8 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
             }
             sun.intensity = light.intensity;
             // Preserve the white legacy default for tag-only sun entities.
-            const JPH::Vec3 color = light.color;
-            sun.color             = color.LengthSq() > 1e-8f ? color : JPH::Vec3::sReplicate(1.0f);
+            const FVec3 color = light.color;
+            sun.color             = color.LengthSquared() > 1e-8f ? color : FVec3::sReplicate(1.0f);
             sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e).has_value();
             found = true;
         });
@@ -59,18 +60,18 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
             }
             reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) {
                 sun.intensity         = light.intensity;
-                const JPH::Vec3 color = light.color;
-                if (color.LengthSq() > 1e-8f)
+                const FVec3 color = light.color;
+                if (color.LengthSquared() > 1e-8f)
                     sun.color = color;
             });
         }
     }
 
-    sun.direction = sun.direction.LengthSq() > 1e-8f ? sun.direction.Normalized() : JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+    sun.direction = sun.direction.LengthSquared() > 1e-8f ? sun.direction.Normalized() : FVec3(0.5f, 1.0f, 0.2f).Normalized();
     return sun;
 }
 
-std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
+std::pair<FVec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
     const SunLight sun = GetSun(reg);
     return {sun.direction, sun.intensity};
 }
@@ -102,7 +103,7 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
 
     ZHLN::Array<RankedLight> ranked;
 
-    const JPH::Vec3 viewPos = cameraComp ? cameraComp->camera.position : JPH::Vec3::sZero();
+    const FVec3 viewPos = cameraComp ? cameraComp->camera.position : FVec3::sZero();
 
     for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
         query.Patch<Components::LightComponent>(e, [&](const auto& light) {
@@ -120,7 +121,7 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
             desc.outerConeRadians = light.outerConeRadians;
             desc.baked            = light.baked;
 
-            JPH::Vec3 lightPos    = JPH::Vec3::sZero();
+            FVec3 lightPos    = FVec3::sZero();
             bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                 const JPH::Mat44 world = worldTrans.world;
                 lightPos               = world.GetTranslation();
@@ -135,8 +136,8 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
             }
             desc.position = lightPos;
 
-            const JPH::Vec3 direction = desc.direction;
-            if (light.type == LightType::Spot && direction.LengthSq() <= 1e-8f) {
+            const FVec3 direction = desc.direction;
+            if (light.type == LightType::Spot && direction.LengthSquared() <= 1e-8f) {
                 if (!query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                         const JPH::Mat44 world = worldTrans.world;
                         desc.direction         = world.GetColumn3(2);
@@ -156,7 +157,7 @@ void LightingSystem::Update(ECS::Query<const Components::LightComponent, const C
                 entry.isRanged = true;
 
                 if (hasLightPos) {
-                    const float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
+                    const float distSq = std::max((lightPos - viewPos).LengthSquared(), 1.0f);
                     entry.score        = light.intensity / distSq;
                 }
             } else {

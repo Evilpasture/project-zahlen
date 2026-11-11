@@ -7,6 +7,7 @@
 // vertex/fragment shaders, which testing the imported Material alone cannot.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -164,7 +165,7 @@ struct TextureTransformsTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = JPH::Vec3(0.0f, 0.0f, kCameraDistance);
+            camera.position = FVec3(0.0f, 0.0f, kCameraDistance);
             camera.yaw      = -90.0f;
             camera.pitch    = 0.0f;
             camera.fov      = 45.0f;
@@ -208,7 +209,7 @@ struct TextureTransformsTestSuite {
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
                 rc.RegisterMesh(meshID, mesh);
-                const JPH::Vec3 offset(kPanelX[column], 0.0f, 0.0f);
+                const FVec3 offset(kPanelX[column], 0.0f, 0.0f);
                 const JPH::Mat44 world = JPH::Mat44::sTranslation(offset);
                 const ZHLN::Entity e = reg.Create();
                 reg.Add(e, ZHLN::Components::TransformComponent {.position = offset});

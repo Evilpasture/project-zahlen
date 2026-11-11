@@ -5,7 +5,7 @@
 //
 // Exercises plugins/lua/ReflectLua.hpp + SceneLua.hpp:
 //   * Reflection-driven evaluation into scalars, FixedString<N>, std::array,
-//     std::vector, maps, Optional, enums, JPH::Float3/Vec3/Vec4/Quat,
+//     std::vector, maps, Optional, enums, JPH::Float3/FVec3/FVec4/Quat,
 //     GraphicsSettings, and ZHLN::Scene::Scene.
 //   * Computed expressions (loops, math, helpers) and pure function reducers
 //     (EvaluateCallString).
@@ -15,6 +15,8 @@
 //     and deterministic instruction + memory budgets.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <RagdollAuthoring/RagdollAuthoring.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -268,7 +270,7 @@ struct ReflectLuaSuite {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
-        // 4. Native Float3 / Float4 accept both sequence and named forms.
+        // 4. Native FVec3 / FVec4 accept both sequence and named forms.
         ZHLN::EnvironmentSettings envComp {};
         envComp.ambientExposure = 1.5f;
         if (auto vecOk = ZHLN::ReflectLua::ApplyPatchString(

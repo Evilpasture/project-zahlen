@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "BSPImporter.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "StudioModelImporter.hpp"
 #include "StudioModelLoader.hpp"
 #include "VMTParser.hpp"
@@ -161,7 +162,7 @@ static auto CreateFallbackModelPrefab(
     fallbackPart.materialAsset = HashAssetID(assetKey + "_mat");
 
     if (options.buildColliders) {
-        const JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(0.25f, 0.25f, 0.25f));
+        const JPH::ShapeRefC baseBox = new JPH::BoxShape(FVec3(0.25f, 0.25f, 0.25f));
         fallbackPart.boxCollider     = baseBox;
         fallbackPart.meshCollider    = baseBox;
     }
@@ -307,7 +308,7 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.meshAsset        = HashAssetID(assetKey);
         modelPart.materialAsset    = HashAssetID(assetKey + "_mat");
 
-        const JPH::Vec3 halfExtents(
+        const FVec3 halfExtents(
             std::max(0.01f, (partData.boundsMax.x - partData.boundsMin.x) * 0.5f),
             std::max(0.01f, (partData.boundsMax.y - partData.boundsMin.y) * 0.5f),
             std::max(0.01f, (partData.boundsMax.z - partData.boundsMin.z) * 0.5f)

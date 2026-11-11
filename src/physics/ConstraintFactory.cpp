@@ -34,7 +34,7 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
             settings.mPoint1 = settings.mPoint2 = p.pivot;
             settings.mHingeAxis1 = settings.mHingeAxis2 = p.axis;
 
-            const JPH::Vec3 normal = static_cast<JPH::Vec3>(p.axis).GetNormalizedPerpendicular();
+            const JPH::Vec3 normal = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z).GetNormalizedPerpendicular();
             settings.mNormalAxis1  = settings.mNormalAxis2 = normal;
 
             settings.mLimitsMin = p.limitMin;
@@ -78,7 +78,7 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
             JPH::DistanceConstraintSettings settings;
             settings.mSpace = JPH::EConstraintSpace::WorldSpace;
 
-            if (static_cast<JPH::Vec3>(p.pivot).LengthSq() > 1e-6f) {
+            if (JPH::Vec3(p.pivot.x, p.pivot.y, p.pivot.z).LengthSq() > 1e-6f) {
                 settings.mPoint1 = settings.mPoint2 = p.pivot;
             } else {
                 settings.mPoint1 = b1->GetPosition();

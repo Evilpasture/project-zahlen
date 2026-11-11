@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "LODSystem.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -40,7 +41,7 @@ void LODSystem::GraphUpdate(LODQuery query) {
                 continue;
             }
 
-            JPH::Vec3 worldPos = JPH::Vec3::sZero();
+            FVec3 worldPos = FVec3::sZero();
             if (auto worldTrans = query.Get<Components::WorldTransformComponent>(e)) {
                 const JPH::Mat44 world = worldTrans->world;
                 worldPos               = world.GetTranslation();

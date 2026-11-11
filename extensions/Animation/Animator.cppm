@@ -31,18 +31,18 @@ struct ParametricCurve {
     }
 };
 
-JPH::Quat AimBone(JPH::Vec3Arg bindDirection, JPH::QuatArg parentWorldQuat, JPH::Vec3Arg targetWorldDir) noexcept {
-    JPH::Vec3 localDir = parentWorldQuat.Inversed() * targetWorldDir.Normalized();
+JPH::Quat AimBone(FVec3 bindDirection, JPH::QuatArg parentWorldQuat, FVec3 targetWorldDir) noexcept {
+    FVec3 localDir = parentWorldQuat.Inversed() * targetWorldDir.Normalized();
     return JPH::Quat::sFromTo(bindDirection, localDir);
 }
 
 void SolveTwoBoneIK(
-    JPH::Vec3Arg jointWorldPos,
-    JPH::Vec3Arg parentBindPos,
-    JPH::Vec3Arg childBindPos,
+    FVec3 jointWorldPos,
+    FVec3 parentBindPos,
+    FVec3 childBindPos,
     JPH::QuatArg grandparentWorldQuat,
-    JPH::Vec3Arg targetWorld,
-    JPH::Vec3Arg poleWorld,
+    FVec3 targetWorld,
+    FVec3 poleWorld,
     JPH::Quat&   outParentQuat,
     JPH::Quat&   outChildQuat
 ) noexcept {

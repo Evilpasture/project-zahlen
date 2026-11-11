@@ -14,6 +14,8 @@
 module;
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
@@ -67,7 +69,7 @@ struct InspectorState {
     std::vector<ZHLN::Entity>     instances {};
     std::optional<ZHLN::FileDrop> pendingDrop {};
 
-    JPH::Vec3 target   = JPH::Vec3(0.0f, 0.0f, 0.0f);
+    FVec3 target   = FVec3(0.0f, 0.0f, 0.0f);
     float     distance = 5.0f;
     float     yaw      = -90.0f;
     float     pitch    = -15.0f;
@@ -83,45 +85,45 @@ struct InspectorState {
     ZHLN::GUI::Context              gui {};
 };
 
-[[nodiscard]] JPH::Vec4 ThemeText() noexcept {
-    return JPH::Vec4(0.86f, 0.90f, 0.96f, 1.0f);
+[[nodiscard]] FVec4 ThemeText() noexcept {
+    return FVec4(0.86f, 0.90f, 0.96f, 1.0f);
 }
-[[nodiscard]] JPH::Vec4 ThemeTextDim() noexcept {
-    return JPH::Vec4(0.55f, 0.62f, 0.72f, 1.0f);
+[[nodiscard]] FVec4 ThemeTextDim() noexcept {
+    return FVec4(0.55f, 0.62f, 0.72f, 1.0f);
 }
-[[nodiscard]] JPH::Vec4 ThemeAccent() noexcept {
-    return JPH::Vec4(0.30f, 0.85f, 1.0f, 1.0f);
+[[nodiscard]] FVec4 ThemeAccent() noexcept {
+    return FVec4(0.30f, 0.85f, 1.0f, 1.0f);
 }
-[[nodiscard]] JPH::Vec4 ThemePlaying() noexcept {
-    return JPH::Vec4(0.45f, 0.95f, 0.55f, 1.0f);
+[[nodiscard]] FVec4 ThemePlaying() noexcept {
+    return FVec4(0.45f, 0.95f, 0.55f, 1.0f);
 }
 
 // ============================================================================
 // CAMERA / SCENE HELPERS
 // ============================================================================
 
-[[nodiscard]] JPH::Vec3 OrbitDirection(float yawDeg, float pitchDeg) noexcept {
+[[nodiscard]] FVec3 OrbitDirection(float yawDeg, float pitchDeg) noexcept {
     const float yaw   = JPH::DegreesToRadians(yawDeg);
     const float pitch = JPH::DegreesToRadians(pitchDeg);
-    return JPH::Vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
+    return FVec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
 }
 
-[[nodiscard]] JPH::Vec3 Cross(JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept {
-    return JPH::Vec3(a.GetY() * b.GetZ() - a.GetZ() * b.GetY(), a.GetZ() * b.GetX() - a.GetX() * b.GetZ(), a.GetX() * b.GetY() - a.GetY() * b.GetX());
+[[nodiscard]] FVec3 Cross(FVec3 a, FVec3 b) noexcept {
+    return FVec3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 }
 
 void AddInspectorLighting(ZHLN::Engine& engine) {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
-    const JPH::Vec3  sunPos   = JPH::Vec3(15.0f, 30.0f, 15.0f);
+    const FVec3  sunPos   = FVec3(15.0f, 30.0f, 15.0f);
     const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
     const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(sunPos, sunRot);
     reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
-        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = JPH::Vec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::sReplicate(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.97f, 0.91f), .intensity = 120.0f, .direction = JPH::Vec3(0.4f, 1.0f, 0.3f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.97f, 0.91f), .intensity = 120.0f, .direction = FVec3(0.4f, 1.0f, 0.3f).Normalized()
         }
     );
 
@@ -133,27 +135,27 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     engine.EnsureFontAtlas();
 }
 
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outCenter, float& outDistance) {
-    JPH::Vec3 min(1e9f, 1e9f, 1e9f);
-    JPH::Vec3 max(-1e9f, -1e9f, -1e9f);
+void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outCenter, float& outDistance) {
+    FVec3 min(1e9f, 1e9f, 1e9f);
+    FVec3 max(-1e9f, -1e9f, -1e9f);
     bool      any = false;
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        min.SetX(std::min(min.GetX(), part.localMin[0]));
-        min.SetY(std::min(min.GetY(), part.localMin[1]));
-        min.SetZ(std::min(min.GetZ(), part.localMin[2]));
-        max.SetX(std::max(max.GetX(), part.localMax[0]));
-        max.SetY(std::max(max.GetY(), part.localMax[1]));
-        max.SetZ(std::max(max.GetZ(), part.localMax[2]));
+        min.SetX(std::min(min.x, part.localMin[0]));
+        min.SetY(std::min(min.y, part.localMin[1]));
+        min.SetZ(std::min(min.z, part.localMin[2]));
+        max.SetX(std::max(max.x, part.localMax[0]));
+        max.SetY(std::max(max.y, part.localMax[1]));
+        max.SetZ(std::max(max.z, part.localMax[2]));
         any = true;
     }
     if (!any) {
-        outCenter   = JPH::Vec3::sZero();
+        outCenter   = FVec3::sZero();
         outDistance = 5.0f;
         return;
     }
 
-    const JPH::Vec3 center = (min + max) * 0.5f;
-    const JPH::Vec3 ext    = (max - min) * 0.5f;
+    const FVec3 center = (min + max) * 0.5f;
+    const FVec3 ext    = (max - min) * 0.5f;
     const float     radius = ext.Length();
     const float     fov    = 45.0f;
     outCenter              = center;
@@ -221,7 +223,7 @@ void TreeRow(
     bool                expandable,
     std::string_view    selectTitle,
     std::string_view    selectDetails,
-    const JPH::Vec4& /*textColor*/,
+    const FVec4& /*textColor*/,
     int32_t clipIndex = -1
 ) {
     const std::string pathStr(path);
@@ -233,8 +235,8 @@ void TreeRow(
     text += expandable ? (expanded ? "v " : "> ") : "  ";
     text += label;
 
-    JPH::Vec4 btnColor = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) :
-                                    (playing ? JPH::Vec4(0.15f, 0.30f, 0.20f, 0.85f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.60f));
+    FVec4 btnColor = selected ? FVec4(0.18f, 0.36f, 0.56f, 0.98f) :
+                                    (playing ? FVec4(0.15f, 0.30f, 0.20f, 0.85f) : FVec4(0.10f, 0.12f, 0.16f, 0.60f));
 
     if (ui.Button(text, btnColor)) {
         if (expandable) {
@@ -277,13 +279,13 @@ void DrawModelNodeRows(
         label += "  [mesh]";
     }
 
-    const JPH::Vec3 pos      = node.localTransform.GetTranslation();
+    const FVec3 pos      = node.localTransform.GetTranslation();
     const bool      expanded = state.expanded.contains(path);
     TreeRow(
         ui, state, path, depth, label, hasChildren, std::format("Node: {}", label),
         std::format(
-            "Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex, node.hasMesh ? "yes" : "no", pos.GetX(),
-            pos.GetY(), pos.GetZ()
+            "Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex, node.hasMesh ? "yes" : "no", pos.x,
+            pos.y, pos.z
         ),
         ThemeText()
     );
@@ -714,12 +716,12 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.pitch -= dy * kOrbitSpeed;
         state.pitch = std::clamp(state.pitch, -89.0f, 89.0f);
     } else if (rmb) {
-        const JPH::Vec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
-        JPH::Vec3       camRight = Cross(forward, JPH::Vec3::sAxisY());
-        if (camRight.LengthSq() > 1e-6f) {
+        const FVec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
+        FVec3       camRight = Cross(forward, FVec3::sAxisY());
+        if (camRight.LengthSquared() > 1e-6f) {
             camRight = camRight.Normalized();
         }
-        const JPH::Vec3 camUp = Cross(camRight, forward).Normalized();
+        const FVec3 camUp = Cross(camRight, forward).Normalized();
         const float     scale = state.distance * kPanSpeed;
 
         state.target += (-camRight * dx + camUp * dy) * scale;
@@ -730,7 +732,7 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 
-    const JPH::Vec3 dir        = OrbitDirection(state.yaw, state.pitch);
+    const FVec3 dir        = OrbitDirection(state.yaw, state.pitch);
     auto            cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
     if (!cameraComp) {
         return;

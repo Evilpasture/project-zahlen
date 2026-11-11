@@ -9,6 +9,7 @@
 // and engine fixture live in LightingRTCommon.hpp.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -70,13 +71,13 @@ struct RayTracedShadowsTestSuite {
                 reg.Add(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(60.0f, 45.0f, 0.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 90.0f, 0.0f})
+                        .position = FVec3(60.0f, 45.0f, 0.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 90.0f, 0.0f})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .color     = FVec3(1.0f, 1.0f, 1.0f),
                         .intensity = 240.0f,
-                        .direction = JPH::Vec3(0.8f, 0.6f, 0.0f).Normalized()
+                        .direction = FVec3(0.8f, 0.6f, 0.0f).Normalized()
                     }
                 );
 
@@ -85,7 +86,7 @@ struct RayTracedShadowsTestSuite {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(-10.0f, 6.0f, -8.0f);
+                cam.position = FVec3(-10.0f, 6.0f, -8.0f);
                 cam.yaw      = 0.0f;
                 cam.pitch    = -20.0f;
                 cam.fov      = 60.0f;

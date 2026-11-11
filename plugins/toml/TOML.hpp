@@ -46,7 +46,7 @@
 //     which is how TOML expresses absence.
 //   * A struct can opt out of table form and serialise as `[x, y, z]` by
 //     specialising ReflectTOML::TOMLVector -- see there. SceneTOML.hpp in
-//     this directory uses it so Jolt's Float3/Float4 read as coordinates in
+//     this directory uses it so Jolt's FVec3/FVec4 read as coordinates in
 //     a scene document while staying Jolt types in the code.
 //
 // The parser accepts the subset the serialiser emits plus what hand-written
@@ -134,7 +134,7 @@ class Document {
 //
 // where `position = [0.0, 8.0, 0.0]` says the same thing on one line and
 // diffs as one line. Specialise this next to the type that needs it -- see
-// Zahlen/Engine/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
+// Zahlen/Engine/Scene.hpp, which does it for JPH::Float2/FVec3/FVec4 -- so this
 // header keeps depending on nothing but the reflection layer.
 //
 // Fields are read and written in declaration order through reflection, so a

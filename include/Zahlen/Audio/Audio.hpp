@@ -6,14 +6,17 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -50,7 +53,7 @@ class ZHLN_API AudioContext {
     [[nodiscard]] auto Channels() const noexcept -> uint32_t;
 
     // Listener state (3D spatialization + Doppler velocity).
-    void UpdateListener(ZHLN::Float3 position, ZHLN::Float3 direction, ZHLN::Float3 up = {0.0f, 1.0f, 0.0f}, ZHLN::Float3 velocity = {0.0f, 0.0f, 0.0f});
+    void UpdateListener(ZHLN::FVec3 position, ZHLN::FVec3 direction, ZHLN::FVec3 up = {0.0f, 1.0f, 0.0f}, ZHLN::FVec3 velocity = {0.0f, 0.0f, 0.0f});
 
     // Deferred transient one-shot & procedural SFX queue.
     void PostEvent(const AudioEvent& event) noexcept;
@@ -131,9 +134,9 @@ class ZHLN_API AudioContext {
     void               SetVoiceBus(VoiceID handle, AudioBusID bus);
     [[nodiscard]] auto GetVoiceBus(VoiceID handle) const noexcept -> AudioBusID;
 
-    void SetVoicePosition(VoiceID handle, ZHLN::Float3 position);
-    void SetVoiceVelocity(VoiceID handle, ZHLN::Float3 velocity);
-    void SetVoiceDirection(VoiceID handle, ZHLN::Float3 direction);
+    void SetVoicePosition(VoiceID handle, ZHLN::FVec3 position);
+    void SetVoiceVelocity(VoiceID handle, ZHLN::FVec3 velocity);
+    void SetVoiceDirection(VoiceID handle, ZHLN::FVec3 direction);
 
     void               SetVoiceVolume(VoiceID handle, float volume);
     [[nodiscard]] auto GetVoiceVolume(VoiceID handle) const noexcept -> float;

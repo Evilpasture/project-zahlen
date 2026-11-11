@@ -12,7 +12,10 @@
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <string_view>
@@ -39,11 +42,11 @@ void ReleaseOwnedMeshes(GraphicsDevice gfx, ECS::Registry& reg);
 // Standalone builders return caller-owned buffers: use DestroyMesh after their
 // last draw. Entity spawners below attach scene-owned cleanup instead.
 auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh;
-auto CreatePlaneMesh(GraphicsDevice gfx, float extent = 10.0f, ZHLN::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
-auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::Float3 halfExtents, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Float4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreatePlaneMesh(GraphicsDevice gfx, float extent = 10.0f, ZHLN::FVec4 color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
+auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
 auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
 auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas;
@@ -58,18 +61,18 @@ auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Option
 
 auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureID;
 
-auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
-auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;
 
 auto CreatePlane(
     GraphicsDevice                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent = 10.0f,
-    ZHLN::Float4                    color  = {0.6f, 0.6f, 0.6f, 1.0f},
+    ZHLN::FVec4                    color  = {0.6f, 0.6f, 0.6f, 1.0f},
     const SpawnParams&              params = {}
 ) -> Entity;
-auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::Float4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
+auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::FVec4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
 
 auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;

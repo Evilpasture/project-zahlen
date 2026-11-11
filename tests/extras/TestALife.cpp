@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <ALife/ALifeComponents.hpp>
 #include <ALife/Factions.hpp>
 #include <ALife/GOAP.hpp>
@@ -70,10 +71,10 @@ struct ALifeTestSuite {
         std::expected<void, ZHLN::ErrorCode> graph_astar_pathfinding() {
             // Create a 4-node linear graph: 0 -- 1 -- 2 -- 3
             ZHLN::ALife::LevelGraph graph(4);
-            graph.GetNode(0).position = JPH::RVec3(0, 0, 0);
-            graph.GetNode(1).position = JPH::RVec3(10, 0, 0);
-            graph.GetNode(2).position = JPH::RVec3(20, 0, 0);
-            graph.GetNode(3).position = JPH::RVec3(30, 0, 0);
+            graph.GetNode(0).position = DVec3(0, 0, 0);
+            graph.GetNode(1).position = DVec3(10, 0, 0);
+            graph.GetNode(2).position = DVec3(20, 0, 0);
+            graph.GetNode(3).position = DVec3(30, 0, 0);
 
             graph.Connect(0, 1);
             graph.Connect(1, 2);
@@ -132,36 +133,36 @@ struct ALifeTestSuite {
             // Entity 1 at (100, 0, 100) -> Cell (2, 2)
             ZHLN::Entity e1 = reg.Create();
             auto&        c1 = reg.Add<ZHLN::ALife::ALifeComponent>(e1);
-            c1.position     = JPH::RVec3(100.0, 0.0, 100.0);
+            c1.position     = DVec3(100.0, 0.0, 100.0);
             c1.self_entity  = e1;
-            grid.UpdateEntity(reg, e1, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(reg, e1, DVec3(-1, -1, -1));
 
             // Entity 2 at (110, 0, 100) (Distance 10m from e1)
             ZHLN::Entity e2 = reg.Create();
             auto&        c2 = reg.Add<ZHLN::ALife::ALifeComponent>(e2);
-            c2.position     = JPH::RVec3(110.0, 0.0, 100.0);
+            c2.position     = DVec3(110.0, 0.0, 100.0);
             c2.self_entity  = e2;
-            grid.UpdateEntity(reg, e2, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(reg, e2, DVec3(-1, -1, -1));
 
             // Entity 3 at (800, 0, 800) (Far away)
             ZHLN::Entity e3 = reg.Create();
             auto&        c3 = reg.Add<ZHLN::ALife::ALifeComponent>(e3);
-            c3.position     = JPH::RVec3(800.0, 0.0, 800.0);
+            c3.position     = DVec3(800.0, 0.0, 800.0);
             c3.self_entity  = e3;
-            grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(reg, e3, DVec3(-1, -1, -1));
 
             // Query within 20m of (100, 0, 100)
-            std::vector<ZHLN::Entity> results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f);
+            std::vector<ZHLN::Entity> results = grid.Query(reg, DVec3(100.0, 0.0, 100.0), 20.0f);
 
             // Should find e1 and e2, but NOT e3
             ZHLN::Test::ExpectEq(results.size(), size_t {2});
 
             // Move e2 outside the radius
-            JPH::RVec3 oldPos = c2.position;
-            c2.position       = JPH::RVec3(300.0, 0.0, 300.0);
+            DVec3 oldPos = c2.position;
+            c2.position       = DVec3(300.0, 0.0, 300.0);
             grid.UpdateEntity(reg, e2, oldPos);
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
+            results = grid.Query(reg, DVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
             ZHLN::Test::ExpectEq(results.size(), size_t {1});
             if (results.size() == 1) {
                 ZHLN::Test::ExpectEq(results[0], e1);
@@ -170,17 +171,17 @@ struct ALifeTestSuite {
             // Unlink a non-head entry, then reuse its ECS slot. A grid link
             // must carry the generation, not accidentally find the old entity
             // through a fabricated generation-0 handle.
-            const JPH::RVec3 movedFrom = c2.position;
-            c2.position = JPH::RVec3(103.0, 0.0, 100.0);
+            const DVec3 movedFrom = c2.position;
+            c2.position = DVec3(103.0, 0.0, 100.0);
             grid.UpdateEntity(reg, e2, movedFrom);
             grid.RemoveEntity(reg, e1);
             reg.Destroy(e1);
             const ZHLN::Entity replacement = reg.Create();
             auto& replacementComp = reg.Add<ZHLN::ALife::ALifeComponent>(replacement);
-            replacementComp.position = JPH::RVec3(105.0, 0.0, 100.0);
-            grid.UpdateEntity(reg, replacement, JPH::RVec3(-1, -1, -1));
+            replacementComp.position = DVec3(105.0, 0.0, 100.0);
+            grid.UpdateEntity(reg, replacement, DVec3(-1, -1, -1));
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
+            results = grid.Query(reg, DVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
             ZHLN::Test::ExpectEq(replacement.index, e1.index);
             ZHLN::Test::ExpectNe(replacement.generation, e1.generation);
             ZHLN::Test::ExpectEq(results.size(), size_t {2});

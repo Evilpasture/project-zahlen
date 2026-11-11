@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPImporter.hpp
 //
 // The Source engine BSP reader, in the same shape as <glTF/GLTFImporter.hpp>:
@@ -82,7 +83,7 @@ auto PreloadStaticProps(
 // not a grey scaled by red.
 struct VmtEmission {
     float     strength = 0.0f;
-    JPH::Vec3 tint {1.0f, 1.0f, 1.0f};
+    FVec3 tint {1.0f, 1.0f, 1.0f};
 };
 
 // Reads the rules above out of one parsed material. The base texture luminance

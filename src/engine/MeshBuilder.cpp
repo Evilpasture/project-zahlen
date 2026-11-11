@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -76,7 +80,7 @@ auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
     return finalMesh;
 }
 
-auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::Float4 color) -> Mesh {
+auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
@@ -120,7 +124,7 @@ auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::Float4 color) -> Me
     return finalMesh;
 }
 
-auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::Float3 halfExtents, ZHLN::Float4 color) -> Mesh {
+auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color) -> Mesh {
     const float x = halfExtents.x;
     const float y = halfExtents.y;
     const float z = halfExtents.z;
@@ -217,7 +221,7 @@ auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::Float3 halfExtents, ZHLN::Float4 co
     return finalMesh;
 }
 
-auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::Float4 color) -> Mesh {
+auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -235,9 +239,9 @@ auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::Float4 color) -> M
         for (int ix = 0; ix <= kSegments; ++ix) {
             const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
             const float     theta = u * 2.0f * JPH::JPH_PI;
-            const JPH::Vec3 n(rr * JPH::Cos(theta), y, rr * JPH::Sin(theta));
-            positions.push_back({n.GetX() * r, n.GetY() * r, n.GetZ() * r});
-            streams.Push(Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()), Math::PackNormal(-JPH::Sin(theta), 0.0f, JPH::Cos(theta)), Math::PackUV(u, v), c);
+            const FVec3 n(rr * JPH::Cos(theta), y, rr * JPH::Sin(theta));
+            positions.push_back({n.x * r, n.y * r, n.z * r});
+            streams.Push(Math::PackNormal(n.x, n.y, n.z), Math::PackNormal(-JPH::Sin(theta), 0.0f, JPH::Cos(theta)), Math::PackUV(u, v), c);
         }
     }
 
@@ -285,7 +289,7 @@ auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::Float4 color) -> M
     return finalMesh;
 }
 
-auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Float4 color) -> Mesh {
+auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
@@ -295,19 +299,19 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Fl
     VertexStreams               streams;
     std::vector<uint32_t>       indices;
 
-    auto pushVert = [&](const JPH::Vec3& pos, const JPH::Vec3& n, const JPH::Vec3& tangent, float u, float v) -> uint32_t {
-        positions.push_back({pos.GetX(), pos.GetY(), pos.GetZ()});
-        streams.Push(Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()), Math::PackNormal(tangent.GetX(), tangent.GetY(), tangent.GetZ()), Math::PackUV(u, v), c);
+    auto pushVert = [&](const FVec3& pos, const FVec3& n, const FVec3& tangent, float u, float v) -> uint32_t {
+        positions.push_back({pos.x, pos.y, pos.z});
+        streams.Push(Math::PackNormal(n.x, n.y, n.z), Math::PackNormal(tangent.x, tangent.y, tangent.z), Math::PackUV(u, v), c);
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
         const float     theta = u * 2.0f * JPH::JPH_PI;
-        const JPH::Vec3 n(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
-        const JPH::Vec3 t(-JPH::Sin(theta), 0.0f, JPH::Cos(theta));
-        pushVert(JPH::Vec3(n.GetX() * r, -hy, n.GetZ() * r), n, t, u, 0.0f);
-        pushVert(JPH::Vec3(n.GetX() * r, hy, n.GetZ() * r), n, t, u, 1.0f);
+        const FVec3 n(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
+        const FVec3 t(-JPH::Sin(theta), 0.0f, JPH::Cos(theta));
+        pushVert(FVec3(n.x * r, -hy, n.z * r), n, t, u, 0.0f);
+        pushVert(FVec3(n.x * r, hy, n.z * r), n, t, u, 1.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         const uint32_t a = static_cast<uint32_t>(ix * 2);
@@ -317,12 +321,12 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Fl
 
     for (int sign = 0; sign < 2; ++sign) {
         const float     y     = (sign == 0) ? hy : -hy;
-        const JPH::Vec3 n     = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
-        const uint32_t  ct    = pushVert(JPH::Vec3(0, y, 0), n, JPH::Vec3(1, 0, 0), 0.5f, 0.5f);
+        const FVec3 n     = (sign == 0) ? FVec3(0, 1, 0) : FVec3(0, -1, 0);
+        const uint32_t  ct    = pushVert(FVec3(0, y, 0), n, FVec3(1, 0, 0), 0.5f, 0.5f);
         const uint32_t  first = static_cast<uint32_t>(positions.size());
         for (int ix = 0; ix <= kSegments; ++ix) {
             const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
-            pushVert(JPH::Vec3(JPH::Cos(theta) * r, y, JPH::Sin(theta) * r), n, JPH::Vec3(1, 0, 0), 0.0f, 0.0f);
+            pushVert(FVec3(JPH::Cos(theta) * r, y, JPH::Sin(theta) * r), n, FVec3(1, 0, 0), 0.0f, 0.0f);
         }
         for (int ix = 0; ix < kSegments; ++ix) {
             if (sign == 0) {
@@ -361,7 +365,7 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Fl
     return finalMesh;
 }
 
-auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Float4 color) -> Mesh {
+auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;
@@ -376,29 +380,29 @@ auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::Float4
     VertexStreams               streams;
     std::vector<uint32_t>       indices;
 
-    auto pushVert = [&](const JPH::Vec3& pos, const JPH::Vec3& n, float u, float v) -> uint32_t {
-        positions.push_back({pos.GetX(), pos.GetY(), pos.GetZ()});
-        streams.Push(Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()), Math::PackNormal(1, 0, 0), Math::PackUV(u, v), c);
+    auto pushVert = [&](const FVec3& pos, const FVec3& n, float u, float v) -> uint32_t {
+        positions.push_back({pos.x, pos.y, pos.z});
+        streams.Push(Math::PackNormal(n.x, n.y, n.z), Math::PackNormal(1, 0, 0), Math::PackUV(u, v), c);
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
-    const uint32_t apex = pushVert(JPH::Vec3(0, hy, 0), JPH::Vec3(0, 1, 0), 0.5f, 1.0f);
+    const uint32_t apex = pushVert(FVec3(0, hy, 0), FVec3(0, 1, 0), 0.5f, 1.0f);
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
         const float     theta = u * 2.0f * JPH::JPH_PI;
-        const JPH::Vec3 dir(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
-        const JPH::Vec3 n(dir.GetX() * nr, ny, dir.GetZ() * nr);
-        pushVert(JPH::Vec3(dir.GetX() * r, -hy, dir.GetZ() * r), n, u, 0.0f);
+        const FVec3 dir(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
+        const FVec3 n(dir.x * nr, ny, dir.z * nr);
+        pushVert(FVec3(dir.x * r, -hy, dir.z * r), n, u, 0.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         indices.insert(indices.end(), {apex, static_cast<uint32_t>(ix + 2), static_cast<uint32_t>(ix + 1)});
     }
 
-    const uint32_t ct    = pushVert(JPH::Vec3(0, -hy, 0), JPH::Vec3(0, -1, 0), 0.5f, 0.5f);
+    const uint32_t ct    = pushVert(FVec3(0, -hy, 0), FVec3(0, -1, 0), 0.5f, 0.5f);
     const uint32_t first = static_cast<uint32_t>(positions.size());
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
-        pushVert(JPH::Vec3(JPH::Cos(theta) * r, -hy, JPH::Sin(theta) * r), JPH::Vec3(0, -1, 0), 0.0f, 0.0f);
+        pushVert(FVec3(JPH::Cos(theta) * r, -hy, JPH::Sin(theta) * r), FVec3(0, -1, 0), 0.0f, 0.0f);
     }
     for (int ix = 0; ix < kSegments; ++ix) {
         indices.insert(indices.end(), {ct, first + static_cast<uint32_t>(ix), first + static_cast<uint32_t>(ix) + 1});

@@ -9,6 +9,8 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPLighting.hpp"
 #include <Zahlen/Log.hpp>
@@ -56,23 +58,23 @@ constexpr int   kAoSamples = 24;
 // to one degree of freedom; roll is pinned to 0 and the heading recovered
 // from u's in-plane angle. Verified 120/120 angle triples (worst axis error
 // 3.5e-4) against a matrix-based ground truth.
-[[nodiscard]] auto EngineTripletFromQuat(JPH::Quat q) -> JPH::Vec3 {
-    const JPH::Vec3 f = q.RotateAxisX();
-    const JPH::Vec3 u = q.RotateAxisY();
-    const float     b = std::asin(std::clamp(-f.GetZ(), -1.0f, 1.0f));
-    float           c = std::atan2(f.GetY(), f.GetX());
+[[nodiscard]] auto EngineTripletFromQuat(JPH::Quat q) -> FVec3 {
+    const FVec3 f = q.RotateAxisX();
+    const FVec3 u = q.RotateAxisY();
+    const float     b = std::asin(std::clamp(-f.z, -1.0f, 1.0f));
+    float           c = std::atan2(f.y, f.x);
     const float     cb = std::cos(b);
     float           a;
     if (cb > 1e-3f) {
         const float cc = std::cos(c);
         const float sc = std::sin(c);
-        a = std::atan2(u.GetZ() / cb, u.GetY() * cc - u.GetX() * sc);
+        a = std::atan2(u.z / cb, u.y * cc - u.x * sc);
     } else {
         const float sb = std::sin(b);
         a = 0.0f;
-        c = (sb > 0.0f) ? -std::atan2(u.GetX(), u.GetY()) : std::atan2(-u.GetX(), u.GetY());
+        c = (sb > 0.0f) ? -std::atan2(u.x, u.y) : std::atan2(-u.x, u.y);
     }
-    return JPH::Vec3(a * kRadiansToDegrees, b * kRadiansToDegrees, c * kRadiansToDegrees);
+    return FVec3(a * kRadiansToDegrees, b * kRadiansToDegrees, c * kRadiansToDegrees);
 }
 
 // The sky_camera's own rotation as a quaternion (SkyboxTransform::rot is its
@@ -80,15 +82,15 @@ constexpr int   kAoSamples = 24;
 // Source parents skybox props to the sky_camera.
 [[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> JPH::Quat {
     const JPH::Mat44 basis(
-        JPH::Vec4(t.rot[0], t.rot[3], t.rot[6], 0.0f), JPH::Vec4(t.rot[1], t.rot[4], t.rot[7], 0.0f), JPH::Vec4(t.rot[2], t.rot[5], t.rot[8], 0.0f),
-        JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)
+        FVec4(t.rot[0], t.rot[3], t.rot[6], 0.0f), FVec4(t.rot[1], t.rot[4], t.rot[7], 0.0f), FVec4(t.rot[2], t.rot[5], t.rot[8], 0.0f),
+        FVec4(0.0f, 0.0f, 0.0f, 1.0f)
     );
     return basis.GetQuaternion();
 }
 
 } // namespace
 
-auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3 {
+auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOptions& options) -> FVec3 {
     // Source entity angles are (pitch, yaw, roll) composing as
     //
     //   R = Rz(yaw) * Ry(pitch) * Rx(roll)        (rightmost = local frame)
@@ -120,14 +122,14 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     // (pitch=roll=0) this reduces to a pure +yaw
     // rotation about engine +Y -- bit-identical behaviour to the previously
     // verified yaw fix, whose -atan2 sign is preserved here.
-    const float     pitch = sourceAnglesDegrees.GetX() * (3.14159265358979323846f / 180.0f);
-    const float     yaw   = sourceAnglesDegrees.GetY() * (3.14159265358979323846f / 180.0f);
-    const float     roll  = sourceAnglesDegrees.GetZ() * (3.14159265358979323846f / 180.0f);
-    const JPH::Quat qSource = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), yaw) * JPH::Quat::sRotation(JPH::Vec3::sAxisY(), pitch) *
-                              JPH::Quat::sRotation(JPH::Vec3::sAxisX(), roll);
+    const float     pitch = sourceAnglesDegrees.x * (3.14159265358979323846f / 180.0f);
+    const float     yaw   = sourceAnglesDegrees.y * (3.14159265358979323846f / 180.0f);
+    const float     roll  = sourceAnglesDegrees.z * (3.14159265358979323846f / 180.0f);
+    const JPH::Quat qSource = JPH::Quat::sRotation(FVec3::sAxisZ(), yaw) * JPH::Quat::sRotation(FVec3::sAxisY(), pitch) *
+                              JPH::Quat::sRotation(FVec3::sAxisX(), roll);
     JPH::Quat qEngine = qSource;
     if (options.convertCoordinates) {
-        const JPH::Quat qC = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.5f * 3.14159265358979323846f);
+        const JPH::Quat qC = JPH::Quat::sRotation(FVec3::sAxisX(), -0.5f * 3.14159265358979323846f);
         qEngine            = qC * qSource * qC.Conjugated();
     }
     return EngineTripletFromQuat(qEngine);
@@ -175,7 +177,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // Source (Z-up) vector, so it has to take the same ConvertDirection hop the
     // spot branch gives its beam; unconverted, the engine's Y-up sun pointed
     // sideways and its shadows were cast into the ground.
-    const JPH::Vec3 sunDirection = ConvertDirection(options, EnvironmentSunDirection(map));
+    const FVec3 sunDirection = ConvertDirection(options, EnvironmentSunDirection(map));
     uint32_t        sceneLightSuppressed = 0;
 
     // The sky gradient is the light_environment's ambient term, converted the
@@ -194,9 +196,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // `_ambient "64 95 166 10"` lands at (0.0033, 0.0050, 0.0087), which is
         // the same irradiance VRAD baked its LDR lightmaps against.
         const float ladder = 1.0f / (kAmbientBrightnessNormalisation * kAmbientExposure);
-        JPH::Float3 sky = {ambient.color.GetX() * ambient.intensity * ladder,
-                           ambient.color.GetY() * ambient.intensity * ladder,
-                           ambient.color.GetZ() * ambient.intensity * ladder};
+        JPH::Float3 sky = {ambient.color.x * ambient.intensity * ladder,
+                           ambient.color.y * ambient.intensity * ladder,
+                           ambient.color.z * ambient.intensity * ladder};
 
         // VRAD's _ambient magnitude is irradiance for baked surfaces, not the
         // visible sky's radiance. Using it verbatim made authored night skies
@@ -260,15 +262,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         }
         float           skyScale  = 1.0f;
         float           placed[3] = {originArr[0], originArr[1], originArr[2]};
-        JPH::Vec3       origin(originArr[0], originArr[1], originArr[2]);
+        FVec3       origin(originArr[0], originArr[1], originArr[2]);
         if (skyEntity) {
             // Geometry and props ride the transform and composite as the
             // background layer; only buried LIGHTS stay filtered below.
             TransformSkyboxPoint(skybox, originArr.data(), placed);
-            origin   = JPH::Vec3(placed[0], placed[1], placed[2]);
+            origin   = FVec3(placed[0], placed[1], placed[2]);
             skyScale = skybox.scale;
         }
-        JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
+        FVec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
         // ---- lights ------------------------------------------------------
         // BSPLighting owns the rules (classname classification, colour
@@ -328,7 +330,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // is a mapper hint, not the light's position.
             if (lightKind == LightEntityKind::Sun) {
                 light.type     = "Sun";
-                light.direction = {sunDirection.GetX(), sunDirection.GetY(), sunDirection.GetZ()};
+                light.direction = {sunDirection.x, sunDirection.y, sunDirection.z};
                 light.position = {0.0f, 0.0f, 0.0f};
                 // Calibration: Source's stock 200-brightness sun maps onto the
                 // engine's LightingSystem default of 180, and the exposure the
@@ -346,35 +348,35 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
             light.type = (lightKind == LightEntityKind::Spot) ? "Spot" : "Point";
 
-            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-            light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+            const FVec3 enginePosition = ConvertPosition(options, origin);
+            light.position                 = {enginePosition.x, enginePosition.y, enginePosition.z};
             light.color                    = {value.rgba[0] / 255.0f, value.rgba[1] / 255.0f, value.rgba[2] / 255.0f};
             // Skybox fixtures: distances scale by skybox.scale, so intensity
             // carries scale^2 to keep the authored pool brightness on the
             // placed scenery (E = I/d^2).
             light.intensity                = value.rgba[3] * kSourceBrightnessToEngine * skyScale * skyScale;
 
-            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
-            light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+            const FVec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
+            light.rotation               = {engineAngles.x, engineAngles.y, engineAngles.z};
 
             if (light.type == "Spot") {
-                JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
-                float     pitchDeg = angles.GetX();
+                FVec3 direction(0.0f, 0.0f, -1.0f);
+                float     pitchDeg = angles.x;
                 if (const auto p = entity.FindFloat("pitch")) {
                     pitchDeg = *p;
                 }
                 const float pitch = pitchDeg * (3.14159265358979323846f / 180.0f);
-                const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
+                const float yaw   = angles.y * (3.14159265358979323846f / 180.0f);
                 const float cp    = std::cos(pitch);
-                direction         = JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+                direction         = FVec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
                 if (skyEntity) {
-                    const float d[3] = {direction.GetX(), direction.GetY(), direction.GetZ()};
+                    const float d[3] = {direction.x, direction.y, direction.z};
                     float       out[3];
                     TransformSkyboxVector(skybox, d, out);
-                    direction = JPH::Vec3(out[0], out[1], out[2]);
+                    direction = FVec3(out[0], out[1], out[2]);
                 }
-                const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
-                light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
+                const FVec3 engineDirection = ConvertDirection(options, direction);
+                light.direction                 = {engineDirection.x, engineDirection.y, engineDirection.z};
 
                 // Cone angles in degrees (_cone outer, _cone2 inner). The old
                 // code assigned the cone WIDTH to light.range -- a 60-degree
@@ -406,17 +408,17 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         }
 
         if (className == "info_player_start" && !cameraSet) {
-            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-            scene.camera.position          = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+            const FVec3 enginePosition = ConvertPosition(options, origin);
+            scene.camera.position          = {enginePosition.x, enginePosition.y, enginePosition.z};
 
             // SceneCamera yaw/pitch invert its own direction formula
             // (cos p cos y, sin p, cos p sin y); take them from the exact
             // conjugated rotation's forward, not the Euler slots, because the
             // slots' yaw sign is the prop convention, not the camera's.
             const JPH::Quat qView     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
-            const JPH::Vec3 viewFwd   = qView.RotateAxisX();
-            scene.camera.pitch        = std::asin(std::clamp(viewFwd.GetY(), -1.0f, 1.0f)) * kRadiansToDegrees;
-            scene.camera.yaw          = std::atan2(viewFwd.GetZ(), viewFwd.GetX()) * kRadiansToDegrees;
+            const FVec3 viewFwd   = qView.RotateAxisX();
+            scene.camera.pitch        = std::asin(std::clamp(viewFwd.y, -1.0f, 1.0f)) * kRadiansToDegrees;
+            scene.camera.yaw          = std::atan2(viewFwd.z, viewFwd.x) * kRadiansToDegrees;
             cameraSet                 = true;
             continue;
         }
@@ -502,20 +504,20 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                     // collider at the origin so it blocked nothing. The
                     // rendered position is unchanged either way, because the
                     // prefab vertices are re-based by the same pivot.
-                    interactive.transform.position = {subRecord->pivot.GetX(), subRecord->pivot.GetY(), subRecord->pivot.GetZ()};
+                    interactive.transform.position = {subRecord->pivot.x, subRecord->pivot.y, subRecord->pivot.z};
 
                     // Submodel bounds still drive the door travel distance
                     // (BSPInteraction) and the instantiator's root collider
                     // fallback.
                     const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
-                    const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
-                    const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
-                    const JPH::Vec3 bspHalf       = (maxs - mins) * 0.5f;
-                    const JPH::Vec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
-                    const JPH::Vec3 engineHalf(
-                        std::abs(convertedHalf.GetX()), std::abs(convertedHalf.GetY()), std::abs(convertedHalf.GetZ())
+                    const FVec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+                    const FVec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+                    const FVec3 bspHalf       = (maxs - mins) * 0.5f;
+                    const FVec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
+                    const FVec3 engineHalf(
+                        std::abs(convertedHalf.x), std::abs(convertedHalf.y), std::abs(convertedHalf.z)
                     );
-                    interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
+                    interactive.halfExtents = {std::max(engineHalf.x, 0.05f), std::max(engineHalf.y, 0.05f), std::max(engineHalf.z, 0.05f)};
                 } else if (isTrigger) {
                     // Trigger volumes are logic only: no rendered geometry and
                     // no collider, just the transform proximity checks measure
@@ -525,31 +527,31 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
                     if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
                         const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
-                        const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
-                        const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
-                        JPH::Vec3       bspCenter = (mins + maxs) * 0.5f;
+                        const FVec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+                        const FVec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+                        FVec3       bspCenter = (mins + maxs) * 0.5f;
                         if (const auto originCheck = entity.FindVector("origin")) {
-                            bspCenter = JPH::Vec3((*originCheck)[0], (*originCheck)[1], (*originCheck)[2]);
+                            bspCenter = FVec3((*originCheck)[0], (*originCheck)[1], (*originCheck)[2]);
                         }
-                        const JPH::Vec3 enginePos = ConvertPosition(options, bspCenter);
-                        interactive.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
-                        const JPH::Vec3 bspHalf       = (maxs - mins) * 0.5f;
-                        const JPH::Vec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
-                        const JPH::Vec3 engineHalf(
-                            std::abs(convertedHalf.GetX()), std::abs(convertedHalf.GetY()), std::abs(convertedHalf.GetZ())
+                        const FVec3 enginePos = ConvertPosition(options, bspCenter);
+                        interactive.transform.position = {enginePos.x, enginePos.y, enginePos.z};
+                        const FVec3 bspHalf       = (maxs - mins) * 0.5f;
+                        const FVec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
+                        const FVec3 engineHalf(
+                            std::abs(convertedHalf.x), std::abs(convertedHalf.y), std::abs(convertedHalf.z)
                         );
-                        interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
+                        interactive.halfExtents = {std::max(engineHalf.x, 0.05f), std::max(engineHalf.y, 0.05f), std::max(engineHalf.z, 0.05f)};
                     } else {
-                        const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-                        interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                        const FVec3 enginePosition = ConvertPosition(options, origin);
+                        interactive.transform.position = {enginePosition.x, enginePosition.y, enginePosition.z};
                     }
                 } else {
                     // Interactive brush with no importable submodel prefab:
                     // keep the placeholder box.
                     interactive.shape  = Scene::ShapeKind::Box;
                     interactive.source = std::string(modelName);
-                    const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-                    interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                    const FVec3 enginePosition = ConvertPosition(options, origin);
+                    interactive.transform.position = {enginePosition.x, enginePosition.y, enginePosition.z};
                     interactive.halfExtents        = {0.5f, 0.5f, 0.5f};
                 }
             } else if (!modelName.empty()) {
@@ -557,19 +559,19 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 interactive.shape  = Scene::ShapeKind::Prefab;
                 interactive.source = std::string(modelName);
 
-                const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-                interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
-                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, interactive);
+                const FVec3 enginePosition = ConvertPosition(options, origin);
+                interactive.transform.position = {enginePosition.x, enginePosition.y, enginePosition.z};
+                ApplyAmbientCube(map, options, {origin.x, origin.y, origin.z}, interactive);
             } else {
                 interactive.shape              = Scene::ShapeKind::Box;
-                const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-                interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                const FVec3 enginePosition = ConvertPosition(options, origin);
+                interactive.transform.position = {enginePosition.x, enginePosition.y, enginePosition.z};
                 interactive.halfExtents        = {1.0f, 1.0f, 1.0f};
             }
 
-            if (angles.LengthSq() > 1e-4f) {
-                const JPH::Vec3 engineAngles   = EngineEulerAnglesFromSourceAngles(angles, options);
-                interactive.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+            if (angles.LengthSquared() > 1e-4f) {
+                const FVec3 engineAngles   = EngineEulerAnglesFromSourceAngles(angles, options);
+                interactive.transform.rotation = {engineAngles.x, engineAngles.y, engineAngles.z};
             }
 
             scene.entities.push_back(std::move(interactive));
@@ -598,14 +600,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             prop.body   = (className == "prop_physics" && !motionDisabled) ? Scene::BodyKind::Dynamic : Scene::BodyKind::Static;
             prop.startsAsleep = prop.body == Scene::BodyKind::Dynamic;
 
-            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
-            prop.transform.position        = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+            const FVec3 enginePosition = ConvertPosition(options, origin);
+            prop.transform.position        = {enginePosition.x, enginePosition.y, enginePosition.z};
 
-            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
-            prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+            const FVec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
+            prop.transform.rotation      = {engineAngles.x, engineAngles.y, engineAngles.z};
 
             if (!skyEntity) {
-                ApplyAmbientCube(map, options, {origin.GetX(), origin.GetY(), origin.GetZ()}, prop);
+                ApplyAmbientCube(map, options, {origin.x, origin.y, origin.z}, prop);
             }
 
             if (skyEntity) {
@@ -616,8 +618,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 prop.drawFlags    = DrawFlags::Background;
                 prop.body         = Scene::BodyKind::None;
                 prop.startsAsleep = false;
-                const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(prop.transform.rotation));
-                prop.transform.rotation  = {composed.GetX(), composed.GetY(), composed.GetZ()};
+                const FVec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(prop.transform.rotation));
+                prop.transform.rotation  = {composed.x, composed.y, composed.z};
             }
 
             scene.entities.push_back(std::move(prop));
@@ -643,11 +645,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         if (skyProp && !skybox.enabled) {
             continue; // skybox off: its props leave with its geometry
         }
-        JPH::Vec3  propOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
+        FVec3  propOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
         if (skyProp) {
             float placed[3];
             TransformSkyboxPoint(skybox, sp.origin.data(), placed);
-            propOrigin = JPH::Vec3(placed[0], placed[1], placed[2]);
+            propOrigin = FVec3(placed[0], placed[1], placed[2]);
         }
 
         Scene::SceneEntity propEntity;
@@ -656,16 +658,16 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         propEntity.source = sp.modelName;
         propEntity.body   = (options.buildColliders && sp.solid != 0 && !skyProp) ? Scene::BodyKind::Static : Scene::BodyKind::None;
 
-        const JPH::Vec3 enginePos = ConvertPosition(options, propOrigin);
-        propEntity.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
+        const FVec3 enginePos = ConvertPosition(options, propOrigin);
+        propEntity.transform.position = {enginePos.x, enginePos.y, enginePos.z};
 
-        const JPH::Vec3 sourceAngles(sp.angles[0], sp.angles[1], sp.angles[2]);
-        const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(sourceAngles, options);
-        propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+        const FVec3 sourceAngles(sp.angles[0], sp.angles[1], sp.angles[2]);
+        const FVec3 engineAngles = EngineEulerAnglesFromSourceAngles(sourceAngles, options);
+        propEntity.transform.rotation = {engineAngles.x, engineAngles.y, engineAngles.z};
         if (skyProp) {
             propEntity.drawFlags = DrawFlags::Background;
-            const JPH::Vec3 composed      = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(propEntity.transform.rotation));
-            propEntity.transform.rotation = {composed.GetX(), composed.GetY(), composed.GetZ()};
+            const FVec3 composed      = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(propEntity.transform.rotation));
+            propEntity.transform.rotation = {composed.x, composed.y, composed.z};
         }
 
         const float s = (sp.uniformScale > 0.0f) ? sp.uniformScale : 1.0f;
@@ -708,7 +710,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             BspPointLight proxy;
             proxy.name     = light.name;
             proxy.type     = LightType::Point;
-            proxy.position = JPH::Vec3(light.position.x, light.position.y, light.position.z);
+            proxy.position = FVec3(light.position.x, light.position.y, light.position.z);
             entityLights.push_back(std::move(proxy));
         }
 
@@ -718,9 +720,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // EmissiveLightFor always builds a Point proxy; say so directly
             // rather than pulling the reflection header in for one enum name.
             light.type             = "Point";
-            light.position         = JPH::Float3(proxy.position.GetX(), proxy.position.GetY(), proxy.position.GetZ());
-            light.direction        = JPH::Float3(proxy.direction.GetX(), proxy.direction.GetY(), proxy.direction.GetZ());
-            light.color            = JPH::Float3(proxy.color.GetX(), proxy.color.GetY(), proxy.color.GetZ());
+            light.position         = JPH::Float3(proxy.position.x, proxy.position.y, proxy.position.z);
+            light.direction        = JPH::Float3(proxy.direction.x, proxy.direction.y, proxy.direction.z);
+            light.color            = JPH::Float3(proxy.color.x, proxy.color.y, proxy.color.z);
             light.intensity        = proxy.intensity;
             light.radius           = proxy.radius;
             light.range            = proxy.range;
@@ -742,7 +744,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     }
 
     if (options.punctualShadowFaceBudget > 0) {
-        const JPH::Vec3 viewer {scene.camera.position};
+        const FVec3 viewer {scene.camera.position};
 
         struct PunctualShadowCandidate {
             float    distSq = 0.0f;
@@ -762,7 +764,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const uint32_t faces = (light.type == "Point") ? 6u : 1u;
             candidates.push_back(
                 PunctualShadowCandidate {
-                    .distSq = (JPH::Vec3 {light.position} - viewer).LengthSq(),
+                    .distSq = (FVec3 {light.position} - viewer).LengthSquared(),
                     .faces  = faces,
                     .index  = index,
                 }

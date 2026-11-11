@@ -8,7 +8,10 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Physics/PhysicsValues.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -24,23 +27,23 @@ struct CharacterParams;
 
 class ZHLN_API Simulation {
   public:
-    [[nodiscard]] auto Raycast(Double3 origin, Float3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const
+    [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const
         -> Physics::RaycastResult;
-    [[nodiscard]] auto BodiesInSphere(Double3 center, float radius) const -> std::vector<Physics::BodyID>;
+    [[nodiscard]] auto BodiesInSphere(DVec3 center, float radius) const -> std::vector<Physics::BodyID>;
     [[nodiscard]] auto DebugDrawData(bool shapes = true, bool constraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
-    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<Double3>;
+    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3>;
     [[nodiscard]] auto BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
-    [[nodiscard]] auto CharacterVelocity(Physics::BodyID handle) const -> Float3;
+    [[nodiscard]] auto CharacterVelocity(Physics::BodyID handle) const -> FVec3;
     [[nodiscard]] auto IsCharacterOnGround(Physics::BodyID handle) const -> bool;
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyID handle) const -> bool;
 
-    void AddImpulse(Physics::BodyID handle, Float3 impulse);
+    void AddImpulse(Physics::BodyID handle, FVec3 impulse);
     void DestroyBody(Physics::BodyID handle);
     void DestroyBodies(std::span<const Physics::BodyID> handles);
-    void SetCharacterVelocity(Physics::BodyID handle, Float3 velocity);
+    void SetCharacterVelocity(Physics::BodyID handle, FVec3 velocity);
     void Step(float deltaTime);
-    [[nodiscard]] auto CreateCharacter(Double3 position) -> Physics::BodyID;
-    [[nodiscard]] auto CreateCharacter(Double3 position, const Physics::CharacterParams& params) -> Physics::BodyID;
+    [[nodiscard]] auto CreateCharacter(DVec3 position) -> Physics::BodyID;
+    [[nodiscard]] auto CreateCharacter(DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID;
     void               DestroyRagdolls(std::span<const Physics::RagdollID> handles) noexcept;
 
 

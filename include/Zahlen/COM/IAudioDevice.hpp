@@ -17,7 +17,10 @@
 #include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 
 #include <type_traits>
 
@@ -45,9 +48,9 @@ struct IAudioDevice : IObject {
 
     virtual void SetVoiceVolume(VoiceID voice, float volume) noexcept = 0;
     virtual void SetVoiceLooping(VoiceID voice, bool looping) noexcept = 0;
-    // By value: twelve bytes in registers, where the facade's const Float3&
+    // By value: twelve bytes in registers, where the facade's const FVec3&
     // would cost an indirection for nothing.
-    virtual void SetVoicePosition(VoiceID voice, Float3 position) noexcept = 0;
+    virtual void SetVoicePosition(VoiceID voice, FVec3 position) noexcept = 0;
 
     // Non-virtual, compiled in the consumer's translation unit. The facade's
     // convenience overload, built caller-side so it costs no vtable slot.

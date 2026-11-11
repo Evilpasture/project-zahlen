@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -70,8 +71,8 @@ struct LightningTestSuite {
             engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kInitialBaselineExposure; });
 
             // 1. Spawn Lightning Strike
-            const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
-            const JPH::RVec3 groundPos(25.0, 0.0, -15.0);
+            const DVec3 cloudPos(0.0, 180.0, 0.0);
+            const DVec3 groundPos(25.0, 0.0, -15.0);
 
             const ZHLN::Entity boltEntity =
                 ZHLN::Lightning::Spawn(*engine, cloudPos, groundPos, ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4});

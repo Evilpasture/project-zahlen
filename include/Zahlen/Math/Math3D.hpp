@@ -3,7 +3,10 @@
 
 #pragma once
 #include <Zahlen/Core/Math.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cmath>
 #include <cstring>
 
@@ -12,9 +15,9 @@
 // clang-format on
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Double3.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/DVec3.h>
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
@@ -22,8 +25,8 @@
 
 namespace ZHLN::Math {
 
-inline auto CreateLookAt(ZHLN::Float3 eye, ZHLN::Float3 target, ZHLN::Float3 up) {
-    return JPH::Mat44::sLookAt(static_cast<JPH::Vec3>(eye), static_cast<JPH::Vec3>(target), static_cast<JPH::Vec3>(up));
+inline auto CreateLookAt(ZHLN::FVec3 eye, ZHLN::FVec3 target, ZHLN::FVec3 up) {
+    return JPH::Mat44::sLookAt(JPH::Vec3(eye.x, eye.y, eye.z), JPH::Vec3(target.x, target.y, target.z), JPH::Vec3(up.x, up.y, up.z));
 }
 
 inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
@@ -45,13 +48,13 @@ inline auto CreateOrtho(float left, float right, float bottom, float top, float 
     );
 }
 
-inline auto CreateTransform(ZHLN::Float3 translation, ZHLN::Float4 rotation, ZHLN::Float3 scale) {
-    JPH::Mat44 m = JPH::Mat44::sRotationTranslation(static_cast<JPH::Quat>(rotation), static_cast<JPH::Vec3>(translation));
-    return m.PreScaled(static_cast<JPH::Vec3>(scale));
+inline auto CreateTransform(ZHLN::FVec3 translation, ZHLN::FVec4 rotation, ZHLN::FVec3 scale) {
+    JPH::Mat44 m = JPH::Mat44::sRotationTranslation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w), JPH::Vec3(translation.x, translation.y, translation.z));
+    return m.PreScaled(JPH::Vec3(scale.x, scale.y, scale.z));
 }
 
-inline auto CreateTransform(ZHLN::Float3 translation, ZHLN::Float4 rotation) {
-    return JPH::Mat44::sRotationTranslation(static_cast<JPH::Quat>(rotation), static_cast<JPH::Vec3>(translation));
+inline auto CreateTransform(ZHLN::FVec3 translation, ZHLN::FVec4 rotation) {
+    return JPH::Mat44::sRotationTranslation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w), JPH::Vec3(translation.x, translation.y, translation.z));
 }
 
 // Exact scalar equality for matrix-cache comparisons; this is not an epsilon test.
@@ -103,21 +106,21 @@ inline constexpr float kDecomposeEpsilon = 1e-5f;
     return trs;
 }
 
-inline auto EulerToQuat(ZHLN::Float3 radians) {
-    return JPH::Quat::sEulerAngles(static_cast<JPH::Vec3>(radians));
+inline auto EulerToQuat(ZHLN::FVec3 radians) {
+    return JPH::Quat::sEulerAngles(JPH::Vec3(radians.x, radians.y, radians.z));
 }
 
-inline auto QuatToEuler(ZHLN::Float4 quat) {
-    return static_cast<JPH::Quat>(quat).GetEulerAngles();
+inline auto QuatToEuler(ZHLN::FVec4 quat) {
+    return JPH::Quat(quat.x, quat.y, quat.z, quat.w).GetEulerAngles();
 }
 
-inline auto EulerDegreesToQuat(ZHLN::Float3 degrees) {
-    const JPH::Vec3 radians = static_cast<JPH::Vec3>(degrees) * (JPH::JPH_PI / 180.0f);
+inline auto EulerDegreesToQuat(ZHLN::FVec3 degrees) {
+    const JPH::Vec3 radians = JPH::Vec3(degrees.x, degrees.y, degrees.z) * (JPH::JPH_PI / 180.0f);
     return JPH::Quat::sEulerAngles(radians);
 }
 
-inline auto QuatToEulerDegrees(ZHLN::Float4 quat) {
-    return static_cast<JPH::Quat>(quat).GetEulerAngles() * (180.0f / JPH::JPH_PI);
+inline auto QuatToEulerDegrees(ZHLN::FVec4 quat) {
+    return JPH::Quat(quat.x, quat.y, quat.z, quat.w).GetEulerAngles() * (180.0f / JPH::JPH_PI);
 }
 
 inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
@@ -203,30 +206,30 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {static_cast<uint32_t>(FloatToHalf(v) << 16) | FloatToHalf(u)};
 }
 
-[[nodiscard]] inline auto Fract(ZHLN::Float3 p) noexcept -> ZHLN::Float3 {
+[[nodiscard]] inline auto Fract(ZHLN::FVec3 p) noexcept -> ZHLN::FVec3 {
     return {Fract(p.x), Fract(p.y), Fract(p.z)};
 }
 
-[[nodiscard]] inline auto Floor(ZHLN::Float3 p) noexcept -> ZHLN::Float3 {
+[[nodiscard]] inline auto Floor(ZHLN::FVec3 p) noexcept -> ZHLN::FVec3 {
     return {Floor(p.x), Floor(p.y), Floor(p.z)};
 }
 
-[[nodiscard]] inline auto Wrap(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> ZHLN::Float3 {
+[[nodiscard]] inline auto Wrap(ZHLN::FVec3 p, ZHLN::FVec3 period) noexcept -> ZHLN::FVec3 {
     auto wrap1 = [](float v, float cell) noexcept -> float { return std::fmod(std::fmod(v, cell) + cell, cell); };
     return {wrap1(p.x, period.x), wrap1(p.y, period.y), wrap1(p.z, period.z)};
 }
 
-[[nodiscard]] inline auto TileableHash3(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> float {
-    const ZHLN::Float3 wrapped = Wrap(p, period);
+[[nodiscard]] inline auto TileableHash3(ZHLN::FVec3 p, ZHLN::FVec3 period) noexcept -> float {
+    const ZHLN::FVec3 wrapped = Wrap(p, period);
     p                         = Fract({wrapped.x * 0.1031f, wrapped.y * 0.1031f, wrapped.z * 0.1031f});
     p                         = {p.x + p.y + 33.33f, p.y + p.z + 33.33f, p.z + p.x + 33.33f};
     return Fract((p.x + p.y) * p.z);
 }
 
-[[nodiscard]] inline auto TileableNoise3(ZHLN::Float3 p, ZHLN::Float3 period) noexcept -> float {
-    const ZHLN::Float3 ip = Floor(p);
-    const ZHLN::Float3 fp = Fract(p);
-    const ZHLN::Float3 u  = {Smoothstep(0.0f, 1.0f, fp.x), Smoothstep(0.0f, 1.0f, fp.y), Smoothstep(0.0f, 1.0f, fp.z)};
+[[nodiscard]] inline auto TileableNoise3(ZHLN::FVec3 p, ZHLN::FVec3 period) noexcept -> float {
+    const ZHLN::FVec3 ip = Floor(p);
+    const ZHLN::FVec3 fp = Fract(p);
+    const ZHLN::FVec3 u  = {Smoothstep(0.0f, 1.0f, fp.x), Smoothstep(0.0f, 1.0f, fp.y), Smoothstep(0.0f, 1.0f, fp.z)};
 
     const auto  at   = [&](float ox, float oy, float oz) noexcept -> float { return TileableHash3({ip.x + ox, ip.y + oy, ip.z + oz}, period); };
     const float n000 = at(0.0f, 0.0f, 0.0f);
@@ -245,7 +248,7 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return Lerp(Lerp(r00, r10, u.y), Lerp(r01, r11, u.y), u.z);
 }
 
-[[nodiscard]] inline auto TileableFbm3(ZHLN::Float3 p, float firstOctavePeriod, uint32_t octaves = 3) noexcept -> float {
+[[nodiscard]] inline auto TileableFbm3(ZHLN::FVec3 p, float firstOctavePeriod, uint32_t octaves = 3) noexcept -> float {
     float value  = 0.0f;
     float amp    = 0.5f;
     float period = firstOctavePeriod;

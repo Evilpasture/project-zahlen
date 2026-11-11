@@ -8,6 +8,7 @@
 // about this door", and the caller answers "what does a door do".
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
 #include <Zahlen/Log.hpp>
@@ -32,12 +33,12 @@ constexpr float kSentinelEpsilon     = 0.01f;
 
 // The three components of a space separated keyvalue, or nothing when the key
 // is absent or unparseable.
-[[nodiscard]] auto OptionalVec3(const BSPEntity& entity, std::string_view key) -> std::optional<JPH::Vec3> {
+[[nodiscard]] auto OptionalVec3(const BSPEntity& entity, std::string_view key) -> std::optional<FVec3> {
     const auto arr = entity.FindVector(key);
     if (!arr) {
         return std::nullopt;
     }
-    return JPH::Vec3((*arr)[0], (*arr)[1], (*arr)[2]);
+    return FVec3((*arr)[0], (*arr)[1], (*arr)[2]);
 }
 
 } // namespace
@@ -138,10 +139,10 @@ auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput> {
     return outputs;
 }
 
-auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> JPH::Vec3 {
+auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3 {
     const std::string_view movedirStr = entity.Find("movedir");
     if (movedirStr.empty()) {
-        return ConvertDirection(options, JPH::Vec3::sAxisX());
+        return ConvertDirection(options, FVec3::sAxisX());
     }
 
     float       v[3] = {0.0f, 0.0f, 0.0f};
@@ -164,18 +165,18 @@ auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -
     // The sentinels are checked before the angle reading: reading -1 as a pitch
     // would aim the mover at 359 degrees instead of straight up.
     if (IsSentinel(v, kMoveDirSentinelUp)) {
-        return ConvertDirection(options, JPH::Vec3(0.0f, 0.0f, 1.0f));
+        return ConvertDirection(options, FVec3(0.0f, 0.0f, 1.0f));
     }
     if (IsSentinel(v, kMoveDirSentinelDown)) {
-        return ConvertDirection(options, JPH::Vec3(0.0f, 0.0f, -1.0f));
+        return ConvertDirection(options, FVec3(0.0f, 0.0f, -1.0f));
     }
 
     const float     pitch = v[0] * kDegreesToRadians;
     const float     yaw   = v[1] * kDegreesToRadians;
     const float     cp    = std::cos(pitch);
-    const JPH::Vec3 sourceDir(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-    if (sourceDir.LengthSq() < 1e-4f) {
-        return ConvertDirection(options, JPH::Vec3(1.0f, 0.0f, 0.0f));
+    const FVec3 sourceDir(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+    if (sourceDir.LengthSquared() < 1e-4f) {
+        return ConvertDirection(options, FVec3(1.0f, 0.0f, 0.0f));
     }
     return ConvertDirection(options, sourceDir.Normalized());
 }
@@ -328,10 +329,10 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
             }
             // Source stores the origin at the feet; it stays there, and the
             // teleport lifts the character by its own ground offset.
-            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(JPH::Vec3::sZero()));
+            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(FVec3::sZero()));
             // The exact conjugated Source rotation: TeleportPlayer recovers the
             // post-teleport view direction from this transform's +X axis.
-            const JPH::Vec3 angles = OptionalVec3(entity, "angles").value_or(JPH::Vec3::sZero());
+            const FVec3 angles = OptionalVec3(entity, "angles").value_or(FVec3::sZero());
             record.orientation     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
             records.push_back(std::move(record));
             continue;

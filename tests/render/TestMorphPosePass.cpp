@@ -47,6 +47,7 @@
 // extract -> shader path with a predictable authored base pose.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -279,10 +280,10 @@ struct MorphPosePassSuite {
         std::expected<void, ZHLN::ErrorCode> draw_params_own_morph_weights() {
             ZHLN::Components::MorphTargetComponent morph {.weights = {0.25f, 0.5f, 0.75f, 1.0f}};
             const ZHLN::DrawParams params {.morphWeights = morph.weights};
-            morph.weights = ZHLN::Float4 {};
+            morph.weights = ZHLN::FVec4 {};
 
-            if (!ZHLN::Test::ExpectEq(params.morphWeights, ZHLN::Float4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
-                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, ZHLN::Float4 {})) {
+            if (!ZHLN::Test::ExpectEq(params.morphWeights, ZHLN::FVec4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
+                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, ZHLN::FVec4 {})) {
                 return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
             }
             return {};
@@ -325,7 +326,7 @@ struct MorphPosePassSuite {
             if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
-            const auto expected = ZHLN::Float4 {
+            const auto expected = ZHLN::FVec4 {
                 MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f
             };
             if (!ZHLN::Test::ExpectEq(morph->weights, expected)) {
@@ -498,7 +499,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.position = FVec3(0.0f, 1.0f, 4.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;

@@ -3,6 +3,7 @@
 
 // extensions/CharacterController/CharacterMovement.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterMovement.hpp"
 
@@ -46,8 +47,8 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
             ZHLN::Log("[Test Fail] Movement State: Entity {} has negative jump delay timer: {}", e.index, move.jumpDelayTimer);
         }
 
-        float orientationMagSq = move.orientation.GetX() * move.orientation.GetX() + move.orientation.GetY() * move.orientation.GetY() +
-                                 move.orientation.GetZ() * move.orientation.GetZ() + move.orientation.GetW() * move.orientation.GetW();
+        float orientationMagSq = move.orientation.x * move.orientation.x + move.orientation.y * move.orientation.y +
+                                 move.orientation.z * move.orientation.z + move.orientation.w * move.orientation.w;
         if (std::abs(orientationMagSq - 1.0f) > 0.01f) {
             ZHLN::Log("[Test Fail] Movement State: Entity {} orientation not normalized (mag={:.4f})", e.index, std::sqrt(orientationMagSq));
         }
@@ -115,10 +116,10 @@ void MovementSystem(Engine& engine, float dt) {
             const float     jumpRecoveryMultiplier = (move.jumpDelayTimer > 0.0f) ? 0.25f : 1.0f;
             const float     sprintMultiplier       = move.isSprinting ? std::max(move.sprintMultiplier, 1.0f) : 1.0f;
             const float     movementSpeed          = move.speed * jumpRecoveryMultiplier * sprintMultiplier;
-            const JPH::Vec3 targetVelocity         = {move.inputX * movementSpeed, 0.0f, move.inputZ * movementSpeed};
+            const FVec3 targetVelocity         = {move.inputX * movementSpeed, 0.0f, move.inputZ * movementSpeed};
 
             // Apply acceleration/deceleration to smoothly transition velocity
-            const float targetSpeedSq = targetVelocity.GetX() * targetVelocity.GetX() + targetVelocity.GetZ() * targetVelocity.GetZ();
+            const float targetSpeedSq = targetVelocity.x * targetVelocity.x + targetVelocity.z * targetVelocity.z;
             const float currentSpeedSq = move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ;
             const bool  hasInput       = targetSpeedSq > 0.01f;
             const float rate           = hasInput ? move.acceleration : move.deceleration;
@@ -126,8 +127,8 @@ void MovementSystem(Engine& engine, float dt) {
             if (hasInput) {
                 // Accelerate toward target velocity
                 const float invTargetSpeed = (targetSpeedSq > 0.01f) ? 1.0f / std::sqrt(targetSpeedSq) : 0.0f;
-                const float targetDirX     = targetVelocity.GetX() * invTargetSpeed;
-                const float targetDirZ     = targetVelocity.GetZ() * invTargetSpeed;
+                const float targetDirX     = targetVelocity.x * invTargetSpeed;
+                const float targetDirZ     = targetVelocity.z * invTargetSpeed;
                 const float targetSpeed    = std::sqrt(targetSpeedSq);
 
                 // Project current velocity onto target direction
@@ -162,10 +163,10 @@ void MovementSystem(Engine& engine, float dt) {
                 }
             }
 
-            JPH::Vec3 flatVel(move.currentVelX, 0.0f, move.currentVelZ);
-            if (flatVel.LengthSq() > 0.1f) {
+            FVec3 flatVel(move.currentVelX, 0.0f, move.currentVelZ);
+            if (flatVel.LengthSquared() > 0.1f) {
                 float     targetAngleRad = std::atan2(-move.currentVelZ, move.currentVelX) + JPH::DegreesToRadians(90.0f);
-                JPH::Quat targetRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), targetAngleRad);
+                JPH::Quat targetRotation = JPH::Quat::sRotation(FVec3::sAxisY(), targetAngleRad);
 
                 JPH::Quat currentRotation = move.orientation;
 
@@ -226,9 +227,9 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
             continue;
         }
 
-        const JPH::RVec3& charPos = *charPosition;
-        const JPH::Vec3 charVel = pc.GetCharacterVelocity(phys->physicsID);
-        if (charVel.LengthSq() < 0.01f) {
+        const DVec3& charPos = *charPosition;
+        const FVec3 charVel = pc.GetCharacterVelocity(phys->physicsID);
+        if (charVel.LengthSquared() < 0.01f) {
             continue; // Not moving: there is no momentum to impart.
         }
 
@@ -244,20 +245,20 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
                 continue;
             }
 
-            JPH::Vec3 delta = JPH::Vec3(charPos - *otherPosition);
+            FVec3 delta = FVec3(charPos - *otherPosition);
             const float len = delta.Length();
             if (len < 1e-4f) {
                 continue;
             }
 
             // normal points body -> character; the push goes the other way.
-            const JPH::Vec3 normal = delta / len;
-            const float     approach = charVel.Dot(normal);
+            const FVec3 normal = delta / len;
+            const float     approach = Dot(charVel, normal);
             if (approach < -kMinApproach) {
-                JPH::Vec3 impulse = -normal * (-approach * kPushStrength);
+                FVec3 impulse = -normal * (-approach * kPushStrength);
                 // Never push a prop into the floor.
-                if (impulse.GetY() < 0.0f) {
-                    impulse.SetY(0.0f);
+                if (impulse.y < 0.0f) {
+                    impulse.y = 0.0f;
                 }
                 pc.AddImpulse(other, impulse);
             }

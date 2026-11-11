@@ -86,6 +86,8 @@
 // reflections, R re-download, C re-crawl the model list.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
@@ -199,14 +201,14 @@ inline constexpr float kAmbientExposure = 4.00f; // scales the baked SH fill *an
 // reads the lit buffer, and the gradient below is what fills it (and what a
 // ray-traced reflection paints where its ray leaves the scene). This is the lever
 // that makes brushed metal read as metal.
-inline const JPH::Vec4 kSkyZenith {0.35f, 0.42f, 0.55f, 1.0f};
-inline const JPH::Vec4 kSkyHorizon {0.90f, 0.92f, 0.96f, 1.0f};
-inline const JPH::Vec4 kSkyGround {0.06f, 0.06f, 0.07f, 1.0f};
+inline const FVec4 kSkyZenith {0.35f, 0.42f, 0.55f, 1.0f};
+inline const FVec4 kSkyHorizon {0.90f, 0.92f, 0.96f, 1.0f};
+inline const FVec4 kSkyGround {0.06f, 0.06f, 0.07f, 1.0f};
 
 // Key light. Directional, so it needs no distance compensation.
 inline constexpr float kSunIntensity = 60.0f;
-inline const JPH::Vec3 kSunColor {1.00f, 0.97f, 0.92f};
-inline const JPH::Vec3 kSunDirection {0.45f, 1.00f, 0.30f};
+inline const FVec3 kSunColor {1.00f, 0.97f, 0.92f};
+inline const FVec3 kSunDirection {0.45f, 1.00f, 0.30f};
 
 // Two point/spot fills, quoted per square metre of subject: a point light falls off
 // as 1/(d^2 + 1) and the rig sits at a distance proportional to the subject's
@@ -214,8 +216,8 @@ inline const JPH::Vec3 kSunDirection {0.45f, 1.00f, 0.30f};
 // car. At the helmet's ~0.5 m that is 25 and 40 — was 70/110 which blew the floor.
 inline constexpr float kFillIntensityPerM2 = 100.0f;
 inline constexpr float kRimIntensityPerM2  = 160.0f;
-inline const JPH::Vec3 kFillColor {0.55f, 0.72f, 1.00f}; // cool, from the front-left
-inline const JPH::Vec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-right
+inline const FVec3 kFillColor {0.55f, 0.72f, 1.00f}; // cool, from the front-left
+inline const FVec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-right
 
 // Floor: dark and glossy enough to show SSR/RTR reflections without blowing out
 // point-light specular. 0.22 was too sharp (blown highlights on RTX 3050),
@@ -223,7 +225,7 @@ inline const JPH::Vec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-ri
 // (alpha=0.078) with 1 SPP sparkle like sparkling water. 0.03 is mirror tier
 // (<0.04): warp-coherent full-res ray, no VNDF jitter, no half-res upsample,
 // clean reflection. Keep dark color so mirror is not blown.
-inline const JPH::Vec4 kFloorColor {0.08f, 0.09f, 0.11f, 1.0f};
+inline const FVec4 kFloorColor {0.08f, 0.09f, 0.11f, 1.0f};
 inline constexpr float kFloorRoughness = 0.03f;
 inline constexpr float kFloorExtent    = 5.0f; // wider to catch reflections at oblique angles
 
@@ -444,9 +446,9 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
 struct Subject {
     ZHLN::ModelPrefab*        prefab    = nullptr;
     std::vector<ZHLN::Entity> instances {};
-    JPH::Vec3                 center    = JPH::Vec3::sZero();
-    JPH::Vec3                 boundsMin = JPH::Vec3::sZero();
-    JPH::Vec3                 boundsMax = JPH::Vec3::sZero();
+    FVec3                 center    = FVec3::sZero();
+    FVec3                 boundsMin = FVec3::sZero();
+    FVec3                 boundsMax = FVec3::sZero();
     float                     radius    = 1.0f;
     uint32_t                  triangles = 0;
     uint32_t                  textures  = 0;
@@ -475,28 +477,28 @@ struct Subject {
 // and a union of untransformed boxes would be a different box. The world AABB of
 // an oriented box is its centre plus the absolute contributions of its three
 // transformed half axes, which is exact for a rotation and a uniform scale.
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3& outMax) {
-    outMin = JPH::Vec3(1e9f, 1e9f, 1e9f);
-    outMax = JPH::Vec3(-1e9f, -1e9f, -1e9f);
+void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax) {
+    outMin = FVec3(1e9f, 1e9f, 1e9f);
+    outMax = FVec3(-1e9f, -1e9f, -1e9f);
 
     for (const ZHLN::ModelPart& part: prefab.parts) {
         const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
+        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const FVec3  localCenter = (localMin + localMax) * 0.5f;
+        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
 
-        const JPH::Vec3 center = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const JPH::Vec3 extent = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
-                                 (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
+        const FVec3 center = model.Multiply3x3(localCenter) + model.GetTranslation();
+        const FVec3 extent = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
+                                 (model.GetColumn3(2) * halfExtent.z).Abs();
 
-        outMin = JPH::Vec3::sMin(outMin, center - extent);
-        outMax = JPH::Vec3::sMax(outMax, center + extent);
+        outMin = FVec3::sMin(outMin, center - extent);
+        outMax = FVec3::sMax(outMax, center + extent);
     }
 
     if (prefab.parts.empty()) {
-        outMin = JPH::Vec3(-1.0f, -1.0f, -1.0f);
-        outMax = JPH::Vec3(1.0f, 1.0f, 1.0f);
+        outMin = FVec3(-1.0f, -1.0f, -1.0f);
+        outMax = FVec3(1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -571,8 +573,8 @@ auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8
     subject.loaded = true;
     ZHLN::Log(
         "[RemoteGLB] Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
-        virtualPath, prefab->parts.size(), prefab->nodes.size(), subject.triangles, subject.textures, subject.center.GetX(), subject.center.GetY(),
-        subject.center.GetZ(), subject.radius, written
+        virtualPath, prefab->parts.size(), prefab->nodes.size(), subject.triangles, subject.textures, subject.center.x, subject.center.y,
+        subject.center.z, subject.radius, written
     );
     return true;
 }
@@ -595,18 +597,18 @@ struct Studio {
     ZHLN::Engine&    engine,
     std::string_view name,
     ZHLN::LightType  type,
-    JPH::Vec3Arg     position,
-    JPH::Vec3Arg     color,
+    FVec3     position,
+    FVec3     color,
     float            intensity,
     float            radius,
     float            range,
-    JPH::Vec3Arg     direction
+    FVec3     direction
 ) -> ZHLN::Entity {
     auto&            reg   = ZHLN::EngineAccess::RegistryOf(engine);
     const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f});
     return reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
-        ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
         ZHLN::Components::LightComponent {.type = type, .color = color, .intensity = intensity, .radius = radius, .direction = direction, .range = range}
     );
@@ -658,18 +660,18 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     const float     radius = subject.radius;
-    const JPH::Vec3 center = subject.center;
+    const FVec3 center = subject.center;
 
-    studio.sun = MakeLight(engine, "StudioSun", ZHLN::LightType::Sun, center + JPH::Vec3(radius * 10.0f, radius * 20.0f, radius * 10.0f), kSunColor,
+    studio.sun = MakeLight(engine, "StudioSun", ZHLN::LightType::Sun, center + FVec3(radius * 10.0f, radius * 20.0f, radius * 10.0f), kSunColor,
                            kSunIntensity, 0.0f, 0.0f, kSunDirection.Normalized());
 
     // Cool fill from the front-left, warm rim from behind-right: the two specular
     // highlights that separate a metal surface from a silhouette. Neither asks to
     // cast, so the shadow atlas hands them no tile.
-    studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + JPH::Vec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
-                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, JPH::Vec3::sZero());
-    studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + JPH::Vec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
-                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, JPH::Vec3::sZero());
+    studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + FVec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
+                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::sZero());
+    studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + FVec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
+                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::sZero());
 
     // The floor sits on the subject's lowest point, and is wide enough to catch a
     // reflection at any orbit angle without reaching the camera's far plane. Two
@@ -684,13 +686,13 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     ZHLN::MaterialDesc floorDesc;
     floorDesc.metallic  = 0.0f;
     floorDesc.roughness = kFloorRoughness;
-    floorDesc.baseColor = {kFloorColor.GetX(), kFloorColor.GetY(), kFloorColor.GetZ(), kFloorColor.GetW()};
+    floorDesc.baseColor = {kFloorColor.x, kFloorColor.y, kFloorColor.z, kFloorColor.w};
     const ZHLN::Material floorMaterial = engine.Graphics().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
 
     studio.floor = ZHLN::PrefabFactory::CreatePlane(
         engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
-            .position         = {center.GetX(), subject.boundsMin.GetY(), center.GetZ()},
+            .position         = {center.x, subject.boundsMin.y, center.z},
             .createPhysics    = false,
             .materialOverride = floorMaterial,
         }
@@ -776,9 +778,9 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // the scene, and the backdrop behind the subject. ambientExposure scales both
     // it and the baked SH fill.
     gfx.environment.ambientExposure = kAmbientExposure;
-    gfx.environment.skyZenith       = {kSkyZenith.GetX(), kSkyZenith.GetY(), kSkyZenith.GetZ(), kSkyZenith.GetW()};
-    gfx.environment.skyHorizon      = {kSkyHorizon.GetX(), kSkyHorizon.GetY(), kSkyHorizon.GetZ(), kSkyHorizon.GetW()};
-    gfx.environment.skyGround       = {kSkyGround.GetX(), kSkyGround.GetY(), kSkyGround.GetZ(), kSkyGround.GetW()};
+    gfx.environment.skyZenith       = {kSkyZenith.x, kSkyZenith.y, kSkyZenith.z, kSkyZenith.w};
+    gfx.environment.skyHorizon      = {kSkyHorizon.x, kSkyHorizon.y, kSkyHorizon.z, kSkyHorizon.w};
+    gfx.environment.skyGround       = {kSkyGround.x, kSkyGround.y, kSkyGround.z, kSkyGround.w};
     gfx.environment.useLocalProbe   = 0;
     gfx.environment.fullBright      = 0;
 
@@ -856,8 +858,8 @@ void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbi
 // ============================================================================
 
 struct OrbitCamera {
-    JPH::Vec3 target         = JPH::Vec3::sZero();
-    JPH::Vec3 wantedTarget   = JPH::Vec3::sZero();
+    FVec3 target         = FVec3::sZero();
+    FVec3 wantedTarget   = FVec3::sZero();
     float     distance       = 3.0f;
     float     wantedDistance = 3.0f;
     float     yaw            = -90.0f;
@@ -869,10 +871,10 @@ struct OrbitCamera {
 
 // The camera's own convention (Camera::GetViewMatrix): yaw and pitch build the
 // view direction, and the eye sits that far back along it from the target.
-[[nodiscard]] auto OrbitDirection(float yawDegrees, float pitchDegrees) noexcept -> JPH::Vec3 {
+[[nodiscard]] auto OrbitDirection(float yawDegrees, float pitchDegrees) noexcept -> FVec3 {
     const float yaw   = JPH::DegreesToRadians(yawDegrees);
     const float pitch = JPH::DegreesToRadians(pitchDegrees);
-    return JPH::Vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
+    return FVec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
 }
 
 // Puts the subject in frame: the bounding sphere at the vertical half-angle, with
@@ -901,12 +903,12 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
         // Pan in the view plane, grab-the-world way round: the subject follows the
         // cursor instead of running away from it. Right and up come from the view
         // direction the way extensions/Camera's target rig derives them.
-        const JPH::Vec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
-        JPH::Vec3       right   = forward.Cross(JPH::Vec3::sAxisY());
-        if (right.LengthSq() > 1e-6f) {
+        const FVec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
+        FVec3       right   = forward.Cross(FVec3::sAxisY());
+        if (right.LengthSquared() > 1e-6f) {
             right = right.Normalized();
         }
-        const JPH::Vec3 up    = right.Cross(forward).Normalized();
+        const FVec3 up    = Cross(right, forward).Normalized();
         const float     scale = orbit.distance * kPanSpeed;
         orbit.wantedTarget += ((right * -dx) + (up * dy)) * scale;
     }
@@ -1182,8 +1184,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 
     if (KeyPressed(state, *input, ZHLN::KeyCode::F) && state.subject.loaded) {
         FrameSubject(state.orbit, state.subject);
-        ZHLN::Log("[RemoteGLB] Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.GetX(),
-                  state.subject.center.GetY(), state.subject.center.GetZ());
+        ZHLN::Log("[RemoteGLB] Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x,
+                  state.subject.center.y, state.subject.center.z);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::G) && state.studio.floor != ZHLN::Entity::Null()) {
         state.studio.floorOn = !state.studio.floorOn;

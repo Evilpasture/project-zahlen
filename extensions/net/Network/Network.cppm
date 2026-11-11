@@ -122,8 +122,8 @@ struct ServerWelcome {
 
 struct ObjectSnapshot {
     uint64_t uid       ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
-    JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
-    JPH::Vec3 size     ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
+    FVec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
+    FVec3 size     ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
@@ -133,9 +133,9 @@ struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
 
 struct PhysicsBodyState {
     uint64_t uid       ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
-    JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
+    FVec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
     JPH::Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
-    JPH::Vec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
+    FVec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
 };
 
 struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) PhysicsBatchMessage {
@@ -216,12 +216,12 @@ struct MessageEnvelope {
 } // namespace ZHLN::Net
 
 template <>
-struct ZHLN::Wire::Codec<JPH::Vec3> {
+struct ZHLN::Wire::Codec<FVec3> {
     // Quantized wire unit: int32 over POSITION_SCALE (1/256 m) → ±8,388,607 m.
     static constexpr double WorldMax = 2147483647.0 / ZHLN::Net::POSITION_SCALE;
 
-    static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
-        const float components[3] = {value.GetX(), value.GetY(), value.GetZ()};
+    static auto Encode(const FVec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
+        const float components[3] = {value.x, value.y, value.z};
         for (const float component: components) {
             const double meters = static_cast<double>(component);
             if (!std::isfinite(component) || meters < -WorldMax || meters > WorldMax) {
@@ -237,7 +237,7 @@ struct ZHLN::Wire::Codec<JPH::Vec3> {
         return {};
     }
 
-    static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
+    static auto Decode(FVec3& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
         int32_t quantized[3] = {};
         for (size_t index = 0; index < 3; ++index) {
             const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
@@ -246,7 +246,7 @@ struct ZHLN::Wire::Codec<JPH::Vec3> {
                 return res;
             }
         }
-        value = JPH::Vec3(
+        value = FVec3(
             static_cast<float>(quantized[0]) * ZHLN::Net::INV_POSITION_SCALE, static_cast<float>(quantized[1]) * ZHLN::Net::INV_POSITION_SCALE,
             static_cast<float>(quantized[2]) * ZHLN::Net::INV_POSITION_SCALE
         );
@@ -259,9 +259,9 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
     static auto Encode(const JPH::Quat& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
         // Canonical form: the representative of the ±q pair with w >= 0, so
         // the same orientation always produces identical bytes.
-        float x = value.GetX();
-        float y = value.GetY();
-        float z = value.GetZ();
+        float x = value.x;
+        float y = value.y;
+        float z = value.z;
         float w = value.GetW();
         if (w < 0.0f) {
             x = -x;
@@ -578,9 +578,9 @@ struct NetworkIdentityComponent {
 };
 
 struct NetworkInterpolationComponent {
-    ZHLN::Float3 targetPosition     = {};
-    ZHLN::Float4 targetRotation     = {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3 linearVelocity     = {};
+    ZHLN::FVec3 targetPosition     = {};
+    ZHLN::FVec4 targetRotation     = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 linearVelocity     = {};
     float        interpolationSpeed = 20.0f;
 };
 

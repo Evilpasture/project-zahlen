@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "FreeCam.hpp"
 
 #include <Zahlen/Math/Camera.hpp>
@@ -38,16 +39,16 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
 
     const float yawRad   = JPH::DegreesToRadians(cam.yaw);
     const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    JPH::Vec3   forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+    FVec3   forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
     forward         = forward.Normalized();
-    JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY());
-    if (right.LengthSq() > 1e-8f) {
+    FVec3 right = forward.Cross(FVec3::sAxisY());
+    if (right.LengthSquared() > 1e-8f) {
         right = right.Normalized();
     }
-    const JPH::Vec3 up    = JPH::Vec3::sAxisY();
+    const FVec3 up    = FVec3::sAxisY();
     const float     speed = input.IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
 
-    JPH::Vec3 move = JPH::Vec3::sZero();
+    FVec3 move = FVec3::sZero();
     if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
         move += forward;
     }
@@ -66,7 +67,7 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::Q))) {
         move -= up;
     }
-    if (move.LengthSq() > 0.0f && dt > 0.0f) {
+    if (move.LengthSquared() > 0.0f && dt > 0.0f) {
         cam.position += move.Normalized() * speed * dt;
     }
 }

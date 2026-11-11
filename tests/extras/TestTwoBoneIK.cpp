@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/IK.hpp>
@@ -65,19 +66,19 @@ struct ServiceProbeSystem {
     prefab->nodes.resize(4);
     prefab->nodes[0].name           = ZHLN::String64("Shoulder");
     prefab->nodes[0].parentIndex    = -1;
-    prefab->nodes[0].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 2.0f, 0.0f));
+    prefab->nodes[0].localTransform = JPH::Mat44::sTranslation(FVec3(0.0f, 2.0f, 0.0f));
 
     prefab->nodes[1].name           = ZHLN::String64("Elbow");
     prefab->nodes[1].parentIndex    = 0;
-    prefab->nodes[1].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 2.0f));
+    prefab->nodes[1].localTransform = JPH::Mat44::sTranslation(FVec3(0.0f, 0.0f, 2.0f));
 
     prefab->nodes[2].name           = ZHLN::String64("Hand");
     prefab->nodes[2].parentIndex    = 1;
-    prefab->nodes[2].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 2.0f));
+    prefab->nodes[2].localTransform = JPH::Mat44::sTranslation(FVec3(0.0f, 0.0f, 2.0f));
 
     prefab->nodes[3].name           = ZHLN::String64("FingerTip");
     prefab->nodes[3].parentIndex    = 2;
-    prefab->nodes[3].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 0.5f));
+    prefab->nodes[3].localTransform = JPH::Mat44::sTranslation(FVec3(0.0f, 0.0f, 0.5f));
     prefab->nodes[3].hasMesh        = true;
 
     ZHLN::Skeleton skel {};
@@ -87,19 +88,19 @@ struct ServiceProbeSystem {
         .name              = ZHLN::String64("Shoulder"),
         .parentIndex       = -1,
         .nodeIndex         = 0,
-        .inverseBindMatrix = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -2.0f, 0.0f)),
+        .inverseBindMatrix = JPH::Mat44::sTranslation(FVec3(0.0f, -2.0f, 0.0f)),
     };
     skel.joints[1] = ZHLN::Joint {
         .name              = ZHLN::String64("Elbow"),
         .parentIndex       = 0,
         .nodeIndex         = 1,
-        .inverseBindMatrix = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -2.0f, -2.0f)),
+        .inverseBindMatrix = JPH::Mat44::sTranslation(FVec3(0.0f, -2.0f, -2.0f)),
     };
     skel.joints[2] = ZHLN::Joint {
         .name              = ZHLN::String64("Hand"),
         .parentIndex       = 1,
         .nodeIndex         = 2,
-        .inverseBindMatrix = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, -2.0f, -4.0f)),
+        .inverseBindMatrix = JPH::Mat44::sTranslation(FVec3(0.0f, -2.0f, -4.0f)),
     };
     prefab->skeletons.push_back(std::move(skel));
 
@@ -161,15 +162,15 @@ struct TwoBoneIKTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> two_bone_ik_solver() {
             ZHLN::IK::TwoBoneIKSolverInput input {
-                .upperPosition  = JPH::Vec3(0.0f, 2.0f, 0.0f),
-                .targetPosition = JPH::Vec3(0.0f, 2.0f, 2.8284f),
-                .poleVector     = JPH::Vec3(0.0f, 1.0f, 0.0f),
+                .upperPosition  = FVec3(0.0f, 2.0f, 0.0f),
+                .targetPosition = FVec3(0.0f, 2.0f, 2.8284f),
+                .poleVector     = FVec3(0.0f, 1.0f, 0.0f),
                 .upperLength    = 2.0f,
                 .lowerLength    = 2.0f,
             };
 
             ZHLN::IK::TwoBoneIKSolverOutput output = ZHLN::IK::SolveTwoBoneIK(input);
-            if (!ZHLN::Test::ExpectTrue(output.valid) || !ZHLN::Test::ExpectGt(output.midPosition.GetY(), input.upperPosition.GetY())) {
+            if (!ZHLN::Test::ExpectTrue(output.valid) || !ZHLN::Test::ExpectGt(output.midPosition.y, input.upperPosition.y)) {
                 return std::unexpected(TwoBoneIKTestError::IKSolverFailed);
             }
 
@@ -179,7 +180,7 @@ struct TwoBoneIKTestSuite {
                 return std::unexpected(TwoBoneIKTestError::IKSolverFailed);
             }
 
-            input.targetPosition = JPH::Vec3(0.0f, 2.0f, 10.0f);
+            input.targetPosition = FVec3(0.0f, 2.0f, 10.0f);
             input.maxExtension   = 0.98f;
             output               = ZHLN::IK::SolveTwoBoneIK(input);
             if (!ZHLN::Test::ExpectTrue(output.valid) || !ZHLN::Test::ExpectTrue(output.reachClamped) ||
@@ -293,8 +294,8 @@ struct TwoBoneIKTestSuite {
                    }
             );
 
-            const JPH::Vec3 targetPos(0.0f, 2.0f, 2.8284f);
-            const JPH::Quat targetRot = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), 0.35f);
+            const FVec3 targetPos(0.0f, 2.0f, 2.8284f);
+            const JPH::Quat targetRot = JPH::Quat::sRotation(FVec3::sAxisY(), 0.35f);
             const std::array chain {
                 ZHLN::Animation::IKChain {
                     .upperNodeIndex    = 0,
@@ -302,7 +303,7 @@ struct TwoBoneIKTestSuite {
                     .endNodeIndex      = 2,
                     .targetPosition    = targetPos,
                     .targetRotation    = targetRot,
-                    .poleVector        = JPH::Vec3(0.0f, 1.0f, 0.0f),
+                    .poleVector        = FVec3(0.0f, 1.0f, 0.0f),
                     .weight            = 1.0f,
                     .orientEndEffector = true,
                 }
@@ -330,7 +331,7 @@ struct TwoBoneIKTestSuite {
             }
 
             // Descendant FK check: node 3 (FingerTip) must sit at HandModel * LocalFingerOffset(0, 0, 0.5).
-            const JPH::Vec3 expectedFingerPos = firstSolvedHand * JPH::Vec3(0.0f, 0.0f, 0.5f);
+            const FVec3 expectedFingerPos = firstSolvedHand * FVec3(0.0f, 0.0f, 0.5f);
             const auto      rigidFinger       = ctx.RigidNode(h, 3);
             if (!ZHLN::Test::ExpectTrue(rigidFinger.has_value()) ||
                 !ZHLN::Test::ExpectTrue(rigidFinger->translation.IsClose(expectedFingerPos, 1.0e-4f))) {
@@ -340,7 +341,7 @@ struct TwoBoneIKTestSuite {
             // Dropping IK chains on the next frame restores the un-bent bind/clip reach (Hand at z = 4.0).
             ctx.Step(1.0f / 60.0f, assets, uploads);
             const auto restoredModel = ctx.ModelPose(h);
-            if (!ZHLN::Test::ExpectTrue(restoredModel[2].GetTranslation().IsClose(JPH::Vec3(0.0f, 2.0f, 4.0f), 1.0e-4f))) {
+            if (!ZHLN::Test::ExpectTrue(restoredModel[2].GetTranslation().IsClose(FVec3(0.0f, 2.0f, 4.0f), 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::RestingIKDrift);
             }
             return {};
@@ -377,7 +378,7 @@ struct TwoBoneIKTestSuite {
             );
             const ZHLN::Entity skinnedChild = registry.Create(
                 ZHLN::Components::HierarchyComponent {.parent = root},
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3(7.0f, 8.0f, 9.0f)},
+                ZHLN::Components::TransformComponent {.position = FVec3(7.0f, 8.0f, 9.0f)},
                 ZHLN::Components::SkeletalMeshComponent {.jointOffset = 32, .skeletonIndex = 0},
                 ZHLN::Components::MeshComponent {.nodeIndex = 2}
             );
@@ -425,8 +426,8 @@ struct TwoBoneIKTestSuite {
             if (!ZHLN::Test::ExpectTrue(animAfter.has_value()) || !ZHLN::Test::ExpectTrue(animAfter->isFinished) ||
                 !ZHLN::Test::ExpectEq(idleMorph->weights[0], 1.0f) || !ZHLN::Test::ExpectEq(idleMorph->weights[1], 0.75f) ||
                 !ZHLN::Test::ExpectTrue(rigidTr.has_value()) ||
-                !ZHLN::Test::ExpectTrue(JPH::Vec3(rigidTr->position).IsClose(JPH::Vec3(0.0f, 2.0f, 4.5f), 1.0e-4f)) ||
-                !ZHLN::Test::ExpectTrue(JPH::Vec3(skinnedTr->position).IsClose(JPH::Vec3(7.0f, 8.0f, 9.0f), 1.0e-4f))) {
+                !ZHLN::Test::ExpectTrue(FVec3(rigidTr->position).IsClose(FVec3(0.0f, 2.0f, 4.5f), 1.0e-4f)) ||
+                !ZHLN::Test::ExpectTrue(FVec3(skinnedTr->position).IsClose(FVec3(7.0f, 8.0f, 9.0f), 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};
@@ -459,7 +460,7 @@ struct TwoBoneIKTestSuite {
             // Place the character root at world (10, 0, 5) and a world target entity at (10, 2, 7.6) with local targetOffset (0, 0, 0.2),
             // yielding a model-space IK target of (0, 2, 2.8).
             const ZHLN::Entity targetEntity = registry.Create(
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3(10.0f, 2.0f, 7.6f)}
+                ZHLN::Components::TransformComponent {.position = FVec3(10.0f, 2.0f, 7.6f)}
             );
 
             ZHLN::IK::TwoBoneIKComponent ikComp {};
@@ -468,9 +469,9 @@ struct TwoBoneIKTestSuite {
                     .upperNodeIndex    = 0,
                     .lowerNodeIndex    = 1,
                     .endNodeIndex      = 2,
-                    .poleVector        = JPH::Vec3(0.0f, 1.0f, 0.0f),
+                    .poleVector        = FVec3(0.0f, 1.0f, 0.0f),
                     .targetEntity      = targetEntity,
-                    .targetOffset      = JPH::Vec3(0.0f, 0.0f, 0.2f),
+                    .targetOffset      = FVec3(0.0f, 0.0f, 0.2f),
                     .weight            = 1.0f,
                     .orientEndEffector = true,
                 }
@@ -480,7 +481,7 @@ struct TwoBoneIKTestSuite {
             }
 
             const ZHLN::Entity root = registry.Create(
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3(10.0f, 0.0f, 5.0f)},
+                ZHLN::Components::TransformComponent {.position = FVec3(10.0f, 0.0f, 5.0f)},
                 ZHLN::Components::AnimatorComponent {
                     .prefabAsset     = id,
                     .currentTrackIdx = 0,
@@ -509,8 +510,8 @@ struct TwoBoneIKTestSuite {
 
             const auto modelPose = animCtx.ModelPose(animComp->animationID);
             if (!ZHLN::Test::ExpectEq(modelPose.size(), static_cast<size_t>(4)) ||
-                !ZHLN::Test::ExpectTrue(modelPose[2].GetTranslation().IsClose(JPH::Vec3(0.0f, 2.0f, 2.8f), 1.0e-3f)) ||
-                !ZHLN::Test::ExpectTrue(JPH::Vec3(fingerTr->position).IsClose(JPH::Vec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {
+                !ZHLN::Test::ExpectTrue(modelPose[2].GetTranslation().IsClose(FVec3(0.0f, 2.0f, 2.8f), 1.0e-3f)) ||
+                !ZHLN::Test::ExpectTrue(FVec3(fingerTr->position).IsClose(FVec3(0.0f, 2.0f, 3.3f), 1.0e-3f))) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);
             }
             return {};

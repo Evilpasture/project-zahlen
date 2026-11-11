@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -44,10 +45,10 @@ void AssignConverted(Dst& dst, const Src& src) {
     // sky: the component carries a fourth lane, the description does not. Sky
     // alpha is not part of the description and is restored as one when a scene
     // is instantiated.
-    } else if constexpr (std::is_same_v<D, ZHLN::Float3> && std::is_same_v<S, ZHLN::Float4>) {
-        dst = ZHLN::Float3 {src.x, src.y, src.z};
-    } else if constexpr (std::is_same_v<D, ZHLN::Float4> && std::is_same_v<S, ZHLN::Float3>) {
-        dst = ZHLN::Float4 {src.x, src.y, src.z, 1.0f};
+    } else if constexpr (std::is_same_v<D, ZHLN::FVec3> && std::is_same_v<S, ZHLN::FVec4>) {
+        dst = ZHLN::FVec3 {src.x, src.y, src.z};
+    } else if constexpr (std::is_same_v<D, ZHLN::FVec4> && std::is_same_v<S, ZHLN::FVec3>) {
+        dst = ZHLN::FVec4 {src.x, src.y, src.z, 1.0f};
     } else if constexpr (std::is_arithmetic_v<D> && std::is_arithmetic_v<S>) {
         dst = static_cast<D>(src);
     }
@@ -61,7 +62,7 @@ void AssignConverted(Dst& dst, const Src& src) {
     //
     // What guards the rules instead: SharesEveryField below pins the name set, and
     // the pairs that do match are same-type except the sky, which the two
-    // Float3/Float4 rules above cover in both directions.
+    // FVec3/FVec4 rules above cover in both directions.
 }
 
 template <typename Dst, typename Src>
@@ -154,7 +155,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     auto&      sceneReg     = ZHLN::EngineAccess::RegistryOf(engine);
     const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
     sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
-        c.camera.position = JPH::Vec3 {description.camera.position};
+        c.camera.position = FVec3 {description.camera.position};
         c.camera.yaw      = description.camera.yaw;
         c.camera.pitch    = description.camera.pitch;
         c.camera.fov      = description.camera.fov;
@@ -248,20 +249,20 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                     // Collider extent: union of the prefab's part bounds when
                     // available (correct for BSP submodel prefabs and .mdl
                     // props alike), otherwise the description's halfExtents.
-                    JPH::Vec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
+                    FVec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
                     if (loadedPrefab && !loadedPrefab->parts.empty()) {
-                        JPH::Vec3 lo = JPH::Vec3::sReplicate(1e30f);
-                        JPH::Vec3 hi = JPH::Vec3::sReplicate(-1e30f);
+                        FVec3 lo = FVec3::sReplicate(1e30f);
+                        FVec3 hi = FVec3::sReplicate(-1e30f);
                         for (const ModelPart& part: loadedPrefab->parts) {
-                            lo = JPH::Vec3::sMin(lo, JPH::Vec3(part.localMin.x, part.localMin.y, part.localMin.z));
-                            hi = JPH::Vec3::sMax(hi, JPH::Vec3(part.localMax.x, part.localMax.y, part.localMax.z));
+                            lo = FVec3::sMin(lo, FVec3(part.localMin.x, part.localMin.y, part.localMin.z));
+                            hi = FVec3::sMax(hi, FVec3(part.localMax.x, part.localMax.y, part.localMax.z));
                         }
                         half = (hi - lo) * 0.5f * std::max({params.scale.x, params.scale.y, params.scale.z});
                     }
-                    half = JPH::Vec3::sMax(half, JPH::Vec3::sReplicate(0.05f));
+                    half = FVec3::sMax(half, FVec3::sReplicate(0.05f));
 
                     auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-                    const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.GetX(), half.GetY(), half.GetZ());
+                    const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.x, half.y, half.z);
                     if (shape != nullptr) {
                         registry.Add(
                             parts[0], Components::PhysicsComponent {
@@ -283,9 +284,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             case ShapeKind::Empty: {
                 // Logic-only entity (trigger volumes): transform + source stamp,
                 // no rendered geometry and no physics.
-                const JPH::Vec3  position = JPH::Vec3 {entity.transform.position};
+                const FVec3  position = FVec3 {entity.transform.position};
                 const JPH::Quat  rotation = Math::EulerDegreesToQuat(entity.transform.rotation);
-                const JPH::Vec3  scale    = JPH::Vec3 {entity.transform.scale};
+                const FVec3  scale    = FVec3 {entity.transform.scale};
                 const JPH::Mat44 world    = Math::CreateTransform(position, rotation, scale);
 
                 const Entity created = registry.Create(
@@ -307,20 +308,20 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             return std::unexpected(SceneError::UnknownLightType);
         }
 
-        const JPH::Vec3  position = JPH::Vec3 {light.position};
+        const FVec3  position = FVec3 {light.position};
         const JPH::Quat  rotation = Math::EulerDegreesToQuat(light.rotation);
         const JPH::Mat44 world    = Math::CreateTransform(position, rotation, {1.0f, 1.0f, 1.0f});
 
-        const JPH::Vec3 rawDirection = JPH::Vec3 {light.direction};
-        const JPH::Vec3 direction    = rawDirection.LengthSq() > 1e-8f ? rawDirection.Normalized() : rawDirection;
+        const FVec3 rawDirection = FVec3 {light.direction};
+        const FVec3 direction    = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
         const Entity created = registry.Create(
             Components::NameComponent {.name = String64(light.name)},
-            Components::TransformComponent {.position = position, .rotation = rotation, .scale = JPH::Vec3::sReplicate(1.0f)},
+            Components::TransformComponent {.position = position, .rotation = rotation, .scale = FVec3::sReplicate(1.0f)},
             Components::WorldTransformComponent {.world = world, .previous = world},
             Components::LightComponent {
                 .type        = *type,
-                .color       = JPH::Vec3 {light.color},
+                .color       = FVec3 {light.color},
                 .intensity   = light.intensity,
                 .radius      = light.radius,
                 .direction   = direction,
@@ -351,7 +352,7 @@ namespace {
 // in (a container, or a Jolt vector out of the maths library). Kept as a function
 // so the description's spelling stays decided in one place rather than at eight
 // call sites.
-[[nodiscard]] auto ToDescriptionFloat3(ZHLN::Float3 v) noexcept -> ZHLN::Float3 {
+[[nodiscard]] auto ToDescriptionFloat3(ZHLN::FVec3 v) noexcept -> ZHLN::FVec3 {
     return v;
 }
 
@@ -393,7 +394,7 @@ namespace {
         .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
-        .emissive              = gpu.has_value() ? ZHLN::Float3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
+        .emissive              = gpu.has_value() ? ZHLN::FVec3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }

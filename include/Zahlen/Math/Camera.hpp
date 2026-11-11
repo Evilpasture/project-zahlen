@@ -3,28 +3,30 @@
 
 #pragma once
 
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Jolt/Jolt.h>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>
+
+// clang-format off
+#include <Jolt/Jolt.h>
+#include <Jolt/Math/Mat4x4.h>
+// clang-format on
 
 namespace ZHLN {
 
 struct Frustum {
-    // The lanes stay JPH::Vec4: the visibility test below is SIMD over six
-    // planes, four at a time, and Vec4 is the compute spelling for that. The
-    // container is not a raw C array -- repeats are std::array -- and the
-    // layout is identical, so every `mX[block]` below is unchanged.
-    std::array<JPH::Vec4, 2> mX {}, mY {}, mZ {}, mW {};
+    std::array<FVec4, 2> mX {}, mY {}, mZ {}, mW {};
 
     void Update(const JPH::Mat44& vp) {
-        JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
-        JPH::Vec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
-        JPH::Vec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
-        JPH::Vec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
+        FVec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
+        FVec4 r1(vp(1, 0), vp(1, 1), vp(1, 2), vp(1, 3));
+        FVec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
+        FVec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
 
-        std::array<JPH::Vec4, 6> planes {};
+        std::array<FVec4, 6> planes {};
         planes[0] = r3 + r0;
         planes[1] = r3 - r0;
         planes[2] = r3 + r1;
@@ -33,68 +35,65 @@ struct Frustum {
         planes[5] = r3 - r2;
 
         for (auto& plane: planes) {
-            float len = JPH::Vec3(plane.GetX(), plane.GetY(), plane.GetZ()).Length();
+            float len = FVec3(plane.x, plane.y, plane.z).Length();
             if (len > 1e-6f) {
                 plane /= len;
             }
         }
 
-        mX[0] = JPH::Vec4(planes[0].GetX(), planes[1].GetX(), planes[2].GetX(), planes[3].GetX());
-        mY[0] = JPH::Vec4(planes[0].GetY(), planes[1].GetY(), planes[2].GetY(), planes[3].GetY());
-        mZ[0] = JPH::Vec4(planes[0].GetZ(), planes[1].GetZ(), planes[2].GetZ(), planes[3].GetZ());
-        mW[0] = JPH::Vec4(planes[0].GetW(), planes[1].GetW(), planes[2].GetW(), planes[3].GetW());
+        mX[0] = FVec4(planes[0].x, planes[1].x, planes[2].x, planes[3].x);
+        mY[0] = FVec4(planes[0].y, planes[1].y, planes[2].y, planes[3].y);
+        mZ[0] = FVec4(planes[0].z, planes[1].z, planes[2].z, planes[3].z);
+        mW[0] = FVec4(planes[0].w, planes[1].w, planes[2].w, planes[3].w);
 
-        mX[1] = JPH::Vec4(planes[4].GetX(), planes[5].GetX(), 0.0f, 0.0f);
-        mY[1] = JPH::Vec4(planes[4].GetY(), planes[5].GetY(), 0.0f, 0.0f);
-        mZ[1] = JPH::Vec4(planes[4].GetZ(), planes[5].GetZ(), 0.0f, 0.0f);
-        mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
+        mX[1] = FVec4(planes[4].x, planes[5].x, 0.0f, 0.0f);
+        mY[1] = FVec4(planes[4].y, planes[5].y, 0.0f, 0.0f);
+        mZ[1] = FVec4(planes[4].z, planes[5].z, 0.0f, 0.0f);
+        mW[1] = FVec4(planes[4].w, planes[5].w, 1e10f, 1e10f);
     }
 
-    [[nodiscard]] auto IsSphereVisible(ZHLN::Float3 center, float radius) const -> bool {
+    [[nodiscard]] auto IsSphereVisible(FVec3 center, float radius) const -> bool {
         const float inflatedRadius = -(radius + 0.5f);
 
-        JPH::Vec4 cX   = JPH::Vec4::sReplicate(center.x);
-        JPH::Vec4 cY   = JPH::Vec4::sReplicate(center.y);
-        JPH::Vec4 cZ   = JPH::Vec4::sReplicate(center.z);
-        JPH::Vec4 negR = JPH::Vec4::sReplicate(inflatedRadius);
+        FVec4 cX   = FVec4::Splat(center.x);
+        FVec4 cY   = FVec4::Splat(center.y);
+        FVec4 cZ   = FVec4::Splat(center.z);
+        FVec4 negR = FVec4::Splat(inflatedRadius);
 
-        JPH::Vec4 dist0 = mX[0] * cX + mY[0] * cY + mZ[0] * cZ + mW[0];
-        if (JPH::Vec4::sLess(dist0, negR).TestAnyTrue()) {
+        FVec4 dist0 = mX[0] * cX + mY[0] * cY + mZ[0] * cZ + mW[0];
+        if (dist0.AnyLess(negR)) {
             return false;
         }
 
-        JPH::Vec4 dist1 = mX[1] * cX + mY[1] * cY + mZ[1] * cZ + mW[1];
-        return !JPH::Vec4::sLess(dist1, negR).TestAnyTrue();
+        FVec4 dist1 = mX[1] * cX + mY[1] * cY + mZ[1] * cZ + mW[1];
+        return !dist1.AnyLess(negR);
     }
 };
 
 struct Camera {
-    JPH::Vec3 position = {0, 2, 10};
-    float     yaw      = -90.0f;
-    float     pitch    = 0.0f;
+    FVec3 position = {0.0f, 2.0f, 10.0f};
+    float yaw      = -90.0f;
+    float pitch    = 0.0f;
 
     float fov   = 45.0f;
     float nearZ = 0.1f;
     float farZ  = 1000.0f;
 
-    // Pose and optics only. The view-projection matrices live on the entity's
-    // CameraComponent, and the culling planes live on the culler that derived
-    // them (see CullingSystem::GetFrustum). A camera that owned its frustum was
-    // camera *state*, not camera data: a second writer had to reach the same
-    // object through a shared service.
     [[nodiscard]] auto GetViewMatrix() const -> JPH::Mat44 {
-        JPH::Vec3 direction {};
-        direction.SetX(JPH::Cos(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
-        direction.SetY(JPH::Sin(JPH::DegreesToRadians(pitch)));
-        direction.SetZ(JPH::Sin(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
+        const RadF pitchRad = DegF(pitch).ToRadians();
+        const RadF yawRad   = DegF(yaw).ToRadians();
+
+        FVec3 direction {};
+        direction.x = Cos(yawRad) * Cos(pitchRad);
+        direction.y = Sin(pitchRad);
+        direction.z = Sin(yawRad) * Cos(pitchRad);
 
         return Math::CreateLookAt(position, position + direction.Normalized(), {0.0f, 1.0f, 0.0f});
     }
 
     [[nodiscard]] auto GetProjectionMatrix(float aspectRatio) const -> JPH::Mat44 {
-        return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
+        return Math::CreatePerspective(DegF(fov).ToRadians().value, aspectRatio, nearZ, farZ);
     }
-
 };
 
 } // namespace ZHLN

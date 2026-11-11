@@ -41,8 +41,8 @@ export struct LightningComponent {
     float currentKA      = 0.0f;
     float flashLuminance = 0.0f;
 
-    JPH::Vec3 cloudOrigin  = JPH::Vec3::sZero();
-    JPH::Vec3 groundTarget = JPH::Vec3::sZero();
+    FVec3 cloudOrigin  = FVec3::sZero();
+    FVec3 groundTarget = FVec3::sZero();
 
     BufferID vboPos          = BufferID::Invalid;
     BufferID vboFrame        = BufferID::Invalid;
@@ -60,7 +60,7 @@ export struct LightningComponent {
 
 namespace Lightning {
 
-export auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg = {}) -> Entity;
+export auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const LightningConfig& cfg = {}) -> Entity;
 
 export auto Update(Engine& engine, float dt) -> void;
 

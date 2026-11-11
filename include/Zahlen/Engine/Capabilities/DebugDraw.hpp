@@ -11,8 +11,8 @@
 
 namespace ZHLN {
 
-class Float3;
-class Float4;
+class FVec3;
+class FVec4;
 struct SceneData;
 struct BillboardQuad;
 struct ParticleEmitterSubmission;
@@ -22,8 +22,8 @@ struct VertexSurface;
 
 class ZHLN_API DebugDraw {
   public:
-    void AddLine(const Float3& start, const Float3& end, const Float4& color);
-    void AddLine(const Float3& start, const Float3& end, const Float4& colorStart, const Float4& colorEnd);
+    void AddLine(const FVec3& start, const FVec3& end, const FVec4& color);
+    void AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd);
     void AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive);
     void AddDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces);
     void Clear() noexcept;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PerfBaseline.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 
 // clang-format off
@@ -91,7 +92,7 @@ struct AgentCombatStateComponent {
 struct SpatialPerceptionComponent {
     uint32_t  nearbyEnemyCount = 0;
     float     nearestDistance  = 999.0f;
-    JPH::Vec3 threatDirection  = JPH::Vec3::sZero();
+    FVec3 threatDirection  = FVec3::sZero();
 };
 
 // ============================================================================
@@ -316,7 +317,7 @@ struct PerformanceTestSuite {
                                            AgentHealthComponent, AgentCombatStateComponent>();
                                        for (size_t i = 0; i < kTotalEntities; ++i) {
                                            (void) benchReg.Create(
-                                               ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
+                                               ZHLN::Components::TransformComponent {.position = FVec3(static_cast<float>(i), 1.0f, 0.0f)},
                                                ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                                                AgentCombatStateComponent {.attackRange = 12.0f}
                                            );
@@ -324,7 +325,7 @@ struct PerformanceTestSuite {
                                    });
             for (size_t i = 0; i < kTotalEntities; ++i) {
                 createdEntities.push_back(reg.Create(
-                    ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
+                    ZHLN::Components::TransformComponent {.position = FVec3(static_cast<float>(i), 1.0f, 0.0f)},
                     ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 12.0f}
                 ));
@@ -377,7 +378,7 @@ struct PerformanceTestSuite {
                                     ZHLN::ECS::EntityCommandBuffer ecb(reg, nullptr, kEcbArenaBytes);
                                     for (size_t i = 0; i < 15000; ++i) {
                                         ZHLN::Entity tempE = ecb.CreateEntity(
-                                            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)},
+                                            ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 0.0f, 0.0f)},
                                             AgentHealthComponent {.currentHealth = 50.0f}
                                         );
                                         ecb.AddComponent<ZHLN::Character::MovementComponent>(tempE);
@@ -590,7 +591,7 @@ struct PerformanceTestSuite {
                                           audio.PostEvent(
                                               ZHLN::AudioEvent {
                                                   .type     = ZHLN::AudioEventType::OneShot3D,
-                                                  .position = JPH::Vec3(static_cast<float>(i % 50), 1.0f, static_cast<float>(i / 50)),
+                                                  .position = FVec3(static_cast<float>(i % 50), 1.0f, static_cast<float>(i / 50)),
                                                   .volume   = 0.8f,
                                                   .pitch    = 1.0f,
                                                   .duration = 0.25f,
@@ -638,7 +639,7 @@ struct PerformanceTestSuite {
                 registry.Clear();
             });
 
-            mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
+            mainCamera.position = FVec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;
             mainCamera.pitch    = -20.0f;
 
@@ -662,13 +663,13 @@ struct PerformanceTestSuite {
             for (size_t i = 0; i < kAgentCount; ++i) {
                 float      spawnX = posDist(rng);
                 float      spawnZ = posDist(rng);
-                JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
+                DVec3 spawnPos(spawnX, 1.5, spawnZ);
 
                 ZHLN::Physics::BodyID bodyID =
                     physicsContext.CreateRigidBody(agentShape, spawnPos, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
-                    ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
+                    ZHLN::Components::TransformComponent {.position = FVec3(spawnPos)},
                     ZHLN::Character::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
                     ZHLN::Components::PhysicsComponent {.physicsID = bodyID, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
@@ -739,9 +740,9 @@ struct PerformanceTestSuite {
                                          }
 
                                          // Raycast to probe surrounding terrain & dynamic obstacles
-                                         JPH::Vec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
+                                         FVec3  forward(std::sin(static_cast<float>(frame + i) * 0.05f), 0.0f, std::cos(static_cast<float>(frame + i) * 0.05f));
                                          const auto rayHit =
-                                             physicsContext.Raycast(JPH::Vec3(trans->position) + JPH::Vec3(0, 0.5f, 0), forward, 10.0f, phys->physicsID);
+                                             physicsContext.Raycast(FVec3(trans->position) + FVec3(0, 0.5f, 0), forward, 10.0f, phys->physicsID);
                                          totalRaysCast.fetch_add(1, std::memory_order::relaxed);
 
                                          if (rayHit.hasHit) {
@@ -764,7 +765,7 @@ struct PerformanceTestSuite {
                                      auto         phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
                                      if (trans && phys) {
                                          if (const auto pos = physicsContext.BodyPosition(phys->physicsID)) {
-                                             trans->position = JPH::Vec3(*pos);
+                                             trans->position = FVec3(*pos);
                                          }
                                      }
                                  }

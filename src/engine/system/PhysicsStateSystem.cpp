@@ -52,8 +52,8 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
         if (!trans) {
             continue;
         }
-        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snapshots[j].previousPosition);
-        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snapshots[j].currentPosition);
+        const JPH::Vec3 previous = JPH::Vec3(snapshots[j].previousPosition.x, snapshots[j].previousPosition.y, snapshots[j].previousPosition.z);
+        const JPH::Vec3 current  = JPH::Vec3(snapshots[j].currentPosition.x, snapshots[j].currentPosition.y, snapshots[j].currentPosition.z);
         JPH::Vec3 expected = previous + clampedAlpha * (current - previous);
         JPH::Vec3 actual(trans->position[0], trans->position[1], trans->position[2]);
         if ((actual - expected).LengthSq() > 1e-3f) {
@@ -106,11 +106,11 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
         }
 
         const auto& snap = snapshots[j];
-        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snap.previousPosition);
-        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snap.currentPosition);
+        const JPH::Vec3 previous = JPH::Vec3(snap.previousPosition.x, snap.previousPosition.y, snap.previousPosition.z);
+        const JPH::Vec3 current  = JPH::Vec3(snap.currentPosition.x, snap.currentPosition.y, snap.currentPosition.z);
         trans->position  = previous + clampedAlpha * (current - previous);
 
-        trans->rotation = static_cast<JPH::Quat>(snap.previousRotation).SLERP(static_cast<JPH::Quat>(snap.currentRotation), clampedAlpha);
+        trans->rotation = JPH::Quat(snap.previousRotation.x, snap.previousRotation.y, snap.previousRotation.z, snap.previousRotation.w).SLERP(JPH::Quat(snap.currentRotation.x, snap.currentRotation.y, snap.currentRotation.z, snap.currentRotation.w), clampedAlpha);
     }
 
     if constexpr (isDev) {

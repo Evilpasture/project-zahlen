@@ -13,6 +13,7 @@
 //      addresses re-pushed via vkCmdPushDataEXT are actually consumed.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -152,7 +153,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 4.45f, 11.0f);
+            cam.position = FVec3(0.0f, 4.45f, 11.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
@@ -194,11 +195,11 @@ struct DescriptorHeapsSuite {
 
                 const uint32_t  col = i % kGridCols;
                 const uint32_t  row = i / kGridCols;
-                const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
+                const FVec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {halfExtent, halfExtent, halfExtent},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.GetX(), pos.GetY(), pos.GetZ()}, .createPhysics = false, .materialOverride = mat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat}
                 );
             }
 
@@ -436,7 +437,7 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 6.0f);
+            cam.position = FVec3(0.0f, 1.5f, 6.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;

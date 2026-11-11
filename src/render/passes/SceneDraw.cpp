@@ -142,7 +142,7 @@ void Draw3DParticleShadows(RenderFrame& ctx, Vk::CommandEncoder& encoder, const 
         const MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.renderer.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress.Get(),
-            .baseColorFactor     = ZHLN::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
+            .baseColorFactor     = ZHLN::FVec4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor      = {},
             .tangentFrameAddress = 0,
             .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,

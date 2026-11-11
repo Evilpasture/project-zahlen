@@ -20,7 +20,7 @@ struct ZHLN_ANNOTATION(SuiteFixture {}) DefaultCameraFrustum {
 
     DefaultCameraFrustum() {
         ZHLN::Camera cam;
-        cam.position = JPH::Vec3(0.0f, 0.0f, 10.0f);
+        cam.position = FVec3(0.0f, 0.0f, 10.0f);
         cam.yaw      = -90.0f; // Look towards -Z
         cam.pitch    = 0.0f;
         cam.fov      = 60.0f;
@@ -59,7 +59,7 @@ void test_scalar_math() {
     ExpectInRange(cell, 0.0f, 1.0f);
 }
 
-// Vec3's component helpers match the existing Math3D Float3 helpers while
+// FVec3's component helpers match the existing Math3D FVec3 helpers while
 // leaving the old API untouched for callers that have not migrated yet.
 void test_vec3_math() {
     constexpr FVec3 a {1.0f, 2.0f, 3.0f};
@@ -92,9 +92,9 @@ void test_vec3_math() {
 
     const FVec3 p {-1.25f, 2.5f, -4.0f};
     const FVec3 period {2.0f, 3.0f, 5.0f};
-    const auto oldFloor = Math::Floor(Float3 {p.x, p.y, p.z});
-    const auto oldFract = Math::Fract(Float3 {p.x, p.y, p.z});
-    const auto oldWrap = Math::Wrap(Float3 {p.x, p.y, p.z}, Float3 {period.x, period.y, period.z});
+    const auto oldFloor = Math::Floor(FVec3 {p.x, p.y, p.z});
+    const auto oldFract = Math::Fract(FVec3 {p.x, p.y, p.z});
+    const auto oldWrap = Math::Wrap(FVec3 {p.x, p.y, p.z}, FVec3 {period.x, period.y, period.z});
     Expect(p.Floor() == FVec3 {oldFloor.x, oldFloor.y, oldFloor.z}) == true;
     Expect(p.Fract() == FVec3 {oldFract.x, oldFract.y, oldFract.z}) == true;
     Expect(Wrap(p, period) == FVec3 {oldWrap.x, oldWrap.y, oldWrap.z}) == true;

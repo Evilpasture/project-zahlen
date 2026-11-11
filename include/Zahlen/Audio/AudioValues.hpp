@@ -17,7 +17,10 @@
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -40,7 +43,7 @@ static_assert(Reflect::EnumCount<AudioEventType>() == kAudioEventTypeCount);
 struct AudioEvent {
     AudioEventType       type       = AudioEventType::OneShot2D;
     String64             filepath {};
-    ZHLN::Float3         position {};
+    ZHLN::FVec3         position {};
     float                volume     = 1.0f;
     float                pitch      = 1.0f;
     float                param1     = 0.0f;
@@ -65,9 +68,9 @@ struct VoiceDesc {
     float                pitch        = 1.0f;
     float                pan          = 0.0f;
     float                reverbSend   = 0.0f;
-    ZHLN::Float3         position {};
-    ZHLN::Float3         velocity {};
-    ZHLN::Float3         direction {0.0f, 0.0f, -1.0f};
+    ZHLN::FVec3         position {};
+    ZHLN::FVec3         velocity {};
+    ZHLN::FVec3         direction {0.0f, 0.0f, -1.0f};
     AudioAttenuationDesc attenuation  {};
     AudioOcclusionDesc   occlusion    {};
 };

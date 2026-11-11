@@ -3,6 +3,7 @@
 
 // gameplay/Interaction/InteractionSystem.cpp
 #include "InteractionSystem.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPInteraction.hpp"
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
@@ -78,8 +79,8 @@ void TeleportPlayer(
 
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
-    const JPH::Vec3 destPos = destTrans->position;
-    const JPH::Vec3 center  = destPos + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
+    const FVec3 destPos = destTrans->position;
+    const FVec3 center  = destPos + FVec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
     physics->SetCharacterPosition(playerPhys->physicsID, center);
     physics->SetCharacterVelocity(playerPhys->physicsID, {0.0f, 0.0f, 0.0f});
 
@@ -91,11 +92,11 @@ void TeleportPlayer(
     // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
     // formula -- so the camera's yaw/pitch invert straight out of it.
     const JPH::Quat destRot = destTrans->rotation;
-    const JPH::Vec3 forward = destRot.RotateAxisX();
+    const FVec3 forward = destRot.RotateAxisX();
     if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
         registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
-            cc.camera.yaw   = std::atan2(forward.GetZ(), forward.GetX()) * 57.29577951308232f;
-            cc.camera.pitch = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * 57.29577951308232f;
+            cc.camera.yaw   = std::atan2(forward.z, forward.x) * 57.29577951308232f;
+            cc.camera.pitch = std::asin(std::clamp(forward.y, -1.0f, 1.0f)) * 57.29577951308232f;
         });
     }
 
@@ -141,7 +142,7 @@ void InteractionSystem::Update(
         return;
     }
 
-    const JPH::Vec3 playerPos = playerTrans->position;
+    const FVec3 playerPos = playerTrans->position;
 
     auto        inputState          = query.GetSingleton<Components::InputStateComponent>();
     const bool  interactPressed     = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
@@ -167,11 +168,11 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 triggerPosition = trans->position;
+        const FVec3 triggerPosition = trans->position;
         bool            inside          = false;
-        if (trigger.halfExtents.LengthSq() > 1e-4f) {
-            const JPH::Vec3 delta = (playerPos - triggerPosition).Abs();
-            inside = delta.GetX() <= trigger.halfExtents.GetX() && delta.GetY() <= trigger.halfExtents.GetY() && delta.GetZ() <= trigger.halfExtents.GetZ();
+        if (trigger.halfExtents.LengthSquared() > 1e-4f) {
+            const FVec3 delta = (playerPos - triggerPosition).Abs();
+            inside = delta.x <= trigger.halfExtents.x && delta.y <= trigger.halfExtents.y && delta.z <= trigger.halfExtents.z;
         } else {
             const float dist = (triggerPosition - playerPos).Length();
             inside           = dist <= trigger.radius;
@@ -275,7 +276,7 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 doorPosition = trans->position;
+        const FVec3 doorPosition = trans->position;
         const float     dist         = (doorPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
@@ -315,7 +316,7 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 buttonPosition = trans->position;
+        const FVec3 buttonPosition = trans->position;
         const float     dist           = (buttonPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {

@@ -6,7 +6,7 @@ module;
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>

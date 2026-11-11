@@ -26,13 +26,17 @@
 // string that FindNodeById / InsertChild / RemoveNodeById already speak.
 
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
@@ -338,7 +342,7 @@ void DrawHierarchyRow(GUI::Frame& gui, Session& session, const GUI::UINode& node
         hierId,
         GUI::BoxConfig {
             .width   = {.grow = 1.0f},
-            .color   = selected ? JPH::Vec4 {0.20f, 0.35f, 0.55f, 0.95f} : JPH::Vec4 {0.10f, 0.12f, 0.16f, 0.80f},
+            .color   = selected ? FVec4 {0.20f, 0.35f, 0.55f, 0.95f} : FVec4 {0.10f, 0.12f, 0.16f, 0.80f},
             .padding = 4.0f,
         },
         [&]() {
@@ -415,7 +419,7 @@ void DrawHierarchy(GUI::Frame& gui, Session& session) {
     return {};
 }
 
-void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::Float4& value, float minVal, float maxVal, float step) {
+void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::FVec4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);

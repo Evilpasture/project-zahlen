@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Core/Platform.hpp>
 
 #if defined(ZHLN_SANITIZER_BUILD)
@@ -15,7 +16,10 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
@@ -757,9 +761,9 @@ struct VoiceSlot {
     float                pitch           = 1.0f;
     float                pan             = 0.0f;
     float                reverbSend      = 0.0f;
-    JPH::Vec3            position        = JPH::Vec3::sZero();
-    JPH::Vec3            velocity        = JPH::Vec3::sZero();
-    JPH::Vec3            direction       = JPH::Vec3(0.0f, 0.0f, -1.0f);
+    FVec3            position        = FVec3::sZero();
+    FVec3            velocity        = FVec3::sZero();
+    FVec3            direction       = FVec3(0.0f, 0.0f, -1.0f);
     AudioAttenuationDesc attenuation {};
     AudioOcclusionDesc   occlusion {};
 };
@@ -884,7 +888,7 @@ struct AudioContext::Impl {
     bool                headless    = false;
     uint32_t            sampleRate  = kDefaultSampleRate;
     uint32_t            channels    = kDefaultChannels;
-    JPH::Vec3           listenerPos = JPH::Vec3::sZero();
+    FVec3           listenerPos = FVec3::sZero();
 
     std::array<BusSlot, kMaxAudioBuses> buses {};
     ReverbAuxNode                       reverbNode {};
@@ -1141,7 +1145,7 @@ struct AudioContext::Impl {
 
         float distGain = 1.0f;
         if (desc.spatialized && desc.attenuation.model == AudioAttenuationModel::Logarithmic) {
-            distGain = EvaluateDistanceAttenuation(desc.attenuation, (static_cast<JPH::Vec3>(desc.position) - listenerPos).Length());
+            distGain = EvaluateDistanceAttenuation(desc.attenuation, (JPH::Vec3(desc.position.x, desc.position.y, desc.position.z) - listenerPos).Length());
         }
         const float initDry = ComputeOcclusionDirectGain(desc.occlusion) * distGain;
         const float initWet = std::clamp(desc.reverbSend, 0.0f, 1.0f) * distGain;
@@ -1487,7 +1491,7 @@ auto AudioContext::Channels() const noexcept -> uint32_t {
     return _impl->channels;
 }
 
-void AudioContext::UpdateListener(ZHLN::Float3 position, ZHLN::Float3 direction, ZHLN::Float3 up, ZHLN::Float3 velocity) {
+void AudioContext::UpdateListener(ZHLN::FVec3 position, ZHLN::FVec3 direction, ZHLN::FVec3 up, ZHLN::FVec3 velocity) {
     if (!_impl->initialized) {
         return;
     }
@@ -1497,7 +1501,7 @@ void AudioContext::UpdateListener(ZHLN::Float3 position, ZHLN::Float3 direction,
     ma_engine_listener_set_velocity(&_impl->engine, 0, velocity.x, velocity.y, velocity.z);
 
     Lock(_impl->voiceMutex, [&]() noexcept -> void {
-        _impl->listenerPos = static_cast<JPH::Vec3>(position);
+        _impl->listenerPos = JPH::Vec3(position.x, position.y, position.z);
         for (const uint32_t slotIdx: _impl->activeVoiceSlots) {
             auto& slot = _impl->voiceSlots[slotIdx];
             if (slot.inUse.load(std::memory_order::relaxed) && slot.spatialized &&
@@ -2171,7 +2175,7 @@ auto AudioContext::GetVoiceBus(VoiceID handle) const noexcept -> AudioBusID {
     });
 }
 
-void AudioContext::SetVoicePosition(VoiceID handle, ZHLN::Float3 position) {
+void AudioContext::SetVoicePosition(VoiceID handle, ZHLN::FVec3 position) {
     const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2180,7 +2184,7 @@ void AudioContext::SetVoicePosition(VoiceID handle, ZHLN::Float3 position) {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.position = static_cast<JPH::Vec3>(position);
+        slot.position = JPH::Vec3(position.x, position.y, position.z);
         ma_sound_set_position(&slot.sound, position.x, position.y, position.z);
         if (slot.spatialized && slot.attenuation.model == AudioAttenuationModel::Logarithmic) {
             _impl->UpdateVoiceDynamicSendTargetsLocked(slot);
@@ -2188,7 +2192,7 @@ void AudioContext::SetVoicePosition(VoiceID handle, ZHLN::Float3 position) {
     });
 }
 
-void AudioContext::SetVoiceVelocity(VoiceID handle, ZHLN::Float3 velocity) {
+void AudioContext::SetVoiceVelocity(VoiceID handle, ZHLN::FVec3 velocity) {
     const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2197,12 +2201,12 @@ void AudioContext::SetVoiceVelocity(VoiceID handle, ZHLN::Float3 velocity) {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.velocity = static_cast<JPH::Vec3>(velocity);
+        slot.velocity = JPH::Vec3(velocity.x, velocity.y, velocity.z);
         ma_sound_set_velocity(&slot.sound, velocity.x, velocity.y, velocity.z);
     });
 }
 
-void AudioContext::SetVoiceDirection(VoiceID handle, ZHLN::Float3 direction) {
+void AudioContext::SetVoiceDirection(VoiceID handle, ZHLN::FVec3 direction) {
     const auto [idx, gen] = UnpackID(static_cast<uint64_t>(handle));
     if (idx >= MAX_VOICE_SLOTS) return;
 
@@ -2211,7 +2215,7 @@ void AudioContext::SetVoiceDirection(VoiceID handle, ZHLN::Float3 direction) {
         if (!slot.inUse.load(std::memory_order::relaxed) || slot.generation.load(std::memory_order::relaxed) != gen) {
             return;
         }
-        slot.direction = static_cast<JPH::Vec3>(direction);
+        slot.direction = JPH::Vec3(direction.x, direction.y, direction.z);
         ma_sound_set_direction(&slot.sound, direction.x, direction.y, direction.z);
     });
 }

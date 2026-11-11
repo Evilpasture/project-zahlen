@@ -39,7 +39,7 @@ namespace ZHLN {
 
 class RenderContext;
 struct EnvironmentRadianceDesc;
-class Mat44;
+class Mat4x4;
 
 class ZHLN_API GraphicsDevice {
   public:
@@ -102,7 +102,7 @@ class ZHLN_API GraphicsDevice {
     void               DestroyMesh(const ZHLN::Mesh& mesh) noexcept;
     [[nodiscard]] auto BuildMeshBLAS(ZHLN::Mesh& mesh) noexcept -> RenderResult;
 
-    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices);
+    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices);
     [[nodiscard]] auto AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t;
 
     // --- Frame submission -----------------------------------------------------

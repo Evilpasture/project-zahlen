@@ -11,6 +11,7 @@
 
 module;
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
@@ -50,8 +51,8 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
     for (const ObjectSnapshot& object: message->objects) {
         const Entity e = GetOrCreateEntity(reg, object.uid);
 
-        const JPH::Vec3  position = object.position;
-        const JPH::Vec3  scale    = object.size;
+        const FVec3  position = object.position;
+        const FVec3  scale    = object.size;
         const JPH::Mat44 worldMat = Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f}, scale);
 
         reg.Add(
@@ -118,9 +119,9 @@ void NetworkInterpolationSystem(
             continue;
         }
         const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
-        const JPH::Vec3 position       = trans->position;
+        const FVec3 position       = trans->position;
         const JPH::Quat rotation       = trans->rotation;
-        const JPH::Vec3 interpTarget   = interp->targetPosition;
+        const FVec3 interpTarget   = interp->targetPosition;
         const JPH::Quat interpRotation = interp->targetRotation;
         trans->position                = position + (interpTarget - position) * t;
         trans->rotation                = rotation.SLERP(interpRotation, t).Normalized();

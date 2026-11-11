@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -111,7 +112,7 @@ struct CameraLookAtTestSuite {
                     .targetDistance      = 5.0f,
                     .yaw                 = -90.0f,
                     .pitch               = 0.0f,
-                    .targetOffset        = JPH::Vec3::sZero(),
+                    .targetOffset        = FVec3::sZero(),
                     .stiffness           = 0.0f,
                     .vignetteIntensity   = 0.0f,
                     .fov                 = 45.0f,

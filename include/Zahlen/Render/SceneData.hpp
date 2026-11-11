@@ -8,7 +8,10 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameData.hpp>
@@ -20,19 +23,19 @@
 namespace ZHLN {
 
 struct BillboardQuad {
-    ZHLN::Float3        position {};
+    ZHLN::FVec3        position {};
     float             size     = 1.0f;
     float             rotation = 0.0f;
-    ZHLN::Float4        color {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4        color {1.0f, 1.0f, 1.0f, 1.0f};
     ParticleAlignment facing = ParticleAlignment::CameraBillboard;
-    ZHLN::Float3        velocity {};
+    ZHLN::FVec3        velocity {};
 };
 
 struct LineSegment {
-    ZHLN::Float3 start {};
-    ZHLN::Float3 end {};
-    ZHLN::Float4 colorStart {1.0f, 1.0f, 1.0f, 1.0f};
-    ZHLN::Float4 colorEnd {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3 start {};
+    ZHLN::FVec3 end {};
+    ZHLN::FVec4 colorStart {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 colorEnd {1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 struct ParticleEmitterSubmission {
@@ -62,7 +65,7 @@ struct SceneRenderPass {
     SceneView        view {};
     Camera           camera {};
     FrameData        frame {};
-    ZHLN::Mat44      shadowProjView = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4      shadowProjView = ZHLN::Mat4x4::Identity();
     GraphicsSettings settings {};
 };
 
@@ -86,10 +89,10 @@ struct SceneData {
         billboards.clear();
     }
 
-    void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 colorStart, ZHLN::Float4 colorEnd) {
+    void AddLine(ZHLN::FVec3 start, ZHLN::FVec3 end, ZHLN::FVec4 colorStart, ZHLN::FVec4 colorEnd) {
         lines.push_back({start, end, colorStart, colorEnd});
     }
-    void AddLine(ZHLN::Float3 start, ZHLN::Float3 end, ZHLN::Float4 color) {
+    void AddLine(ZHLN::FVec3 start, ZHLN::FVec3 end, ZHLN::FVec4 color) {
         AddLine(start, end, color, color);
     }
 

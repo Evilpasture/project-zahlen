@@ -165,7 +165,7 @@ void GraphicsDevice::DestroyMesh(const ZHLN::Mesh& mesh) noexcept {
 auto GraphicsDevice::BuildMeshBLAS(ZHLN::Mesh& mesh) noexcept -> RenderResult {
     return _ctx->BuildMeshBLAS(mesh);
 }
-void GraphicsDevice::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices) {
+void GraphicsDevice::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) {
     _ctx->UpdateJointMatrices(offset, matrices);
 }
 auto GraphicsDevice::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
@@ -183,27 +183,27 @@ void GraphicsDevice::DrawCSG(const ZHLN::Material& material, const ZHLN::Mesh& m
 
 // --- Simulation ---------------------------------------------------------------
 
-auto Simulation::Raycast(Double3 origin, Float3 direction, float maxDistance, Physics::BodyID ignore) const -> Physics::RaycastResult {
+auto Simulation::Raycast(DVec3 origin, FVec3 direction, float maxDistance, Physics::BodyID ignore) const -> Physics::RaycastResult {
     return _ctx->Raycast(origin, direction, maxDistance, ignore);
 }
-auto Simulation::BodiesInSphere(Double3 center, float radius) const -> std::vector<Physics::BodyID> {
+auto Simulation::BodiesInSphere(DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
     return _ctx->OverlapSphere(center, radius);
 }
 auto Simulation::DebugDrawData(bool shapes, bool constraints, bool wireframe) const -> Physics::DebugDrawData {
     return _ctx->GetDebugDrawData(shapes, constraints, wireframe);
 }
-auto Simulation::BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<Double3> {
+auto Simulation::BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3> {
     const auto position = _ctx->BodyPosition(handle);
     if (!position) {
         return std::nullopt;
     }
-    return Double3 {*position};
+    return DVec3 {*position};
 }
 auto Simulation::BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
     return _ctx->BodyState(handle);
 }
-auto Simulation::CharacterVelocity(Physics::BodyID handle) const -> Float3 {
-    return Float3 {_ctx->GetCharacterVelocity(handle)};
+auto Simulation::CharacterVelocity(Physics::BodyID handle) const -> FVec3 {
+    return FVec3 {_ctx->GetCharacterVelocity(handle)};
 }
 auto Simulation::IsCharacterOnGround(Physics::BodyID handle) const -> bool {
     return _ctx->IsCharacterOnGround(handle);
@@ -211,7 +211,7 @@ auto Simulation::IsCharacterOnGround(Physics::BodyID handle) const -> bool {
 auto Simulation::IsBodyDynamic(Physics::BodyID handle) const -> bool {
     return _ctx->IsBodyDynamic(handle);
 }
-void Simulation::AddImpulse(Physics::BodyID handle, Float3 impulse) {
+void Simulation::AddImpulse(Physics::BodyID handle, FVec3 impulse) {
     _ctx->AddImpulse(handle, impulse);
 }
 void Simulation::DestroyBody(Physics::BodyID handle) {
@@ -220,16 +220,16 @@ void Simulation::DestroyBody(Physics::BodyID handle) {
 void Simulation::DestroyBodies(std::span<const Physics::BodyID> handles) {
     _ctx->DestroyBodies(handles);
 }
-void Simulation::SetCharacterVelocity(Physics::BodyID handle, Float3 velocity) {
+void Simulation::SetCharacterVelocity(Physics::BodyID handle, FVec3 velocity) {
     _ctx->SetCharacterVelocity(handle, velocity);
 }
 void Simulation::Step(float deltaTime) {
     _ctx->Step(deltaTime);
 }
-auto Simulation::CreateCharacter(Double3 position) -> Physics::BodyID {
+auto Simulation::CreateCharacter(DVec3 position) -> Physics::BodyID {
     return _ctx->CreateCharacter(position);
 }
-auto Simulation::CreateCharacter(Double3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
+auto Simulation::CreateCharacter(DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
     return _ctx->CreateCharacter(position, params);
 }
 void Simulation::DestroyRagdolls(std::span<const Physics::RagdollID> handles) noexcept {
@@ -238,10 +238,10 @@ void Simulation::DestroyRagdolls(std::span<const Physics::RagdollID> handles) no
 
 // --- DebugDraw ----------------------------------------------------------------
 
-void DebugDraw::AddLine(const Float3& start, const Float3& end, const Float4& color) {
+void DebugDraw::AddLine(const FVec3& start, const FVec3& end, const FVec4& color) {
     _scene->AddLine(start, end, color);
 }
-void DebugDraw::AddLine(const Float3& start, const Float3& end, const Float4& colorStart, const Float4& colorEnd) {
+void DebugDraw::AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd) {
     _scene->AddLine(start, end, colorStart, colorEnd);
 }
 void DebugDraw::AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive) {
@@ -323,7 +323,7 @@ void AudioEngine::SetVoiceVolume(VoiceID handle, float volume) {
 void AudioEngine::SetVoiceLooping(VoiceID handle, bool looping) {
     _ctx->SetVoiceLooping(handle, looping);
 }
-void AudioEngine::SetVoicePosition(VoiceID handle, const Float3& position) {
+void AudioEngine::SetVoicePosition(VoiceID handle, const FVec3& position) {
     _ctx->SetVoicePosition(handle, position);
 }
 

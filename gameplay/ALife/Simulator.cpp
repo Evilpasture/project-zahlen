@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -17,9 +18,9 @@
 namespace ZHLN::ALife {
 
 // --- Package-Safe Math Helper ---
-static auto MoveTowards(JPH::RVec3Arg current, JPH::RVec3Arg target, float max_dist) -> JPH::RVec3 {
-    JPH::RVec3 diff = target - current; // Keep as RVec3 to handle single/double precision correctly
-    double     d2   = diff.LengthSq();
+static auto MoveTowards(DVec3 current, DVec3 target, float max_dist) -> DVec3 {
+    DVec3 diff = target - current; // Keep as DVec3 to handle single/double precision correctly
+    double     d2   = diff.LengthSquared();
 
     if (d2 < static_cast<double>(max_dist * max_dist) || d2 < 0.0001) {
         return target;
@@ -48,7 +49,7 @@ void Simulator::BroadcastEvent(const Event& event) {
 
 // --- Main Simulation Loop ---
 
-void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
+void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
     ZHLN::ScopedTimer profTimer("ALife Simulator Update");
 
     // 1. Advance Game Time
@@ -89,7 +90,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             // Movement along path (A*)
             if (comp.path_index < comp.path_count && _levelGraph.GetNodeCount() > 0) {
                 uint32_t   target_node = comp.path[comp.path_index];
-                JPH::RVec3 target_pos  = _levelGraph.GetNode(target_node).position;
+                DVec3 target_pos  = _levelGraph.GetNode(target_node).position;
 
                 float speed = comp.travel_speed;
                 if (comp.is_fleeing) {
@@ -112,7 +113,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             }
             // Fallback: Direct Node Movement
             else if (comp.target_node != INVALID_GRAPH_NODE && _levelGraph.GetNodeCount() > 0) {
-                JPH::RVec3 target_pos = _levelGraph.GetNode(comp.target_node).position;
+                DVec3 target_pos = _levelGraph.GetNode(comp.target_node).position;
 
                 float speed = comp.travel_speed;
                 if (comp.is_fleeing) {
@@ -131,7 +132,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             }
 
             // Distance-based Online/Offline State Switching
-            float d2        = (comp.position - observer_pos).LengthSq();
+            float d2        = (comp.position - observer_pos).LengthSquared();
             State old_state = comp.state;
 
             if (comp.state == State::Offline && d2 < dist_sq_threshold) {
@@ -151,7 +152,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     // Fast O(N) re-indexing of all entities into the spatial grid
     _grid.Clear();
     for (auto entitie: entities) {
-        _grid.UpdateEntity(reg, entitie, JPH::RVec3(-1, -1, -1)); // -1 forces fresh insertion
+        _grid.UpdateEntity(reg, entitie, DVec3(-1, -1, -1)); // -1 forces fresh insertion
     }
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
@@ -306,7 +307,7 @@ auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
     _grid.Clear();
     auto entities = reg.GetEntitiesWith<ALifeComponent>();
     for (Entity e: entities) {
-        _grid.UpdateEntity(reg, e, JPH::RVec3(-1, -1, -1));
+        _grid.UpdateEntity(reg, e, DVec3(-1, -1, -1));
     }
 
     return true;

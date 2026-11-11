@@ -26,6 +26,8 @@
 //                    isolated ray debris.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -149,9 +151,9 @@ struct RayTracedReflectionNoiseTestSuite {
             gfx.post.giIntensity             = 0.0f;
             gfx.post.vignetteIntensity       = 0.0f;
             gfx.environment.ambientExposure  = 3.0f;
-            gfx.environment.skyZenith        = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            gfx.environment.skyHorizon       = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            gfx.environment.skyGround        = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+            gfx.environment.skyZenith        = FVec4(0.001f, 0.002f, 0.006f, 1.0f);
+            gfx.environment.skyHorizon       = FVec4(0.004f, 0.006f, 0.012f, 1.0f);
+            gfx.environment.skyGround        = FVec4(0.001f, 0.001f, 0.002f, 1.0f);
         });
     }
 
@@ -232,9 +234,9 @@ struct RayTracedReflectionNoiseTestSuite {
         const ZHLN::Entity sunEnt = reg.Create();
         reg.Add(
             sunEnt,
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
             ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 120.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 120.0f, .direction = FVec3(0.0f, 0.75f, 0.66f).Normalized()
             }
         );
 
@@ -243,7 +245,7 @@ struct RayTracedReflectionNoiseTestSuite {
             return false;
         }
         ZHLN::Camera& cam = camComp->camera;
-        cam.position = JPH::Vec3(0.0f, 5.0f, 20.0f);
+        cam.position = FVec3(0.0f, 5.0f, 20.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = -22.0f;
         cam.fov      = 60.0f;

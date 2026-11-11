@@ -25,7 +25,10 @@
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 
 #include <cstdint>
@@ -39,32 +42,32 @@ static_assert(std::is_standard_layout_v<Physics::BodyID> && std::is_trivially_co
 static_assert(std::is_standard_layout_v<Physics::RaycastResult> && std::is_trivially_copyable_v<Physics::RaycastResult>);
 static_assert(std::is_standard_layout_v<Physics::BodyStateSnapshot> && std::is_trivially_copyable_v<Physics::BodyStateSnapshot>);
 static_assert(std::is_standard_layout_v<Physics::DebugDrawData> && std::is_trivially_copyable_v<Physics::DebugDrawData>);
-static_assert(std::is_standard_layout_v<Float3> && std::is_trivially_copyable_v<Float3>);
-static_assert(std::is_standard_layout_v<Double3> && std::is_trivially_copyable_v<Double3>);
+static_assert(std::is_standard_layout_v<FVec3> && std::is_trivially_copyable_v<FVec3>);
+static_assert(std::is_standard_layout_v<DVec3> && std::is_trivially_copyable_v<DVec3>);
 
 struct ISimulation : IObject {
-    [[nodiscard]] virtual Physics::RaycastResult Raycast(Double3 origin, Float3 direction, float maxDistance,
+    [[nodiscard]] virtual Physics::RaycastResult Raycast(DVec3 origin, FVec3 direction, float maxDistance,
                                                          Physics::BodyID ignore) const noexcept = 0;
 
     // Writes up to `capacity` ids and returns how many bodies are actually in
     // the sphere, which may be more. A caller that wants them all sizes its
     // buffer from the first answer and asks again; nothing is allocated on
     // either side of the boundary.
-    [[nodiscard]] virtual uint32_t BodiesInSphere(Double3 center, float radius, Physics::BodyID* bodies,
+    [[nodiscard]] virtual uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies,
                                                   uint32_t capacity) const noexcept = 0;
 
     // COM::Option is the boundary's spelling of the facade's std::optional:
     // a fixed layout of the value plus a flag, returned by value, with an
     // implicit conversion to std::optional in the caller's own TU.
-    [[nodiscard]] virtual Option<Double3> BodyPosition(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual Option<DVec3> BodyPosition(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual Option<Physics::BodyStateSnapshot> BodyState(Physics::BodyID body) const noexcept = 0;
 
-    [[nodiscard]] virtual Float3 CharacterVelocity(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual FVec3 CharacterVelocity(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual bool   IsCharacterOnGround(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual bool   IsBodyDynamic(Physics::BodyID body) const noexcept = 0;
 
-    virtual void AddImpulse(Physics::BodyID body, Float3 impulse) noexcept = 0;
-    virtual void SetCharacterVelocity(Physics::BodyID body, Float3 velocity) noexcept = 0;
+    virtual void AddImpulse(Physics::BodyID body, FVec3 impulse) noexcept = 0;
+    virtual void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
     virtual void DestroyBody(Physics::BodyID body) noexcept = 0;
     virtual void DestroyBodies(Span<const Physics::BodyID> bodies) noexcept = 0;
     virtual void DestroyRagdolls(Span<const Physics::RagdollID> ragdolls) noexcept = 0;
@@ -74,7 +77,7 @@ struct ISimulation : IObject {
     // physics yourself.
     virtual void Step(float deltaTime) noexcept = 0;
 
-    [[nodiscard]] virtual Physics::BodyID CreateCharacter(Double3 position) noexcept = 0;
+    [[nodiscard]] virtual Physics::BodyID CreateCharacter(DVec3 position) noexcept = 0;
 
     // Borrowed vertex spans owned by the engine's debug buffers. They stay
     // valid until the next call or the next step, and are never freed by the
@@ -83,7 +86,7 @@ struct ISimulation : IObject {
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
-    [[nodiscard]] auto Raycast(Double3 origin, Float3 direction) const noexcept -> Physics::RaycastResult {
+    [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction) const noexcept -> Physics::RaycastResult {
         return Raycast(origin, direction, 1000.0F, Physics::BodyID {});
     }
 
@@ -94,7 +97,7 @@ struct ISimulation : IObject {
     // Count, then fill. Safe to ask twice because this is a pure query: the
     // vector is allocated by the caller's allocator, the library writes
     // through the bare pointer, and the caller's allocator frees it.
-    [[nodiscard]] auto BodiesInSphere(Double3 center, float radius) const -> std::vector<Physics::BodyID> {
+    [[nodiscard]] auto BodiesInSphere(DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
         const uint32_t total = BodiesInSphere(center, radius, nullptr, 0);
         if (total == 0) return {};
 

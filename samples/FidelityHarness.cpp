@@ -34,6 +34,7 @@
 // scenario set and compares the frames against the reference goldens.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
@@ -320,13 +321,13 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     const float thetaRad = JPH::DegreesToRadians(scenario.orbit.theta);
     const float phiRad   = JPH::DegreesToRadians(scenario.orbit.phi);
 
-    const JPH::Vec3 direction(
+    const FVec3 direction(
         std::sin(phiRad) * std::sin(thetaRad),
         std::cos(phiRad),
         std::sin(phiRad) * std::cos(thetaRad)
     );
 
-    const JPH::Vec3 target(scenario.target.x, scenario.target.y, scenario.target.z);
+    const FVec3 target(scenario.target.x, scenario.target.y, scenario.target.z);
     camera.position = target + (direction * scenario.orbit.radius);
     camera.fov      = scenario.verticalFov;
     camera.nearZ    = 0.01f;
@@ -334,9 +335,9 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 
     // The view frame is -direction even when radius is zero and eye == target.
     // Decompose the orbit angles, not the eye-to-target displacement.
-    const JPH::Vec3 forward = -direction;
-    camera.pitch            = JPH::RadiansToDegrees(std::asin(forward.GetY()));
-    camera.yaw              = JPH::RadiansToDegrees(std::atan2(forward.GetZ(), forward.GetX()));
+    const FVec3 forward = -direction;
+    camera.pitch            = JPH::RadiansToDegrees(std::asin(forward.y));
+    camera.yaw              = JPH::RadiansToDegrees(std::atan2(forward.z, forward.x));
 }
 
 // ============================================================================
@@ -755,7 +756,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     ZHLN::Camera& camera = cameraComp->camera;
     SetFidelityCamera(camera, scenario);
-    if (!std::isfinite(camera.position.GetX()) || !std::isfinite(camera.position.GetY()) || !std::isfinite(camera.position.GetZ()) ||
+    if (!std::isfinite(camera.position.x) || !std::isfinite(camera.position.y) || !std::isfinite(camera.position.z) ||
         !std::isfinite(camera.yaw) || !std::isfinite(camera.pitch)) {
         ZHLN::Log("[Fidelity] Invalid camera for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;

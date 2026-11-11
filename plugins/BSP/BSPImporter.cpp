@@ -10,6 +10,7 @@
 // one node per light so ModelLight's node chain carries its transform.
 
 #include "BSPImporter.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPLighting.hpp"
 #include "BSPRead.hpp"
 #include "SourceVFS.hpp"
@@ -493,10 +494,10 @@ void AssemblePrefabParts(
         if (options.buildColliders && !part.skyboxLayer) {
             modelPart.meshCollider = Physics::CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
 
-            const JPH::Vec3 localCenter(
+            const FVec3 localCenter(
                 (part.boundsMin.x + part.boundsMax.x) * 0.5f, (part.boundsMin.y + part.boundsMax.y) * 0.5f, (part.boundsMin.z + part.boundsMax.z) * 0.5f
             );
-            const JPH::Vec3 halfExtents(
+            const FVec3 halfExtents(
                 std::max((part.boundsMax.x - part.boundsMin.x) * 0.5f, 0.01f), std::max((part.boundsMax.y - part.boundsMin.y) * 0.5f, 0.01f),
                 std::max((part.boundsMax.z - part.boundsMin.z) * 0.5f, 0.01f)
             );
@@ -527,8 +528,8 @@ void AssemblePrefabParts(
                     continue;
                 }
                 JPH::StaticCompoundShapeSettings compoundSettings;
-                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), part.meshCollider);
-                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), collisionShape);
+                compoundSettings.AddShape(FVec3::sZero(), JPH::Quat::sIdentity(), part.meshCollider);
+                compoundSettings.AddShape(FVec3::sZero(), JPH::Quat::sIdentity(), collisionShape);
                 const auto compound = compoundSettings.Create();
                 if (!compound.IsValid()) {
                     continue;
@@ -550,30 +551,30 @@ void AssemblePrefabParts(
 // Translates every stream (render parts and the collision-only fold) by
 // offset. Used to re-base rotating doors on their hinge pivot so the entity
 // transform -- placed at the pivot -- rotates the geometry about it.
-void ShiftImportedGeometry(ImportedMapData& data, JPH::Vec3Arg offset) {
+void ShiftImportedGeometry(ImportedMapData& data, FVec3 offset) {
     const auto shiftStreams = [offset](MaterialStreams& streams) {
         for (VertexPosition& vertex: streams.positions) {
-            vertex.position[0] += offset.GetX();
-            vertex.position[1] += offset.GetY();
-            vertex.position[2] += offset.GetZ();
+            vertex.position[0] += offset.x;
+            vertex.position[1] += offset.y;
+            vertex.position[2] += offset.z;
         }
-        streams.boundsMin.x += offset.GetX();
-        streams.boundsMin.y += offset.GetY();
-        streams.boundsMin.z += offset.GetZ();
-        streams.boundsMax.x += offset.GetX();
-        streams.boundsMax.y += offset.GetY();
-        streams.boundsMax.z += offset.GetZ();
+        streams.boundsMin.x += offset.x;
+        streams.boundsMin.y += offset.y;
+        streams.boundsMin.z += offset.z;
+        streams.boundsMax.x += offset.x;
+        streams.boundsMax.y += offset.y;
+        streams.boundsMax.z += offset.z;
     };
     for (MaterialStreams& part: data.parts) {
         shiftStreams(part);
     }
     shiftStreams(data.collisionOnly);
-    data.boundsMin.x += offset.GetX();
-    data.boundsMin.y += offset.GetY();
-    data.boundsMin.z += offset.GetZ();
-    data.boundsMax.x += offset.GetX();
-    data.boundsMax.y += offset.GetY();
-    data.boundsMax.z += offset.GetZ();
+    data.boundsMin.x += offset.x;
+    data.boundsMin.y += offset.y;
+    data.boundsMin.z += offset.z;
+    data.boundsMax.x += offset.x;
+    data.boundsMax.y += offset.y;
+    data.boundsMax.z += offset.z;
 }
 
 auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
@@ -669,7 +670,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         "{} fixtures damped{}",
         virtualPath, lighting.entityLightsEmitted, lighting.entityLightsOffered, lighting.droppedBeamCone, lighting.droppedDisabled,
         lighting.ambientAuthored ? "authored" : "default",
-        (imported.ambient.color.GetX() + imported.ambient.color.GetY() + imported.ambient.color.GetZ() > 0.0f) ? "" : " (zero)", lighting.emissiveFaces,
+        (imported.ambient.color.x + imported.ambient.color.y + imported.ambient.color.z > 0.0f) ? "" : " (zero)", lighting.emissiveFaces,
         lighting.emissiveSurfaces, lighting.emissiveAreaSquareMetres, emissiveProbeDropped, lighting.emissiveDroppedCap, lighting.emissiveFixtureDamped,
         lighting.floorEnforced ? " [floor enforced]" : "");
 
@@ -744,12 +745,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         // leave them in world space. Re-base only the latter: unconditionally
         // subtracting the entity pivot sends already-local render geometry back
         // to the map origin, while the fallback collider remains at the door.
-        const JPH::Vec3 geometryCenter(
+        const FVec3 geometryCenter(
             (subImported.boundsMin.x + subImported.boundsMax.x) * 0.5f,
             (subImported.boundsMin.y + subImported.boundsMax.y) * 0.5f,
             (subImported.boundsMin.z + subImported.boundsMax.z) * 0.5f
         );
-        if ((geometryCenter - sub.pivot).LengthSq() < geometryCenter.LengthSq()) {
+        if ((geometryCenter - sub.pivot).LengthSquared() < geometryCenter.LengthSquared()) {
             ShiftImportedGeometry(subImported, -sub.pivot);
         }
 
@@ -823,9 +824,9 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
 
     // Keep the term at the material's own chromaticity and let its luminance
     // set the magnitude: a red neon sign emits red, not a grey scaled by red.
-    emission.tint = JPH::Vec3(vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z);
+    emission.tint = FVec3(vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z);
     if (Rec709Luma(emission.tint) < 1e-4f) {
-        emission.tint = JPH::Vec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
+        emission.tint = FVec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
     }
     return emission;
 }
@@ -891,7 +892,7 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // a lamp reads the same whichever shader class the mapper reached for.
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
     const float scale = emission.strength * kSourceEmissionHdrScale / luma;
-    desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
+    desc.emissive     = JPH::Float4(emission.tint.x * scale, emission.tint.y * scale, emission.tint.z * scale, 1.0f);
 
     // The additive term carries the surface's own art whenever the material
     // builder did not already say so: a screen glows with its picture, not

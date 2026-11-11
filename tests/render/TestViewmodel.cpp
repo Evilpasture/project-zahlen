@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -113,8 +114,8 @@ struct ViewmodelTestSuite {
             // 1. Sun light
             const ZHLN::Entity sunEnt = reg.Create();
             reg.Add(
-                sunEnt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 10.0f, 0.0f)},
-                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 150.0f}
+                sunEnt, ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 10.0f, 0.0f)},
+                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 1.0f, 1.0f), .intensity = 150.0f}
             );
 
             // 2. Spawn viewmodel weapon box in front of camera (-Z direction)
@@ -167,7 +168,7 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
+            cam.position = FVec3(0.0f, 1.5f, 2.0f);
             cam.yaw      = -90.0f; // Look directly along -Z
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;

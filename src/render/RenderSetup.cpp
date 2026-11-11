@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Zahlen/Math/Camera.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "Zahlen/Math/Math3D.hpp"
 #include "render/GpuPack.hpp"
 #include "render/RenderInternal.hpp"
@@ -21,7 +22,7 @@ void RenderContext::ClearDrawQueues() noexcept {
 void RenderContext::SetFrameData(
     const Camera&              cam,
     const FrameData&           frame,
-    const ZHLN::Mat44&         shadowProjView,
+    const ZHLN::Mat4x4&         shadowProjView,
     std::span<const LightDesc> lights,
     float                      dt
 ) noexcept {
@@ -40,7 +41,7 @@ void RenderContext::SetFrameData(
     const auto  sceneVp  = _impl->EffectiveViewport();
     const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
-    Float4 cascadeSplits {
+    FVec4 cascadeSplits {
         cam.nearZ + (cam.farZ - cam.nearZ) * 0.08f, cam.nearZ + (cam.farZ - cam.nearZ) * 0.22f, cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f,
         cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f
     };
@@ -58,8 +59,8 @@ void RenderContext::SetFrameData(
     gpuUniforms.sh              = _impl->iblPayload.shCoeffs;
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
-    JPH::Vec3 sunDir = frame.sunDirection;
-    if (sunDir.LengthSq() > 1e-6f) {
+    FVec3 sunDir = frame.sunDirection;
+    if (sunDir.LengthSquared() > 1e-6f) {
         sunDir = sunDir.Normalized();
     }
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
@@ -100,13 +101,13 @@ void RenderContext::SetGISettings(GISettings settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept {
+void RenderContext::Impl::AllocateShadowTiles(const FVec3& viewPos) noexcept {
     shadowAtlas.BeginFrame();
 
     std::array<JPH::Mat44, ShadowAtlas::kPointFaces> faces {};
     for (size_t index = 0; index < submittedLights.size(); ++index) {
         const LightDesc& desc          = submittedLights[index];
-        const JPH::Vec3  lightPosition = desc.position;
+        const FVec3  lightPosition = desc.position;
         const bool       isPoint       = desc.type == LightType::Point;
         const bool       isSpot        = desc.type == LightType::Spot;
         if (!desc.castsShadow || (!isPoint && !isSpot)) {

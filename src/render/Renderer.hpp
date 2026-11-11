@@ -39,7 +39,7 @@ struct IBLPayload {
     Vk::Image     visualSkyImage;
     Vk::ImageView visualSkyView;
 
-    std::array<ZHLN::Float4, 9> shCoeffs {};
+    std::array<ZHLN::FVec4, 9> shCoeffs {};
     VkFormat                    prefilteredFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
     uint64_t                    contentHash       = 0;
     int                         environmentMode   = 0;

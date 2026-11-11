@@ -300,14 +300,14 @@ public:
     }
 
     // ------------------------------------------------------------ ISimulation
-    [[nodiscard]] Physics::RaycastResult Raycast(Double3 origin, Float3 direction, float maxDistance,
+    [[nodiscard]] Physics::RaycastResult Raycast(DVec3 origin, FVec3 direction, float maxDistance,
                                                  Physics::BodyID ignore) const noexcept override {
         return Sim().Raycast(origin, direction, maxDistance, ignore);
     }
 
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
-    [[nodiscard]] uint32_t BodiesInSphere(Double3 center, float radius, Physics::BodyID* bodies,
+    [[nodiscard]] uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies,
                                           uint32_t capacity) const noexcept override {
         const std::vector<Physics::BodyID> found = Sim().BodiesInSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
@@ -317,8 +317,8 @@ public:
         return total;
     }
 
-    [[nodiscard]] Option<Double3> BodyPosition(Physics::BodyID body) const noexcept override {
-        const std::optional<Double3> found = Sim().BodyPosition(body);
+    [[nodiscard]] Option<DVec3> BodyPosition(Physics::BodyID body) const noexcept override {
+        const std::optional<DVec3> found = Sim().BodyPosition(body);
         if (!found.has_value()) return std::nullopt;
         return *found;
     }
@@ -329,7 +329,7 @@ public:
         return *found;
     }
 
-    [[nodiscard]] Float3 CharacterVelocity(Physics::BodyID body) const noexcept override {
+    [[nodiscard]] FVec3 CharacterVelocity(Physics::BodyID body) const noexcept override {
         return Sim().CharacterVelocity(body);
     }
 
@@ -341,11 +341,11 @@ public:
         return Sim().IsBodyDynamic(body);
     }
 
-    void AddImpulse(Physics::BodyID body, Float3 impulse) noexcept override {
+    void AddImpulse(Physics::BodyID body, FVec3 impulse) noexcept override {
         Sim().AddImpulse(body, impulse);
     }
 
-    void SetCharacterVelocity(Physics::BodyID body, Float3 velocity) noexcept override {
+    void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept override {
         Sim().SetCharacterVelocity(body, velocity);
     }
 
@@ -365,7 +365,7 @@ public:
         Sim().Step(deltaTime);
     }
 
-    [[nodiscard]] Physics::BodyID CreateCharacter(Double3 position) noexcept override {
+    [[nodiscard]] Physics::BodyID CreateCharacter(DVec3 position) noexcept override {
         return Sim().CreateCharacter(position);
     }
 
@@ -406,7 +406,7 @@ public:
         Sound().SetVoiceLooping(voice, looping);
     }
 
-    void SetVoicePosition(VoiceID voice, Float3 position) noexcept override {
+    void SetVoicePosition(VoiceID voice, FVec3 position) noexcept override {
         Sound().SetVoicePosition(voice, position);
     }
 

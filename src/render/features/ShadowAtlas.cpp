@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/features/ShadowAtlas.hpp"
-#include <Jolt/Math/Float2.h>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Jolt/Math/Vec2.h>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
@@ -18,9 +20,9 @@ namespace {
 constexpr float kAtlasNearPlane = 0.05f;
 
 struct FaceBasis {
-    JPH::Vec3 x;
-    JPH::Vec3 y;
-    JPH::Vec3 z;
+    FVec3 x;
+    FVec3 y;
+    FVec3 z;
 };
 
 constexpr std::array<Mat3, ShadowAtlas::kPointFaces> kFaceAxes = {{
@@ -41,24 +43,24 @@ constexpr std::array<Mat3, ShadowAtlas::kPointFaces> kFaceAxes = {{
     };
 }
 
-[[nodiscard]] auto BasisToView(const FaceBasis& basis, const JPH::Vec3& origin) noexcept -> JPH::Mat44 {
+[[nodiscard]] auto BasisToView(const FaceBasis& basis, const FVec3& origin) noexcept -> JPH::Mat44 {
     const JPH::Mat44 rotation {
-        JPH::Vec4 {basis.x.GetX(), basis.y.GetX(), basis.z.GetX(), 0.0f},
-        JPH::Vec4 {basis.x.GetY(), basis.y.GetY(), basis.z.GetY(), 0.0f},
-        JPH::Vec4 {basis.x.GetZ(), basis.y.GetZ(), basis.z.GetZ(), 0.0f},
-        JPH::Vec4 {0.0f, 0.0f, 0.0f, 1.0f},
+        FVec4 {basis.x.x, basis.y.x, basis.z.x, 0.0f},
+        FVec4 {basis.x.y, basis.y.y, basis.z.y, 0.0f},
+        FVec4 {basis.x.z, basis.y.z, basis.z.z, 0.0f},
+        FVec4 {0.0f, 0.0f, 0.0f, 1.0f},
     };
-    const JPH::Vec3 shift = rotation * (-origin);
+    const FVec3 shift = rotation * (-origin);
     JPH::Mat44      view  = rotation;
-    view.SetColumn4(3, JPH::Vec4 {shift.GetX(), shift.GetY(), shift.GetZ(), 1.0f});
+    view.SetColumn4(3, FVec4 {shift.x, shift.y, shift.z, 1.0f});
     return view;
 }
 
-[[nodiscard]] auto ConeToView(const JPH::Vec3& direction, const JPH::Vec3& origin) noexcept -> JPH::Mat44 {
-    const JPH::Vec3 forward = direction.LengthSq() > 1e-8f ? direction.Normalized() : JPH::Vec3 {0.0f, 0.0f, -1.0f};
-    const JPH::Vec3 hint    = (std::abs(forward.GetY()) > 0.99f) ? JPH::Vec3::sAxisZ() : JPH::Vec3::sAxisY();
-    const JPH::Vec3 right   = hint.Cross(forward).NormalizedOr(JPH::Vec3::sAxisX());
-    const FaceBasis basis {.x = right, .y = forward.Cross(right), .z = -forward};
+[[nodiscard]] auto ConeToView(const FVec3& direction, const FVec3& origin) noexcept -> JPH::Mat44 {
+    const FVec3 forward = direction.LengthSquared() > 1e-8f ? direction.Normalized() : FVec3 {0.0f, 0.0f, -1.0f};
+    const FVec3 hint    = (std::abs(forward.y) > 0.99f) ? FVec3::sAxisZ() : FVec3::sAxisY();
+    const FVec3 right   = Cross(hint, forward).NormalizedOr(FVec3::sAxisX());
+    const FaceBasis basis {.x = right, .y = Cross(forward, right), .z = -forward};
     return BasisToView(basis, origin);
 }
 
@@ -69,8 +71,8 @@ auto ShadowAtlas::FaceCount(bool isPoint, float outerConeRadians) noexcept -> ui
 }
 
 auto ShadowAtlas::MakeFaceMatrices(
-    const JPH::Vec3& position,
-    const JPH::Vec3& direction,
+    const FVec3& position,
+    const FVec3& direction,
     float            range,
     bool             isPoint,
     float            outerConeRadians,
@@ -93,8 +95,8 @@ auto ShadowAtlas::MakeFaceMatrices(
     return kPointFaces;
 }
 
-auto ShadowAtlas::MakeLightKey(LightType type, const JPH::Vec3& position, float intensity, float range) noexcept -> uint64_t {
-    const float parts[] = {position.GetX(), position.GetY(), position.GetZ(), intensity, range};
+auto ShadowAtlas::MakeLightKey(LightType type, const FVec3& position, float intensity, float range) noexcept -> uint64_t {
+    const float parts[] = {position.x, position.y, position.z, intensity, range};
     uint64_t    hash    = Hash64(reinterpret_cast<const char*>(parts), sizeof(parts));
     const auto  kind    = static_cast<uint32_t>(type);
     hash ^= Hash64(reinterpret_cast<const char*>(&kind), sizeof(kind)) + kGolden64 + (hash << 6) + (hash >> 2);
@@ -202,7 +204,7 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
     for (uint32_t face = 0; face < faceCount; ++face) {
         ShadowTile tileEntry {};
         tileEntry.viewProj = req.faces[face];
-        tileEntry.uvOrigin = ZHLN::Float2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
+        tileEntry.uvOrigin = ZHLN::FVec2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
         tileEntry.uvScale  = static_cast<float>(tile) * invAtlas;
         _tiles.push_back(tileEntry);
     }

@@ -77,7 +77,7 @@ module;
 #include <Jolt/Core/UnorderedMap.h>
 #include <Jolt/Geometry/AABox.h>
 #include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Math.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Real.h>
@@ -206,19 +206,19 @@ using JPH::AABox;
 using JPH::BodyID;
 using JPH::Cos;
 using JPH::DegreesToRadians;
-using JPH::DVec3;
+using DVec3;
 using JPH::EMotionType;
 using JPH::Mat44;
 using JPH::ObjectLayer;
 using JPH::Quat;
 using JPH::RadiansToDegrees;
 using JPH::Ref;
-using JPH::RVec3;
+using DVec3;
 using JPH::Shape;
 using JPH::ShapeRefC;
 using JPH::Sin;
 using JPH::Tan;
-using JPH::Vec3;
+using FVec3;
 using JPH::Vec4;
 } // namespace JPH
 

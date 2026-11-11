@@ -3,6 +3,7 @@
 
 // extensions/Terrain/TerrainSystem.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "TerrainSystem.hpp"
 #include "TerrainFactory.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -236,18 +237,18 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
         }
 
         const auto trans    = reg.Get<Components::TransformComponent>(e);
-        JPH::Vec3  pos      = JPH::Vec3::sZero();
+        FVec3  pos      = FVec3::sZero();
         if (trans) {
             pos = trans->position;
         }
         float       halfSize = tData->worldSize * 0.5f;
 
-        float localX = worldX - pos.GetX();
-        float localZ = worldZ - pos.GetZ();
+        float localX = worldX - pos.x;
+        float localZ = worldZ - pos.z;
 
         if (localX >= -halfSize && localX <= halfSize && localZ >= -halfSize && localZ <= halfSize) {
             if (tData->heights.empty() || tData->sampleCount < 2) {
-                return pos.GetY();
+                return pos.y;
             }
 
             // Map [-halfSize, halfSize] -> [0, sampleCount - 1]
@@ -270,7 +271,7 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
             float h0 = h00 + tx * (h10 - h00);
             float h1 = h01 + tx * (h11 - h01);
 
-            return pos.GetY() + (h0 + tz * (h1 - h0));
+            return pos.y + (h0 + tz * (h1 - h0));
         }
     }
 

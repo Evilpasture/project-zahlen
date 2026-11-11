@@ -5,18 +5,21 @@
 #pragma once
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
 namespace ZHLN {
 
 struct SceneView {
-    ZHLN::Mat44  viewMatrix        = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  projMatrix        = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  viewProjMatrix    = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  invViewProjMatrix = ZHLN::Mat44::sIdentity();
-    ZHLN::Float3 worldPosition {};
+    ZHLN::Mat4x4  viewMatrix        = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  projMatrix        = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  viewProjMatrix    = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  invViewProjMatrix = ZHLN::Mat4x4::Identity();
+    ZHLN::FVec3 worldPosition {};
     ViewportRect viewport       = {};
     FrameTarget  target         = {};
     Frustum      frustum        = {};

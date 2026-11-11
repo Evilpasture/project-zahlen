@@ -75,7 +75,7 @@ struct DrawCommand {
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;
-    ZHLN::Float4                           morphWeights;
+    ZHLN::FVec4                           morphWeights;
 
     DrawFlags            flags;
 };

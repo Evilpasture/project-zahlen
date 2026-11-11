@@ -21,7 +21,7 @@
 // that is the point of a byte-copy boundary, and requiring the engine's own
 // type spellings would mean requiring the engine's headers, which is exactly
 // what the COM layer exists to avoid. So a consumer's `alignas(16) float[16]`
-// matches the engine's `ZHLN::Mat44`, as it should: the bytes are the same.
+// matches the engine's `ZHLN::Mat4x4`, as it should: the bytes are the same.
 //
 // The cost is that this cannot distinguish a float from an int32 of the same
 // size at the same offset. That is an accepted limit, not an oversight: it

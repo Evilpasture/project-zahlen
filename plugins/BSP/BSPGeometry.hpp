@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPGeometry.hpp
 //
 // The import step: BSP lumps in, Zahlen-native vertex streams out. The
@@ -205,9 +206,9 @@ struct BspPointLight {
     std::string name;
     LightType   type = LightType::Point; // Direct reuse of engine enum
 
-    JPH::Vec3 position {0.0f, 0.0f, 0.0f};
-    JPH::Vec3 direction {0.0f, -1.0f, 0.0f};
-    JPH::Vec3 color {1.0f, 1.0f, 1.0f};
+    FVec3 position {0.0f, 0.0f, 0.0f};
+    FVec3 direction {0.0f, -1.0f, 0.0f};
+    FVec3 color {1.0f, 1.0f, 1.0f};
     float     intensity        = 1.0f;
     float     innerConeRadians = 0.0f;
     float     outerConeRadians = 0.78539816339f; // Default 45 deg
@@ -230,7 +231,7 @@ struct BspPointLight {
 // the SH irradiance RTGI/DDGI probes start from, so a map with no sun still
 // has an irradiance floor. See BSPLighting.hpp for the reading rules.
 struct AmbientTerm {
-    JPH::Vec3 color {0.0f, 0.0f, 0.0f};
+    FVec3 color {0.0f, 0.0f, 0.0f};
     float     intensity = 0.0f;
     bool      authored  = false; // a light_environment was found
 };
@@ -241,9 +242,9 @@ struct AmbientTerm {
 // BSPLighting.hpp for the material heuristics that decide a face belongs here.
 struct EmissiveSurface {
     std::string materialName;
-    JPH::Vec3   position {0.0f, 0.0f, 0.0f};
-    JPH::Vec3   normal {0.0f, 1.0f, 0.0f};
-    JPH::Vec3   color {1.0f, 1.0f, 1.0f};
+    FVec3   position {0.0f, 0.0f, 0.0f};
+    FVec3   normal {0.0f, 1.0f, 0.0f};
+    FVec3   color {1.0f, 1.0f, 1.0f};
     float       areaSquareMetres = 0.0f;
     float       areaSquareInches = 0.0f;
     float       strength         = 0.0f;   // authored self-illumination, 0..1
@@ -341,8 +342,8 @@ struct ImportedMapData {
 
 // Position transform for the options in force (Source Z-up inches -> engine
 // Y-up metres by default). Exposed so scene importing converts identically.
-[[nodiscard]] auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
-[[nodiscard]] auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
+[[nodiscard]] auto ConvertPosition(const ImportOptions& options, FVec3 in) noexcept -> FVec3;
+[[nodiscard]] auto ConvertDirection(const ImportOptions& options, FVec3 in) noexcept -> FVec3;
 
 // Rec.709 luma of the texdata reflectivity vbsp baked for a face's material.
 // Source's `reflectivity` is the material's diffuse albedo in linear 0-1 and is
@@ -414,7 +415,7 @@ void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) no
 struct InteractiveSubmodel {
     int32_t   modelIndex = -1;
     bool      rotating   = false;
-    JPH::Vec3 pivot {0.0f, 0.0f, 0.0f};
+    FVec3 pivot {0.0f, 0.0f, 0.0f};
 };
 
 [[nodiscard]] auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;

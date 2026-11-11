@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Widget/BarStrip.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <format>
@@ -77,7 +78,7 @@ void BarStrip(GUI::Frame& ui, std::span<const float> samples, const BarStripStyl
 
         const float height = absent ? style.minBarHeight : BarHeight(value, peak, style);
 
-        JPH::Vec4 ink = style.ink;
+        FVec4 ink = style.ink;
         if (style.inkFor != nullptr) {
             ink = style.inkFor(style.inkUser, bar, value, absent);
         } else if (absent) {

@@ -3,6 +3,7 @@
 
 // extensions/Terrain/TerrainFactory.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TerrainFactory.hpp"
@@ -11,7 +12,10 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -34,12 +38,12 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         return heights[x + z * sampleCount];
     };
 
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
+    auto get_normal = [&](int x, int z) -> FVec3 {
         float hL = get_height(x - 1, z);
         float hR = get_height(x + 1, z);
         float hD = get_height(x, z - 1);
         float hU = get_height(x, z + 1);
-        return JPH::Vec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
+        return FVec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
     };
 
     std::vector<VertexPosition>     positions;
@@ -66,10 +70,10 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             float dx_ = -halfSize + (x + 1) * dx;
             float dz_ = -halfSize + (z + 1) * dz;
 
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
+            FVec3 nA = get_normal(x, z);
+            FVec3 nB = get_normal(x + 1, z);
+            FVec3 nC = get_normal(x, z + 1);
+            FVec3 nD = get_normal(x + 1, z + 1);
 
             auto fetch_color = [&](int idx) -> PackedRGBA8 {
                 if (colorsRGBA == nullptr) {
@@ -80,23 +84,23 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             };
 
             VertexPosition     posA {{ax, heights[idxA], az}};
-            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.x, nA.y, nA.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxA)};
 
             VertexPosition     posB {{bx, heights[idxB], bz}};
-            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.x, nB.y, nB.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceB = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxB)
             };
 
             VertexPosition     posC {{cx, heights[idxC], cz}};
-            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.x, nC.y, nC.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceC = {
                      .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxC)
             };
 
             VertexPosition     posD {{dx_, heights[idxD], dz_}};
-            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.x, nD.y, nD.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceD = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxD)
             };
@@ -216,14 +220,14 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     tangentFrames.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
     surfaces.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
 
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
+    auto get_normal = [&](int x, int z) -> FVec3 {
         float     posX = -halfSize + x * dx;
         float     posZ = -halfSize + z * dz;
         float     hL   = (x > 0) ? outHeights[(x - 1) + z * sampleCount] : get_height(posX - dx, posZ);
         float     hR   = (x < sampleCount - 1) ? outHeights[(x + 1) + z * sampleCount] : get_height(posX + dx, posZ);
         float     hD   = (z > 0) ? outHeights[x + (z - 1) * sampleCount] : get_height(posX, posZ - dz);
         float     hU   = (z < sampleCount - 1) ? outHeights[x + (z + 1) * sampleCount] : get_height(posX, posZ + dz);
-        JPH::Vec3 normal(hL - hR, 2.0f * dx, hD - hU);
+        FVec3 normal(hL - hR, 2.0f * dx, hD - hU);
         return normal.Normalized();
     };
 
@@ -248,13 +252,13 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             float cy = outHeights[idxC];
             float dy = outHeights[idxD];
 
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
+            FVec3 nA = get_normal(x, z);
+            FVec3 nB = get_normal(x + 1, z);
+            FVec3 nC = get_normal(x, z + 1);
+            FVec3 nD = get_normal(x + 1, z + 1);
 
-            auto get_color = [&](float y, JPH::Vec3 normal) -> PackedRGBA8 {
-                float slope = normal.GetY();
+            auto get_color = [&](float y, FVec3 normal) -> PackedRGBA8 {
+                float slope = normal.y;
                 float normY = y / maxHeight;
 
                 if (type == TerrainType::Snow) {
@@ -291,23 +295,23 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             };
 
             VertexPosition     posA = {{ax, ay, az}};
-            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.x, nA.y, nA.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(ay, nA)};
 
             VertexPosition     vB = {{bx, by, bz}};
-            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.x, nB.y, nB.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceB = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(by, nB)
             };
 
             VertexPosition     vC = {{cx, cy, cz}};
-            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.x, nC.y, nC.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceC = {
                      .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(cy, nC)
             };
 
             VertexPosition     vD = {{dx_, dy, dz_}};
-            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.x, nD.y, nD.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceD = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(dy, nD)
             };
@@ -406,7 +410,7 @@ auto CreateTerrainFromData(
     JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
@@ -484,7 +488,7 @@ auto CreateTerrain(
     JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});

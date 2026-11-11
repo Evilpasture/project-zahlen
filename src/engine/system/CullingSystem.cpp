@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include "CullingSystem.hpp"
 #include <Zahlen/Engine/VisibilityList.hpp>
@@ -37,7 +39,7 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
         if (worldTrans) {
             worldMat = worldTrans->world;
         }
-        JPH::Vec3  pos        = worldMat * meshes[i].localCenter;
+        FVec3  pos        = worldMat * meshes[i].localCenter;
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
 
@@ -66,12 +68,12 @@ namespace ZHLN {
 
 namespace {
 
-[[nodiscard]] inline float GetLane(const JPH::Vec4& v, uint32_t lane) noexcept {
+[[nodiscard]] inline float GetLane(const FVec4& v, uint32_t lane) noexcept {
     switch (lane) {
-        case 0:  return v.GetX();
-        case 1:  return v.GetY();
-        case 2:  return v.GetZ();
-        default: return v.GetW();
+        case 0:  return v.x;
+        case 1:  return v.y;
+        case 2:  return v.z;
+        default: return v.w;
     }
 }
 
@@ -96,13 +98,13 @@ struct BatchedFrustum {
         return out;
     }
 
-    void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
-        JPH::Vec4 worstViolation = JPH::Vec4::sReplicate(-1.0f);
+    void Test4(const FVec4& centersX, const FVec4& centersY, const FVec4& centersZ, const FVec4& negInflatedRadii, bool* outVisible) const noexcept {
+        FVec4 worstViolation = FVec4::Splat(-1.0f);
 
         for (uint32_t p = 0; p < kPlaneCount; ++p) {
-            JPH::Vec4 dist = JPH::Vec4::sReplicate(nx[p]) * centersX + JPH::Vec4::sReplicate(ny[p]) * centersY + JPH::Vec4::sReplicate(nz[p]) * centersZ +
-                             JPH::Vec4::sReplicate(pw[p]);
-            worstViolation = JPH::Vec4::sMax(worstViolation, negInflatedRadii - dist);
+            FVec4 dist = FVec4::Splat(nx[p]) * centersX + FVec4::Splat(ny[p]) * centersY + FVec4::Splat(nz[p]) * centersZ +
+                             FVec4::Splat(pw[p]);
+            worstViolation = FVec4::sMax(worstViolation, negInflatedRadii - dist);
         }
 
         for (uint32_t j = 0; j < 4; ++j) {
@@ -181,13 +183,13 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                          const Components::TransformComponent, const Components::SunTagComponent,
                          const Components::EnvironmentSunTagComponent>());
 
-        JPH::Vec3 shadowCenter = cam.position;
+        FVec3 shadowCenter = cam.position;
         float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
-        shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
-        shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
-        shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+        shadowCenter.SetX(std::round(shadowCenter.x / texelSize) * texelSize);
+        shadowCenter.SetY(std::round(shadowCenter.y / texelSize) * texelSize);
+        shadowCenter.SetZ(std::round(shadowCenter.z / texelSize) * texelSize);
 
-        JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
+        FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
         JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
         float      halfWidth      = shadowWidth * 0.5f;
@@ -228,7 +230,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(scratch.shadowFrustum);
 
     std::array<Entity, kBatch>  batchEntities {};
-    std::array<JPH::Vec3, kBatch> batchCenters {};
+    std::array<FVec3, kBatch> batchCenters {};
     std::array<float, kBatch>   batchRadii {};
     std::array<float, kBatch>   batchScaledRadii {};
     std::array<uint32_t, kBatch> batchTris {};
@@ -276,17 +278,17 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             ++n;
         }
 
-        const JPH::Vec4 centersX(batchCenters[0].GetX(), batchCenters[1].GetX(), batchCenters[2].GetX(), batchCenters[3].GetX());
-        const JPH::Vec4 centersY(batchCenters[0].GetY(), batchCenters[1].GetY(), batchCenters[2].GetY(), batchCenters[3].GetY());
-        const JPH::Vec4 centersZ(batchCenters[0].GetZ(), batchCenters[1].GetZ(), batchCenters[2].GetZ(), batchCenters[3].GetZ());
-        const JPH::Vec4 negScaled = JPH::Vec4(
+        const FVec4 centersX(batchCenters[0].x, batchCenters[1].x, batchCenters[2].x, batchCenters[3].x);
+        const FVec4 centersY(batchCenters[0].y, batchCenters[1].y, batchCenters[2].y, batchCenters[3].y);
+        const FVec4 centersZ(batchCenters[0].z, batchCenters[1].z, batchCenters[2].z, batchCenters[3].z);
+        const FVec4 negScaled = FVec4(
             -(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)
         );
 
         mainPlanes.Test4(centersX, centersY, centersZ, negScaled, mainVisible.data());
 
         if (!isFullBright) {
-            const JPH::Vec4 negPlain = JPH::Vec4(-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f));
+            const FVec4 negPlain = FVec4(-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f));
             shadowPlanes.Test4(centersX, centersY, centersZ, negPlain, shadowVisible.data());
         }
 
@@ -325,7 +327,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     if (!camComp) {
         return;
     }
-    const std::array<JPH::Vec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
+    const std::array<FVec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
 
     auto scene = engine.Debug();
 
@@ -348,35 +350,35 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
          {.start = 3, .end = 7}}
     };
 
-    JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
+    FVec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
     for (auto edge: frustumEdges) {
         scene.AddLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
     }
 }
 
-std::array<JPH::Vec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept {
-    // JPH::Vec4's constructor is not constexpr, so this is a constant of the pass
+std::array<FVec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept {
+    // FVec4's constructor is not constexpr, so this is a constant of the pass
     // rather than a compile-time one.
-    const std::array<JPH::Vec4, 8> kClipCorners = {
-        JPH::Vec4 {-1.0f, -1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {1.0f, -1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {1.0f, 1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {-1.0f, 1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {-1.0f, -1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {1.0f, -1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {-1.0f, 1.0f, 1.0f, 1.0f},
+    const std::array<FVec4, 8> kClipCorners = {
+        FVec4 {-1.0f, -1.0f, 0.0f, 1.0f},
+        FVec4 {1.0f, -1.0f, 0.0f, 1.0f},
+        FVec4 {1.0f, 1.0f, 0.0f, 1.0f},
+        FVec4 {-1.0f, 1.0f, 0.0f, 1.0f},
+        FVec4 {-1.0f, -1.0f, 1.0f, 1.0f},
+        FVec4 {1.0f, -1.0f, 1.0f, 1.0f},
+        FVec4 {1.0f, 1.0f, 1.0f, 1.0f},
+        FVec4 {-1.0f, 1.0f, 1.0f, 1.0f},
     };
 
-    std::array<JPH::Vec3, 8> corners {};
-    corners.fill(JPH::Vec3::sZero());
+    std::array<FVec3, 8> corners {};
+    corners.fill(FVec3::sZero());
 
     const JPH::Mat44 invViewProj = viewProj.Inversed();
     for (size_t i = 0; i < kClipCorners.size(); ++i) {
-        const JPH::Vec4 worldPos = invViewProj * kClipCorners[i];
-        const float     w        = worldPos.GetW();
+        const FVec4 worldPos = invViewProj * kClipCorners[i];
+        const float     w        = worldPos.w;
         if (std::abs(w) > 1e-6f) {
-            corners[i] = JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
+            corners[i] = FVec3(worldPos.x / w, worldPos.y / w, worldPos.z / w);
         }
     }
     return corners;

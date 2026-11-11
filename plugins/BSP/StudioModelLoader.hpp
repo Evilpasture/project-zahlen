@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPGeometry.hpp"
 #include "StudioModelTypes.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
@@ -42,7 +43,7 @@ struct StudioMeshPart {
 };
 
 struct StudioPhysicsConvex {
-    std::vector<JPH::Vec3> vertices;
+    std::vector<FVec3> vertices;
 };
 
 struct StudioPhysicsSolid {

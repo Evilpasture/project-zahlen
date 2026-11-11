@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
@@ -20,7 +21,7 @@ inline constexpr uint32_t MAX_NODE_NEIGHBORS = 4;
 enum class NodeType : uint8_t { Wilderness, Hub, Campfire, Lair };
 
 struct Node {
-    JPH::RVec3 position;
+    DVec3 position;
     uint32_t   neighbors[MAX_NODE_NEIGHBORS];
     uint32_t   neighbor_count = 0;
     NodeType   type           = NodeType::Wilderness;
@@ -51,7 +52,7 @@ class ZHLN_STATIC_API LevelGraph {
     explicit LevelGraph(uint32_t node_count);
 
     void               Connect(uint32_t a, uint32_t b);
-    [[nodiscard]] auto FindClosest(JPH::RVec3Arg pos) const -> uint32_t;
+    [[nodiscard]] auto FindClosest(DVec3 pos) const -> uint32_t;
 
     // No locks required. Safe to call concurrently.
     auto FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const -> uint32_t;

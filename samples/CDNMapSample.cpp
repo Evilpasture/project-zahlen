@@ -10,6 +10,7 @@
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
@@ -69,24 +70,24 @@ inline constexpr uint32_t         kTimeout = 180;
     return transform;
 }
 
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3& outMax) {
-    outMin = JPH::Vec3(1e9f, 1e9f, 1e9f);
-    outMax = JPH::Vec3(-1e9f, -1e9f, -1e9f);
+void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax) {
+    outMin = FVec3(1e9f, 1e9f, 1e9f);
+    outMax = FVec3(-1e9f, -1e9f, -1e9f);
     for (const ZHLN::ModelPart& part: prefab.parts) {
         const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const JPH::Vec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const JPH::Vec3  extent      = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
-                                       (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
-        outMin                       = JPH::Vec3::sMin(outMin, center - extent);
-        outMax                       = JPH::Vec3::sMax(outMax, center + extent);
+        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const FVec3  localCenter = (localMin + localMax) * 0.5f;
+        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
+        const FVec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
+        const FVec3  extent      = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
+                                       (model.GetColumn3(2) * halfExtent.z).Abs();
+        outMin                       = FVec3::sMin(outMin, center - extent);
+        outMax                       = FVec3::sMax(outMax, center + extent);
     }
     if (prefab.parts.empty()) {
-        outMin = JPH::Vec3(-1.0f, -1.0f, -1.0f);
-        outMax = JPH::Vec3(1.0f, 1.0f, 1.0f);
+        outMin = FVec3(-1.0f, -1.0f, -1.0f);
+        outMax = FVec3(1.0f, 1.0f, 1.0f);
     }
 }
 
@@ -174,14 +175,14 @@ auto main(int argc, char* argv[]) -> int {
     instances.resize(std::min(written, capacity));
     ZHLN::Log("[CDNMap] Spawned {} instance(s), {} part(s).", written, prefab->parts.size());
 
-    JPH::Vec3 boundsMin;
-    JPH::Vec3 boundsMax;
+    FVec3 boundsMin;
+    FVec3 boundsMax;
     ComputeBounds(*prefab, boundsMin, boundsMax);
-    const JPH::Vec3 center    = (boundsMin + boundsMax) * 0.5f;
+    const FVec3 center    = (boundsMin + boundsMax) * 0.5f;
     const float     radius    = std::max((boundsMax - boundsMin).Length() * 0.5f, 1.0f);
     const float     moveSpeed = std::clamp(radius * 0.35f, 8.0f, 400.0f);
     ZHLN::FreeCam::Attach(*engine, moveSpeed);
-    ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.GetX(), center.GetY(), center.GetZ(), radius);
+    ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
 
     {
         auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
@@ -195,26 +196,26 @@ auto main(int argc, char* argv[]) -> int {
             gfx.shadows.resolution          = 2048;
         });
 
-        const JPH::Vec3  sunPos = center + JPH::Vec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
+        const FVec3  sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
         const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});
         reg.Create(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
-            ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+            ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Sun,
-                .color     = JPH::Vec3(1.00f, 0.97f, 0.92f),
+                .color     = FVec3(1.00f, 0.97f, 0.92f),
                 .intensity = 12.0f,
-                .direction = JPH::Vec3(0.35f, 1.00f, 0.25f).Normalized(),
+                .direction = FVec3(0.35f, 1.00f, 0.25f).Normalized(),
             }
         );
 
         const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
-            const JPH::Vec3 eye   = center + JPH::Vec3(radius * 0.9f, std::max(radius * 0.35f, 8.0f), radius * 0.9f);
-            const JPH::Vec3 dir   = (center - eye).Normalized();
-            const float     yaw   = JPH::RadiansToDegrees(std::atan2(dir.GetZ(), dir.GetX()));
-            const float     pitch = JPH::RadiansToDegrees(std::asin(std::clamp(dir.GetY(), -0.99f, 0.99f)));
+            const FVec3 eye   = center + FVec3(radius * 0.9f, std::max(radius * 0.35f, 8.0f), radius * 0.9f);
+            const FVec3 dir   = (center - eye).Normalized();
+            const float     yaw   = JPH::RadiansToDegrees(std::atan2(dir.z, dir.x));
+            const float     pitch = JPH::RadiansToDegrees(std::asin(std::clamp(dir.y, -0.99f, 0.99f)));
             reg.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
                 cc.camera.position = eye;
                 cc.camera.yaw      = yaw;

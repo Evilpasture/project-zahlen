@@ -6,13 +6,13 @@
 // extensions/Scripting/ScriptValueTypes.hpp
 //
 // Teaches ScriptBinder the value types the engine's scripting surface actually
-// passes around: Entity, and Jolt's Vec3/DVec3/Quat/Vec4.
+// passes around: Entity, and Jolt's FVec3/DVec3/Quat/FVec4.
 //
 // Why these need teaching at all is at ScriptValueTrait in ScriptBinder.hpp. The
-// short version: left generic, a Vec3 crosses as an opaque BoxedObject, so a
+// short version: left generic, a FVec3 crosses as an opaque BoxedObject, so a
 // script could only hand back one it had already been given. Physics calls like
-//   SetCharacterVelocity(Entity, Float3)
-//   Raycast(Double3 origin, Float3 dir, float max, Physics::BodyID ignore)
+//   SetCharacterVelocity(Entity, FVec3)
+//   Raycast(DVec3 origin, FVec3 dir, float max, Physics::BodyID ignore)
 // would be uncallable from Lua, which is most of the reason the
 // ZHLN_DispatchCommand table still exists.
 //
@@ -45,6 +45,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Quat.h>
@@ -79,7 +81,7 @@ inline auto NumberArray(std::initializer_list<double> values) -> ScriptVal {
 // it along without rewriting it as a literal.
 //
 // The binder cannot check a pointer's dynamic type, so `scriptName` is the only
-// guard available. Without it a Quat handed where a Vec3 was wanted would be
+// guard available. Without it a Quat handed where a FVec3 was wanted would be
 // reinterpreted rather than rejected, reading four floats out of a
 // three-float object.
 template <size_t N, typename T, typename Unbox>
@@ -137,46 +139,46 @@ struct ScriptValueTrait<Entity> {
 };
 
 // ---------------------------------------------------------------------------
-// JPH::Vec3 / JPH::DVec3 <-> {x, y, z}
+// FVec3 / Vec3<-> {x, y, z}
 // ---------------------------------------------------------------------------
 
 template <>
-struct ScriptValueTrait<JPH::Vec3> {
+struct ScriptValueTrait<FVec3> {
     static constexpr bool             specialized = true;
-    static constexpr std::string_view scriptName  = "Vec3";
+    static constexpr std::string_view scriptName  = "FVec3";
 
-    static auto To(const JPH::Vec3& v) -> ScriptVal {
-        return NumberArray({static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ())});
+    static auto To(const FVec3& v) -> ScriptVal {
+        return NumberArray({static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec3, ErrorCode> {
-        auto nums = ReadNumbers<3, JPH::Vec3>(sval, scriptName, [](const JPH::Vec3& v) -> std::array<double, 3> {
-            return {static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ())};
+    static auto From(const ScriptVal& sval) -> std::expected<FVec3, ErrorCode> {
+        auto nums = ReadNumbers<3, FVec3>(sval, scriptName, [](const FVec3& v) -> std::array<double, 3> {
+            return {static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)};
         });
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return JPH::Vec3(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]));
+        return FVec3(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]));
     }
 };
 
-// RVec3 is DVec3 under JPH_DOUBLE_PRECISION and Vec3 otherwise (Real.h:17,29).
+// DVec3 is DVec3 under JPH_DOUBLE_PRECISION and FVec3 otherwise (Real.h:17,29).
 // Both are handled, so a physics origin crosses correctly in either build.
 template <>
-struct ScriptValueTrait<JPH::DVec3> {
+struct ScriptValueTrait<DVec3> {
     static constexpr bool             specialized = true;
     static constexpr std::string_view scriptName  = "DVec3";
 
-    static auto To(const JPH::DVec3& v) -> ScriptVal {
-        return NumberArray({v.GetX(), v.GetY(), v.GetZ()});
+    static auto To(const DVec3& v) -> ScriptVal {
+        return NumberArray({v.x, v.y, v.z});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::DVec3, ErrorCode> {
-        auto nums = ReadNumbers<3, JPH::DVec3>(sval, scriptName, [](const JPH::DVec3& v) -> std::array<double, 3> { return {v.GetX(), v.GetY(), v.GetZ()}; });
+    static auto From(const ScriptVal& sval) -> std::expected<DVec3, ErrorCode> {
+        auto nums = ReadNumbers<3, DVec3>(sval, scriptName, [](const DVec3& v) -> std::array<double, 3> { return {v.x, v.y, v.z}; });
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return JPH::DVec3((*nums)[0], (*nums)[1], (*nums)[2]);
+        return DVec3((*nums)[0], (*nums)[1], (*nums)[2]);
     }
 };
 
@@ -190,12 +192,12 @@ struct ScriptValueTrait<JPH::Quat> {
     static constexpr std::string_view scriptName  = "Quat";
 
     static auto To(const JPH::Quat& q) -> ScriptVal {
-        return NumberArray({static_cast<double>(q.GetX()), static_cast<double>(q.GetY()), static_cast<double>(q.GetZ()), static_cast<double>(q.GetW())});
+        return NumberArray({static_cast<double>(q.x), static_cast<double>(q.y), static_cast<double>(q.z), static_cast<double>(q.w)});
     }
 
     static auto From(const ScriptVal& sval) -> std::expected<JPH::Quat, ErrorCode> {
         auto nums = ReadNumbers<4, JPH::Quat>(sval, scriptName, [](const JPH::Quat& q) -> std::array<double, 4> {
-            return {static_cast<double>(q.GetX()), static_cast<double>(q.GetY()), static_cast<double>(q.GetZ()), static_cast<double>(q.GetW())};
+            return {static_cast<double>(q.x), static_cast<double>(q.y), static_cast<double>(q.z), static_cast<double>(q.w)};
         });
         if (!nums) {
             return std::unexpected(nums.error());
@@ -205,29 +207,29 @@ struct ScriptValueTrait<JPH::Quat> {
 };
 
 // ---------------------------------------------------------------------------
-// JPH::Vec4 <-> {x, y, z, w}
+// Vec4<-> {x, y, z, w}
 //
 // Colours reach scripts this way: DrawLine's two endpoints, and
 // Material.baseColorFactor.
 // ---------------------------------------------------------------------------
 
 template <>
-struct ScriptValueTrait<JPH::Vec4> {
+struct ScriptValueTrait<FVec4> {
     static constexpr bool             specialized = true;
-    static constexpr std::string_view scriptName  = "Vec4";
+    static constexpr std::string_view scriptName  = "FVec4";
 
-    static auto To(const JPH::Vec4& v) -> ScriptVal {
-        return NumberArray({static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ()), static_cast<double>(v.GetW())});
+    static auto To(const FVec4& v) -> ScriptVal {
+        return NumberArray({static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z), static_cast<double>(v.w)});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec4, ErrorCode> {
-        auto nums = ReadNumbers<4, JPH::Vec4>(sval, scriptName, [](const JPH::Vec4& v) -> std::array<double, 4> {
-            return {static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ()), static_cast<double>(v.GetW())};
+    static auto From(const ScriptVal& sval) -> std::expected<FVec4, ErrorCode> {
+        auto nums = ReadNumbers<4, FVec4>(sval, scriptName, [](const FVec4& v) -> std::array<double, 4> {
+            return {static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z), static_cast<double>(v.w)};
         });
         if (!nums) {
             return std::unexpected(nums.error());
         }
-        return JPH::Vec4(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
+        return FVec4(static_cast<float>((*nums)[0]), static_cast<float>((*nums)[1]), static_cast<float>((*nums)[2]), static_cast<float>((*nums)[3]));
     }
 };
 

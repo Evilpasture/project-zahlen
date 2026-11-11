@@ -108,7 +108,7 @@ struct Vec3 {
         return length == T(0) ? Zero() : *this / length;
     }
 
-    // Component-wise equivalents of Math3D's Float3 helpers.
+    // Component-wise equivalents of Math3D's FVec3 helpers.
     [[nodiscard]] auto Floor() const noexcept -> Vec3 requires std::is_floating_point_v<T> {
         return {std::floor(x), std::floor(y), std::floor(z)};
     }

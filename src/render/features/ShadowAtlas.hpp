@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Math/Vec3.hpp>
 #include "render/GpuLayout.hpp"
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
@@ -68,10 +69,10 @@ class ShadowAtlas {
 
     [[nodiscard]] static auto FaceCount(bool isPoint, float outerConeRadians) noexcept -> uint32_t;
     [[nodiscard]] static auto
-        MakeFaceMatrices(const JPH::Vec3& position, const JPH::Vec3& direction, float range, bool isPoint, float outerConeRadians, JPH::Mat44* out) noexcept
+        MakeFaceMatrices(const FVec3& position, const FVec3& direction, float range, bool isPoint, float outerConeRadians, JPH::Mat44* out) noexcept
         -> uint32_t;
 
-    [[nodiscard]] static auto MakeLightKey(LightType type, const JPH::Vec3& position, float intensity, float range) noexcept -> uint64_t;
+    [[nodiscard]] static auto MakeLightKey(LightType type, const FVec3& position, float intensity, float range) noexcept -> uint64_t;
 
     [[nodiscard]] static auto TileForDistance(float distance) noexcept -> uint32_t;
 

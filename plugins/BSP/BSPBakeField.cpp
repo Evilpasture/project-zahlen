@@ -21,6 +21,7 @@
 // fake twice.
 
 #include "BSPBakeField.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPLighting.hpp"
 #include "VMTParser.hpp"
@@ -44,7 +45,7 @@ constexpr float kUnitsToMetres         = 0.0254F;
 constexpr float kPi                    = 3.14159265358979323846F; // file-local, as BSPLighting.cpp
 
 struct FaceRadiance {
-    JPH::Vec3 positionEngine {0.0F, 0.0F, 0.0F}; // converted centroid
+    FVec3 positionEngine {0.0F, 0.0F, 0.0F}; // converted centroid
     float     radiance[3] {0.0F, 0.0F, 0.0F};    // mean luxel radiance (source-brightness family)
     float     luma        = 0.0F;
     float     areaSquareMetres = 0.0F;
@@ -180,10 +181,10 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         entry.radiance[0] = sum[0] / static_cast<float>(sampleCount);
         entry.radiance[1] = sum[1] / static_cast<float>(sampleCount);
         entry.radiance[2] = sum[2] / static_cast<float>(sampleCount);
-        entry.luma        = Rec709Luma(JPH::Vec3 {entry.radiance[0], entry.radiance[1], entry.radiance[2]});
+        entry.luma        = Rec709Luma(FVec3 {entry.radiance[0], entry.radiance[1], entry.radiance[2]});
         entry.areaSquareMetres = poly.area * kUnitsToMetres * kUnitsToMetres;
 
-        const JPH::Vec3 centroidSource {poly.centroid[0], poly.centroid[1], poly.centroid[2]};
+        const FVec3 centroidSource {poly.centroid[0], poly.centroid[1], poly.centroid[2]};
         entry.positionEngine = ConvertPosition(options, centroidSource);
 
         faces.push_back(entry);
@@ -247,12 +248,12 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     }
 
     const float fillRadiance[3] {fillSum[0] / fillWeight, fillSum[1] / fillWeight, fillSum[2] / fillWeight};
-    const float fillLuma = std::max(Rec709Luma(JPH::Vec3 {fillRadiance[0], fillRadiance[1], fillRadiance[2]}), 1e-4F);
+    const float fillLuma = std::max(Rec709Luma(FVec3 {fillRadiance[0], fillRadiance[1], fillRadiance[2]}), 1e-4F);
 
     // AmbientTerm convention (BSPLighting ladder): irradiance =
     // luma(color) * intensity / kAmbientBrightnessLadder. Carry the fit's
     // irradiance exactly, hue in color at the authored luma of 0.34.
-    field.ambient.color     = JPH::Vec3 {fillRadiance[0] / fillLuma * kAmbientReferenceLuma,
+    field.ambient.color     = FVec3 {fillRadiance[0] / fillLuma * kAmbientReferenceLuma,
                                      fillRadiance[1] / fillLuma * kAmbientReferenceLuma,
                                      fillRadiance[2] / fillLuma * kAmbientReferenceLuma};
     field.ambient.intensity = fillLuma * kAmbientBrightnessLadder / kAmbientReferenceLuma;
@@ -271,17 +272,17 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     // passing raw radiance as color would square the level.
     // ---------------------------------------------------------------------
     struct Cluster {
-        JPH::Vec3 centroidSum {0.0F, 0.0F, 0.0F};
+        FVec3 centroidSum {0.0F, 0.0F, 0.0F};
         float     radianceSum[3] {0.0F, 0.0F, 0.0F};
         float     areaSum = 0.0F;
     };
     std::unordered_map<uint64_t, Cluster> clusters;
     clusters.reserve(faces.size() / 4 + 1);
 
-    const auto voxelKey = [](const JPH::Vec3& p) -> uint64_t {
-        const int64_t ix = static_cast<int64_t>(std::floor(p.GetX() / kVoxelMetres));
-        const int64_t iy = static_cast<int64_t>(std::floor(p.GetY() / kVoxelMetres));
-        const int64_t iz = static_cast<int64_t>(std::floor(p.GetZ() / kVoxelMetres));
+    const auto voxelKey = [](const FVec3& p) -> uint64_t {
+        const int64_t ix = static_cast<int64_t>(std::floor(p.x / kVoxelMetres));
+        const int64_t iy = static_cast<int64_t>(std::floor(p.y / kVoxelMetres));
+        const int64_t iz = static_cast<int64_t>(std::floor(p.z / kVoxelMetres));
         return (static_cast<uint64_t>(ix & 0x1FFFFF) << 42) | (static_cast<uint64_t>(iy & 0x1FFFFF) << 21) | static_cast<uint64_t>(iz & 0x1FFFFF);
     };
 
@@ -310,22 +311,22 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         if (cluster.areaSum <= 0.0F) {
             continue;
         }
-        const JPH::Vec3 position  = cluster.centroidSum / cluster.areaSum;
-        const JPH::Vec3 radiance {cluster.radianceSum[0] / cluster.areaSum, cluster.radianceSum[1] / cluster.areaSum,
+        const FVec3 position  = cluster.centroidSum / cluster.areaSum;
+        const FVec3 radiance {cluster.radianceSum[0] / cluster.areaSum, cluster.radianceSum[1] / cluster.areaSum,
                                   cluster.radianceSum[2] / cluster.areaSum};
         const float level = std::max(Rec709Luma(radiance), 0.0F);
 
         Candidate out;
         out.key          = key;
-        out.quota        = voxelKey(JPH::Vec3 {std::floor(position.GetX() / kSpatialQuotaMetres) * kSpatialQuotaMetres,
-                                                std::floor(position.GetY() / kSpatialQuotaMetres) * kSpatialQuotaMetres,
-                                                std::floor(position.GetZ() / kSpatialQuotaMetres) * kSpatialQuotaMetres});
+        out.quota        = voxelKey(FVec3 {std::floor(position.x / kSpatialQuotaMetres) * kSpatialQuotaMetres,
+                                                std::floor(position.y / kSpatialQuotaMetres) * kSpatialQuotaMetres,
+                                                std::floor(position.z / kSpatialQuotaMetres) * kSpatialQuotaMetres});
         out.light.name       = "bake_vpl";
         out.light.className  = "bake_vpl";
         out.light.position   = position;
-        out.light.direction  = JPH::Vec3 {0.0F, -1.0F, 0.0F};
-        out.light.color      = (level > 1e-4F) ? JPH::Vec3 {radiance.GetX() / level, radiance.GetY() / level, radiance.GetZ() / level}
-                                               : JPH::Vec3 {1.0F, 1.0F, 1.0F};
+        out.light.direction  = FVec3 {0.0F, -1.0F, 0.0F};
+        out.light.color      = (level > 1e-4F) ? FVec3 {radiance.x / level, radiance.y / level, radiance.z / level}
+                                               : FVec3 {1.0F, 1.0F, 1.0F};
         out.light.fromEmissive = false; // fitted from the bake, not an emissive surface
 
         // Exactly EmissiveLightFor's equivalent-Source-brightness chain with

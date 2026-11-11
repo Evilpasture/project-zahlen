@@ -12,7 +12,7 @@ module;
 #include <Zahlen/Math/ValueTypes.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
@@ -93,16 +93,16 @@ export enum class OrdnanceType : uint8_t {
     return v / norm;
 }
 
-[[nodiscard]] static float Hash31(JPH::Vec3Arg p) noexcept {
-    float px = std::fmod(p.GetX() * 0.1031f, 1.0f);
-    float py = std::fmod(p.GetY() * 0.1031f, 1.0f);
-    float pz = std::fmod(p.GetZ() * 0.1031f, 1.0f);
+[[nodiscard]] static float Hash31(FVec3 p) noexcept {
+    float px = std::fmod(p.x * 0.1031f, 1.0f);
+    float py = std::fmod(p.y * 0.1031f, 1.0f);
+    float pz = std::fmod(p.z * 0.1031f, 1.0f);
 
     float dotVal = px * (pz + 31.32f) + py * (py + 31.32f) + pz * (px + 31.32f);
     return std::fmod((px + dotVal) * (py + dotVal) * (pz + dotVal), 1.0f);
 }
 
-[[nodiscard]] static JPH::Vec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
+[[nodiscard]] static FVec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 u     = dis(gen);
     float                                 v     = dis(gen);
@@ -112,24 +112,24 @@ export enum class OrdnanceType : uint8_t {
     return {r * std::sin(phi) * std::cos(theta), r * std::sin(phi) * std::sin(theta), r * std::cos(phi)};
 }
 
-[[nodiscard]] static JPH::Vec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
+[[nodiscard]] static FVec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 theta = JPH::DegreesToRadians(dis(gen) * maxAngleDeg);
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
     float                                 sinT  = std::sin(theta);
     float                                 cosT  = std::cos(theta);
 
-    return JPH::Vec3(sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)).Normalized();
+    return FVec3(sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)).Normalized();
 }
 
-[[nodiscard]] static JPH::Vec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
+[[nodiscard]] static FVec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 theta = JPH::DegreesToRadians(minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg));
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
     float                                 sinT  = std::sin(theta);
     float                                 cosT  = std::cos(theta);
 
-    return JPH::Vec3(sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)).Normalized();
+    return FVec3(sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)).Normalized();
 }
 
 // ============================================================================
@@ -314,27 +314,27 @@ struct ShockwaveParticle {
     float     maxLife   = 0.5f;
     float     maxRadius = 18.0f;
     float     speed     = 1.0f;
-    JPH::Vec3 colorStart {};
-    JPH::Vec3 colorEnd {};
+    FVec3 colorStart {};
+    FVec3 colorEnd {};
     bool      isGround = false;
 };
 
 struct ExplosionParticle {
-    JPH::Vec3 position {};
-    JPH::Vec3 velocity {};
+    FVec3 position {};
+    FVec3 velocity {};
     float     life      = 0.0f;
     float     maxLife   = 1.0f;
     float     startSize = 1.0f;
     float     drag      = 1.0f;
     float     gravity   = 0.0f;
-    JPH::Vec3 colorStart {};
-    JPH::Vec3 colorMid {};
-    JPH::Vec3 colorEnd {};
+    FVec3 colorStart {};
+    FVec3 colorMid {};
+    FVec3 colorEnd {};
 };
 
 export struct ExplosionComponent {
     OrdnanceType type     = OrdnanceType::ArtilleryMortar;
-    JPH::Vec3    origin   = JPH::Vec3::sZero();
+    FVec3    origin   = FVec3::sZero();
     float        scale    = 1.0f;
     float        age      = 0.0f;
     float        duration = 3.5f;
@@ -357,7 +357,7 @@ export struct CraterDecalComponent {
     float     fadeDuration = 6.0f;  // Dissolves smoothly over the final 6 seconds
     float     baseRadius   = 3.4f;
     float     baseDepth    = 5.0f;
-    JPH::Vec3 origin       = JPH::Vec3::sZero();
+    FVec3 origin       = FVec3::sZero();
     JPH::Quat rotation     = JPH::Quat::sIdentity();
 };
 
@@ -449,12 +449,12 @@ export class ExplosionSystem {
         ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
     }
 
-    static Entity Spawn(Engine& engine, ZHLN::Float3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
+    static Entity Spawn(Engine& engine, ZHLN::FVec3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
         auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
         Init(engine);
 
         ExplosionComponent initialExp {
-            .type = type, .origin = static_cast<JPH::Vec3>(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
+            .type = type, .origin = static_cast<FVec3>(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
         };
 
         std::mt19937 gen(std::random_device {}());
@@ -470,7 +470,7 @@ export class ExplosionSystem {
         initialExp.debrisEntity = debrisEntity;
 
         // Position light directly at origin with slight vertical offset
-        JPH::Vec3  lightWorldPos = static_cast<JPH::Vec3>(origin) + JPH::Vec3(0.0f, 1.8f * scale, 0.0f);
+        FVec3  lightWorldPos = static_cast<FVec3>(origin) + FVec3(0.0f, 1.8f * scale, 0.0f);
         JPH::Mat44 rootTransform = Math::CreateTransform(lightWorldPos, {0.0f, 0.0f, 0.0f, 1.0f});
 
         // Attach synchronously to root entity
@@ -478,7 +478,7 @@ export class ExplosionSystem {
             root, Components::NameComponent {.name = String64("ArtilleryExplosionRoot")}, Components::TransformComponent {.position = lightWorldPos},
             Components::WorldTransformComponent {.world = rootTransform, .previous = rootTransform},
             Components::LightComponent {
-                .type = LightType::Point, .color = JPH::Vec3(1.0f, 0.48f, 0.09f), .intensity = 2800.0f * scale * scale, .radius = 1.5f, .range = 60.0f * scale
+                .type = LightType::Point, .color = FVec3(1.0f, 0.48f, 0.09f), .intensity = 2800.0f * scale * scale, .radius = 1.5f, .range = 60.0f * scale
             },
             std::move(initialExp)
         );
@@ -486,7 +486,7 @@ export class ExplosionSystem {
         if (debrisEntity != Entity::Null()) {
             reg.Add(
                 debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")},
-                Components::TransformComponent {.position = static_cast<JPH::Vec3>(origin)},
+                Components::TransformComponent {.position = static_cast<FVec3>(origin)},
                 Components::MeshParticleEmitterComponent {
                     .meshAsset     = s_DebrisMeshAsset,
                     .materialAsset = s_DebrisMatAsset,
@@ -495,7 +495,7 @@ export class ExplosionSystem {
                     .params =
                         {.gravity     = {0.0f, -18.0f * scale, 0.0f},
                          .drag        = 0.32f,
-                         .spawnOrigin = static_cast<JPH::Vec3>(origin),
+                         .spawnOrigin = static_cast<FVec3>(origin),
                          .initVelMin  = {-12.0f * scale, 6.0f * scale, -12.0f * scale},
                          .lifetimeMin = 2.0f,
                          .initVelMax  = {12.0f * scale, 20.0f * scale, 12.0f * scale},
@@ -515,7 +515,7 @@ export class ExplosionSystem {
         auto audio = engine.Audio();
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<JPH::Vec3>(origin),
+             .position   = static_cast<FVec3>(origin),
              .volume     = 1.0f,
              .param1     = 60.0f, // Low pass cutoff frequency
              .param2     = 3.5f,  // Q factor
@@ -526,7 +526,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type     = AudioEventType::ToneSweep3D,
-             .position = static_cast<JPH::Vec3>(origin),
+             .position = static_cast<FVec3>(origin),
              .volume   = 0.85f,
              .param1   = 150.0f, // Start frequency
              .param2   = 30.0f,  // End frequency
@@ -536,7 +536,7 @@ export class ExplosionSystem {
 
         audio.PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<JPH::Vec3>(origin),
+             .position   = static_cast<FVec3>(origin),
              .volume     = 0.65f,
              .param1     = 320.0f, // Band pass center frequency
              .param2     = 1.4f,   // Q factor
@@ -577,7 +577,7 @@ export class ExplosionSystem {
                     } else {
                         float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
                         light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
-                        light.color     = JPH::Vec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
+                        light.color     = FVec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
                     }
                 });
 
@@ -587,13 +587,13 @@ export class ExplosionSystem {
                     Entity crater     = reg.Create();
 
                     float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                    JPH::Quat yawRot    = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), randomYaw);
-                    JPH::Quat baseRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
+                    JPH::Quat yawRot    = JPH::Quat::sRotation(FVec3::sAxisY(), randomYaw);
+                    JPH::Quat baseRot   = JPH::Quat::sRotation(FVec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
                     JPH::Quat decalRot  = (yawRot * baseRot).Normalized();
 
                     float     radius    = 3.4f * exp.scale;
                     float     projDepth = 5.0f * exp.scale;
-                    JPH::Vec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
+                    FVec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
 
                     JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
 
@@ -654,7 +654,7 @@ export class ExplosionSystem {
                     float currentRadius = crater.baseRadius * ease;
                     float currentDepth  = crater.baseDepth * ease;
 
-                    JPH::Vec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
+                    FVec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
 
                     reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
                     reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
@@ -674,7 +674,7 @@ export class ExplosionSystem {
         exp.fireball.resize(78);
         for (size_t i = 0; i < exp.fireball.size(); ++i) {
             bool      isRing = (i > 52);
-            JPH::Vec3 dir    = isRing ? SampleRingDirection(gen, 82.0f, 94.0f) : SampleConeDirection(gen, 34.0f);
+            FVec3 dir    = isRing ? SampleRingDirection(gen, 82.0f, 94.0f) : SampleConeDirection(gen, 34.0f);
             float     speed  = (isRing ? (10.0f + Hash31(dir * 1.5f) * 6.0f) : (16.0f + Hash31(dir * 1.5f) * 11.0f)) * exp.scale;
 
             exp.fireball[i] = {
@@ -685,18 +685,18 @@ export class ExplosionSystem {
                 .startSize  = (0.85f + Hash31(dir * 3.5f) * 0.95f) * exp.scale,
                 .drag       = 3.0f,
                 .gravity    = -4.2f,
-                .colorStart = JPH::Vec3(4.0f, 2.8f, 1.2f),
-                .colorMid   = JPH::Vec3(2.5f, 1.0f, 0.2f),
-                .colorEnd   = JPH::Vec3(0.23f, 0.10f, 0.04f)
+                .colorStart = FVec3(4.0f, 2.8f, 1.2f),
+                .colorMid   = FVec3(2.5f, 1.0f, 0.2f),
+                .colorEnd   = FVec3(0.23f, 0.10f, 0.04f)
             };
         }
 
         exp.soilSmoke.resize(84);
         for (size_t i = 0; i < exp.soilSmoke.size(); ++i) {
             bool      isRing = (i < 24);
-            JPH::Vec3 dir    = isRing ? SampleRingDirection(gen, 84.0f, 92.0f) : SampleConeDirection(gen, 40.0f);
+            FVec3 dir    = isRing ? SampleRingDirection(gen, 84.0f, 92.0f) : SampleConeDirection(gen, 40.0f);
             float     speed  = (isRing ? (7.0f + Hash31(dir * 1.5f) * 4.0f) : (8.0f + Hash31(dir * 1.5f) * 6.0f)) * exp.scale;
-            JPH::Vec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? JPH::Vec3(0.42f, 0.35f, 0.26f) : JPH::Vec3(0.54f, 0.48f, 0.38f);
+            FVec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? FVec3(0.42f, 0.35f, 0.26f) : FVec3(0.54f, 0.48f, 0.38f);
 
             exp.soilSmoke[i] = {
                 .position   = dir * (0.2f * exp.scale),
@@ -706,7 +706,7 @@ export class ExplosionSystem {
                 .startSize  = (1.55f + Hash31(dir * 3.5f) * 1.35f) * exp.scale,
                 .drag       = 1.8f,
                 .gravity    = -1.1f,
-                .colorStart = JPH::Vec3(1.2f, 0.7f, 0.25f),
+                .colorStart = FVec3(1.2f, 0.7f, 0.25f),
                 .colorMid   = sc * 1.2f,
                 .colorEnd   = sc * 0.7f
             };
@@ -754,8 +754,8 @@ export class ExplosionSystem {
     static void InitStandardFireballParticles(ExplosionComponent& exp, std::mt19937& gen) {
         exp.fireball.resize(120);
         for (auto& p: exp.fireball) {
-            JPH::Vec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.GetY()) * 0.6f + dir.GetY() * 0.4f);
+            FVec3 dir = RandomInUnitSphere(gen);
+            dir.SetY(std::abs(dir.y) * 0.6f + dir.y * 0.4f);
 
             p = {
                 .position   = dir * (0.15f * exp.scale),
@@ -765,29 +765,29 @@ export class ExplosionSystem {
                 .startSize  = (0.5f + Hash31(dir * 3.5f) * 0.8f) * exp.scale,
                 .drag       = 2.5f,
                 .gravity    = -1.0f,
-                .colorStart = JPH::Vec3(4.0f, 3.0f, 1.4f),
-                .colorMid   = JPH::Vec3(2.2f, 0.9f, 0.25f),
-                .colorEnd   = JPH::Vec3(0.4f, 0.06f, 0.02f)
+                .colorStart = FVec3(4.0f, 3.0f, 1.4f),
+                .colorMid   = FVec3(2.2f, 0.9f, 0.25f),
+                .colorEnd   = FVec3(0.4f, 0.06f, 0.02f)
             };
         }
 
         exp.soilSmoke.resize(80);
         for (auto& p: exp.soilSmoke) {
-            JPH::Vec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.GetY()) * 0.8f + dir.GetY() * 0.2f);
+            FVec3 dir = RandomInUnitSphere(gen);
+            dir.SetY(std::abs(dir.y) * 0.8f + dir.y * 0.2f);
             float gray = 0.05f + Hash31(dir * 6.5f) * 0.15f;
 
             p = {
                 .position   = dir * (0.3f * exp.scale),
-                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + JPH::Vec3(0.0f, 0.8f * exp.scale, 0.0f),
+                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + FVec3(0.0f, 0.8f * exp.scale, 0.0f),
                 .life       = 0.0f,
                 .maxLife    = 2.5f + Hash31(dir * 2.5f) * 2.0f,
                 .startSize  = (1.0f + Hash31(dir * 4.5f) * 1.0f) * exp.scale,
                 .drag       = 1.2f,
                 .gravity    = 0.6f,
-                .colorStart = JPH::Vec3(1.4f, 0.6f, 0.15f),
-                .colorMid   = JPH::Vec3(0.35f, 0.25f, 0.2f),
-                .colorEnd   = JPH::Vec3(gray, gray, gray * 0.95f)
+                .colorStart = FVec3(1.4f, 0.6f, 0.15f),
+                .colorMid   = FVec3(0.35f, 0.25f, 0.2f),
+                .colorEnd   = FVec3(gray, gray, gray * 0.95f)
             };
         }
     }
@@ -800,11 +800,11 @@ export class ExplosionSystem {
             }
 
             if (isSmoke) {
-                p.velocity.SetY(p.velocity.GetY() + 0.58f * dt);
+                p.velocity.y = p.velocity.y + 0.58f * dt;
             }
 
             p.velocity *= std::exp(-p.drag * dt);
-            p.velocity.SetY(p.velocity.GetY() + p.gravity * dt);
+            p.velocity.y = p.velocity.y + p.gravity * dt;
             p.position += p.velocity * dt;
         }
     }
@@ -822,7 +822,7 @@ export class ExplosionSystem {
             for (const auto& p: exp.fireball) {
                 const float t = std::min(1.0f, p.life / p.maxLife);
 
-                const JPH::Vec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
+                const FVec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
                                                       p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.52f) / 0.48f);
 
                 const float opacity = (1.0f - t) * 0.98f;
@@ -847,7 +847,7 @@ export class ExplosionSystem {
             for (const auto& p: exp.soilSmoke) {
                 float     opacity = 0.0f;
                 float     size    = p.startSize;
-                JPH::Vec3 color   = p.colorEnd;
+                FVec3 color   = p.colorEnd;
 
                 if (p.life < p.maxLife) {
                     float t = p.life / p.maxLife;
@@ -878,7 +878,7 @@ export class ExplosionSystem {
                     float       localTime = exp.age - sw.delay;
                     float       opacity   = 0.0f;
                     float       radius    = 0.1f;
-                    JPH::Vec3   color     = sw.colorStart;
+                    FVec3   color     = sw.colorStart;
 
                     if (localTime > 0.0f && localTime < sw.maxLife) {
                         float t = localTime / sw.maxLife;
@@ -905,7 +905,7 @@ export class ExplosionSystem {
                 float       localTime = exp.age - sw.delay;
                 float       opacity   = 0.0f;
                 float       radius    = 0.1f;
-                JPH::Vec3   color     = sw.colorStart;
+                FVec3   color     = sw.colorStart;
 
                 if (localTime > 0.0f && localTime < sw.maxLife) {
                     float t = localTime / sw.maxLife;
@@ -915,7 +915,7 @@ export class ExplosionSystem {
                 }
 
                 const BillboardQuad quad {
-                    .position = exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f),
+                    .position = exp.origin + FVec3(0.0f, 0.05f, 0.0f),
                     .size     = radius * 2.0f,
                     .rotation = 0.0f,
                     .color    = JPH::Vec4(color, opacity),

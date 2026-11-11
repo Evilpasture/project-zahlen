@@ -10,11 +10,12 @@
 // from this interface.
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Mat44.h>
+#include <Jolt/Math/Vec4.h>
+#include <Jolt/Math/Mat4x4.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/AssetID.hpp>
@@ -49,7 +50,7 @@ struct PlaybackState {
 
 struct MorphSample {
     uint32_t     activeCount = 0;
-    ZHLN::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct SkeletonBinding {
@@ -62,9 +63,9 @@ struct IKChain {
     int32_t   upperNodeIndex    = -1;
     int32_t   lowerNodeIndex    = -1;
     int32_t   endNodeIndex      = -1;
-    JPH::Vec3 targetPosition    = JPH::Vec3::sZero();
+    FVec3 targetPosition    = FVec3::sZero();
     JPH::Quat targetRotation    = JPH::Quat::sIdentity();
-    JPH::Vec3 poleVector        = JPH::Vec3(0.0f, -1.0f, 0.0f);
+    FVec3 poleVector        = FVec3(0.0f, -1.0f, 0.0f);
     float     weight            = 1.0f;
     bool      orientEndEffector = true;
 };

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
@@ -86,9 +87,9 @@ struct RenderAnimatedMeshTestSuite {
             reg.Add(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 15.0f, 0.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
+                    .position = FVec3(0.0f, 15.0f, 0.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
                 },
-                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.94f), .intensity = 160.0f}
+                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.98f, 0.94f), .intensity = 160.0f}
             );
 
             // 3. Instantiate Prefab Directly From Embedded In-Memory Byte Stream
@@ -120,7 +121,7 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 2.5f);
+            cam.position = FVec3(0.0f, 1.0f, 2.5f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
             cam.fov      = 45.0f;

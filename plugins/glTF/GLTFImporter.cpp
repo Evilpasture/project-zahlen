@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "GLTFImporter.hpp"
@@ -844,14 +846,14 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
 
     ReadMorphTargets(job, prim, vertexCount);
 
-    const JPH::Vec3 localCenter(
+    const FVec3 localCenter(
         (job.localMax[0] + job.localMin[0]) * 0.5f, (job.localMax[1] + job.localMin[1]) * 0.5f, (job.localMax[2] + job.localMin[2]) * 0.5f
     );
     float maxD2    = 0.0f;
     auto  Consider = [&](float x, float y, float z) {
-        const float dx = x - localCenter.GetX();
-        const float dy = y - localCenter.GetY();
-        const float dz = z - localCenter.GetZ();
+        const float dx = x - localCenter.x;
+        const float dy = y - localCenter.y;
+        const float dz = z - localCenter.z;
         maxD2          = std::max(dx * dx + dy * dy + dz * dz, maxD2);
     };
     for (const auto& pos: job.positions) {
@@ -870,7 +872,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     const float extentsY = (job.localMax[1] - job.localMin[1]) * 0.5f;
     const float extentsZ = (job.localMax[2] - job.localMin[2]) * 0.5f;
 
-    const JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(extentsX, extentsY, extentsZ));
+    const JPH::ShapeRefC baseBox = new JPH::BoxShape(FVec3(extentsX, extentsY, extentsZ));
     job.boxCollider              = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
 
     if (prim.type == cgltf_primitive_type_triangles && jointsAcc == nullptr) {
@@ -1235,7 +1237,7 @@ auto BuildModelPrefab(
         float m[16];
         cgltf_node_transform_local(node, m);
         const JPH::Mat44 localTransform(
-            JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]), JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15])
+            FVec4(m[0], m[1], m[2], m[3]), FVec4(m[4], m[5], m[6], m[7]), FVec4(m[8], m[9], m[10], m[11]), FVec4(m[12], m[13], m[14], m[15])
         );
 
         prefab->nodes.push_back(
@@ -1286,8 +1288,8 @@ auto BuildModelPrefab(
                 float ibmRaw[16];
                 cgltf_accessor_read_float(skin->inverse_bind_matrices, j, ibmRaw, 16);
                 ibm = JPH::Mat44(
-                    JPH::Vec4(ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]), JPH::Vec4(ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]),
-                    JPH::Vec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]), JPH::Vec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15])
+                    FVec4(ibmRaw[0], ibmRaw[1], ibmRaw[2], ibmRaw[3]), FVec4(ibmRaw[4], ibmRaw[5], ibmRaw[6], ibmRaw[7]),
+                    FVec4(ibmRaw[8], ibmRaw[9], ibmRaw[10], ibmRaw[11]), FVec4(ibmRaw[12], ibmRaw[13], ibmRaw[14], ibmRaw[15])
                 );
             }
 

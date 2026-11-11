@@ -165,7 +165,7 @@ void Engine::TraceDiagnostics() const noexcept {
 
     if (camComp) {
         const Camera& cam     = camComp->camera;
-        auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+        auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.x, cam.position.y, cam.position.z);
         auto          cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
         Diagnostics::WriteDiagnosticError(cam_pos.string_view());
         Diagnostics::WriteDiagnosticError(cam_dir.string_view());

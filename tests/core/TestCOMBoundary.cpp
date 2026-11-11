@@ -43,8 +43,8 @@ enum class BoundaryTestError : uint8_t { QueryFailed = 1 };
 
 // The whole surface is reachable without any engine header.
 static_assert(ZHLN::COM::ComComponent<ClientTransform>);
-static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::Double3>>);
-static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::Double3>>);
+static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::DVec3>>);
+static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::DVec3>>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
 static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
 // EngineConfigCOM is gone: a struct the consumer allocates and the library
@@ -136,30 +136,30 @@ static_assert(ZHLN::COM::IEntities::ComponentName<ClientTransform>().size > 0);
 void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     // The wire tier, called directly: caller's buffer, count returned.
     ZHLN::Physics::BodyID found[4] {};
-    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::Double3 {0.0, 0.0, 0.0}, 50.0F, found, 4), uint32_t {0});
+    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, found, 4), uint32_t {0});
     // A null buffer is legal and still reports the real count.
-    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::Double3 {0.0, 0.0, 0.0}, 50.0F, nullptr, 0), uint32_t {0});
+    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, nullptr, 0), uint32_t {0});
 
     // Presence comes back as a value, not as a bool plus storage the caller
     // had to declare first.
-    const ZHLN::COM::Option<ZHLN::Double3> noPosition = simulation.BodyPosition(ZHLN::Physics::BodyID::Null());
+    const ZHLN::COM::Option<ZHLN::DVec3> noPosition = simulation.BodyPosition(ZHLN::Physics::BodyID::Null());
     ZHLN::Test::ExpectTrue(!noPosition.HasValue());
-    ZHLN::Test::ExpectEq(noPosition.ValueOr(ZHLN::Double3 {7.0, 8.0, 9.0}).x, 7.0);
+    ZHLN::Test::ExpectEq(noPosition.ValueOr(ZHLN::DVec3 {7.0, 8.0, 9.0}).x, 7.0);
 
     ZHLN::Test::ExpectTrue(!simulation.BodyState(ZHLN::Physics::BodyID::Null()).HasValue());
 
     // ...and converts to the standard type in this translation unit, which is
     // the half the library never compiles.
-    const std::optional<ZHLN::Double3> asStd = simulation.BodyPosition(ZHLN::Physics::BodyID::Null());
+    const std::optional<ZHLN::DVec3> asStd = simulation.BodyPosition(ZHLN::Physics::BodyID::Null());
     ZHLN::Test::ExpectTrue(!asStd.has_value());
 
-    const std::vector<ZHLN::Physics::BodyID> nearby = simulation.BodiesInSphere(ZHLN::Double3 {0.0, 0.0, 0.0}, 50.0F);
+    const std::vector<ZHLN::Physics::BodyID> nearby = simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F);
     ZHLN::Test::ExpectTrue(nearby.empty());
 
     // Returned in memory through the Itanium hidden pointer, 56 bytes
     // of it, from the inline overload that supplies the defaults.
     const ZHLN::Physics::RaycastResult hit =
-        simulation.Raycast(ZHLN::Double3 {0.0, 100.0, 0.0}, ZHLN::Float3 {0.0F, -1.0F, 0.0F});
+        simulation.Raycast(ZHLN::DVec3 {0.0, 100.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F});
     ZHLN::Test::ExpectTrue(!hit.hasHit);
 
     // Borrowed engine memory: counts may be zero, but the pair must be
@@ -277,10 +277,10 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
 // A consumer's own declaration of two engine components. Nothing here
 // includes an engine header: the layout is restated, and the engine's hash
 // check is what decides whether the restatement is true. Mat44Bytes stands in
-// for ZHLN::Mat44 at the only level the boundary cares about -- its bytes.
+// for ZHLN::Mat4x4 at the only level the boundary cares about -- its bytes.
 namespace ConsumerSide {
 
-// alignas matches ZHLN::Mat44, which is alignas(alignof(JPH::Mat44)). A
+// alignas matches ZHLN::Mat4x4, which is alignas(alignof(JPH::Mat44)). A
 // consumer restating a layout restates its alignment as well -- and if it
 // gets that wrong, the hash is what says so.
 struct alignas(16) Mat44Bytes {

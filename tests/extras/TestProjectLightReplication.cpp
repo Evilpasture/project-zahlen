@@ -11,6 +11,7 @@
 // "needs a server to reproduce".
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <ProjectLightClient/LightProtocol.hpp>
 #include <ProjectLightClient/SceneMirror.hpp>
@@ -313,19 +314,19 @@ struct TestProjectLightReplicationSuite {
             ZHLN::ProjectLight::NetworkTransformHistory history;
             ZHLN::Test::ExpectTrue(history.Empty());
 
-            JPH::Vec3 sampledPosition {};
+            FVec3 sampledPosition {};
             JPH::Quat sampledRotation {};
             ZHLN::Test::ExpectFalse(history.Sample(std::chrono::steady_clock::now(), sampledPosition, sampledRotation));
 
             const auto base = std::chrono::steady_clock::now();
-            history.Push({.position = JPH::Vec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base});
-            history.Push({.position = JPH::Vec3(10.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base + std::chrono::milliseconds(10)});
+            history.Push({.position = FVec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base});
+            history.Push({.position = FVec3(10.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .receivedAt = base + std::chrono::milliseconds(10)});
 
             ZHLN::Test::ExpectTrue(history.Sample(base + std::chrono::milliseconds(5), sampledPosition, sampledRotation));
-            ZHLN::Test::ExpectTrue(sampledPosition.GetX() > 4.0f && sampledPosition.GetX() < 6.0f);
+            ZHLN::Test::ExpectTrue(sampledPosition.x > 4.0f && sampledPosition.x < 6.0f);
 
             ZHLN::Test::ExpectTrue(history.Sample(base + std::chrono::milliseconds(50), sampledPosition, sampledRotation));
-            ZHLN::Test::ExpectEq(sampledPosition.GetX(), 10.0f);
+            ZHLN::Test::ExpectEq(sampledPosition.x, 10.0f);
             return {};
         }
     };

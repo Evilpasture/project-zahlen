@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/GpuPack.hpp"
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 
 namespace ZHLN::GpuPack {
 
@@ -120,14 +125,14 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
         packed.outerConeCos = -1.0f;
     }
 
-    const JPH::Vec3 position     = desc.position;
-    const JPH::Vec4 positionView = JPH::Vec4(worldToView * position, 1.0f);
+    const FVec3 position     = desc.position;
+    const FVec4 positionView = FVec4(worldToView * position, 1.0f);
     packed.positionView          = positionView;
 
     if (desc.type == LightType::Area) {
         const JPH::Mat44 quad = desc.points;
         for (uint32_t column = 0; column < 4; ++column) {
-            const ZHLN::Float4 lane = quad.GetColumn4(column);
+            const ZHLN::FVec4 lane = quad.GetColumn4(column);
             packed.points[column]   = lane;
         }
     }

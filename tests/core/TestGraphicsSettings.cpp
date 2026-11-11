@@ -61,7 +61,7 @@ struct BlitStyle {
     float                contrast;
     float                saturation;
     int                  tonemapper;
-    ZHLN::Float3         colorFilter;
+    ZHLN::FVec3         colorFilter;
 
     auto operator==(const BlitStyle&) const noexcept -> bool = default;
 };

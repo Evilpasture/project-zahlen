@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -46,12 +50,12 @@ struct Components {
         float metallic  = 0.0f;
     };
     struct TransformComponent {
-        ZHLN::Float3 position = {};
-        ZHLN::Float4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
-        ZHLN::Float3 scale    = {1.0f, 1.0f, 1.0f};
+        ZHLN::FVec3 position = {};
+        ZHLN::FVec4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+        ZHLN::FVec3 scale    = {1.0f, 1.0f, 1.0f};
 
         // The calculation loads the Jolt types; the component is storage. The
-        // parameters are Vec3Arg/QuatArg, so the members convert on the way in.
+        // parameters are FVec3/QuatArg, so the members convert on the way in.
         [[nodiscard]] JPH::Mat44 GetLocalMatrix() const {
             return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
         }
@@ -62,21 +66,21 @@ struct Components {
     };
 
     struct WorldTransformComponent {
-        ZHLN::Mat44 world    = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 previous = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4 world    = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 previous = ZHLN::Mat4x4::Identity();
     };
 
     // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
     // cube term in the material shader for this entity's mesh parts.
     struct AmbientCubeComponent {
-        std::array<ZHLN::Float4, 6> cube {};
+        std::array<ZHLN::FVec4, 6> cube {};
     };
 
     struct MeshComponent {
         AssetID      meshAsset     = InvalidAssetID;
         MaterialID   materialAsset = InvalidMaterialID;
         float        cullRadius    = 1.0f;
-        ZHLN::Float3 localCenter   = {};
+        ZHLN::FVec3 localCenter   = {};
         DrawFlags    flags         = DrawFlags::None;
         int32_t      nodeIndex     = -1;
     };
@@ -91,8 +95,8 @@ struct Components {
         AssetID      meshAsset  = InvalidAssetID;
         Mesh         mesh       = {};
         Shape        shape      = Shape::None;
-        JPH::Vec3    dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
-        ZHLN::Float4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
+        FVec3    dimensions = FVec3::sZero(); // box: half extents; others: radius/extent, height
+        ZHLN::FVec4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
     };
 
     struct SkeletalMeshComponent {
@@ -105,7 +109,7 @@ struct Components {
     struct MorphTargetComponent {
         uint32_t    offset      = 0;
         uint32_t    activeCount = 0;
-        ZHLN::Float4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
+        ZHLN::FVec4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
     };
 
     struct LODComponent {
@@ -125,7 +129,7 @@ struct Components {
     };
 
     struct ImpulseCommand {
-        ZHLN::Float3 linear = {};
+        ZHLN::FVec3 linear = {};
     };
     struct RagdollHitReactionCommand {
         uint32_t jointIndex = 0;
@@ -136,7 +140,7 @@ struct Components {
 
     struct RagdollImpulseCommand {
         uint32_t     jointIndex = 0;
-        ZHLN::Float3 impulse    = {};
+        ZHLN::FVec3 impulse    = {};
     };
 
     struct RagdollComponent {
@@ -160,10 +164,10 @@ struct Components {
     struct CameraComponent {
         Camera camera {};
 
-        ZHLN::Mat44 viewProj               = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 unjitteredViewProj     = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 prevUnjitteredViewProj = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 frozenViewProj         = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4 viewProj               = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 unjitteredViewProj     = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 prevUnjitteredViewProj = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 frozenViewProj         = ZHLN::Mat4x4::Identity();
         uint32_t    frameCounter           = 0;
     };
     // The pose rides in the same storage as the matrices, so it must stay a pod
@@ -179,7 +183,7 @@ struct Components {
     struct SceneSourceComponent {
         Scene::ShapeKind shape = Scene::ShapeKind::Box;
         ZHLN::String256  source;
-        ZHLN::Float3     halfExtents           = {0.5f, 0.5f, 0.5f};
+        ZHLN::FVec3     halfExtents           = {0.5f, 0.5f, 0.5f};
         float            extent                = 10.0f;
         bool             emissiveVirtualLights = false;
     };
@@ -227,7 +231,7 @@ struct Components {
 
     struct AudioListenerComponent {
         bool         isPrimary = true;
-        ZHLN::Float3 velocity  = {};
+        ZHLN::FVec3 velocity  = {};
     };
     static_assert(std::is_trivially_copyable_v<AudioListenerComponent>);
 
@@ -243,7 +247,7 @@ struct Components {
         AudioBusID           bus           = AudioBus::SFX;
         AudioPlaybackMode    playbackMode  = AudioPlaybackMode::Decompressed;
         float                reverbSend    = 0.0f;
-        ZHLN::Float3         velocity      = {};
+        ZHLN::FVec3         velocity      = {};
         AudioAttenuationDesc attenuation {};
         AudioOcclusionDesc   occlusion {};
 
@@ -556,12 +560,12 @@ struct Components {
     static_assert(std::is_trivially_copyable_v<InputStateComponent>);
     struct LightComponent {
         LightType    type;
-        ZHLN::Float3 color     = {};
+        ZHLN::FVec3 color     = {};
         float        intensity = 0.0f;
         float        radius    = 0.0f;
-        ZHLN::Float3 direction = {};
+        ZHLN::FVec3 direction = {};
         float        range     = 0.0f;
-        ZHLN::Mat44  points    = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4  points    = ZHLN::Mat4x4::Identity();
         uint32_t     twoSided  = 0;
         // Asks the shadow atlas for a tile. How many lights get one is not
         // capped here: the atlas sub-allocates from one depth image and steps
@@ -626,9 +630,9 @@ struct Components {
         float        heightFalloff   = 0.035f;
         float        heightOffset    = 0.0f;
         float        anisotropy      = 0.5f;
-        ZHLN::Float3 scatteringColor = {0.91f, 0.95f, 1.0f};
-        ZHLN::Float3 absorptionColor = {0.015f, 0.015f, 0.015f};
-        ZHLN::Float3 emissiveColor   = {};
+        ZHLN::FVec3 scatteringColor = {0.91f, 0.95f, 1.0f};
+        ZHLN::FVec3 absorptionColor = {0.015f, 0.015f, 0.015f};
+        ZHLN::FVec3 emissiveColor   = {};
         float        noiseScale      = 0.035f;
         float        noiseSpeed      = 1.0f;
         float        noiseIntensity  = 0.5f;
@@ -637,10 +641,10 @@ struct Components {
 
     struct VolumetricVolumeComponent {
         VolumetricVolumeType type       = VolumetricVolumeType::Box;
-        ZHLN::Float3         extents    = {5.0f, 5.0f, 5.0f};
+        ZHLN::FVec3         extents    = {5.0f, 5.0f, 5.0f};
         float                density    = 0.1f;
-        ZHLN::Float3         color      = {1.0f, 1.0f, 1.0f};
-        ZHLN::Float3         emissive   = {};
+        ZHLN::FVec3         color      = {1.0f, 1.0f, 1.0f};
+        ZHLN::FVec3         emissive   = {};
         float                anisotropy = 0.5f;
         float                blendEdge  = 0.2f;
     };

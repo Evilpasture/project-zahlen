@@ -3,7 +3,10 @@
 
 #pragma once
 
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <array>
 #include <cstdint>
 
@@ -39,7 +42,7 @@ struct GISettings {
     float                contrast      = 1.0f;
     float                saturation    = 1.0f;
     int                  tonemapper    = 3;
-    ZHLN::Float3         colorFilter   = {1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3         colorFilter   = {1.0f, 1.0f, 1.0f};
 
     // Runtime RCAS dial forwarded to BlitPushConstants.rcasSharpness. 0.0 turns
     // sharpening off; positive values are AMD's exp2(-stops) sharpness, 0.2
@@ -78,13 +81,13 @@ struct EnvironmentSettings {
     int   fullBright      = 0;
     int   useLocalProbe   = 0;
 
-    ZHLN::Float3 probeMin      = {-22.0f, 0.0f, -22.0f};
-    ZHLN::Float3 probeMax      = {22.0f, 12.0f, 22.0f};
-    ZHLN::Float3 probePos      = {0.0f, 4.0f, 0.0f};
+    ZHLN::FVec3 probeMin      = {-22.0f, 0.0f, -22.0f};
+    ZHLN::FVec3 probeMax      = {22.0f, 12.0f, 22.0f};
+    ZHLN::FVec3 probePos      = {0.0f, 4.0f, 0.0f};
 
-    ZHLN::Float4 skyZenith     = {0.003f, 0.008f, 0.020f, 1.0f};
-    ZHLN::Float4 skyHorizon    = {0.015f, 0.035f, 0.080f, 1.0f};
-    ZHLN::Float4 skyGround     = {0.001f, 0.001f, 0.003f, 1.0f};
+    ZHLN::FVec4 skyZenith     = {0.003f, 0.008f, 0.020f, 1.0f};
+    ZHLN::FVec4 skyHorizon    = {0.015f, 0.035f, 0.080f, 1.0f};
+    ZHLN::FVec4 skyGround     = {0.001f, 0.001f, 0.003f, 1.0f};
 
     auto operator==(const EnvironmentSettings&) const noexcept -> bool = default;
 };

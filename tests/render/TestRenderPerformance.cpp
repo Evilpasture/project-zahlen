@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -236,7 +237,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
+    cam.position = FVec3(0.0f, 25.0f, -50.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -30.0f;
     cam.fov      = 60.0f;
@@ -247,8 +248,8 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
         float angle  = static_cast<float>(f) * 0.05f;
-        cam.position = JPH::Vec3(std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f);
-        cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
+        cam.position = FVec3(std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f);
+        cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.z, -cam.position.x));
 
         // The orbit moves the camera every frame, and the engine renders from the
         // registry's copy: the pose is written back before the tick.
@@ -301,10 +302,10 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     for (size_t i = 0; i < kLightCount; ++i) {
         float     hue = static_cast<float>(i) / static_cast<float>(kLightCount);
-        JPH::Vec3 color(std::sin(hue * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.33f) * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.66f) * 6.28f) * 0.5f + 0.5f);
+        FVec3 color(std::sin(hue * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.33f) * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.66f) * 6.28f) * 0.5f + 0.5f);
 
         auto l = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 2.0f, 0.0f)}, ZHLN::Components::LightComponent {
+            ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 2.0f, 0.0f)}, ZHLN::Components::LightComponent {
                                                                                                 .type      = ZHLN::LightType::Point,
                                                                                                 .color     = color,
                                                                                                 .intensity = 150.0f,
@@ -319,7 +320,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 12.0f, -30.0f);
+    cam.position = FVec3(0.0f, 12.0f, -30.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -20.0f;
 
@@ -334,7 +335,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
             float lz    = std::cos(phase * 0.9f) * (15.0f + static_cast<float>(i % 4) * 3.0f);
             float ly    = 1.5f + std::sin(phase * 2.0f) * 0.8f;
 
-            reg.Patch<ZHLN::Components::TransformComponent>(lightEntities[i], [&](auto& t) { t.position = JPH::Vec3(lx, ly, lz); });
+            reg.Patch<ZHLN::Components::TransformComponent>(lightEntities[i], [&](auto& t) { t.position = FVec3(lx, ly, lz); });
         }
 
         engine.ProcessEvents();
@@ -363,7 +364,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
     reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
+        ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -4.0f, 0.0f},
                                                                                                  .drag        = 0.1f,
@@ -392,7 +393,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 8.0f, -20.0f);
+    cam.position = FVec3(0.0f, 8.0f, -20.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -15.0f;
 
@@ -416,9 +417,9 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
 
     reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 0.0f)},
+        ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 40.0f, 0.0f)},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.95f, 0.85f), .intensity = 180.0f, .direction = JPH::Vec3(0.5f, 0.8f, 0.3f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.95f, 0.85f), .intensity = 180.0f, .direction = FVec3(0.5f, 0.8f, 0.3f).Normalized()
         }
     );
 
@@ -428,7 +429,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             .heightFalloff   = 0.02f,
             .heightOffset    = 0.0f,
             .anisotropy      = 0.65f,
-            .scatteringColor = JPH::Vec3(0.85f, 0.90f, 1.0f),
+            .scatteringColor = FVec3(0.85f, 0.90f, 1.0f),
             .noiseScale      = 0.05f,
             .noiseSpeed      = 1.2f,
             .noiseIntensity  = 0.6f,
@@ -445,7 +446,7 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 3.0f, -25.0f);
+    cam.position = FVec3(0.0f, 3.0f, -25.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
@@ -481,11 +482,11 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
         float posX = -20.0f + static_cast<float>(i % 20) * 2.0f;
         float posY = 1.5f + static_cast<float>(i / 20) * 2.5f;
 
-        const JPH::Vec3  pos(posX, posY, 0.0f);
+        const FVec3  pos(posX, posY, 0.0f);
         const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
 
         reg.Create(
-            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
+            ZHLN::Components::TransformComponent {.position = pos, .scale = FVec3(2.5f, 2.5f, 2.5f)},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = decalTex, .roughness = 0.8f, .metallic = 0.1f}
         );
@@ -496,7 +497,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 7.5f, -18.0f);
+    cam.position = FVec3(0.0f, 7.5f, -18.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = 0.0f;
 
@@ -626,9 +627,9 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     });
 
     reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(40.0f, 50.0f, 30.0f)},
+        ZHLN::Components::TransformComponent {.position = FVec3(40.0f, 50.0f, 30.0f)},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.94f), .intensity = 180.0f, .direction = JPH::Vec3(0.5f, 0.7f, 0.35f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.98f, 0.94f), .intensity = 180.0f, .direction = FVec3(0.5f, 0.7f, 0.35f).Normalized()
         }
     );
 
@@ -668,7 +669,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 14.0f, -32.0f);
+    cam.position = FVec3(0.0f, 14.0f, -32.0f);
     cam.yaw      = 90.0f;
     cam.pitch    = -22.0f;
     cam.fov      = 60.0f;
@@ -678,7 +679,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     for (uint32_t f = 0; f < kFrames; ++f) {
         float t = static_cast<float>(f) * 0.05f;
         reg.Patch<ZHLN::Components::TransformComponent>(emissiveCube, [&](auto& trans) {
-            trans.position = JPH::Vec3(std::sin(t) * 15.0f, 4.0f + std::sin(t * 2.0f) * 2.0f, std::cos(t) * 15.0f);
+            trans.position = FVec3(std::sin(t) * 15.0f, 4.0f + std::sin(t * 2.0f) * 2.0f, std::cos(t) * 15.0f);
         });
 
         engine.ProcessEvents();
@@ -750,9 +751,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // 3. Clustered Forward+ Multi-Light Grid (48 Dynamic Point Lights + Sun)
     reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 0.0f)},
+        ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 50.0f, 0.0f)},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.92f), .intensity = 160.0f, .direction = JPH::Vec3(0.6f, 0.75f, 0.4f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3(1.0f, 0.98f, 0.92f), .intensity = 160.0f, .direction = FVec3(0.6f, 0.75f, 0.4f).Normalized()
         }
     );
 
@@ -763,10 +764,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     for (size_t i = 0; i < kLightCount; ++i) {
         float hue = static_cast<float>(i) / static_cast<float>(kLightCount);
         auto  l   = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 2.0f, 0.0f)},
+            ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 2.0f, 0.0f)},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Point,
-                .color     = JPH::Vec3(std::sin(hue * 6.28f) * 0.5f + 0.5f, 0.8f, std::cos(hue * 6.28f) * 0.5f + 0.5f),
+                .color     = FVec3(std::sin(hue * 6.28f) * 0.5f + 0.5f, 0.8f, std::cos(hue * 6.28f) * 0.5f + 0.5f),
                 .intensity = 220.0f,
                 .range     = 20.0f,
             }
@@ -777,7 +778,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     // 4. GPU Particle Emitter (10,000 Particles)
     auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
     reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 1.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
+        ZHLN::Components::TransformComponent {.position = FVec3(0.0f, 1.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -2.5f, 0.0f},
                                                                                                  .drag        = 0.15f,
@@ -808,7 +809,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             .heightFalloff   = 0.025f,
             .heightOffset    = 0.0f,
             .anisotropy      = 0.55f,
-            .scatteringColor = JPH::Vec3(0.8f, 0.88f, 1.0f),
+            .scatteringColor = FVec3(0.8f, 0.88f, 1.0f),
             .noiseScale      = 0.04f,
             .noiseSpeed      = 1.0f,
             .noiseIntensity  = 0.5f,
@@ -820,11 +821,11 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     for (size_t i = 0; i < 50; ++i) {
         float            posX  = -30.0f + static_cast<float>(i % 10) * 6.5f;
         float            posZ  = -30.0f + static_cast<float>(i / 10) * 12.0f;
-        const JPH::Vec3  pos   = JPH::Vec3(posX, 0.01f, posZ);
+        const FVec3  pos   = FVec3(posX, 0.01f, posZ);
         const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
 
         reg.Create(
-            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
+            ZHLN::Components::TransformComponent {.position = pos, .scale = FVec3(2.5f, 2.5f, 2.5f)},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = sparkTex, .roughness = 0.9f, .metallic = 0.0f}
         );
@@ -898,8 +899,8 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                      .P99Limit(50.0)
                      .Run([&](uint32_t f) {
                          float t      = static_cast<float>(f) * 0.035f;
-                         cam.position = JPH::Vec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
-                         cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
+                         cam.position = FVec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
+                         cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.z, -cam.position.x));
                          cam.pitch    = -18.0f + std::sin(t * 2.0f) * 4.0f;
 
                          // The orbit moves the camera every frame, and the engine renders
@@ -911,7 +912,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                              float lz    = std::cos(phase * 1.1f) * (20.0f + static_cast<float>(i % 3) * 4.0f);
                              float ly    = 1.2f + std::sin(phase * 2.5f) * 0.8f;
 
-                             reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = JPH::Vec3(lx, ly, lz); });
+                             reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = FVec3(lx, ly, lz); });
                          }
 
                          engine.ProcessEvents();

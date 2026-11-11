@@ -3,6 +3,7 @@
 
 // gameplay/FallbackScene/FallbackScene.cpp
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "FallbackScene.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -209,7 +210,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // 1. Animate 3D Emblem & Orbit Light
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
-            JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
+            FVec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
             trans.rotation = Math::EulerDegreesToQuat(euler);
             trans.position.y = 2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f;
         });
@@ -217,7 +218,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         reg.Patch<Components::TransformComponent>(s_PointLight, [&](auto& trans) -> auto {
             float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
             float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
-            trans.position = JPH::Vec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
+            trans.position = FVec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
         });
     }
 

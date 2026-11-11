@@ -107,7 +107,7 @@ struct InstanceDataDesc {
     uint32_t                    bakedIrradianceTex   = kNoFilmTexture;
     float                       bakedIrradianceScale = 1.0f;
     bool                        hasAmbientCube       = false;
-    std::array<ZHLN::Float4, 6> ambientCube {};
+    std::array<ZHLN::FVec4, 6> ambientCube {};
 
     uint32_t alphaMode    = 0;
     bool     isViewmodel  = false;
@@ -128,10 +128,10 @@ struct InstanceDataDesc {
     float roughnessFactor = 1.0f;
     float alphaCutoff     = 0.0f;
 
-    ZHLN::Float3 localCenter {0.0f, 0.0f, 0.0f};
-    ZHLN::Float4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
-    ZHLN::Float4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-    ZHLN::Float4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 localCenter {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
 
     float                     transmissionFactor       = 0.0f;
     float                     iridescenceFactor        = 0.0f;
@@ -153,7 +153,7 @@ struct InstanceDataDesc {
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f;
     uint32_t                  anisotropyTex            = kNoFilmTexture;
-    ZHLN::Float3              sheenColorFactor {};
+    ZHLN::FVec3              sheenColorFactor {};
     float                     sheenRoughnessFactor           = 0.0f;
     uint32_t                  sheenColorTex                  = kNoFilmTexture;
     uint32_t                  sheenRoughnessTex              = kNoFilmTexture;
@@ -164,7 +164,7 @@ struct InstanceDataDesc {
     bool                      environmentReflectionAlphaMask = false;
     float                     environmentReflectionFactor    = 1.0f;
     float                     specularFactor                 = 1.0f;
-    ZHLN::Float3              specularColorFactor {1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3              specularColorFactor {1.0f, 1.0f, 1.0f};
     uint32_t                  specularTex     = kNoFilmTexture;
     uint32_t                  specularTexMode = 0;
     MaterialSamplerAddresses  textureSamplers {};
@@ -200,7 +200,7 @@ struct InstanceDataDesc {
 
     const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
-    ZHLN::Float4 emissive       = desc.emissiveFactor;
+    ZHLN::FVec4 emissive       = desc.emissiveFactor;
     uint32_t     paddingCenter  = 0;
     uint32_t     paddingMeshlet = 0;
     if (hasTransmission != 0) {
@@ -216,14 +216,14 @@ struct InstanceDataDesc {
         }
     }
 
-    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow0;
-    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow1;
+    std::array<ZHLN::FVec4, kMaterialTextureSlotCount> uvRow0;
+    std::array<ZHLN::FVec4, kMaterialTextureSlotCount> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s         = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot]          = ZHLN::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
-        uvRow1[slot]          = ZHLN::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
+        uvRow0[slot]          = ZHLN::FVec4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot]          = ZHLN::FVec4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {

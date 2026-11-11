@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -15,7 +17,10 @@
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
@@ -212,7 +217,7 @@ namespace {
 auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) -> Entity {
     Entity     root     = reg.Create();
     JPH::Mat44 localMat = Math::CreateTransform(p.position, p.rotation, p.scale);
-    reg.Add(root, Components::TransformComponent {.position = ZHLN::Float3(p.position), .rotation = p.rotation, .scale = p.scale});
+    reg.Add(root, Components::TransformComponent {.position = ZHLN::FVec3(p.position), .rotation = p.rotation, .scale = p.scale});
     reg.Add(root, Components::WorldTransformComponent {.world = localMat, .previous = localMat});
     reg.Add(root, Components::NameComponent {.name = String64("Root_" + std::string(vPath))});
     return root;
@@ -230,9 +235,9 @@ auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> JP
 }
 
 struct PreparedPart {
-    JPH::Vec3      translation {};
+    FVec3      translation {};
     JPH::Quat      rotation {};
-    JPH::Vec3      scale {};
+    FVec3      scale {};
     float          maxScale = 1.0f;
     JPH::ShapeRefC shape    = nullptr;
 };
@@ -253,12 +258,12 @@ auto PreparePrefabPhysics(const ModelPrefab& prefab, const JPH::Mat44& baseTrans
             prep.scale       = trs.scale;
             prep.rotation    = trs.rotation;
             prep.translation = trs.translation;
-            prep.maxScale    = std::max({std::abs(trs.scale.GetX()), std::abs(trs.scale.GetY()), std::abs(trs.scale.GetZ())});
+            prep.maxScale    = std::max({std::abs(trs.scale.x), std::abs(trs.scale.y), std::abs(trs.scale.z)});
 
             if (createPhysics) {
                 JPH::ShapeRefC rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
                 if (rawShape != nullptr) {
-                    prep.shape = !prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f) ? new JPH::ScaledShape(rawShape, prep.scale) : rawShape;
+                    prep.shape = !prep.scale.IsClose(FVec3::sReplicate(1.0f), 1e-5f) ? new JPH::ScaledShape(rawShape, prep.scale) : rawShape;
                 }
             }
         }
@@ -336,15 +341,15 @@ auto InstantiateMeshPart(
             }
         );
     } else if (part.isSkinned && params.isAnimated) {
-        reg.Add(e, Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+        reg.Add(e, Components::TransformComponent {.position = FVec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)});
         reg.Add(e, Components::WorldTransformComponent {.world = baseTransform, .previous = baseTransform});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     } else {
         const JPH::Mat44         nodeLocal  = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
         const Math::TransformTRS localTRS   = Math::Decompose(nodeLocal);
-        const JPH::Vec3&         localPos   = localTRS.translation;
+        const FVec3&         localPos   = localTRS.translation;
         const JPH::Quat&         localRot   = localTRS.rotation;
-        const JPH::Vec3&         localScale = localTRS.scale;
+        const FVec3&         localScale = localTRS.scale;
 
         reg.Add(e, Components::TransformComponent {.position = localPos, .rotation = localRot, .scale = localScale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
@@ -358,7 +363,7 @@ auto InstantiateMeshPart(
                .meshAsset     = meshAsset,
                .materialAsset = matAsset,
                .cullRadius    = part.boundingRadius,
-               .localCenter   = JPH::Vec3(
+               .localCenter   = FVec3(
                    (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
                ),
                .flags     = flags,
@@ -391,7 +396,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float         invImportScale = 1.0f / emissiveFactorScale;
-    const ZHLN::Float4& raw            = part.defaultMaterial.emissiveFactor;
+    const ZHLN::FVec4& raw            = part.defaultMaterial.emissiveFactor;
     const float         ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
@@ -399,23 +404,23 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
         return std::nullopt;
     }
 
-    JPH::Vec3 localCenter(
+    FVec3 localCenter(
         (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
     );
     float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
 
     Entity glowEnt = reg.Create();
-    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)});
     reg.Add(glowEnt, Components::HierarchyComponent {.parent = parentEntity});
     reg.Add(glowEnt, Components::NameComponent {.name = String64("Glow_" + std::string(part.name.c_str()))});
 
     reg.Add(
         glowEnt, Components::LightComponent {
                      .type      = LightType::Point,
-                     .color     = JPH::Vec3(ef[0], ef[1], ef[2]),
+                     .color     = FVec3(ef[0], ef[1], ef[2]),
                      .intensity = lum * 35.0f,
                      .radius    = std::max(partExtent * scaleMult * 0.15f, 0.05f),
-                     .direction = JPH::Vec3(0, -1, 0),
+                     .direction = FVec3(0, -1, 0),
                      .range     = std::max(partExtent * scaleMult * 2.5f, 3.0f),
                      .points    = {},
                      .twoSided  = 0
@@ -426,13 +431,13 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
-    JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
-                             JPH::Vec4(
+auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+    FVec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
+                             FVec4(
                                  params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
                                  params.materialOverride.baseColorFactor[2], params.materialOverride.baseColorFactor[3]
                              ) :
-                             JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+                             FVec4(0.8f, 0.4f, 0.2f, 1.0f);
 
     Mesh mesh = CreateBoxMesh(gfx, halfExtents, boxColor);
 
@@ -442,7 +447,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = ZHLN::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
+        mat.baseColorFactor = ZHLN::FVec4 {boxColor.x, boxColor.y, boxColor.z, boxColor.w};
         mat.roughnessFactor = 0.3f;
         mat.metallicFactor  = 0.1f;
     }
@@ -457,7 +462,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     float maxExtent = std::max({halfExtents.x, halfExtents.y, halfExtents.z});
@@ -467,7 +472,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
                .meshAsset  = meshAsset,
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Box,
-               .dimensions = static_cast<JPH::Vec3>(halfExtents),
+               .dimensions = JPH::Vec3(halfExtents.x, halfExtents.y, halfExtents.z),
                .color      = boxColor
            }
     );
@@ -488,7 +493,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     return e;
 }
 
-auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
     return CreateBox(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), halfExtents, params);
 }
 
@@ -501,14 +506,14 @@ auto SpawnPrimitive(
     std::string_view                      shapeName,
     Mesh                                  mesh,
     Components::OwnedMeshComponent::Shape shape,
-    JPH::Vec3                             dimensions,
+    FVec3                             dimensions,
     float                                 cullRadius,
     Physics::ShapeType                    physicsShape,
     float                                 physP1,
     float                                 physP2,
     const SpawnParams&                    params
 ) -> Entity {
-    const JPH::Vec4 shapeColor = (params.color.w >= 0.0f) ? JPH::Vec4(params.color) : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    const FVec4 shapeColor = (params.color.w >= 0.0f) ? FVec4(params.color) : FVec4(0.8f, 0.4f, 0.2f, 1.0f);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -516,7 +521,7 @@ auto SpawnPrimitive(
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = ZHLN::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
+        mat.baseColorFactor = ZHLN::FVec4 {shapeColor.x, shapeColor.y, shapeColor.z, shapeColor.w};
         mat.roughnessFactor = params.roughness;
         mat.metallicFactor  = params.metallic;
     }
@@ -531,7 +536,7 @@ auto SpawnPrimitive(
     JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
     reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor});
@@ -559,7 +564,7 @@ auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physics
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, JPH::Vec3(radius, 0.0f, 0.0f),
+        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, FVec3(radius, 0.0f, 0.0f),
         radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
     );
 }
@@ -577,7 +582,7 @@ auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physi
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
         gfx, reg, pc, "Cylinder", CreateCylinderMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
-        JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
+        FVec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
         height * 0.5f * maxScale, resolved
     );
 }
@@ -593,7 +598,7 @@ auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCo
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, JPH::Vec3(radius, height, 0.0f),
+        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, FVec3(radius, height, 0.0f),
         std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
     );
 }
@@ -602,7 +607,7 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
     return CreateCone(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
 }
 
-auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::Float4 color, const SpawnParams& params)
+auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
     -> Entity {
     Mesh mesh = CreatePlaneMesh(gfx, extent, color);
 
@@ -627,7 +632,7 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = ZHLN::FVec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
@@ -636,8 +641,8 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
                .meshAsset  = meshAsset,
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Plane,
-               .dimensions = JPH::Vec3(extent, 0.0f, 0.0f),
-               .color      = static_cast<JPH::Vec4>(color)
+               .dimensions = FVec3(extent, 0.0f, 0.0f),
+               .color      = JPH::Vec4(color.x, color.y, color.z, color.w)
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
@@ -653,7 +658,7 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     return e;
 }
 
-auto CreatePlane(Engine& engine, float extent, ZHLN::Float4 color, const SpawnParams& params) -> Entity {
+auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
     return CreatePlane(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
 }
 
@@ -765,7 +770,7 @@ auto InstantiatePrefab(
             Math::TransformTRS localTRS = Math::Decompose(nodeModelMat);
 
             // Per glTF spec, directional and spot lights point along local -Z
-            JPH::Vec3 worldDir = (worldTRS.rotation * JPH::Vec3(0.0f, 0.0f, -1.0f)).Normalized();
+            FVec3 worldDir = (worldTRS.rotation * FVec3(0.0f, 0.0f, -1.0f)).Normalized();
 
             Entity lightEnt = reg.Create();
             reg.Add(lightEnt, Components::NameComponent {.name = light.name});
@@ -822,16 +827,16 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
                 owned.mesh = CreateBoxMesh(gfx, owned.dimensions, owned.color);
                 break;
             case Shape::Plane:
-                owned.mesh = CreatePlaneMesh(gfx, owned.dimensions.GetX(), owned.color);
+                owned.mesh = CreatePlaneMesh(gfx, owned.dimensions.x, owned.color);
                 break;
             case Shape::Sphere:
-                owned.mesh = CreateSphereMesh(gfx, owned.dimensions.GetX(), owned.color);
+                owned.mesh = CreateSphereMesh(gfx, owned.dimensions.x, owned.color);
                 break;
             case Shape::Cylinder:
-                owned.mesh = CreateCylinderMesh(gfx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
+                owned.mesh = CreateCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
                 break;
             case Shape::Cone:
-                owned.mesh = CreateConeMesh(gfx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
+                owned.mesh = CreateConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
                 break;
             case Shape::None:
                 continue;

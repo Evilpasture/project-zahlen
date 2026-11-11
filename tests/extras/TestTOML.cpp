@@ -19,6 +19,7 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -367,7 +368,7 @@ intensity = 250.0
             ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
             // ... and only in that form.
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
-            // A Float3 accepts the integers a person types.
+            // A FVec3 accepts the integers a person types.
             const auto integral = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
             ZHLN::Test::ExpectTrue(integral.has_value()) && ZHLN::Test::ExpectEq(integral->camera.position.z, 12.0f);
 
@@ -610,9 +611,9 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(1.0f, 2.0f, 3.0f),
+                    .position = FVec3(1.0f, 2.0f, 3.0f),
                     .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 45.0f, 0.0f}),
-                    .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
+                    .scale    = FVec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
                 ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {.isStatic = false},
@@ -640,14 +641,14 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
+                    .position = FVec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,
-                    .color       = JPH::Vec3(1.0f, 0.5f, 0.25f),
+                    .color       = FVec3(1.0f, 0.5f, 0.25f),
                     .intensity   = 180.0f,
                     .radius      = 0.0f,
-                    .direction   = JPH::Vec3(0.4f, 1.0f, 0.3f),
+                    .direction   = FVec3(0.4f, 1.0f, 0.3f),
                     .range       = 0.0f,
                     .castsShadow = true
                 },
@@ -659,7 +660,7 @@ onClickAction = "editor.save_scene"
             registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
 
             ZHLN::Camera camera;
-            camera.position = JPH::Vec3(0.0f, 3.8f, 7.5f);
+            camera.position = FVec3(0.0f, 3.8f, 7.5f);
             camera.yaw      = -90.0f;
             camera.pitch    = -14.0f;
             camera.fov      = 52.0f;
@@ -692,7 +693,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
 
             // The environment comes back out of the settings by field name,
-            // int -> bool and native Float3/Float4 -> JPH::Float3 included.
+            // int -> bool and native FVec3/FVec4 -> JPH::Float3 included.
             ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
             ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
             ZHLN::Test::ExpectTrue(scene.environment.enableRTR);

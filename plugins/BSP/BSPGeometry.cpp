@@ -11,6 +11,7 @@
 // BSPLighting.hpp for the lighting rules.
 
 #include "BSPGeometry.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPBakeField.hpp"
 #include "BSPLighting.hpp"
@@ -41,39 +42,39 @@ constexpr int32_t kSurfNodraw  = 0x80;
 constexpr int32_t kSurfHint    = 0x100;
 constexpr int32_t kSurfSkip    = 0x200;
 
-void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, JPH::Vec3 p) {
+void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, FVec3 p) {
     if (first) {
-        boundsMin = JPH::Float3(p.GetX(), p.GetY(), p.GetZ());
-        boundsMax = JPH::Float3(p.GetX(), p.GetY(), p.GetZ());
+        boundsMin = JPH::Float3(p.x, p.y, p.z);
+        boundsMax = JPH::Float3(p.x, p.y, p.z);
         first     = false;
         return;
     }
-    boundsMin.x = std::min(boundsMin.x, p.GetX());
-    boundsMin.y = std::min(boundsMin.y, p.GetY());
-    boundsMin.z = std::min(boundsMin.z, p.GetZ());
-    boundsMax.x = std::max(boundsMax.x, p.GetX());
-    boundsMax.y = std::max(boundsMax.y, p.GetY());
-    boundsMax.z = std::max(boundsMax.z, p.GetZ());
+    boundsMin.x = std::min(boundsMin.x, p.x);
+    boundsMin.y = std::min(boundsMin.y, p.y);
+    boundsMin.z = std::min(boundsMin.z, p.z);
+    boundsMax.x = std::max(boundsMax.x, p.x);
+    boundsMax.y = std::max(boundsMax.y, p.y);
+    boundsMax.z = std::max(boundsMax.z, p.z);
 }
 
 // Source angle triples are (pitch, yaw, roll) degrees, pitch positive down,
 // around a Z-up world. Pitch/yaw -> unit direction in source space.
-[[nodiscard]] auto AngleDirection(JPH::Vec3 angles) -> JPH::Vec3 {
-    const float pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
-    const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
+[[nodiscard]] auto AngleDirection(FVec3 angles) -> FVec3 {
+    const float pitch = angles.x * (3.14159265358979323846f / 180.0f);
+    const float yaw   = angles.y * (3.14159265358979323846f / 180.0f);
     const float cp    = std::cos(pitch);
-    return JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+    return FVec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
-[[nodiscard]] auto FaceWinding(const BSPMap& map, const DFace& face) -> std::optional<std::vector<JPH::Vec3>> {
+[[nodiscard]] auto FaceWinding(const BSPMap& map, const DFace& face) -> std::optional<std::vector<FVec3>> {
     if (face.firstedge < 0 || face.numedges < 3) {
         return std::nullopt;
     }
     if (static_cast<size_t>(face.firstedge) + static_cast<size_t>(face.numedges) > map.surfEdges.size()) {
         return std::nullopt;
     }
-    std::vector<JPH::Vec3> out;
+    std::vector<FVec3> out;
     out.reserve(static_cast<size_t>(face.numedges));
     for (int16_t k = 0; k < face.numedges; ++k) {
         const int32_t surfEdge  = map.surfEdges[static_cast<size_t>(face.firstedge) + static_cast<size_t>(k)];
@@ -92,24 +93,24 @@ void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, J
     return out;
 }
 
-[[nodiscard]] auto DropDuplicateCorners(std::span<const JPH::Vec3> winding) -> std::vector<JPH::Vec3> {
-    std::vector<JPH::Vec3> unique;
+[[nodiscard]] auto DropDuplicateCorners(std::span<const FVec3> winding) -> std::vector<FVec3> {
+    std::vector<FVec3> unique;
     unique.reserve(winding.size());
-    for (const JPH::Vec3& point: winding) {
-        if (unique.empty() || (point - unique.back()).LengthSq() > kEpsilon * kEpsilon) {
+    for (const FVec3& point: winding) {
+        if (unique.empty() || (point - unique.back()).LengthSquared() > kEpsilon * kEpsilon) {
             unique.push_back(point);
         }
     }
-    if (unique.size() > 1 && (unique.front() - unique.back()).LengthSq() <= kEpsilon * kEpsilon) {
+    if (unique.size() > 1 && (unique.front() - unique.back()).LengthSquared() <= kEpsilon * kEpsilon) {
         unique.pop_back();
     }
     return unique;
 }
 
 struct FaceProjection {
-    JPH::Vec3 sDir {1.0f, 0.0f, 0.0f};
+    FVec3 sDir {1.0f, 0.0f, 0.0f};
     float     sOffset = 0.0f;
-    JPH::Vec3 tDir {0.0f, 1.0f, 0.0f};
+    FVec3 tDir {0.0f, 1.0f, 0.0f};
     float     tOffset = 0.0f;
     float     width   = 512.0f;
     float     height  = 512.0f;
@@ -127,9 +128,9 @@ struct FaceProjection {
     }
     const DTexData& texData = map.texDatas[static_cast<size_t>(texInfo.texdata)];
     FaceProjection  out;
-    out.sDir    = JPH::Vec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
+    out.sDir    = FVec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
     out.sOffset = texInfo.textureVecs[0][3];
-    out.tDir    = JPH::Vec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
+    out.tDir    = FVec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
     out.tOffset = texInfo.textureVecs[1][3];
     out.width   = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
     out.height  = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
@@ -163,12 +164,12 @@ struct FaceProjection {
 }
 
 // Vertex centroid of a winding (unweighted -- the caller weights by area).
-[[nodiscard]] auto WindingCentroid(std::span<const JPH::Vec3> winding) noexcept -> JPH::Vec3 {
+[[nodiscard]] auto WindingCentroid(std::span<const FVec3> winding) noexcept -> FVec3 {
     if (winding.empty()) {
-        return JPH::Vec3::sZero();
+        return FVec3::sZero();
     }
-    JPH::Vec3 sum = JPH::Vec3::sZero();
-    for (const JPH::Vec3& corner: winding) {
+    FVec3 sum = FVec3::sZero();
+    for (const FVec3& corner: winding) {
         sum += corner;
     }
     return sum / static_cast<float>(winding.size());
@@ -177,15 +178,15 @@ struct FaceProjection {
 // Planar area of a closed convex winding (Source faces are convex planar
 // polygons), in square Source units. Used for the twin audit's coverage test
 // and for the emissive surfaces' area budget.
-[[nodiscard]] auto WindingArea(std::span<const JPH::Vec3> winding) noexcept -> double {
+[[nodiscard]] auto WindingArea(std::span<const FVec3> winding) noexcept -> double {
     if (winding.size() < 3) {
         return 0.0;
     }
     double area = 0.0;
     for (size_t i = 1; i + 1 < winding.size(); ++i) {
-        const JPH::Vec3 a = winding[i] - winding[0];
-        const JPH::Vec3 b = winding[i + 1] - winding[0];
-        area += 0.5 * static_cast<double>(a.Cross(b).Length());
+        const FVec3 a = winding[i] - winding[0];
+        const FVec3 b = winding[i + 1] - winding[0];
+        area += 0.5 * static_cast<double>(Cross(a, b).Length());
     }
     return area;
 }
@@ -280,7 +281,7 @@ struct TwinRecord {
     double                 uLo = 0.0, uHi = 0.0, vLo = 0.0, vHi = 0.0; // extents in canonical plane axes
     double                 area      = 0.0;
     size_t                 partIndex = 0;
-    std::vector<JPH::Vec3> winding; // Source-space corners in emitted (post-flip) order
+    std::vector<FVec3> winding; // Source-space corners in emitted (post-flip) order
 };
 
 // Twin matching tolerance grouping: normals quantized to 0.01, plane constant
@@ -306,7 +307,7 @@ constexpr int32_t kContentsSolid = 0x1;
 // BSPTree point classification against model 0's head node: walks split
 // planes down to a leaf and reports its contents. Mirrors Source's own "what
 // volume is this point in" query; runs in Source coordinates.
-[[nodiscard]] auto ContentsAtPoint(const BSPMap& map, const JPH::Vec3& p) noexcept -> int32_t {
+[[nodiscard]] auto ContentsAtPoint(const BSPMap& map, const FVec3& p) noexcept -> int32_t {
     if (map.models.empty() || map.nodes.empty()) {
         return kContentsSolid;
     }
@@ -324,7 +325,7 @@ constexpr int32_t kContentsSolid = 0x1;
             return kContentsSolid;
         }
         const DPlane& plane = map.planes[static_cast<size_t>(n.planenum)];
-        const float   dist  = p.GetX() * plane.normal[0] + p.GetY() * plane.normal[1] + p.GetZ() * plane.normal[2] - plane.dist;
+        const float   dist  = p.x * plane.normal[0] + p.y * plane.normal[1] + p.z * plane.normal[2] - plane.dist;
         node                = n.children[dist >= 0.0f ? 0 : 1];
     }
     return kContentsSolid;
@@ -378,14 +379,14 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
             // Open air behind the face (centroid and a few edge midpoints,
             // sampled close and far)? Without it nobody can ever see or touch
             // the back side, so the twin-less sheets is fine single-sided.
-            const JPH::Vec3 n(rec.ownN[0], rec.ownN[1], rec.ownN[2]);
-            JPH::Vec3       centre = JPH::Vec3::sZero();
-            for (const JPH::Vec3& corner: rec.winding) {
+            const FVec3 n(rec.ownN[0], rec.ownN[1], rec.ownN[2]);
+            FVec3       centre = FVec3::sZero();
+            for (const FVec3& corner: rec.winding) {
                 centre += corner;
             }
             centre          = centre / static_cast<float>(rec.winding.size());
             bool backIsOpen = false;
-            auto probeBack  = [&](const JPH::Vec3& at, float distance) {
+            auto probeBack  = [&](const FVec3& at, float distance) {
                 const int32_t contents = ContentsAtPoint(map, at - n * distance);
                 if ((contents & kContentsSolid) == 0) {
                     backIsOpen = true;
@@ -396,7 +397,7 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
                 probeBack(centre, 8.0f);
             }
             for (size_t i = 1; i < rec.winding.size() && !backIsOpen; i += 2) {
-                const JPH::Vec3 mid = (rec.winding[i - 1] + rec.winding[i]) * 0.5f;
+                const FVec3 mid = (rec.winding[i - 1] + rec.winding[i]) * 0.5f;
                 probeBack(mid, 2.0f);
             }
             if (!backIsOpen) {
@@ -409,9 +410,9 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const 
             }
             MaterialStreams& coll = result.collisionOnly;
             const uint32_t   base = coll.VertexCount();
-            for (const JPH::Vec3& corner: rec.winding) {
-                const JPH::Vec3 p = ConvertPosition(options, corner);
-                coll.positions.push_back(VertexPosition {{p.GetX(), p.GetY(), p.GetZ()}});
+            for (const FVec3& corner: rec.winding) {
+                const FVec3 p = ConvertPosition(options, corner);
+                coll.positions.push_back(VertexPosition {{p.x, p.y, p.z}});
             }
             for (size_t i = 1; i + 1 < rec.winding.size(); ++i) {
                 coll.indices.push_back(base);
@@ -433,14 +434,14 @@ void EmitVertex(
     const DFace&              face,
     const VradLightmapAtlas&  lightmaps,
     const VradLightmapChart*  lightmapChart,
-    JPH::Vec3                 sourcePos,
-    JPH::Vec3                 sourceNormal,
+    FVec3                 sourcePos,
+    FVec3                 sourceNormal,
     ImportedMapData&          result,
     bool&                     partBoundsFirst,
     bool&                     mapBoundsFirst
 ) {
-    const float u = (sourcePos.Dot(projection.sDir) + projection.sOffset) / projection.width;
-    const float v = (sourcePos.Dot(projection.tDir) + projection.tOffset) / projection.height;
+    const float u = (Dot(sourcePos, projection.sDir) + projection.sOffset) / projection.width;
+    const float v = (Dot(sourcePos, projection.tDir) + projection.tOffset) / projection.height;
 
     // UV1 is reserved for Source's static-lighting atlas on BSP geometry.
     // Do this in source coordinates, where texinfo.lightmapVecs and the face's
@@ -455,33 +456,33 @@ void EmitVertex(
         // lightmapVecs are luxels per world unit (Source's lightmapVecsLuxelsPerWorldUnits),
         // so dot + offset is already a luxel coordinate. Dividing by 16 here
         // shrinks every face's sample grid and mis-addresses the chart.
-        const float s = sourcePos.GetX() * lightInfo.lightmapVecs[0][0] + sourcePos.GetY() * lightInfo.lightmapVecs[0][1] +
-                        sourcePos.GetZ() * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3];
-        const float t = sourcePos.GetX() * lightInfo.lightmapVecs[1][0] + sourcePos.GetY() * lightInfo.lightmapVecs[1][1] +
-                        sourcePos.GetZ() * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3];
+        const float s = sourcePos.x * lightInfo.lightmapVecs[0][0] + sourcePos.y * lightInfo.lightmapVecs[0][1] +
+                        sourcePos.z * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3];
+        const float t = sourcePos.x * lightInfo.lightmapVecs[1][0] + sourcePos.y * lightInfo.lightmapVecs[1][1] +
+                        sourcePos.z * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3];
         lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) /
                  static_cast<float>(page.width);
         lightV = (static_cast<float>(lightmapChart->y) + (t - static_cast<float>(face.lightmapTextureMinsInLuxels[1])) + 0.5f) /
                  static_cast<float>(page.height);
     }
 
-    const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
-    const JPH::Vec3 normal  = (sourceNormal.LengthSq() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : JPH::Vec3::sAxisZ();
+    const FVec3 tangent = (projection.sDir.LengthSquared() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : FVec3::sAxisX();
+    const FVec3 normal  = (sourceNormal.LengthSquared() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : FVec3::sAxisZ();
 
     // Handedness so that bitangent = cross(normal, tangent.xyz) * tangent.w,
     // which is the glTF convention the renderer's tangent frames assume.
-    const JPH::Vec3 crossNT    = normal.Cross(tangent);
-    const float     handedness = (crossNT.Dot(projection.tDir) < 0.0f) ? -1.0f : 1.0f;
+    const FVec3 crossNT    = Cross(normal, tangent);
+    const float     handedness = (Dot(crossNT, projection.tDir) < 0.0f) ? -1.0f : 1.0f;
 
-    const JPH::Vec3 enginePos     = ConvertPosition(options, sourcePos);
-    const JPH::Vec3 engineNormal  = ConvertDirection(options, normal);
-    const JPH::Vec3 engineTangent = ConvertDirection(options, tangent);
+    const FVec3 enginePos     = ConvertPosition(options, sourcePos);
+    const FVec3 engineNormal  = ConvertDirection(options, normal);
+    const FVec3 engineTangent = ConvertDirection(options, tangent);
 
-    part.positions.push_back(VertexPosition {{enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()}});
+    part.positions.push_back(VertexPosition {{enginePos.x, enginePos.y, enginePos.z}});
     part.tangentFrames.push_back(
         VertexTangentFrame {
-            Math::PackNormal(engineNormal.GetX(), engineNormal.GetY(), engineNormal.GetZ()),
-            Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
+            Math::PackNormal(engineNormal.x, engineNormal.y, engineNormal.z),
+            Math::PackNormal(engineTangent.x, engineTangent.y, engineTangent.z, handedness),
         }
     );
     part.surfaces.push_back(
@@ -525,21 +526,21 @@ void EmitVertex(
     return refl[0] * 0.2126f + refl[1] * 0.7152f + refl[2] * 0.0722f;
 }
 
-auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3 {
+auto ConvertPosition(const ImportOptions& options, FVec3 in) noexcept -> FVec3 {
     const float s = options.unitScale;
     if (!options.convertCoordinates) {
         return in * s;
     }
     // Z-up right-handed -> Y-up right-handed: rotate -90 degrees about X,
     // then scale. (x, y, z) -> (x, z, -y).
-    return JPH::Vec3(in.GetX() * s, in.GetZ() * s, -in.GetY() * s);
+    return FVec3(in.x * s, in.z * s, -in.y * s);
 }
 
-auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3 {
+auto ConvertDirection(const ImportOptions& options, FVec3 in) noexcept -> FVec3 {
     if (!options.convertCoordinates) {
         return in;
     }
-    return JPH::Vec3(in.GetX(), in.GetZ(), -in.GetY());
+    return FVec3(in.x, in.z, -in.y);
 }
 
 namespace {
@@ -736,8 +737,8 @@ auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> Skybo
             if (!winding) {
                 continue;
             }
-            for (const JPH::Vec3& corner: *winding) {
-                const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
+            for (const FVec3& corner: *winding) {
+                const float p[3] = {corner.x, corner.y, corner.z};
                 float       placed[3];
                 TransformSkyboxPoint(t, p, placed);
                 for (int k = 0; k < 2; ++k) {
@@ -829,11 +830,11 @@ auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options
         sub.rotating   = (className == "func_door_rotating" || className == "func_rot_button" || className == "momentary_rot_button");
 
         const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
-        const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
-        const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
-        JPH::Vec3       pivot = (mins + maxs) * 0.5f;
+        const FVec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+        const FVec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+        FVec3       pivot = (mins + maxs) * 0.5f;
         if (const auto originKey = entity.FindVector("origin")) {
-            pivot = JPH::Vec3((*originKey)[0], (*originKey)[1], (*originKey)[2]);
+            pivot = FVec3((*originKey)[0], (*originKey)[1], (*originKey)[2]);
         }
         sub.pivot = ConvertPosition(options, pivot);
 
@@ -883,8 +884,8 @@ auto GatherEmissiveAreaLights(
                 continue;
             }
             if (sky.active) {
-                const JPH::Vec3 c    = WindingCentroid(*winding);
-                const float     src[3] = {c.GetX(), c.GetY(), c.GetZ()};
+                const FVec3 c    = WindingCentroid(*winding);
+                const float     src[3] = {c.x, c.y, c.z};
                 if (IsSkyboxPoint(sky, src)) {
                     // Background scenery keeps its lamp entities; its panels do
                     // not compete for the play area's emissive-proxy budget.
@@ -913,10 +914,10 @@ auto GatherEmissiveAreaLights(
             surface.position         = ConvertPosition(options, WindingCentroid(*winding));
             // The face's plane normal, +N out of the solid (see the winding
             // orientation note in ImportMapGeometry).
-            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
+            FVec3 faceNormal = FVec3::sAxisZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+                faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
             }
             surface.normal           = ConvertDirection(options, faceNormal);
             surface.areaSquareInches = static_cast<float>(areaInches);
@@ -1010,19 +1011,19 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // this point on the backdrop is ordinary scenery.
             bool skyFace = false;
             if (sky.active) {
-                const JPH::Vec3 centroid = WindingCentroid(*winding);
-                const float    src[3] = {centroid.GetX(), centroid.GetY(), centroid.GetZ()};
+                const FVec3 centroid = WindingCentroid(*winding);
+                const float    src[3] = {centroid.x, centroid.y, centroid.z};
                 skyFace = IsSkyboxPoint(sky, src);
                 if (skyFace && !sky.enabled) {
                     ++result.stats.skyboxFacesDropped;
                     continue;
                 }
                 if (skyFace) {
-                    for (JPH::Vec3& corner: *winding) {
-                        const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
+                    for (FVec3& corner: *winding) {
+                        const float p[3] = {corner.x, corner.y, corner.z};
                         float       out[3];
                         TransformSkyboxPoint(sky, p, out);
-                        corner = JPH::Vec3(out[0], out[1], out[2]);
+                        corner = FVec3(out[0], out[1], out[2]);
                     }
                 }
             }
@@ -1046,28 +1047,28 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // inverted floor drops props straight through; the
             // CharacterVirtual walks anywhere only because it opts into
             // EBackFaceMode::CollideWithBackFaces).
-            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
+            FVec3 faceNormal = FVec3::sAxisZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+                faceNormal          = FVec3(plane.normal[0], plane.normal[1], plane.normal[2]);
             }
             if (skyFace) {
-                const float n[3] = {faceNormal.GetX(), faceNormal.GetY(), faceNormal.GetZ()};
+                const float n[3] = {faceNormal.x, faceNormal.y, faceNormal.z};
                 float       out[3];
                 TransformSkyboxVector(sky, n, out);
-                faceNormal = JPH::Vec3(out[0], out[1], out[2]);
+                faceNormal = FVec3(out[0], out[1], out[2]);
             }
             {
-                JPH::Vec3 windingNormal = JPH::Vec3::sZero();
+                FVec3 windingNormal = FVec3::sZero();
                 for (size_t i = 0; i < winding->size(); ++i) {
-                    const JPH::Vec3& a = (*winding)[i];
-                    const JPH::Vec3& b = (*winding)[(i + 1) % winding->size()];
-                    windingNormal += JPH::Vec3(
-                        (a.GetY() - b.GetY()) * (a.GetZ() + b.GetZ()), (a.GetZ() - b.GetZ()) * (a.GetX() + b.GetX()),
-                        (a.GetX() - b.GetX()) * (a.GetY() + b.GetY())
+                    const FVec3& a = (*winding)[i];
+                    const FVec3& b = (*winding)[(i + 1) % winding->size()];
+                    windingNormal += FVec3(
+                        (a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x),
+                        (a.x - b.x) * (a.y + b.y)
                     );
                 }
-                if (windingNormal.Dot(faceNormal) < 0.0f) {
+                if (Dot(windingNormal, faceNormal) < 0.0f) {
                     std::reverse(winding->begin(), winding->end());
                 }
             }
@@ -1180,7 +1181,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 const uint32_t gridSize = 1u << static_cast<uint32_t>(power);
                 const uint32_t side     = gridSize + 1;
 
-                const JPH::Vec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
+                const FVec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
                 // Rotate the base quad so corner 0 is the displacement's start
                 // position, keeping winding order. Skybox windings were already
                 // moved into placed space above (scaled by sky.scale around the
@@ -1188,23 +1189,23 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 // transform before the match: comparing placed corners against
                 // the source-space start position picked the wrong corner and
                 // warped the whole grid into a self-intersecting sheet.
-                JPH::Vec3 matchStartPos = dispStartPos;
+                FVec3 matchStartPos = dispStartPos;
                 if (skyFace) {
-                    const float s[3] = {dispStartPos.GetX(), dispStartPos.GetY(), dispStartPos.GetZ()};
+                    const float s[3] = {dispStartPos.x, dispStartPos.y, dispStartPos.z};
                     float       out[3];
                     TransformSkyboxPoint(sky, s, out);
-                    matchStartPos = JPH::Vec3(out[0], out[1], out[2]);
+                    matchStartPos = FVec3(out[0], out[1], out[2]);
                 }
                 size_t startIndex = 0;
                 float  bestDistSq = 1e30f;
                 for (size_t c = 0; c < 4; ++c) {
-                    const float distSq = ((*winding)[c] - matchStartPos).LengthSq();
+                    const float distSq = ((*winding)[c] - matchStartPos).LengthSquared();
                     if (distSq < bestDistSq) {
                         bestDistSq = distSq;
                         startIndex = c;
                     }
                 }
-                const std::array<JPH::Vec3, 4> corners = {
+                const std::array<FVec3, 4> corners = {
                     (*winding)[startIndex],
                     (*winding)[(startIndex + 1) % 4],
                     (*winding)[(startIndex + 2) % 4],
@@ -1216,19 +1217,19 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     continue;
                 }
 
-                std::vector<JPH::Vec3> grid(static_cast<size_t>(side) * side);
+                std::vector<FVec3> grid(static_cast<size_t>(side) * side);
                 for (uint32_t j = 0; j < side; ++j) {
                     const float fv = static_cast<float>(j) / static_cast<float>(gridSize);
                     for (uint32_t i = 0; i < side; ++i) {
                         const float fu = static_cast<float>(i) / static_cast<float>(gridSize);
 
-                        const JPH::Vec3 row0 = corners[0] + (corners[1] - corners[0]) * fu;
-                        const JPH::Vec3 row1 = corners[3] + (corners[2] - corners[3]) * fu;
-                        const JPH::Vec3 base = row0 + (row1 - row0) * fv;
+                        const FVec3 row0 = corners[0] + (corners[1] - corners[0]) * fu;
+                        const FVec3 row1 = corners[3] + (corners[2] - corners[3]) * fu;
+                        const FVec3 base = row0 + (row1 - row0) * fv;
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
-                        const JPH::Vec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
-                        JPH::Vec3        offset = dispVec * dispVert.dist;
+                        const FVec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
+                        FVec3        offset = dispVec * dispVert.dist;
                         if (skyFace) {
                             // The base quad already carries sky.scale (the
                             // miniscape is magnified into place), but the
@@ -1236,22 +1237,22 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                             // scale -- and the sky_camera's rotation -- the
                             // displacement collapses to 1/scale against its own
                             // base and shear-warps across the transformed quad.
-                            const float d[3] = {offset.GetX(), offset.GetY(), offset.GetZ()};
+                            const float d[3] = {offset.x, offset.y, offset.z};
                             float       out[3];
                             TransformSkyboxVector(sky, d, out);
-                            offset = JPH::Vec3(out[0], out[1], out[2]) * sky.scale;
+                            offset = FVec3(out[0], out[1], out[2]) * sky.scale;
                         }
                         grid[static_cast<size_t>(j) * side + i] = base + offset;
                     }
                 }
 
-                std::vector<JPH::Vec3> vertexNormals(static_cast<size_t>(side) * side, JPH::Vec3::sZero());
+                std::vector<FVec3> vertexNormals(static_cast<size_t>(side) * side, FVec3::sZero());
                 for (uint32_t j = 0; j < gridSize; ++j) {
                     for (uint32_t i = 0; i < gridSize; ++i) {
-                        const JPH::Vec3& p00 = grid[static_cast<size_t>(j) * side + i];
-                        const JPH::Vec3& p10 = grid[static_cast<size_t>(j) * side + i + 1];
-                        const JPH::Vec3& p01 = grid[static_cast<size_t>(j + 1) * side + i];
-                        const JPH::Vec3 cell = (p10 - p00).Cross(p01 - p00);
+                        const FVec3& p00 = grid[static_cast<size_t>(j) * side + i];
+                        const FVec3& p10 = grid[static_cast<size_t>(j) * side + i + 1];
+                        const FVec3& p01 = grid[static_cast<size_t>(j + 1) * side + i];
+                        const FVec3 cell = (p10 - p00).Cross(p01 - p00);
                         for (uint32_t corner = 0; corner < 4; ++corner) {
                             const uint32_t ci = i + (corner & 1u);
                             const uint32_t cj = j + ((corner >> 1) & 1u);
@@ -1262,10 +1263,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                 for (uint32_t j = 0; j < side; ++j) {
                     for (uint32_t i = 0; i < side; ++i) {
-                        JPH::Vec3 vertexNormal = vertexNormals[static_cast<size_t>(j) * side + i];
-                        if (vertexNormal.LengthSq() <= kEpsilon * kEpsilon) {
+                        FVec3 vertexNormal = vertexNormals[static_cast<size_t>(j) * side + i];
+                        if (vertexNormal.LengthSquared() <= kEpsilon * kEpsilon) {
                             vertexNormal = faceNormal;
-                        } else if (vertexNormal.Dot(faceNormal) < 0.0f) {
+                        } else if (Dot(vertexNormal, faceNormal) < 0.0f) {
                             vertexNormal = -vertexNormal;
                         }
                         EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart,
@@ -1328,9 +1329,9 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             if (disposition == FaceDisposition::Render && !displaced && !skyFace) {
                 TwinRecord rec;
                 rec.partIndex   = static_cast<size_t>(&part - result.parts.data());
-                rec.ownN[0]     = faceNormal.GetX();
-                rec.ownN[1]     = faceNormal.GetY();
-                rec.ownN[2]     = faceNormal.GetZ();
+                rec.ownN[0]     = faceNormal.x;
+                rec.ownN[1]     = faceNormal.y;
+                rec.ownN[2]     = faceNormal.z;
                 const double nx = rec.ownN[0], ny = rec.ownN[1], nz = rec.ownN[2];
                 const double ax = std::abs(nx), ay = std::abs(ny), az = std::abs(nz);
                 const int    dom        = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
@@ -1340,13 +1341,13 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 rec.cn[1]               = ny * sgn;
                 rec.cn[2]               = nz * sgn;
                 rec.winding             = *winding;
-                const JPH::Vec3& anchor = rec.winding.front();
-                rec.cd                  = rec.cn[0] * anchor.GetX() + rec.cn[1] * anchor.GetY() + rec.cn[2] * anchor.GetZ();
+                const FVec3& anchor = rec.winding.front();
+                rec.cd                  = rec.cn[0] * anchor.x + rec.cn[1] * anchor.y + rec.cn[2] * anchor.z;
                 const int au = (dom + 1) % 3, av = (dom + 2) % 3;
-                auto      comp = [](const JPH::Vec3& p, int axis) { return axis == 0 ? p.GetX() : (axis == 1 ? p.GetY() : p.GetZ()); };
+                auto      comp = [](const FVec3& p, int axis) { return axis == 0 ? p.x : (axis == 1 ? p.y : p.z); };
                 rec.uLo = rec.vLo = 1e30;
                 rec.uHi = rec.vHi = -1e30;
-                for (const JPH::Vec3& p: rec.winding) {
+                for (const FVec3& p: rec.winding) {
                     const float uu = comp(p, au), vv = comp(p, av);
                     rec.uLo = std::min(rec.uLo, static_cast<double>(uu));
                     rec.uHi = std::max(rec.uHi, static_cast<double>(uu));
@@ -1354,9 +1355,9 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     rec.vHi = std::max(rec.vHi, static_cast<double>(vv));
                 }
                 for (size_t i = 1; i + 1 < rec.winding.size(); ++i) {
-                    const JPH::Vec3 a  = rec.winding[i] - rec.winding[0];
-                    const JPH::Vec3 b  = rec.winding[i + 1] - rec.winding[0];
-                    const JPH::Vec3 cr = a.Cross(b);
+                    const FVec3 a  = rec.winding[i] - rec.winding[0];
+                    const FVec3 b  = rec.winding[i + 1] - rec.winding[0];
+                    const FVec3 cr = Cross(a, b);
                     rec.area += 0.5 * static_cast<double>(cr.Length());
                 }
                 twinRecords.push_back(std::move(rec));
