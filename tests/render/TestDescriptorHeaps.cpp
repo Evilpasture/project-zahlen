@@ -328,8 +328,10 @@ struct DescriptorHeapsSuite {
 
             std::array<uint32_t, 16> texels {};
             texels.fill(0xFF3366CCu);
+            // Exercise both fixed-extent typed spans and byte spans: forwarding
+            // must erase the extent before choosing the non-template overload.
             const auto first  = rc.CreateTexture(std::span {texels}, {4, 4}, false);
-            const auto second = rc.CreateTexture(std::span {texels}, {4, 4}, false);
+            const auto second = rc.CreateTexture(std::as_bytes(std::span {texels}), {4, 4}, false);
             if (!ZHLN::Test::ExpectTrue(first.has_value() && second.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -356,7 +358,7 @@ struct DescriptorHeapsSuite {
                                    *callback != ZHLN::SystemTextures::FlatNormal);
 
             const auto named = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
-            const auto same  = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
+            const auto same  = rc.CreateTexture("dheap_named_upload", std::as_bytes(std::span {texels}), {4, 4}, false);
             if (!ZHLN::Test::ExpectTrue(named.has_value() && same.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }

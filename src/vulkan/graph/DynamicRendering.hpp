@@ -392,6 +392,11 @@ class RenderingInheritance {
         return &storage;
     }
 
+    /// Keep secondary recording in the same viewport as the primary pass.
+    constexpr void SetViewport(VkViewport viewport) noexcept {
+        _viewport = viewport;
+    }
+
     /// Tells the secondary command buffer to adopt the viewport this pass
     /// renders at; a non-raster inheritance has none to give.
     void ApplyViewportAndScissor(VkCommandBuffer cmd) const noexcept {

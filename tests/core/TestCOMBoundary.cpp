@@ -29,8 +29,16 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #include <vector>
+
+namespace COMNameTest {
+struct Outer { struct Value {}; };
+namespace Other { struct Value {}; }
+}
+static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Outer::Value>()) == "COMNameTest::Outer::Value");
+static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Other::Value>()) == "COMNameTest::Other::Value");
 
 namespace {
 

@@ -120,18 +120,18 @@ class ZHLN_API GraphicsDevice {
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto UpdateBuffer(BufferID handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
-        return UpdateBuffer(handle, std::as_bytes(elements));
+        return UpdateBuffer(handle, std::span<const std::byte>{std::as_bytes(elements)});
     }
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode> {
-        return CreateTexture(std::as_bytes(pixels), extent, isSRGB);
+        return CreateTexture(std::span<const std::byte>{std::as_bytes(pixels)}, extent, isSRGB);
     }
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
         -> std::expected<TextureID, ErrorCode> {
-        return CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+        return CreateTexture(name, std::span<const std::byte>{std::as_bytes(pixels)}, extent, isSRGB);
     }
 
     [[nodiscard]] auto BeginFrame() noexcept -> FrameOutcome<FrameScope>;

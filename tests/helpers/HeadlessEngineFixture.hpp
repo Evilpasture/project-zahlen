@@ -185,6 +185,11 @@ inline void ResetScene(ZHLN::Engine& engine) {
     engine.ClearScene();
     engine.InitializeDefaultScene();
 
+    // Graphics settings belong to the renderer, not the cleared ECS scene.
+    // A pooled acquisition must not inherit the previous test's grading,
+    // lighting, AA, or other renderer configuration.
+    engine.Graphics().ApplySettings(ZHLN::GraphicsSettings {});
+
     // The camera lives in an entity, so the reset has to follow the rebuild above:
     // before it there is no camera entity to write, and Patch reports that rather
     // than panicking. Tests routinely set only the fields they care about

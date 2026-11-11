@@ -5,6 +5,8 @@
 #include <Zahlen/ECS/ECS.hpp>
 #include <cstring>
 #include <memory>
+#include <string>
+#include <unordered_set>
 
 namespace ZHLN::ECS {
 
@@ -13,6 +15,9 @@ namespace {
 ZHLN::Mutex                         s_FamilyMutex {};
 uint32_t                            s_TypeCounter = 0;
 HashMap<uint32_t, uint32_t>         s_HashToDense;
+// Node-based storage keeps references stable across insertions and rehashes.
+// The map and per-registry type metadata both refer to these owned strings.
+std::unordered_set<std::string>     s_FamilyNames;
 HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
 // Keep the old allocation sizes as well as their resource: a memory_resource
@@ -40,7 +45,16 @@ auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
 }
 
 void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    ZHLN::Lock(s_FamilyMutex, [&] -> void { s_NameToFamilyID.Insert(name, id); });
+    (void)InternAndMapNameToFamilyID(name, id);
+}
+
+auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) noexcept -> std::string_view {
+    return ZHLN::Lock(s_FamilyMutex, [&] -> std::string_view {
+        const auto entry = s_FamilyNames.emplace(name).first;
+        const std::string_view stableName = *entry;
+        s_NameToFamilyID.Insert(stableName, id);
+        return stableName;
+    });
 }
 
 auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
@@ -372,7 +386,7 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
             id = 0xFFFFFFFF;
             return;
         }
-        MapNameToFamilyID(name, id);
+        name = InternAndMapNameToFamilyID(name, id);
         _components[id] = CreateSparseSet(size, alignment);
         _typeInfo[id] = {
             .name      = name,

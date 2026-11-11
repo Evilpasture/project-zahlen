@@ -33,6 +33,10 @@ struct PayloadComponent {
     uint32_t resource = 0;
 };
 
+struct TemporaryNameComponent {
+    uint32_t value = 0;
+};
+
 struct CountedComponent {
     uint32_t* destructions = nullptr;
 
@@ -175,6 +179,34 @@ namespace ZHLN_ANNOTATION(UseFixtures<EcsComponentRegistration> {}) {
             ZHLN::Test::Expect(reg.Get<PayloadComponent>(recycled)->resource) == 4;
             reg.Clear();
             ZHLN::Test::Expect(!reg.IsAlive(recycled));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_component_names_survive_caller_storage_changes(ZHLN::ECS::Registry& reg) {
+            const std::string expected = "ECS_Dynamic_Name_Requires_Owned_Storage";
+            std::string name = expected;
+            const auto family = reg.RegisterComponentDynamic(name, sizeof(uint32_t), alignof(uint32_t));
+            const auto entity = reg.Create();
+            ZHLN::Test::ExpectTrue(reg.AddDynamic(entity, family) != nullptr);
+            name.assign(name.size(), 'x'); // overwrite the original buffer, deterministically
+
+            const std::string typedExpected = "ECS_Typed_Name_Requires_Owned_Storage";
+            std::string typedName = typedExpected;
+            reg.RegisterComponent<TemporaryNameComponent>(typedName);
+            reg.Add(entity, TemporaryNameComponent {});
+            typedName.assign(typedName.size(), 'y');
+
+            // Force both name stores to grow; metadata must keep stable views.
+            for (uint32_t i = 0; i < 128; ++i) {
+                ZHLN::ECS::Registry::MapNameToFamilyID("ECS_Lifetime_Growth_" + std::to_string(i), 0xF0000000u + i);
+            }
+            ZHLN::Test::ExpectEq(ZHLN::ECS::Registry::GetFamilyIDFromName(expected), family);
+            ZHLN::Test::ExpectEq(ZHLN::ECS::Registry::GetFamilyIDFromName(typedExpected),
+                                 ZHLN::ECS::ComponentFamily::GetTypeID<TemporaryNameComponent>());
+            std::string dump;
+            reg.DebugDumpEntity(entity, dump);
+            ZHLN::Test::ExpectTrue(dump.find(expected) != std::string::npos);
+            ZHLN::Test::ExpectTrue(dump.find(typedExpected) != std::string::npos);
             return {};
         }
 

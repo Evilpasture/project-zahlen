@@ -16,6 +16,8 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 
 #include <RagdollAuthoring/RagdollAuthoring.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -301,6 +303,30 @@ struct ReflectLuaSuite {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
+        return {};
+    }
+
+    auto TestNativeVectorPatchRollback() -> std::expected<void, ZHLN::ErrorCode> {
+        ZHLN::FVec3 position{1.0f, 2.0f, 3.0f};
+        auto named = ZHLN::ReflectLua::ApplyPatchString(position, "return { y = 9 }");
+        if (!named || !Near(position.x, 1.0f) || !Near(position.y, 9.0f) || !Near(position.z, 3.0f))
+            return std::unexpected(LuaSuiteFail::WrongValue);
+
+        ZHLN::FVec4 color{1.0f, 2.0f, 3.0f, 4.0f};
+        auto shortSeq = ZHLN::ReflectLua::ApplyPatchString(color, "return { 7, 8 }");
+        if (!shortSeq || !Near(color.x, 7.0f) || !Near(color.y, 8.0f) || !Near(color.z, 3.0f) || !Near(color.w, 4.0f))
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        auto bad = ZHLN::ReflectLua::ApplyPatchString(color, "return { 5, 'bad' }");
+        if (bad || !bad.error().Is(ZHLN::LuaError::TypeMismatch) || !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+        auto longSeq = ZHLN::ReflectLua::ApplyPatchString(color, "return { 1, 2, 3, 4, 5 }");
+        if (longSeq || !longSeq.error().Is(ZHLN::LuaError::OutOfRange) || !Near(color.x, 7.0f))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+
+        // Constructing a new vector retains the full-sequence value contract.
+        auto incomplete = ZHLN::ReflectLua::EvaluateString<ZHLN::FVec4>("return { 1, 2 }");
+        if (incomplete || !incomplete.error().Is(ZHLN::LuaError::OutOfRange))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
         return {};
     }
 

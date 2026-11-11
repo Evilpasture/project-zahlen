@@ -194,7 +194,12 @@ struct RenderPipelinesTestSuite {
                 });
                 ZHLN::Test::ExpectTrue(engine->Entities().Detach<ZHLN::Components::SkeletalMeshComponent>(skinned));
                 const std::array<std::byte, 3> bytes {};
+                // Both typed and fixed-extent byte spans must reach the byte
+                // overload, rather than recursively selecting the template.
                 ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span {bytes}).has_value());
+                const std::array<uint32_t, 1> words {};
+                ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span {words}).has_value());
+                ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span<const std::byte> {bytes}).has_value());
             }
             reg.Destroy(skinned);
 

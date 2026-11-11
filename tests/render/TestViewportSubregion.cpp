@@ -155,6 +155,23 @@ struct ViewportSubregionTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> pooled_scene_reset_restores_graphics_settings() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Settings Reset", 320, 240);
+            if (!engine.Valid()) {
+                return std::unexpected(ViewportSubregionError::EngineInitFailed);
+            }
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright = 1;
+                gfx.environment.ambientExposure = 7.0f;
+                gfx.post.exposure = 3.0f;
+                gfx.antiAliasing.mode = ZHLN::AAMode::None;
+            });
+            ZHLN::Test::ExpectFalse(engine->Graphics().Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            ZHLN::Test::Headless::ResetScene(*engine);
+            ZHLN::Test::ExpectTrue(engine->Graphics().Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> scene_stays_in_its_band_and_keeps_aspect() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Viewport Subregion", 960, 540);
             if (!engine.Valid()) {

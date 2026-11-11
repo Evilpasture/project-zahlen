@@ -90,7 +90,7 @@ template <typename T>
     static_assert(std::is_trivially_copyable_v<T>, "a published component must be trivially copyable: the boundary copies it as bytes");
     static_assert(std::is_standard_layout_v<T>, "a published component must be standard layout: the consumer models it from the same offsets");
     return PublishedComponent {
-        .name       = Reflect::QualifiedTypeName<T>(),
+        .name       = Reflect::ScopedTypeName<T>(),
         .size       = static_cast<uint32_t>(sizeof(T)),
         .alignment  = static_cast<uint32_t>(alignof(T)),
         .layoutHash = Reflect::LayoutHash<T>(),
@@ -116,6 +116,11 @@ template <typename T>
         },
     };
 }
+
+static_assert(Reflect::ScopedTypeName<Components::WorldTransformComponent>() == "ZHLN::Components::WorldTransformComponent");
+static_assert(Reflect::ScopedTypeName<Components::MeshComponent>() == "ZHLN::Components::MeshComponent");
+static_assert(Reflect::ScopedTypeName<Components::CameraComponent>() == "ZHLN::Components::CameraComponent");
+static_assert(std::string_view(IEntities::ComponentName<Components::WorldTransformComponent>()) == "ZHLN::Components::WorldTransformComponent");
 
 constexpr std::array kPublishedComponents {
     Publish<Components::WorldTransformComponent>(),

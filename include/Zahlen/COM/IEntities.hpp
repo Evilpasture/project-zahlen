@@ -97,7 +97,7 @@ struct IEntities : IObject {
     // namespaces are different families.
     template <typename T>
     [[nodiscard]] static consteval auto ComponentName() noexcept -> StringView {
-        return Reflect::QualifiedTypeName<T>();
+        return Reflect::ScopedTypeName<T>();
     }
 
 protected:
