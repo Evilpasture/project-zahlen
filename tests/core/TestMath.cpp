@@ -7,6 +7,8 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <cmath>
 #include <cstdint>
 
 namespace ZHLN::Test {
@@ -54,6 +56,50 @@ void test_scalar_math() {
     const float cell  = ZHLN::Math::Worley(0.25f, 0.75f);
     ExpectInRange(noise, 0.0f, 1.0f);
     ExpectInRange(cell, 0.0f, 1.0f);
+}
+
+// Vec3's component helpers match the existing Math3D Float3 helpers while
+// leaving the old API untouched for callers that have not migrated yet.
+void test_vec3_math() {
+    constexpr FVec3 a {1.0f, 2.0f, 3.0f};
+    constexpr FVec3 b {4.0f, 5.0f, 6.0f};
+    static_assert(a + b == FVec3 {5.0f, 7.0f, 9.0f});
+    static_assert(b - a == FVec3 {3.0f, 3.0f, 3.0f});
+    static_assert(a * b == FVec3 {4.0f, 10.0f, 18.0f});
+    static_assert(2.0f * a == FVec3 {2.0f, 4.0f, 6.0f});
+    static_assert(b / 2.0f == FVec3 {2.0f, 2.5f, 3.0f});
+    static_assert(Dot(a, b) == 32.0f);
+    static_assert(Cross(FVec3::UnitX(), FVec3::UnitY()) == FVec3::UnitZ());
+    static_assert(a.LengthSquared() == 14.0f);
+    static_assert(DistanceSquared(a, b) == 27.0f);
+    static_assert(Lerp(a, b, 0.5f) == FVec3 {2.5f, 3.5f, 4.5f});
+    static_assert(a[0] == 1.0f && a[1] == 2.0f && a[2] == 3.0f);
+    static_assert(sizeof(FVec3) == 3 * sizeof(float));
+    static_assert(sizeof(DVec3) == 3 * sizeof(double));
+
+    FVec3 mutableVector = a;
+    mutableVector[1] = 8.0f;
+    mutableVector += b;
+    mutableVector -= b;
+    mutableVector *= 2.0f;
+    mutableVector /= 2.0f;
+    Expect(mutableVector.y) == 8.0f;
+    Expect(FVec3::Zero().Normalized() == FVec3::Zero()) == true;
+    const FVec3 unit = FVec3 {3.0f, 4.0f, 0.0f}.Normalized();
+    Expect(std::abs(unit.Length() - 1.0f) < 1e-6f) == true;
+    Expect(std::abs(Distance(DVec3 {3.0, 4.0, 0.0}, DVec3::Zero()) - 5.0) < 1e-12) == true;
+
+    const FVec3 p {-1.25f, 2.5f, -4.0f};
+    const FVec3 period {2.0f, 3.0f, 5.0f};
+    const auto oldFloor = Math::Floor(Float3 {p.x, p.y, p.z});
+    const auto oldFract = Math::Fract(Float3 {p.x, p.y, p.z});
+    const auto oldWrap = Math::Wrap(Float3 {p.x, p.y, p.z}, Float3 {period.x, period.y, period.z});
+    Expect(p.Floor() == FVec3 {oldFloor.x, oldFloor.y, oldFloor.z}) == true;
+    Expect(p.Fract() == FVec3 {oldFract.x, oldFract.y, oldFract.z}) == true;
+    Expect(Wrap(p, period) == FVec3 {oldWrap.x, oldWrap.y, oldWrap.z}) == true;
+    const DVec3 dp {-1.25, 2.5, -4.0};
+    Expect(dp.Fract() == DVec3 {0.75, 0.5, 0.0}) == true;
+    Expect(Wrap(dp, DVec3 {2.0, 3.0, 5.0}) == DVec3 {0.75, 2.5, 1.0}) == true;
 }
 
 // --- 2. Frustum Plane Extraction & SIMD SoA Culling ---
