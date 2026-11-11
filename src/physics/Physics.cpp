@@ -22,6 +22,7 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Core/Buffer.h>
@@ -348,9 +349,52 @@ void PhysicsContext::TraceDiagnostics() const {
     ZHLN::Trace(_impl->world);
 }
 
+void PhysicsContext::BindCollisionAssetResolver(Physics::CollisionAssetResolver resolver, void* context) noexcept {
+    _impl->shapeCache.BindCollisionAssetResolver(resolver, context);
+}
+
+void PhysicsContext::ClearMeshShapeCache() noexcept {
+    _impl->shapeCache.ClearMeshes();
+}
+
 void PhysicsContext::OptimizeBroadphase() {
     _impl->FlushPendingSetup();
     _impl->physicsSystem.OptimizeBroadPhase();
+}
+
+auto PhysicsContext::CreateRigidBody(
+    const Physics::AnyShape& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
+    uint32_t materialID, uint32_t category, uint32_t mask, Physics::Activation activation, FVec3 scale
+) -> Physics::BodyID {
+    auto pinned = _impl->shapeCache.Resolve(shape);
+    if (!pinned) return Physics::BodyID::Null();
+    const JPH::Vec3 joltScale(scale.x, scale.y, scale.z);
+    if (!joltScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
+        JPH::ScaledShapeSettings settings(pinned, joltScale);
+        const auto result = settings.Create();
+        if (!result.IsValid()) return Physics::BodyID::Null();
+        pinned = result.Get();
+    }
+    JPH::EMotionType jm;
+    switch (motion) {
+        case Physics::MotionType::Static: jm = JPH::EMotionType::Static; break;
+        case Physics::MotionType::Kinematic: jm = JPH::EMotionType::Kinematic; break;
+        case Physics::MotionType::Dynamic: jm = JPH::EMotionType::Dynamic; break;
+        default: return Physics::BodyID::Null();
+    }
+    Layers::ID jl;
+    switch (layer) {
+        case Physics::ObjectLayer::NonMoving: jl = Layers::ID::NON_MOVING; break;
+        case Physics::ObjectLayer::Moving: jl = Layers::ID::MOVING; break;
+        default: return Physics::BodyID::Null();
+    }
+    JPH::EActivation ja;
+    switch (activation) {
+        case Physics::Activation::Activate: ja = JPH::EActivation::Activate; break;
+        case Physics::Activation::DontActivate: ja = JPH::EActivation::DontActivate; break;
+        default: return Physics::BodyID::Null();
+    }
+    return CreateRigidBody(pinned, pos, rot, jm, jl, materialID, category, mask, ja);
 }
 
 auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {

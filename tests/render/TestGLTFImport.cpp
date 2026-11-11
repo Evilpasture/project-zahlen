@@ -16,6 +16,7 @@
 // This suite lives in a GPU group because BuildModelPrefab uploads textures
 // and geometry through RenderContext, so it needs a real (headless) device.
 
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Matrix.hpp>
@@ -1061,7 +1062,7 @@ struct GLTFImportTestSuite {
                     return std::unexpected(GLTFImportError::NodeGraphMismatch);
                 }
 
-                if (!imported.localTransform.IsClose(SourceLocal(sourceNode), 0.0001f)) {
+                if (!ZHLN::Physics::ToJoltMatrix(imported.localTransform).IsClose(SourceLocal(sourceNode), 0.0001f)) {
                     return std::unexpected(GLTFImportError::NodeGraphMismatch);
                 }
             }
@@ -1073,10 +1074,10 @@ struct GLTFImportTestSuite {
             // transforms. This is what catches a transposed matrix load or a
             // reversed parent/child multiply that per-node comparisons miss.
             for (size_t index = 0; index < prefab->nodes.size(); ++index) {
-                JPH::Mat44 world  = prefab->nodes[index].localTransform;
+                JPH::Mat44 world  = ZHLN::Physics::ToJoltMatrix(prefab->nodes[index].localTransform);
                 int32_t    cursor = prefab->nodes[index].parentIndex;
                 for (size_t depth = 0; cursor >= 0 && depth < prefab->nodes.size(); ++depth) {
-                    world  = prefab->nodes[static_cast<size_t>(cursor)].localTransform * world;
+                    world  = ZHLN::Physics::ToJoltMatrix(prefab->nodes[static_cast<size_t>(cursor)].localTransform) * world;
                     cursor = prefab->nodes[static_cast<size_t>(cursor)].parentIndex;
                 }
                 if (!world.IsClose(SourceWorld(document.nodes[index]), 0.0001f)) {
@@ -1354,7 +1355,7 @@ struct GLTFImportTestSuite {
             }
             const ZHLN::ModelNode& lightNode = lightOnly->nodes[0];
             if (std::string_view(lightNode.name) != "PunctualLight" || lightNode.hasMesh || lightNode.parentIndex != -1 ||
-                !lightNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
+                !ZHLN::Physics::ToJoltMatrix(lightNode.localTransform).GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // Formerly checked that lights were dropped; now verify the light is present:
@@ -1553,17 +1554,19 @@ struct GLTFImportTestSuite {
                 ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), bytes, "KHR_materials_unlit.glb");
             if (!cached || &*cached != &*prefab) return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             for (size_t i = 0; i < 2; ++i) {
-                if (!prefab->parts[i].boxCollider || !prefab->parts[i].meshCollider ||
-                    prefab->parts[i].boxCollider != cached->parts[i].boxCollider || prefab->parts[i].meshCollider != cached->parts[i].meshCollider) {
+                if (!prefab->parts[i].boxCollider || !prefab->parts[i].meshCollider) {
                     return std::unexpected(GLTFImportError::PrefabCacheMismatch);
                 }
-                const auto bounds = prefab->parts[i].boxCollider->GetLocalBounds();
-                const auto centerOfMass = prefab->parts[i].boxCollider->GetCenterOfMass();
-                if (std::abs(bounds.mMin.GetX() + centerOfMass.GetX()) > 1e-4f || std::abs(bounds.mMin.GetY() + centerOfMass.GetY()) > 1e-4f ||
-                    std::abs(bounds.mMax.GetX() + centerOfMass.GetX() - 1.0f) > 1e-4f || std::abs(bounds.mMax.GetY() + centerOfMass.GetY() - 1.0f) > 1e-4f ||
-                    bounds.mMin.GetZ() + centerOfMass.GetZ() > 0.0f || bounds.mMax.GetZ() + centerOfMass.GetZ() < 0.0f) {
+                const auto* compound = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Compound>>(&*prefab->parts[i].boxCollider);
+                if (!compound || compound->children.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+                const auto* box = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Box>>(&compound->children[0].shape);
+                const auto center = compound->children[0].position;
+                if (!box || std::abs(center.x - 0.5f) > 1e-4f || std::abs(center.y - 0.5f) > 1e-4f ||
+                    std::abs(box->halfExtents.x - 0.5f) > 1e-4f || std::abs(box->halfExtents.y - 0.5f) > 1e-4f) {
                     return std::unexpected(GLTFImportError::PrefabLoadFailed);
                 }
+                const auto* mesh = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Mesh>>(&*prefab->parts[i].meshCollider);
+                if (!mesh || !mesh->storage || mesh->vertices.empty() || mesh->indices.empty()) return std::unexpected(GLTFImportError::PrefabLoadFailed);
                 const auto& expected = source.data->materials[i];
                 const auto& material = prefab->parts[i].defaultMaterial;
                 if (!material.unlit || material.alphaMode != 0u || material.albedoMap != ZHLN::TextureID::Invalid ||
@@ -1576,6 +1579,28 @@ struct GLTFImportTestSuite {
                         return std::unexpected(GLTFImportError::ExtensionMismatch);
                     }
                 }
+            }
+            // Exercise both prefab collider forms after importer scratch buffers
+            // have been destroyed. Non-unit scale must reach the physics layer.
+            auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
+            for (bool useBox: {true, false}) {
+                std::array<ZHLN::Entity, 8> entities {};
+                const double baseX = useBox ? 10.0 : 20.0;
+                ZHLN::PrefabFactory::SpawnParams params {};
+                params.position = {baseX, 0, 0};
+                params.scale = {2, 2, 2};
+                params.createPhysics = true;
+                params.useBoxColliders = useBox;
+                const auto count = ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), entities.size());
+                if (count != 2) { ZHLN::Log("prefab collider: count={} box={}", count, useBox); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
+                const auto firstBody = registry.Get<ZHLN::Components::PhysicsComponent>(entities[0]);
+                if (!firstBody || firstBody->physicsID == ZHLN::Physics::BodyID::Null()) { ZHLN::Log("prefab collider: missing body box={}", useBox); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
+                auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
+                physics.Step(1.0f / 60.0f);
+                const double localX = useBox ? 1.5 : 0.25;
+                const double localY = useBox ? 1.5 : 0.25;
+                const auto hit = physics.Raycast({baseX - 2.4 + localX, localY, 5.0}, {0, 0, -1}, 10.0f);
+                if (!hit.hasHit || hit.bodyID != firstBody->physicsID) { ZHLN::Log("prefab collider: ray miss box={} hit={} got={} expected={}", useBox, hit.hasHit, hit.bodyID.Pack(), firstBody->physicsID.Pack()); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
             }
             const ZHLN::Material defaults {};
             if (defaults.unlit)

@@ -88,19 +88,19 @@ struct ServiceProbeSystem {
     prefab->nodes.resize(4);
     prefab->nodes[0].name           = ZHLN::String64("Shoulder");
     prefab->nodes[0].parentIndex    = -1;
-    prefab->nodes[0].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 2.0f, 0.0f));
+    prefab->nodes[0].localTransform = ZHLN::CreateTranslation(ZHLN::FVec3 {0.0f, 2.0f, 0.0f});
 
     prefab->nodes[1].name           = ZHLN::String64("Elbow");
     prefab->nodes[1].parentIndex    = 0;
-    prefab->nodes[1].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 2.0f));
+    prefab->nodes[1].localTransform = ZHLN::CreateTranslation(ZHLN::FVec3 {0.0f, 0.0f, 2.0f});
 
     prefab->nodes[2].name           = ZHLN::String64("Hand");
     prefab->nodes[2].parentIndex    = 1;
-    prefab->nodes[2].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 2.0f));
+    prefab->nodes[2].localTransform = ZHLN::CreateTranslation(ZHLN::FVec3 {0.0f, 0.0f, 2.0f});
 
     prefab->nodes[3].name           = ZHLN::String64("FingerTip");
     prefab->nodes[3].parentIndex    = 2;
-    prefab->nodes[3].localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 0.0f, 0.5f));
+    prefab->nodes[3].localTransform = ZHLN::CreateTranslation(ZHLN::FVec3 {0.0f, 0.0f, 0.5f});
     prefab->nodes[3].hasMesh        = true;
 
     ZHLN::Skeleton skel {};

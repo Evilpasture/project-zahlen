@@ -111,6 +111,14 @@ class AssetManager {
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
     [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool { return _vfs.Exists(virtualPath); }
 
+    // Installs an immutable snapshot, replacing any previous revision for this
+    // ID. Rejects invalid IDs, nonfinite vertices, bad indices and meshes with
+    // no distinct-index triangle. This is structural validation, not a Jolt
+    // bake: geometrically degenerate meshes can still fail body creation.
+    // No I/O is performed.
+    [[nodiscard]] auto CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool;
+    [[nodiscard]] auto FindCollisionMesh(CollisionAssetID id) const noexcept -> std::shared_ptr<const Physics::MeshGeometry>;
+
     // Non-owning borrow of a cached prefab. Invalidated by ClearCache() or
     // device-loss recovery; prefer WithCachedPrefab when the whole read must
     // be atomic with respect to the cache lock.
@@ -193,6 +201,10 @@ class AssetManager {
     Remote::AsyncAssetFetcher* _remoteFetcher = nullptr;
     FS::VirtualFileSystem _vfs;
 
+    // An outer lock makes lookup-or-insert atomic; FS::AssetCache pins the
+    // shared snapshot while visitors take copies under its own lock.
+    mutable ZHLN::Mutex _collisionMutex {};
+    FS::AssetCache<std::shared_ptr<const Physics::MeshGeometry>> _collisionMeshes;
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
     FS::AssetCache<EnvironmentImage> _environmentImages;

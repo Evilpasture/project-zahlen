@@ -12,10 +12,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <filesystem>
 #include <fstream>
 #include <stb_image.h>
@@ -145,14 +141,14 @@ static auto CreateFallbackModelPrefab(
     prefab->nodes.push_back(ModelNode {
         .name           = String64("root"),
         .parentIndex    = -1,
-        .localTransform = JPH::Mat44::sIdentity(),
+        .localTransform = Mat4x4::Identity(),
         .hasMesh        = false,
     });
 
     ModelPart fallbackPart;
     fallbackPart.name           = String64("placeholder");
     fallbackPart.nodeIndex      = 0;
-    fallbackPart.localTransform = JPH::Mat44::sIdentity();
+    fallbackPart.localTransform = Mat4x4::Identity();
     fallbackPart.localMin       = {-0.25f, -0.25f, -0.25f};
     fallbackPart.localMax       = {0.25f, 0.25f, 0.25f};
     fallbackPart.boundingRadius = 0.433f;
@@ -162,9 +158,9 @@ static auto CreateFallbackModelPrefab(
     fallbackPart.materialAsset = HashAssetID(assetKey + "_mat");
 
     if (options.buildColliders) {
-        const auto baseBox = physics.GetOrCreateShape(Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
-        fallbackPart.boxCollider     = baseBox;
-        fallbackPart.meshCollider    = baseBox;
+        const auto box = MakePrefabBoxCollider({0.25f, 0.25f, 0.25f});
+        fallbackPart.boxCollider = box;
+        fallbackPart.meshCollider = box;
     }
 
     prefab->parts.push_back(std::move(fallbackPart));
@@ -260,7 +256,7 @@ auto LoadStudioModelPrefabFromMemory(
     prefab->nodes.push_back(ModelNode {
         .name           = String64("root"),
         .parentIndex    = -1,
-        .localTransform = JPH::Mat44::sIdentity(),
+        .localTransform = Mat4x4::Identity(),
         .hasMesh        = false,
     });
 
@@ -302,7 +298,7 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.mesh            = subMesh;
         modelPart.defaultMaterial = subMaterial;
         modelPart.nodeIndex       = 0;
-        modelPart.localTransform  = JPH::Mat44::sIdentity();
+        modelPart.localTransform  = Mat4x4::Identity();
         modelPart.localMin        = {partData.boundsMin.x, partData.boundsMin.y, partData.boundsMin.z};
         modelPart.localMax        = {partData.boundsMax.x, partData.boundsMax.y, partData.boundsMax.z};
 
@@ -318,11 +314,9 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.boundingRadius = halfExtents.Length();
 
         if (options.buildColliders) {
-            const auto shape = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
-            if (shape) {
-                modelPart.boxCollider  = shape;
-                modelPart.meshCollider = shape;
-            }
+            const auto shape = MakePrefabBoxCollider(halfExtents);
+            modelPart.boxCollider = shape;
+            modelPart.meshCollider = shape;
         }
 
         prefab->parts.push_back(std::move(modelPart));

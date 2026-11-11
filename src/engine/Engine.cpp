@@ -331,6 +331,15 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->kernel = std::move(kernel_res.value());
 
+    // World and Kernel outlive the binding; it must exist before the lazy
+    // SimServices graph is created and before the first Engine::Physics call.
+    _impl->world->GetPhysics().BindCollisionAssetResolver(
+        [](void* context, CollisionAssetID id) noexcept -> std::shared_ptr<const Physics::MeshGeometry> {
+            return static_cast<AssetManager*>(context)->FindCollisionMesh(id);
+        },
+        &_impl->kernel->GetAssetManager()
+    );
+
     _impl->world->GetInput().SetRumbleSink(
         [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept { static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble); },
         &_impl->kernel->GetPlatformHost()
@@ -627,6 +636,8 @@ void Engine::ProcessPendingDestroy() {
 
 void Engine::ClearScene() {
     SceneCleanupSystem::ClearAll(*this);
+    // Queued destroys and any surviving bodies retain their own shapes.
+    Physics().ClearMeshShapeCache();
     ClearVisibilityLists();
     _impl->world->GetEventBus().ClearEvents();
 }

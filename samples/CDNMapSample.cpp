@@ -9,6 +9,7 @@
 //
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -60,10 +61,10 @@ inline constexpr uint32_t         kTimeout = 180;
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
         return JPH::Mat44::sIdentity();
     }
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
+    JPH::Mat44 transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
     int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -73,7 +74,7 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax
     outMin = FVec3(1e9f, 1e9f, 1e9f);
     outMax = FVec3(-1e9f, -1e9f, -1e9f);
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  localCenter = (localMin + localMax) * 0.5f;

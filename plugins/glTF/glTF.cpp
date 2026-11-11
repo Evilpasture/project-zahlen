@@ -284,8 +284,8 @@ void DrawModelNodeRows(
         label += "  [mesh]";
     }
 
-    const auto translation = node.localTransform.GetTranslation();
-    const FVec3 pos {translation.GetX(), translation.GetY(), translation.GetZ()};
+    const auto& m = node.localTransform;
+    const FVec3 pos {m[0, 3], m[1, 3], m[2, 3]};
     const bool      expanded = state.expanded.contains(path);
     TreeRow(
         ui, state, path, depth, label, hasChildren, std::format("Node: {}", label),

@@ -467,7 +467,7 @@ void AssemblePrefabParts(
         modelPart.mesh            = subMesh;
         modelPart.defaultMaterial = subMaterial;
         modelPart.nodeIndex       = 0;
-        modelPart.localTransform  = JPH::Mat44::sIdentity();
+        modelPart.localTransform  = Mat4x4::Identity();
         modelPart.localMin        = {part.boundsMin.x, part.boundsMin.y, part.boundsMin.z};
         modelPart.localMax        = {part.boundsMax.x, part.boundsMax.y, part.boundsMax.z};
 
@@ -489,7 +489,7 @@ void AssemblePrefabParts(
         }
 
         if (options.buildColliders && !part.skyboxLayer) {
-            modelPart.meshCollider = physics.CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
+            modelPart.meshCollider = MakePrefabMeshCollider(part.positions, part.indices);
 
             const FVec3 localCenter{
                 (part.boundsMin.x + part.boundsMax.x) * 0.5f, (part.boundsMin.y + part.boundsMax.y) * 0.5f, (part.boundsMin.z + part.boundsMax.z) * 0.5f
@@ -498,10 +498,9 @@ void AssemblePrefabParts(
                 std::max((part.boundsMax.x - part.boundsMin.x) * 0.5f, 0.01f), std::max((part.boundsMax.y - part.boundsMin.y) * 0.5f, 0.01f),
                 std::max((part.boundsMax.z - part.boundsMin.z) * 0.5f, 0.01f)
             };
-            const auto baseBox = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
-            modelPart.boxCollider = physics.CreateTranslatedShape(baseBox, localCenter);
+            modelPart.boxCollider = MakePrefabBoxCollider(halfExtents, localCenter);
 
-            if (modelPart.meshCollider == nullptr) {
+            if (!modelPart.meshCollider) {
                 modelPart.meshCollider = modelPart.boxCollider;
             }
         }
@@ -516,27 +515,20 @@ void AssemblePrefabParts(
     // compound of {part mesh, collision-only mesh} keeps both hulls intact
     // for mesh queries and CharacterVirtual alike.
     if (options.buildColliders && data.collisionOnly.IndexCount() > 0) {
-        if (auto collisionShape = physics.CreateMeshShape(
-                data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(), data.collisionOnly.IndexCount()
-            )) {
+        if (auto collisionShape = MakePrefabMeshCollider(data.collisionOnly.positions, data.collisionOnly.indices)) {
             bool folded = false;
             for (ModelPart& part: prefab.parts) {
-                if (part.meshCollider == nullptr) {
-                    continue;
-                }
-                const auto compound = physics.CreateCompoundShape(part.meshCollider, collisionShape);
-                if (!compound) {
-                    continue;
-                }
-                part.meshCollider = compound;
-                folded            = true;
+                if (!part.meshCollider) continue;
+                Physics::Shape<Physics::Compound> compound;
+                AppendPrefabCollider(compound, *part.meshCollider);
+                AppendPrefabCollider(compound, *collisionShape);
+                part.meshCollider = Physics::AnyShape(std::move(compound));
+                folded = true;
                 break;
             }
             if (!folded) {
-                LogWarning(
-                    "BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
-                    data.collisionOnly.indices.size() / 3
-                );
+                LogWarning("BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
+                           data.collisionOnly.indices.size() / 3);
             }
         }
     }
@@ -671,7 +663,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
     // One identity root; parts hang off it directly (part.localTransform does
     // the placement), lights get their own translated nodes because ModelLight
     // resolves position through its node chain.
-    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
+    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false});
 
     AssemblePrefabParts(ctx, physics, vfs, imported, virtualPath, options, *prefab);
 
@@ -679,7 +671,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
         ModelNode node;
         node.name           = String64(light.name.c_str());
         node.parentIndex    = 0;
-        node.localTransform = JPH::Mat44::sTranslation(JPH::Vec3(light.position.x, light.position.y, light.position.z));
+        node.localTransform = CreateTranslation(FVec3 {light.position.x, light.position.y, light.position.z});
         node.hasMesh        = false;
         prefab->nodes.push_back(node);
 
@@ -753,7 +745,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
         subPrefab->virtualPath         = String256(subPath);
         subPrefab->emissiveFactorScale = 1.0f;
         subPrefab->nodes.push_back(
-            ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false}
+            ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false}
         );
         AssemblePrefabParts(ctx, physics, vfs, subImported, subPath, options, *subPrefab);
         assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));

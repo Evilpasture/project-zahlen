@@ -103,7 +103,8 @@ constexpr std::array kModelCandidates {
 void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, float fovDegrees) {
     double radius = 0.0;
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const float offset = part.localTransform.GetTranslation().Length();
+        const auto& m = part.localTransform;
+        const float offset = ZHLN::FVec3 {m[0, 3], m[1, 3], m[2, 3]}.Length();
         radius             = std::max(radius, static_cast<double>(offset + part.boundingRadius));
     }
     if (!(radius > 0.5)) {

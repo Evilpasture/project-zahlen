@@ -8,6 +8,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <cstdint>
 #include <optional>
@@ -24,6 +25,25 @@ struct CharacterParams;
 
 class ZHLN_API Simulation {
   public:
+    // Resolves the value synchronously; mesh spans are borrowed only until this returns.
+    [[nodiscard]] auto CreateRigidBody(
+        const Physics::AnyShape& shape, DVec3 position, FVec4 rotation, Physics::MotionType motion, Physics::ObjectLayer layer,
+        uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
+    ) -> Physics::BodyID;
+    template <Physics::PhysicsShape S>
+    [[nodiscard]] auto CreateRigidBody(
+        const S& shape, DVec3 position, FVec4 rotation, Physics::MotionType motion, Physics::ObjectLayer layer,
+        uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
+    ) -> Physics::BodyID {
+        return CreateRigidBody(Physics::AnyShape(shape), position, rotation, motion, layer, materialID, category, mask, activation, scale);
+    }
+
+    // Drop cached mesh flyweights at a level-unload boundary. Existing bodies
+    // and queued commands remain valid; primitive flyweights stay cached.
+    void ClearMeshShapeCache() noexcept;
+
     [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const
         -> Physics::RaycastResult;
     [[nodiscard]] auto BodiesInSphere(DVec3 center, float radius) const -> std::vector<Physics::BodyID>;

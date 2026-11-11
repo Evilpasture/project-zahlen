@@ -54,6 +54,23 @@ struct RenderPipelinesTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> collision_asset_resolves_before_first_frame() {
+            ZHLN::Test::Headless::ShutdownPooledEngines();
+            auto engine = ZHLN::Test::Headless::CreateEngine("CollisionAssetBeforeGraph", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) return {};
+            const auto id = ZHLN::HashCollisionAssetID("tests/before-first-frame");
+            ZHLN::Physics::MeshGeometry geometry {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,2}};
+            ZHLN::Test::ExpectTrue(engine->Assets().CacheCollisionMesh(id, std::move(geometry)));
+            auto physics = engine->Physics();
+            const auto body = physics.CreateRigidBody(ZHLN::Physics::Shape<ZHLN::Physics::Mesh> {id}, {0,0,0}, {0,0,0,1},
+                                                       ZHLN::Physics::MotionType::Static, ZHLN::Physics::ObjectLayer::NonMoving);
+            ZHLN::Test::ExpectTrue(body != ZHLN::Physics::BodyID::Null());
+            physics.Step(1.0f / 60.0f);
+            const auto hit = physics.Raycast({0.2,0.2,5}, {0,0,-1}, 10);
+            ZHLN::Test::ExpectTrue(hit.hasHit && hit.bodyID == body);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> material_cache_reset_after_submitted_draw() {
             // A submitted draw can still be in flight when its material is
             // unregistered. Use an exclusive engine because ClearGPUCaches

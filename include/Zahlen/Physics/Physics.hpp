@@ -23,6 +23,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 // clang-format on
 
@@ -195,6 +196,20 @@ class ZHLN_API PhysicsContext {
     [[nodiscard]] auto GetWorld() const -> const Physics::PhysicsWorld&;
 
     void OptimizeBroadphase();
+
+    // Level-unload seam: drop cached mesh flyweights; bodies and queued
+    // commands keep their own shape references. Primitive cache is unchanged.
+    void ClearMeshShapeCache() noexcept;
+
+    // Bind only while no threads are resolving shapes. The caller keeps the
+    // resolver context alive until this PhysicsContext is destroyed or unbound.
+    void BindCollisionAssetResolver(Physics::CollisionAssetResolver resolver, void* context) noexcept;
+
+    [[nodiscard]] auto CreateRigidBody(
+        const Physics::AnyShape& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
+        uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
+    ) -> Physics::BodyID;
 
     auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
     auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;

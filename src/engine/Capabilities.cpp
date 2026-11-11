@@ -202,6 +202,15 @@ auto Simulation::BodyPosition(Physics::BodyID handle) const noexcept -> std::opt
 auto Simulation::BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
     return _ctx->BodyState(handle);
 }
+void Simulation::ClearMeshShapeCache() noexcept {
+    _ctx->ClearMeshShapeCache();
+}
+auto Simulation::CreateRigidBody(
+    const Physics::AnyShape& shape, DVec3 position, FVec4 rotation, Physics::MotionType motion, Physics::ObjectLayer layer,
+    uint32_t materialID, uint32_t category, uint32_t mask, Physics::Activation activation, FVec3 scale
+) -> Physics::BodyID {
+    return _ctx->CreateRigidBody(shape, position, rotation, motion, layer, materialID, category, mask, activation, scale);
+}
 auto Simulation::CharacterVelocity(Physics::BodyID handle) const -> FVec3 {
     return Physics::FromJoltVector(_ctx->GetCharacterVelocity(handle));
 }
@@ -283,6 +292,12 @@ void AssetLibrary::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 }
 void AssetLibrary::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab) {
     _assets->CachePrefab(hash, std::move(prefab));
+}
+auto AssetLibrary::CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool {
+    return _assets->CacheCollisionMesh(id, std::move(geometry));
+}
+auto AssetLibrary::FindCollisionMesh(CollisionAssetID id) const noexcept -> std::shared_ptr<const Physics::MeshGeometry> {
+    return _assets->FindCollisionMesh(id);
 }
 auto AssetLibrary::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
     return _assets->CacheEnvironmentImage(key, std::move(image));

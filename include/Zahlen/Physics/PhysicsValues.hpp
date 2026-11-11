@@ -16,6 +16,10 @@
 
 namespace ZHLN::Physics {
 
+enum class MotionType : uint8_t { Static, Kinematic, Dynamic };
+enum class ObjectLayer : uint8_t { NonMoving, Moving };
+enum class Activation : uint8_t { Activate, DontActivate };
+
 struct DebugVertex {
     float    x, y, z;
     uint32_t color;

@@ -301,8 +301,8 @@ struct CPUPrimitiveJob {
     std::vector<float> tempDeltas;
 
     bool           wantsMeshCollider = false;
-    JPH::ShapeRefC meshCollider = nullptr;
-    JPH::ShapeRefC boxCollider  = nullptr;
+    std::optional<Physics::AnyShape> meshCollider;
+    std::optional<Physics::AnyShape> boxCollider;
 
     // VK_EXT_mesh_shader: meshlets are built JIT on the same worker threads
     // that decode the primitive, using the exact same partitioning as zcook.
@@ -315,8 +315,8 @@ struct CompiledPrimitive {
     float          boundingRadius   = 1.0f;
     float          localMin[3]      = {0.0f, 0.0f, 0.0f};
     float          localMax[3]      = {0.0f, 0.0f, 0.0f};
-    JPH::ShapeRefC meshCollider     = nullptr;
-    JPH::ShapeRefC boxCollider      = nullptr;
+    std::optional<Physics::AnyShape> meshCollider;
+    std::optional<Physics::AnyShape> boxCollider;
     uint32_t       morphOffset      = 0;
     uint32_t       activeMorphCount = 0;
 };
@@ -1010,8 +1010,8 @@ auto ProcessCPUTasks(
     std::span<CPUPrimitiveJob>          primitiveJobs,
     float                               emissiveFactorScale,
     uint32_t                            maxTextureDimension
-) -> JPH::Array<CPUTextureJob> {
-    JPH::Array<CPUTextureJob> outTextureJobs;
+) -> std::vector<CPUTextureJob> {
+    std::vector<CPUTextureJob> outTextureJobs;
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
         outTextureJobs[i] = {
@@ -1231,9 +1231,9 @@ auto BuildModelPrefab(
 
         float m[16];
         cgltf_node_transform_local(node, m);
-        const JPH::Mat44 localTransform(
-            JPH::Vec4(m[0], m[1], m[2], m[3]), JPH::Vec4(m[4], m[5], m[6], m[7]), JPH::Vec4(m[8], m[9], m[10], m[11]), JPH::Vec4(m[12], m[13], m[14], m[15])
-        );
+        Mat4x4 localTransform {};
+        for (size_t col = 0; col < 4; ++col)
+            for (size_t row = 0; row < 4; ++row) localTransform[row, col] = m[col * 4 + row];
 
         prefab->nodes.push_back(
             ModelNode {
@@ -1454,10 +1454,9 @@ auto BuildModelPrefab(
             const FVec3 center {(primJob.localMax[0] + primJob.localMin[0]) * 0.5f,
                                 (primJob.localMax[1] + primJob.localMin[1]) * 0.5f,
                                 (primJob.localMax[2] + primJob.localMin[2]) * 0.5f};
-            const auto box = physics.GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x, halfExtents.y, halfExtents.z);
-            primJob.boxCollider = physics.CreateTranslatedShape(box, center);
+            primJob.boxCollider = MakePrefabBoxCollider(halfExtents, center);
             if (primJob.wantsMeshCollider) {
-                primJob.meshCollider = physics.CreateMeshShape(primJob.positions.data(), static_cast<uint32_t>(primJob.positions.size()), primJob.indices.data(), primJob.indexCount);
+                primJob.meshCollider = MakePrefabMeshCollider(primJob.positions, std::span(primJob.indices).first(primJob.indexCount));
             }
         }
         const auto* node     = primJob.node;
@@ -1487,7 +1486,7 @@ auto BuildModelPrefab(
                 .materialAsset    = materialAsset,
                 .mesh             = compPrim.mesh,
                 .defaultMaterial  = compPrim.defaultMaterial,
-                .localTransform   = JPH::Mat44::sIdentity(),
+                .localTransform   = Mat4x4::Identity(),
                 .jointOffset      = 0,
                 .isSkinned        = isSkinned,
                 .nodeIndex        = nodeMap[node],

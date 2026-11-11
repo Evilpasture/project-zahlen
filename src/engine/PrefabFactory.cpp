@@ -26,14 +26,8 @@
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <optional>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 // TODO(Evilpasture): REMOVE SYSTEM LEAK
 #include "ArticulationSystem.hpp"
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <algorithm>
 #include <cstddef>
 #include <span>
@@ -214,17 +208,7 @@ auto LoadModelPrefab(GraphicsDevice, AssetManager& assetMgr, std::string_view pa
 
 namespace {
 
-// ModelPrefab still stores imported node matrices as Jolt matrices. Convert
-// at that boundary; all composition and decomposition below is native.
-[[nodiscard]] auto NativeModelMatrix(const JPH::Mat44& source) -> Mat4x4 {
-    Mat4x4 result {};
-    for (int column = 0; column < 4; ++column) {
-        for (int row = 0; row < 4; ++row) {
-            result[static_cast<size_t>(row), static_cast<size_t>(column)] = source(row, column);
-        }
-    }
-    return result;
-}
+[[nodiscard]] auto NativeModelMatrix(const Mat4x4& source) -> Mat4x4 { return source; }
 
 [[nodiscard]] auto SpawnLocalTransform(const SpawnParams& params) -> Components::TransformComponent {
     return {
@@ -264,7 +248,7 @@ struct PreparedPart {
     Quat           rotation = Quat::Identity();
     FVec3      scale {};
     float          maxScale = 1.0f;
-    JPH::ShapeRefC shape    = nullptr;
+    const Physics::AnyShape* shape = nullptr;
 };
 
 auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform, bool createPhysics, bool useBoxColliders) -> std::vector<PreparedPart> {
@@ -285,11 +269,8 @@ auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform
             prep.maxScale    = std::max({std::abs(trs.scale.x), std::abs(trs.scale.y), std::abs(trs.scale.z)});
 
             if (createPhysics) {
-                const auto rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
-                if (rawShape != nullptr) {
-                    const auto shapeScale = JPH::Vec3(prep.scale.x, prep.scale.y, prep.scale.z);
-                    prep.shape = !shapeScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f) ? new JPH::ScaledShape(rawShape, shapeScale) : rawShape;
-                }
+                const auto& shape = useBoxColliders ? part.boxCollider : part.meshCollider;
+                if (shape) prep.shape = &*shape;
             }
         }
     });
@@ -349,22 +330,20 @@ auto InstantiateMeshPart(
 
     const auto worldMat = ComposeTransform(prep.translation, prep.rotation, prep.scale);
 
+    auto body = Physics::BodyID::Null();
     if (params.createPhysics && prep.shape != nullptr) {
+        body = pc.CreateRigidBody(
+            *prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
+            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate,
+            prep.scale
+        );
+    }
+    if (body != Physics::BodyID::Null()) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-
-        reg.Add(
-            e,
-            Components::PhysicsComponent {
-                .physicsID = pc.CreateRigidBody(
-                    prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
-                    params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-                    (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory,
-                    params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
-                ),
-                .isStatic = params.isStaticPhysics
-            }
-        );
+        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     } else if (part.isSkinned && params.isAnimated) {
         reg.Add(e, Components::TransformComponent {});
         reg.Add(e, Components::WorldTransformComponent {.world = baseTransform, .previous = baseTransform});
@@ -496,13 +475,14 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto shape =
-            pc->GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z);
+        Physics::AnyShape shape = Physics::Shape<Physics::Box> {
+            halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z
+        };
         auto body = pc->CreateRigidBody(
             shape, params.position, params.rotation.AsVec4(),
-            params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -563,12 +543,14 @@ auto SpawnPrimitive(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        Physics::AnyShape bodyShape = physicsShape == Physics::ShapeType::Sphere ?
+            Physics::AnyShape(Physics::Shape<Physics::Sphere> {physP1}) :
+            Physics::AnyShape(Physics::Shape<Physics::Cylinder> {physP1, physP2});
         auto body      = pc->CreateRigidBody(
             bodyShape, params.position, params.rotation.AsVec4(),
-            params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -668,9 +650,9 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
+        Physics::AnyShape shape = Physics::Shape<Physics::Plane> {};
         auto body  = pc->CreateRigidBody(
-            shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask
+            shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }

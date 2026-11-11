@@ -6,6 +6,8 @@
 // manager itself stays inside Engine.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <concepts>
@@ -60,6 +62,8 @@ class ZHLN_API AssetLibrary {
 
     void               CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void               CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
+    [[nodiscard]] auto CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool;
+    [[nodiscard]] auto FindCollisionMesh(CollisionAssetID id) const noexcept -> std::shared_ptr<const Physics::MeshGeometry>;
     [[nodiscard]] auto CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool;
     [[nodiscard]] auto FindEnvironmentImage(std::string_view key) const noexcept -> std::optional<EnvironmentImageView>;
     void               SetRemoteFetcher(Remote::AsyncAssetFetcher* fetcher) noexcept;

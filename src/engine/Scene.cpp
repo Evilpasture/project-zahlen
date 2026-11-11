@@ -266,18 +266,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                     }
                     half = {std::max(half.x, 0.05f), std::max(half.y, 0.05f), std::max(half.z, 0.05f)};
 
-                    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-                    const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.x, half.y, half.z);
-                    if (shape != nullptr) {
-                        registry.Add(
-                            parts[0], Components::PhysicsComponent {
-                                          .physicsID = physics.CreateRigidBody(
-                                              shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
-                                              params.physicsCategory, params.physicsMask
-                                          ),
-                                          .isStatic = true
-                                      }
-                        );
+                    auto physics = engine.Physics();
+                    const auto body = physics.CreateRigidBody(
+                        Physics::Shape<Physics::Box> {half}, params.position, params.rotation.AsVec4(),
+                        Physics::MotionType::Kinematic, Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask
+                    );
+                    if (body != Physics::BodyID::Null()) {
+                        registry.Add(parts[0], Components::PhysicsComponent {.physicsID = body, .isStatic = true});
                     }
                 }
 

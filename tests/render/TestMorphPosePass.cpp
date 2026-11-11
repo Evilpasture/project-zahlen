@@ -181,7 +181,7 @@ struct MorphPosePassSuite {
         ZHLN::ModelPart part {};
         part.name                  = ZHLN::String64("MorphBody");
         part.nodeIndex             = 1;
-        part.localTransform        = JPH::Mat44::sIdentity();
+        part.localTransform        = ZHLN::Mat4x4::Identity();
         part.mesh                  = box;
         part.meshAsset             = ZHLN::HashAssetID(degenerateClip ? "zahlen_test_morph_pose_box_mesh_deg" : "zahlen_test_morph_pose_box_mesh");
         part.materialAsset         = ZHLN::HashAssetID("zahlen_test_morph_pose_box_material");
@@ -197,11 +197,11 @@ struct MorphPosePassSuite {
         prefab->nodes.resize(2);
         prefab->nodes[0].name           = ZHLN::String64("MorphRoot");
         prefab->nodes[0].parentIndex    = -1;
-        prefab->nodes[0].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[0].localTransform = ZHLN::Mat4x4::Identity();
         prefab->nodes[0].hasMesh        = false;
         prefab->nodes[1].name           = ZHLN::String64("MorphBody");
         prefab->nodes[1].parentIndex    = 0;
-        prefab->nodes[1].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[1].localTransform = ZHLN::Mat4x4::Identity();
         prefab->nodes[1].hasMesh        = true;
 
         ZHLN::AnimationClip weightsClip;
