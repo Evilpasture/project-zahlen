@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IK.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "AnimationContext.hpp"
 #include "AnimationSystem.hpp"
@@ -59,7 +62,7 @@ void TwoBoneIKSystem::Update(
                 if (const auto targetTr = query.Get<Components::TransformComponent>(src.targetEntity)) {
                     const auto targetInModel = invEntityLocal * ComposeTransform(targetTr->position, targetTr->rotation, targetTr->scale);
                     targetPosModel = (targetInModel * FVec4 {src.targetOffset.x, src.targetOffset.y, src.targetOffset.z, 1.0f}).XYZ();
-                    targetRotModel = (invEntityRot * targetTr->rotation).Normalized().AsVec4();
+                    targetRotModel = (invEntityRot * targetTr->rotation).Normalized();
                 }
             }
 

@@ -8,6 +8,7 @@
 // member. See SceneMirror.hpp for the split and the per-frame ordering.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
@@ -158,7 +159,7 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVe
     object.rotationQuat = rotation.Normalized();
     object.renderPosition = object.position;
     object.renderRotation = object.rotationQuat;
-    object.rotationEulerDeg = object.rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
+    object.rotationEulerDeg = object.rotationQuat.EulerAnglesDegrees();
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;

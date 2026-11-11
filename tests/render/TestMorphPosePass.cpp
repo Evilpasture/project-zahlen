@@ -47,7 +47,6 @@
 // extract -> shader path with a predictable authored base pose.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"

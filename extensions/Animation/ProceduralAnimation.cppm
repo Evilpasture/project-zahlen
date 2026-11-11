@@ -5,12 +5,15 @@ module;
 
 // clang-format off
 #include <Animation/ProceduralMath.hpp>
+#include <Zahlen/Math/Angles.hpp>
 // clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -538,8 +541,8 @@ Mat4x4 AlignFootToGround(
     const Mat4x4& authoredFoot,
     FVec3      target,
     FVec3      modelNormal,
-    float             maxSidewaysRadians = ProceduralMath::Radians(15.0f),
-    float             maxForwardRadians  = ProceduralMath::Radians(35.0f)
+    float             maxSidewaysRadians = ZHLN::DegF(15.0f).ToRadians().value,
+    float             maxForwardRadians  = ZHLN::DegF(35.0f).ToRadians().value
 ) noexcept;
 size_t SetModelTransformAndCarrySubtree(Mat4x4* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const Mat4x4& target) noexcept;
 void   ApplyIKReachTilt(
@@ -570,9 +573,9 @@ void SolveLegGrounding(
     float                          dt                      = 1.0f / 60.0f,
     float                          pelvisDropWeight        = 1.0f,
     float                          maxLegExtension         = 0.98f,
-    float                          maxBodyTiltRadians      = ProceduralMath::Radians(10.0f),
-    float                          maxAnkleSidewaysRadians = ProceduralMath::Radians(15.0f),
-    float                          maxAnkleForwardRadians  = ProceduralMath::Radians(35.0f)
+    float                          maxBodyTiltRadians      = ZHLN::DegF(10.0f).ToRadians().value,
+    float                          maxAnkleSidewaysRadians = ZHLN::DegF(15.0f).ToRadians().value,
+    float                          maxAnkleForwardRadians  = ZHLN::DegF(35.0f).ToRadians().value
 ) noexcept;
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,

@@ -11,6 +11,9 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Math/Transform.hpp>
@@ -57,7 +60,7 @@ struct IKChain {
     int32_t   lowerNodeIndex    = -1;
     int32_t   endNodeIndex      = -1;
     FVec3 targetPosition    = FVec3::Zero();
-    FVec4 targetRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
+    Quat  targetRotation = Quat::Identity();
     FVec3 poleVector        = FVec3(0.0f, -1.0f, 0.0f);
     float     weight            = 1.0f;
     bool      orientEndEffector = true;

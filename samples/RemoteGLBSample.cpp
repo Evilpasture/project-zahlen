@@ -86,8 +86,6 @@
 // reflections, R re-download, C re-crawl the model list.
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>

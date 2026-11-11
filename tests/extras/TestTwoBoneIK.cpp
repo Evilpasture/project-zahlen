@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
@@ -22,8 +25,12 @@
 #include <memory>
 #include <numbers>
 #include <vector>
+#include <type_traits>
 
 using ZHLN::FVec3;
+
+static_assert(std::is_same_v<decltype(ZHLN::IK::TwoBoneIKChain{}.targetRotation), ZHLN::Quat>);
+static_assert(std::is_same_v<decltype(ZHLN::Animation::IKChain{}.targetRotation), ZHLN::Quat>);
 
 enum class TwoBoneIKTestError : uint32_t {
     IKSolverFailed ZHLN_ANNOTATION(ZHLN::Description<"TwoBoneIK solver produced invalid joint orientations or positions."> {}) = 1,
@@ -318,7 +325,7 @@ struct TwoBoneIKTestSuite {
             );
 
             const FVec3 targetPos(0.0f, 2.0f, 2.8284f);
-            const auto targetRot = ZHLN::RotationFromEulerDegrees({0.0f, 0.35f * 180.0f / std::numbers::pi_v<float>, 0.0f});
+            const auto targetRot = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), 0.35f);
             const std::array chain {
                 ZHLN::Animation::IKChain {
                     .upperNodeIndex    = 0,

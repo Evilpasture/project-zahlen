@@ -39,7 +39,6 @@
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <toml/TOML.hpp>
 #include <type_traits>
 

@@ -18,7 +18,6 @@
 // include/ names a generated type, which is what lets the engine build with no shader
 // tool having run: the engine is a producer of scene terms, not a consumer of the ABI.
 
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>

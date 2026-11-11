@@ -10,7 +10,6 @@
 // one node per light so ModelLight's node chain carries its transform.
 
 #include "BSPImporter.hpp"
-#include <Zahlen/Math/Vec3.hpp>
 #include "BSPLighting.hpp"
 #include "BSPRead.hpp"
 #include "SourceVFS.hpp"

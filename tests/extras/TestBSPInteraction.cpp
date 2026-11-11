@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 // clang-format off
@@ -20,9 +21,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Physics/Physics.hpp>

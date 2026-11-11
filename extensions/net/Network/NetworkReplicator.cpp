@@ -80,7 +80,7 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
         if (const auto e = uidToEntityMap.Find(body.uid)) {
             reg.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
                 interp.targetPosition = body.position;
-                interp.targetRotation = body.rotation.AsVec4();
+                interp.targetRotation = body.rotation;
                 interp.linearVelocity = body.velocity;
             });
         }
@@ -121,7 +121,7 @@ void NetworkInterpolationSystem(
         }
         const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
         trans->position = Lerp(trans->position, interp->targetPosition, t);
-        trans->rotation = Slerp(Quat {trans->rotation}, Quat {interp->targetRotation}, t);
+        trans->rotation = Slerp(trans->rotation, interp->targetRotation, t);
     }
 }
 

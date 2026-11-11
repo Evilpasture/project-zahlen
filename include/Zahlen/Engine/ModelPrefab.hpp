@@ -13,7 +13,6 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Physics/Collision/Shape/Shape.h>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>

@@ -8,7 +8,7 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 

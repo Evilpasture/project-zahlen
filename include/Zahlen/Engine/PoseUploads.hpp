@@ -19,9 +19,6 @@
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Zahlen/Core/Arena.hpp>
-#include <Zahlen/Math/Vec2.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <algorithm>
 #include <cstddef>

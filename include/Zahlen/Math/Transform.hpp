@@ -4,6 +4,8 @@
 #pragma once
 
 #include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <algorithm>
 #include <cmath>
@@ -89,7 +91,7 @@ namespace ZHLN {
 
 struct TransformParts {
     FVec3 translation {};
-    FVec4 rotation {0.0f, 0.0f, 0.0f, 1.0f};
+    Quat rotation = Quat::Identity();
     FVec3 scale {1.0f, 1.0f, 1.0f};
 };
 

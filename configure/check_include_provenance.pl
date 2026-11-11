@@ -74,6 +74,21 @@ my %FIRST_PARTY = (
     HashAssetID      => ['include/Zahlen/Core/AssetID.hpp'],
     EnableEnumFlags  => ['include/Zahlen/Core/EnumFlags.hpp'],
     EnumFlag         => ['include/Zahlen/Core/EnumFlags.hpp'],
+    # Native math values
+    FVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    DVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    FVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    DVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    FVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    DVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    Mat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    Mat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DegF => ['include/Zahlen/Math/Angles.hpp'],
+    DegD => ['include/Zahlen/Math/Angles.hpp'],
+    RadF => ['include/Zahlen/Math/Angles.hpp'],
+    RadD => ['include/Zahlen/Math/Angles.hpp'],
     # Geometry
     Extent2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
     Offset2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
@@ -229,7 +244,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp', 'ValueTypes.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a
@@ -405,7 +420,7 @@ my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
     my ($suffix) = /(\.[^.]*)$/;
     defined $suffix && $HEADER_SUFFIXES{lc $suffix};
 } keys %tree_files));
-my $CACHE_SCHEMA = 2;
+my $CACHE_SCHEMA = 3;
 
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
 

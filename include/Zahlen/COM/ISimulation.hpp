@@ -25,10 +25,7 @@
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 
 #include <cstdint>

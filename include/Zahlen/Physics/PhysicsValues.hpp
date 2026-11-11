@@ -4,15 +4,13 @@
 
 // Query results that cross the engine's public boundary. Every field is spelled
 // in ZHLN value types, so this header names no JPH type and adds no Jolt
-// include: ValueTypes.hpp supplies the aliases, PhysicsIDs.hpp is header
-// only. Physics.hpp includes it, so existing code sees the same types in the
-// same namespace. CharacterParams needs Jolt shapes and stays in Physics.hpp.
+// include. PhysicsIDs.hpp is header only. Physics.hpp includes this header,
+// so existing code sees the same types in the same namespace. CharacterParams
+// needs Jolt shapes and stays in Physics.hpp.
 
 #include <Zahlen/Physics/PhysicsIDs.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <cstddef>
 #include <cstdint>
 

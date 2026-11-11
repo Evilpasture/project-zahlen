@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <cmath>
-#include <numbers>
 
 namespace ZHLN::ProceduralMath {
 [[nodiscard]] constexpr auto Translation(const Mat4x4& m) noexcept -> FVec3 { return {m[0, 3], m[1, 3], m[2, 3]}; }
@@ -39,5 +41,4 @@ constexpr void SetTranslation(Mat4x4& m, FVec3 value) noexcept {
     return q.Normalized();
 }
 [[nodiscard]] inline auto Transform(Quat q, FVec3 p, FVec3 s = FVec3::Splat(1.0f)) noexcept -> Mat4x4 { return ComposeTransform(p, q, s); }
-[[nodiscard]] constexpr auto Radians(float degrees) noexcept -> float { return degrees * (std::numbers::pi_v<float> / 180.0f); }
 } // namespace ZHLN::ProceduralMath

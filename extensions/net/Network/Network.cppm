@@ -42,7 +42,7 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -575,7 +575,7 @@ struct NetworkIdentityComponent {
 
 struct NetworkInterpolationComponent {
     ZHLN::FVec3 targetPosition     = {};
-    ZHLN::FVec4 targetRotation     = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::Quat  targetRotation     = ZHLN::Quat::Identity();
     ZHLN::FVec3 linearVelocity     = {};
     float        interpolationSpeed = 20.0f;
 };

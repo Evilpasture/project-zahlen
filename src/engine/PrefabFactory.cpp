@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -17,7 +18,6 @@
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
@@ -261,7 +261,7 @@ auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> Ma
 
 struct PreparedPart {
     FVec3      translation {};
-    FVec4          rotation {0.0f, 0.0f, 0.0f, 1.0f};
+    Quat           rotation = Quat::Identity();
     FVec3      scale {};
     float          maxScale = 1.0f;
     JPH::ShapeRefC shape    = nullptr;
@@ -350,14 +350,14 @@ auto InstantiateMeshPart(
     const auto worldMat = ComposeTransform(prep.translation, prep.rotation, prep.scale);
 
     if (params.createPhysics && prep.shape != nullptr) {
-        reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = Quat(prep.rotation), .scale = prep.scale});
+        reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
         reg.Add(
             e,
             Components::PhysicsComponent {
                 .physicsID = pc.CreateRigidBody(
-                    prep.shape, {static_cast<double>(prep.translation.x), static_cast<double>(prep.translation.y), static_cast<double>(prep.translation.z)}, prep.rotation,
+                    prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
                     params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
                     (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory,
                     params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
@@ -372,7 +372,7 @@ auto InstantiateMeshPart(
     } else {
         const auto nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * NativeModelMatrix(part.localTransform);
         const auto localTRS = DecomposeTransform(nodeLocal);
-        reg.Add(e, Components::TransformComponent {.position = localTRS.translation, .rotation = Quat(localTRS.rotation), .scale = localTRS.scale});
+        reg.Add(e, Components::TransformComponent {.position = localTRS.translation, .rotation = localTRS.rotation, .scale = localTRS.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     }
@@ -796,10 +796,10 @@ auto InstantiatePrefab(
             reg.Add(lightEnt, Components::NameComponent {.name = light.name});
 
             if (rootEntity != Entity::Null()) {
-                reg.Add(lightEnt, Components::TransformComponent {.position = localTRS.translation, .rotation = Quat(localTRS.rotation), .scale = localTRS.scale});
+                reg.Add(lightEnt, Components::TransformComponent {.position = localTRS.translation, .rotation = localTRS.rotation, .scale = localTRS.scale});
                 reg.Add(lightEnt, Components::HierarchyComponent {.parent = rootEntity});
             } else {
-                reg.Add(lightEnt, Components::TransformComponent {.position = worldTRS.translation, .rotation = Quat(worldTRS.rotation), .scale = worldTRS.scale});
+                reg.Add(lightEnt, Components::TransformComponent {.position = worldTRS.translation, .rotation = worldTRS.rotation, .scale = worldTRS.scale});
             }
 
             reg.Add(lightEnt, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});

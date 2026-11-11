@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "helpers/CommonFixtures.hpp"
 
 // clang-format off

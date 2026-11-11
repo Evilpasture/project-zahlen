@@ -5,6 +5,9 @@ module;
 
 // clang-format off
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
 // clang-format on
@@ -752,7 +755,7 @@ void SolveUpperBody(
 
     const FVec3 currentForward = SafeNormalized(ProceduralMath::Direction(nodeTransforms[headNode], FVec3::UnitZ()), FVec3::UnitZ());
     const float     aimAngle       = std::acos(std::clamp(Dot(currentForward, targetDir), -1.0f, 1.0f));
-    const float     maxAngle       = std::clamp(ProceduralMath::Radians(lookAt->maxAngleDeg), 0.0f, std::numbers::pi_v<float>);
+    const float     maxAngle       = std::clamp(ZHLN::DegF(lookAt->maxAngleDeg).ToRadians().value, 0.0f, std::numbers::pi_v<float>);
     Quat       fullAim        = FromTo(currentForward, targetDir);
     if (aimAngle > maxAngle && aimAngle > 1.0e-5f) {
         fullAim = Slerp(Quat::Identity(), fullAim, maxAngle / aimAngle).Normalized();

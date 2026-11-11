@@ -15,7 +15,10 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>

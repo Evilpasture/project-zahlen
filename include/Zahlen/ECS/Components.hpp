@@ -4,7 +4,6 @@
 #pragma once
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>

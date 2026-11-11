@@ -18,10 +18,8 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>

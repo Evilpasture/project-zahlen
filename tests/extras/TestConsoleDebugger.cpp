@@ -8,6 +8,7 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include <Console/Console.hpp>
 #include <Console/ConsoleDebugger.hpp>
 #include <Scripting/ScriptBinder.hpp>

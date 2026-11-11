@@ -12,6 +12,7 @@
 // a statement of fact rather than a promise that needs a try/catch to keep.
 
 #include <array>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>

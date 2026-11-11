@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/IBLProcessor.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include "render/RenderInternal.hpp"
 #include "render/Resources.hpp"
 #include <ShaderBindings.hpp>

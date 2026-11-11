@@ -4,7 +4,6 @@
 // gameplay/ALife/Types.hpp
 #pragma once
 
-#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on

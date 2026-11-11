@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <ProjectLightClient/LightProtocol.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <bit>
 #include <cctype>

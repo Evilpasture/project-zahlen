@@ -8,10 +8,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Physics/PhysicsValues.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
 #include <optional>
 #include <span>

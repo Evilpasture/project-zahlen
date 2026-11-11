@@ -5,6 +5,10 @@ module;
 
 // clang-format off
 #include <Animation/ProceduralMath.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 // clang-format on
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>

@@ -13,10 +13,7 @@
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Math/Vec2.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>

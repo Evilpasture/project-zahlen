@@ -12,10 +12,8 @@
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <string_view>

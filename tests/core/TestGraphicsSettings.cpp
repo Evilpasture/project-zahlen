@@ -15,6 +15,7 @@
 // rather than any per-frame state.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/QualityPresets.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <array>

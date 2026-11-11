@@ -18,7 +18,9 @@ module;
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -204,7 +206,7 @@ class System {
             FVec3 yAxis = Cross(zAxis, xAxis).Normalized();
 
             const auto rotMat = Mat4x4::FromCols(FVec4(xAxis, 0.0f), FVec4(yAxis, 0.0f), FVec4(zAxis, 0.0f), FVec4(0.0f, 0.0f, 0.0f, 1.0f));
-            const auto decalRot = Quat(DecomposeTransform(rotMat).rotation);
+            const auto decalRot = DecomposeTransform(rotMat).rotation;
 
             FVec3  decalScale(cfg.decalSize, cfg.decalSize, 0.40f);
             const auto worldMat = ComposeTransform(point, decalRot, decalScale);

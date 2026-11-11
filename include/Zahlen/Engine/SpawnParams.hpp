@@ -13,7 +13,6 @@
 // A fixed layout of native values, which is what lets ZHLN::COM::IAssetLibrary take
 // it by const reference across the shared-library boundary.
 
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>

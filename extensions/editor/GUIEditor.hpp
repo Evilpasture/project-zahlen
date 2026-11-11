@@ -29,7 +29,6 @@
 
 #pragma once
 
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags, for the editor's own input flag set

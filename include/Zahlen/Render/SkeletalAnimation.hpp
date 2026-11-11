@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
 #include <Zahlen/Core/String.hpp>
 #include <vector>

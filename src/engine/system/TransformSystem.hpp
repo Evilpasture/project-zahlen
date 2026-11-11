@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <array>

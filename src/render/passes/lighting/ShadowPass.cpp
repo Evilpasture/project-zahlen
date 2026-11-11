@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/passes/lighting/ShadowPass.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "render/Renderer.hpp"
 #include "render/features/ShadowAtlas.hpp"

@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>

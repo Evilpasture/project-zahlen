@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AnimationContext.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "IK.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
@@ -49,7 +51,7 @@ constexpr size_t kMaxIKChains       = 4;
 
 struct SampledTRS {
     FVec3 translation = FVec3::Zero();
-    FVec4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    Quat rotation = Quat::Identity();
     FVec3 scale       = FVec3::Splat(1.0f);
 };
 
@@ -79,9 +81,9 @@ void SampleTRSChannel(const AnimationChannel& channel, float time, SampledTRS& t
         }
         const float*    q0 = &channel.keyValues[idx0 * 4];
         const float*    q1 = &channel.keyValues[idx1 * 4];
-        const auto rot0 = FVec4 {q0[0], q0[1], q0[2], q0[3]};
-        const auto rot1 = FVec4 {q1[0], q1[1], q1[2], q1[3]};
-        target.rotation = SlerpRotation(rot0, rot1, factor);
+        const auto rot0 = Quat {q0[0], q0[1], q0[2], q0[3]};
+        const auto rot1 = Quat {q1[0], q1[1], q1[2], q1[3]};
+        target.rotation = Slerp(rot0, rot1, factor);
     } else if (channel.path == AnimationPathType::Scale) {
         if (channel.keyValues.size() < (idx1 + 1) * 3) {
             return;
@@ -403,7 +405,7 @@ void ApplyIKAndPropagateDescendantFK(
             const auto aParts = DecomposeTransform(a);
             const auto bParts = DecomposeTransform(b);
             return ComposeTransform(Lerp(aParts.translation, bParts.translation, t),
-                                    SlerpRotation(aParts.rotation, bParts.rotation, t), FVec3::One());
+                                    Slerp(aParts.rotation, bParts.rotation, t), FVec3::One());
         };
 
         model[upperIdx] = blend(upperModel, newUpper, w);
@@ -807,7 +809,7 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
                     if (inst.prevTrack >= 0 && inst.blendFactor < 1.0f) {
                         const float     t        = inst.blendFactor;
                         const FVec3 blendedT = state.prev.translation + t * (state.curr.translation - state.prev.translation);
-                        const auto blendedR = SlerpRotation(state.prev.rotation, state.curr.rotation, t);
+                        const auto blendedR = Slerp(state.prev.rotation, state.curr.rotation, t);
                         const FVec3 blendedS = state.prev.scale + t * (state.curr.scale - state.prev.scale);
                         clipLocal[n]             = ComposeTransform(blendedT, blendedR, blendedS);
                     } else {

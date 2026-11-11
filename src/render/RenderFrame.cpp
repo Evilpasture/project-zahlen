@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/RenderInternal.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include "Zahlen/Math/Math3D.hpp"
 #include "Zahlen/Core/Profiler.hpp"
 #include "vulkan/diagnostics/GpuProfiler.hpp"

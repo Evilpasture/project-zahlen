@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -62,6 +63,10 @@ struct alignas(16) Quat {
         return {std::atan2(2.0f * (w*x + y*z), 1.0f - 2.0f * (x*x + y*y)),
                 std::asin(std::clamp(2.0f * (w*y - z*x), -1.0f, 1.0f)),
                 std::atan2(2.0f * (w*z + x*y), 1.0f - 2.0f * (y*y + z*z))};
+    }
+    // Same convention as EulerAngles(), returned in degrees.
+    [[nodiscard]] auto EulerAnglesDegrees() const noexcept -> FVec3 {
+        return EulerAngles() * (180.0f / std::numbers::pi_v<float>);
     }
     [[nodiscard]] constexpr auto Conjugated() const noexcept -> Quat { return {-x, -y, -z, w}; }
     [[nodiscard]] constexpr auto Inversed() const noexcept -> Quat {

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Zahlen/Math/Camera.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "Zahlen/Math/Matrix.hpp"
 #include "render/GpuPack.hpp"

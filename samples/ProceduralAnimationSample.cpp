@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -352,7 +355,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
         engine, {4.5f, 0.18f, 2.2f},
         ZHLN::PrefabFactory::SpawnParams {
             .position        = {-14.0, 2.75, 5.0},
-            .rotation        = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::ProceduralMath::Radians(30.0f)),
+            .rotation        = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::DegF(30.0f).ToRadians().value),
             .createPhysics   = true,
             .isStaticPhysics = true,
             .roughness       = 0.55f,
@@ -457,7 +460,7 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
     );
     addPart(
         "Handgun_Grip", FVec3(0.060f, 0.135f, 0.055f), FVec3(0.0f, -0.145f, -0.065f),
-        Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::ProceduralMath::Radians(-10.0f)), gripColor, 0.35f
+        Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::DegF(-10.0f).ToRadians().value), gripColor, 0.35f
     );
     addPart("Handgun_TriggerGuard", FVec3(0.045f, 0.035f, 0.055f), FVec3(0.0f, -0.070f, 0.015f), Quat::Identity(), darkMetal, 0.80f);
     addPart(

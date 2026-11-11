@@ -9,10 +9,7 @@ module;
 // clang-format off
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 // clang-format on
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Math/Camera.hpp>

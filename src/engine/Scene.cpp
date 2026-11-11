@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -361,7 +363,7 @@ namespace {
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
     return Transform {
         .position = ToDescriptionFloat3(transform.position),
-        .rotation = ToDescriptionFloat3(transform.rotation.EulerAngles() * (180.0f / std::numbers::pi_v<float>)),
+        .rotation = ToDescriptionFloat3(transform.rotation.EulerAnglesDegrees()),
         .scale    = ToDescriptionFloat3(transform.scale)
     };
 }
@@ -467,7 +469,7 @@ namespace {
                 .name        = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAngles() * (180.0f / std::numbers::pi_v<float>)) : defaults.rotation,
+                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAnglesDegrees()) : defaults.rotation,
                 .direction   = ToDescriptionFloat3(light.direction),
                 .color       = ToDescriptionFloat3(light.color),
                 .intensity   = light.intensity,

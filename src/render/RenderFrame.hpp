@@ -4,6 +4,7 @@
 #pragma once
 
 #include "vulkan/VulkanHeader.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 
 #include "render/FrameResources.hpp"
 #include "render/GpuLayout.hpp"

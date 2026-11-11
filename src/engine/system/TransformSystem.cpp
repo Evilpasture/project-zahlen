@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TransformSystem.hpp"
-#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ArticulationSystem.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -302,7 +303,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                     const auto animTRS = DecomposeTransform(animModel);
                     const auto physTRS = DecomposeTransform(physModel);
                     const auto tBlended = Lerp(animTRS.translation, physTRS.translation, blendWeight);
-                    const auto rBlended = SlerpRotation(animTRS.rotation, physTRS.rotation, blendWeight);
+                    const auto rBlended = Slerp(animTRS.rotation, physTRS.rotation, blendWeight);
                     const auto sBlended = Lerp(animTRS.scale, physTRS.scale, blendWeight);
                     const auto blendedModel = ComposeTransform(tBlended, rBlended, sBlended);
                     finalSkinningMatrices[j] = blendedModel * ibm;

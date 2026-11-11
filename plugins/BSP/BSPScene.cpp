@@ -9,7 +9,8 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
-#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPLighting.hpp"
@@ -58,7 +59,7 @@ constexpr int   kAoSamples = 24;
 // to one degree of freedom; roll is pinned to 0 and the heading recovered
 // from u's in-plane angle. Verified 120/120 angle triples (worst axis error
 // 3.5e-4) against a matrix-based ground truth.
-[[nodiscard]] auto EngineTripletFromQuat(FVec4 q) -> FVec3 {
+[[nodiscard]] auto EngineTripletFromQuat(Quat q) -> FVec3 {
     const auto matrix = ComposeTransform(FVec3::Zero(), q, FVec3::One());
     const auto f = matrix.Column(0).XYZ();
     const auto u = matrix.Column(1).XYZ();
@@ -81,7 +82,7 @@ constexpr int   kAoSamples = 24;
 // The sky_camera's own rotation as a quaternion (SkyboxTransform::rot is its
 // row-major AngleMatrix), so entity orientations can compose with it the way
 // Source parents skybox props to the sky_camera.
-[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> FVec4 {
+[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> Quat {
     auto basis = Mat4x4::Identity();
     for (size_t row = 0; row < 3; ++row) {
         for (size_t col = 0; col < 3; ++col) {
@@ -125,11 +126,11 @@ auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOp
     // (pitch=roll=0) this reduces to a pure +yaw
     // rotation about engine +Y -- bit-identical behaviour to the previously
     // verified yaw fix, whose -atan2 sign is preserved here.
-    const auto qSource = RotationFromEulerDegrees({sourceAnglesDegrees.z, sourceAnglesDegrees.x, sourceAnglesDegrees.y});
+    const auto qSource = Quat::FromEulerDegrees({sourceAnglesDegrees.z, sourceAnglesDegrees.x, sourceAnglesDegrees.y});
     auto qEngine = qSource;
     if (options.convertCoordinates) {
-        const auto qC = RotationFromEulerDegrees({-90.0f, 0.0f, 0.0f});
-        qEngine = MultiplyRotations(MultiplyRotations(qC, qSource), ConjugateRotation(qC));
+        const auto qC = Quat::FromEulerDegrees({-90.0f, 0.0f, 0.0f});
+        qEngine = qC * qSource * qC.Conjugated();
     }
     return EngineTripletFromQuat(qEngine);
 }
@@ -415,7 +416,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // (cos p cos y, sin p, cos p sin y); take them from the exact
             // conjugated rotation's forward, not the Euler slots, because the
             // slots' yaw sign is the prop convention, not the camera's.
-            const auto qView    = RotationFromEulerDegrees(EngineEulerAnglesFromSourceAngles(angles, options));
+            const auto qView    = Quat::FromEulerDegrees(EngineEulerAnglesFromSourceAngles(angles, options));
             const auto viewFwd  = ComposeTransform(FVec3::Zero(), qView, FVec3::One()).Column(0).XYZ();
             scene.camera.pitch        = std::asin(std::clamp(viewFwd.y, -1.0f, 1.0f)) * kRadiansToDegrees;
             scene.camera.yaw          = std::atan2(viewFwd.z, viewFwd.x) * kRadiansToDegrees;
@@ -618,7 +619,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 prop.drawFlags    = DrawFlags::Background;
                 prop.body         = Scene::BodyKind::None;
                 prop.startsAsleep = false;
-                const FVec3 composed = EngineTripletFromQuat(MultiplyRotations(SkyboxRotationQuat(skybox), RotationFromEulerDegrees(prop.transform.rotation)));
+                const FVec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Quat::FromEulerDegrees(prop.transform.rotation));
                 prop.transform.rotation  = {composed.x, composed.y, composed.z};
             }
 
@@ -666,7 +667,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         propEntity.transform.rotation = {engineAngles.x, engineAngles.y, engineAngles.z};
         if (skyProp) {
             propEntity.drawFlags = DrawFlags::Background;
-            const FVec3 composed      = EngineTripletFromQuat(MultiplyRotations(SkyboxRotationQuat(skybox), RotationFromEulerDegrees(propEntity.transform.rotation)));
+            const FVec3 composed      = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Quat::FromEulerDegrees(propEntity.transform.rotation));
             propEntity.transform.rotation = {composed.x, composed.y, composed.z};
         }
 

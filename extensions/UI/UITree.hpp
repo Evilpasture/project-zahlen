@@ -31,10 +31,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Math/Vec2.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
 #include <string>
 #include <string_view>
 #include <vector>

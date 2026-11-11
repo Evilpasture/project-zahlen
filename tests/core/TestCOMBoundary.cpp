@@ -11,6 +11,7 @@
 // away.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>

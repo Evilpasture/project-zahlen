@@ -29,8 +29,12 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <type_traits>
 
 import ZHLN.Network;
+
+static_assert(std::is_same_v<decltype(ZHLN::Net::NetworkInterpolationComponent{}.targetRotation), ZHLN::Quat>);
+static_assert(ZHLN::Net::NetworkInterpolationComponent{}.targetRotation == ZHLN::Quat::Identity());
 
 #if !defined(__cpp_impl_reflection) && !(defined(__has_feature) && __has_feature(reflection))
 #error "TestNetworkWire requires a compiler with C++26 static reflection"

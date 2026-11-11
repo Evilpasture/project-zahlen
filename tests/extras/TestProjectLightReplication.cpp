@@ -11,6 +11,7 @@
 // "needs a server to reproduce".
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 #include <ProjectLightClient/LightProtocol.hpp>

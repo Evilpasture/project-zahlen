@@ -4,6 +4,8 @@
 // Core math tests. The two-bone IK solver test moved with its code to
 // tests/extras/TestTwoBoneIK.cpp when IK left core for extensions/Animation.
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -426,6 +428,9 @@ void test_quaternion_math() {
     const auto same = Slerp(identity, -quarterTurn, 0.5f);
     Expect(std::abs(std::abs(Dot(half, same)) - 1.0f) < 1e-5f) == true;
     const auto euler = Quat::FromEulerDegrees({20.0f, 30.0f, -45.0f});
+    const auto degrees = euler.EulerAnglesDegrees();
+    Expect((degrees - FVec3 {20.0f, 30.0f, -45.0f}).Length() < 1e-4f) == true;
+    static_assert(std::is_same_v<decltype(TransformParts{}.rotation), Quat>);
     const auto reference = Math::EulerDegreesToQuat({20.0f, 30.0f, -45.0f});
     Expect(std::abs(euler.x - reference.GetX()) < 1e-5f && std::abs(euler.y - reference.GetY()) < 1e-5f &&
            std::abs(euler.z - reference.GetZ()) < 1e-5f && std::abs(euler.w - reference.GetW()) < 1e-5f) == true;

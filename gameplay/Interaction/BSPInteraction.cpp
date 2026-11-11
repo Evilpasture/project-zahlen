@@ -12,6 +12,7 @@
 // geometry of how far a door travels.
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/Audio.hpp>

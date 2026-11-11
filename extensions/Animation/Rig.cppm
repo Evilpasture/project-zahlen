@@ -4,6 +4,7 @@
 module;
 
 #include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -57,15 +58,15 @@ enum class Limb : uint8_t { Root, Spine, Head, LeftArm, RightArm, LeftLeg, Right
 
 /**
  * @brief Metadata for a single joint within the standardized rig.
- * Uses raw floats to ensure compile-time literal compatibility.
+ * Bind pose values are native constexpr math types.
  */
 struct JointDesc {
     Joint                id;
     std::string_view     name;
     int32_t              parentIndex; // -1 for root (Hips)
     Limb                 limbGroup;
-    std::array<float, 3> bindPosition;
-    std::array<float, 4> bindRotation;
+    FVec3                bindPosition;
+    Quat                 bindRotation;
 };
 
 /**
@@ -171,17 +172,15 @@ inline constexpr std::array<HitCapsule, 11> HIT_CAPSULES = {
 /**
  * @brief Returns the default bind pose local position as a native vector.
  */
-[[nodiscard]] FVec3 GetBindPosition(Joint joint) noexcept {
-    const auto& pos = StandardHierarchy[static_cast<size_t>(joint)].bindPosition;
-    return {pos[0], pos[1], pos[2]};
+[[nodiscard]] constexpr FVec3 GetBindPosition(Joint joint) noexcept {
+    return StandardHierarchy[static_cast<size_t>(joint)].bindPosition;
 }
 
 /**
  * @brief Returns the default bind pose local rotation as a native quaternion.
  */
-[[nodiscard]] Quat GetBindRotation(Joint joint) noexcept {
-    const auto& rot = StandardHierarchy[static_cast<size_t>(joint)].bindRotation;
-    return {rot[0], rot[1], rot[2], rot[3]};
+[[nodiscard]] constexpr Quat GetBindRotation(Joint joint) noexcept {
+    return StandardHierarchy[static_cast<size_t>(joint)].bindRotation;
 }
 
 [[nodiscard]] constexpr std::optional<Joint> FindJointByName(std::string_view name) noexcept {

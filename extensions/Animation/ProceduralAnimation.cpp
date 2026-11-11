@@ -5,6 +5,9 @@ module;
 
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -347,7 +350,7 @@ void SpringRotation(Quat& value, FVec3& angularVelocity, Quat target, float dt, 
 }
 
 [[nodiscard]] Quat AlignQuaternionHemisphere(Quat value, Quat reference) noexcept {
-    return QuaternionDot(value, reference) < 0.0f ? Quat(-value.x, -value.y, -value.z, -value.w) : Quat(value);
+    return QuaternionDot(value, reference) < 0.0f ? -value : value;
 }
 
 [[nodiscard]] Quat BicubicRotation(Quat q0, Quat q1, Quat q2, Quat q3, float phase, float tension) noexcept {
@@ -2188,9 +2191,9 @@ void ProceduralAnimationSystem(
             const float           pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
             const float           maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
             const float           maxLegExtension        = config ? config->maxLegExtension : 0.98f;
-            const float           maxBodyTilt            = ProceduralMath::Radians(config ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float           maxAnkleSideways       = ProceduralMath::Radians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float           maxAnkleForward        = ProceduralMath::Radians(config ? config->maxAnkleForwardDegrees : 35.0f);
+            const float           maxBodyTilt            = ZHLN::DegF(config ? config->maxIKBodyTiltDegrees : 10.0f).ToRadians().value;
+            const float           maxAnkleSideways       = ZHLN::DegF(config ? config->maxAnkleSidewaysDegrees : 15.0f).ToRadians().value;
+            const float           maxAnkleForward        = ZHLN::DegF(config ? config->maxAnkleForwardDegrees : 35.0f).ToRadians().value;
             const bool            preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
             const bool            worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
@@ -2458,9 +2461,9 @@ void ProceduralAnimationSystem(
                 const Quat   headRotation   = ExtractRotation(headModel);
                 const FVec3   targetEyeModel = ProceduralMath::Translation(headModel) + headRotation * firstPerson->eyeOffsetModel;
                 const Quat   lookYaw =
-                    Quat::FromAxisAngle(FVec3::UnitY(), ProceduralMath::Radians(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)));
+                    Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::DegF(std::clamp(firstPerson->lookYawDegrees, -80.0f, 80.0f)).ToRadians().value);
                 const Quat lookPitch =
-                    Quat::FromAxisAngle(FVec3::UnitX(), ProceduralMath::Radians(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)));
+                    Quat::FromAxisAngle(FVec3::UnitX(), ZHLN::DegF(std::clamp(firstPerson->lookPitchDegrees, -70.0f, 70.0f)).ToRadians().value);
                 const Quat targetViewModel = (headRotation * lookYaw * lookPitch).Normalized();
                 if (!firstPerson->cameraInitialized) {
                     firstPerson->smoothedEyeModel    = targetEyeModel;

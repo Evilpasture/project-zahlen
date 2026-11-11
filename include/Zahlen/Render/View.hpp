@@ -5,9 +5,7 @@
 #pragma once
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>

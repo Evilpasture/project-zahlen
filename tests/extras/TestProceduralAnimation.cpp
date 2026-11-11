@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Animation/ProceduralMath.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -27,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+import ZHLN.Rig;
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
@@ -37,6 +40,9 @@ using ZHLN::Quat;
 using ZHLN::CreateTranslation;
 using ZHLN::Inverse;
 using ZHLN::Dot;
+
+static_assert(ZHLN::Rig::GetBindPosition(ZHLN::Rig::Joint::Hips) == FVec3 {0.0f, 1.0f, 0.0f});
+static_assert(ZHLN::Rig::GetBindRotation(ZHLN::Rig::Joint::Hips) == Quat::Identity());
 
 
 enum class ProceduralAnimationTestError : uint32_t {

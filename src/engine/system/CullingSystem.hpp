@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>

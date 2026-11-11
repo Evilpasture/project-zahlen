@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
@@ -830,7 +831,7 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = object->rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
+        object->rotationEulerDeg = object->rotationQuat.EulerAnglesDegrees();
         object->linearVelocity   = FVec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
         object->hasPhysicsSample = true;
         object->transformDirty = true;
@@ -1322,7 +1323,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = object.rotationQuat.EulerAngles() * (180.0f / std::numbers::pi_v<float>);
+        object.rotationEulerDeg = object.rotationQuat.EulerAnglesDegrees();
         object.linearVelocity   = transform.linearVelocity;
         object.renderPosition   = object.position;
         object.renderRotation   = object.rotationQuat;

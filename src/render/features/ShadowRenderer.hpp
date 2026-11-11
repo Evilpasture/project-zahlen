@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "vulkan/Rendering.hpp"

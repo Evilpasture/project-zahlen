@@ -9,6 +9,9 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -42,7 +45,7 @@ struct TwoBoneIKChain {
     int32_t endNodeIndex   = -1;
 
     FVec3 targetPosition = FVec3::Zero();
-    FVec4 targetRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    Quat  targetRotation = Quat::Identity();
     FVec3 poleVector     = FVec3(0.0f, -1.0f, 0.0f);
 
     Entity    targetEntity = Entity::Null();
@@ -173,7 +176,7 @@ inline auto AlignNodeToDirection(const Mat4x4& currentWorldMat, FVec3 localBindD
     const auto lengthProduct = std::sqrt(currentWorldDir.LengthSquared() * worldTargetDir.LengthSquared());
     const auto w = lengthProduct + Dot(currentWorldDir, worldTargetDir);
     auto axis = Cross(currentWorldDir, worldTargetDir);
-    auto adjust = FVec4 {axis.x, axis.y, axis.z, w};
+    auto adjust = Quat {axis.x, axis.y, axis.z, w};
     if (w == 0.0f) {
         if (lengthProduct == 0.0f) return currentWorldMat;
         axis = (std::abs(currentWorldDir.x) > std::abs(currentWorldDir.y) ?
@@ -183,7 +186,7 @@ inline auto AlignNodeToDirection(const Mat4x4& currentWorldMat, FVec3 localBindD
         adjust = adjust.Normalized();
     }
     const auto parts = DecomposeTransform(currentWorldMat);
-    return ComposeTransform(parts.translation, MultiplyRotations(adjust, parts.rotation).Normalized(), FVec3::One());
+    return ComposeTransform(parts.translation, (adjust * parts.rotation).Normalized(), FVec3::One());
 }
 
 } // namespace IK

@@ -4,6 +4,8 @@
 #pragma once
 
 #include "render/DrawQueueManager.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "render/FrameDestinations.hpp"
 #include "render/FrameResources.hpp"
 #include "render/GeometryManager.hpp"
