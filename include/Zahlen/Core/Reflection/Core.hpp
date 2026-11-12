@@ -138,8 +138,7 @@ consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
     return std::string_view(span.data(), span.size());
 }
 
-// Keep the historical display spelling used for COM interface IDs: changing
-// it would invalidate QueryInterface IDs held by existing binary consumers.
+// Presentation-only compiler spelling. Never use this for canonical IDs.
 template <typename T>
 consteval auto QualifiedTypeName() -> std::string_view {
     return DefineStaticString(std::meta::display_string_of(std::meta::dealias(^^std::remove_cvref_t<T>)));

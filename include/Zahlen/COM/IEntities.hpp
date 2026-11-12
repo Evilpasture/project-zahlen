@@ -18,7 +18,7 @@
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
-#include <Zahlen/Core/Reflection/Core.hpp>
+#include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <Zahlen/Core/Reflection/LayoutHash.hpp>
 
 #include <cstdint>
@@ -97,7 +97,7 @@ struct IEntities : IObject {
     // namespaces are different families.
     template <typename T>
     [[nodiscard]] static consteval auto ComponentName() noexcept -> StringView {
-        return Reflect::ScopedTypeName<T>();
+        return Reflect::CanonicalTypeName<T>();
     }
 
 protected:

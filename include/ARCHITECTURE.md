@@ -636,16 +636,25 @@ three virtuals is then the final overrider for every branch. Interfaces are
 listed once, as template arguments, and the reflected dispatch covers interfaces
 reached through interface inheritance as well as the direct ones.
 
-`InterfaceIdOf<T>()` hashes `display_string_of(^^T)`, which on this toolchain
-answers `ZHLN::COM::IGraphicsDevice` rather than the unqualified `identifier_of`.
-The ID is therefore stable for a given toolchain and spelling, but it is not yet
-a portable wire constant: a deployment that mixes compiler vendors should pin
-IDs with an explicit override before relying on them across binaries. The
-layout of `StringView`, `Span<T>` and `Result<T>` is pinned by static asserts in
-`tests/core/TestCOM.cpp` instead.
+`InterfaceIdOf<T>()` hashes the canonical AST name from `identifier_of` and
+its declaring scopes, never compiler display text. `IEntities` uses the same
+name for consumer components and engine component lookup; the ECS dynamic
+path hashes the exact name supplied over the boundary. Specializations encode
+the template and tagged arguments, including integral/enum values, qualifiers,
+pointers and arrays. Anonymous or local scopes, unsupported type forms (such as function types) and unsupported template
+arguments (such as pointer and structural-object values), fail at compile time
+rather than being given an ambiguous identity. Such types must be moved to a
+named namespace or use the explicit raw API with a caller-chosen name.
+
+This changes interface IDs wherever the old display spelling differs, and
+changes template component names; rebuild the engine and all consumers together
+and migrate any persisted IDs/names. Neither the 128-bit interface hash nor the
+32-bit ECS hash is collision-proof. Different compiler ABIs, standard library
+inline namespaces and platform-dependent type aliases can still differ; the
+canonical grammar is not an ABI compatibility guarantee.
 
 The reflection library has **no domain**: it gained only generic primitives --
-`QualifiedTypeName<T>()` in `Core.hpp`, and
+`CanonicalTypeName<T>()` in `CanonicalName.hpp`, and
 `MethodSignature<Return, Noexcept, Parameters...>` plus
 `ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
 `ForEachBase`. `MethodSignature` reports a return type, a `noexcept` bit and

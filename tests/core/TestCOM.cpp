@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace {
+namespace COMIdentityTest {
 
 enum class COMTestError : uint8_t { DivisionByZero = 1, UnknownInterface = 2 };
 
@@ -36,10 +36,21 @@ struct ITestBuffer : ZHLN::COM::IObject {
     virtual uint32_t Sum(ZHLN::COM::Span<const uint8_t> bytes) const noexcept = 0;
 };
 
+template <typename T> struct ITemplate : ZHLN::COM::IObject {};
+
 // A well-formed interface that this object does not implement.
 struct ITestMissing : ZHLN::COM::IObject {
     virtual int32_t Missing() const noexcept = 0;
 };
+
+} // namespace COMIdentityTest
+
+namespace {
+using namespace COMIdentityTest;
+
+static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>().high == ZHLN::Hash64("COMIdentityTest::ITestMath"));
+static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>() != ZHLN::COM::InterfaceIdOf<ITestExtended>());
+static_assert(ZHLN::COM::InterfaceIdOf<ITemplate<int>>() != ZHLN::COM::InterfaceIdOf<ITemplate<float>>());
 
 // Watches the assignment that destroys it. Release has to happen last, so the
 // slot being assigned already names its new object by the time this runs.

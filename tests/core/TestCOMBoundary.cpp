@@ -36,17 +36,38 @@
 namespace COMNameTest {
 struct Outer { struct Value {}; };
 namespace Other { struct Value {}; }
+template <typename T, int N> struct Component { T value[N > 0 ? N : 1]; };
+template <typename T> struct OuterTemplate { struct Value {}; };
+template <auto V> struct Value {};
+enum class Sign : int { Negative = -3 };
+template <template <typename> class T> struct TemplateArg {};
+template <typename T> struct TypeArg {};
 }
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Value<-3>>() == "COMNameTest::Value<V{int:-3}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Value<COMNameTest::Sign::Negative>>() == "COMNameTest::Value<V{COMNameTest::Sign:-3}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Value<true>>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::Value<1>>());
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::TypeArg<const COMNameTest::Outer*>>() == "COMNameTest::TypeArg<T{P{C{COMNameTest::Outer}}}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::TypeArg<int[3]>>() == "COMNameTest::TypeArg<T{A{3:int}}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::TemplateArg<COMNameTest::TypeArg>>() == "COMNameTest::TemplateArg<M{COMNameTest::TypeArg}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>() == "COMNameTest::Component<T{int}V{int:2}>");
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 3>>());
+static_assert(ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<int>::Value>() != ZHLN::Reflect::CanonicalTypeName<COMNameTest::OuterTemplate<float>::Value>());
+static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Component<int, 2>>()) == ZHLN::Reflect::CanonicalTypeName<COMNameTest::Component<int, 2>>());
 static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Outer::Value>()) == "COMNameTest::Outer::Value");
 static_assert(std::string_view(ZHLN::COM::IEntities::ComponentName<COMNameTest::Other::Value>()) == "COMNameTest::Other::Value");
 
-namespace {
+namespace COMIdentityTest {
 
 // A component the library has never heard of, declared in the consumer's TU.
 struct ClientTransform {
     float position[3];
     float scale;
 };
+
+} // namespace COMIdentityTest
+
+namespace {
+using COMIdentityTest::ClientTransform;
 
 enum class BoundaryTestError : uint8_t { QueryFailed = 1 };
 
@@ -449,6 +470,21 @@ struct COMBoundarySuite {
                 }
                 ZHLN::Test::ExpectTrue(entities->Detach<ClientTransform>(entity));
                 ZHLN::Test::ExpectTrue(entities->Get<ClientTransform>(entity) == nullptr);
+            }
+
+            using TemplateComponent = COMNameTest::Component<int, 2>;
+            using OtherTemplateComponent = COMNameTest::Component<int, 3>;
+            auto* templateAttached = entities->Attach(entity, TemplateComponent {{11, 22}});
+            auto* otherAttached = entities->Attach(entity, OtherTemplateComponent {{33, 44, 55}});
+            if (ZHLN::Test::ExpectTrue(templateAttached != nullptr && otherAttached != nullptr)) {
+                auto* first = entities->Get<TemplateComponent>(entity);
+                auto* second = entities->Get<OtherTemplateComponent>(entity);
+                if (ZHLN::Test::ExpectTrue(first != nullptr && second != nullptr)) {
+                    ZHLN::Test::ExpectEq(first->value[1], 22);
+                    ZHLN::Test::ExpectEq(second->value[2], 55);
+                }
+                ZHLN::Test::ExpectTrue(entities->Detach<TemplateComponent>(entity));
+                ZHLN::Test::ExpectTrue(entities->Get<OtherTemplateComponent>(entity) != nullptr);
             }
 
             // Despawn marks the entity for destruction and the engine frees it
