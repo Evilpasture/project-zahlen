@@ -77,6 +77,14 @@ struct ParameterResolver<Query<Comps...>> {
     }
 };
 
+template <typename... Comps>
+struct ParameterResolver<ExclusiveQuery<Comps...>> {
+    template <typename CarrierType>
+    static auto Resolve(CarrierType& carrier) noexcept -> ExclusiveQuery<Comps...> {
+        return ExclusiveQuery<Comps...>(carrier.registry);
+    }
+};
+
 template <>
 struct ParameterResolver<Registry&> {
     template <typename CarrierType>
@@ -500,6 +508,25 @@ consteval auto SignatureUsesCommandBuffer() -> bool {
     return uses;
 }
 
+// Direct phase calls do not have a graph node, so they cannot resolve node
+// state or a raw registry. They may use queries, ordinary service views,
+// frame values and, for the playback form only, a private command buffer;
+// the phase owner provides isolation.
+template <typename Param>
+inline constexpr bool SequentialParameter =
+    std::is_same_v<Param, EntityCommandBuffer&> ||
+    (std::is_same_v<Param, std::remove_cvref_t<Param>> &&
+     (IsQuery<Param> || ResourceView<Param>::value || OptionalResourceParam<Param> ||
+      std::is_same_v<Param, FrameDt> || std::is_same_v<Param, FrameAlpha> || std::is_same_v<Param, FrameIndex>));
+
+template <auto SystemFn>
+consteval auto SequentialParameters() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    return []<std::size_t... Is>(std::index_sequence<Is...>) {
+        return (SequentialParameter<typename Inspector::template ParameterType<Is>> && ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+}
+
 } // namespace TemplatedDetail
 
 // A system parameter is admissible when the graph's carrier can resolve it. The
@@ -549,7 +576,7 @@ consteval void AdmitParameters() {
     static_assert(
         EveryParameterResolvable<CarrierT, SystemFn>(std::make_index_sequence<Reflect::CallableInspector<SystemFn>::ParameterCount()> {}),
         "A system parameter cannot be resolved by this graph. Either add the service it asks for to the graph's service bundle, "
-        "or ask for something every graph resolves: Query<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
+        "or ask for something every graph resolves: Query<...>, ExclusiveQuery<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
         "for the node's own state, EventReader<T>/EventWriter<T> (with EventBus in services), Res<T>/ResMut<T>/Optional<T&> for a service "
         "the bundle provides, SoAScratch<T, N> or LinearArena&."
     );
@@ -693,6 +720,7 @@ class ZHLN_API SystemGraphCore {
 
   protected:
     void BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept;
+    [[nodiscard]] auto CommandDestroy() const noexcept -> EntityCommandBuffer::DestroyFn { return _commandDestroy; }
 
   private:
     // An aggregate on purpose: every construction site spells out the fields it
@@ -783,6 +811,33 @@ class SystemGraph: public SystemGraphCore {
     void Execute(const ZHLN::Frame& frame) {
         CarrierType carrier {.registry = _registry, .services = _services, .frame = frame};
         SystemGraphCore::Execute(&carrier);
+    }
+
+    // Invoke a stateless system at an externally ordered phase boundary, not
+    // as a graph node. The caller must ensure no graph or other world work is
+    // running concurrently: this call does not participate in hazard ordering.
+    // It resolves against the graph's already-bound world and services without
+    // giving the system a Registry&. Node-local state and ECBs are deliberately
+    // unavailable here; such work belongs in a graph or an explicit barrier.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && !TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequential(const ZHLN::Frame& frame) {
+        AdmitParameters<SystemFn, CarrierType>();
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+    }
+
+    // As above, but structural commands use a private buffer and are played
+    // back before returning. In particular this never flushes the engine's main
+    // buffer. The caller still owns the phase's concurrency and ordering.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequentialAndPlayback(const ZHLN::Frame& frame) {
+        AdmitParameters<SystemFn, CarrierType>();
+        EntityCommandBuffer commands {_registry, CommandDestroy()};
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame, .ecb = &commands};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+        commands.Playback();
     }
 
     [[nodiscard]] auto GetRegistry() noexcept -> ECS::Registry& {

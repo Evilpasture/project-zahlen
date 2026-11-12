@@ -315,21 +315,22 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
 }
 
 void CullingSystem::DrawDebugFrustum(Engine& engine) {
-    auto& reg    = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  stats  = reg.GetSingleton<Components::CullingStatsComponent>();
+    DrawDebugFrustum(DebugFrustumQuery {EngineAccess::RegistryOf(engine)}, engine.Debug());
+}
+
+void CullingSystem::DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene) {
+    const auto stats = query.GetSingleton<Components::CullingStatsComponent>();
     if (!stats || !stats->stats.FreezeFrustum) {
         return;
     }
 
     // The pass's corners are its own state, so this draws the same frustum from
     // the same source: the view-projection the pass froze.
-    const auto camComp = reg.GetSingleton<Components::CameraComponent>();
+    const auto camComp = query.GetSingleton<Components::CameraComponent>();
     if (!camComp) {
         return;
     }
     const std::array<FVec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
-
-    auto scene = engine.Debug();
 
     struct FrustumEdge {
         int start;

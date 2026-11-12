@@ -4,6 +4,7 @@
 #pragma once
 
 #include "InteractionComponents.hpp"
+#include "InteractionDispatch.hpp"
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -14,32 +15,25 @@ namespace ZHLN {
 class Engine;
 class PhysicsContext;
 class AudioContext;
+namespace ECS { class EntityCommandBuffer; }
 
 namespace Interaction {
 
-// E-key proximity interaction: trigger volumes detect the player, doors
-// open/toggle on use or touch, buttons depress, pickups enter container,
-// and usables dispatch their script hash.
+// Every family read or written by interaction, including teleport and labels.
+using InteractionQuery = ECS::Query<
+    const Character::MovementComponent, Components::TransformComponent&, TriggerComponent&,
+    const Components::InputStateComponent, PickupComponent&, const ItemBaseComponent,
+    ContainerComponent&, Components::PhysicsComponent&, const Components::MeshComponent,
+    const UsableComponent, DoorComponent&, ButtonComponent&,
+    const BSPEntityMetadataComponent, const Components::NameComponent,
+    const TeleportDestinationComponent, const Components::MainCameraTagComponent,
+    Components::CameraComponent&, Components::LightComponent&, EntityConnectionComponent&>;
+
+// E-key proximity interaction, with structural changes deferred until playback.
 class InteractionSystem {
   public:
-    static void Update(
-        ECS::Query<
-            const Character::MovementComponent,
-            const Components::TransformComponent,
-            TriggerComponent&,
-            const Components::InputStateComponent,
-            PickupComponent&,
-            const ItemBaseComponent,
-            ContainerComponent&,
-            const Components::PhysicsComponent,
-            const Components::MeshComponent,
-            const UsableComponent,
-            DoorComponent&,
-            ButtonComponent&>           query,
-        ECS::Registry&                  registry,
-        ZHLN::Optional<PhysicsContext&> physics,
-        ZHLN::Optional<AudioContext&>   audio
-    );
+    static void Update(InteractionQuery query, ECS::EntityCommandBuffer& commands,
+                       ZHLN::Optional<PhysicsContext&> physics = std::nullopt, ZHLN::Optional<AudioContext&> audio = std::nullopt);
 };
 
 // Simulates linear (sliding) and angular (rotating) door movement,
@@ -48,10 +42,10 @@ class DoorMovementSystem {
   public:
     static void Update(
         ECS::Query<DoorComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-        ECS::Registry&                                                                                                                   registry,
+        DispatchQuery                                                                                                                    dispatch,
         FrameDt                                                                                                                          dt,
-        ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
-        ZHLN::Optional<AudioContext&>                                                                                                    audio
+        ZHLN::Optional<PhysicsContext&>                                                                                                  physics = std::nullopt,
+        ZHLN::Optional<AudioContext&>                                                                                                    audio = std::nullopt
     );
 };
 
@@ -60,10 +54,10 @@ class ButtonMovementSystem {
   public:
     static void Update(
         ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-        ECS::Registry&                                                                                                                   registry,
+        DispatchQuery                                                                                                                    dispatch,
         FrameDt                                                                                                                          dt,
-        ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
-        ZHLN::Optional<AudioContext&>                                                                                                    audio
+        ZHLN::Optional<PhysicsContext&>                                                                                                  physics = std::nullopt,
+        ZHLN::Optional<AudioContext&>                                                                                                    audio = std::nullopt
     );
 };
 

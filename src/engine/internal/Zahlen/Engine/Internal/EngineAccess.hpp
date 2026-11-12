@@ -46,9 +46,8 @@ struct ZHLN_API EngineAccess {
     // Core wiring and in-tree failure-injection tests only. Not installed.
     static auto FramePlanOf(Engine&) -> FramePlan&;
 
-    // Capability -> implementation. The only free function that still needs the
-    // concrete subsystem is PushProps(Simulation, ...). This header is not
-    // installed, so API consumers cannot reach this overload.
+    // Capability -> implementation for build-tree-only callers. This header
+    // is not installed, so API consumers cannot reach this overload.
     static auto PhysicsOf(Simulation&) noexcept -> PhysicsContext&;
 };
 

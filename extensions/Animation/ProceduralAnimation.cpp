@@ -44,6 +44,25 @@ module;
 module ZHLN.ProceduralAnimation;
 
 namespace ZHLN {
+
+namespace Animation {
+// Module-internal overload: no Registry is needed once the optional body ID
+// has been resolved by the procedural evaluator's query.
+void UpdateItemDynamics(Physics::BodyID ignoredPhysics, const PhysicsContext& physics, ItemHandlingComponent& handling,
+                        FVec3 rootPosition, Quat rootRotation, float dt) noexcept;
+}
+
+using ProceduralAnimationQuery = ECS::ExclusiveQuery<
+    ProceduralLocomotionComponent&, HairStrandsComponent&, const ProceduralAnimationConfigComponent,
+    FirstPersonVisibilityComponent&, ProceduralLocomotionTracksComponent&, Animation::ItemHandlingComponent&,
+    const Character::MovementComponent, Components::TransformComponent&, const Components::PhysicsComponent,
+    RigBoneMap&, const Components::RagdollComponent, Components::AnimatorComponent&, const ProceduralLookAtComponent,
+    const Components::HierarchyComponent, Components::WorldTransformComponent&, Components::CameraComponent&,
+    const Components::MainCameraTagComponent, const Components::SkeletalMeshComponent, const Components::MeshComponent>;
+using SkinBindingQuery = ECS::Query<const Components::SkeletalMeshComponent, const Components::HierarchyComponent>;
+using AttachmentQuery = ECS::Query<const Components::MeshComponent, const Components::HierarchyComponent,
+                                  const Components::SkeletalMeshComponent, Components::TransformComponent&>;
+
 namespace {
 
 constexpr std::array<std::string_view, kCoreBoneCount> kCoreBoneLabels = {
@@ -1273,7 +1292,7 @@ void ConfigureFootAttachmentConstraints(const ModelPrefab& prefab, RigBoneMap& m
 }
 
 struct SkinBinding {
-    Components::SkeletalMeshComponent* skeletalMesh = nullptr;
+    const Components::SkeletalMeshComponent* skeletalMesh = nullptr;
     const Skeleton*                    skeleton     = nullptr;
 };
 
@@ -1305,7 +1324,7 @@ struct SkinBinding {
     return coreMatches * 1000u + hairMatches;
 }
 
-[[nodiscard]] SkinBinding FindSkinBinding(ECS::Registry& registry, Entity root, const ModelPrefab* prefab) noexcept {
+[[nodiscard]] SkinBinding FindSkinBinding(SkinBindingQuery query, Entity root, const ModelPrefab* prefab) noexcept {
     if (prefab == nullptr) {
         return {};
     }
@@ -1315,7 +1334,7 @@ struct SkinBinding {
     size_t      considered = 0;
     size_t      skipped    = 0;
     auto        consider   = [&](Entity entity) {
-        auto mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
+        auto mesh = query.Get<Components::SkeletalMeshComponent>(entity);
         if (!mesh || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
             return;
         }
@@ -1343,8 +1362,8 @@ struct SkinBinding {
     };
 
     consider(root);
-    for (Entity entity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-        const auto hierarchy = registry.Get<Components::HierarchyComponent>(entity);
+    for (Entity entity: query.Entities<Components::SkeletalMeshComponent>()) {
+        const auto hierarchy = query.Get<Components::HierarchyComponent>(entity);
         if (hierarchy && hierarchy->parent == root) {
             consider(entity);
         }
@@ -1658,7 +1677,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 }
 
 void ProceduralAnimationSystem(
-    ECS::Registry&               registry,
+    ProceduralAnimationQuery     query,
     FrameDt                      frameDt,
     ECS::Res<PhysicsContext>     physicsRes,
     ECS::Res<AssetManager>       assetsRes,
@@ -1892,14 +1911,15 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
     return masked;
 }
 
-size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
+namespace {
+size_t SyncAttachmentsTyped(AttachmentQuery query, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
     size_t synchronizedCount = 0;
-    for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
-        const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+    for (Entity childEntity: query.Entities<Components::MeshComponent>()) {
+        const auto hierarchy = query.Get<Components::HierarchyComponent>(childEntity);
         if (!hierarchy || hierarchy->parent != rootEntity) {
             continue;
         }
-        const auto mesh = registry.Get<Components::MeshComponent>(childEntity);
+        const auto mesh = query.Get<Components::MeshComponent>(childEntity);
         if (!mesh || mesh->nodeIndex < 0) {
             continue;
         }
@@ -1907,11 +1927,11 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
         if (!IsValidRigNode(node, boneMap.nodeCount)) {
             continue;
         }
-        const auto skeletalMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity);
+        const auto skeletalMesh = query.Get<Components::SkeletalMeshComponent>(childEntity);
         if (skeletalMesh && skeletalMesh->skeletonIndex >= 0) {
             continue;
         }
-        if (auto childTransform = registry.Get<Components::TransformComponent>(childEntity)) {
+        if (auto childTransform = query.Get<Components::TransformComponent>(childEntity)) {
             const Mat4x4& modelTransform = boneMap.modelTransforms[node];
             childTransform->position         = ProceduralMath::Translation(modelTransform);
             childTransform->rotation = ExtractRotation(modelTransform);
@@ -1922,18 +1942,24 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
     return synchronizedCount;
 }
 
+} // namespace
+
+size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
+    return SyncAttachmentsTyped(AttachmentQuery {registry}, rootEntity, boneMap);
+}
+
 // Kept for custom schedules: the graph entry point is ProceduralAnimationSystem
 // below. The carrier's services are the simulation domain's, so the pose it
 // produces goes to the palette queue rather than to a renderer reference.
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
     ProceduralAnimationSystem(
-        ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::Res<AssetManager> {&ctx.services.assets},
+        ProceduralAnimationQuery {ctx.registry}, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::Res<AssetManager> {&ctx.services.assets},
         ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
     );
 }
 
 void ProceduralAnimationSystem(
-    ECS::Registry&               registry,
+    ProceduralAnimationQuery     query,
     FrameDt                      frameDt,
     ECS::Res<PhysicsContext>     physicsRes,
     ECS::Res<AssetManager>       assetsRes,
@@ -1945,7 +1971,7 @@ void ProceduralAnimationSystem(
     auto&       physics = *physicsRes;
     const auto& assets  = *assetsRes;
 
-    for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
+    for (Entity entity: query.Entities<ProceduralLocomotionComponent>()) {
         // Everything between the loop entry and the first stage below: the
         // component fetches, FindSkinBinding, the rig rebuild, and the
         // velocity/rotation math. Held in an optional so it can be stopped where
@@ -1953,27 +1979,27 @@ void ProceduralAnimationSystem(
         // cannot be hoisted out of the loop body to close a scope around them.
         std::optional<ZHLN::ScopedTimer> preambleTimer(std::in_place, "PA Stage: Entity preamble");
 
-        auto       gait             = registry.Get<ProceduralLocomotionComponent>(entity);
-        auto       hair             = registry.Get<HairStrandsComponent>(entity);
-        auto       config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
-        auto       firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
-        auto       tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
-        auto       itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
-        auto       movement         = registry.Get<Character::MovementComponent>(entity);
-        auto       transform        = registry.Get<Components::TransformComponent>(entity);
-        auto       physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
-        auto       boneMap          = registry.Get<RigBoneMap>(entity);
-        const bool hasRagdoll       = registry.Get<Components::RagdollComponent>(entity).has_value();
+        auto       gait             = query.Get<ProceduralLocomotionComponent>(entity);
+        auto       hair             = query.Get<HairStrandsComponent>(entity);
+        auto       config           = query.Get<ProceduralAnimationConfigComponent>(entity);
+        auto       firstPerson      = query.Get<FirstPersonVisibilityComponent>(entity);
+        auto       tracks           = query.Get<ProceduralLocomotionTracksComponent>(entity);
+        auto       itemHandling     = query.Get<Animation::ItemHandlingComponent>(entity);
+        auto       movement         = query.Get<Character::MovementComponent>(entity);
+        auto       transform        = query.Get<Components::TransformComponent>(entity);
+        auto       physicsComponent = query.Get<Components::PhysicsComponent>(entity);
+        auto       boneMap          = query.Get<RigBoneMap>(entity);
+        const bool hasRagdoll       = query.Get<Components::RagdollComponent>(entity).has_value();
 
         if (!gait || !transform || !boneMap) {
             continue;
         }
 
-        auto               animator    = registry.Get<Components::AnimatorComponent>(entity);
+        auto               animator    = query.Get<Components::AnimatorComponent>(entity);
         const AssetID      prefabAsset = (animator && animator->prefabAsset != InvalidAssetID) ? animator->prefabAsset : boneMap->sourcePrefabAsset;
         const auto         prefabOpt   = prefabAsset != InvalidAssetID ? assets.GetCachedPrefab(prefabAsset) : ZHLN::Optional<const ModelPrefab&> {};
         const ModelPrefab* prefab      = prefabOpt ? &*prefabOpt : nullptr;
-        SkinBinding        skin        = FindSkinBinding(registry, entity, prefab);
+        SkinBinding        skin        = FindSkinBinding(query.As<SkinBindingQuery>(), entity, prefab);
 
         if ((!boneMap->initialized || boneMap->sourcePrefabAsset != prefabAsset) && prefab != nullptr && skin.skeleton != nullptr) {
             const bool complete        = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
@@ -2217,7 +2243,7 @@ void ProceduralAnimationSystem(
             const bool                      forceLayering = config && config->layerUpperBodyOverAuthoredChannels;
             const bool                      applyArmSwing = forceLayering || !coverage.arms;
             const bool                      applyLookAt   = forceLayering || !coverage.torsoHead;
-            const auto                      lookAt        = registry.Get<ProceduralLookAtComponent>(entity);
+            const auto                      lookAt        = query.Get<ProceduralLookAtComponent>(entity);
             if (applyArmSwing || applyLookAt) {
                 Animation::SolveUpperBody(
                     *gait, lookAt ? &*lookAt : nullptr, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap, applyArmSwing, applyLookAt
@@ -2240,7 +2266,7 @@ void ProceduralAnimationSystem(
             const FVec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? ProceduralMath::Translation(boneMap->modelTransforms[headNode]) :
                                                                                                  FVec3{0.0f, 1.6f, 0.0f};
             FVec3           aimDirection    = FVec3::UnitZ();
-            if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
+            if (const auto lookAt = query.Get<ProceduralLookAtComponent>(entity)) {
                 const FVec3 entityPosition = transform->position;
                 const FVec3 lookAtTarget   = lookAt->targetWorldPos;
                 const FVec3 targetModel    = rootRotation.Inversed() * (lookAtTarget - entityPosition);
@@ -2254,7 +2280,7 @@ void ProceduralAnimationSystem(
             const Mat4x4 worldToModel = Inverse(rootWorld);
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
-            Animation::UpdateItemDynamics(registry, physics, entity, *itemHandling, transform->position, rootRotation, dt);
+            Animation::UpdateItemDynamics(physicsComponent ? physicsComponent->physicsID : Physics::BodyID {}, physics, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);
@@ -2319,24 +2345,24 @@ void ProceduralAnimationSystem(
                 Animation::SolveLimbIK(boneMap->modelTransforms.data(), *boneMap, upperBone, foreBone, handBone, gripTarget, grip);
             }
 
-            if (registry.IsAlive(itemHandling->itemEntity)) {
+            if (query.IsAlive(itemHandling->itemEntity)) {
                 const Mat4x4 worldItem = rootWorld * itemHandling->itemModelTransform;
                 Mat4x4       localItem = worldItem;
-                if (const auto hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
-                    hierarchy && hierarchy->parent != Entity::Null() && registry.IsAlive(hierarchy->parent)) {
+                if (const auto hierarchy = query.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
+                    hierarchy && hierarchy->parent != Entity::Null() && query.IsAlive(hierarchy->parent)) {
                     if (hierarchy->parent == entity) {
                         localItem = itemHandling->itemModelTransform;
-                    } else if (const auto parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
+                    } else if (const auto parentWorld = query.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
                         const Mat4x4 parentMatrix = parentWorld->world;
                         localItem                     = Inverse(parentMatrix) * worldItem;
                     }
                 }
-                if (auto itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
+                if (auto itemTransform = query.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
                     itemTransform->position = ProceduralMath::Translation(localItem);
                     itemTransform->rotation = ExtractRotation(localItem);
-                    auto itemWorld          = registry.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
+                    auto itemWorld          = query.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
                     if (!itemWorld) {
-                        itemWorld = registry.Add(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
+                        itemWorld = query.AddIfMissing(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
                     } else {
                         itemWorld->previous = itemWorld->world;
                         itemWorld->world    = worldItem;
@@ -2485,7 +2511,9 @@ void ProceduralAnimationSystem(
                 // The first-person pose goes to the camera entity's own
                 // component: the engine owns no camera, so there is no service
                 // to reach through.
-                if (auto cameraComp = registry.Get<Components::CameraComponent>(registry.SingletonEntity<Components::MainCameraTagComponent>())) {
+                const auto cameraEntities = query.Entities<Components::MainCameraTagComponent>();
+                const Entity mainCamera = cameraEntities.empty() ? Entity::Null() : cameraEntities.front();
+                if (auto cameraComp = query.Get<Components::CameraComponent>(mainCamera)) {
                     Camera&         camera         = cameraComp->camera;
                     const FVec3 entityPosition = transform->position;
                     camera.position                = entityPosition + rootRotation * firstPerson->smoothedEyeModel;
@@ -2509,7 +2537,7 @@ void ProceduralAnimationSystem(
         uploadedOffsets.fill(std::numeric_limits<uint32_t>::max());
         size_t uploadedPaletteCount = 0;
 
-        auto uploadSkin = [&](Components::SkeletalMeshComponent* skeletalMesh) {
+        auto uploadSkin = [&](const Components::SkeletalMeshComponent* skeletalMesh) {
             if (skeletalMesh == nullptr || skeletalMesh->skeletonIndex < 0 || skeletalMesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
                 return;
             }
@@ -2556,13 +2584,13 @@ void ProceduralAnimationSystem(
             // Upload the best semantic skeleton first so its generic motor target is
             // always published even when another part shares the same joint offset.
             uploadSkin(skin.skeletalMesh);
-            if (auto selfMesh = registry.Get<Components::SkeletalMeshComponent>(entity)) {
+            if (auto selfMesh = query.Get<Components::SkeletalMeshComponent>(entity)) {
                 uploadSkin(&*selfMesh);
             }
-            for (Entity childEntity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-                const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+            for (Entity childEntity: query.Entities<Components::SkeletalMeshComponent>()) {
+                const auto hierarchy = query.Get<Components::HierarchyComponent>(childEntity);
                 if (hierarchy && hierarchy->parent == entity) {
-                    if (auto childMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity)) {
+                    if (auto childMesh = query.Get<Components::SkeletalMeshComponent>(childEntity)) {
                         uploadSkin(&*childMesh);
                     }
                 }
@@ -2584,7 +2612,7 @@ void ProceduralAnimationSystem(
         const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Attachments");
-            boneMap->synchronizedAttachmentCount = ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
+            boneMap->synchronizedAttachmentCount = SyncAttachmentsTyped(query.As<AttachmentQuery>(), entity, *boneMap);
         }
         if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
             ZHLN::Log("[ProceduralAnimation] Entity {} synchronized {} non-skinned node attachments.", entity.index, boneMap->synchronizedAttachmentCount);

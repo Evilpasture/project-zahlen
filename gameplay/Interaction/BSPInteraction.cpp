@@ -28,7 +28,7 @@ namespace ZHLN::Interaction {
 // --- Dispatch ---------------------------------------------------------------
 
 void FireEntityInput(
-    ECS::Registry&                registry,
+    DispatchQuery                 query,
     Entity                        entity,
     std::string_view              input,
     std::string_view              parameter,
@@ -36,14 +36,14 @@ void FireEntityInput(
 ) {
     const Entity e = entity;
     std::string_view label = "<unnamed>";
-    if (const auto nameComp = registry.Get<Components::NameComponent>(e)) {
+    if (const auto nameComp = query.Get<Components::NameComponent>(e)) {
         label = std::string_view(nameComp->name);
     }
 
     {
         {
             // Check DoorComponent
-            if (auto door = registry.Get<DoorComponent>(e)) {
+            if (auto door = query.Get<DoorComponent>(e)) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None && input != "Unlock") {
                     Log("[Interaction] Door '{}' is locked", label);
                     return;
@@ -52,20 +52,20 @@ void FireEntityInput(
                 if (input == "Open") {
                     if (door->state == DoorState::Closed || door->state == DoorState::Closing) {
                         door->state = DoorState::Opening;
-                        FireEntityOutputs(registry, e, "OnStartOpening", audio);
+                        FireEntityOutputs(query, e, "OnStartOpening", audio);
                     }
                 } else if (input == "Close") {
                     if (door->state == DoorState::Open || door->state == DoorState::Opening) {
                         door->state = DoorState::Closing;
-                        FireEntityOutputs(registry, e, "OnStartClosing", audio);
+                        FireEntityOutputs(query, e, "OnStartClosing", audio);
                     }
                 } else if (input == "Toggle") {
                     if (door->state == DoorState::Closed || door->state == DoorState::Closing) {
                         door->state = DoorState::Opening;
-                        FireEntityOutputs(registry, e, "OnStartOpening", audio);
+                        FireEntityOutputs(query, e, "OnStartOpening", audio);
                     } else {
                         door->state = DoorState::Closing;
-                        FireEntityOutputs(registry, e, "OnStartClosing", audio);
+                        FireEntityOutputs(query, e, "OnStartClosing", audio);
                     }
                 } else if (input == "Lock") {
                     door->flags |= DoorFlags::Locked;
@@ -77,7 +77,7 @@ void FireEntityInput(
             }
 
             // Check ButtonComponent
-            if (auto button = registry.Get<ButtonComponent>(e)) {
+            if (auto button = query.Get<ButtonComponent>(e)) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None && input != "Unlock") {
                     Log("[Interaction] Button '{}' is locked", label);
                     return;
@@ -89,9 +89,9 @@ void FireEntityInput(
                         button->waitTimer = button->wait;
                         if ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None) {
                             button->progress          = 1.0f;
-                            const uint32_t firedCount = FireEntityOutputs(registry, e, "OnPressed", audio);
+                            const uint32_t firedCount = FireEntityOutputs(query, e, "OnPressed", audio);
                             if (firedCount == 0 && !button->target.empty()) {
-                                FireEntityInput(registry, std::string_view(button->target), "Toggle", "", audio);
+                                FireEntityInput(query, std::string_view(button->target), "Toggle", "", audio);
                             }
                         }
                     }
@@ -103,7 +103,7 @@ void FireEntityInput(
             }
 
             // Check TriggerComponent
-            if (auto trigger = registry.Get<TriggerComponent>(e)) {
+            if (auto trigger = query.Get<TriggerComponent>(e)) {
                 if (input == "Enable") {
                     trigger->flags |= TriggerFlags::Active;
                 } else if (input == "Disable") {
@@ -118,7 +118,7 @@ void FireEntityInput(
             }
 
             // Check LightComponent
-            if (auto light = registry.Get<Components::LightComponent>(e)) {
+            if (auto light = query.Get<Components::LightComponent>(e)) {
                 if (input == "TurnOn") {
                     if (light->intensity <= 0.0f) {
                         light->intensity = 100.0f;
@@ -131,7 +131,7 @@ void FireEntityInput(
             }
 
             // Check UsableComponent
-            if (auto usable = registry.Get<UsableComponent>(e)) {
+            if (auto usable = query.Get<UsableComponent>(e)) {
                 if (usable->scriptHash != 0) {
                     Log("[Interaction] Script triggered on {}: {:#X}", label, usable->scriptHash);
                 }
@@ -141,7 +141,7 @@ void FireEntityInput(
 }
 
 void FireEntityInput(
-    ECS::Registry&                registry,
+    DispatchQuery                 query,
     std::string_view              targetname,
     std::string_view              input,
     std::string_view              parameter,
@@ -151,20 +151,20 @@ void FireEntityInput(
         return;
     }
 
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
+    for (const Entity e: query.GetEntitiesWith<Components::NameComponent>()) {
+        const auto nameComp = query.Get<Components::NameComponent>(e);
         if (!nameComp) {
             continue;
         }
 
         if (std::string_view(nameComp->name) == targetname || targetname == "*") {
-            FireEntityInput(registry, e, input, parameter, audio);
+            FireEntityInput(query, e, input, parameter, audio);
         }
     }
 }
 
-uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
-    auto conn = registry.Get<EntityConnectionComponent>(entity);
+uint32_t FireEntityOutputs(DispatchQuery query, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
+    auto conn = query.Get<EntityConnectionComponent>(entity);
     if (!conn) {
         return 0;
     }
@@ -180,11 +180,21 @@ uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_v
                 out.timesToFire--;
             }
 
-            FireEntityInput(registry, std::string_view(out.target), std::string_view(out.input), std::string_view(out.parameter), audio);
+            FireEntityInput(query, std::string_view(out.target), std::string_view(out.input), std::string_view(out.parameter), audio);
             ++fired;
         }
     }
     return fired;
+}
+
+void FireEntityInput(ECS::Registry& registry, Entity entity, std::string_view input, std::string_view parameter, ZHLN::Optional<AudioContext&> audio) {
+    FireEntityInput(DispatchQuery {registry}, entity, input, parameter, audio);
+}
+void FireEntityInput(ECS::Registry& registry, std::string_view target, std::string_view input, std::string_view parameter, ZHLN::Optional<AudioContext&> audio) {
+    FireEntityInput(DispatchQuery {registry}, target, input, parameter, audio);
+}
+uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
+    return FireEntityOutputs(DispatchQuery {registry}, entity, event, audio);
 }
 
 // --- The translation pass ---------------------------------------------------

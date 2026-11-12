@@ -8,7 +8,10 @@
 #include <ALife/GOAP.hpp>
 #include <ALife/Graph.hpp>
 #include <ALife/SpatialGrid.hpp>
+#include <ALife/Simulator.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <atomic>
 #include <algorithm>
 #include <expected>
 #include <memory_resource>
@@ -121,6 +124,96 @@ struct ALifeTestSuite {
             ZHLN::Test::ExpectEq(factions.GetRelation(stalkers, bandits), -1.0f);
             ZHLN::Test::ExpectEq(factions.GetRelation(bandits, stalkers), -1.0f); // Symmetric
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> typed_simulator_preserves_phase_order_and_grid_membership() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            sim.GetTuning().switch_distance = 1.0f;
+            const Entity first = reg.Create(ALifeComponent {.position = {100, 0, 100}, .state = State::Offline});
+            const Entity second = reg.Create(ALifeComponent {.position = {110, 0, 100}, .state = State::Online});
+            const Entity waiting = reg.Create(ALifeComponent {.position = {300, 0, 300}, .state = State::Online, .wait_time = 10});
+            const Entity dead = reg.Create(ALifeComponent {.position = {800, 0, 800}, .state = State::Dead});
+            SpatialGrid::WriteQuery query {reg};
+            int thinkCount = 0, eventCount = 0, interactionCount = 0;
+            bool phaseOrder = true;
+            sim.on_think = [&](Simulator&, Entity e) {
+                phaseOrder = phaseOrder && (e == first || e == second);
+                ++thinkCount;
+            };
+            sim.on_event = [&](Simulator&, const Event&) { ++eventCount; };
+            sim.on_interaction = [&](Simulator& current, Entity e, Entity neighbor) {
+                const auto matches = current.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+                phaseOrder = phaseOrder && thinkCount == 2 && eventCount == 1 && matches.size() == 2 &&
+                    ((e == first && neighbor == second) || (e == second && neighbor == first));
+                ++interactionCount;
+            };
+            sim.Update(query, 0.5f, {0, 0, 0});
+            ZHLN::Test::ExpectTrue(phaseOrder && thinkCount == 2 && eventCount == 1 && interactionCount == 2);
+            ZHLN::Test::ExpectEq(sim.GetGameTimeMS(), uint64_t {5000});
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(second)->state == State::Offline);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(waiting)->state == State::Online);
+            ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(waiting)->wait_time, 5);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(dead)->state == State::Dead);
+            for (const Entity entity: {first, second, waiting, dead}) {
+                ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(entity)->self_entity, entity);
+            }
+            // A typed unlink remains compatible with the legacy const-registry query.
+            sim.GetGrid().RemoveEntity(query, first);
+            const ECS::Registry& readOnlyRegistry = reg;
+            const auto remaining = sim.GetGrid().Query(readOnlyRegistry, {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(remaining.size() == 1 && remaining[0] == second);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> typed_and_legacy_interaction_entry_points_unlink_looted_entities() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            const Entity living = reg.Create(ALifeComponent {.position = {100, 0, 100}, .state = State::Offline, .power = 10});
+            const Entity corpse1 = reg.Create(ALifeComponent {.position = {101, 0, 100}, .state = State::Dead, .loot_value = 30});
+            const Entity corpse2 = reg.Create(ALifeComponent {.position = {102, 0, 100}, .state = State::Dead, .loot_value = 40});
+            SpatialGrid::WriteQuery query {reg};
+            for (Entity e: {living, corpse1, corpse2}) sim.GetGrid().UpdateEntity(query, e, {-1, -1, -1});
+            sim.ResolveOfflineInteraction(query, living, corpse1);
+            sim.ResolveOfflineInteraction(reg, corpse2, living);
+            ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(living)->power, 17);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(corpse1)->is_looted && query.Get<ALifeComponent>(corpse2)->is_looted);
+            const auto remaining = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(remaining.size() == 1 && remaining[0] == living);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> typed_simulator_parallel_chunks_join_before_grid_and_interactions() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            TaskSystem::Scope tasks {2, 64, kMinimumFiberStackSize};
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            sim.GetTuning().switch_distance = 1.0f;
+            constexpr uint32_t count = 300; // more than the 256-item chunk
+            for (uint32_t i = 0; i < count; ++i) {
+                reg.Create(ALifeComponent {.position = {100.0 + static_cast<double>(i) * 0.01, 0, 100}, .state = State::Offline});
+            }
+            std::atomic<uint32_t> thinkCount {0}, interactionCount {0};
+            std::atomic<bool> phaseOrder {true};
+            sim.on_think = [&](Simulator&, Entity) { thinkCount.fetch_add(1, std::memory_order_relaxed); };
+            sim.on_interaction = [&](Simulator&, Entity, Entity) {
+                if (thinkCount.load(std::memory_order_relaxed) != count) phaseOrder.store(false, std::memory_order_relaxed);
+                interactionCount.fetch_add(1, std::memory_order_relaxed);
+            };
+            SpatialGrid::WriteQuery query {reg};
+            sim.Update(query, 0.1f, {0, 0, 0});
+            const auto nearby = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(phaseOrder.load() && thinkCount.load() == count && interactionCount.load() == count);
+            ZHLN::Test::ExpectEq(nearby.size(), static_cast<size_t>(count));
             return {};
         }
 

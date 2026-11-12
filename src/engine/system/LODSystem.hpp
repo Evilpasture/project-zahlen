@@ -7,7 +7,6 @@
 #include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {
-class Engine;
 class ZHLN_API LODSystem {
   public:
     using LODQuery = ECS::Query<
@@ -15,6 +14,5 @@ class ZHLN_API LODSystem {
         const Components::WorldTransformComponent, const Components::TransformComponent>;
 
     static void GraphUpdate(LODQuery query);
-    static void Update(Engine& engine);
 };
 }

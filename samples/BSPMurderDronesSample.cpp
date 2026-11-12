@@ -456,8 +456,7 @@ inline constexpr float kLookSensitivity = 0.12f;
 inline constexpr float kFlySpeedMeters = 8.0f;
 
 // One sample process, one main camera and one player: the rig state is
-// file-static for the same reason the controller extension keeps its
-// PlayerInputSystem static inside its frame steps.
+// file-static for the lifetime of this sample.
 ZHLN::Entity g_player = ZHLN::Entity::Null();
 
 // The player's glTF rig is spawned outside the BSP importer, so its parts get no

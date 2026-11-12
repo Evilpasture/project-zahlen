@@ -17,6 +17,7 @@
 // caller keeps the same one-function entry point it always had.
 
 #include "InteractionComponents.hpp"
+#include "InteractionDispatch.hpp"
 #include <BSP/BSPGeometry.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
@@ -54,6 +55,15 @@ void FireEntityInput(
 // Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.),
 // returning the number of matching outputs dispatched.
 uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
+
+// Typed runtime dispatch; unlike the standalone Registry overloads these
+// declare every family touched by recursive input/output delivery.
+void FireEntityInput(DispatchQuery query, std::string_view targetname, std::string_view input,
+                     std::string_view parameter = "", ZHLN::Optional<AudioContext&> audio = std::nullopt);
+void FireEntityInput(DispatchQuery query, Entity entity, std::string_view input,
+                     std::string_view parameter = "", ZHLN::Optional<AudioContext&> audio = std::nullopt);
+uint32_t FireEntityOutputs(DispatchQuery query, Entity entity, std::string_view event,
+                           ZHLN::Optional<AudioContext&> audio = std::nullopt);
 
 // Translates a map's interactive entities into this layer's components:
 // DoorComponent, ButtonComponent, TriggerComponent, EntityConnectionComponent

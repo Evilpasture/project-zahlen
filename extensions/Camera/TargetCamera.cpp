@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Camera/TargetCamera.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
@@ -17,6 +16,8 @@
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <cmath>
 #include <string_view>
@@ -50,39 +51,46 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 
 namespace ZHLN::CameraRig {
 
-void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept {
-    auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
+void TargetCameraSystem::Update(RigQuery query, FrameDt frameDt, FrameAlpha frameAlpha) noexcept {
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    Camera& cam = camera->camera;
+    const float dt = frameDt.value;
+    const float alpha = frameAlpha.value;
+    auto cameraEntities = query.Entities<TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
     }
 
     Entity camEnt = cameraEntities[0];
 
-    reg.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
+    query.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
         // Fly-cam owns pose while the tag is present; skip the orbit.
-        if (reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
+        if (query.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
             return;
         }
 
         Entity targetEnt = camComp.target;
-        if (!reg.IsAlive(targetEnt)) {
+        if (!query.IsAlive(targetEnt)) {
             return;
         }
 
         FVec3 targetPos = FVec3::Zero();
 
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
-        bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
+        bool foundPos = query.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
             const auto& world = worldTrans.world;
             targetPos = {world[0, 3], world[1, 3], world[2, 3]};
         });
 
         if (!foundPos) {
-            reg.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
+            query.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
         }
 
         // 3. ZOOM & FOV SMOOTHING
-        auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
+        auto  inputState = query.GetSingleton<Components::InputStateComponent>();
         float wheelDelta = inputState ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = std::clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
@@ -140,42 +148,21 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 namespace ZHLN {
 namespace {
 
-// The rig's frame step: keep the boot camera's component present (core no
-// longer creates any camera rig -- that is gameplay policy), then resolve
-// the orbit before the core CameraSystem projects the matrices.
+using RigSeedQuery = ECS::Query<const Components::MainCameraTagComponent, const CameraRig::TargetCameraComponent>;
+void SeedTargetCamera(RigSeedQuery query, ECS::EntityCommandBuffer& commands) {
+    const auto cameras = query.Entities<Components::MainCameraTagComponent>();
+    if (!cameras.empty() && !query.Get<CameraRig::TargetCameraComponent>(cameras.front())) {
+        commands.AddComponent(cameras.front(), CameraRig::TargetCameraComponent {});
+    }
+}
+
+// Seed and play back before resolving the orbit, still ahead of core camera
+// projection. The first rig and first camera retain their original semantics.
 void TargetCameraStep(Engine& engine, float dt, FrameContext& ctx) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
-        const Entity camEnt = mainCams[0];
-        if (!reg.Get<CameraRig::TargetCameraComponent>(camEnt)) {
-            // Boot rig: the same defaults the core default scene used to
-            // create, so the default view (a free-cam host keeps its
-            // FreeCamTag) keeps its pre-decomposition framing.
-            reg.Add(
-                camEnt,
-                CameraRig::TargetCameraComponent {
-                    .distance          = 4.5f,
-                    .targetDistance    = 4.5f,
-                    .yaw               = -90.0f,
-                    .pitch             = -10.0f,
-                    .stiffness         = 15.0f,
-                    .vignetteIntensity = 1.10f,
-                    .vignettePower     = 1.50f,
-                    .fov               = 45.0f,
-                    .targetFov         = 45.0f
-                }
-            );
-        }
-    }
-
-    static CameraRig::TargetCameraSystem sys;
-    // The rig drives the world's camera; a world without one has nothing to drive.
-    // The borrow is the component itself, so the system's updates land in the
-    // registry without a copy to hand back.
-    if (const auto camera = reg.GetSingleton<Components::CameraComponent>()) {
-        sys.Update(reg, camera->camera, dt, ctx.alpha);
-    }
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
+    auto& graph = engine.GetRenderGraph();
+    graph.InvokeSequentialAndPlayback<&SeedTargetCamera>(frame);
+    graph.InvokeSequential<&CameraRig::TargetCameraSystem::Update>(frame);
 }
 
 // The rig's step, declared. It runs before the core "CameraSystems" step

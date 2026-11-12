@@ -28,6 +28,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -47,7 +48,7 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
+[[nodiscard]] auto EnsureSkinnedScratch(GraphicsDevice rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
     if (skeleton.skinnedScratch != BufferID::Invalid && skeleton.scratchVertexCount != vertexCount) {
         rc.DestroyBuffer(skeleton.skinnedScratch);
         skeleton.skinnedScratch     = BufferID::Invalid;
@@ -62,27 +63,25 @@ namespace {
     return skeleton.skinnedScratch;
 }
 
-[[nodiscard]] auto HasSceneSun(const ECS::Registry& reg) noexcept -> bool {
-    for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-        if (const auto light = reg.Get<Components::LightComponent>(e); light && light->type == LightType::Sun) {
+using SceneSunQuery = ECS::Query<const Components::LightComponent, const Components::SunTagComponent>;
+
+[[nodiscard]] auto HasSceneSun(SceneSunQuery query) noexcept -> bool {
+    for (const Entity e: query.Entities<Components::LightComponent>()) {
+        if (const auto light = query.Get<Components::LightComponent>(e); light && light->type == LightType::Sun) {
             return true;
         }
     }
-    return !reg.GetEntitiesWith<Components::SunTagComponent>().empty();
+    return !query.Entities<Components::SunTagComponent>().empty();
 }
 
-[[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
-    const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
-    if (ent == Entity::Null()) {
-        return rc.SetEnvironmentRadiance({});
-    }
-    const auto env = reg.Get<Components::EnvironmentMapComponent>(ent);
+using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
+
+[[nodiscard]] auto SyncEnvironmentMap(EnvironmentQuery query, GraphicsDevice rc, AssetLibrary assets) -> std::expected<void, ErrorCode> {
+    const auto env = query.GetSingleton<Components::EnvironmentMapComponent>();
     if (!env || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
-    const auto pixels = engine.Assets().FindEnvironmentImage(std::string_view(env->source));
+    const auto pixels = assets.FindEnvironmentImage(std::string_view(env->source));
     if (!pixels) {
         Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
@@ -106,20 +105,20 @@ constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
 // The simulation description stays in ECS; only a stable emitter identity crosses
 // the API. Persistent particle buffers are private to the RenderContext.
-void SubmitParticleEmitters(Engine& engine) {
-    auto scene = engine.Debug();
-    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
+using ParticleSubmitQuery = ECS::Query<const Components::CameraComponent, const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
+
+void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
     // render path reports NoMainCamera on its own.
-    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return;
     }
     const auto& cam = camera->camera;
 
-    for (const Entity entity: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {
-        auto emitter = reg.Get<Components::ParticleEmitterComponent>(entity);
+    for (const Entity entity: query.Entities<Components::ParticleEmitterComponent>()) {
+        auto emitter = query.Get<Components::ParticleEmitterComponent>(entity);
         if (!emitter || !emitter->active) {
             continue;
         }
@@ -134,8 +133,8 @@ void SubmitParticleEmitters(Engine& engine) {
         );
     }
 
-    for (const Entity entity: reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>()) {
-        auto emitter = reg.Get<Components::MeshParticleEmitterComponent>(entity);
+    for (const Entity entity: query.Entities<Components::MeshParticleEmitterComponent>()) {
+        auto emitter = query.Get<Components::MeshParticleEmitterComponent>(entity);
         if (!emitter || !emitter->active) {
             continue;
         }
@@ -155,13 +154,16 @@ void UploadPosePalettes(Engine& engine) {
     ZHLN::EngineAccess::PoseUploadsOf(engine).Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
-void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
-    auto rc = engine.Graphics();
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+using MeshSubmitQuery = ECS::Query<
+    const Components::MeshComponent, const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&,
+    const Components::MorphTargetComponent, const Components::WorldTransformComponent, const Components::PBRComponent,
+    const Components::CSGComponent, const Components::AmbientCubeComponent>;
+
+void SubmitVisibleMeshes(MeshSubmitQuery query, GraphicsDevice rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
 
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
-    for (Entity e: reg.GetEntitiesWith<Components::MeshComponent>()) {
+    for (Entity e: query.Entities<Components::MeshComponent>()) {
         bool inMain   = IsInList(mainVisible, e);
         bool inShadow = IsInList(shadowVisible, e);
 
@@ -169,7 +171,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             continue;
         }
 
-        auto meshComp = reg.Get<Components::MeshComponent>(e);
+        auto meshComp = query.Get<Components::MeshComponent>(e);
         if (!meshComp) {
             continue;
         }
@@ -178,7 +180,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         if (!gpuMeshOpt.has_value()) {
             // Explicit cache clears discard lookups, not scene-owned buffers.
             // Rebind the owner's view instead of allocating another mesh.
-            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
+            if (const auto owned = query.Get<Components::OwnedMeshComponent>(e);
                 owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferID::Invalid) {
                 rc.RegisterMesh(meshComp->meshAsset, owned->mesh);
                 gpuMeshOpt = owned->mesh;
@@ -192,9 +194,9 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         Mesh     gpuMesh = *gpuMeshOpt;
         Material gpuMat  = *gpuMatOpt;
 
-        auto skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
-        auto morphComp  = reg.Get<Components::MorphTargetComponent>(e);
-        auto worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        auto skelMesh   = query.Get<Components::SkeletalMeshComponent>(e);
+        auto morphComp  = query.Get<Components::MorphTargetComponent>(e);
+        auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
 
         auto worldMat = Mat4x4::Identity();
         auto prevMat  = Mat4x4::Identity();
@@ -215,7 +217,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         BufferID scratchVbo = BufferID::Invalid;
         if (isSkinned) {
-            scratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *skelMesh, gpuMesh.vertexCount);
+            scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
         }
 
         // The 3D skybox is ordinary geometry now: it is placed where the
@@ -235,12 +237,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         float roughness = -1.0f;
         float metallic  = -1.0f;
-        if (auto pbr = reg.Get<Components::PBRComponent>(e)) {
+        if (auto pbr = query.Get<Components::PBRComponent>(e)) {
             roughness = pbr->roughness;
             metallic  = pbr->metallic;
         }
 
-        if (auto csg = reg.Get<Components::CSGComponent>(e)) {
+        if (auto csg = query.Get<Components::CSGComponent>(e)) {
             CSGDrawParams csgParams;
             csgParams.eyeParams = {
                 .transform           = worldMat,
@@ -258,13 +260,13 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             };
 
             for (const auto& mod: csg->modifiers) {
-                if (reg.IsAlive(mod.operandEntity)) {
-                    if (auto cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                if (query.IsAlive(mod.operandEntity)) {
+                    if (auto cutMesh = query.Get<Components::MeshComponent>(mod.operandEntity)) {
                         auto cutGpuMeshOpt = rc.Mesh(cutMesh->meshAsset);
                         auto cutGpuMatOpt  = rc.Material(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
-                            auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                            auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            auto       cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                            auto       cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
                             auto cutWorldMat   = Mat4x4::Identity();
                             auto cutPrevMat    = Mat4x4::Identity();
                             if (cutWorldTrans) {
@@ -274,7 +276,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
                             BufferID cutScratchVbo = BufferID::Invalid;
                             if (cutSkelMesh) {
-                                cutScratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *cutSkelMesh, cutGpuMeshOpt->vertexCount);
+                                cutScratchVbo = EnsureSkinnedScratch(rc, *cutSkelMesh, cutGpuMeshOpt->vertexCount);
                             }
 
                             csgParams.cutters.push_back(
@@ -313,7 +315,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             .roughness           = roughness,
             .metallic            = metallic
         };
-        if (auto ambient = reg.Get<Components::AmbientCubeComponent>(e)) {
+        if (auto ambient = query.Get<Components::AmbientCubeComponent>(e)) {
             drawParams.hasAmbientCube = true;
             drawParams.ambientCube    = ambient->cube;
         }
@@ -321,28 +323,29 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     }
 }
 
-[[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> std::optional<Camera> {
+using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Components::WorldTransformComponent>;
+
+[[nodiscard]] auto MakeViewportCamera(ViewCameraQuery query, Entity cameraEnt) -> std::optional<Camera> {
     // A viewport camera is built from the main camera's optics: a world without a
     // main camera has no optics to build from, and says so by returning nothing.
-    const auto main = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
+    const auto main = query.GetSingleton<Components::CameraComponent>();
     if (!main) {
         return std::nullopt;
     }
     Camera extra = main->camera;
-    auto&  reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
+    if (cameraEnt == Entity::Null() || !query.IsAlive(cameraEnt)) {
         return extra;
     }
-    if (auto world = reg.Get<Components::WorldTransformComponent>(cameraEnt)) {
+    if (auto world = query.Get<Components::WorldTransformComponent>(cameraEnt)) {
         const Mat4x4& worldMat = world->world;
         extra.position = {worldMat[0, 3], worldMat[1, 3], worldMat[2, 3]};
     }
     return extra;
 }
 
-[[nodiscard]] auto MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
+[[nodiscard]] auto MakeViewFor(ViewCameraQuery query, GraphicsDevice rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
     -> std::optional<SceneView> {
-    auto cComp = ZHLN::EngineAccess::RegistryOf(engine).Get<Components::CameraComponent>(cameraEnt);
+    auto cComp = query.Get<Components::CameraComponent>(cameraEnt);
 
     // The view's camera is the entity's own component when it has one; a bare
     // transform entity gets a viewport camera built from the main camera's optics
@@ -351,12 +354,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     Camera     cam {};
     if (cComp) {
         cam = cComp->camera;
-    } else if (auto fallback = MakeViewportCamera(engine, cameraEnt)) {
+    } else if (auto fallback = MakeViewportCamera(query, cameraEnt)) {
         cam = *fallback;
     } else {
         return std::nullopt;
     }
-    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.Graphics().ViewportAspect();
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.ViewportAspect();
     const auto view = cam.GetViewMatrix();
     const auto proj = cam.GetProjectionMatrix(aspect);
     auto viewProj = proj * view;
@@ -379,8 +382,8 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         .target            = target,
         .frustum           = frustum,
         .visibilityMask    = ~0ULL,
-        .frameIndex        = static_cast<uint32_t>(engine.GetCurrentFrame()),
-        .time              = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep,
+        .frameIndex        = static_cast<uint32_t>(frameIndex),
+        .time              = static_cast<float>(frameIndex & kFrameClockMask) * kFrameTimeStep,
     };
 }
 
@@ -403,11 +406,12 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt) {
     auto rc = engine.Graphics();
-    auto&       reg             = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
     // anything is recorded rather than after a dereference.
-    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
@@ -423,21 +427,19 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     // The getter above already proved a main camera entity exists; this is the
     // entity itself, for the viewport views built below.
-    auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
+    auto cameraEntities = query.Entities<Components::MainCameraTagComponent>();
 
     // The graphics owner is authoritative; nothing scrapes the registry for it.
     const GraphicsSettings gfx = engine.Graphics().Settings();
 
     outPhysicsDrawMode = 0;
-    if (const Entity dbgEnt = reg.SingletonEntity<Components::DebugSettingsComponent>(); dbgEnt != Entity::Null()) {
-        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(dbgEnt)) {
-            outPhysicsDrawMode = dbg->physicsDrawMode;
-        }
+    if (const auto dbg = query.GetSingleton<Components::DebugSettingsComponent>()) {
+        outPhysicsDrawMode = dbg->physicsDrawMode;
     }
 
     auto scene = engine.Debug();
     scene.SetFrameDelta(dt);
-    SubmitParticleEmitters(engine);
+    SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), scene);
     RenderDebug(engine, outPhysicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
@@ -448,12 +450,12 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return FrameSkipped {};
     }
     FrameScope gpuFrame = std::move(**begin_res);
-    if (auto env = SyncEnvironmentMap(engine); !env) {
+    if (auto env = SyncEnvironmentMap(query.As<EnvironmentQuery>(), rc, engine.Assets()); !env) {
         return std::unexpected(env.error());
     }
     Entity cameraEntity = cameraEntities[0];
 
-    if (auto cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
+    if (auto cComp = query.Get<Components::CameraComponent>(cameraEntity)) {
         vp               = cComp->viewProj;
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
@@ -461,9 +463,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    auto sun = LightingSystem::GetSun(LightingSystem::SunQuery {reg});
-    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasSceneSun(reg)) {
-        if (const auto env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env && !env->source.empty()) {
+    auto sun = LightingSystem::GetSun(query.As<LightingSystem::SunQuery>());
+    if (const auto env = query.GetSingleton<Components::EnvironmentMapComponent>(); env && !HasSceneSun(query.As<SceneSunQuery>())) {
+        if (!env->source.empty()) {
             sun.intensity = 0.0f;
         }
     }
@@ -530,7 +532,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     UploadPosePalettes(engine);
 
     if (outPhysicsDrawMode == 0) {
-        SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+        SubmitVisibleMeshes(query.As<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
     if (auto sim_res = gpuFrame.DispatchSimulations(ZHLN::EngineAccess::SceneOf(engine), dt); !sim_res) {
@@ -546,7 +548,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return {};
     }
     const FrameTarget attachment = **target;
-    const auto       sceneView   = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    const auto       sceneView   = MakeViewFor(query.As<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
     if (!sceneView) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
@@ -576,7 +578,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
-        const auto     input    = reg.GetSingleton<Components::InputStateComponent>();
+        const auto     input    = query.GetSingleton<Components::InputStateComponent>();
         const Extent2D hostSize = host.GetSize();
         const float    rawX     = input ? input->mouseX : static_cast<float>(hostSize.width) * 0.5f;
         const float    rawY     = input ? input->mouseY : static_cast<float>(hostSize.height) * 0.5f;
@@ -602,7 +604,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     auto& cstats = ZHLN::EngineAccess::WorldOf(engine).GetCullingStats();
-    cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
+    cstats.TotalObjects  = query.Entities<Components::MeshComponent>().size();
     cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
 
     return {};

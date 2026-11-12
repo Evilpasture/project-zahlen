@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
@@ -57,8 +58,21 @@ void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float, FrameContext& ctx) {
-    PhysicsSystem::Update(engine, ctx.fixedSteps);
+void Physics(Engine& engine, float dt, FrameContext& ctx) {
+    const auto& character = engine.GetPhysicsSubstepHooks();
+    ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
+    for (uint32_t step = 0; step < ctx.fixedSteps; ++step) {
+        if (character.preStep != nullptr) {
+            character.preStep(engine, kFixedStepDt);
+        }
+        // A private buffer is played here, not at simulation-graph or main
+        // buffer playback: hooks in the next substep must see consumed commands.
+        engine.GetUpdateGraph().InvokeSequentialAndPlayback<&PhysicsSystem::CommitImpulses>(engine.MakeFrame(dt, ctx.alpha));
+        engine.Physics().Step(kFixedStepDt);
+        if (character.postStep != nullptr) {
+            character.postStep(engine);
+        }
+    }
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext& ctx) {
@@ -80,7 +94,7 @@ void CleanupScene(Engine& engine, float, FrameContext&) {
 void Camera(Engine& engine, float dt, FrameContext& ctx) {
     // No instance and no function-local static: the pass is stateless, and the
     // camera it projects is component data.
-    CameraSystem::Update(engine, dt, ctx.alpha);
+    engine.GetRenderGraph().InvokeSequential<&CameraSystem::Update>(engine.MakeFrame(dt, ctx.alpha));
 }
 
 void LOD(Engine&, float, FrameContext&) {
@@ -97,6 +111,7 @@ void RenderGraph(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 void Present(Engine& engine, float dt, FrameContext& ctx) {
+    // Ordered presentation barrier after the render graph, not an ECS graph node.
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
         if (render_res.error().Is(FrameResult::DeviceLost)) {
@@ -111,9 +126,9 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-void TransformHistory(Engine& engine, float, FrameContext&) {
+void TransformHistory(Engine& engine, float dt, FrameContext& ctx) {
     ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
-    TransformSystem::UpdateTransformHistory(ZHLN::EngineAccess::RegistryOf(engine));
+    engine.GetUpdateGraph().InvokeSequential<&TransformSystem::UpdateTransformHistory>(engine.MakeFrame(dt, ctx.alpha));
 }
 
 }} // namespace ::Steps

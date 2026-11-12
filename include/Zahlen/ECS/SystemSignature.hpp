@@ -21,6 +21,11 @@ template <typename... Comps>
 inline constexpr bool IsQuery<Query<Comps...>> = true;
 
 template <typename T>
+inline constexpr bool IsExclusiveQuery = false;
+template <typename... Comps>
+inline constexpr bool IsExclusiveQuery<ExclusiveQuery<Comps...>> = true;
+
+template <typename T>
 struct QueryArguments;
 
 template <typename... Comps>
@@ -110,7 +115,11 @@ struct SystemSignature {
 
         Inspector::ForEachParameter([&]<typename Param>() {
             using Clean = std::remove_cvref_t<Param>;
-            if constexpr (TemplatedDetail::IsQuery<Clean>) {
+            if constexpr (TemplatedDetail::IsExclusiveQuery<Clean>) {
+                // Immediate insertion needs the same conservative serialization
+                // as the Registry& system it replaces.
+                appendAccess(AllComponents, Access::Write);
+            } else if constexpr (TemplatedDetail::IsQuery<Clean>) {
                 TemplatedDetail::QueryArguments<Clean>::ForEach([&]<typename Comp>() {
                     using Raw = std::remove_cvref_t<Comp>;
                     appendAccess(ComponentFamily::GetTypeID<Raw>(), std::is_const_v<std::remove_reference_t<Comp>> ? Access::Read : Access::Write);
@@ -122,6 +131,16 @@ struct SystemSignature {
                 // service is complete where the systems that use it are declared.
                 if constexpr (CompleteType<Target>) {
                     constexpr Access mode = std::is_same_v<Clean, ResMut<Target>> ? Access::Write : Access::Read;
+                    appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
+                }
+            } else if constexpr (TemplatedDetail::OptionalResourceParam<Clean>) {
+                // Optional presence does not mean optional synchronisation: if
+                // the service exists, a mutable view writes the same state as
+                // ResMut<T>. Track the underlying T, not Optional<T&>.
+                using Value = typename Clean::value_type;
+                using Target = std::remove_const_t<Value>;
+                if constexpr (CompleteType<Target>) {
+                    constexpr Access mode = std::is_const_v<Value> ? Access::Read : Access::Write;
                     appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
                 }
             } else if constexpr (TemplatedDetail::EventParamTraits<Clean>::value) {

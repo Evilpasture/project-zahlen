@@ -50,6 +50,10 @@ void Simulator::BroadcastEvent(const Event& event) {
 // --- Main Simulation Loop ---
 
 void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
+    Update(SpatialGrid::WriteQuery {EngineAccess::RegistryOf(engine)}, dt, observer_pos);
+}
+
+void Simulator::Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos) {
     ZHLN::ScopedTimer profTimer("ALife Simulator Update");
 
     // 1. Advance Game Time
@@ -58,9 +62,8 @@ void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
     const float game_dt           = dt * _tuning.time_factor;
     const float dist_sq_threshold = _tuning.switch_distance * _tuning.switch_distance;
 
-    ECS::Registry&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    std::span<const Entity>      entities = reg.GetEntitiesWith<ALifeComponent>();
-    RestrictSpan<ALifeComponent> comps    = reg.GetRawArray<ALifeComponent>();
+    std::span<const Entity>      entities = query.Entities<ALifeComponent>();
+    RestrictSpan<ALifeComponent> comps    = query.Raw<ALifeComponent>();
 
     if (entities.empty()) {
         return;
@@ -152,7 +155,7 @@ void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
     // Fast O(N) re-indexing of all entities into the spatial grid
     _grid.Clear();
     for (auto entitie: entities) {
-        _grid.UpdateEntity(reg, entitie, DVec3{-1, -1, -1}); // -1 forces fresh insertion
+        _grid.UpdateEntity(query, entitie, DVec3{-1, -1, -1}); // -1 forces fresh insertion
     }
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
@@ -169,7 +172,7 @@ void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
                     continue;
                 }
 
-                neighbors = _grid.Query(reg, comp.position, 50.0f, std::move(neighbors));
+                neighbors = _grid.Query(query.As<SpatialGrid::ReadQuery>(), comp.position, 50.0f, std::move(neighbors));
 
                 for (Entity neighbor: neighbors) {
                     if (neighbor != e) {
@@ -187,8 +190,12 @@ void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
 // --- Interaction Math ---
 
 void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    auto c1 = reg.Get<ALifeComponent>(e1);
-    auto c2 = reg.Get<ALifeComponent>(e2);
+    ResolveOfflineInteraction(SpatialGrid::WriteQuery {reg}, e1, e2);
+}
+
+void Simulator::ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2) {
+    auto c1 = query.Get<ALifeComponent>(e1);
+    auto c2 = query.Get<ALifeComponent>(e2);
     if (!c1 || !c2) {
         return;
     }
@@ -237,13 +244,13 @@ void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity 
     else if (c1->state != State::Dead && c2->state == State::Dead && !c2->is_looted) {
         c1->power += (c2->loot_value / 10);
         c2->is_looted = true;
-        _grid.RemoveEntity(reg, e2);
+        _grid.RemoveEntity(query, e2);
     }
     // Scavenging: E2 loots E1
     else if (c2->state != State::Dead && c1->state == State::Dead && !c1->is_looted) {
         c2->power += (c1->loot_value / 10);
         c1->is_looted = true;
-        _grid.RemoveEntity(reg, e1);
+        _grid.RemoveEntity(query, e1);
     }
 }
 

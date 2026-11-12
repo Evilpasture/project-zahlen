@@ -50,6 +50,27 @@ template <typename Q>
 concept CanProjectWriteA = requires(Q q) { q.template Select<TestCompA&>(); };
 static_assert(!CanReadB<WriteQuery>);
 static_assert(!CanProjectWriteA<ReadQuery>);
+template <typename Source, typename Target>
+concept CanAs = requires(Source source) { source.template As<Target>(); };
+static_assert(CanAs<ReadQuery, ZHLN::ECS::Query<const TestCompA>>);
+static_assert(CanAs<WriteQuery, ZHLN::ECS::Query<const TestCompA&>>);
+static_assert(CanAs<WriteQuery, ZHLN::ECS::Query<TestCompA&>>);
+static_assert(CanAs<ReadQuery, ZHLN::ECS::Query<const TestCompB, const TestCompA>>); // reorder
+static_assert(!CanAs<ReadQuery, WriteQuery>); // no read-to-write upgrade
+static_assert(!CanAs<ReadQuery, ZHLN::ECS::Query<TestCompA>>); // unqualified means writable
+static_assert(!CanAs<WriteQuery, ZHLN::ECS::Query<const TestCompB>>); // no undeclared family
+static_assert(!CanAs<WriteQuery, int>); // only Query targets
+
+using ExclusiveTestQuery = ZHLN::ECS::ExclusiveQuery<TestCompA&, const TestCompB>;
+template <typename Q, typename T>
+concept CanAddIfMissing = requires(Q q, T value) { q.AddIfMissing(ZHLN::Entity {}, value); };
+static_assert(CanAddIfMissing<ExclusiveTestQuery, TestCompA>);
+static_assert(!CanAddIfMissing<ExclusiveTestQuery, TestCompB>); // read-only
+static_assert(!CanAddIfMissing<ExclusiveTestQuery, int>); // undeclared
+static_assert(CanAs<ExclusiveTestQuery, ZHLN::ECS::Query<const TestCompA, const TestCompB>>);
+static_assert(!CanAs<ExclusiveTestQuery, ZHLN::ECS::Query<TestCompB&>>);
+static_assert(ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<ZHLN::ECS::NoServices>, ExclusiveTestQuery>);
+
 // Engine::GetRenderGraph returns this ECS graph, not the Vulkan frame graph.
 static_assert(std::is_same_v<decltype(std::declval<ZHLN::Engine&>().GetRenderGraph()), ZHLN::RenderGraph&>);
 static_assert(requires(ZHLN::RenderGraph& graph, ZHLN::ECS::GraphTaskScheduler* scheduler) {
@@ -84,6 +105,17 @@ void DeclarativeReader(ReadQuery query) {
     });
 }
 
+std::atomic<int> immediateObserved {0};
+void ExclusiveInsert(ExclusiveTestQuery query) {
+    for (const auto entity: query.Entities<TestCompB>()) {
+        query.AddIfMissing(entity, TestCompA {.value = 17});
+        query.AddIfMissing(entity, TestCompA {.value = 99}); // never replaces
+    }
+}
+void ObserveImmediate(ZHLN::ECS::Query<const TestCompA, const TestCompB> query) {
+    query.ForEach([](ZHLN::Entity, const TestCompA& a, const TestCompB&) { immediateObserved.store(a.value); });
+}
+
 void WildcardRegistrySystem(ZHLN::ECS::Registry&) {}
 void ReadOnlyRegistrySystem(const ZHLN::ECS::Registry&) {}
 void CommandBufferSystemA(ZHLN::ECS::Query<TestCompA&> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
@@ -100,6 +132,45 @@ void CommandBufferSystemB(ZHLN::ECS::Query<const TestCompB> query, ZHLN::ECS::En
         }
     }
 }
+struct OptionalHazardService { int value = 0; };
+void OptionalServiceReader(ZHLN::Optional<const OptionalHazardService&>) {}
+void OptionalServiceWriter(ZHLN::Optional<OptionalHazardService&>) {}
+void RequiredServiceWriter(ZHLN::ECS::ResMut<OptionalHazardService>) {}
+void SequentialWriter(WriteQuery query, ZHLN::FrameDt dt) {
+    query.ForEach([&](ZHLN::Entity, TestCompA& value) { value.value += static_cast<int>(dt.value); });
+}
+struct SequentialServices { OptionalHazardService& service; };
+void SequentialAfterPlayback(ZHLN::ECS::Query<TestCompA&, const TestCompB> query,
+                             ZHLN::ECS::Res<OptionalHazardService> service) {
+    query.ForEach([&](ZHLN::Entity, TestCompA& a, const TestCompB& b) { a.value += b.value + service->value; });
+}
+void SequentialWithCommands(ZHLN::ECS::EntityCommandBuffer&) {}
+void SequentialWithLocal(ZHLN::ECS::Local<TestCompA>) {}
+
+void SequentialDestroy(ZHLN::ECS::Query<const TestCompB> query, ZHLN::ECS::EntityCommandBuffer& commands) {
+    for (const auto entity: query.Entities<TestCompB>()) commands.DestroyEntity(entity);
+}
+int sequentialDestroyCalls = 0;
+void RecordSequentialDestroy(ZHLN::ECS::Registry&, ZHLN::Entity) { ++sequentialDestroyCalls; }
+
+template <auto Fn>
+concept CanInvokeSequentialAndPlayback = requires(ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices>& graph, const ZHLN::Frame& frame) {
+    graph.template InvokeSequentialAndPlayback<Fn>(frame);
+};
+static_assert(CanInvokeSequentialAndPlayback<&CommandBufferSystemA>);
+static_assert(!CanInvokeSequentialAndPlayback<&SequentialWriter>);
+static_assert(!CanInvokeSequentialAndPlayback<&SequentialWithLocal>);
+static_assert(!CanInvokeSequentialAndPlayback<&WildcardRegistrySystem>);
+
+template <auto Fn>
+concept CanInvokeSequential = requires(ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices>& graph, const ZHLN::Frame& frame) {
+    graph.template InvokeSequential<Fn>(frame);
+};
+static_assert(CanInvokeSequential<&SequentialWriter>);
+static_assert(!CanInvokeSequential<&SequentialWithCommands>);
+static_assert(!CanInvokeSequential<&SequentialWithLocal>);
+static_assert(!CanInvokeSequential<&WildcardRegistrySystem>);
+
 void NullarySystem() { nullaryCalls.fetch_add(1); }
 void MultipleQueries(ZHLN::ECS::Query<const TestCompA>, ZHLN::ECS::Query<TestCompA&>,
                      ZHLN::ECS::Query<const TestCompB&>) {}
@@ -377,12 +448,72 @@ struct SystemGraphTestSuite {
                 &*query.Get<TestCompA>(both) != &*reg.Get<TestCompA>(both)) {
                 return std::unexpected(SystemGraphTestError::QueryIterationFailed);
             }
+            const auto projected = query.As<ZHLN::ECS::Query<TestCompB&>>();
+            const auto readonly = query.As<ZHLN::ECS::Query<const TestCompB>>();
+            if (&*projected.Get<TestCompB>(both) != &*reg.Get<TestCompB>(both) ||
+                &*readonly.Get<TestCompB>(both) != &*reg.Get<TestCompB>(both)) {
+                return std::unexpected(SystemGraphTestError::QueryIterationFailed);
+            }
+            projected.Get<TestCompB>(both)->value += 1;
+            if (readonly.Get<TestCompB>(both)->value != 15) {
+                return std::unexpected(SystemGraphTestError::QueryIterationFailed);
+            }
             // A system can be called with just its declared dependencies,
             // without constructing a context or any engine services.
             DeclarativeWriter(WriteQuery(reg), ZHLN::FrameDt {0.02f}, ZHLN::FrameAlpha {0.5f},
                               ZHLN::FrameIndex {4}, ZHLN::Optional<ZHLN::AudioContext&> {});
             if (reg.Get<TestCompA>(both)->value != 5 || reg.Get<TestCompA>(onlyA)->value != 6) {
                 return std::unexpected(SystemGraphTestError::QueryIterationFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> externally_ordered_phase_resolves_typed_query() {
+            ZHLN::ECS::Registry reg;
+            const auto entity = reg.Create(TestCompA {.value = 3});
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
+            graph.InvokeSequential<&SequentialWriter>(ZHLN::Frame {.dt = {4.0f}});
+            if (reg.Get<TestCompA>(entity)->value != 7 || graph.GetSystemCount() != 0) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            // The direct phase sees structural changes played back by the graph,
+            // and resolves the live service from the bound bundle.
+            ZHLN::ECS::Registry other;
+            const auto after = other.Create(TestCompA {.value = 1});
+            OptionalHazardService service {.value = 4};
+            SequentialServices services {.service = service};
+            ZHLN::ECS::SystemGraph<SequentialServices> withService {other, services};
+            withService.AddSystem<&CommandBufferSystemA>();
+            withService.Compile();
+            withService.Execute(ZHLN::Frame {});
+            service.value = 6;
+            withService.InvokeSequential<&SequentialAfterPlayback>(ZHLN::Frame {});
+            if (!other.Get<TestCompB>(after) || other.Get<TestCompA>(after)->value != 94) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> sequential_playback_is_private_and_uses_graph_destroy_policy() {
+            ZHLN::ECS::Registry reg;
+            const auto entity = reg.Create(TestCompA {.value = 1});
+            const auto unrelated = reg.Create();
+            ZHLN::ECS::EntityCommandBuffer mainCommands {reg};
+            mainCommands.AddComponent(unrelated, TestCompB {.value = 123});
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg, &RecordSequentialDestroy};
+
+            graph.InvokeSequentialAndPlayback<&CommandBufferSystemA>(ZHLN::Frame {});
+            if (!reg.Get<TestCompB>(entity) || reg.Get<TestCompB>(unrelated) || mainCommands.Empty()) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            sequentialDestroyCalls = 0;
+            graph.InvokeSequentialAndPlayback<&SequentialDestroy>(ZHLN::Frame {});
+            if (sequentialDestroyCalls != 1 || !reg.IsAlive(entity)) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            mainCommands.Playback();
+            if (!reg.Get<TestCompB>(unrelated)) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
             }
             return {};
         }
@@ -420,6 +551,46 @@ struct SystemGraphTestSuite {
                 !ZHLN::ECS::SystemGraphCore::HasConflict(wildInfo, readInfo) ||
                 ZHLN::ECS::SystemGraphCore::HasConflict(readInfo, readInfo)) {
                 return std::unexpected(SystemGraphTestError::HazardMismatch);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> optional_service_access_conflicts_with_required_views() {
+            using ZHLN::ECS::SystemInfo;
+            using ZHLN::ECS::SystemSignature;
+            const SystemInfo reader {.access_pattern = SystemSignature<&OptionalServiceReader>::PopulateAccessPattern()};
+            const SystemInfo writer {.access_pattern = SystemSignature<&OptionalServiceWriter>::PopulateAccessPattern()};
+            const SystemInfo required {.access_pattern = SystemSignature<&RequiredServiceWriter>::PopulateAccessPattern()};
+            if (reader.access_pattern.size() != 1 || writer.access_pattern.size() != 1 ||
+                ZHLN::ECS::SystemGraphCore::HasConflict(reader, reader) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(reader, writer) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(reader, required) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(writer, required)) {
+                return std::unexpected(SystemGraphTestError::HazardMismatch);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> exclusive_query_serializes_immediate_add_and_preserves_existing_components() {
+            using namespace ZHLN::ECS;
+            const SystemInfo exclusive {.access_pattern = SystemSignature<&ExclusiveInsert>::PopulateAccessPattern()};
+            const SystemInfo legacy {.access_pattern = SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern()};
+            const SystemInfo reader {.access_pattern = SystemSignature<&ObserveImmediate>::PopulateAccessPattern()};
+            if (exclusive.access_pattern.size() != 1 || exclusive.access_pattern[0].familyId != AllComponents ||
+                exclusive.access_pattern[0].mode != Access::Write ||
+                !SystemGraphCore::HasConflict(exclusive, reader) || !SystemGraphCore::HasConflict(legacy, reader)) {
+                return std::unexpected(SystemGraphTestError::HazardMismatch);
+            }
+            Registry reg;
+            const auto entity = reg.Create(TestCompB {.value = 5});
+            immediateObserved.store(0);
+            SystemGraph<NoServices> graph {reg};
+            graph.AddSystem<&ExclusiveInsert>();
+            graph.AddSystem<&ObserveImmediate>();
+            graph.Compile();
+            graph.Execute(ZHLN::Frame {.dt = {TestDeltaTime}});
+            if (immediateObserved.load() != 17 || !reg.Get<TestCompA>(entity) || reg.Get<TestCompA>(entity)->value != 17) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
             return {};
         }

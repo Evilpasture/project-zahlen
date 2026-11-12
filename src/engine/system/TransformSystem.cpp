@@ -301,9 +301,9 @@ void TransformSystem::Update(TransformQuery query, ECS::EntityCommandBuffer& ecb
     }
 }
 
-void TransformSystem::UpdateTransformHistory(ECS::Registry& registry) noexcept {
-    const auto entities        = registry.GetEntitiesWith<Components::WorldTransformComponent>();
-    auto       worldTransforms = registry.GetRawArray<Components::WorldTransformComponent>();
+void TransformSystem::UpdateTransformHistory(ECS::Query<Components::WorldTransformComponent&> query) noexcept {
+    const auto entities        = query.Entities<Components::WorldTransformComponent>();
+    auto       worldTransforms = query.Raw<Components::WorldTransformComponent>();
 
     // WorldTransformComponent is public output data, and existing systems may
     // write `world` directly (including on entities without TransformComponent).

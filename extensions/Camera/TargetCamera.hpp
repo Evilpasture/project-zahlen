@@ -14,6 +14,9 @@
 
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <optional>
 
@@ -26,6 +29,7 @@ class Registry;
 } // namespace ECS
 
 struct Camera;
+namespace FreeCam { struct FreeCamTagComponent; }
 
 namespace CameraRig {
 
@@ -57,22 +61,10 @@ struct TargetCameraComponent {
 // position and orientation are what the frame is actually rasterized with.
 class TargetCameraSystem {
   public:
-    TargetCameraSystem()                                     = default;
-    ~TargetCameraSystem()                                    = default;
-    TargetCameraSystem(const TargetCameraSystem&)            = delete;
-    TargetCameraSystem(TargetCameraSystem&&)                 = default;
-    TargetCameraSystem& operator=(const TargetCameraSystem&) = delete;
-    TargetCameraSystem& operator=(TargetCameraSystem&&)      = default;
-
-    // The rig's orbit speed is this component's own state (see
-    // TargetCameraComponent::stiffness and the entity's follow speed). It used to
-    // take a `speedQuery` parameter — a function pointer the engine held and
-    // handed out — and the body opened with `(void)speedQuery;`: the hook fed a
-    // parameter nothing read. Deleted rather than redesigned, because the
-    // behaviour it was meant to provide (share the tracked entity's speed) has a
-    // component-shaped answer if it is ever wanted: the field belongs on the
-    // target entity, where a camera rig can read it, not on Engine.
-    void Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept;
+    using RigQuery = ECS::Query<TargetCameraComponent&, Components::CameraComponent&, const Components::WorldTransformComponent,
+                                const Components::TransformComponent, const Components::InputStateComponent,
+                                const FreeCam::FreeCamTagComponent>;
+    static void Update(RigQuery query, FrameDt dt, FrameAlpha alpha) noexcept;
 };
 
 // Composition-root entry point: registers TargetCameraComponent and installs

@@ -31,6 +31,7 @@
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <expected>
@@ -252,6 +253,65 @@ struct RenderPipelinesTestSuite {
                 standalone.Clear();
                 ZHLN::Test::ExpectFalse(rc.Mesh(looseID).has_value());
             }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> visible_mesh_submission_rebinds_owner_and_updates_csg_scratch() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("TypedMeshSubmit", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) return {};
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto rc = engine->Graphics();
+            const auto box = ZHLN::PrefabFactory::CreateBox(
+                *engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 3, 0}, .createPhysics = false});
+            auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
+            auto mesh = reg.Get<ZHLN::Components::MeshComponent>(box);
+            auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue(camera && mesh && owner)) return {};
+            camera->camera.position = {0.0f, 5.0f, 10.0f};
+            camera->camera.yaw = ZHLN::DegF {-90.0f};
+            camera->camera.pitch = ZHLN::DegF {-15.0f};
+            auto meshData = *mesh;
+            meshData.flags |= ZHLN::DrawFlags::Hidden;
+            const auto ownerMesh = owner->mesh;
+            const auto id = owner->meshAsset;
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto visible = engine->GetVisibleEntities();
+            if (!ZHLN::Test::ExpectTrue(std::ranges::find(visible, box) != visible.end())) return {};
+
+            // The hidden cutter is excluded from both visibility lists. Its
+            // skeletal state must nevertheless be visited through the CSG link.
+            const auto cutter = reg.Create(meshData, ZHLN::Components::SkeletalMeshComponent {});
+            ZHLN::Components::CSGComponent csg;
+            csg.modifiers.push_back({.operation = ZHLN::CSGOperation::Difference, .operandEntity = cutter});
+            reg.Add(box, std::move(csg));
+            reg.Add(box, ZHLN::Components::SkeletalMeshComponent {});
+            rc.UnregisterMesh(id);
+            ZHLN::Test::ExpectFalse(rc.Mesh(id).has_value());
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            const auto mainVisible = engine->GetVisibleEntities();
+            const auto shadowVisible = engine->GetVisibleShadowEntities();
+            ZHLN::Test::ExpectTrue(std::ranges::find(mainVisible, cutter) == mainVisible.end());
+            ZHLN::Test::ExpectTrue(std::ranges::find(shadowVisible, cutter) == shadowVisible.end());
+            const auto rebound = rc.Mesh(id);
+            const auto eyeSkeleton = reg.Get<ZHLN::Components::SkeletalMeshComponent>(box);
+            const auto cutterSkeleton = reg.Get<ZHLN::Components::SkeletalMeshComponent>(cutter);
+            if (!ZHLN::Test::ExpectTrue(rebound && eyeSkeleton && cutterSkeleton)) return {};
+            ZHLN::Test::ExpectEq(rebound->posBuffer, ownerMesh.posBuffer);
+            ZHLN::Test::ExpectTrue(eyeSkeleton->skinnedScratch != ZHLN::BufferID::Invalid && cutterSkeleton->skinnedScratch != ZHLN::BufferID::Invalid);
+            ZHLN::Test::ExpectEq(eyeSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            ZHLN::Test::ExpectEq(cutterSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+
+            // A stale recorded capacity retires and recreates both scratch buffers.
+            const auto oldEye = eyeSkeleton->skinnedScratch;
+            const auto oldCutter = cutterSkeleton->skinnedScratch;
+            eyeSkeleton->scratchVertexCount += 1;
+            cutterSkeleton->scratchVertexCount += 1;
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            ZHLN::Test::ExpectEq(eyeSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            ZHLN::Test::ExpectEq(cutterSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            const std::array<std::byte, 1> data {};
+            ZHLN::Test::ExpectFalse(rc.UpdateBuffer(oldEye, std::span {data}).has_value());
+            ZHLN::Test::ExpectFalse(rc.UpdateBuffer(oldCutter, std::span {data}).has_value());
             return {};
         }
 

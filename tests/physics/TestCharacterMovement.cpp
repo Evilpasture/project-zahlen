@@ -16,6 +16,8 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterMovement.hpp>
+#include <CharacterController/PlayerInput.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -134,7 +136,7 @@ struct CPUPipelineHarness {
             // Prop interaction is controller policy, not a contact-callback
             // policy: the fixed step pushes the props the character moves
             // through, the same way the engine's CharacterPreStep hook does.
-            ZHLN::Character::PushProps(pc, reg);
+            ZHLN::Character::PushProps(ZHLN::Character::CharacterReadQuery {reg}, ZHLN::ECS::ResMut<ZHLN::PhysicsContext> {&pc});
             pc.Step(kTargetDt);
 
             prevPos = currPos;
@@ -166,6 +168,66 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
         void test_00_task_and_jolt_fixture_is_live(Fixture::TaskSystemAndJoltScope&) {
             ZHLN::Test::ExpectGt(ZHLN::TaskSystem::GetWorkerCount(), 0u);
             ZHLN::Test::ExpectTrue(JPH::Factory::sInstance != nullptr);
+        }
+
+        void test_typed_player_input_and_intent_seat_and_freecam(Fixture::TaskSystemAndJoltScope&) {
+            ECS::Registry reg;
+            InputContext input;
+            auto state = Components::InputStateComponent {};
+            state.SetKey(KeyCode::W, true);
+            state.SetKey(KeyCode::Space, true);
+            state.SetKey(KeyCode::LShift, true);
+            reg.Create(state);
+            input.SetKeyboardMouseSeat(1, true);
+            input.MutableSeatKeyboardMouse(1).SetKey(KeyCode::D, true);
+            const auto primary = reg.Create(Character::InputComponent {}, Character::MovementComponent {});
+            const auto secondary = reg.Create(Character::InputComponent {}, Character::MovementComponent {}, Components::PlayerSeatComponent {.seat = 1});
+            ExpectTrue(input.SeatReceivesKeyboardMouse(1));
+            ExpectTrue(input.SeatKeyboardMouse(1).IsKeyDown(KeyCode::D));
+            ExpectTrue(reg.Get<Components::PlayerSeatComponent>(secondary)->seat == 1);
+            Character::PlayerInputSystem::InputQuery q {reg};
+            ExpectTrue(q.Get<Components::PlayerSeatComponent>(secondary).transform([](const Components::PlayerSeatComponent& seat) { return seat.seat; }).value_or(kPrimarySeat) == 1);
+            Character::PlayerInputSystem::Update(Character::PlayerInputSystem::InputQuery {reg}, ECS::Res<InputContext> {&input});
+            ExpectTrue(reg.Get<Character::InputComponent>(primary)->localMoveZ == 1.0f);
+            ExpectTrue(reg.Get<Character::InputComponent>(primary)->wantsToJump && reg.Get<Character::InputComponent>(primary)->wantsToSprint);
+            ExpectEq(reg.Get<Character::InputComponent>(secondary)->localMoveX, 1.0f);
+
+            // No camera means intent remains latched, not partially changed.
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            ExpectTrue(reg.Get<Character::MovementComponent>(primary)->inputX == 0.0f);
+            Components::CameraComponent camera {};
+            camera.camera.yaw = DegF {0.0f};
+            const auto cameraEntity = reg.Create(camera, Components::MainCameraTagComponent {});
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            const auto p = reg.Get<Character::MovementComponent>(primary);
+            const auto s = reg.Get<Character::MovementComponent>(secondary);
+            ExpectTrue(std::abs(p->inputX - 1.0f) < 1e-5f && std::abs(p->inputZ) < 1e-5f);
+            ExpectTrue(p->jumpRequested && p->isSprinting && std::abs(s->inputZ - 1.0f) < 1e-5f);
+            reg.Add(cameraEntity, FreeCam::FreeCamTagComponent {});
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            ExpectTrue(p->inputX == 0.0f && p->inputZ == 0.0f && !p->jumpRequested);
+            ExpectTrue(s->inputX == 0.0f && s->inputZ == 0.0f && !s->jumpRequested);
+        }
+
+        void test_typed_fixed_step_movement_and_grounded_state(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness harness(cfg);
+            harness.Settle(10);
+            auto move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            move->inputX = 1.0f;
+            move->jumpRequested = true;
+            move->isGrounded = true;
+            const auto withoutPhysics = harness.reg.Create(Character::MovementComponent {.currentYVel = 7.0f});
+            Character::MovementSystem(Character::MovementQuery {harness.reg}, FrameDt {1.0f / 60.0f});
+            move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            ExpectTrue(!move->jumpRequested && move->currentYVel == move->jumpForce && move->currentVelX > 0.0f);
+            ExpectTrue(harness.reg.Get<Character::MovementComponent>(withoutPhysics)->currentYVel == 7.0f);
+            Character::CommitCharacterSteering(Character::CharacterReadQuery {harness.reg}, ECS::ResMut<PhysicsContext> {&harness.pc});
+            ExpectTrue(harness.pc.GetCharacterVelocity(harness.charPhys).GetX() > 0.0f);
+            harness.pc.Step(1.0f / 60.0f);
+            Character::WriteCharacterGrounded(Character::CharacterGroundedQuery {harness.reg}, ECS::Res<PhysicsContext> {&harness.pc});
+            move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            ExpectTrue(move->wasGrounded && move->isGrounded == harness.pc.IsCharacterOnGround(harness.charPhys));
         }
 
         // 1. Settle & Resting Stability

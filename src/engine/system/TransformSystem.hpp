@@ -84,7 +84,7 @@ class ZHLN_API TransformSystem {
 
     // Called after Present. Copy only matrices whose world value differs from
     // previous, so direct world-matrix writers need no transient dirty flag.
-    static void UpdateTransformHistory(ECS::Registry& registry) noexcept;
+    static void UpdateTransformHistory(ECS::Query<Components::WorldTransformComponent&> query) noexcept;
 
   private:
     [[nodiscard]] static auto LocalTransformBits(const Components::TransformComponent& transform) noexcept -> std::array<uint32_t, 10>;

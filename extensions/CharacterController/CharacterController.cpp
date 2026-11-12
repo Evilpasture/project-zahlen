@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/CharacterController.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterController.hpp"
 #include <Zahlen/Math/Transform.hpp>
 
@@ -24,9 +22,8 @@ namespace {
 
 // --- Frame-phase contributions -----------------------------------------------
 
-void CharacterInputStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static PlayerInputSystem inputSystem;
-    inputSystem.Update(engine);
+void CharacterInputStep(Engine& engine, float dt, FrameContext& ctx) {
+    engine.GetUpdateGraph().InvokeSequential<&PlayerInputSystem::Update>(engine.MakeFrame(dt, ctx.alpha));
 }
 
 // Translate gameplay input using the previous resolved camera. Camera
@@ -40,15 +37,12 @@ void CharacterInputStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 // the InputComponents, and the pump only refreshes levels and accumulates
 // motion/wheel deltas, so running both twice per frame neither double-applies
 // nor loses anything.
-void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static PlayerInputSystem inputSystem;
+void PlayerIntentStep(Engine& engine, float dt, FrameContext& ctx) {
     engine.PollLateInput();
-    inputSystem.Update(engine);
-    // Translation is relative to the view; a world with no camera has none, and the
-    // raw intents stay latched for the frame that does.
-    if (const auto camera = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>()) {
-        inputSystem.PlayerInputTranslate(engine, camera->camera);
-    }
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
+    engine.GetUpdateGraph().InvokeSequential<&PlayerInputSystem::Update>(frame);
+    // A world with no camera leaves raw intent latched until one exists.
+    engine.GetUpdateGraph().InvokeSequential<&PlayerInputSystem::PlayerInputTranslate>(frame);
 }
 
 // The steps this module contributes, declared rather than inserted. The input
@@ -87,11 +81,16 @@ void RegisterComponents(ECS::Registry& reg) {
 // --- Physics substep hooks ----------------------------------------------------
 
 void CharacterPreStep(Engine& engine, float dt) {
-    MovementSystem(engine, dt);
-    CommitCharacterSteering(engine);
-    // Prop interaction runs with the steering it depends on: the impulse is
-    // computed from the character velocity committed into the body just above.
-    PushProps(engine.Physics(), ZHLN::EngineAccess::RegistryOf(engine));
+    const Frame frame = engine.MakeFrame(dt, FrameAlpha {});
+    auto& graph = engine.GetUpdateGraph();
+    graph.InvokeSequential<&MovementSystem>(frame);
+    graph.InvokeSequential<&CommitCharacterSteering>(frame);
+    // Prop interaction uses the velocity committed into the body just above.
+    graph.InvokeSequential<&PushProps>(frame);
+}
+
+void CharacterPostStep(Engine& engine) {
+    engine.GetUpdateGraph().InvokeSequential<&WriteCharacterGrounded>(engine.MakeFrame(0.0f, FrameAlpha {}));
 }
 
 // --- Update-graph contributions ------------------------------------------------
@@ -150,7 +149,7 @@ void Install(Engine& engine) {
     // The physics substep hooks are engine-owned lifecycle, not a contribution:
     // they run inside PhysicsSystem's fixed-timestep loop, which no module can
     // express as a frame step. See Engine::PhysicsSubstepHooks.
-    engine.SetPhysicsSubstepHooks({.preStep = &CharacterPreStep, .postStep = &WriteCharacterGrounded});
+    engine.SetPhysicsSubstepHooks({.preStep = &CharacterPreStep, .postStep = &CharacterPostStep});
 
     // A host that wants the placement error itself calls Describe() and
     // Engine::InstallModule directly; Install is the two-line convenience and

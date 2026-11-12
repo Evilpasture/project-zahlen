@@ -13,6 +13,12 @@
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/ECS/ExtensionServices.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/SystemContext.hpp>
+#include <Zahlen/Engine/PoseUploads.hpp>
+#include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -157,6 +163,73 @@ struct ProceduralAnimationTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> procedural_update_immediately_creates_item_world_and_uploads_pose() {
+            using namespace ZHLN;
+            auto created = World::Create(PhysicsConfig {});
+            if (!created) return std::unexpected(created.error());
+            auto world = std::move(*created);
+            AudioContext audio {AudioConfig {.headless = true}};
+            AssetManager assets;
+            ECS::ExtensionServices extensions;
+            PoseUploadQueue uploads;
+            SimServices services {.physics = world->GetPhysics(), .audio = audio, .assets = assets, .input = world->GetInput(),
+                                  .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
+                                  .extensions = extensions, .poseUploads = uploads};
+            const Frame frame {.dt = {1.0f / 60.0f}};
+            SystemContext ctx {.registry = world->GetRegistry(), .services = services, .frame = frame};
+            auto& reg = world->GetRegistry();
+            const AssetID prefabID = HashAssetPath("tests/procedural-query-prefab");
+            auto prefab = std::make_unique<ModelPrefab>();
+            Skeleton skeleton;
+            skeleton.joints.push_back(Joint {.name = String64("Root"), .nodeIndex = 0});
+            prefab->skeletons.push_back(std::move(skeleton));
+            assets.CachePrefab(prefabID, std::move(prefab));
+
+            auto map = std::make_unique<RigBoneMap>();
+            BuildStandardProceduralRig(*map);
+            map->sourcePrefabAsset = prefabID;
+            ProceduralAnimationConfigComponent config;
+            config.enableGait = false;
+            config.enableLegIK = false;
+            config.enableAccelerationTilt = false;
+            config.enableUpperBody = false;
+            config.enableSecondaryMotion = false;
+            const Entity item = reg.Create(Components::TransformComponent {});
+            Animation::ItemHandlingComponent handling;
+            handling.itemEntity = item;
+            handling.gripCount = 1;
+            handling.grips[0].ikWeight = 0.0f;
+            handling.grips[0].evaluatedIKWeight = 0.0f;
+            handling.avoidance.probeDistance = 0.0f;
+            const auto headNode = map->nodeIndices[BoneSlot(CharacterBone::Head)];
+            FirstPersonVisibilityComponent firstPerson;
+            firstPerson.enabled = true;
+            const Entity camera = reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
+            const Entity actor = reg.Create(ProceduralLocomotionComponent {}, Components::TransformComponent {}, std::move(*map), config,
+                                            handling, firstPerson, Components::SkeletalMeshComponent {.jointOffset = 7, .skeletonIndex = 0});
+            const Entity attachment = reg.Create(Components::HierarchyComponent {.parent = actor},
+                Components::MeshComponent {.nodeIndex = static_cast<int32_t>(headNode)}, Components::TransformComponent {});
+            if (reg.Get<Components::WorldTransformComponent>(item)) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            ProceduralAnimation::Update(ctx, 1.0f / 60.0f);
+            auto itemWorld = reg.Get<Components::WorldTransformComponent>(item);
+            auto boneMap = reg.Get<RigBoneMap>(actor);
+            const auto childTransform = reg.Get<Components::TransformComponent>(attachment);
+            if (!itemWorld || !boneMap || !childTransform || uploads.Size() != 1) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            if (!reg.Get<FirstPersonVisibilityComponent>(actor)->cameraInitialized) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            const auto cameraPosition = reg.Get<Components::CameraComponent>(camera)->camera.position;
+            const auto firstWorld = itemWorld->world;
+            if (!Close(firstWorld, itemWorld->previous, 1.0e-6f)) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            if (!boneMap->poseValid || boneMap->synchronizedSkinPaletteCount != 1 || boneMap->synchronizedAttachmentCount != 1) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            reg.Get<Components::TransformComponent>(actor)->position = {5.0f, 0.0f, 0.0f};
+            ProceduralAnimation::Update(ctx, 1.0f / 60.0f);
+            itemWorld = reg.Get<Components::WorldTransformComponent>(item);
+            const auto updatedCameraPosition = reg.Get<Components::CameraComponent>(camera)->camera.position;
+            if (std::abs(updatedCameraPosition.x - cameraPosition.x - 5.0f) > 0.001f) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            if (!itemWorld || !Close(itemWorld->previous, firstWorld, 1.0e-6f) || Close(itemWorld->world, firstWorld, 1.0e-6f) || uploads.Size() != 2)
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> authored_track_lookup_prefers_exact_idle() {
             ZHLN::ModelPrefab prefab;
             prefab.animations.push_back({.name = ZHLN::String64("Walk")});

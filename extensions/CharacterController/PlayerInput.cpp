@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/PlayerInput.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "PlayerInput.hpp"
 
 #include "CharacterComponents.hpp"
 #include "Zahlen/Math/Camera.hpp"
 #include "Zahlen/ECS/Components.hpp"
-#include "Zahlen/Engine/Engine.hpp"
 #include "Zahlen/ECS/Entity.hpp"
 #include "Zahlen/Input/Input.hpp"
 #include "Zahlen/Input/InputContext.hpp"
@@ -20,33 +18,32 @@ namespace ZHLN::Character {
 
 namespace {
 [[nodiscard]] auto ResolveSeatInputState(
-    const Engine&        engine,
-    const ECS::Registry& reg,
-    PlayerSeat           seat
+    const InputContext& input,
+    PlayerInputSystem::InputQuery query,
+    PlayerSeat seat
 ) noexcept -> const Components::InputStateComponent* {
     if (seat == kPrimarySeat) {
-        if (const auto singleton = reg.GetSingleton<Components::InputStateComponent>()) {
+        if (const auto singleton = query.GetSingleton<Components::InputStateComponent>()) {
             return &(*singleton);
         }
     }
-    if (engine.GetInput().SeatReceivesKeyboardMouse(seat)) {
-        return &engine.GetInput().SeatKeyboardMouse(seat);
+    if (input.SeatReceivesKeyboardMouse(seat)) {
+        return &input.SeatKeyboardMouse(seat);
     }
     return nullptr;
 }
 } // namespace
 
-void PlayerInputSystem::Update(Engine& engine) {
-    auto&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const InputContext& inputCtx = engine.GetInput();
+void PlayerInputSystem::Update(InputQuery query, ECS::Res<InputContext> input) {
+    const InputContext& inputCtx = *input;
 
-    for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
-        if (auto ic = reg.Get<InputComponent>(e)) {
-            const PlayerSeat seatComp = reg.Get<Components::PlayerSeatComponent>(e)
+    for (Entity e: query.Entities<InputComponent>()) {
+        if (auto ic = query.Get<InputComponent>(e)) {
+            const PlayerSeat seatComp = query.Get<Components::PlayerSeatComponent>(e)
                                             .transform([](const Components::PlayerSeatComponent& s) { return s.seat; })
                                             .value_or(kPrimarySeat);
 
-            const auto* kbm     = ResolveSeatInputState(engine, reg, seatComp);
+            const auto* kbm     = ResolveSeatInputState(inputCtx, query, seatComp);
             const auto  gamepad = inputCtx.PrimaryGamepadForSeat(seatComp);
 
             float moveX = 0.0f;
@@ -122,14 +119,18 @@ void PlayerInputSystem::Update(Engine& engine) {
     }
 }
 
-void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
-    if (camEnt != Entity::Null() && reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
+void PlayerInputSystem::PlayerInputTranslate(IntentQuery query) {
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    const Camera& cam = camera->camera;
+    const auto mainCameras = query.Entities<Components::MainCameraTagComponent>();
+    const Entity camEnt = mainCameras.empty() ? Entity::Null() : mainCameras.front();
+    if (camEnt != Entity::Null() && query.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
         // Zero out player intent so they stand frozen in an Idle pose
-        for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-            if (auto move = reg.Get<MovementComponent>(e)) {
+        for (Entity e: query.Entities<MovementComponent>()) {
+            if (auto move = query.Get<MovementComponent>(e)) {
                 move->inputX        = 0.0f;
                 move->inputZ        = 0.0f;
                 move->jumpRequested = false;
@@ -138,9 +139,9 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
         return;
     }
 
-    for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-        auto move  = reg.Get<MovementComponent>(e);
-        auto input = reg.Get<InputComponent>(e);
+    for (Entity e: query.Entities<MovementComponent>()) {
+        auto move  = query.Get<MovementComponent>(e);
+        auto input = query.Get<InputComponent>(e);
         if (!move || !input) {
             continue;
         }

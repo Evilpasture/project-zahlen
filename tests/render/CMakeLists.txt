@@ -210,6 +210,16 @@ zahlen_add_gpu_test_group(GPU_Application 120
     TestApplication.cpp
 )
 target_link_libraries(GPU_Application PRIVATE zahlen_application)
+if(TARGET zahlen_character_controller)
+    target_link_libraries(GPU_Application PRIVATE zahlen_character_controller)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+endif()
+if(TARGET zahlen_camera AND TARGET zahlen_freecam)
+    target_link_libraries(GPU_Application PRIVATE zahlen_camera zahlen_freecam)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CAMERA_MODULES=1)
+endif()
 
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp

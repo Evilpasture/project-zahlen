@@ -14,6 +14,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 
 
 #include <algorithm>
@@ -76,46 +78,57 @@ Entity MainCamera(ECS::Registry& reg) {
     return reg.SingletonEntity<Components::MainCameraTagComponent>();
 }
 
-void SeedBootCamera(ECS::Registry& reg) {
-    const Entity camera = MainCamera(reg);
-    if (camera == Entity::Null()) {
+using SeedQuery = ECS::Query<const Components::MainCameraTagComponent, const FreeCamOptOutComponent,
+                             const FreeCamTagComponent, const FreeCamComponent>;
+void SeedBootCamera(SeedQuery query, ECS::EntityCommandBuffer& commands) {
+    const auto cameras = query.Entities<Components::MainCameraTagComponent>();
+    if (cameras.empty()) {
         return;
     }
-    if (reg.Get<FreeCamOptOutComponent>(camera)) {
+    const Entity camera = cameras.front();
+    if (query.Get<FreeCamOptOutComponent>(camera)) {
         return;
     }
-    if (!reg.Get<FreeCamTagComponent>(camera)) {
-        reg.Add(camera, FreeCamTagComponent {});
+    if (!query.Get<FreeCamTagComponent>(camera)) {
+        commands.AddComponent(camera, FreeCamTagComponent {});
     }
-    if (!reg.Get<FreeCamComponent>(camera)) {
-        reg.Add(camera, FreeCamComponent {});
+    if (!query.Get<FreeCamComponent>(camera)) {
+        commands.AddComponent(camera, FreeCamComponent {});
+    }
+}
+
+using FreeCamQuery = ECS::Query<const Components::InputStateComponent, const FreeCamTagComponent,
+                                const FreeCamComponent, Components::CameraComponent&>;
+void ApplyTyped(FreeCamQuery query, FrameDt frameDt) {
+    const auto input = query.GetSingleton<Components::InputStateComponent>();
+    if (!input) {
+        return;
+    }
+    for (Entity e: query.Entities<FreeCamTagComponent>()) {
+        const auto knobs = query.Get<FreeCamComponent>(e);
+        const FreeCamComponent defaults {};
+        const FreeCamComponent& cfg = knobs ? *knobs : defaults;
+        query.Patch<Components::CameraComponent>(e, [&](auto& cc) { Drive(cc, *input, cfg, frameDt.value); });
     }
 }
 
 } // namespace
 
 void Apply(Engine& engine, float dt) {
-    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  input = reg.GetSingleton<Components::InputStateComponent>();
-    if (!input) {
-        return;
-    }
-    for (Entity e: reg.GetEntitiesWith<FreeCamTagComponent>()) {
-        auto                   knobs = reg.Get<FreeCamComponent>(e);
-        const FreeCamComponent defaults {};
-        const FreeCamComponent& cfg = knobs ? *knobs : defaults;
-        reg.Patch<Components::CameraComponent>(e, [&](auto& cc) -> auto { Drive(cc, *input, cfg, dt); });
-    }
+    engine.GetRenderGraph().InvokeSequential<&ApplyTyped>(engine.MakeFrame(dt, FrameAlpha {}));
 }
 
 namespace {
 
-void FreeCamStep(Engine& engine, float dt, FrameContext&) {
-    SeedBootCamera(ZHLN::EngineAccess::RegistryOf(engine));
+void FreeCamStep(Engine& engine, float dt, FrameContext& ctx) {
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
+    auto& graph = engine.GetRenderGraph();
+    // The pose pass below must see the newly seeded components this frame.
+    graph.InvokeSequentialAndPlayback<&SeedBootCamera>(frame);
     if (dt <= 0.0f) {
         return;
     }
-    Apply(engine, dt);
+    graph.InvokeSequential<&ApplyTyped>(frame);
 }
 
 // Declared, and placed before the core "CameraSystems" step so the matrices it

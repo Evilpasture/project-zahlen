@@ -2,16 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/CharacterMovement.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <numbers>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "CharacterMovement.hpp"
 
 #include "CharacterComponents.hpp"
 #include "Zahlen/ECS/Components.hpp"
-#include "Zahlen/Engine/Engine.hpp"
 #include "Zahlen/Log.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -21,19 +18,19 @@
 #include <cmath>
 
 namespace ZHLN::Tests {
-static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
+static void VerifyMovementStateConsistency(ECS::Query<const Character::MovementComponent> query) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
     }
 
-    auto entities = reg.GetEntitiesWith<Character::MovementComponent>();
+    auto entities = query.Entities<Character::MovementComponent>();
     if (entities.empty()) {
         return;
     }
     testsRun = true;
 
-    auto movements = reg.GetRawArray<Character::MovementComponent>();
+    auto movements = query.Raw<Character::MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e    = entities[i];
         const auto& move = movements[i];
@@ -66,15 +63,14 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
 
 namespace ZHLN::Character {
 
-void MovementSystem(Engine& engine, float dt) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    auto entities = reg.GetEntitiesWith<MovementComponent>();
+void MovementSystem(MovementQuery query, FrameDt frameDt) {
+    const float dt = frameDt.value;
+    auto entities = query.Entities<MovementComponent>();
     if (entities.empty()) {
         return;
     }
 
-    auto movements = reg.GetRawArray<MovementComponent>();
+    auto movements = query.Raw<MovementComponent>();
 
     TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
@@ -82,12 +78,12 @@ void MovementSystem(Engine& engine, float dt) {
             Entity             e    = entities[i];
             move.prevOrientation    = move.orientation;
 
-            auto phys = reg.Get<Components::PhysicsComponent>(e);
+            auto phys = query.Get<Components::PhysicsComponent>(e);
             if (!phys) {
                 continue;
             }
 
-            reg.Patch<Components::RagdollComponent>(e, [&](auto& ragComp) {
+            query.Patch<Components::RagdollComponent>(e, [&](auto& ragComp) {
                 if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic) {
                     return;
                 }
@@ -178,30 +174,24 @@ void MovementSystem(Engine& engine, float dt) {
     });
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyMovementStateConsistency(reg);
+        ZHLN::Tests::VerifyMovementStateConsistency(query.As<ECS::Query<const MovementComponent>>());
     }
 }
 
-void CommitCharacterSteering(Engine& engine) {
-    auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
-    auto  entities = reg.GetEntitiesWith<MovementComponent>();
-    auto  moves    = reg.GetRawArray<MovementComponent>();
+void CommitCharacterSteering(CharacterReadQuery query, ECS::ResMut<PhysicsContext> physics) {
+    const auto entities = query.Entities<MovementComponent>();
+    auto moves = query.Raw<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        const auto phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        const auto phys = query.Get<Components::PhysicsComponent>(entities[i]);
         if (!phys) {
             continue;
         }
         const auto& move = moves[i];
-        pc.SetCharacterVelocity(phys->physicsID, {move.currentVelX, move.currentYVel, move.currentVelZ});
+        physics->SetCharacterVelocity(phys->physicsID, {move.currentVelX, move.currentYVel, move.currentVelZ});
     }
 }
 
-void PushProps(Simulation physics, ECS::Registry& reg) {
-    PushProps(ZHLN::EngineAccess::PhysicsOf(physics), reg);
-}
-
-void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
+void PushProps(CharacterReadQuery query, ECS::ResMut<PhysicsContext> physics) {
     // Interaction tuning, not physics constants: how strongly a moving
     // character imparts momentum to the props it moves through, and how close
     // a body must be to the character's hull to count as pushed at all.
@@ -209,37 +199,37 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
     constexpr float kPushRadius   = 0.75f;
     constexpr float kMinApproach  = 0.01f;
 
-    auto entities = reg.GetEntitiesWith<MovementComponent>();
+    auto entities = query.Entities<MovementComponent>();
     if (entities.empty()) {
         return;
     }
 
     for (Entity e: entities) {
-        const auto phys = reg.Get<Components::PhysicsComponent>(e);
+        const auto phys = query.Get<Components::PhysicsComponent>(e);
         if (!phys || phys->isStatic) {
             continue;
         }
 
-        const auto charPosition = pc.BodyPosition(phys->physicsID);
+        const auto charPosition = physics->BodyPosition(phys->physicsID);
         if (!charPosition) {
             // The character may be queued for destruction; nothing to push.
             continue;
         }
 
         const auto& charPos = *charPosition;
-        const auto charVel = Physics::FromJoltVector(pc.GetCharacterVelocity(phys->physicsID));
+        const auto charVel = Physics::FromJoltVector(physics->GetCharacterVelocity(phys->physicsID));
         if (charVel.LengthSquared() < 0.01f) {
             continue; // Not moving: there is no momentum to impart.
         }
 
-        const std::vector<Physics::BodyID> overlaps = pc.OverlapSphere(charPos, kPushRadius);
+        const std::vector<Physics::BodyID> overlaps = physics->OverlapSphere(charPos, kPushRadius);
 
         for (Physics::BodyID other: overlaps) {
-            if (other == phys->physicsID || !pc.IsBodyDynamic(other)) {
+            if (other == phys->physicsID || !physics->IsBodyDynamic(other)) {
                 continue;
             }
 
-            const auto otherPosition = pc.BodyPosition(other);
+            const auto otherPosition = physics->BodyPosition(other);
             if (!otherPosition) {
                 continue;
             }
@@ -259,24 +249,22 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
                 if (impulse.y < 0.0f) {
                     impulse.y = 0.0f;
                 }
-                pc.AddImpulse(other, impulse);
+                physics->AddImpulse(other, impulse);
             }
         }
     }
 }
 
-void WriteCharacterGrounded(Engine& engine) {
-    auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    auto& pc = ZHLN::EngineAccess::PhysicsOf(engine);
-    auto  entities = reg.GetEntitiesWith<MovementComponent>();
-    auto  moves    = reg.GetRawArray<MovementComponent>();
+void WriteCharacterGrounded(CharacterGroundedQuery query, ECS::Res<PhysicsContext> physics) {
+    const auto entities = query.Entities<MovementComponent>();
+    auto moves = query.Raw<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        const auto phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        const auto phys = query.Get<Components::PhysicsComponent>(entities[i]);
         if (!phys) {
             continue;
         }
         moves[i].wasGrounded = moves[i].isGrounded;
-        moves[i].isGrounded  = pc.IsCharacterOnGround(phys->physicsID);
+        moves[i].isGrounded  = physics->IsCharacterOnGround(phys->physicsID);
     }
 }
 

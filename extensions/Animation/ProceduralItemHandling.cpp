@@ -167,10 +167,12 @@ float UpdateGripWeight(GripPoint& grip, float dt) noexcept {
     return grip.evaluatedIKWeight;
 }
 
+// Internal entry point: the evaluator already resolved the optional physics
+// component through its query. The public Registry overload below remains for
+// callers of the module's existing API.
 void UpdateItemDynamics(
-    const ECS::Registry&   registry,
+    Physics::BodyID        ignoredPhysics,
     const PhysicsContext&  physics,
-    Entity                 characterEntity,
     ItemHandlingComponent& handling,
     FVec3           rootPosition,
     Quat           rootRotation,
@@ -209,10 +211,6 @@ void UpdateItemDynamics(
         const Mat4x4 worldItem = rootWorld * handling.itemModelTransform;
         const FVec3  origin    = ProceduralMath::Translation(worldItem);
         const FVec3  forward   = SafeNormalized(ProceduralMath::Direction(worldItem, FVec3::UnitZ()), rootRotation * FVec3::UnitZ());
-        Physics::BodyID ignoredPhysics {};
-        if (const auto physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
-            ignoredPhysics = physicsComponent->physicsID;
-        }
         const auto hit = physics.Raycast(origin.Cast<double>(), forward, handling.avoidance.probeDistance, ignoredPhysics);
         if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
@@ -262,6 +260,17 @@ void UpdateItemDynamics(
     const Mat4x4 itemModel   = handling.itemModelTransform;
     handling.sway.rotationOffset = swayRotation;
     handling.itemModelTransform  = itemModel * ProceduralMath::Transform(swayRotation, handling.sway.positionOffset);
+}
+
+void UpdateItemDynamics(
+    const ECS::Registry& registry, const PhysicsContext& physics, Entity characterEntity, ItemHandlingComponent& handling,
+    FVec3 rootPosition, Quat rootRotation, float dt
+) noexcept {
+    Physics::BodyID ignoredPhysics {};
+    if (handling.avoidance.probeDistance > 0.01f) {
+        if (const auto component = registry.Get<Components::PhysicsComponent>(characterEntity)) ignoredPhysics = component->physicsID;
+    }
+    UpdateItemDynamics(ignoredPhysics, physics, handling, rootPosition, rootRotation, dt);
 }
 
 void ConstrainItemToGripReach(ItemHandlingComponent& handling, const Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept {

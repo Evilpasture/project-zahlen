@@ -17,6 +17,7 @@
 namespace ZHLN {
 class Engine;
 class RenderContext;
+class DebugDraw;
 
 // The culling pass's working set: the planes it derived this frame, the
 // freeze-frame corners, and whether the last frame was frozen. This is the
@@ -51,6 +52,9 @@ class ZHLN_API CullingSystem {
     // The freeze-frame debug view. The corners are the pass's own state now, so
     // this derives them from the same view-projection the pass froze instead of
     // reaching into another node's storage.
+    using DebugFrustumQuery = ECS::Query<const Components::CullingStatsComponent, const Components::CameraComponent>;
+    static void DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene);
+    // Compatibility entry point for presentation and existing callers.
     static void DrawDebugFrustum(Engine& engine);
 
   private:

@@ -3,6 +3,8 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <expected>
@@ -12,6 +14,20 @@ class Engine;
 
 class ZHLN_API RenderSystem {
   public:
+    // The presentation step is an ordered engine/frame-plan barrier, not a
+    // graph node. This describes its direct component access; helper queries
+    // project narrower views without giving those helpers the whole registry.
+    // It is not a scheduler access declaration. A future extraction boundary
+    // can move scene gathering out of presentation without changing frame order.
+    using RenderFrameQuery = ECS::Query<
+        const Components::CameraComponent, const Components::MainCameraTagComponent, const Components::DebugSettingsComponent,
+        const Components::EnvironmentMapComponent, const Components::InputStateComponent, const Components::MeshComponent,
+        const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&, const Components::MorphTargetComponent,
+        const Components::WorldTransformComponent, const Components::TransformComponent, const Components::PBRComponent,
+        const Components::CSGComponent, const Components::AmbientCubeComponent, const Components::LightComponent,
+        const Components::SunTagComponent, const Components::EnvironmentSunTagComponent,
+        const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
+
     static std::expected<void, ErrorCode> Update(Engine& engine, float dt);
 
   private:

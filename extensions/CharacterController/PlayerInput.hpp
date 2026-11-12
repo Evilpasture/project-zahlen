@@ -4,23 +4,25 @@
 // extensions/CharacterController/PlayerInput.hpp
 #pragma once
 
-namespace ZHLN {
+#include "CharacterComponents.hpp"
+#include <FreeCam/FreeCam.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 
-class Engine;
-struct Camera;
+namespace ZHLN {
+class InputContext;
 
 namespace Character {
 
-// WASD/mouse -> character intent. Update fills per-entity InputComponent
-// from the raw InputStateComponent (Input phase); PlayerInputTranslate
-// resolves that intent against the resolved camera into world-space
-// MovementComponent input (PlayerIntent phase). Moved out of core: the
-// key mapping (WASD, Space, LShift, RButton look, 0.15 sensitivity) is
-// this controller's contract, not engine substrate.
+// Device input is latched in Input phase and re-latched after late polling;
+// intent translation remains in PlayerIntent before the fixed substeps.
 class PlayerInputSystem {
   public:
-    void Update(Engine& engine);
-    void PlayerInputTranslate(Engine& engine, const Camera& cam);
+    using InputQuery = ECS::Query<InputComponent&, const Components::PlayerSeatComponent, const Components::InputStateComponent>;
+    using IntentQuery = ECS::Query<MovementComponent&, const InputComponent, const Components::CameraComponent,
+                                   const Components::MainCameraTagComponent, const FreeCam::FreeCamTagComponent>;
+    static void Update(InputQuery query, ECS::Res<InputContext> input);
+    static void PlayerInputTranslate(IntentQuery query);
 };
 
 } // namespace Character

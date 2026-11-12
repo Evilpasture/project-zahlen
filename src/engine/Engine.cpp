@@ -52,6 +52,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <thread>
@@ -215,6 +216,21 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
 
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
+    }
+    // RenderServices stores references and the graph holds a reference to the
+    // bundle. Reconstruct the bundle in place after a successful replacement:
+    // this rebinds the renderer without rebuilding either graph (and losing
+    // graph-local state). Recovery runs outside graph execution.
+    if (_impl->renderServices != nullptr) {
+        std::destroy_at(_impl->renderServices.get());
+        std::construct_at(_impl->renderServices.get(), RenderServices {
+            .render     = _impl->kernel->GetRenderContext(),
+            .scene      = _impl->sceneData,
+            .assets     = _impl->kernel->GetAssetManager(),
+            .extensions = _impl->extensions,
+            .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+        });
     }
     PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
     _impl->fontAtlasUploaded = false;
