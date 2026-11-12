@@ -68,40 +68,6 @@ struct TypeReflector {
     }
 };
 
-}
-
-template <typename R>
-consteval auto Expand(R&& range) {
-    std::vector<std::meta::info> args;
-    args.reserve(range.size());
-    for (auto r: range) {
-        args.push_back(std::meta::reflect_constant(r));
-    }
-    return std::meta::substitute(^^TemplatedDetail::Replicator, args);
-}
-
-template <typename T>
-consteval auto TypeName() -> std::string_view {
-    return TemplatedDetail::TypeReflector<std::remove_cvref_t<T>>::name();
-}
-
-template <typename T, typename NameOverride>
-consteval auto TypeName(NameOverride rename) -> std::string_view {
-    const std::string_view spelling   = TypeName<T>();
-    const char*            overridden = rename(spelling);
-    if (overridden != nullptr) {
-        return overridden;
-    }
-    return spelling;
-}
-
-consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
-    const auto span = std::define_static_array(sv);
-    return std::string_view(span.data(), span.size());
-}
-
-namespace TemplatedDetail {
-
 // display_string_of is implementation-defined: some compilers include scope,
 // others return only the final identifier. Walk parents to obtain the scope
 // instead. Specializations have no identifier, so retain their display spelling
@@ -140,7 +106,37 @@ consteval auto QualifiedTypeSpelling(std::meta::info info) -> std::string {
     return name;
 }
 
-} // namespace TemplatedDetail
+}
+
+template <typename R>
+consteval auto Expand(R&& range) {
+    std::vector<std::meta::info> args;
+    args.reserve(range.size());
+    for (auto r: range) {
+        args.push_back(std::meta::reflect_constant(r));
+    }
+    return std::meta::substitute(^^TemplatedDetail::Replicator, args);
+}
+
+template <typename T>
+consteval auto TypeName() -> std::string_view {
+    return TemplatedDetail::TypeReflector<std::remove_cvref_t<T>>::name();
+}
+
+template <typename T, typename NameOverride>
+consteval auto TypeName(NameOverride rename) -> std::string_view {
+    const std::string_view spelling   = TypeName<T>();
+    const char*            overridden = rename(spelling);
+    if (overridden != nullptr) {
+        return overridden;
+    }
+    return spelling;
+}
+
+consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
+    const auto span = std::define_static_array(sv);
+    return std::string_view(span.data(), span.size());
+}
 
 // Keep the historical display spelling used for COM interface IDs: changing
 // it would invalidate QueryInterface IDs held by existing binary consumers.
