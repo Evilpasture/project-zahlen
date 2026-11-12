@@ -5,6 +5,7 @@
 #include "helpers/MockTaskScheduler.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -128,6 +129,25 @@ void ObserveBareEntity(ZHLN::ECS::Query<const TestCompA> query) {
 
 void WildcardRegistrySystem(ZHLN::ECS::Registry&) {}
 void ReadOnlyRegistrySystem(const ZHLN::ECS::Registry&) {}
+void ReadOnlyA(ZHLN::ECS::Query<const TestCompA>) {}
+static_assert(!ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<ZHLN::ECS::NoServices>, ZHLN::ECS::Registry&>);
+static_assert(!ZHLN::ECS::ResolvableFrom<ZHLN::ECS::Carrier<ZHLN::ECS::NoServices>, const ZHLN::ECS::Registry&>);
+struct RegistryServiceBundle { ZHLN::ECS::Registry& registry; };
+using RegistryCarrier = ZHLN::ECS::Carrier<RegistryServiceBundle>;
+struct InspectionServiceBundle { ZHLN::ECS::Inspection& inspection; };
+using InspectionCarrier = ZHLN::ECS::Carrier<InspectionServiceBundle>;
+static_assert(!ZHLN::ECS::ResolvableFrom<InspectionCarrier, ZHLN::ECS::Inspection>);
+static_assert(!ZHLN::ECS::ResolvableFrom<InspectionCarrier, ZHLN::ECS::ResMut<ZHLN::ECS::Inspection>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<InspectionCarrier, ZHLN::Optional<ZHLN::ECS::Inspection&>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::ECS::Registry*>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::ECS::Res<ZHLN::ECS::Registry>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::ECS::ResMut<ZHLN::ECS::Registry>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::ECS::Res<ZHLN::ECS::Registry*>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::Optional<ZHLN::ECS::Registry*&>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::Optional<ZHLN::ECS::Registry&>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::Optional<const ZHLN::ECS::Registry&>>);
+template <typename W> concept PublicRegistry = requires(W& world) { world.GetRegistry(); };
+static_assert(!PublicRegistry<ZHLN::World>);
 void CommandBufferSystemA(ZHLN::ECS::Query<TestCompA&> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
     query.ForEach([&](ZHLN::Entity e, TestCompA& comp) {
         comp.value += 10;
@@ -566,7 +586,7 @@ struct SystemGraphTestSuite {
             const auto writer = SystemSignature<&DeclarativeWriter>::PopulateAccessPattern();
             const auto reader = SystemSignature<&DeclarativeReader>::PopulateAccessPattern();
             const auto multiple = SystemSignature<&MultipleQueries>::PopulateAccessPattern();
-            const auto wildcard = SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern();
+            const auto wildcard = SystemSignature<&ExclusiveInsert>::PopulateAccessPattern();
             const auto functor = SystemSignature<ReadFunctor {}>::PopulateAccessPattern();
             const auto lambda = SystemSignature<ReadLambda>::PopulateAccessPattern();
             const auto member = SystemSignature<&ReadStatic::Update>::PopulateAccessPattern();
@@ -613,11 +633,10 @@ struct SystemGraphTestSuite {
         std::expected<void, ZHLN::ErrorCode> exclusive_query_serializes_immediate_add_and_preserves_existing_components() {
             using namespace ZHLN::ECS;
             const SystemInfo exclusive {.access_pattern = SystemSignature<&ExclusiveInsert>::PopulateAccessPattern()};
-            const SystemInfo legacy {.access_pattern = SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern()};
             const SystemInfo reader {.access_pattern = SystemSignature<&ObserveImmediate>::PopulateAccessPattern()};
             if (exclusive.access_pattern.size() != 1 || exclusive.access_pattern[0].familyId != AllComponents ||
                 exclusive.access_pattern[0].mode != Access::Write ||
-                !SystemGraphCore::HasConflict(exclusive, reader) || !SystemGraphCore::HasConflict(legacy, reader)) {
+                !SystemGraphCore::HasConflict(exclusive, reader)) {
                 return std::unexpected(SystemGraphTestError::HazardMismatch);
             }
             Registry reg;
@@ -665,7 +684,7 @@ struct SystemGraphTestSuite {
             before.AddSystem<&DeclarativeReader>();
             if (!before.AddSystemBefore<&DeclarativeWriter>("DeclarativeReader") ||
                 before.AddSystemBefore<&DeclarativeWriter>("DeclarativeReader") ||
-                before.AddSystemBefore<&WildcardRegistrySystem>("MissingAnchor")) {
+                before.AddSystemBefore<&SequentialWriter>("MissingAnchor")) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             before.AddSystem<&ReadStatic::Update>();
@@ -686,23 +705,23 @@ struct SystemGraphTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> command_buffer_and_const_registry_hazards_and_playback() {
+        std::expected<void, ZHLN::ErrorCode> command_buffer_and_typed_read_hazards_and_playback() {
             using ZHLN::ECS::Access;
             using ZHLN::ECS::SystemSignature;
 
-            const auto constWildcard = SystemSignature<&ReadOnlyRegistrySystem>::PopulateAccessPattern();
+            const auto typedRead = SystemSignature<&ReadOnlyA>::PopulateAccessPattern();
             const auto ecbAccessA    = SystemSignature<&CommandBufferSystemA>::PopulateAccessPattern();
             const auto ecbAccessB    = SystemSignature<&CommandBufferSystemB>::PopulateAccessPattern();
             const uint32_t idA       = ZHLN::ECS::ComponentFamily::GetTypeID<TestCompA>();
             const uint32_t idB       = ZHLN::ECS::ComponentFamily::GetTypeID<TestCompB>();
 
-            if (constWildcard.size() != 1 || constWildcard[0].familyId != ZHLN::ECS::AllComponents || constWildcard[0].mode != Access::Read ||
+            if (typedRead.size() != 1 || typedRead[0].familyId != idA || typedRead[0].mode != Access::Read ||
                 ecbAccessA.size() != 1 || ecbAccessA[0].familyId != idA || ecbAccessA[0].mode != Access::Write ||
                 ecbAccessB.size() != 1 || ecbAccessB[0].familyId != idB || ecbAccessB[0].mode != Access::Read) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
 
-            ZHLN::ECS::SystemInfo constWildInfo {.access_pattern = constWildcard};
+            ZHLN::ECS::SystemInfo constWildInfo {.access_pattern = typedRead};
             ZHLN::ECS::SystemInfo ecbInfoA {.access_pattern = ecbAccessA};
             ZHLN::ECS::SystemInfo ecbInfoB {.access_pattern = ecbAccessB};
             if (ZHLN::ECS::SystemGraphCore::HasConflict(constWildInfo, constWildInfo) ||

@@ -23,10 +23,12 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <utility>
+#include <string_view>
 
 namespace ZHLN {
 
 class Engine;
+namespace ECS { class Inspection; }
 
 class ZHLN_API Entities {
   public:
@@ -43,6 +45,13 @@ class ZHLN_API Entities {
     void               Despawn(Entity entity) noexcept;
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
 
+    // Explicit unscheduled tool/scripting access. Call only at an isolated
+    // phase boundary; see Inspection for pointer lifetime and concurrency.
+    [[nodiscard]] auto Inspect() const noexcept -> ECS::Inspection;
+
+    template <typename T>
+    void Register(std::string_view name) const { Registry().RegisterComponent<T>(name); }
+
     // --- Read-only queries -----------------------------------------------------
     template <typename T>
     [[nodiscard]] auto Get(Entity entity) const noexcept -> ZHLN::Optional<const T&> {
@@ -52,6 +61,18 @@ class ZHLN_API Entities {
     template <typename T>
     [[nodiscard]] auto GetSingleton() const noexcept -> ZHLN::Optional<const T&> {
         return std::as_const(Registry()).GetSingleton<T>();
+    }
+
+    // Synchronous, unscheduled access for editor tools and lifecycle passes.
+    // The caller must exclude graph execution and structural mutations while
+    // retaining a returned span or running a patch callback.
+    template <typename T>
+    [[nodiscard]] auto EntitiesWith() const noexcept -> std::span<const Entity> { return Registry().GetEntitiesWith<T>(); }
+
+    template <typename T, typename Fn>
+        requires (!SceneResources::OwnsExternalResource<T>)
+    auto Patch(Entity entity, Fn&& fn) -> bool {
+        return Registry().Patch<T>(entity, std::forward<Fn>(fn));
     }
 
     // --- Component attachment / detachment -------------------------------------
@@ -64,6 +85,13 @@ class ZHLN_API Entities {
             Registry().Remove<T>(entity);
         }
         return Registry().Add(entity, std::move(component));
+    }
+
+    template <typename First, typename Second, typename... Rest>
+    void Attach(Entity entity, First first, Second second, Rest... rest) {
+        Attach(entity, std::move(first));
+        Attach(entity, std::move(second));
+        (Attach(entity, std::move(rest)), ...);
     }
 
     template <typename T>

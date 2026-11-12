@@ -16,9 +16,8 @@ struct ComponentAccess {
     Access   mode;
 };
 
-// An explicitly injected Registry& can access or structurally change *any*
-// component. Serialise it against all declared component accesses rather than
-// pretending that the graph can infer its effects from the function body.
+// Immediate structural capabilities can invalidate any component view. An
+// ExclusiveQuery serialises against all declared component accesses.
 inline constexpr uint32_t AllComponents = std::numeric_limits<uint32_t>::max();
 
 template <typename T>

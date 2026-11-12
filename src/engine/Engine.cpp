@@ -33,6 +33,7 @@
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>

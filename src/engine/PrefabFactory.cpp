@@ -67,23 +67,6 @@ auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::Ba
 
 } // namespace
 
-void DetachOwnedMesh(GraphicsDevice gfx, ECS::Registry& reg, Entity entity) {
-    SceneResources::Detach<Components::OwnedMeshComponent>(gfx, reg, entity);
-}
-
-void AttachOwnedMesh(GraphicsDevice gfx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component) {
-    SceneResources::Attach(gfx, reg, entity, std::move(component));
-}
-
-void ReleaseOwnedMeshes(GraphicsDevice gfx, ECS::Registry& reg) {
-    if (reg.GetEntitiesWith<Components::OwnedMeshComponent>().empty()) {
-        return;
-    }
-    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
-        SceneResources::Release(gfx, owned);
-    }
-}
-
 auto CreateFontAtlas(RenderContext& render) -> FontAtlas {
     return CreateFontAtlas(render, std::nullopt, GUI::kDefaultFontAssetID);
 }
@@ -429,7 +412,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+static auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
     auto boxColor = params.materialOverride.baseColorFactor;
     if (!(boxColor.w >= 0.0f)) {
         boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -559,7 +542,7 @@ auto SpawnPrimitive(
 
 } // namespace
 
-auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
+static auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -575,7 +558,7 @@ auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> En
     return CreateSphere(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, params);
 }
 
-auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
+static auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
     -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
@@ -593,7 +576,7 @@ auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParam
     return CreateCylinder(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
 }
 
-auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
+static auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -609,7 +592,7 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
     return CreateCone(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
 }
 
-auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
+static auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
     -> Entity {
     Mesh mesh = CreatePlaneMesh(gfx, extent, color);
 
@@ -664,7 +647,7 @@ auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnPar
     return CreatePlane(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
 }
 
-auto InstantiatePrefab(
+static auto InstantiatePrefab(
     GraphicsDevice      gfx,
     ECS::Registry&      reg,
     PhysicsContext&     pc,

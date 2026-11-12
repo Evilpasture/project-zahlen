@@ -430,7 +430,7 @@ void AttachTrigger(ECS::Registry& registry, const BSP::EntityRecord& record, Com
 } // namespace
 
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(registry, map, options)) {
+    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(BSP::ResolutionQuery {registry}, map, options)) {
         // A teleport landing point is pure logic and has nothing in the scene:
         // DescribeScene keeps info_* classes out of the spawned entities, so
         // this layer creates the lightweight entity the trigger resolves its

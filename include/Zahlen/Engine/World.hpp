@@ -39,14 +39,10 @@ class ZHLN_API World {
     World(const World&)                    = delete;
     auto operator=(const World&) -> World& = delete;
 
-    auto GetRegistry() -> ECS::Registry&;
-    [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
     auto GetPhysics() -> PhysicsContext&;
     // No camera accessor here. The main camera is a component on the entity
-    // carrying MainCameraTagComponent, and callers resolve it the way they resolve
-    // any other component: through the registry. A helper that hid that lookup was
-    // what made "no camera yet" look like a fatal state instead of an empty
-    // GetSingleton, and it could not answer the world it described.
+    // carrying MainCameraTagComponent. Engine callers resolve it through the
+    // entity capability; scheduled systems declare the components they read.
 
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
     auto GetEventBus() noexcept -> ECS::EventBus&;
@@ -67,6 +63,8 @@ class ZHLN_API World {
     // needs the *writable* producer. These are deliberately not public: a
     // caller gets a std::span<const Entity>, never a container to mutate.
     friend class Engine;
+    auto GetRegistry() -> ECS::Registry&;
+    [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
     auto VisibleEntitiesForServices() noexcept -> VisibilityList&;
     auto VisibleShadowEntitiesForServices() noexcept -> VisibilityList&;
 

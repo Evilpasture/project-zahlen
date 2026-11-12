@@ -182,7 +182,7 @@ auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -
 
 // --- Resolution -------------------------------------------------------------
 
-auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity {
+auto FindMatchingEntity(ResolutionQuery query, std::string_view matchName, std::string_view modelSource) -> Entity {
     if (!modelSource.empty()) {
         // A targetname is not an entity identity: Source deliberately allows
         // many brush entities to share one so an input can address the whole
@@ -192,8 +192,8 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
         if (modelSource.starts_with('*')) {
             modelSuffix = "#model_" + std::string(modelSource.substr(1));
         }
-        for (const Entity e: registry.GetEntitiesWith<Components::SceneSourceComponent>()) {
-            const auto srcComp = registry.Get<Components::SceneSourceComponent>(e);
+        for (const Entity e: query.Entities<Components::SceneSourceComponent>()) {
+            const auto srcComp = query.Get<Components::SceneSourceComponent>(e);
             if (!srcComp) {
                 continue;
             }
@@ -203,8 +203,8 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
             }
         }
     }
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
+    for (const Entity e: query.Entities<Components::NameComponent>()) {
+        const auto nameComp = query.Get<Components::NameComponent>(e);
         if (nameComp && std::string_view(nameComp->name) == matchName) {
             return e;
         }
@@ -292,7 +292,7 @@ namespace {
 
 } // namespace
 
-auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, const ImportOptions& options) -> std::vector<EntityRecord> {
+auto DescribeInteractiveEntities(ResolutionQuery query, const BSPMap& map, const ImportOptions& options) -> std::vector<EntityRecord> {
     std::vector<EntityRecord> records;
     records.reserve(map.entities.size() / 4);
 
@@ -338,7 +338,7 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
         }
 
         record.matchName = record.targetName.empty() ? FallbackMatchName(className, record.model) : record.targetName;
-        record.entity    = FindMatchingEntity(registry, record.matchName, record.model);
+        record.entity    = FindMatchingEntity(query, record.matchName, record.model);
         if (record.entity == Entity::Null()) {
             continue;
         }

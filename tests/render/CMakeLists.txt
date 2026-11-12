@@ -210,6 +210,11 @@ zahlen_add_gpu_test_group(GPU_Application 120
     TestApplication.cpp
 )
 target_link_libraries(GPU_Application PRIVATE zahlen_application)
+if(TARGET zahlen_editor)
+    target_link_libraries(GPU_Application PRIVATE zahlen_editor)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_EDITOR=1)
+endif()
 if(TARGET zahlen_skeletal_animation)
     target_link_libraries(GPU_Application PRIVATE zahlen_skeletal_animation)
     target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)

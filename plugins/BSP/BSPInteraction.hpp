@@ -36,7 +36,7 @@
 #include "BSPRead.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <cstdint>
 #include <optional>
@@ -167,10 +167,12 @@ struct EntityRecord {
     std::string matchName;
 };
 
+using ResolutionQuery = ECS::Query<const Components::SceneSourceComponent, const Components::NameComponent>;
+
 // Every interactive entity in @p map, decoded, with `entity` resolved against
-// the entities already in @p registry. The registry is read, never written:
+// the entities already in @p query. The registry is read, never written:
 // this describes what should happen, and the caller does it.
-[[nodiscard]] auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
+[[nodiscard]] auto DescribeInteractiveEntities(ResolutionQuery query, const BSPMap& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
 
 // The entity the lump entry @p matchName / @p modelSource refers to, or
 // Entity::Null(). A model source ("*12") is matched against the scene's brush
@@ -178,6 +180,6 @@ struct EntityRecord {
 // lets many brush entities share one so an input can address the whole group,
 // and matching by name alone attaches every member of a named door bank to the
 // first entity that answers.
-[[nodiscard]] auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity;
+[[nodiscard]] auto FindMatchingEntity(ResolutionQuery query, std::string_view matchName, std::string_view modelSource) -> Entity;
 
 } // namespace ZHLN::BSP

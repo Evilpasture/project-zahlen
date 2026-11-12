@@ -5,8 +5,8 @@
 //
 // The headless half of the logic benchmark (zahlen_benchmark).
 //
-// What it times is a standalone ZHLN::World -- the ECS registry and the Jolt
-// PhysicsContext behind it -- stepped at a fixed timestep, plus the per-entity
+// What it times is a standalone ECS registry and the Jolt PhysicsContext
+// of a ZHLN::World -- stepped at a fixed timestep, plus the per-entity
 // transform sync a game loop would run over the bodies physics just wrote.
 // Nothing here names the Engine, a render header, a window or Clay: the target
 // this header belongs to links zahlen_engine and nothing else, so a CI job, a
@@ -29,6 +29,8 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+
+namespace ZHLN::ECS { class Registry; }
 
 namespace ZHLN::Bench {
 
@@ -117,6 +119,8 @@ class ZHLN_STATIC_API LogicBenchmark {
     auto SpawnFloor() -> void;
 
     std::unique_ptr<World> m_world;
+    // Benchmark-owned data-only ECS; physics bodies are released before World.
+    std::unique_ptr<ECS::Registry> m_registry;
     // The run clock: wall time since the object was constructed, so Initialize
     // seeds m_runStartSeconds from it and totalTimeSec is the difference.
     Clock              m_clock;

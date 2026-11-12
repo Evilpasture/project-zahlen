@@ -5,7 +5,6 @@
 // Public Engine & Jolt Headers
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>

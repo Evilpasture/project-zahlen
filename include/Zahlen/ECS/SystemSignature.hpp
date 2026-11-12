@@ -149,14 +149,9 @@ struct SystemSignature {
                     appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::EventToken<Event>>(), TemplatedDetail::EventParamTraits<Clean>::mode);
                 }
                 appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<EventBus>>(), Access::Read);
-            } else if constexpr (std::is_same_v<Param, Registry&>) {
-                // Direct mutable registry access can touch any component,
-                // including families not listed in this system's Query parameters.
-                accesses.push_back({AllComponents, Access::Write});
-            } else if constexpr (std::is_same_v<Param, const Registry&>) {
-                // Read-only registry access conflicts with writers of any
-                // component, while still allowing concurrent read-only passes.
-                accesses.push_back({AllComponents, Access::Read});
+            } else {
+                static_assert(!std::is_same_v<std::remove_cvref_t<Param>, Registry>,
+                              "System signatures cannot declare Registry; use Query, ExclusiveQuery or EntityCommandBuffer.");
             }
         });
         return accesses;

@@ -15,6 +15,7 @@
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/ECS/Inspection.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -41,6 +42,8 @@ void Entities::Despawn(Entity entity) noexcept {
 auto Entities::IsAlive(Entity entity) const noexcept -> bool {
     return Registry().IsAlive(entity);
 }
+
+auto Entities::Inspect() const noexcept -> ECS::Inspection { return ECS::Inspection {Registry()}; }
 
 auto Entities::Registry() const noexcept -> ECS::Registry& {
     return ZHLN::EngineAccess::RegistryOf(*_engine);

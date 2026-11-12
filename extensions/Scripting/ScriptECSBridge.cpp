@@ -7,16 +7,15 @@ namespace ZHLN {
 
 auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode> {
     if (obj.ownerEntity != Entity::Null()) {
-        if (!m_registry.IsAlive(obj.ownerEntity)) {
+        if (!m_inspection.IsAlive(obj.ownerEntity)) {
             return std::unexpected(ScriptError::EntityNotFound);
         }
 
-        uint32_t familyID = ECS::Registry::GetFamilyIDFromName(obj.compName);
-        if (familyID == 0xFFFFFFFF) {
+        if (!m_inspection.IsRegistered(obj.compName)) {
             return std::unexpected(ScriptError::ComponentNotFound);
         }
 
-        void* compPtr = m_registry.GetRawByFamily(obj.ownerEntity, familyID);
+        void* compPtr = m_inspection.Component(obj.ownerEntity, obj.compName);
         if (compPtr == nullptr) {
             return std::unexpected(ScriptError::ComponentNotFound);
         }
@@ -66,7 +65,7 @@ auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::
 }
 
 auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, ErrorCode> {
-    if (!m_registry.IsAlive(entity)) {
+    if (!m_inspection.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
 
@@ -76,12 +75,11 @@ auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std:
         return std::unexpected(ScriptError::TypeNotFound);
     }
 
-    uint32_t familyID = ECS::Registry::GetFamilyIDFromName(compName);
-    if (familyID == 0xFFFFFFFF) {
+    if (!m_inspection.IsRegistered(compName)) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
 
-    const void* compPtr = m_registry.GetRawByFamily(entity, familyID);
+    const void* compPtr = m_inspection.Component(entity, compName);
     if (compPtr == nullptr) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
@@ -151,7 +149,7 @@ auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view
 
 auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val)
     -> std::expected<void, ErrorCode> {
-    if (!m_registry.IsAlive(entity)) {
+    if (!m_inspection.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
 
@@ -161,12 +159,11 @@ auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std:
         return std::unexpected(ScriptError::TypeNotFound);
     }
 
-    uint32_t familyID = ECS::Registry::GetFamilyIDFromName(compName);
-    if (familyID == 0xFFFFFFFF) {
+    if (!m_inspection.IsRegistered(compName)) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
 
-    void* compPtr = m_registry.GetRawByFamily(entity, familyID);
+    void* compPtr = m_inspection.Component(entity, compName);
     if (compPtr == nullptr) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
@@ -249,7 +246,7 @@ auto ScriptECSBridge::SetArrayElement(ScriptVal& arrayVal, size_t index, const S
 
 auto ScriptECSBridge::GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index)
     -> std::expected<ScriptVal, ErrorCode> {
-    if (!m_registry.IsAlive(entity)) {
+    if (!m_inspection.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
 
@@ -259,12 +256,11 @@ auto ScriptECSBridge::GetPropertyElementAt(Entity entity, std::string_view compN
         return std::unexpected(ScriptError::TypeNotFound);
     }
 
-    uint32_t familyID = ECS::Registry::GetFamilyIDFromName(compName);
-    if (familyID == 0xFFFFFFFF) {
+    if (!m_inspection.IsRegistered(compName)) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
 
-    const void* compPtr = m_registry.GetRawByFamily(entity, familyID);
+    const void* compPtr = m_inspection.Component(entity, compName);
     if (compPtr == nullptr) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
@@ -296,7 +292,7 @@ auto ScriptECSBridge::GetPropertyElementAt(Entity entity, std::string_view compN
 
 auto ScriptECSBridge::SetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index, const ScriptVal& val)
     -> std::expected<void, ErrorCode> {
-    if (!m_registry.IsAlive(entity)) {
+    if (!m_inspection.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
 
@@ -306,12 +302,11 @@ auto ScriptECSBridge::SetPropertyElementAt(Entity entity, std::string_view compN
         return std::unexpected(ScriptError::TypeNotFound);
     }
 
-    uint32_t familyID = ECS::Registry::GetFamilyIDFromName(compName);
-    if (familyID == 0xFFFFFFFF) {
+    if (!m_inspection.IsRegistered(compName)) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }
 
-    void* compPtr = m_registry.GetRawByFamily(entity, familyID);
+    void* compPtr = m_inspection.Component(entity, compName);
     if (compPtr == nullptr) {
         return std::unexpected(ScriptError::ComponentNotFound);
     }

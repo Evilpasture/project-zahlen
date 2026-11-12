@@ -8,7 +8,7 @@
 // that the transpiler fallback (scripts/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -65,9 +65,9 @@ consteval auto MakeComponentKind() -> ComponentKind {
     return ComponentKind {// The same spelling the registry registers the component under, so the
                           // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
                           .name   = ZHLN::ECS::BoxedName<C>(),
-                          .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
-                          .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
-                          .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
+                          .has    = [](const ZHLN::Entities& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
+                          .add    = [](ZHLN::Entities& reg, ZHLN::Entity entity) -> void { reg.Attach<C>(entity, C {}); },
+                          .remove = [](ZHLN::Entities& reg, ZHLN::Entity entity) -> void { reg.Detach<C>(entity); }
     };
 }
 
@@ -88,7 +88,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
 // has to know which subtree is chrome. Walk HierarchyComponent upward
 // from `e`; anything that reaches `editorRoot` is the editor's own.
 // Bounded so a corrupted parent cycle cannot hang the frame.
-[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot) -> bool {
+[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::Entities& reg, ZHLN::Entity editorRoot) -> bool {
     if (editorRoot == ZHLN::Entity::Null()) {
         return false;
     }
@@ -211,7 +211,7 @@ auto ComponentKinds() noexcept -> std::span<const ComponentKind> {
     return kComponentKinds;
 }
 
-auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Entity {
+auto CreateEntity(ZHLN::Entities& reg, std::string_view name) -> ZHLN::Entity {
     const ZHLN::Entity entity = reg.Create();
 
     std::array<char, 64>   nameBuf {};
@@ -223,15 +223,15 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
     // it on the same frame does not depend on a system having run.
     const auto local = Mat4x4::Identity();
 
-    reg.Add(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
-    reg.Add(entity, Comp::TransformComponent {});
-    reg.Add(entity, Comp::WorldTransformComponent {.world = local, .previous = local});
+    reg.Attach(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
+    reg.Attach(entity, Comp::TransformComponent {});
+    reg.Attach(entity, Comp::WorldTransformComponent {.world = local, .previous = local});
 
     return entity;
 }
 
 void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
-    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto               reg    = engine.Entities();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -241,7 +241,7 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
     if (victim == ZHLN::Entity::Null() || !reg.IsAlive(victim)) {
         return;
     }
-    ZHLN::DespawnEntity(engine, victim);
+    reg.Despawn(victim);
 }
 
 // ============================================================================
@@ -374,7 +374,7 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
     return kSpawnShapeNames;
 }
 
-void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput) noexcept {
+void UpdateTransformMode(ZHLN::Entities& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput) noexcept {
     const auto input = reg.GetSingleton<Comp::InputStateComponent>();
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
@@ -523,7 +523,7 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
 }
 
 void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -535,7 +535,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     // parent walks; sibling order is the entity index so the list is
     // deterministic without a private UI layout stamp.
     std::vector<Row> rows;
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
+    for (const ZHLN::Entity e: reg.EntitiesWith<Comp::NameComponent>()) {
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
@@ -629,7 +629,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     gui.EndColumn();
 }
 
-void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
+void DrawInspectorPanel(GUI::Frame& gui, ZHLN::Entities& reg, EditorState& state, std::string_view id) {
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
@@ -652,7 +652,7 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
     const auto section = [&](std::string_view sectionId, std::string_view title, auto comp, auto&& reflect) -> void {
         if (!comp)
             return;
-        using CompT = typename decltype(comp)::value_type;
+        using CompT = std::remove_const_t<typename decltype(comp)::value_type>;
         if (gui.BeginCollapsingHeader(title, true)) {
             CompT local = *comp;
             reflect(local, MakeRowSink(gui, sectionId));
@@ -664,7 +664,7 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
             // patch below, which would otherwise write the stale copy back.
             std::array<char, 64> removeBuf {};
             if (gui.Button(ZHLN::FormatTo(removeBuf, "Remove {}", title), {0.40f, 0.16f, 0.16f, 0.90f})) {
-                reg.Remove<CompT>(sel);
+                reg.Detach<CompT>(sel);
                 gui.EndCollapsingHeader();
                 return;
             }

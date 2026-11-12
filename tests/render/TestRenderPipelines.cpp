@@ -245,11 +245,14 @@ struct RenderPipelinesTestSuite {
             // An independent Registry has no Engine cleanup system. Release
             // its owned meshes explicitly before clearing its data-only ECS.
             ZHLN::ECS::Registry standalone;
-            const auto          loose      = ZHLN::PrefabFactory::CreateBox(engine->Graphics(), standalone, std::nullopt, {0.25f, 0.25f, 0.25f});
-            const auto          looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
+            auto looseMesh = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.25f, 0.25f, 0.25f});
+            const auto looseID = ZHLN::HashAssetID("standalone_owned_mesh_test");
+            rc.RegisterMesh(looseID, looseMesh);
+            const auto loose = standalone.Create(ZHLN::Components::OwnedMeshComponent {.meshAsset = looseID, .mesh = looseMesh});
+            const auto looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
             if (ZHLN::Test::ExpectTrue(looseOwner.has_value())) {
                 const auto looseID = looseOwner->meshAsset;
-                ZHLN::PrefabFactory::ReleaseOwnedMeshes(engine->Graphics(), standalone);
+                ZHLN::SceneResources::Release(engine->Graphics(), *looseOwner);
                 standalone.Clear();
                 ZHLN::Test::ExpectFalse(rc.Mesh(looseID).has_value());
             }

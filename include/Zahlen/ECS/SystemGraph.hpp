@@ -32,6 +32,13 @@
 
 namespace ZHLN::ECS {
 
+class Inspection;
+
+template <typename T>
+inline constexpr bool IsUnscheduledWorldAccess =
+    std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>, Registry> ||
+    std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>, Inspection>;
+
 // What the core hands a node's function: the carrier the graph was executed with,
 // and the storage this node owns. One of these is built per invocation on the
 // invoking thread's stack -- the carrier itself is shared by every node, so
@@ -85,21 +92,10 @@ struct ParameterResolver<ExclusiveQuery<Comps...>> {
     }
 };
 
-template <>
-struct ParameterResolver<Registry&> {
-    template <typename CarrierType>
-    static auto Resolve(CarrierType& carrier) noexcept -> Registry& {
-        return carrier.registry;
-    }
-};
-
-template <>
-struct ParameterResolver<const Registry&> {
-    template <typename CarrierType>
-    static auto Resolve(CarrierType& carrier) noexcept -> const Registry& {
-        return carrier.registry;
-    }
-};
+// A graph never hands systems the raw registry, even if a service bundle
+// happens to contain one. Structural work uses an exclusive query or ECB.
+template <> struct ParameterResolver<Registry&> {};
+template <> struct ParameterResolver<const Registry&> {};
 
 template <>
 struct ParameterResolver<EntityCommandBuffer&> {
@@ -137,8 +133,9 @@ struct ParameterResolver<FrameIndex> {
 template <typename T>
 struct ParameterResolver<Res<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+        requires(!IsUnscheduledWorldAccess<T> &&
+                 (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
     static auto Resolve(CarrierType& carrier) noexcept -> Res<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -155,8 +152,9 @@ struct ParameterResolver<Res<T>> {
 template <typename T>
 struct ParameterResolver<ResMut<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+        requires(!IsUnscheduledWorldAccess<T> &&
+                 (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
     static auto Resolve(CarrierType& carrier) noexcept -> ResMut<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -243,6 +241,7 @@ struct ParameterResolver<Param> {
     using Clean = std::remove_const_t<Value>;
 
     template <typename CarrierType>
+        requires (!IsUnscheduledWorldAccess<Clean>)
     static auto Resolve(CarrierType& carrier) noexcept -> Param {
         if constexpr (Reflect::BundleProvides<Clean, typename CarrierType::Services>()) {
             return *Reflect::FindService<Clean>(carrier.services);
@@ -534,9 +533,10 @@ consteval auto SequentialParameters() -> bool {
 // this graph provide" has exactly one answer, in the resolver table rather than
 // in a hand-maintained list beside it.
 template <typename CarrierT, typename Param>
-concept ResolvableFrom = requires(CarrierT& carrier) {
+concept ResolvableFrom = !IsUnscheduledWorldAccess<Param> &&
+    requires(CarrierT& carrier) {
     // The parameter is resolved as written. A reference parameter is part of the
-    // signature's meaning (Registry& is the world; Res<T> is the indirection),
+    // signature's meaning (Res<T> is the indirection),
     // so stripping the reference here would silently change what a system asked
     // for -- and would miss the specialization that answers it.
     ParameterResolver<Param>::Resolve(carrier);
@@ -576,7 +576,7 @@ consteval void AdmitParameters() {
     static_assert(
         EveryParameterResolvable<CarrierT, SystemFn>(std::make_index_sequence<Reflect::CallableInspector<SystemFn>::ParameterCount()> {}),
         "A system parameter cannot be resolved by this graph. Either add the service it asks for to the graph's service bundle, "
-        "or ask for something every graph resolves: Query<...>, ExclusiveQuery<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
+        "or ask for something every graph resolves: Query<...>, ExclusiveQuery<...>, EntityCommandBuffer&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
         "for the node's own state, EventReader<T>/EventWriter<T> (with EventBus in services), Res<T>/ResMut<T>/Optional<T&> for a service "
         "the bundle provides, SoAScratch<T, N> or LinearArena&."
     );
@@ -850,10 +850,6 @@ class SystemGraph: public SystemGraphCore {
         CarrierType carrier {.registry = _registry, .services = _services, .frame = frame, .ecb = &commands};
         SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
         commands.Playback();
-    }
-
-    [[nodiscard]] auto GetRegistry() noexcept -> ECS::Registry& {
-        return _registry;
     }
 
   private:

@@ -26,9 +26,11 @@ set(ZHLN_VFX_MODULES
 
 # The ordinary translation units of this target, named.
 set(ZHLN_VFX_SOURCES
+    CombatFXLifecycle.cpp
     Lightning.cpp
     LightningUpdate.cpp
     Explosion.cpp
+    ExplosionLifecycle.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)

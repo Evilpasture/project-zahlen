@@ -19,6 +19,9 @@
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#if defined(ZHLN_HAS_EDITOR)
+#include <editor/GUIEditor.hpp>
+#endif
 #if defined(ZHLN_HAS_ANIMATION)
 #include <Animation/AnimationSystem.hpp>
 #endif
@@ -566,6 +569,44 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
     ExpectUserClosed(result);
+    Expect(ran);
+}
+#endif
+
+#if defined(ZHLN_HAS_EDITOR)
+void test_editor_capability_crud_is_immediate_and_destruction_is_deferred() {
+    auto app = App(EngineConfig {.appName = "EditorCapabilityTest", .validationMode = ValidationMode::Off, .headless = true});
+    bool ran = false;
+    app.OnStart([&](Engine& engine) {
+        auto entities = engine.Entities();
+        Editor::EditorState state;
+        const Entity entity = Editor::CreateEntity(entities, "Edited");
+        Expect(entities.IsAlive(entity));
+        Expect(entities.Get<Components::NameComponent>(entity).has_value());
+        Expect(entities.Get<Components::TransformComponent>(entity).has_value());
+        Expect(entities.Get<Components::WorldTransformComponent>(entity).has_value());
+        bool foundPBR = false;
+        for (const auto& kind: Editor::ComponentKinds()) {
+            if (kind.name == "PBRComponent") {
+                foundPBR = true;
+                Expect(!kind.has(entities, entity));
+                kind.add(entities, entity);
+                Expect(kind.has(entities, entity));
+                kind.remove(entities, entity);
+                Expect(!kind.has(entities, entity));
+            }
+        }
+        Expect(foundPBR);
+        state.selectedEntity = entity;
+        Editor::DestroySelected(engine, state);
+        Expect(state.selectedEntity == Entity::Null());
+        Expect(entities.IsAlive(entity));
+        Expect(entities.Get<Components::PendingDestroy>(entity).has_value());
+        engine.ProcessPendingDestroy();
+        Expect(!entities.IsAlive(entity));
+        ran = true;
+    });
+    ExpectUserClosed(app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); }));
     Expect(ran);
 }
 #endif

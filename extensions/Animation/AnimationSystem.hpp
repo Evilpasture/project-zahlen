@@ -19,13 +19,6 @@ class PoseUploadQueue;
 
 namespace Animation {
 
-using AnimationReleaseQuery = ECS::Query<Components::AnimatorComponent&, const Components::PendingDestroy>;
-
-// Run only at the externally ordered cleanup boundary, or with equivalent
-// isolation from animation stepping and component mutation. On full cleanup,
-// unreferenced handles in the animation context are cleared as well.
-void ReleaseOwnedAnimations(AnimationReleaseQuery query, AnimationContext& animations, bool all);
-
 struct AnimationSyncSystem {
     static void Update(
         ECS::Query<

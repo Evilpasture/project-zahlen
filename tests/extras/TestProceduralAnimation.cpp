@@ -172,28 +172,6 @@ struct ProceduralAnimationTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::ErrorCode> typed_animation_cleanup_preserves_survivors_and_clears_orphans() {
-            using namespace ZHLN;
-            ECS::Registry registry;
-            Animation::AnimationContext animations;
-            const auto pendingID = animations.Create(1);
-            const auto liveID = animations.Create(2);
-            const auto orphanID = animations.Create(3);
-            const auto pending = registry.Create(Components::AnimatorComponent {.animationID = pendingID}, Components::PendingDestroy {});
-            const auto live = registry.Create(Components::AnimatorComponent {.animationID = liveID});
-            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, false);
-            if (animations.Valid(pendingID) || !animations.Valid(liveID) || !animations.Valid(orphanID) ||
-                registry.Get<Components::AnimatorComponent>(pending)->animationID.IsValid() ||
-                registry.Get<Components::AnimatorComponent>(live)->animationID != liveID || !registry.IsAlive(pending))
-                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
-            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, false);
-            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, true);
-            if (animations.Valid(liveID) || animations.Valid(orphanID) || animations.ActiveCount() != 0 ||
-                registry.Get<Components::AnimatorComponent>(live)->animationID.IsValid())
-                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
-            return {};
-        }
-
         std::expected<void, ZHLN::ErrorCode> procedural_update_immediately_creates_item_world_and_uploads_pose() {
             using namespace ZHLN;
             auto created = World::Create(PhysicsConfig {});
@@ -207,7 +185,7 @@ struct ProceduralAnimationTestSuite {
                                   .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
                                   .extensions = extensions, .poseUploads = uploads};
             const Frame frame {.dt = {1.0f / 60.0f}};
-            auto& reg = world->GetRegistry();
+            ECS::Registry reg;
             ECS::SimGraph graph {reg, services};
             ProceduralAnimation::AddEvaluator(graph);
             graph.AddSystem<&ObserveItemWorld>();

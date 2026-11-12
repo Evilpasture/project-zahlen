@@ -153,8 +153,8 @@ module;
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -171,9 +171,9 @@ module;
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
@@ -223,10 +223,10 @@ using JPH::Vec4;
 } // namespace JPH
 
 export namespace ZHLN {
-using ZHLN::Quat;
 using ZHLN::Dot;
-using ZHLN::Rotate;
 using ZHLN::FromTo;
+using ZHLN::Quat;
+using ZHLN::Rotate;
 using ZHLN::Slerp;
 using ZHLN::operator==;
 using ZHLN::operator+;
@@ -342,8 +342,8 @@ using ZHLN::CSGOperation;
 using ZHLN::Extent2D;
 using ZHLN::FontAtlas;
 using ZHLN::FrameData;
-using ZHLN::Frustum;
 using ZHLN::FrameError;
+using ZHLN::Frustum;
 using ZHLN::GISettings;
 using ZHLN::GlyphMetric;
 using ZHLN::HashAssetID;
@@ -493,7 +493,6 @@ using ZHLN::AudioContext;
 using ZHLN::AudioEvent;
 using ZHLN::AudioEventType;
 using ZHLN::AudioFilterType;
-using ZHLN::VoiceID;
 using ZHLN::AudioNoiseType;
 using ZHLN::AudioOcclusionDesc;
 using ZHLN::AudioPlaybackMode;
@@ -514,6 +513,7 @@ using ZHLN::kAudioWaveformTypeCount;
 using ZHLN::kMaxAudioBuses;
 using ZHLN::MAX_VOICE_SLOTS;
 using ZHLN::VoiceDesc;
+using ZHLN::VoiceID;
 
 using ZHLN::ActionID;
 using ZHLN::ActionKind;
@@ -586,7 +586,6 @@ using ZHLN::PrefabFactory::InstantiatePrefab;
 using ZHLN::PrefabFactory::LoadModelPrefab;
 using ZHLN::PrefabFactory::LoadTexture;
 using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
-using ZHLN::PrefabFactory::RebuildVulkanResources;
 using ZHLN::PrefabFactory::SpawnParams;
 } // namespace PrefabFactory
 } // namespace ZHLN

@@ -190,6 +190,19 @@ namespace {
 
 struct BSPInteractionTestSuite {
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> typed_resolution_prefers_unique_brush_model() {
+            ZHLN::ECS::Registry registry;
+            const auto first = registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
+                ZHLN::Components::SceneSourceComponent {.source = ZHLN::String256 {"maps/example.bsp#model_1"}});
+            const auto second = registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
+                ZHLN::Components::SceneSourceComponent {.source = ZHLN::String256 {"maps/example.bsp#model_2"}});
+            const ZHLN::BSP::ResolutionQuery query {registry};
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "shared", "*2") == second);
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "shared", "") == first);
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "absent", "*99") == ZHLN::Entity::Null());
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> describe_scene_converts_interactive_entities() {
             const auto map   = BuildSyntheticMap();
             const auto scene = ZHLN::BSP::DescribeScene(map, "maps/test.bsp");
@@ -252,7 +265,7 @@ struct BSPInteractionTestSuite {
             registry.RegisterComponent<ZHLN::Components::TransformComponent>();
             registry.RegisterComponent<ZHLN::Interaction::TeleportDestinationComponent>();
             const ZHLN::BSP::ImportOptions options {};
-            const auto decoded = ZHLN::BSP::DescribeInteractiveEntities(registry, map, options);
+            const auto decoded = ZHLN::BSP::DescribeInteractiveEntities(ZHLN::BSP::ResolutionQuery {registry}, map, options);
             ZHLN::Test::ExpectEq(decoded.size(), size_t {1});
             if (decoded.size() != 1) return {};
 

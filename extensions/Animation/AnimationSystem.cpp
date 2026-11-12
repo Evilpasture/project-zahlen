@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -22,7 +22,18 @@ void ReleaseAnimations(Engine& engine, bool all) {
     if (!animOpt) {
         return;
     }
-    ReleaseOwnedAnimations(AnimationReleaseQuery {ZHLN::EngineAccess::RegistryOf(engine)}, *animOpt, all);
+    auto entities = engine.Entities();
+    std::vector<AnimationID> doomed;
+    for (const Entity e: entities.EntitiesWith<Components::AnimatorComponent>()) {
+        if (all || entities.Get<Components::PendingDestroy>(e)) {
+            entities.Patch<Components::AnimatorComponent>(e, [&](Components::AnimatorComponent& comp) {
+                const AnimationID handle = std::exchange(comp.animationID, AnimationID::Null());
+                if (!all && handle.IsValid()) doomed.push_back(handle);
+            });
+        }
+    }
+    if (all) animOpt->Clear();
+    else if (!doomed.empty()) animOpt->Destroy(doomed);
 }
 
 void AddSystems(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
@@ -45,37 +56,6 @@ void AppendUniqueBinding(std::vector<SkeletonBinding>& bindings, SkeletonBinding
 }
 
 } // namespace
-
-void ReleaseOwnedAnimations(AnimationReleaseQuery query, AnimationContext& animations, bool all) {
-    const auto owners = query.Entities<Components::AnimatorComponent>();
-    if (all) {
-        if (!owners.empty()) {
-            auto components = query.Raw<Components::AnimatorComponent>();
-            for (Components::AnimatorComponent& comp: components) {
-                comp.animationID = AnimationID::Null();
-            }
-        }
-        animations.Clear();
-        return;
-    }
-    if (owners.empty()) {
-        return;
-    }
-    std::vector<AnimationID> doomed;
-    doomed.reserve(owners.size());
-    auto components = query.Raw<Components::AnimatorComponent>();
-    for (size_t i = 0; i < owners.size(); ++i) {
-        if (query.Get<Components::PendingDestroy>(owners[i]).has_value()) {
-            const AnimationID handle = std::exchange(components[i].animationID, AnimationID::Null());
-            if (handle.IsValid()) {
-                doomed.push_back(handle);
-            }
-        }
-    }
-    if (!doomed.empty()) {
-        animations.Destroy(doomed);
-    }
-}
 
 void AnimationSyncSystem::Update(
     ECS::Query<

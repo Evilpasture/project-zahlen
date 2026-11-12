@@ -3,7 +3,7 @@
 
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -109,7 +109,7 @@ constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
-    auto& reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     if (auto st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
@@ -147,7 +147,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
 void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     gui.SetFontAtlas(engine.GetFontAtlas());
     ZHLN::GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
 
@@ -218,7 +218,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
                     .gap          = 6.0f,
                     .direction    = ZHLN::GUI::Direction::Column
                 },
-                [&]() -> void { ZHLN::Editor::DrawInspectorPanel(ui, reg, s_NativeEditorState, "Inspector"); }
+                [&]() -> void { ZHLN::Editor::DrawInspectorPanel(ui, entities, s_NativeEditorState, "Inspector"); }
             );
         }
     );
@@ -231,15 +231,16 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     ZHLN::Clock clock;
     // The editor poses the world's camera: a world with no main camera entity has
     // none to pose.
-    auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
+    auto entities = engine.Entities();
+    const auto cameraEntities = entities.EntitiesWith<ZHLN::Components::CameraComponent>();
+    if (cameraEntities.empty()) {
         return std::unexpected(ZHLN::AppError::SceneInitFailed);
     }
-    ZHLN::Camera& cam = cameraComp->camera;
-
-    cam.position = {0.0f, 20.0f, 40.0f};
-    cam.yaw      = ZHLN::DegF{-90.0f};
-    cam.pitch    = ZHLN::DegF{-20.0f};
+    entities.Patch<ZHLN::Components::CameraComponent>(cameraEntities.front(), [](auto& component) {
+        component.camera.position = {0.0f, 20.0f, 40.0f};
+        component.camera.yaw = ZHLN::DegF {-90.0f};
+        component.camera.pitch = ZHLN::DegF {-20.0f};
+    });
 
     const uint32_t maxFramesPerSecond = engine.MaxFramesPerSecond();
     const double   targetFrameTime =
@@ -259,8 +260,10 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         engine.ProcessEvents();
         if (!engine.IsRunning()) break;
 
-        auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
-        auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+        auto  state = entities.GetSingleton<ZHLN::Components::InputStateComponent>();
+        const auto cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
+        if (!cameraComp) return std::unexpected(ZHLN::AppError::SceneInitFailed);
+        const ZHLN::Camera cam = cameraComp->camera;
 
         auto winSize = engine.GetPlatformHost().GetSize();
 
@@ -324,7 +327,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // the user meant as "abort the manipulation".
         const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
         ZHLN::Editor::UpdateTransformMode(
-            reg, s_NativeEditorState, cam, ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height},
+            entities, s_NativeEditorState, cam, ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height},
             uiCapturesKeyboard
         );
 
@@ -366,8 +369,8 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
                 // unowned bodies and removed components are not selectable.
                 s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
                 if (hit.hasHit) {
-                    for (ZHLN::Entity entity: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
-                        const auto physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
+                    for (ZHLN::Entity entity: entities.EntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+                        const auto physics = entities.Get<ZHLN::Components::PhysicsComponent>(entity);
                         if (physics && physics->physicsID == hit.bodyID) {
                             s_NativeEditorState.selectedEntity = entity;
                             break;
@@ -426,14 +429,15 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
 
         if (state && state->needsResize) {
             engine.Graphics().SetResolution(state->newSize);
-            state->needsResize = false;
+            const auto inputs = entities.EntitiesWith<ZHLN::Components::InputStateComponent>();
+            if (!inputs.empty()) entities.Patch<ZHLN::Components::InputStateComponent>(inputs.front(), [](auto& input) { input.needsResize = false; });
             continue;
         }
 
         {
-            const ZHLN::Entity camEnt = ZHLN::EngineAccess::RegistryOf(engine).SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-            if (camEnt != ZHLN::Entity::Null()) {
-                ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::FreeCam::FreeCamComponent>(camEnt, [&](auto& fc) -> auto { fc.enabled = !transformActive; });
+            const auto cameras = entities.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            if (!cameras.empty()) {
+                entities.Patch<ZHLN::FreeCam::FreeCamComponent>(cameras.front(), [&](auto& fc) { fc.enabled = !transformActive; });
             }
         }
         if (s_EditorState.simulationRunning) {

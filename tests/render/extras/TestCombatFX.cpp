@@ -105,7 +105,10 @@ struct CombatFXTestSuite {
             const ZHLN::FVec3 hitNorm3{-1.0f, 0.0f, 0.0f};
             combatFX.SpawnImpact(*engine, hitPos3, hitNorm3, 4);
 
-            // Playback ECB to instantiate queued decal entities
+            // The bare entity exists immediately, but decal components remain
+            // invisible until the caller-owned main buffer is played back.
+            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::Components::DecalComponent>().empty());
+            ZHLN::Test::ExpectTrue(!engine->Commands().Empty());
             engine->Commands().Playback();
 
             const auto decalEntities = reg.GetEntitiesWith<ZHLN::Components::DecalComponent>();

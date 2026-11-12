@@ -84,7 +84,7 @@ LogicBenchmark::LogicBenchmark() {
     m_history.reserve(kHistoryCapacity);
 }
 
-LogicBenchmark::~LogicBenchmark() = default;
+LogicBenchmark::~LogicBenchmark() { Reset(); }
 
 auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& physCfg) -> bool {
     Reset();
@@ -98,6 +98,7 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     }
 
     m_world = std::move(world.value());
+    m_registry = std::make_unique<ECS::Registry>();
     // The ceiling is what the PhysicsSystem was built for, less the reserve the
     // header documents. Spawning is bounded by this rather than by Jolt's own
     // refusal, which comes back as a silently invalid body.
@@ -129,7 +130,7 @@ auto LogicBenchmark::SpawnFloor() -> void {
     // A slab rather than a Jolt plane: a plane is infinite, and the workload is
     // meant to land on a surface whose contacts cost what any other surface's
     // do.
-    m_world->GetRegistry().Create(
+    m_registry->Create(
         Components::PhysicsComponent {
             .physicsID = physics.CreateRigidBody(
                 slab, {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, Layers::ID::NON_MOVING
@@ -145,7 +146,7 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         return;
     }
 
-    auto&                registry = m_world->GetRegistry();
+    auto&                registry = *m_registry;
     auto&                physics  = m_world->GetPhysics();
     const JPH::ShapeRefC cube     = physics.GetOrCreateShape(Physics::ShapeType::Box, kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent);
     if (cube == nullptr) {
@@ -187,7 +188,7 @@ void LogicBenchmark::Step(float fixedDt) {
     }
 
     auto& physics  = m_world->GetPhysics();
-    auto& registry = m_world->GetRegistry();
+    auto& registry = *m_registry;
 
     const TickTimer::time_point begin = TickTimer::now();
 
@@ -235,9 +236,18 @@ void LogicBenchmark::Step(float fixedDt) {
 }
 
 void LogicBenchmark::Reset() {
-    // The world owns every body it holds: dropping it destroys the Jolt bodies
-    // through the PhysicsComponents and releases its Jolt registration, so
-    // there is nothing left to unwind by hand here.
+    // This benchmark's data-only registry is independent of World. Retire its
+    // bodies while the world's PhysicsContext and Jolt registration still live.
+    if (m_world && m_registry) {
+        std::vector<Physics::BodyID> bodies;
+        for (const Entity e: m_registry->GetEntitiesWith<Components::PhysicsComponent>()) {
+            if (const auto body = m_registry->Get<Components::PhysicsComponent>(e); body && body->physicsID != Physics::BodyID::Null()) {
+                bodies.push_back(body->physicsID);
+            }
+        }
+        if (!bodies.empty()) m_world->GetPhysics().DestroyBodies(bodies);
+    }
+    m_registry.reset();
     m_world.reset();
 
     m_metrics         = BenchmarkMetrics {};

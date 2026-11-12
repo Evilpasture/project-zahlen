@@ -16,6 +16,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/Inspection.hpp>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -101,7 +102,7 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> help_lists_commands() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
-            ZHLN::ConsoleDebugger::Execute(reg, console, "help");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, console, "help");
             const std::string logs = JoinedLogs(console);
             ZHLN::Test::ExpectTrue(Contains(logs, "Zahlen Debugger Commands"));
             ZHLN::Test::ExpectTrue(Contains(logs, "types"));
@@ -109,7 +110,7 @@ struct ConsoleDebuggerTestSuite {
             ZHLN::Test::ExpectTrue(Contains(logs, "find"));
 
             ZHLN::GameConsole alias;
-            ZHLN::ConsoleDebugger::Execute(reg, alias, "?");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, alias, "?");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(alias), "Zahlen Debugger Commands"));
             return {};
         }
@@ -117,7 +118,7 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> empty_line_is_a_no_op() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
-            ZHLN::ConsoleDebugger::Execute(reg, console, "   ");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, console, "   ");
             ZHLN::Test::ExpectEq(console.GetEntryCount(), static_cast<size_t>(0));
             return {};
         }
@@ -125,7 +126,7 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> unknown_command_reports_help_hint() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
-            ZHLN::ConsoleDebugger::Execute(reg, console, "explode");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, console, "explode");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(console), "Unknown command: 'explode'"));
             return {};
         }
@@ -133,7 +134,7 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> types_lists_registered_components() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
-            ZHLN::ConsoleDebugger::Execute(reg, console, "types");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, console, "types");
             const std::string logs = JoinedLogs(console);
             ZHLN::Test::ExpectTrue(Contains(logs, "Registered Reflected Types"));
             ZHLN::Test::ExpectTrue(Contains(logs, "PBRComponent"));
@@ -144,15 +145,15 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> type_dumps_fields_or_reports_missing() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
-            ZHLN::ConsoleDebugger::Execute(reg, console, "type");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, console, "type");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(console), "Usage: type <TypeName>"));
 
             ZHLN::GameConsole missing;
-            ZHLN::ConsoleDebugger::Execute(reg, missing, "type NotAComponent");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, missing, "type NotAComponent");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(missing), "not found"));
 
             ZHLN::GameConsole pbr;
-            ZHLN::ConsoleDebugger::Execute(reg, pbr, "type PBRComponent");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, pbr, "type PBRComponent");
             const std::string logs = JoinedLogs(pbr);
             ZHLN::Test::ExpectTrue(Contains(logs, "Type 'PBRComponent'"));
             ZHLN::Test::ExpectTrue(Contains(logs, ".roughness"));
@@ -167,28 +168,28 @@ struct ConsoleDebuggerTestSuite {
             reg.Add(hero, ZHLN::Components::PBRComponent {.roughness = 0.4f, .metallic = 0.2f});
 
             ZHLN::GameConsole findConsole;
-            ZHLN::ConsoleDebugger::Execute(reg, findConsole, "find Hero");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, findConsole, "find Hero");
             const std::string found = JoinedLogs(findConsole);
             ZHLN::Test::ExpectTrue(Contains(found, "Found Entity: Hero"));
             ZHLN::Test::ExpectTrue(Contains(found, std::format("ID: {}", hero.Pack())));
 
             ZHLN::GameConsole quoted;
-            ZHLN::ConsoleDebugger::Execute(reg, quoted, R"(find "Hero")");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, quoted, R"(find "Hero")");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(quoted), "Found Entity: Hero"));
 
             ZHLN::GameConsole missing;
-            ZHLN::ConsoleDebugger::Execute(reg, missing, "find Nobody");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, missing, "find Nobody");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(missing), "No entity named 'Nobody'"));
 
             ZHLN::GameConsole inspect;
-            ZHLN::ConsoleDebugger::Execute(reg, inspect, std::format("entity {}", hero.Pack()));
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, inspect, std::format("entity {}", hero.Pack()));
             const std::string dump = JoinedLogs(inspect);
             ZHLN::Test::ExpectTrue(Contains(dump, std::format("Entity {}:", hero.Pack())));
 
             ZHLN::GameConsole dead;
             const uint64_t    packed = hero.Pack();
             reg.Destroy(hero);
-            ZHLN::ConsoleDebugger::Execute(reg, dead, std::format("entity {}", packed));
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, dead, std::format("entity {}", packed));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(dead), "Invalid or dead entity"));
             return {};
         }
@@ -206,11 +207,11 @@ struct ConsoleDebuggerTestSuite {
             const std::string id = std::format("{}", e.Pack());
 
             ZHLN::GameConsole getConsole;
-            ZHLN::ConsoleDebugger::Execute(reg, getConsole, std::format("get {} PBRComponent.roughness", id));
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, getConsole, std::format("get {} PBRComponent.roughness", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(getConsole), "PBRComponent.roughness = 0.5"));
 
             ZHLN::GameConsole setConsole;
-            ZHLN::ConsoleDebugger::Execute(reg, setConsole, std::format("set {} PBRComponent.roughness 0.25", id));
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, setConsole, std::format("set {} PBRComponent.roughness 0.25", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(setConsole), "Updated PBRComponent.roughness to 0.25"));
             const auto pbr = reg.Get<ZHLN::Components::PBRComponent>(e);
             ZHLN::Test::ExpectTrue(pbr.has_value());
@@ -219,11 +220,11 @@ struct ConsoleDebuggerTestSuite {
             }
 
             ZHLN::GameConsole usage;
-            ZHLN::ConsoleDebugger::Execute(reg, usage, "get");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, usage, "get");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(usage), "Usage: get"));
 
             ZHLN::GameConsole badField;
-            ZHLN::ConsoleDebugger::Execute(reg, badField, std::format("get {} PBRComponent", id));
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, badField, std::format("get {} PBRComponent", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(badField), "<Component>.<field>"));
             return {};
         }
@@ -231,11 +232,11 @@ struct ConsoleDebuggerTestSuite {
         std::expected<void, ZHLN::ErrorCode> sym_rejects_bad_addresses() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    usage;
-            ZHLN::ConsoleDebugger::Execute(reg, usage, "sym");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, usage, "sym");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(usage), "Usage: sym"));
 
             ZHLN::GameConsole bad;
-            ZHLN::ConsoleDebugger::Execute(reg, bad, "sym not-hex");
+            ZHLN::ConsoleDebugger::Execute(ZHLN::ECS::Inspection {reg}, bad, "sym not-hex");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(bad), "Invalid address format"));
             return {};
         }
@@ -249,7 +250,7 @@ struct ConsoleDebuggerTestSuite {
 
             ZHLN::GameConsole okConsole;
             ZHLN::ConsoleDebugger::Execute(
-                reg, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id)
+                ZHLN::ECS::Inspection {reg}, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id)
             );
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(okConsole), "Patched PBRComponent"));
             const auto updated = reg.Get<ZHLN::Components::PBRComponent>(e);
@@ -262,7 +263,7 @@ struct ConsoleDebuggerTestSuite {
             // Invalid field must roll back the entire patch cleanly.
             ZHLN::GameConsole badConsole;
             ZHLN::ConsoleDebugger::Execute(
-                reg, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id)
+                ZHLN::ECS::Inspection {reg}, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id)
             );
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(badConsole), "Failed to patch PBRComponent"));
             const auto preserved = reg.Get<ZHLN::Components::PBRComponent>(e);

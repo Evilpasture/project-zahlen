@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 // --- Global Module Fragment: Implementation Dependencies ---
@@ -49,9 +49,6 @@ namespace {
 // These views are used inside the existing externally ordered Engine calls,
 // not registered as parallel graph nodes. Graphics/audio and immediate
 // hierarchy despawn remain phase-owned side effects.
-using LightningCleanupQuery = ECS::Query<LightningComponent&, const Components::PendingDestroy>;
-using LightningRecoveryQuery = ECS::Query<LightningComponent&>;
-using LightningSpawnReadQuery = ECS::Query<const LightningComponent, const Components::CameraComponent>;
 
 struct LightningSegment {
     FVec3 start;
@@ -194,33 +191,27 @@ void ReleaseLightning(GraphicsDevice render, LightningComponent& bolt) {
     bolt.matAssetId  = InvalidMaterialID;
 }
 
-void CleanupLightningTyped(LightningCleanupQuery query, GraphicsDevice render, bool all) {
-    const auto entities = query.Entities<LightningComponent>();
-    if (entities.empty()) {
-        return;
-    }
-    auto bolts = query.Raw<LightningComponent>();
-    for (size_t i = 0; i < entities.size(); ++i) {
-        if (all || query.Get<Components::PendingDestroy>(entities[i])) {
-            ReleaseLightning(render, bolts[i]);
+void CleanupLightning(Engine& engine, bool all) {
+    auto entities = engine.Entities();
+    auto render = engine.Graphics();
+    for (const Entity e: entities.EntitiesWith<LightningComponent>()) {
+        if (all || entities.Get<Components::PendingDestroy>(e)) {
+            entities.Patch<LightningComponent>(e, [&](LightningComponent& bolt) { ReleaseLightning(render, bolt); });
         }
     }
 }
 
-void CleanupLightning(Engine& engine, bool all) {
-    CleanupLightningTyped(LightningCleanupQuery {ZHLN::EngineAccess::RegistryOf(engine)}, engine.Graphics(), all);
-}
-
 void RegisterCleanup(Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    reg.RegisterComponent<LightningComponent>("LightningComponent");
+    engine.Entities().Register<LightningComponent>("LightningComponent");
     if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
-            const LightningRecoveryQuery query {ZHLN::EngineAccess::RegistryOf(owner)};
-            for (auto& bolt: query.Raw<LightningComponent>()) {
-                bolt.vboPos     = BufferID::Invalid;
-                bolt.vboFrame   = BufferID::Invalid;
-                bolt.vboSurface = BufferID::Invalid;
+            auto entities = owner.Entities();
+            for (const Entity e: entities.EntitiesWith<LightningComponent>()) {
+                entities.Patch<LightningComponent>(e, [](LightningComponent& bolt) {
+                    bolt.vboPos = BufferID::Invalid;
+                    bolt.vboFrame = BufferID::Invalid;
+                    bolt.vboSurface = BufferID::Invalid;
+                });
             }
         });
     }
@@ -231,29 +222,29 @@ void RegisterCleanup(Engine& engine) {
 namespace Lightning {
 
 void Detach(Engine& engine, Entity entity) {
-    if (auto bolt = ZHLN::EngineAccess::RegistryOf(engine).Get<LightningComponent>(entity)) {
-        ReleaseLightning(engine.Graphics(), *bolt);
-        ZHLN::EngineAccess::RegistryOf(engine).Remove<LightningComponent>(entity);
+    auto entities = engine.Entities();
+    auto render = engine.Graphics();
+    if (entities.Patch<LightningComponent>(entity, [&](LightningComponent& bolt) { ReleaseLightning(render, bolt); })) {
+        entities.Detach<LightningComponent>(entity);
     }
 }
 
 void Attach(Engine& engine, Entity entity, LightningComponent component) {
     RegisterCleanup(engine);
     Detach(engine, entity);
-    ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
+    engine.Entities().Attach(entity, std::move(component));
 }
 
 auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const LightningConfig& cfg) -> Entity {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     auto rc = engine.Graphics();
 
     RegisterCleanup(engine);
 
-    const LightningSpawnReadQuery read {reg};
     float      baseExposure = 4.5f;
-    const auto existingEnts = read.Entities<LightningComponent>();
+    const auto existingEnts = entities.EntitiesWith<LightningComponent>();
     if (!existingEnts.empty()) {
-        if (const auto existingComp = read.Get<LightningComponent>(existingEnts[0])) {
+        if (const auto existingComp = entities.Get<LightningComponent>(existingEnts[0])) {
             baseExposure = existingComp->baseAmbientExposure;
         }
     } else {
@@ -270,7 +261,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     // bolt to spawn. The null entity says that -- the alternative was fabricating a
     // camera at the engine's default framing, then aiming the ribbon and the flash
     // at a point no observer occupies.
-    const auto camComp = read.GetSingleton<Components::CameraComponent>();
+    const auto camComp = entities.GetSingleton<Components::CameraComponent>();
     if (!camComp) {
         return Entity::Null();
     }
@@ -283,7 +274,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     const BufferID vboFrame   = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
     const BufferID vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
 
-    const Entity boltEntity = reg.Create();
+    const Entity boltEntity = entities.Create();
 
     std::array<char, 64> strBuf {};
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
@@ -299,7 +290,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     const FVec3 flashPos  = cameraPosition + FVec3{0.0f, 25.0f, 0.0f};
     const FVec3 impactPos = groundTarget + FVec3{0.0f, 20.0f, 0.0f};
 
-    const Entity flashLight = reg.Create(
+    const Entity flashLight = entities.Spawn(
         Components::TransformComponent {.position = flashPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
@@ -311,7 +302,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
         }
     );
 
-    const Entity impactLight = reg.Create(
+    const Entity impactLight = entities.Spawn(
         Components::TransformComponent {.position = impactPos}, Components::HierarchyComponent {.parent = boltEntity},
         Components::LightComponent {
             .type        = LightType::Point,
@@ -323,7 +314,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
         }
     );
 
-    reg.Add(
+    entities.Attach(
         boltEntity, Components::TransformComponent {}, Components::NameComponent {.name = String64("ProceduralLightning")},
         Components::MeshComponent {.meshAsset = meshAssetId, .materialAsset = matAssetId, .cullRadius = 20000.0f, .flags = DrawFlags::ExcludeFromTLAS},
         LightningComponent {
