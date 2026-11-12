@@ -29,7 +29,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include "EngineAccess.hpp"
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>

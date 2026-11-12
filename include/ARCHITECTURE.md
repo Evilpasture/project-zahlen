@@ -569,23 +569,17 @@ replacement is chosen by semantics rather than by a blanket naming rule.
 | frame schedule | `Steps() const noexcept -> std::span<const FrameStep>` | diagnostics and profilers can read the composed order, but only `InstallModule(const Module&)` mutates it, all-or-nothing against core's anchor names. `Clear()` / `Append()` on a public `FramePlan&` silently bypassed anchor validation. |
 | entity lifecycle | `Entities() -> Entities` (`Zahlen/Engine/Capabilities/Entities.hpp`) | not a `Registry` pass-through. `Despawn` marks `PendingDestroy` so `SceneCleanup` releases Jolt bodies, miniaudio voices and GPU buffers; `Attach` / `Detach` route replacements through `SceneResources::Release`. `Get` / `GetSingleton` are read-only `Optional<const T&>`. |
 | in-frame mutations | `Commands() -> ECS::EntityCommandBuffer&` | systems declare `ECS::EntityCommandBuffer&` in their signature and `SystemGraph` resolves it from `carrier.ecb`; external frame steps record into the same ECB. Playback is `MainECBPlayback`, immediately followed by `SceneCleanup`. Synchronous creation/destruction inside `Tick` is prohibited. |
-| skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal; their two consumers reach them through `EngineAccess`. |
+| skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal. |
 
 `Engine.hpp` forward-declares `ECS::Registry` and `ECS::EntityCommandBuffer` and
 does not include `<Zahlen/ECS/ECS.hpp>` or `<Zahlen/Engine/PoseUploads.hpp>`.
-The raw registry is reachable only through the build-tree-only
-`Zahlen/Engine/Internal/EngineAccess.hpp` seam (`RegistryOf`, `PoseUploadsOf`,
-`ArticulationOf`, `FramePlanOf`), which is **not installed**. That seam is for
-engine implementation units, `SystemGraph` compilation,
-`GameModule::ComponentRegistrar`, cold-boot scene deserializers and in-tree
-failure-injection tests. In-repo systems, extensions, samples and tests that
-still need arbitrary registry operations use `RegistryOf`; API consumers get
-`Entities()` and `Commands()` instead.
-
-The remaining work -- rewriting every in-tree system to `Query<...>` /
-`EntityCommandBuffer&` signatures so `RegistryOf` survives only in the three
-cold-start seams -- is tracked in `todo/ecs_capability_boundary.md`. It is a
-multi-patch change and is deliberately not folded into this one.
+Engine implementation headers live under `src/engine` and are included locally;
+no engine-internal directory is exposed to build-tree or installed consumers.
+External code must use the public capabilities or typed queries instead of
+including engine implementation headers. `EngineAccess` is a remaining internal
+migration seam, not a supported interface: existing external references must be
+removed, and those targets will not compile until they are migrated. The goal
+is to delete the seam, not preserve it as an extension point.
 
 ### 3.5 Frame outcome
 

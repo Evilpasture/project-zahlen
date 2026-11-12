@@ -3,7 +3,7 @@
 
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include "EngineAccess.hpp"
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"

@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// BUILD-TREE ONLY. This header is deliberately NOT installed. It is the seam
-// engine implementation units and in-repo tooling use to reach the concrete
-// subsystems; the public Engine API exposes capabilities, not these types.
-// If you are writing a consumer of the engine, this file does not exist for you.
+// Engine implementation only. This temporary seam must not be included by
+// consumers, extensions, plugins, samples, tests, or generated code. Migrate
+// the remaining engine users to explicit ownership and remove it.
 
 #include <Zahlen/Common.h>
 
@@ -37,17 +36,15 @@ struct ZHLN_API EngineAccess {
     static auto AudioOf(Engine&) noexcept -> AudioContext&;
     static auto SceneOf(Engine&) noexcept -> SceneData&;
 
-    // Concrete subsystem seams for build-tree-only callers. None of these is
-    // installed with the engine: the public Engine API exposes capabilities.
+    // Concrete subsystem seams for engine implementation units only.
     static auto RegistryOf(Engine&) noexcept -> ECS::Registry&;
     static auto RegistryOf(const Engine&) noexcept -> const ECS::Registry&;
     static auto PoseUploadsOf(Engine&) noexcept -> PoseUploadQueue&;
     static auto ArticulationOf(Engine&) noexcept -> ArticulationSystem&;
-    // Core wiring and in-tree failure-injection tests only. Not installed.
+    // Core wiring only.
     static auto FramePlanOf(Engine&) -> FramePlan&;
 
-    // Capability -> implementation for build-tree-only callers. This header
-    // is not installed, so API consumers cannot reach this overload.
+    // Capability -> implementation for engine code during migration.
     static auto PhysicsOf(Simulation&) noexcept -> PhysicsContext&;
 };
 

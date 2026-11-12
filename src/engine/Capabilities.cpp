@@ -19,7 +19,7 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include "EngineAccess.hpp"
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Physics/Physics.hpp>

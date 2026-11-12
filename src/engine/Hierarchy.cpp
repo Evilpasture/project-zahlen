@@ -5,7 +5,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include "EngineAccess.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <vector>
