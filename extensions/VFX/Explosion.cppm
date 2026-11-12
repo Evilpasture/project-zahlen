@@ -5,6 +5,7 @@ module;
 
 // Public Engine & Jolt Headers
 // clang-format off
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
@@ -548,126 +549,15 @@ export class ExplosionSystem {
         return root;
     }
 
-    static void Update(Engine& engine, float dt) {
-        Init(engine);
-
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        auto& ecb = engine.Commands();
-
-        // --------------------------------------------------------------------
-        // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)
-        // --------------------------------------------------------------------
-        auto expEntities = reg.GetEntitiesWith<ExplosionComponent>();
-        if (!expEntities.empty()) {
-            auto explosions = reg.GetRawArray<ExplosionComponent>();
-
-            for (size_t i = 0; i < expEntities.size(); ++i) {
-                Entity              e   = expEntities[i];
-                ExplosionComponent& exp = explosions[i];
-                if (reg.Get<Components::PendingDestroy>(e)) {
-                    continue;
-                }
-                exp.age += dt;
-
-                // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
-                reg.Patch<Components::LightComponent>(e, [&](auto& light) {
-                    float flashT = std::exp(-exp.age * 5.5f);
-                    if (flashT < 0.002f) {
-                        light.intensity = 0.0f; // Drop to pitch black so zero light lingers in fog
-                    } else {
-                        float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
-                        light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
-                        light.color     = FVec3{1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT};
-                    }
-                });
-
-                // Spawn autonomous crater decal
-                if (!exp.craterSpawned && exp.age >= 0.20f && exp.type == OrdnanceType::ArtilleryMortar) {
-                    exp.craterSpawned = true;
-                    Entity crater     = reg.Create();
-
-                    float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                    const auto yawRot = Quat::FromAxisAngle(FVec3::UnitY(), RadF{randomYaw});
-                    const auto baseRot = Quat::FromAxisAngle(FVec3::UnitX(), RadF{-std::numbers::pi_v<float> * 0.5f});
-                    const auto decalRot = (yawRot * baseRot).Normalized();
-
-                    float     radius    = 3.4f * exp.scale;
-                    float     projDepth = 5.0f * exp.scale;
-                    FVec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
-
-                    const auto localMat = ComposeTransform(exp.origin, decalRot, decalScale);
-
-                    // Autonomous entity with CraterDecalComponent
-                    ecb.AddComponent(
-                        crater, Components::NameComponent {.name = String64("ArtilleryCraterDecal")},
-                        Components::TransformComponent {.position = exp.origin, .rotation = decalRot, .scale = decalScale},
-                        Components::WorldTransformComponent {.world = localMat, .previous = localMat},
-                        Components::DecalComponent {.albedoMap = s_CraterTexID, .normalMap = s_CraterNormalTexID, .roughness = 0.96f, .metallic = 0.0f},
-                        CraterDecalComponent {
-                            .age          = 0.0f,
-                            .lifetime     = 28.0f,
-                            .fadeDuration = 6.0f,
-                            .baseRadius   = radius,
-                            .baseDepth    = projDepth,
-                            .origin       = exp.origin,
-                            .rotation     = decalRot
-                        }
-                    );
-                }
-
-                // Update Particle Emitters
-                UpdateGroup(exp.fireball, dt, false);
-                UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(ZHLN::EngineAccess::SceneOf(engine), exp);
-
-                // Clean up explosion particle root and children when particles finish
-                if (exp.age > exp.duration) {
-                    if (exp.debrisEntity != Entity::Null()) {
-                        ecb.DestroyEntity(exp.debrisEntity);
-                    }
-                    ecb.DestroyEntity(e); // Atomically destroys root and its LightComponent
-                }
-            }
-        }
-
-        // --------------------------------------------------------------------
-        // 2. UPDATE PERSISTENT CRATER DECALS (Long-lived & Smooth Fade)
-        // --------------------------------------------------------------------
-        auto craterEntities = reg.GetEntitiesWith<CraterDecalComponent>();
-        if (!craterEntities.empty()) {
-            auto craters = reg.GetRawArray<CraterDecalComponent>();
-
-            for (size_t i = 0; i < craterEntities.size(); ++i) {
-                Entity                craterEnt = craterEntities[i];
-                CraterDecalComponent& crater    = craters[i];
-                if (reg.Get<Components::PendingDestroy>(craterEnt)) {
-                    continue;
-                }
-                crater.age += dt;
-
-                // Handle smooth dissolution over the final fadeDuration seconds
-                if (crater.age >= (crater.lifetime - crater.fadeDuration)) {
-                    float remaining = std::max(0.0f, crater.lifetime - crater.age);
-                    float fadeRatio = remaining / crater.fadeDuration; // 1.0 -> 0.0
-
-                    float ease          = std::pow(fadeRatio, 0.75f);
-                    float currentRadius = crater.baseRadius * ease;
-                    float currentDepth  = crater.baseDepth * ease;
-
-                    FVec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
-
-                    reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
-                    reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
-                        wt.world = ComposeTransform(crater.origin, crater.rotation, newScale);
-                    });
-                }
-
-                if (crater.age >= crater.lifetime) {
-                    ecb.DestroyEntity(craterEnt);
-                }
-            }
-        }
+    // The typed ECS update lives outside this module interface so its query
+    // definitions do not enter the module's global fragment.
+    static void AdvanceAndRender(ExplosionComponent& exp, SceneData& scene, float dt) {
+        UpdateGroup(exp.fireball, dt, false);
+        UpdateGroup(exp.soilSmoke, dt, true);
+        RenderBatchGPU(scene, exp);
     }
+    static float EffectHash(FVec3 position) noexcept { return Hash31(position); }
+    static auto CraterTextures() noexcept -> std::pair<TextureID, TextureID> { return {s_CraterTexID, s_CraterNormalTexID}; }
 
   private:
     static void InitArtilleryParticles(ExplosionComponent& exp, std::mt19937& gen) {

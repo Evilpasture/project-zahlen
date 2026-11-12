@@ -30,6 +30,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
@@ -865,7 +866,20 @@ auto main(int argc, char* argv[]) -> int {
         // 4. Render diagnostic hull/skeleton only in third person; first person
         // keeps the actual full body and arms without debug geometry at the face.
         if (!viewState.enabled) {
-            ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
+            // The completed Tick is an externally ordered debug boundary.
+            const ZHLN::ECS::Query<const ZHLN::Components::TransformComponent, const ZHLN::Character::MovementComponent> query {registry};
+            if (query.IsAlive(player)) {
+                const auto transform = query.Get<ZHLN::Components::TransformComponent>(player);
+                const auto movement = query.Get<ZHLN::Character::MovementComponent>(player);
+                if (transform) {
+                    FVec3 velocity = FVec3::Zero();
+                    if (movement) {
+                        const float speed = movement->speed * (movement->isSprinting ? std::max(movement->sprintMultiplier, 1.0f) : 1.0f);
+                        velocity = FVec3 {movement->inputX * speed, movement->currentYVel, movement->inputZ * speed};
+                    }
+                    ZHLN::Locomotion::RenderDebugRig(engine->Debug(), transform->position, velocity, dualShapeConfig);
+                }
+            }
             registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
                 const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
                 ZHLN::ProceduralAnimation::DrawDebugRig(ZHLN::EngineAccess::SceneOf(*engine), trans.position, Quat{trans.rotation}, rig, gait ? &*gait : nullptr);

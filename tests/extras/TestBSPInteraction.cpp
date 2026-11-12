@@ -503,7 +503,7 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
                 const ZHLN::Components::PhysicsComponent>
                 query(reg);
-            ZHLN::Interaction::FireEntityInput(reg, "gate", "Open");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "gate", "Open");
             ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.5f});
 
             const auto moved = reg.Get<ZHLN::Components::TransformComponent>(gate);
@@ -551,7 +551,7 @@ struct BSPInteractionTestSuite {
             );
 
             // 1. Send "Open" input
-            ZHLN::Interaction::FireEntityInput(reg, "sliding_door", "Open");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "sliding_door", "Open");
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
 
@@ -627,7 +627,7 @@ struct BSPInteractionTestSuite {
                 }
             );
 
-            ZHLN::Interaction::FireEntityInput(reg, "rot_door", "Open");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "rot_door", "Open");
             ZHLN::ECS::Query<
                 ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
                 const ZHLN::Components::PhysicsComponent>
@@ -713,7 +713,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
 
             // Test door locking: lock door and verify input ignored
-            ZHLN::Interaction::FireEntityInput(reg, "secure_vault", "Lock");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "secure_vault", "Lock");
             door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectTrue((door->flags & ZHLN::Interaction::DoorFlags::Locked) != ZHLN::Interaction::DoorFlags::None);
 

@@ -13,6 +13,7 @@ module;
 #include <Animation/ProceduralMath.hpp>
 // clang-format on
 #include <Animation/AnimationContext.hpp>
+#include <Animation/AttachmentSync.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Profiler.hpp>
@@ -60,8 +61,7 @@ using ProceduralAnimationQuery = ECS::ExclusiveQuery<
     const Components::HierarchyComponent, Components::WorldTransformComponent&, Components::CameraComponent&,
     const Components::MainCameraTagComponent, const Components::SkeletalMeshComponent, const Components::MeshComponent>;
 using SkinBindingQuery = ECS::Query<const Components::SkeletalMeshComponent, const Components::HierarchyComponent>;
-using AttachmentQuery = ECS::Query<const Components::MeshComponent, const Components::HierarchyComponent,
-                                  const Components::SkeletalMeshComponent, Components::TransformComponent&>;
+using Animation::AttachmentQuery;
 
 namespace {
 
@@ -302,17 +302,8 @@ struct HairAddress {
     return result.IsValid() ? result : HairAddress {};
 }
 
-[[nodiscard]] FVec3 ExtractScale(const Mat4x4& matrix) noexcept {
-    return {ProceduralMath::Column3(matrix, 0).Length(), ProceduralMath::Column3(matrix, 1).Length(), ProceduralMath::Column3(matrix, 2).Length()};
-}
-
-[[nodiscard]] Quat ExtractRotation(const Mat4x4& matrix) noexcept {
-    const FVec3 scale = ExtractScale(matrix);
-    const FVec3 x     = scale.x > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / scale.x : FVec3::UnitX();
-    const FVec3 y     = scale.y > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / scale.y : FVec3::UnitY();
-    const FVec3 z     = scale.z > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / scale.z : FVec3::UnitZ();
-    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{x, 0.0f}, FVec4{y, 0.0f}, FVec4{z, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
-}
+using Animation::AttachmentMath::ExtractRotation;
+using Animation::AttachmentMath::ExtractScale;
 
 [[nodiscard]] float SmootherStep(float value) noexcept {
     value = std::clamp(value, 0.0f, 1.0f);
@@ -1719,6 +1710,10 @@ void AddProceduralSystems(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
 
 } // namespace
 
+void ProceduralAnimation::AddEvaluator(ECS::SimGraph& graph) {
+    graph.AddSystem<&ProceduralAnimationSystem>();
+}
+
 void ProceduralAnimation::Register(Engine& engine) {
     Animation::Install(engine);
 
@@ -1909,53 +1904,6 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
         }
     }
     return masked;
-}
-
-namespace {
-size_t SyncAttachmentsTyped(AttachmentQuery query, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
-    size_t synchronizedCount = 0;
-    for (Entity childEntity: query.Entities<Components::MeshComponent>()) {
-        const auto hierarchy = query.Get<Components::HierarchyComponent>(childEntity);
-        if (!hierarchy || hierarchy->parent != rootEntity) {
-            continue;
-        }
-        const auto mesh = query.Get<Components::MeshComponent>(childEntity);
-        if (!mesh || mesh->nodeIndex < 0) {
-            continue;
-        }
-        const RigNodeIndex node = static_cast<RigNodeIndex>(mesh->nodeIndex);
-        if (!IsValidRigNode(node, boneMap.nodeCount)) {
-            continue;
-        }
-        const auto skeletalMesh = query.Get<Components::SkeletalMeshComponent>(childEntity);
-        if (skeletalMesh && skeletalMesh->skeletonIndex >= 0) {
-            continue;
-        }
-        if (auto childTransform = query.Get<Components::TransformComponent>(childEntity)) {
-            const Mat4x4& modelTransform = boneMap.modelTransforms[node];
-            childTransform->position         = ProceduralMath::Translation(modelTransform);
-            childTransform->rotation = ExtractRotation(modelTransform);
-            childTransform->scale            = ExtractScale(modelTransform);
-            ++synchronizedCount;
-        }
-    }
-    return synchronizedCount;
-}
-
-} // namespace
-
-size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
-    return SyncAttachmentsTyped(AttachmentQuery {registry}, rootEntity, boneMap);
-}
-
-// Kept for custom schedules: the graph entry point is ProceduralAnimationSystem
-// below. The carrier's services are the simulation domain's, so the pose it
-// produces goes to the palette queue rather than to a renderer reference.
-void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
-    ProceduralAnimationSystem(
-        ProceduralAnimationQuery {ctx.registry}, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::Res<AssetManager> {&ctx.services.assets},
-        ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
-    );
 }
 
 void ProceduralAnimationSystem(
@@ -2612,7 +2560,7 @@ void ProceduralAnimationSystem(
         const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Attachments");
-            boneMap->synchronizedAttachmentCount = SyncAttachmentsTyped(query.As<AttachmentQuery>(), entity, *boneMap);
+            boneMap->synchronizedAttachmentCount = Animation::SyncNonSkinnedAttachments(query.As<AttachmentQuery>(), entity, *boneMap);
         }
         if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
             ZHLN::Log("[ProceduralAnimation] Entity {} synchronized {} non-skinned node attachments.", entity.index, boneMap->synchronizedAttachmentCount);

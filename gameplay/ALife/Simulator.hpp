@@ -11,11 +11,6 @@
 #include <Zahlen/Common.h>
 #include <functional>
 
-// Forward-declare Engine to break the circular dependency loop
-namespace ZHLN {
-class Engine;
-}
-
 namespace ZHLN::ALife {
 
 struct SimTuning {
@@ -44,13 +39,10 @@ class ZHLN_STATIC_API Simulator {
     // structurally mutate the queried storage, and shared callback state and
     // cross-entity writes require their own synchronization.
     void Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos);
-    // Compatibility entry point for existing engine callers.
-    void Update(ZHLN::Engine& engine, float dt, DVec3 observer_pos);
 
     void SetRelation(uint32_t a, uint32_t b, float value);
     void BroadcastEvent(const Event& event);
     void ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2);
-    void ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2);
 
     auto Save(const char* filename) const -> bool;
     auto Load(ECS::Registry& reg, const char* filename) -> bool;

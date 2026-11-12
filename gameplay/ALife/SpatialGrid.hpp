@@ -14,11 +14,6 @@
 #include <cstdint>
 #include <vector>
 
-// Forward declare engine registry
-namespace ZHLN::ECS {
-class Registry;
-}
-
 namespace ZHLN::ALife {
 
 struct ALifeComponent;
@@ -32,17 +27,9 @@ class ZHLN_STATIC_API SpatialGrid {
 
     void Clear() noexcept;
     void UpdateEntity(WriteQuery query, Entity handle, DVec3 old_pos);
+    // Unlink before destroying the component: its next link lives there.
     void RemoveEntity(WriteQuery query, Entity handle);
     [[nodiscard]] auto Query(ReadQuery query, DVec3 pos, float radius, std::vector<Entity> reusable = {}) const -> std::vector<Entity>;
-
-    // Compatibility overloads for standalone Registry callers.
-    void UpdateEntity(ECS::Registry& reg, Entity handle, DVec3 old_pos);
-    // Unlink before destroying the ECS component: its next link lives there.
-    void RemoveEntity(ECS::Registry& reg, Entity handle);
-
-    // Returns matching entities. A caller may move in a reusable buffer to retain its capacity.
-    [[nodiscard]] auto Query(const ECS::Registry& reg, DVec3 pos, float radius, std::vector<Entity> reusable = {}) const
-        -> std::vector<Entity>;
 
     [[nodiscard]] auto GetCellIndex(DVec3 pos) const noexcept -> int32_t;
 

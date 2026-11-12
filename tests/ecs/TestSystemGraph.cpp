@@ -116,6 +116,16 @@ void ObserveImmediate(ZHLN::ECS::Query<const TestCompA, const TestCompB> query) 
     query.ForEach([](ZHLN::Entity, const TestCompA& a, const TestCompB&) { immediateObserved.store(a.value); });
 }
 
+ZHLN::Entity phaseCreated = ZHLN::Entity::Null();
+bool graphSawBareCreatedEntity = false;
+void CreateImmediateQueueAttachment(ExclusiveTestQuery query, ZHLN::ECS::EntityCommandBuffer& commands) {
+    phaseCreated = query.CreateEntity();
+    commands.AddComponent(phaseCreated, TestCompA {.value = 42});
+}
+void ObserveBareEntity(ZHLN::ECS::Query<const TestCompA> query) {
+    graphSawBareCreatedEntity = query.IsAlive(phaseCreated) && !query.Get<TestCompA>(phaseCreated);
+}
+
 void WildcardRegistrySystem(ZHLN::ECS::Registry&) {}
 void ReadOnlyRegistrySystem(const ZHLN::ECS::Registry&) {}
 void CommandBufferSystemA(ZHLN::ECS::Query<TestCompA&> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
@@ -491,6 +501,35 @@ struct SystemGraphTestSuite {
             if (!other.Get<TestCompB>(after) || other.Get<TestCompA>(after)->value != 94) {
                 return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
             }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> exclusive_creation_and_borrowed_buffer_keep_phase_boundaries() {
+            using namespace ZHLN::ECS;
+            Registry reg;
+            Registry other;
+            const auto unrelated = reg.Create();
+            EntityCommandBuffer commands {reg};
+            commands.AddComponent(unrelated, TestCompB {.value = 77});
+            if (!commands.Targets(reg) || commands.Targets(other)) return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            SystemGraph<NoServices> graph {reg};
+            phaseCreated = ZHLN::Entity::Null();
+            graph.InvokeSequentialWithCommands<&CreateImmediateQueueAttachment>(ZHLN::Frame {}, commands);
+            if (!reg.IsAlive(phaseCreated) || reg.Get<TestCompA>(phaseCreated) || reg.Get<TestCompB>(unrelated) || commands.Empty())
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            commands.Playback();
+            if (!reg.Get<TestCompA>(phaseCreated) || reg.Get<TestCompA>(phaseCreated)->value != 42 || !reg.Get<TestCompB>(unrelated))
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+
+            const SystemInfo writer {.access_pattern = SystemSignature<&CreateImmediateQueueAttachment>::PopulateAccessPattern()};
+            const SystemInfo reader {.access_pattern = SystemSignature<&ObserveBareEntity>::PopulateAccessPattern()};
+            if (!SystemGraphCore::HasConflict(writer, reader)) return std::unexpected(SystemGraphTestError::HazardMismatch);
+            graphSawBareCreatedEntity = false;
+            graph.AddSystem<&CreateImmediateQueueAttachment>();
+            graph.AddSystem<&ObserveBareEntity>();
+            graph.Compile();
+            graph.Execute(ZHLN::Frame {});
+            if (!graphSawBareCreatedEntity || !reg.Get<TestCompA>(phaseCreated)) return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             return {};
         }
 

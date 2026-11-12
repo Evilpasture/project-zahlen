@@ -30,34 +30,8 @@ class AudioContext;
 
 namespace Interaction {
 
-// Dispatches a named action (e.g. "Open", "Close", "Toggle", "Press", "Lock")
-// to all entities matching `targetname`.
-void FireEntityInput(
-    ECS::Registry&                registry,
-    std::string_view              targetname,
-    std::string_view              input,
-    std::string_view              parameter = "",
-    ZHLN::Optional<AudioContext&> audio     = std::nullopt
-);
-
-// Same dispatch applied to one already-resolved entity. Used by the
-// interaction step, which knows the exact entity it is looking at -- unnamed
-// brush doors/buttons have an empty targetname, so the named lookup above
-// can never reach them.
-void FireEntityInput(
-    ECS::Registry&                registry,
-    Entity                        entity,
-    std::string_view              input,
-    std::string_view              parameter = "",
-    ZHLN::Optional<AudioContext&> audio     = std::nullopt
-);
-
-// Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.),
-// returning the number of matching outputs dispatched.
-uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
-
-// Typed runtime dispatch; unlike the standalone Registry overloads these
-// declare every family touched by recursive input/output delivery.
+// Runtime dispatch declares every family touched by recursive input/output
+// delivery. The entity overload also handles unnamed brush entities.
 void FireEntityInput(DispatchQuery query, std::string_view targetname, std::string_view input,
                      std::string_view parameter = "", ZHLN::Optional<AudioContext&> audio = std::nullopt);
 void FireEntityInput(DispatchQuery query, Entity entity, std::string_view input,

@@ -19,6 +19,12 @@
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#if defined(ZHLN_HAS_ANIMATION)
+#include <Animation/AnimationSystem.hpp>
+#endif
+#if defined(ZHLN_HAS_TERRAIN)
+#include <Terrain/TerrainSystem.hpp>
+#endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
 #include <CharacterController/CharacterController.hpp>
 #endif
@@ -533,6 +539,79 @@ void test_cleanup_releases_expanded_hierarchy_before_callbacks_and_clears_comman
     ExpectUserClosed(result);
     Expect(ran);
 }
+
+#if defined(ZHLN_HAS_ANIMATION)
+void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
+    auto app = App(EngineConfig {.appName = "AnimationQueryCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
+    bool ran = false;
+    app.OnStart([&](Engine& engine) {
+        Animation::Install(engine);
+        auto animations = engine.Service<Animation::AnimationContext>();
+        Expect(animations.has_value());
+        if (!animations) return;
+        auto& registry = EngineAccess::RegistryOf(engine);
+        const auto deadID = animations->Create(1);
+        const auto liveID = animations->Create(2);
+        const auto orphanID = animations->Create(3);
+        const auto dead = registry.Create(Components::AnimatorComponent {.animationID = deadID});
+        const auto live = registry.Create(Components::AnimatorComponent {.animationID = liveID});
+        engine.Commands().DestroyEntity(dead);
+        engine.Commands().Playback();
+        engine.ProcessPendingDestroy();
+        Expect(!registry.IsAlive(dead) && registry.IsAlive(live));
+        Expect(!animations->Valid(deadID) && animations->Valid(liveID) && animations->Valid(orphanID));
+        engine.ClearScene();
+        Expect(!registry.IsAlive(live) && !animations->Valid(liveID) && !animations->Valid(orphanID));
+        ran = true;
+    });
+    const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
+    ExpectUserClosed(result);
+    Expect(ran);
+}
+#endif
+
+#if defined(ZHLN_HAS_TERRAIN)
+void test_terrain_typed_sampling_and_scene_cleanup() {
+    auto app = App(EngineConfig {.appName = "TerrainQueryBoundaryTest", .validationMode = ValidationMode::Off, .headless = true});
+    bool ran = false;
+    app.OnStart([&](Engine& engine) {
+        using namespace Terrain;
+        auto& registry = EngineAccess::RegistryOf(engine);
+        TerrainSystem::RegisterCleanup(engine);
+        TerrainData data;
+        data.sampleCount = 2;
+        data.worldSize = 10.0f;
+        data.heights.resize(4);
+        data.heights[0] = 1.0f;
+        data.heights[1] = 3.0f;
+        data.heights[2] = 5.0f;
+        data.heights[3] = 7.0f;
+        const auto retired = TerrainSystem::RegisterTerrainData(std::move(data));
+        const auto survivor = TerrainSystem::RegisterTerrainData({});
+        Expect(retired != TerrainID::Invalid && survivor != TerrainID::Invalid);
+        if (retired == TerrainID::Invalid || survivor == TerrainID::Invalid) {
+            TerrainSystem::UnregisterTerrainData(retired);
+            TerrainSystem::UnregisterTerrainData(survivor);
+            return;
+        }
+        const Entity dead = registry.Create(TerrainComponent {.terrainID = retired}, Components::TransformComponent {.position = {10.0f, 4.0f, 20.0f}});
+        const Entity live = registry.Create(TerrainComponent {.terrainID = survivor}, Components::TransformComponent {.position = {500.0f, 0.0f, 0.0f}});
+        const float typed = TerrainSystem::SampleHeightAtWithQuery(TerrainHeightQuery {registry}, 10.0f, 20.0f);
+        Expect(typed == 8.0f);
+        engine.Commands().DestroyEntity(dead);
+        engine.Commands().Playback();
+        engine.ProcessPendingDestroy();
+        Expect(!registry.IsAlive(dead) && registry.IsAlive(live));
+        Expect(TerrainSystem::GetTerrainData(retired) == nullptr && TerrainSystem::GetTerrainData(survivor) != nullptr);
+        engine.ClearScene();
+        Expect(!registry.IsAlive(live) && TerrainSystem::GetTerrainData(survivor) == nullptr);
+        ran = true;
+    });
+    const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
+    ExpectUserClosed(result);
+    Expect(ran);
+}
+#endif
 
 static RenderContext* observedRenderContext = nullptr;
 void ObserveRenderContext(ECS::ResMut<RenderContext> render) { observedRenderContext = &*render; }

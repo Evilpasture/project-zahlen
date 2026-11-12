@@ -28,6 +28,7 @@ module;
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,6 +45,13 @@ module ZHLN.Lightning;
 namespace ZHLN {
 
 namespace {
+
+// These views are used inside the existing externally ordered Engine calls,
+// not registered as parallel graph nodes. Graphics/audio and immediate
+// hierarchy despawn remain phase-owned side effects.
+using LightningCleanupQuery = ECS::Query<LightningComponent&, const Components::PendingDestroy>;
+using LightningRecoveryQuery = ECS::Query<LightningComponent&>;
+using LightningSpawnReadQuery = ECS::Query<const LightningComponent, const Components::CameraComponent>;
 
 struct LightningSegment {
     FVec3 start;
@@ -168,17 +176,7 @@ auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, FVec3 c
     return ribbon;
 }
 
-auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float {
-    if (tUs <= 0.0f || i0 <= 0.0f) {
-        return 0.0f;
-    }
-    const float x  = (tUs / t1) * (tUs / t1);
-    const float ec = std::exp(-(t1 / t2) * std::sqrt(2.0f * t2 / t1));
-    return (i0 / ec) * (x / (1.0f + x)) * std::exp(-tUs / t2);
-}
-
-void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
-    auto render = engine.Graphics();
+void ReleaseLightning(GraphicsDevice render, LightningComponent& bolt) {
     if (bolt.meshAssetId != InvalidAssetID) {
         render.UnregisterMesh(bolt.meshAssetId);
     }
@@ -196,18 +194,21 @@ void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
     bolt.matAssetId  = InvalidMaterialID;
 }
 
-void CleanupLightning(Engine& engine, bool all) {
-    auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto entities = reg.GetEntitiesWith<LightningComponent>();
+void CleanupLightningTyped(LightningCleanupQuery query, GraphicsDevice render, bool all) {
+    const auto entities = query.Entities<LightningComponent>();
     if (entities.empty()) {
         return;
     }
-    auto bolts = reg.GetRawArray<LightningComponent>();
+    auto bolts = query.Raw<LightningComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        if (all || reg.Get<Components::PendingDestroy>(entities[i])) {
-            ReleaseLightning(engine, bolts[i]);
+        if (all || query.Get<Components::PendingDestroy>(entities[i])) {
+            ReleaseLightning(render, bolts[i]);
         }
     }
+}
+
+void CleanupLightning(Engine& engine, bool all) {
+    CleanupLightningTyped(LightningCleanupQuery {ZHLN::EngineAccess::RegistryOf(engine)}, engine.Graphics(), all);
 }
 
 void RegisterCleanup(Engine& engine) {
@@ -215,7 +216,8 @@ void RegisterCleanup(Engine& engine) {
     reg.RegisterComponent<LightningComponent>("LightningComponent");
     if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
-            for (auto& bolt: ZHLN::EngineAccess::RegistryOf(owner).GetRawArray<LightningComponent>()) {
+            const LightningRecoveryQuery query {ZHLN::EngineAccess::RegistryOf(owner)};
+            for (auto& bolt: query.Raw<LightningComponent>()) {
                 bolt.vboPos     = BufferID::Invalid;
                 bolt.vboFrame   = BufferID::Invalid;
                 bolt.vboSurface = BufferID::Invalid;
@@ -230,7 +232,7 @@ namespace Lightning {
 
 void Detach(Engine& engine, Entity entity) {
     if (auto bolt = ZHLN::EngineAccess::RegistryOf(engine).Get<LightningComponent>(entity)) {
-        ReleaseLightning(engine, *bolt);
+        ReleaseLightning(engine.Graphics(), *bolt);
         ZHLN::EngineAccess::RegistryOf(engine).Remove<LightningComponent>(entity);
     }
 }
@@ -247,10 +249,11 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
 
     RegisterCleanup(engine);
 
+    const LightningSpawnReadQuery read {reg};
     float      baseExposure = 4.5f;
-    const auto existingEnts = reg.GetEntitiesWith<LightningComponent>();
+    const auto existingEnts = read.Entities<LightningComponent>();
     if (!existingEnts.empty()) {
-        if (const auto existingComp = reg.Get<LightningComponent>(existingEnts[0])) {
+        if (const auto existingComp = read.Get<LightningComponent>(existingEnts[0])) {
             baseExposure = existingComp->baseAmbientExposure;
         }
     } else {
@@ -267,7 +270,7 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     // bolt to spawn. The null entity says that -- the alternative was fabricating a
     // camera at the engine's default framing, then aiming the ribbon and the flash
     // at a point no observer occupies.
-    const auto camComp = reg.GetSingleton<Components::CameraComponent>();
+    const auto camComp = read.GetSingleton<Components::CameraComponent>();
     if (!camComp) {
         return Entity::Null();
     }
@@ -344,178 +347,16 @@ auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const Li
     return boltEntity;
 }
 
-auto Update(Engine& engine, float dt) -> void {
-    auto rc = engine.Graphics();
-    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto ents = reg.GetEntitiesWith<LightningComponent>();
-
-    if (ents.empty()) {
-        return;
-    }
-
-    auto bolts = reg.GetRawArray<LightningComponent>();
-
-    std::vector<Entity> deadEntities;
-    float               peakLuminanceThisFrame = 0.0f;
-    float               unflashedBaseExposure  = 4.5f;
-    bool                hasActiveBolts         = false;
-
-    for (size_t i = 0; i < ents.size(); ++i) {
-        const Entity        e    = ents[i];
-        LightningComponent& bolt = bolts[i];
-
-        if (bolt.phase == LightningPhase::Idle || reg.Get<Components::PendingDestroy>(e)) {
-            continue;
-        }
-
-        // A rebuilt renderer has no cached mesh or material. Restore them from
-        // component data, never from an entity-keyed buffer table.
-        bool needsMeshRegistration = !rc.Mesh(bolt.meshAssetId).has_value();
-        if (bolt.vboPos == BufferID::Invalid || bolt.vboFrame == BufferID::Invalid || bolt.vboSurface == BufferID::Invalid) {
-            const auto camComp = reg.GetSingleton<Components::CameraComponent>();
-            if (!camComp) {
-                // No view to face: the ribbon cannot be rebuilt, and the handles stay
-                // invalid so the first frame that has a camera retries them. Building
-                // it against a fabricated pose would bake the wrong geometry in.
-                continue;
-            }
-            static thread_local std::mt19937 rng(std::random_device {}());
-            const auto                       segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
-            const FVec3                  cameraPosition = camComp->camera.position;
-            const auto                       ribbon   = BuildCameraFacingRibbon(segments, cameraPosition);
-            if (bolt.vboPos == BufferID::Invalid) {
-                bolt.vboPos = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
-            }
-            if (bolt.vboFrame == BufferID::Invalid) {
-                bolt.vboFrame = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
-            }
-            if (bolt.vboSurface == BufferID::Invalid) {
-                bolt.vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
-            }
-            bolt.maxVertices      = ribbon.maxVertices;
-            bolt.visibleVertices  = std::min(bolt.visibleVertices, bolt.maxVertices);
-            needsMeshRegistration = true;
-        }
-        if (needsMeshRegistration && bolt.vboPos != BufferID::Invalid && bolt.vboFrame != BufferID::Invalid &&
-            bolt.vboSurface != BufferID::Invalid) {
-            rc.RegisterMesh(
-                bolt.meshAssetId,
-                Mesh {.posBuffer = bolt.vboPos, .tangentFrameBuffer = bolt.vboFrame, .surfaceBuffer = bolt.vboSurface, .vertexCount = bolt.visibleVertices}
-            );
-        }
-        if (!rc.Material(bolt.matAssetId)) {
-            if (auto mat = rc.CreateMaterial(
-                    {.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
-                )) {
-                rc.RegisterMaterial(bolt.matAssetId, *mat);
-            }
-        }
-
-        unflashedBaseExposure = bolt.baseAmbientExposure;
-
-        const float dtReal = dt / bolt.config.timeDilation;
-        bolt.realTime += dtReal;
-        bolt.phaseTime += dtReal;
-
-        switch (bolt.phase) {
-            case LightningPhase::SteppedLeader: {
-                const float growthRate = static_cast<float>(bolt.maxVertices) / 0.04f;
-                bolt.visibleVertices += static_cast<uint32_t>(growthRate * dtReal);
-
-                if (bolt.visibleVertices >= bolt.maxVertices) {
-                    bolt.visibleVertices = bolt.maxVertices;
-                    bolt.phase           = LightningPhase::ReturnStroke;
-                    bolt.phaseTime       = 0.0f;
-
-                    engine.Audio().PostEvent(
-                        {.type     = AudioEventType::OneShot3D,
-                         .filepath = "resources/assets/audio/lightning.wav",
-                         .position = bolt.groundTarget,
-                         .volume   = bolt.config.soundVolume}
-                    );
-                }
-                break;
-            }
-
-            case LightningPhase::ReturnStroke: {
-                const float tNorm = std::clamp(bolt.phaseTime / 0.15f, 0.0f, 1.0f);
-                const float tUs   = tNorm * 200.0f;
-                const float iNow  = EvaluateHeidler(tUs, bolt.config.peakCurrentKA, 1.8f, 95.0f);
-
-                bolt.currentKA      = iNow;
-                bolt.flashLuminance = std::pow(std::max(iNow, 0.0f) / 30.0f, 1.4f);
-
-                if (bolt.phaseTime > 0.15f) {
-                    bolt.phase     = LightningPhase::Dissipating;
-                    bolt.phaseTime = 0.0f;
-                }
-                break;
-            }
-
-            case LightningPhase::Dissipating: {
-                const float fade    = std::exp(-bolt.phaseTime * 8.0f);
-                bolt.flashLuminance = fade * 0.2f;
-
-                if (fade < 0.01f) {
-                    bolt.phase = LightningPhase::Idle;
-                    deadEntities.push_back(e);
-                    continue;
-                }
-                break;
-            }
-            default:
-                break;
-        }
-
-        hasActiveBolts         = true;
-        peakLuminanceThisFrame = std::max(peakLuminanceThisFrame, bolt.flashLuminance);
-
-        if (auto gpuMatOpt = rc.Material(bolt.matAssetId)) {
-            Material    mat       = *gpuMatOpt;
-            const float intensity = (bolt.phase == LightningPhase::SteppedLeader) ? 15.0f : (bolt.flashLuminance * bolt.config.emissiveIntensity);
-
-            // Lanes 0-2 only: the fourth lane belongs to the ABI's emissive
-            // packing and this path never owned it.
-            mat.emissiveFactor.x  = 0.88f * intensity;
-            mat.emissiveFactor.y  = 0.95f * intensity;
-            mat.emissiveFactor.z  = 1.00f * intensity;
-            rc.RegisterMaterial(bolt.matAssetId, mat);
-        }
-
-        if (auto gpuMeshOpt = rc.Mesh(bolt.meshAssetId)) {
-            Mesh m        = *gpuMeshOpt;
-            m.vertexCount = bolt.visibleVertices;
-            rc.RegisterMesh(bolt.meshAssetId, m);
-        }
-
-        if (reg.IsAlive(bolt.flashLightEntity)) {
-            reg.Patch<Components::LightComponent>(bolt.flashLightEntity, [&](auto& light) { light.intensity = bolt.flashLuminance * 8000000.0f; });
-        }
-        if (reg.IsAlive(bolt.impactLightEntity)) {
-            reg.Patch<Components::LightComponent>(bolt.impactLightEntity, [&](auto& light) { light.intensity = bolt.flashLuminance * 4000000.0f; });
-        }
-    }
-
-    const auto setAmbientExposure = [&engine](float value) {
-        GraphicsSettings gfx            = engine.Graphics().Settings();
-        gfx.environment.ambientExposure = value;
-        engine.Graphics().ApplySettings(gfx);
-    };
-    if (hasActiveBolts) {
-        setAmbientExposure(unflashedBaseExposure + (180.0f * peakLuminanceThisFrame));
-    }
-
-    for (const Entity deadEnt: deadEntities) {
-        // The scene cleanup pass releases VBOs and child lights after the
-        // simulation step, while the LightningComponent is still inspectable.
-        DespawnEntity(engine, deadEnt);
-    }
-
-    if (!hasActiveBolts) {
-        setAmbientExposure(unflashedBaseExposure);
-    }
+void RebuildBuffers(LightningComponent& bolt, GraphicsDevice rc, FVec3 cameraPosition) {
+    static thread_local std::mt19937 rng(std::random_device {}());
+    const auto segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
+    const auto ribbon = BuildCameraFacingRibbon(segments, cameraPosition);
+    if (bolt.vboPos == BufferID::Invalid) bolt.vboPos = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
+    if (bolt.vboFrame == BufferID::Invalid) bolt.vboFrame = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
+    if (bolt.vboSurface == BufferID::Invalid) bolt.vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
+    bolt.maxVertices = ribbon.maxVertices;
+    bolt.visibleVertices = std::min(bolt.visibleVertices, bolt.maxVertices);
 }
 
 } // namespace Lightning
-
 } // namespace ZHLN

@@ -58,7 +58,9 @@ namespace Lightning {
 
 export auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const LightningConfig& cfg = {}) -> Entity;
 
-export auto Update(Engine& engine, float dt) -> void;
+// Rendering support shared with the resolved update implementation.
+// The update itself is declared in <VFX/LightningUpdate.hpp>.
+export void RebuildBuffers(LightningComponent& bolt, GraphicsDevice graphics, FVec3 cameraPosition);
 
 // Explicit replacement/removal of a resource-owning LightningComponent.
 export void Attach(Engine& engine, Entity entity, LightningComponent component);

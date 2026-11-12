@@ -13,11 +13,12 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <VFX/ExplosionUpdate.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <expected>
 #include <memory>
 
-import ZHLN.Explosions;
 
 enum class ExplosionTestError : uint32_t {
     ExplosionSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"ExplosionSystem::Spawn failed to instantiate entity hierarchy.">{}) = 1,
@@ -62,7 +63,46 @@ struct ExplosionTestSuite {
         return engine;
     }
 
+    // The phase owner preserves the original Init -> update -> main ECB
+    // playback ordering; the system itself receives no Engine or Registry.
+    static void Step(ZHLN::Engine& engine, float dt) {
+        ZHLN::ExplosionSystem::Init(engine);
+        engine.GetRenderGraph().InvokeSequentialWithCommands<&ZHLN::UpdateExplosions>(engine.MakeFrame(dt, ZHLN::FrameAlpha {0.0f}), engine.Commands());
+    }
+
     struct Tests {
+        auto crater_components_follow_existing_playback_boundary() -> std::expected<void, ZHLN::ErrorCode> {
+            auto engine = CreateTestEngine();
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) return std::unexpected(ExplosionTestError::EngineInitFailed);
+            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            const auto root = ZHLN::ExplosionSystem::Spawn(*engine, {0.0f, 0.0f, 0.0f}, 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
+            engine->Commands().Playback();
+            auto explosion = reg.Get<ZHLN::ExplosionComponent>(root);
+            if (!ZHLN::Test::ExpectTrue(explosion.has_value())) return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
+            Step(*engine, 0.21f);
+            explosion = reg.Get<ZHLN::ExplosionComponent>(root);
+            ZHLN::Test::ExpectTrue(explosion->craterSpawned);
+            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::CraterDecalComponent>().empty());
+            ZHLN::Test::ExpectFalse(engine->Commands().Empty());
+            engine->Commands().Playback();
+            const auto craters = reg.GetEntitiesWith<ZHLN::CraterDecalComponent>();
+            if (!ZHLN::Test::ExpectEq(craters.size(), size_t {1})) return std::unexpected(ExplosionTestError::CraterDecalSpawnFailed);
+            const auto crater = craters.front();
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::CraterDecalComponent>(crater)->age, 0.0f);
+            Step(*engine, 0.01f);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::CraterDecalComponent>(crater)->age > 0.0f);
+            const auto age = reg.Get<ZHLN::ExplosionComponent>(root)->age;
+            const auto craterAge = reg.Get<ZHLN::CraterDecalComponent>(crater)->age;
+            ZHLN::DespawnEntity(*engine, root);
+            ZHLN::DespawnEntity(*engine, crater);
+            Step(*engine, 0.01f);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(root)->age, age);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::CraterDecalComponent>(crater)->age, craterAge);
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(root));
+            return {};
+        }
+
         // ====================================================================
         // 1. Standard Fireball Spawn & Lifecycle
         // ====================================================================
@@ -92,7 +132,7 @@ struct ExplosionTestSuite {
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::LightComponent>(expRoot).has_value());
 
             constexpr float dt = 1.0f / 60.0f;
-            ZHLN::ExplosionSystem::Update(*engine, dt);
+            Step(*engine, dt);
             const auto active = reg.Get<ZHLN::ExplosionComponent>(expRoot);
             if (!ZHLN::Test::ExpectTrue(active.has_value() && !active->fireball.empty() && !active->soilSmoke.empty())) {
                 return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
@@ -102,13 +142,13 @@ struct ExplosionTestSuite {
             // is the effect's state, not a handle the component no longer owns.
             const size_t fireCount = active->fireball.size();
             (void) engine->Tick(dt);
-            ZHLN::ExplosionSystem::Update(*engine, dt);
+            Step(*engine, dt);
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(expRoot)->fireball.size(), fireCount);
             (void) engine->Tick(dt);
             // Advance past StandardFireball's 2.5s lifetime.
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
-                ZHLN::ExplosionSystem::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
             }
 
@@ -154,7 +194,7 @@ struct ExplosionTestSuite {
             // 3. Simulate 60 frames (1.0s) — crater should spawn at age >= 0.20s
             for (int i = 0; i < 60; ++i) {
                 engine->ProcessEvents();
-                ZHLN::ExplosionSystem::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
                 const auto craters = reg.GetEntitiesWith<ZHLN::CraterDecalComponent>();
                 if (!craters.empty()) {
@@ -170,7 +210,7 @@ struct ExplosionTestSuite {
 
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
-                ZHLN::ExplosionSystem::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
             }
 
@@ -216,7 +256,7 @@ struct ExplosionTestSuite {
             // 1. Simulate 2.0s into the dissolution window (age: 25s -> 27s)
             for (int i = 0; i < 120; ++i) {
                 engine->ProcessEvents();
-                ZHLN::ExplosionSystem::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
             }
 
@@ -230,7 +270,7 @@ struct ExplosionTestSuite {
             // 2. Simulate past the 28.0s expiration mark (age: 27s -> 29.5s)
             for (int i = 0; i < 150; ++i) {
                 engine->ProcessEvents();
-                ZHLN::ExplosionSystem::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
             }
 

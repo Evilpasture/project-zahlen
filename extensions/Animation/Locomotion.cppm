@@ -297,21 +297,8 @@ auto SpawnCharacter(
 /**
  * @brief Renders the visual dual-shape rig 1:1 anchored to the smoothed character transform.
  */
-auto
-    RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto scene = engine.Debug();
-
-    if (!reg.IsAlive(playerEntity)) {
-        return;
-    }
-
-    const auto trans = reg.Get<Components::TransformComponent>(playerEntity);
-    if (!trans) {
-        return;
-    }
-
-    const FVec3 pos               = trans->position;
+auto RenderDebugRig(DebugDraw scene, FVec3 pos, FVec3 velocity,
+                    const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
     const FVec3 finalLifterCenter = pos + FVec3{0.0f, config.GetLifterOffsetY(), 0.0f};
     const FVec3 finalBumperCenter = pos + FVec3{0.0f, config.GetBumperOffsetY(), 0.0f};
 
@@ -323,13 +310,8 @@ auto
     DrawWireframeSphere(scene, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector
-    const auto move = reg.Get<Character::MovementComponent>(playerEntity);
-    if (move) {
-        const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
-        const FVec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
-        if (vel.LengthSquared() > 0.01f) {
-            scene.AddLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
-        }
+    if (velocity.LengthSquared() > 0.01f) {
+        scene.AddLine(finalBumperCenter, finalBumperCenter + (velocity * 0.25f), palette.colorVelocityDebug);
     }
 }
 

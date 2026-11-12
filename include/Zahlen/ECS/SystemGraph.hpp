@@ -516,7 +516,7 @@ template <typename Param>
 inline constexpr bool SequentialParameter =
     std::is_same_v<Param, EntityCommandBuffer&> ||
     (std::is_same_v<Param, std::remove_cvref_t<Param>> &&
-     (IsQuery<Param> || ResourceView<Param>::value || OptionalResourceParam<Param> ||
+     (IsQuery<Param> || IsExclusiveQuery<Param> || ResourceView<Param>::value || OptionalResourceParam<Param> ||
       std::is_same_v<Param, FrameDt> || std::is_same_v<Param, FrameAlpha> || std::is_same_v<Param, FrameIndex>));
 
 template <auto SystemFn>
@@ -824,6 +824,18 @@ class SystemGraph: public SystemGraphCore {
     void InvokeSequential(const ZHLN::Frame& frame) {
         AdmitParameters<SystemFn, CarrierType>();
         CarrierType carrier {.registry = _registry, .services = _services, .frame = frame};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+    }
+
+    // Invoke at an externally ordered barrier, recording into the caller's
+    // existing buffer without playing it back. The buffer must target this
+    // graph's world; the phase owner owns isolation, ordering, and playback.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequentialWithCommands(const ZHLN::Frame& frame, EntityCommandBuffer& commands) {
+        AdmitParameters<SystemFn, CarrierType>();
+        ZHLN::PanicIf(!commands.Targets(_registry), "A sequential phase command buffer must target the graph's registry");
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame, .ecb = &commands};
         SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
     }
 

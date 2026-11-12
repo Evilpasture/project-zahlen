@@ -1,11 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -48,10 +46,6 @@ void Simulator::BroadcastEvent(const Event& event) {
 }
 
 // --- Main Simulation Loop ---
-
-void Simulator::Update(Engine& engine, float dt, DVec3 observer_pos) {
-    Update(SpatialGrid::WriteQuery {EngineAccess::RegistryOf(engine)}, dt, observer_pos);
-}
 
 void Simulator::Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos) {
     ZHLN::ScopedTimer profTimer("ALife Simulator Update");
@@ -189,10 +183,6 @@ void Simulator::Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_p
 
 // --- Interaction Math ---
 
-void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    ResolveOfflineInteraction(SpatialGrid::WriteQuery {reg}, e1, e2);
-}
-
 void Simulator::ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2) {
     auto c1 = query.Get<ALifeComponent>(e1);
     auto c2 = query.Get<ALifeComponent>(e2);
@@ -312,9 +302,10 @@ auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
     }
 
     _grid.Clear();
-    auto entities = reg.GetEntitiesWith<ALifeComponent>();
+    const SpatialGrid::WriteQuery query {reg};
+    const auto entities = query.Entities<ALifeComponent>();
     for (Entity e: entities) {
-        _grid.UpdateEntity(reg, e, DVec3{-1, -1, -1});
+        _grid.UpdateEntity(query, e, DVec3{-1, -1, -1});
     }
 
     return true;

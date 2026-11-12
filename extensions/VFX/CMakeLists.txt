@@ -3,11 +3,10 @@
 
 # extensions/VFX -- the visual-effects toolkits (zahlen_vfx).
 #
-# Three module interfaces: ZHLN.CombatFX and ZHLN.Explosions are interface-only
-# (everything they export is defined in the interface), ZHLN.Lightning is backed
-# by Lightning.cpp, its module implementation unit. The unit stays in this target
-# with its interface: CMake orders an implementation unit against the BMI it
-# belongs to, and that edge only exists inside one target.
+# Three module interfaces: CombatFX and Explosions export their content from
+# interfaces; Lightning has a module implementation. The separate typed
+# update units import their respective module interfaces. All live in this
+# target so CMake can order implementation/importers against the BMIs.
 #
 # These are the extensions that do reach for the renderer -- BufferID, MaterialID
 # and the creative-works factory all appear in the exported structs -- so this
@@ -28,6 +27,8 @@ set(ZHLN_VFX_MODULES
 # The ordinary translation units of this target, named.
 set(ZHLN_VFX_SOURCES
     Lightning.cpp
+    LightningUpdate.cpp
+    Explosion.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)

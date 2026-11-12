@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -12,7 +11,6 @@
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -312,10 +310,6 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     if constexpr (isDev) {
         ZHLN::Tests::VerifyCullingResults(query, outVisible.AsSpan(), scratch.mainFrustum, stats);
     }
-}
-
-void CullingSystem::DrawDebugFrustum(Engine& engine) {
-    DrawDebugFrustum(DebugFrustumQuery {EngineAccess::RegistryOf(engine)}, engine.Debug());
 }
 
 void CullingSystem::DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene) {

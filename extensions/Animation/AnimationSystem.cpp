@@ -22,38 +22,7 @@ void ReleaseAnimations(Engine& engine, bool all) {
     if (!animOpt) {
         return;
     }
-
-    auto&      registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto owners   = registry.GetEntitiesWith<Components::AnimatorComponent>();
-    if (all) {
-        if (!owners.empty()) {
-            auto components = registry.GetRawArray<Components::AnimatorComponent>();
-            for (Components::AnimatorComponent& comp: components) {
-                comp.animationID = AnimationID::Null();
-            }
-        }
-        animOpt->Clear();
-        return;
-    }
-
-    if (owners.empty()) {
-        return;
-    }
-
-    std::vector<AnimationID> doomed;
-    doomed.reserve(owners.size());
-    auto components = registry.GetRawArray<Components::AnimatorComponent>();
-    for (size_t i = 0; i < owners.size(); ++i) {
-        if (registry.Get<Components::PendingDestroy>(owners[i]).has_value()) {
-            const AnimationID handle = std::exchange(components[i].animationID, AnimationID::Null());
-            if (handle.IsValid()) {
-                doomed.push_back(handle);
-            }
-        }
-    }
-    if (!doomed.empty()) {
-        animOpt->Destroy(doomed);
-    }
+    ReleaseOwnedAnimations(AnimationReleaseQuery {ZHLN::EngineAccess::RegistryOf(engine)}, *animOpt, all);
 }
 
 void AddSystems(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
@@ -76,6 +45,37 @@ void AppendUniqueBinding(std::vector<SkeletonBinding>& bindings, SkeletonBinding
 }
 
 } // namespace
+
+void ReleaseOwnedAnimations(AnimationReleaseQuery query, AnimationContext& animations, bool all) {
+    const auto owners = query.Entities<Components::AnimatorComponent>();
+    if (all) {
+        if (!owners.empty()) {
+            auto components = query.Raw<Components::AnimatorComponent>();
+            for (Components::AnimatorComponent& comp: components) {
+                comp.animationID = AnimationID::Null();
+            }
+        }
+        animations.Clear();
+        return;
+    }
+    if (owners.empty()) {
+        return;
+    }
+    std::vector<AnimationID> doomed;
+    doomed.reserve(owners.size());
+    auto components = query.Raw<Components::AnimatorComponent>();
+    for (size_t i = 0; i < owners.size(); ++i) {
+        if (query.Get<Components::PendingDestroy>(owners[i]).has_value()) {
+            const AnimationID handle = std::exchange(components[i].animationID, AnimationID::Null());
+            if (handle.IsValid()) {
+                doomed.push_back(handle);
+            }
+        }
+    }
+    if (!doomed.empty()) {
+        animations.Destroy(doomed);
+    }
+}
 
 void AnimationSyncSystem::Update(
     ECS::Query<

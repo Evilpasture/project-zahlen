@@ -187,16 +187,6 @@ uint32_t FireEntityOutputs(DispatchQuery query, Entity entity, std::string_view 
     return fired;
 }
 
-void FireEntityInput(ECS::Registry& registry, Entity entity, std::string_view input, std::string_view parameter, ZHLN::Optional<AudioContext&> audio) {
-    FireEntityInput(DispatchQuery {registry}, entity, input, parameter, audio);
-}
-void FireEntityInput(ECS::Registry& registry, std::string_view target, std::string_view input, std::string_view parameter, ZHLN::Optional<AudioContext&> audio) {
-    FireEntityInput(DispatchQuery {registry}, target, input, parameter, audio);
-}
-uint32_t FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio) {
-    return FireEntityOutputs(DispatchQuery {registry}, entity, event, audio);
-}
-
 // --- The translation pass ---------------------------------------------------
 
 namespace {

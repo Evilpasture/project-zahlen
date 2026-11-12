@@ -346,7 +346,8 @@ class Query {
     Registry* _registry;
 };
 
-// Transitional view for systems that must make an immediate structural add.
+// Transitional view for systems that must make an immediate structural add
+// or create a bare entity immediately.
 // A graph schedules it with the same AllComponents write hazard as Registry&;
 // it is NOT a way to make structural mutations safe in a parallel query. Only
 // declared writable families can be added, and existing components are never
@@ -360,6 +361,10 @@ class ExclusiveQuery : public Query<Comps...> {
 
   public:
     explicit ExclusiveQuery(Registry& registry) noexcept: Query<Comps...>(registry), _registry(&registry) {}
+
+    // Creates a live, component-free entity immediately; component attachment
+    // remains either AddIfMissing or explicitly deferred through an ECB.
+    [[nodiscard]] auto CreateEntity() const -> Entity { return _registry->Create(); }
 
     template <typename T>
         requires (Writable<T> && std::is_same_v<T, std::remove_cvref_t<T>>)

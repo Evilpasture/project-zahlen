@@ -145,20 +145,11 @@ auto SpatialGrid::QueryImpl(const View& view, DVec3 pos, float radius, std::vect
 void SpatialGrid::UpdateEntity(WriteQuery query, Entity handle, DVec3 old_pos) {
     UpdateEntityImpl(query, handle, old_pos);
 }
-void SpatialGrid::UpdateEntity(ECS::Registry& registry, Entity handle, DVec3 old_pos) {
-    UpdateEntityImpl(registry, handle, old_pos);
-}
 void SpatialGrid::RemoveEntity(WriteQuery query, Entity handle) {
     RemoveEntityImpl(query, handle);
 }
-void SpatialGrid::RemoveEntity(ECS::Registry& registry, Entity handle) {
-    RemoveEntityImpl(registry, handle);
-}
 auto SpatialGrid::Query(ReadQuery query, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
     return QueryImpl(query, pos, radius, std::move(reusable));
-}
-auto SpatialGrid::Query(const ECS::Registry& registry, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
-    return QueryImpl(registry, pos, radius, std::move(reusable));
 }
 
 } // namespace ZHLN::ALife

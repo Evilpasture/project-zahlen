@@ -604,15 +604,6 @@ void SolveUpperBody(
     const Mat4x4&            worldAnchor
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
-void  UpdateItemDynamics(
-    const ECS::Registry&   registry,
-    const PhysicsContext&  physics,
-    Entity                 characterEntity,
-    ItemHandlingComponent& handling,
-    FVec3           rootPosition,
-    Quat           rootRotation,
-    float                  dt
-) noexcept;
 void ConstrainItemToGripReach(ItemHandlingComponent& handling, const Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept;
 void ApplyClavicleLead(Mat4x4* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, FVec3 targetGripPos, float weight) noexcept;
 void ApplyTorsoReachCompensation(
@@ -696,8 +687,9 @@ namespace ProceduralAnimation {
 
 /** Registers ECS types and inserts the optional evaluator before articulation. */
 void Register(Engine& engine);
-/** Direct evaluation entry point for custom schedules. */
-void   Update(SystemContext& ctx, float dt) noexcept;
+/** Add the typed evaluator to a custom simulation graph. The caller owns
+ * scheduling and must Compile the graph before execution. */
+void AddEvaluator(ECS::SimGraph& graph);
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;
@@ -719,7 +711,6 @@ size_t MaskFirstPersonPalette(
     bool                  hideHead = true,
     bool                  hideHair = true
 ) noexcept;
-size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     SceneData&                           scene,
     FVec3                         rootPosition,

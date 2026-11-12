@@ -15,7 +15,6 @@
 #include <array>
 
 namespace ZHLN {
-class Engine;
 class RenderContext;
 class DebugDraw;
 
@@ -54,8 +53,6 @@ class ZHLN_API CullingSystem {
     // reaching into another node's storage.
     using DebugFrustumQuery = ECS::Query<const Components::CullingStatsComponent, const Components::CameraComponent>;
     static void DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene);
-    // Compatibility entry point for presentation and existing callers.
-    static void DrawDebugFrustum(Engine& engine);
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,

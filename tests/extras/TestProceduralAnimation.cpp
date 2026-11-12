@@ -6,6 +6,8 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Animation/ProceduralMath.hpp>
+#include <Animation/AnimationSystem.hpp>
+#include <Animation/AttachmentSync.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -16,11 +18,12 @@
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/SystemContext.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cgltf.h>
 #include <cmath>
@@ -153,6 +156,12 @@ inline void BuildFixture(const cgltf_data& data, ZHLN::ModelPrefab& outPrefab) {
 
 namespace {
 
+ZHLN::Entity observedItem = ZHLN::Entity::Null();
+std::atomic<bool> itemWorldSeen {false};
+void ObserveItemWorld(ZHLN::ECS::Query<const ZHLN::Components::WorldTransformComponent> query) {
+    itemWorldSeen.store(query.Get<ZHLN::Components::WorldTransformComponent>(observedItem).has_value(), std::memory_order_relaxed);
+}
+
 struct ProceduralAnimationTestSuite {
     ProceduralAnimationTestSuite() {
         ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
@@ -163,6 +172,28 @@ struct ProceduralAnimationTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> typed_animation_cleanup_preserves_survivors_and_clears_orphans() {
+            using namespace ZHLN;
+            ECS::Registry registry;
+            Animation::AnimationContext animations;
+            const auto pendingID = animations.Create(1);
+            const auto liveID = animations.Create(2);
+            const auto orphanID = animations.Create(3);
+            const auto pending = registry.Create(Components::AnimatorComponent {.animationID = pendingID}, Components::PendingDestroy {});
+            const auto live = registry.Create(Components::AnimatorComponent {.animationID = liveID});
+            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, false);
+            if (animations.Valid(pendingID) || !animations.Valid(liveID) || !animations.Valid(orphanID) ||
+                registry.Get<Components::AnimatorComponent>(pending)->animationID.IsValid() ||
+                registry.Get<Components::AnimatorComponent>(live)->animationID != liveID || !registry.IsAlive(pending))
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, false);
+            Animation::ReleaseOwnedAnimations(Animation::AnimationReleaseQuery {registry}, animations, true);
+            if (animations.Valid(liveID) || animations.Valid(orphanID) || animations.ActiveCount() != 0 ||
+                registry.Get<Components::AnimatorComponent>(live)->animationID.IsValid())
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> procedural_update_immediately_creates_item_world_and_uploads_pose() {
             using namespace ZHLN;
             auto created = World::Create(PhysicsConfig {});
@@ -176,8 +207,11 @@ struct ProceduralAnimationTestSuite {
                                   .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
                                   .extensions = extensions, .poseUploads = uploads};
             const Frame frame {.dt = {1.0f / 60.0f}};
-            SystemContext ctx {.registry = world->GetRegistry(), .services = services, .frame = frame};
             auto& reg = world->GetRegistry();
+            ECS::SimGraph graph {reg, services};
+            ProceduralAnimation::AddEvaluator(graph);
+            graph.AddSystem<&ObserveItemWorld>();
+            graph.Compile();
             const AssetID prefabID = HashAssetPath("tests/procedural-query-prefab");
             auto prefab = std::make_unique<ModelPrefab>();
             Skeleton skeleton;
@@ -195,6 +229,8 @@ struct ProceduralAnimationTestSuite {
             config.enableUpperBody = false;
             config.enableSecondaryMotion = false;
             const Entity item = reg.Create(Components::TransformComponent {});
+            observedItem = item;
+            itemWorldSeen.store(false, std::memory_order_relaxed);
             Animation::ItemHandlingComponent handling;
             handling.itemEntity = item;
             handling.gripCount = 1;
@@ -210,18 +246,19 @@ struct ProceduralAnimationTestSuite {
             const Entity attachment = reg.Create(Components::HierarchyComponent {.parent = actor},
                 Components::MeshComponent {.nodeIndex = static_cast<int32_t>(headNode)}, Components::TransformComponent {});
             if (reg.Get<Components::WorldTransformComponent>(item)) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
-            ProceduralAnimation::Update(ctx, 1.0f / 60.0f);
+            graph.Execute(frame);
             auto itemWorld = reg.Get<Components::WorldTransformComponent>(item);
             auto boneMap = reg.Get<RigBoneMap>(actor);
             const auto childTransform = reg.Get<Components::TransformComponent>(attachment);
-            if (!itemWorld || !boneMap || !childTransform || uploads.Size() != 1) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
+            if (!itemWorld || !boneMap || !childTransform || uploads.Size() != 1 || !itemWorldSeen.load(std::memory_order_relaxed))
+                return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             if (!reg.Get<FirstPersonVisibilityComponent>(actor)->cameraInitialized) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             const auto cameraPosition = reg.Get<Components::CameraComponent>(camera)->camera.position;
             const auto firstWorld = itemWorld->world;
             if (!Close(firstWorld, itemWorld->previous, 1.0e-6f)) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             if (!boneMap->poseValid || boneMap->synchronizedSkinPaletteCount != 1 || boneMap->synchronizedAttachmentCount != 1) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             reg.Get<Components::TransformComponent>(actor)->position = {5.0f, 0.0f, 0.0f};
-            ProceduralAnimation::Update(ctx, 1.0f / 60.0f);
+            graph.Execute(frame);
             itemWorld = reg.Get<Components::WorldTransformComponent>(item);
             const auto updatedCameraPosition = reg.Get<Components::CameraComponent>(camera)->camera.position;
             if (std::abs(updatedCameraPosition.x - cameraPosition.x - 5.0f) > 0.001f) return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
@@ -1011,7 +1048,7 @@ struct ProceduralAnimationTestSuite {
             const Quat expectedRotation = Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{0.35f});
             map.modelTransforms[2]           = ZHLN::ProceduralMath::Transform(expectedRotation, expectedPosition, expectedScale);
 
-            const size_t synchronizedCount   = ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map);
+            const size_t synchronizedCount   = ZHLN::Animation::SyncNonSkinnedAttachments(ZHLN::Animation::AttachmentQuery {registry}, root, map);
             const auto   attachmentTransform = registry.Get<ZHLN::Components::TransformComponent>(attachment);
             const auto   skinnedTransform    = registry.Get<ZHLN::Components::TransformComponent>(skinned);
             if (synchronizedCount != 1 || !attachmentTransform || !Close(FVec3{attachmentTransform->position}, expectedPosition, 0.0001f) ||
@@ -1320,7 +1357,7 @@ struct ProceduralAnimationTestSuite {
                 }
             }
 
-            if (ZHLN::ProceduralAnimation::SyncNonSkinnedAttachments(registry, root, map) != descendants.size()) {
+            if (ZHLN::Animation::SyncNonSkinnedAttachments(ZHLN::Animation::AttachmentQuery {registry}, root, map) != descendants.size()) {
                 return std::unexpected(ProceduralAnimationTestError::RigMappingFailed);
             }
             for (const Descendant& descendant: descendants) {

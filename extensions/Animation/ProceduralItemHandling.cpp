@@ -262,17 +262,6 @@ void UpdateItemDynamics(
     handling.itemModelTransform  = itemModel * ProceduralMath::Transform(swayRotation, handling.sway.positionOffset);
 }
 
-void UpdateItemDynamics(
-    const ECS::Registry& registry, const PhysicsContext& physics, Entity characterEntity, ItemHandlingComponent& handling,
-    FVec3 rootPosition, Quat rootRotation, float dt
-) noexcept {
-    Physics::BodyID ignoredPhysics {};
-    if (handling.avoidance.probeDistance > 0.01f) {
-        if (const auto component = registry.Get<Components::PhysicsComponent>(characterEntity)) ignoredPhysics = component->physicsID;
-    }
-    UpdateItemDynamics(ignoredPhysics, physics, handling, rootPosition, rootRotation, dt);
-}
-
 void ConstrainItemToGripReach(ItemHandlingComponent& handling, const Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || handling.driverMode == ItemDriverMode::WorldAnchored || handling.driverMode == ItemDriverMode::HandAnchored) {
         return;
