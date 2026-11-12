@@ -599,7 +599,7 @@ class ClientReplicator {
     auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
 
   private:
-    auto GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity;
+    auto GetOrCreateEntity(Entities& entities, uint64_t uid) -> Entity;
 };
 
 } // namespace ZHLN::Net

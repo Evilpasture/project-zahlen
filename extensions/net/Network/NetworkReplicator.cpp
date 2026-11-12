@@ -10,7 +10,7 @@
 // ============================================================================
 
 module;
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 
 // clang-format off
@@ -47,16 +47,16 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     for (const ObjectSnapshot& object: message->objects) {
-        const Entity e = GetOrCreateEntity(reg, object.uid);
+        const Entity e = GetOrCreateEntity(entities, object.uid);
 
         const FVec3  position = object.position;
         const FVec3  scale    = object.size;
         const auto worldMat = ComposeTransform(position, Quat::Identity(), scale);
 
-        reg.Add(
+        entities.Attach(
             e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = position, .scale = scale},
             Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
             NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false},
@@ -74,11 +74,11 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     for (const PhysicsBodyState& body: message->bodies) {
         if (const auto e = uidToEntityMap.Find(body.uid)) {
-            reg.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
+            entities.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
                 interp.targetPosition = body.position;
                 interp.targetRotation = body.rotation;
                 interp.linearVelocity = body.velocity;
@@ -88,13 +88,13 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
     return {};
 }
 
-auto ClientReplicator::GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity {
+auto ClientReplicator::GetOrCreateEntity(Entities& entities, uint64_t uid) -> Entity {
     if (const auto found = uidToEntityMap.Find(uid)) {
-        if (reg.IsAlive(*found)) {
+        if (entities.IsAlive(*found)) {
             return *found;
         }
     }
-    const Entity newEntity = reg.Create();
+    const Entity newEntity = entities.Create();
     uidToEntityMap.Insert(uid, newEntity);
     return newEntity;
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Terrain/TerrainSystem.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "TerrainSystem.hpp"
 #include "TerrainFactory.hpp"
@@ -106,22 +106,23 @@ void TerrainSystem::UnregisterTerrainData(TerrainID handle) noexcept {
 }
 
 void TerrainSystem::RegisterCleanup(Engine& engine) {
-    ZHLN::EngineAccess::RegistryOf(engine).RegisterComponent<TerrainComponent>();
+    engine.Entities().Register<TerrainComponent>(ECS::BoxedName<TerrainComponent>());
     static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
 }
 
 void TerrainSystem::Detach(Engine& engine, Entity entity) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    if (auto terrain = registry.Get<TerrainComponent>(entity)) {
-        UnregisterTerrainData(std::exchange(terrain->terrainID, TerrainID::Invalid));
-        registry.Remove<TerrainComponent>(entity);
+    auto entities = engine.Entities();
+    if (entities.Patch<TerrainComponent>(entity, [](TerrainComponent& terrain) {
+            UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
+        })) {
+        entities.Detach<TerrainComponent>(entity);
     }
 }
 
 void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
     RegisterCleanup(engine);
     Detach(engine, entity);
-    ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
+    engine.Entities().Attach(entity, std::move(component));
 }
 
 void TerrainSystem::ReleaseTerrainDataWithQuery(TerrainReleaseQuery query) {
@@ -149,7 +150,15 @@ void TerrainSystem::CleanupWithQuery(TerrainCleanupQuery query, bool all) {
 }
 
 void TerrainSystem::Cleanup(Engine& engine, bool all) {
-    CleanupWithQuery(TerrainCleanupQuery {ZHLN::EngineAccess::RegistryOf(engine)}, all);
+    auto entities = engine.Entities();
+    for (const Entity e: entities.EntitiesWith<TerrainComponent>()) {
+        if (all || entities.Get<Components::PendingDestroy>(e)) {
+            entities.Patch<TerrainComponent>(e, [](TerrainComponent& terrain) {
+                UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
+            });
+        }
+    }
+    if (all) Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 }
 
 void TerrainSystem::Update(

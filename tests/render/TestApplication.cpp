@@ -637,6 +637,16 @@ void test_terrain_typed_sampling_and_scene_cleanup() {
         }
         const Entity dead = registry.Create(TerrainComponent {.terrainID = retired}, Components::TransformComponent {.position = {10.0f, 4.0f, 20.0f}});
         const Entity live = registry.Create(TerrainComponent {.terrainID = survivor}, Components::TransformComponent {.position = {500.0f, 0.0f, 0.0f}});
+        const Entity attached = registry.Create();
+        const auto first = TerrainSystem::RegisterTerrainData({});
+        const auto replacement = TerrainSystem::RegisterTerrainData({});
+        TerrainSystem::Attach(engine, attached, TerrainComponent {.terrainID = first});
+        TerrainSystem::Attach(engine, attached, TerrainComponent {.terrainID = replacement});
+        Expect(TerrainSystem::GetTerrainData(first) == nullptr);
+        Expect(TerrainSystem::GetTerrainData(replacement) != nullptr);
+        TerrainSystem::Detach(engine, attached);
+        Expect(TerrainSystem::GetTerrainData(replacement) == nullptr);
+        Expect(!registry.Get<TerrainComponent>(attached));
         const float typed = TerrainSystem::SampleHeightAtWithQuery(TerrainHeightQuery {registry}, 10.0f, 20.0f);
         Expect(typed == 8.0f);
         engine.Commands().DestroyEntity(dead);

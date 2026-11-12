@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "FreeCam.hpp"
@@ -74,8 +74,9 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     }
 }
 
-Entity MainCamera(ECS::Registry& reg) {
-    return reg.SingletonEntity<Components::MainCameraTagComponent>();
+Entity MainCamera(const Entities& entities) {
+    const auto cameras = entities.EntitiesWith<Components::MainCameraTagComponent>();
+    return cameras.empty() ? Entity::Null() : cameras.front();
 }
 
 using SeedQuery = ECS::Query<const Components::MainCameraTagComponent, const FreeCamOptOutComponent,
@@ -168,34 +169,34 @@ void Install(Engine& engine) {
 }
 
 void Attach(Engine& engine, float speed, bool lookRequiresButton) {
-    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto         reg    = engine.Entities();
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
     }
-    reg.Remove<FreeCamOptOutComponent>(camera);
+    reg.Detach<FreeCamOptOutComponent>(camera);
     if (!reg.Get<FreeCamTagComponent>(camera)) {
-        reg.Add(camera, FreeCamTagComponent {});
+        reg.Attach(camera, FreeCamTagComponent {});
     }
     if (!reg.Patch<FreeCamComponent>(camera, [speed, lookRequiresButton](auto& fc) -> auto {
             fc.speed              = speed;
             fc.lookRequiresButton = lookRequiresButton;
         })) {
-        reg.Add(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton});
+        reg.Attach(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton});
     }
 }
 
 void Detach(Engine& engine) {
-    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto         reg    = engine.Entities();
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
     }
     if (!reg.Get<FreeCamOptOutComponent>(camera)) {
-        reg.Add(camera, FreeCamOptOutComponent {});
+        reg.Attach(camera, FreeCamOptOutComponent {});
     }
-    reg.Remove<FreeCamTagComponent>(camera);
-    reg.Remove<FreeCamComponent>(camera);
+    reg.Detach<FreeCamTagComponent>(camera);
+    reg.Detach<FreeCamComponent>(camera);
 }
 
 } // namespace ZHLN::FreeCam

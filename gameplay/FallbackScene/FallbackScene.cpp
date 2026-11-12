@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // gameplay/FallbackScene/FallbackScene.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "FallbackScene.hpp"
@@ -193,7 +193,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 
     s_AccumTime += dt;
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
