@@ -9,8 +9,11 @@
 //
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
-#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
@@ -27,7 +30,6 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -41,8 +43,6 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -53,18 +53,20 @@
 
 namespace {
 
+using ZHLN::FVec3;
+
 inline constexpr std::string_view kBaseURL = "https://pub-59179c82c36c49338ceec8b7926c93cd.r2.dev";
 inline constexpr std::string_view kAsset   = "MD_Map_Lights.glb";
 inline constexpr uint32_t         kTimeout = 180;
 
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
+[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -74,16 +76,16 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax
     outMin = FVec3(1e9f, 1e9f, 1e9f);
     outMax = FVec3(-1e9f, -1e9f, -1e9f);
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
+        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  localCenter = (localMin + localMax) * 0.5f;
         const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const FVec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const FVec3  extent      = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
-                                       (model.GetColumn3(2) * halfExtent.z).Abs();
-        outMin                       = FVec3::sMin(outMin, center - extent);
-        outMax                       = FVec3::sMax(outMax, center + extent);
+        const FVec3  center      = ZHLN::TransformPoint(model, localCenter);
+        const FVec3  extent      = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                       (model.Column(2).XYZ() * halfExtent.z).Abs();
+        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
+        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
     }
     if (prefab.parts.empty()) {
         outMin = FVec3(-1.0f, -1.0f, -1.0f);
@@ -197,10 +199,10 @@ auto main(int argc, char* argv[]) -> int {
         });
 
         const FVec3  sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
-        const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});
+        const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
         reg.Create(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
-            ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
+            ZHLN::Components::TransformComponent {.position = sunPos, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Sun,
@@ -214,8 +216,8 @@ auto main(int argc, char* argv[]) -> int {
         if (camera != ZHLN::Entity::Null()) {
             const FVec3 eye   = center + FVec3(radius * 0.9f, std::max(radius * 0.35f, 8.0f), radius * 0.9f);
             const FVec3 dir   = (center - eye).Normalized();
-            const float     yaw   = JPH::RadiansToDegrees(std::atan2(dir.z, dir.x));
-            const float     pitch = JPH::RadiansToDegrees(std::asin(std::clamp(dir.y, -0.99f, 0.99f)));
+            const float     yaw   = ZHLN::RadF {std::atan2(dir.z, dir.x)}.ToDegrees().value;
+            const float     pitch = ZHLN::RadF {std::asin(std::clamp(dir.y, -0.99f, 0.99f))}.ToDegrees().value;
             reg.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
                 cc.camera.position = eye;
                 cc.camera.yaw      = ZHLN::DegF{yaw};

@@ -85,8 +85,12 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
-#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
@@ -104,7 +108,6 @@
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -131,10 +134,6 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -151,6 +150,9 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 // ============================================================================
 // WHAT TO FETCH
@@ -445,9 +447,9 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
 struct Subject {
     ZHLN::ModelPrefab*        prefab    = nullptr;
     std::vector<ZHLN::Entity> instances {};
-    FVec3                 center    = FVec3::sZero();
-    FVec3                 boundsMin = FVec3::sZero();
-    FVec3                 boundsMax = FVec3::sZero();
+    FVec3                 center    = FVec3::Zero();
+    FVec3                 boundsMin = FVec3::Zero();
+    FVec3                 boundsMax = FVec3::Zero();
     float                     radius    = 1.0f;
     uint32_t                  triangles = 0;
     uint32_t                  textures  = 0;
@@ -457,14 +459,14 @@ struct Subject {
 // A part's node transform, accumulated up the hierarchy -- the same product
 // PrefabFactory::InstantiatePrefab places the part with, and the same walk
 // ProceduralAnimationSample uses to estimate a character's bounds.
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
+[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -481,18 +483,18 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax
     outMax = FVec3(-1e9f, -1e9f, -1e9f);
 
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
+        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  localCenter = (localMin + localMax) * 0.5f;
         const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
 
-        const FVec3 center = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const FVec3 extent = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
-                                 (model.GetColumn3(2) * halfExtent.z).Abs();
+        const FVec3 center = ZHLN::TransformPoint(model, localCenter);
+        const FVec3 extent = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                 (model.Column(2).XYZ() * halfExtent.z).Abs();
 
-        outMin = FVec3::sMin(outMin, center - extent);
-        outMax = FVec3::sMax(outMax, center + extent);
+        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
+        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
     }
 
     if (prefab.parts.empty()) {
@@ -604,10 +606,10 @@ struct Studio {
     FVec3     direction
 ) -> ZHLN::Entity {
     auto&            reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f});
+    const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), FVec3::One());
     return reg.Create(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
-        ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
         ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
         ZHLN::Components::LightComponent {.type = type, .color = color, .intensity = intensity, .radius = radius, .direction = direction, .range = range}
     );
@@ -668,9 +670,9 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // highlights that separate a metal surface from a silhouette. Neither asks to
     // cast, so the shadow atlas hands them no tile.
     studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + FVec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
-                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::sZero());
+                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::Zero());
     studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + FVec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
-                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::sZero());
+                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::Zero());
 
     // The floor sits on the subject's lowest point, and is wide enough to catch a
     // reflection at any orbit angle without reaching the camera's far plane. Two
@@ -857,8 +859,8 @@ void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbi
 // ============================================================================
 
 struct OrbitCamera {
-    FVec3 target         = FVec3::sZero();
-    FVec3 wantedTarget   = FVec3::sZero();
+    FVec3 target         = FVec3::Zero();
+    FVec3 wantedTarget   = FVec3::Zero();
     float     distance       = 3.0f;
     float     wantedDistance = 3.0f;
     float     yaw            = -90.0f;
@@ -871,15 +873,15 @@ struct OrbitCamera {
 // The camera's own convention (Camera::GetViewMatrix): yaw and pitch build the
 // view direction, and the eye sits that far back along it from the target.
 [[nodiscard]] auto OrbitDirection(float yawDegrees, float pitchDegrees) noexcept -> FVec3 {
-    const float yaw   = JPH::DegreesToRadians(yawDegrees);
-    const float pitch = JPH::DegreesToRadians(pitchDegrees);
+    const float yaw   = ZHLN::DegF {yawDegrees}.ToRadians().value;
+    const float pitch = ZHLN::DegF {pitchDegrees}.ToRadians().value;
     return FVec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
 }
 
 // Puts the subject in frame: the bounding sphere at the vertical half-angle, with
 // the zoom clamps derived from the same radius.
 void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
-    const float distance = (subject.radius / std::tan(JPH::DegreesToRadians(orbit.fov) * 0.5f)) * kFrameMargin;
+    const float distance = (subject.radius / std::tan(ZHLN::DegF {orbit.fov}.ToRadians().value * 0.5f)) * kFrameMargin;
     orbit.target         = subject.center;
     orbit.wantedTarget   = subject.center;
     orbit.distance       = distance;
@@ -903,7 +905,7 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
         // cursor instead of running away from it. Right and up come from the view
         // direction the way extensions/Camera's target rig derives them.
         const FVec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
-        FVec3       right   = forward.Cross(FVec3::sAxisY());
+        FVec3       right   = ZHLN::Cross(forward, FVec3::UnitY());
         if (right.LengthSquared() > 1e-6f) {
             right = right.Normalized();
         }

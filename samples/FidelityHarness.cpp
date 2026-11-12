@@ -49,7 +49,6 @@
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -65,9 +64,6 @@
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
 #include <netpbm/PpmEncoder.hpp>
-
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
 #include <array>
@@ -87,6 +83,8 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
 
 std::atomic<uint32_t> g_validationErrors {0};
 
@@ -319,8 +317,8 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
 // Sponza's eye *at* its target (radius 0), still looking into the scene.
 // Deriving the forward vector from target - eye would normalize zero there.
 void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
-    const float thetaRad = JPH::DegreesToRadians(scenario.orbit.theta);
-    const float phiRad   = JPH::DegreesToRadians(scenario.orbit.phi);
+    const float thetaRad = ZHLN::DegF {scenario.orbit.theta}.ToRadians().value;
+    const float phiRad   = ZHLN::DegF {scenario.orbit.phi}.ToRadians().value;
 
     const FVec3 direction(
         std::sin(phiRad) * std::sin(thetaRad),

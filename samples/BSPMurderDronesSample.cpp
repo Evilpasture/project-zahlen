@@ -27,6 +27,8 @@
 
 #include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -118,6 +120,9 @@ import ZHLN.ProceduralAnimation;
 
 namespace {
 
+using ZHLN::FVec3;
+using ZHLN::FVec4;
+
 inline constexpr std::string_view kDefaultMapPath   = "import/engine_assets/maps/gm_murder_drones.bsp";
 inline constexpr std::string_view kDefaultAssetRoot = "import/engine_assets";
 
@@ -147,14 +152,14 @@ inline constexpr std::string_view kFallbackRigPath = "ProceduralAnimationBaseRig
     return out;
 }
 
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
+[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -164,16 +169,16 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax
     outMin = FVec3(1e9f, 1e9f, 1e9f);
     outMax = FVec3(-1e9f, -1e9f, -1e9f);
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
+        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  localCenter = (localMin + localMax) * 0.5f;
         const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const FVec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const FVec3  extent      = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
-                                       (model.GetColumn3(2) * halfExtent.z).Abs();
-        outMin                       = FVec3::sMin(outMin, center - extent);
-        outMax                       = FVec3::sMax(outMax, center + extent);
+        const FVec3  center      = ZHLN::TransformPoint(model, localCenter);
+        const FVec3  extent      = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                       (model.Column(2).XYZ() * halfExtent.z).Abs();
+        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
+        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
     }
     if (prefab.parts.empty()) {
         outMin = FVec3(-10.0f, -10.0f, -10.0f);
@@ -199,8 +204,8 @@ inline constexpr float kPickDistance       = 400.0f; // m, ray length
 struct CrosshairPick {
     bool         hasHit    = false;
     std::string  label     = "world brush"; // entity name, or BSP world geometry
-    FVec3    position  = FVec3::sZero();
-    FVec3    normal    = FVec3::sAxisY();
+    FVec3    position  = FVec3::Zero();
+    FVec3    normal    = FVec3::UnitY();
     float        distance  = 0.0f;
     uint32_t     bodyIndex = 0;
     ZHLN::Entity entity    = ZHLN::Entity::Null();
@@ -294,15 +299,14 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 
     // The player is a CharacterVirtual, not a Jolt body, so it is not
     // in the broadphase and cannot be hit -- no ignore handle is needed.
-    const ZHLN::Physics::RaycastResult hit = engine.Physics().Raycast(cc->camera.position, dir, kPickDistance);
+    const ZHLN::Physics::RaycastResult hit = engine.Physics().Raycast(cc->camera.position.Cast<double>(), dir, kPickDistance);
     if (!hit.hasHit) {
         return;
     }
 
     g_pick.hasHit = true;
-    // RaycastResult::position is DVec3 (world space) and this struct is FVec3
-    // (local space): widen to DVec3 first, then narrow to the local spelling.
-    g_pick.position  = JPH::Vec3(JPH::RVec3(hit.position.x, static_cast<DVec3>(hit.position.y, static_cast<DVec3>(hit.position.z.x, hit.position.x, static_cast<DVec3>(hit.position.y, static_cast<DVec3>(hit.position.z.y, hit.position.x, static_cast<DVec3>(hit.position.y, static_cast<DVec3>(hit.position.z.z));
+    // The physics hit is double precision; the HUD stores float coordinates.
+    g_pick.position  = hit.position.Cast<float>();
     g_pick.normal    = hit.normal;
     g_pick.distance  = hit.fraction * kPickDistance;
     g_pick.bodyIndex = hit.bodyID.index;
@@ -477,7 +481,7 @@ void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
         return;
     }
     // Inverse of ConvertPosition (Source -> engine): engine = (x*s, z*s, -y*s).
-    const FVec3 e = JPH::Mat44(world->world).GetTranslation();
+    const FVec3 e = world->world.Column(3).XYZ();
     const float     s = g_rigImportOpts.unitScale;
     const std::array<float, 3> src = {e.x / s, -e.z / s, e.y / s};
 
@@ -616,14 +620,14 @@ ProceduralViewState g_view;
     return false;
 }
 
-[[nodiscard]] JPH::Mat44 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
+[[nodiscard]] ZHLN::Mat4x4 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
     if (node < 0 || node >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(node)].localTransform);
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(node)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(node)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = ZHLN::Physics::ToJoltMatrix(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
         parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
@@ -699,12 +703,12 @@ ProceduralViewState g_view;
         if (part.nodeIndex != nodeIndex) {
             continue;
         }
-        const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
+        const ZHLN::Mat4x4 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  halfExtent = (localMax - localMin) * 0.5f;
-        const FVec3  center     = model.Multiply3x3((localMin + localMax) * 0.5f) + model.GetTranslation();
-        const float      radius     = model.Multiply3x3(halfExtent).Length();
+        const FVec3  center     = ZHLN::TransformPoint(model, (localMin + localMax) * 0.5f);
+        const float      radius     = ZHLN::TransformVector(model, halfExtent).Length();
         // 3.5 head radii covers a beanie, its rim and a visor shell; a torso
         // piece fails the cap before proximity is even considered.
         if (radius > headScale * 3.5f) {
@@ -734,16 +738,16 @@ ProceduralViewState g_view;
         if (part.nodeIndex != nodeIndex) {
             continue;
         }
-        const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * ZHLN::Physics::ToJoltMatrix(part.localTransform);
+        const ZHLN::Mat4x4 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         const FVec3  localCenter = (localMin + localMax) * 0.5f;
         const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const FVec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
+        const FVec3  center      = ZHLN::TransformPoint(model, localCenter);
         // Column-absolute form of the same box transform ComputeBounds uses: the
         // half extent of an axis-aligned box under a rotation.
-        const FVec3 extent = (model.GetColumn3(0) * halfExtent.x).Abs() + (model.GetColumn3(1) * halfExtent.y).Abs() +
-                                 (model.GetColumn3(2) * halfExtent.z).Abs();
+        const FVec3 extent = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                 (model.Column(2).XYZ() * halfExtent.z).Abs();
         if (center.y - extent.y < neckPosition.y - headScale * 0.35f) {
             continue;
         }
@@ -774,8 +778,8 @@ void CollectFirstPersonHeadMeshes(
             neckNode = static_cast<int32_t>(node);
         }
     }
-    const FVec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).GetTranslation();
-    const FVec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).GetTranslation();
+    const FVec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).Column(3).XYZ();
+    const FVec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).Column(3).XYZ();
     const float     headScale    = headNode >= 0 && neckNode >= 0 ? std::max((headPosition - neckPosition).Length(), 0.06f) : 0.12f;
 
     state.headMeshes.clear();
@@ -1164,7 +1168,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     if (const auto firstPerson = reg.Get<ZHLN::FirstPersonVisibilityComponent>(g_player); firstPerson && firstPerson->cameraInitialized) {
         eyeOffsetModel = firstPerson->smoothedEyeModel;
     }
-    const FVec3 eyePos = FVec3(trans->position) + JPH::Quat(trans->rotation) * eyeOffsetModel;
+    const FVec3 eyePos = trans->position + trans->rotation * eyeOffsetModel;
 
     // Camera-relative turning, applied to the ECS rotation rather than to
     // Character::MovementComponent::orientation: the controller SLEPs that
@@ -1179,7 +1183,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     {
         const float     yawRadians = JPH::DegreesToRadians(g_view.yaw);
         const FVec3 viewFlat(JPH::Cos(yawRadians), 0.0f, JPH::Sin(yawRadians));
-        const FVec3 facing = JPH::Quat(trans->rotation) * FVec3::sAxisZ();
+        const FVec3 facing = trans->rotation * FVec3::UnitZ();
         const FVec3 facingFlat(facing.x, 0.0f, facing.z);
         if (facingFlat.LengthSquared() > 1.0e-6f) {
             const FVec3 facingUnit   = facingFlat.Normalized();
@@ -1188,7 +1192,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
                 // g_frameDt is the loop's own dt, refreshed once per frame -- the same value the HUD and every step got.
                 const float     turnTowards = (1.0f - std::exp(-kBodyFacingSlewSpeed * std::max(g_frameDt, 1.0e-4f))) * std::min(angleDegrees, 60.0f);
                 const float     turnSign    = Cross(facingUnit, viewFlat).y < 0.0f ? -1.0f : 1.0f;
-                const JPH::Quat target      = JPH::Quat::sRotation(FVec3::sAxisY(), JPH::DegreesToRadians(turnSign * turnTowards)) * trans->rotation;
+                const ZHLN::Quat target = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::DegF {turnSign * turnTowards}.ToRadians()) * trans->rotation;
                 reg.Patch<ZHLN::Components::TransformComponent>(g_player, [&](auto& t) -> auto { t.rotation = target.Normalized(); });
                 if (auto move = reg.Get<ZHLN::Character::MovementComponent>(g_player); move) {
                     move->orientation     = target.Normalized();
@@ -1285,7 +1289,7 @@ class VoidCatcherContactListener final: public JPH::ContactListener {
         return _inner;
     }
 
-    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, DVec3 baseOffset, const JPH::CollideShapeResult& result)
+    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg baseOffset, const JPH::CollideShapeResult& result)
         -> JPH::ValidateResult override {
         return _inner != nullptr ? _inner->OnContactValidate(b1, b2, baseOffset, result) : JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
     }
@@ -1340,8 +1344,8 @@ class VoidCatcherContactListener final: public JPH::ContactListener {
             }
             PendingLog entry;
             entry.display         = propIt->second.display;
-            entry.fellPoint       = manifold.mRelativeContactPointsOn1.empty() ? FVec3(manifold.mBaseOffset) :
-                                                                                 FVec3(manifold.GetWorldSpaceContactPointOn1(0));
+            entry.fellPoint       = manifold.mRelativeContactPointsOn1.empty() ? ZHLN::Physics::FromJoltPosition(manifold.mBaseOffset).Cast<float>() :
+                                                                                 ZHLN::Physics::FromJoltPosition(manifold.GetWorldSpaceContactPointOn1(0)).Cast<float>();
             const auto touchIt    = _lastTouch.find(propId.GetIndexAndSequenceNumber());
             entry.hadSurfaceTouch = touchIt != _lastTouch.end();
             if (entry.hadSurfaceTouch) {
@@ -1353,9 +1357,9 @@ class VoidCatcherContactListener final: public JPH::ContactListener {
 
         // Real-surface contact: remember where, so a later void fall can name
         // the visible plane the prop slipped through.
-        FVec3 point(manifold.mBaseOffset);
+        FVec3 point = ZHLN::Physics::FromJoltPosition(manifold.mBaseOffset).Cast<float>();
         if (!manifold.mRelativeContactPointsOn1.empty()) {
-            point = FVec3(manifold.GetWorldSpaceContactPointOn1(0));
+            point = ZHLN::Physics::FromJoltPosition(manifold.GetWorldSpaceContactPointOn1(0)).Cast<float>();
         }
         const uint32_t k1 = b1.GetID().GetIndexAndSequenceNumber();
         const uint32_t k2 = b2.GetID().GetIndexAndSequenceNumber();
@@ -1655,11 +1659,11 @@ auto main(int argc, char* argv[]) -> int {
 
         JPH::PhysicsSystem& system = physics.GetInternalSystem();
         const FVec3     center = (boundsMin + boundsMax) * 0.5f;
-        const FVec3     extent = (boundsMax - boundsMin) * 0.5f + FVec3::sReplicate(50.0f);
+        const FVec3     extent = (boundsMax - boundsMin) * 0.5f + FVec3::Splat(50.0f);
 
         JPH::BodyCreationSettings catcherSettings;
-        catcherSettings.SetShape(new JPH::BoxShape(FVec3(extent.x, 0.5f, extent.z)));
-        catcherSettings.mPosition    = DVec3(center.x, boundsMin.y - kVoidCatcherDropMeters, center.z);
+        catcherSettings.SetShape(new JPH::BoxShape(JPH::Vec3(extent.x, 0.5f, extent.z)));
+        catcherSettings.mPosition    = JPH::RVec3(center.x, boundsMin.y - kVoidCatcherDropMeters, center.z);
         catcherSettings.mRotation    = JPH::Quat::sIdentity();
         catcherSettings.mMotionType  = JPH::EMotionType::Static;
         catcherSettings.mObjectLayer = static_cast<JPH::ObjectLayer>(ZHLN::Layers::ID::NON_MOVING);
@@ -1738,18 +1742,18 @@ auto main(int argc, char* argv[]) -> int {
         const ZHLN::Physics::CharacterParams characterParams {
             .shape            = ZHLN::Physics::CreateDualShape(playerHull),
             .maxSlopeAngle    = JPH::DegreesToRadians(50.0f),
-            .supportingVolume = JPH::Plane(FVec3::sAxisY(), -playerHull.GetLifterOffsetY()),
+            .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -playerHull.GetLifterOffsetY()),
         };
-        const ZHLN::Physics::BodyID playerBody = physics.CreateCharacter(spawnCenter, characterParams);
+        const ZHLN::Physics::BodyID playerBody = physics.CreateCharacter(spawnCenter.Cast<double>(), characterParams);
         if (playerBody == ZHLN::Physics::BodyID::Null()) {
             ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
 
-        const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(spawnCenter, {0.0f, 0.0f, 0.0f, 1.0f});
+        const ZHLN::Mat4x4 playerWorld = ZHLN::ComposeTransform(spawnCenter, ZHLN::Quat::Identity(), FVec3::One());
         g_player                     = reg.Create(
             ZHLN::Components::PlayerTagComponent {}, ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
-            ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
+            ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
             ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}, ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
@@ -1821,10 +1825,10 @@ auto main(int argc, char* argv[]) -> int {
 
         if (!hasSun) {
             const FVec3  sunPos = mapCenter + FVec3(mapRadius * 1.5f, mapRadius * 2.5f, mapRadius * 1.0f);
-            const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});
+            const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
             reg.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64("WorldSun")},
-                ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = FVec3::sReplicate(1.0f)},
+                ZHLN::Components::TransformComponent {.position = sunPos, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
                 ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
                 ZHLN::Components::LightComponent {
                     .type  = ZHLN::LightType::Sun,

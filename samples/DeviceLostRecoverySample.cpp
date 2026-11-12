@@ -51,10 +51,6 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -63,6 +59,9 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 std::atomic<bool> g_ProvokeRequested {false};
 
