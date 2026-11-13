@@ -59,7 +59,6 @@ struct ExplosionTestSuite {
         }
 
         auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
         return engine;
     }
 

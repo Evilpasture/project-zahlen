@@ -132,6 +132,7 @@ class ZHLN_API Engine {
     [[nodiscard]] auto Assets() noexcept -> AssetLibrary;
     [[nodiscard]] auto Audio() noexcept -> AudioEngine;
     [[nodiscard]] auto State() noexcept -> ZHLN::EngineState;
+    [[nodiscard]] auto State() const noexcept -> ZHLN::EngineState;
     // Entity lifecycle and typed component access, with resource-owning
     // components released through SceneResources. Not a Registry pass-through.
     [[nodiscard]] auto Entities() noexcept -> ZHLN::Entities;
@@ -252,8 +253,6 @@ class ZHLN_API Engine {
 
     void ProvokeDeviceLost();
 
-    auto InitializeDefaultScene() -> bool;
-
     [[nodiscard]] auto Tick(float dt) -> std::expected<void, ErrorCode>;
 
     // The frame cap lives with the pacing that reads it every frame, not in
@@ -298,8 +297,11 @@ class ZHLN_API Engine {
     // application and bespoke hosts never need to inspect ECS resize flags.
     void SynchronizeResize();
 
-    // Build the service bundles and the two typed graphs on first use.
+    // Build the service bundles and the two typed graphs on first use, and
+    // recompile them when installed modules have marked them dirty.
     void EnsureSystemGraphs();
+
+    void ReleaseSceneContents();
 
     // Core's own frame steps, placed once. Not a scene-reset concern: the plan a
     // module composed into has to survive a scene rebuild, and rebuilding it per

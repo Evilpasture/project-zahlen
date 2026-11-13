@@ -800,8 +800,6 @@ namespace ZHLN::glTF {
 void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
-    engine.InitializeDefaultScene();
-
     auto* state   = new InspectorState();
     state->engine = &engine;
     engine.SetGameState(state);

@@ -137,7 +137,6 @@ auto main(int argc, char* argv[]) -> int {
 #endif
 
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    engine->InitializeDefaultScene();
 
     ZHLN::CDN::CDNConfig config {
         .baseURL        = kBaseURL,

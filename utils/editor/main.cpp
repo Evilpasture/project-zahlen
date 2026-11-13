@@ -518,10 +518,6 @@ auto main(int argc, char* argv[]) -> int {
     auto engine = std::move(*created);
     ZHLN::InstallApplicationDefaults(*engine);
     engine->GetPlatformHost().Focus();
-    if (!engine->InitializeDefaultScene()) {
-        ZHLN::LogError("[WorldEditor] initial scene failed");
-        return EXIT_FAILURE;
-    }
     if (!scenePath.empty() && !ZHLN::Tools::LoadSceneDocument(*engine, scenePath)) {
         return EXIT_FAILURE;
     }

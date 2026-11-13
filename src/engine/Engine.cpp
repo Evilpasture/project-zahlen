@@ -67,10 +67,6 @@ enum class EngineInitError : uint8_t {
     EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
 };
 
-enum class EngineRunError : uint8_t {
-    SceneInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine default scene initialization failed"> {}) = 1,
-};
-
 struct EngineImpl {
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
@@ -116,6 +112,7 @@ struct EngineImpl {
     std::unique_ptr<RenderServices> renderServices;
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
+    bool                            systemGraphsDirty = true;
 
     FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureID::Invalid);
     bool                  fontAtlasUploaded = false;
@@ -178,8 +175,7 @@ void Engine::TraceDiagnostics() const noexcept {
     }
 
     Frustum    f {};
-    const auto stats  = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
-    const bool frozen = stats && stats->stats.FreezeFrustum;
+    const bool frozen = world.GetCullingStats().FreezeFrustum;
     if (camComp) {
         f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
     }
@@ -228,12 +224,13 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     if (_impl->renderServices != nullptr) {
         std::destroy_at(_impl->renderServices.get());
         std::construct_at(_impl->renderServices.get(), RenderServices {
-            .render     = _impl->kernel->GetRenderContext(),
-            .scene      = _impl->sceneData,
-            .assets     = _impl->kernel->GetAssetManager(),
-            .extensions = _impl->extensions,
-            .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+            .render       = _impl->kernel->GetRenderContext(),
+            .scene        = _impl->sceneData,
+            .assets       = _impl->kernel->GetAssetManager(),
+            .extensions   = _impl->extensions,
+            .cullingStats = _impl->world->GetCullingStats(),
+            .visible      = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow       = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
         });
     }
     PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
@@ -365,9 +362,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         &_impl->kernel->GetPlatformHost()
     );
 
-    // Core's steps are composition state, not scene state: build them once here
-    // so the const, noexcept Steps() view is always a complete schedule.
+    // Core's steps, components, baseline world entities and system graphs are
+    // wired here so an Engine returned by Create() is immediately ready to run.
+    SeedBaselineScene(GetInternalRegistry());
     EnsureFramePlan();
+    EnsureSystemGraphs();
 
     return {};
 }
@@ -384,7 +383,7 @@ Engine::~Engine() {
 
         // Release external handles while both the World and Kernel still live.
         // The World destructor can safely clear its already-empty registry.
-        ClearScene();
+        ReleaseSceneContents();
     }
 
     _impl->updateGraph.reset();
@@ -505,12 +504,21 @@ auto Engine::Audio() noexcept -> AudioEngine {
 auto Engine::State() noexcept -> ZHLN::EngineState {
     return ZHLN::EngineState {*this};
 }
+auto Engine::State() const noexcept -> ZHLN::EngineState {
+    return ZHLN::EngineState {const_cast<Engine&>(*this)};
+}
 
 auto EngineState::CullingStats() const noexcept -> ZHLN::CullingStats {
     return _engine->_impl->world->GetCullingStats();
 }
 void EngineState::ResetCullingStats() noexcept {
     _engine->_impl->world->GetCullingStats() = {};
+}
+void EngineState::SetCullingEnabled(bool enabled) noexcept {
+    _engine->_impl->world->GetCullingStats().EnableCulling = enabled;
+}
+void EngineState::SetFreezeFrustum(bool freeze) noexcept {
+    _engine->_impl->world->GetCullingStats().FreezeFrustum = freeze;
 }
 auto EngineState::Configuration() const noexcept -> EngineConfig {
     return _engine->_impl->kernel->GetConfig();
@@ -596,34 +604,39 @@ constexpr size_t kWorkerScratchBytes = 256 * 1024;
 } // namespace
 
 void Engine::EnsureSystemGraphs() {
-    if (_impl->updateGraph != nullptr) {
-        return;
+    if (_impl->updateGraph == nullptr) {
+        auto& render = _impl->kernel->GetRenderContext();
+
+        _impl->simServices = std::make_unique<SimServices>(SimServices {
+            .physics      = _impl->world->GetPhysics(),
+            .audio        = _impl->kernel->GetAudioContext(),
+            .assets       = _impl->kernel->GetAssetManager(),
+            .input        = _impl->world->GetInput(),
+            .articulation = _impl->world->GetArticulationSystem(),
+            .events       = _impl->world->GetEventBus(),
+            .extensions   = _impl->extensions,
+            .poseUploads  = _impl->poseUploads,
+        });
+
+        _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
+            .render       = render,
+            .scene        = _impl->sceneData,
+            .assets       = _impl->kernel->GetAssetManager(),
+            .extensions   = _impl->extensions,
+            .cullingStats = _impl->world->GetCullingStats(),
+            .visible      = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow       = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+        });
+
+        _impl->updateGraph       = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
+        _impl->renderGraph       = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
+        _impl->systemGraphsDirty = true;
     }
 
-    auto& render = _impl->kernel->GetRenderContext();
-
-    _impl->simServices = std::make_unique<SimServices>(SimServices {
-        .physics      = _impl->world->GetPhysics(),
-        .audio        = _impl->kernel->GetAudioContext(),
-        .assets       = _impl->kernel->GetAssetManager(),
-        .input        = _impl->world->GetInput(),
-        .articulation = _impl->world->GetArticulationSystem(),
-        .events       = _impl->world->GetEventBus(),
-        .extensions   = _impl->extensions,
-        .poseUploads  = _impl->poseUploads,
-    });
-
-    _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
-        .render     = render,
-        .scene      = _impl->sceneData,
-        .assets     = _impl->kernel->GetAssetManager(),
-        .extensions = _impl->extensions,
-        .visible    = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-        .shadow     = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
-    });
-
-    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
-    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
+    if (_impl->systemGraphsDirty) {
+        _impl->systemGraphsDirty = false;
+        BuildSystemGraphs(*this);
+    }
 }
 
 auto Engine::MakeFrame(float dt, FrameAlpha alpha) -> Frame {
@@ -694,12 +707,24 @@ void Engine::ProcessPendingDestroy() {
     SceneCleanupSystem::ProcessPending(*this, GetInternalRegistry());
 }
 
-void Engine::ClearScene() {
+void Engine::ReleaseSceneContents() {
     SceneCleanupSystem::ClearAll(*this, GetInternalRegistry());
     // Queued destroys and any surviving bodies retain their own shapes.
     Physics().ClearMeshShapeCache();
     ClearVisibilityLists();
     _impl->world->GetEventBus().ClearEvents();
+    _impl->world->GetCullingStats() = {};
+    if (_impl->updateGraph != nullptr) {
+        _impl->updateGraph->ResetLocals();
+    }
+    if (_impl->renderGraph != nullptr) {
+        _impl->renderGraph->ResetLocals();
+    }
+}
+
+void Engine::ClearScene() {
+    ReleaseSceneContents();
+    SeedBaselineScene(GetInternalRegistry());
 }
 
 auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
@@ -862,8 +887,8 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     }
 
     _impl->modules.push_back(module);
-    if (module.addGraphSystems != nullptr && _impl->updateGraph != nullptr) {
-        BuildSystemGraphs(*this);
+    if (module.addGraphSystems != nullptr) {
+        _impl->systemGraphsDirty = true;
     }
     return {};
 }
@@ -917,11 +942,10 @@ void Engine::ProvokeDeviceLost() {
     _impl->kernel->ProvokeDeviceLost();
 }
 
-auto Engine::InitializeDefaultScene() -> bool {
-    return ZHLN::InitializeDefaultScene(*this, GetInternalRegistry());
-}
-
 auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
+    EnsureFontAtlas();
+    EnsureSystemGraphs();
+
     _impl->world->GetInput().StepHaptics(dt);
 
     // The clock owns the fixed-step accumulator and is drained exactly once per
@@ -966,14 +990,10 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
     auto engine = std::move(engine_res.value());
     engine->GetPlatformHost().Focus();
 
-    // The application's install pass, before the first scene: modules contribute
-    // components and declare their frame steps, and InitializeDefaultScene then
-    // builds the graphs with the systems they added.
+    // The application's install pass: modules contribute components, declare
+    // their frame steps, and mark the system graphs dirty for the first Tick.
     if (installModules != nullptr) {
         installModules(*engine);
-    }
-    if (!engine->InitializeDefaultScene()) {
-        return std::unexpected(EngineRunError::SceneInitializationFailed);
     }
 
     if (uiCallback) {

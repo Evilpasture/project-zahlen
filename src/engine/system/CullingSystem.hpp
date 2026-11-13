@@ -25,8 +25,8 @@ class DebugDraw;
 // (ECS::Local<CullingScratch>) rather than to the world.
 //
 // The counters the pass publishes are a different thing: they are read by the
-// overlay, the crash dump and the render tests, so they live in
-// Components::CullingStatsComponent where world data belongs.
+// overlay, the crash dump and the render tests, so they live on World and enter
+// the render graph through RenderServices (ECS::ResMut<CullingStats>).
 struct CullingScratch {
     Frustum                  mainFrustum {};
     Frustum                  shadowFrustum {};
@@ -39,20 +39,19 @@ class ZHLN_API CullingSystem {
     using CullingQuery = ECS::Query<
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
         const Components::LightComponent, const Components::SunTagComponent,
-        const Components::EnvironmentSunTagComponent, const Components::TransformComponent, Components::CullingStatsComponent&>;
+        const Components::EnvironmentSunTagComponent, const Components::TransformComponent>;
 
     // Reflected graph entry point. The pass owns its scratch (ECS::Local), reads
     // the camera entity's pose from the registry, and writes the counters it
-    // publishes into the stats singleton. There is no culler *object* left to
-    // hand it: the class is a namespace for the pass.
-    static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, VisibleEntities visible, VisibleShadowEntities shadow,
-                            ECS::Local<CullingScratch> scratch);
+    // publishes into the world's CullingStats service.
+    static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
+                            VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch);
 
     // The freeze-frame debug view. The corners are the pass's own state now, so
     // this derives them from the same view-projection the pass froze instead of
     // reaching into another node's storage.
-    using DebugFrustumQuery = ECS::Query<const Components::CullingStatsComponent, const Components::CameraComponent>;
-    static void DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene);
+    using DebugFrustumQuery = ECS::Query<const Components::CameraComponent>;
+    static void DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene);
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,

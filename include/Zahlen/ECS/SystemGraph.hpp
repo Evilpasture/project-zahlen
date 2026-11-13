@@ -638,6 +638,20 @@ class LocalBlock {
         }
     }
 
+    // Destroy and default-reconstruct every slot in place, keeping the block
+    // and layout intact across a scene reset without rebuilding the graph.
+    void Reinitialize() {
+        if (_block == nullptr) {
+            return;
+        }
+        for (auto& slot: std::ranges::reverse_view(_layout.slots)) {
+            slot.destroy(static_cast<std::byte*>(_block) + slot.offset);
+        }
+        for (const TemplatedDetail::LocalSlotDesc& slot: _layout.slots) {
+            slot.construct(static_cast<std::byte*>(_block) + slot.offset);
+        }
+    }
+
     // Take the state down, in reverse order, and hand the bytes back.
     void Reset() noexcept {
         if (_block != nullptr) {
@@ -714,6 +728,7 @@ class ZHLN_API SystemGraphCore {
     [[nodiscard]] auto IsSystemEnabled(std::string_view name) const noexcept -> bool;
     [[nodiscard]] auto GetSystemCount() const noexcept -> size_t;
     [[nodiscard]] auto IsEmpty() const noexcept -> bool;
+    void               ResetLocals();
     void               Clear() noexcept;
 
     [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;

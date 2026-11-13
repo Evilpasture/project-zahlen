@@ -58,7 +58,6 @@ struct CombatFXTestSuite {
         }
 
         auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
         return engine;
     }
 

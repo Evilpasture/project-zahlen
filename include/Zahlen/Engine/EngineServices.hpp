@@ -21,6 +21,7 @@ namespace ZHLN {
 class RenderContext;
 class VisibilityList;
 struct SceneData;
+struct CullingStats;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
@@ -65,6 +66,7 @@ struct RenderServices {
     SceneData&              scene;
     AssetManager&           assets;
     ECS::ExtensionServices& extensions;
+    CullingStats&           cullingStats;
     VisibleEntities         visible;
     VisibleShadowEntities   shadow;
 };

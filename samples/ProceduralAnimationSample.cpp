@@ -721,8 +721,6 @@ auto main(int argc, char* argv[]) -> int {
     // frame step (re-seeding the boot camera's rig component), before the
     // scene build picks the step up.
     ZHLN::CameraRig::Install(*engine);
-
-    engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);
     BuildProceduralArena(*engine);
 

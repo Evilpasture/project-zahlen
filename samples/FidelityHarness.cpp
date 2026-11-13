@@ -356,7 +356,7 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // conformance wants that 1:1, which is why it is the default. `--no-aa` is
 // only for checking the unfiltered coverage against the SMAA capture.
 //
-// No analytical sun. InitializeDefaultScene does not spawn one; the 180-intensity
+// No analytical sun. Engine::Create does not spawn one; the 180-intensity
 // value LightingSystem returns when none is authored is the procedural sky's
 // fill, and RenderSystem drops it while an environment map is set. StripSceneLights
 // removes anything a later spawn attaches (an emissive part becomes a point light).
@@ -689,7 +689,6 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     ZHLN::Animation::Install(*engine);
-    engine->InitializeDefaultScene();
 
     ZHLN::Log(
         "[Fidelity] '{}': model='{}', lighting='{}', {}x{}, orbit(theta={:.1f}, phi={:.1f}, radius={:.3f}), fov={:.1f}.",

@@ -21,6 +21,7 @@
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -506,7 +507,7 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
 void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulation& simulation) {
     const ZHLN::Entity entity = entities.CreateEntity();
 
-    // All 35 fixed-layout engine components are published; CSGComponent (with std::vector) is not.
+    // All 34 fixed-layout engine components are published; CSGComponent (with std::vector) is not.
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::TransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::WorldTransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::PBRComponent"));
@@ -688,9 +689,22 @@ struct COMBoundarySuite {
             CheckAssets(*assets.Get(), *entities.Get());
             CheckActions(*actions.Get());
 
-            ZHLN::Test::ExpectTrue(engine->InitializeDefaultScene().HasValue());
+            auto state = engine.As<ZHLN::COM::IState>();
+            if (ZHLN::Test::ExpectTrue(static_cast<bool>(state) && state.Get() == engine->State())) {
+                ZHLN::Test::ExpectTrue(state->CullingStats().EnableCulling);
+                ZHLN::Test::ExpectFalse(state->CullingStats().FreezeFrustum);
+                state->SetCullingEnabled(false);
+                state->SetFreezeFrustum(true);
+                ZHLN::Test::ExpectFalse(state->CullingStats().EnableCulling);
+                ZHLN::Test::ExpectTrue(state->CullingStats().FreezeFrustum);
+                state->ResetCullingStats();
+                ZHLN::Test::ExpectTrue(state->CullingStats().EnableCulling);
+                ZHLN::Test::ExpectFalse(state->CullingStats().FreezeFrustum);
+            }
+
             ZHLN::Test::ExpectTrue(entities->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
             engine->ClearScene();
+            ZHLN::Test::ExpectTrue(entities->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
             return {};
         }
     };

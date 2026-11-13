@@ -49,7 +49,6 @@ class App {
     auto Validation(bool enabled) -> App& { _validation = enabled; return *this; }
     auto MeshShading(bool enabled) -> App& { _meshShading = enabled; return *this; }
     auto MaxFPS(uint32_t fps) -> App& { _maxFps = fps; return *this; }
-    auto DefaultScene(bool enabled) -> App& { _defaultScene = enabled; return *this; }
     auto LogLevel(ZHLN::LogLevel level) -> App& { _logLevel = level; return *this; }
     auto PhysicsLimits(uint32_t bodies, uint32_t pairs, uint32_t contacts, uint32_t bytes) -> App& {
         _maxBodies = bodies; _maxPairs = pairs; _maxContacts = contacts; _tempAllocBytes = bytes;
@@ -99,10 +98,9 @@ class App {
     template <typename UpdateFn>
     auto RunLoop(UpdateFn&& update) const -> std::expected<void, ErrorCode> {
         const EngineAppConfig appCfg {
-            .appName                = String64(_title),
-            .logLevel               = _logLevel,
-            .maxFramesPerSecond     = _maxFps,
-            .initializeDefaultScene = _defaultScene,
+            .appName            = String64(_title),
+            .logLevel           = _logLevel,
+            .maxFramesPerSecond = _maxFps,
         };
         const EngineWindowConfig winCfg {
             .width      = _width,
@@ -172,7 +170,7 @@ class App {
 
     std::string _title = "Zahlen Application";
     uint32_t _width = 1280, _height = 720;
-    bool _vsync = true, _fullscreen = false, _headless = false, _validation = true, _meshShading = true, _defaultScene = false;
+    bool _vsync = true, _fullscreen = false, _headless = false, _validation = true, _meshShading = true;
     uint32_t _maxFps = 0;
     ZHLN::LogLevel _logLevel = ZHLN::LogLevel::Moderate;
     uint32_t _maxBodies = 5000, _maxPairs = 10000, _maxContacts = 10000, _tempAllocBytes = 64 * 1024 * 1024;

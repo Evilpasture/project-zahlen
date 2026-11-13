@@ -122,9 +122,6 @@ void BootHostStateStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /
             // A partially instantiated document must not survive as the next
             // frame's scene; restore the engine's empty default scene.
             engine.ClearScene();
-            if (!engine.InitializeDefaultScene()) {
-                ZHLN::LogError("[Scene] could not restore the default scene");
-            }
             ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", s_HostLaunchConfig.scenePath.string());
         }
     }

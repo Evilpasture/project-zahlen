@@ -19,6 +19,7 @@
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -30,6 +31,7 @@
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
@@ -182,7 +184,6 @@ constexpr std::array kPublishedComponents {
     Publish<Components::AudioSourceComponent>(),
     Publish<Components::PlayerTagComponent>(),
     Publish<Components::PlayerSeatComponent>(),
-    Publish<Components::CullingStatsComponent>(),
     Publish<Components::DebugSettingsComponent>(),
 };
 
@@ -238,7 +239,7 @@ constexpr uint32_t kInvalidFamily = 0xFFFFFFFFu;
 
 class EngineCOM final
     : public Implements<EngineCOM, IEngine, IGraphicsDevice, IEntities, ISimulation, IAudioDevice, IAssetLibrary,
-                        IActionContext> {
+                        IActionContext, IState> {
 public:
     explicit EngineCOM(std::unique_ptr<Engine> engine) noexcept : m_engine(std::move(engine)) {}
 
@@ -265,11 +266,6 @@ public:
         m_engine->ClearScene();
     }
 
-    [[nodiscard]] Result<void> InitializeDefaultScene() noexcept override {
-        m_engine->InitializeDefaultScene();
-        return {};
-    }
-
     [[nodiscard]] IGraphicsDevice* Graphics() noexcept override {
         return static_cast<IGraphicsDevice*>(this);
     }
@@ -292,6 +288,27 @@ public:
 
     [[nodiscard]] IActionContext* Actions() noexcept override {
         return static_cast<IActionContext*>(this);
+    }
+
+    [[nodiscard]] IState* State() noexcept override {
+        return static_cast<IState*>(this);
+    }
+
+    // ----------------------------------------------------------------- IState
+    [[nodiscard]] ZHLN::CullingStats CullingStats() const noexcept override {
+        return m_engine->State().CullingStats();
+    }
+
+    void ResetCullingStats() noexcept override {
+        m_engine->State().ResetCullingStats();
+    }
+
+    void SetCullingEnabled(bool enabled) noexcept override {
+        m_engine->State().SetCullingEnabled(enabled);
+    }
+
+    void SetFreezeFrustum(bool freeze) noexcept override {
+        m_engine->State().SetFreezeFrustum(freeze);
     }
 
     // -------------------------------------------------------- IGraphicsDevice
@@ -1493,7 +1510,7 @@ public:
 
 private:
     friend class Implements<EngineCOM, IEngine, IGraphicsDevice, IEntities, ISimulation, IAudioDevice, IAssetLibrary,
-                            IActionContext>;
+                            IActionContext, IState>;
 
     ~EngineCOM() = default;
 
@@ -1531,8 +1548,7 @@ private:
 
 auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     EngineConfig config {};
-    uint32_t     maxFramesPerSecond     = 0;
-    bool         initializeDefaultScene = false;
+    uint32_t     maxFramesPerSecond = 0;
 
     const Result<void> chainRes =
         DispatchInChain<EngineAppConfig, EngineWindowConfig, EngineRenderConfig, PhysicsConfig>(
@@ -1540,9 +1556,8 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
                 if constexpr (std::is_same_v<NodeT, EngineAppConfig>) {
                     const std::string_view nameView(node.appName);
                     if (!nameView.empty()) config.appName = node.appName;
-                    config.logLevel        = node.logLevel;
-                    maxFramesPerSecond     = node.maxFramesPerSecond;
-                    initializeDefaultScene = node.initializeDefaultScene;
+                    config.logLevel    = node.logLevel;
+                    maxFramesPerSecond = node.maxFramesPerSecond;
                 } else if constexpr (std::is_same_v<NodeT, EngineWindowConfig>) {
                     config.width      = node.width;
                     config.height     = node.height;
@@ -1564,9 +1579,6 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
-    if (initializeDefaultScene) {
-        (*created)->InitializeDefaultScene();
-    }
 
     auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
     if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);

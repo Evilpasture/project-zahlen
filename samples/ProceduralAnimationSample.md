@@ -32,7 +32,6 @@ import ZHLN.ProceduralAnimation;
 
 ZHLN::Character::Install(engine); // required for WASD, gravity, jump and grounding
 ZHLN::CameraRig::Install(engine);
-engine.InitializeDefaultScene();
 ZHLN::ProceduralAnimation::Register(engine);
 ```
 

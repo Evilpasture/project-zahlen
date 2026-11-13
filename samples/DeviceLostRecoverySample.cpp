@@ -206,16 +206,15 @@ auto main(int argc, char* argv[]) -> int {
     }
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored
-    // JetBrains Mono NF, installed before the scene boots so the atlas the
-    // engine builds at InitializeDefaultScene comes from it. Without the fonts
-    // extra -- or without the checkout's resources -- core's embedded bake is
-    // what the font-atlas rebuild below exercises.
+    // JetBrains Mono NF, installed before the first frame so the atlas the
+    // engine builds lazily comes from it. Without the fonts extra -- or without
+    // the checkout's resources -- core's embedded bake is what the font-atlas
+    // rebuild below exercises.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
     ZHLN::FreeCam::Install(*engine);
-    engine->InitializeDefaultScene();
 
     std::vector<ZHLN::Entity> arena = BuildArena(*engine);
 

@@ -116,8 +116,8 @@ struct BatchedFrustum {
 }
 
 
-void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, VisibleEntities visible, VisibleShadowEntities shadow,
-                                ECS::Local<CullingScratch> scratch) {
+void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
+                                VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch) {
     // The pose the culler tests against is the main camera entity's: it is world
     // data, not a service. No camera entity means this frame has no view to cull
     // for -- RenderSystem reports NoMainCamera for it.
@@ -126,16 +126,7 @@ void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> rend
         return;
     }
 
-    // The counters are world data, so they live in the registry rather than on
-    // the pass. World::Create() creates the singleton and a scene reset re-seeds it
-    // in InitializeDefaultScene, so this is unreachable on those paths -- it marks the
-    // one that is left: a graph run against a registry that was cleared and never
-    // re-seeded. (World::GetCullingStats() would create it, but the culler reaches the
-    // component through its declared query, which by design cannot emplace.)
-    auto stats = query.GetSingleton<Components::CullingStatsComponent>();
-    ZHLN::Assert(stats.has_value(), "CullingStatsComponent singleton is missing: World::Create() creates it and InitializeDefaultScene re-seeds it after a scene clear");
-
-    UpdateCore(query, *render, camComp->camera, true, *scratch, stats->stats, visible.values, shadow.values);
+    UpdateCore(query, *render, camComp->camera, true, *scratch, *stats, visible.values, shadow.values);
 }
 
 void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
@@ -312,9 +303,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     }
 }
 
-void CullingSystem::DrawDebugFrustum(DebugFrustumQuery query, DebugDraw scene) {
-    const auto stats = query.GetSingleton<Components::CullingStatsComponent>();
-    if (!stats || !stats->stats.FreezeFrustum) {
+void CullingSystem::DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene) {
+    if (!stats.FreezeFrustum) {
         return;
     }
 

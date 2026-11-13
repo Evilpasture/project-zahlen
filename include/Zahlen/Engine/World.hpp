@@ -51,7 +51,8 @@ class ZHLN_API World {
     [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
 
     auto GetArticulationSystem() -> ArticulationSystem&;
-    auto GetCullingStats() -> CullingStats&;
+    auto GetCullingStats() noexcept -> CullingStats&;
+    [[nodiscard]] auto GetCullingStats() const noexcept -> const CullingStats&;
 
     // Read-only views onto the engine-owned visibility lists. No container type
     // crosses this boundary, and no caller can clear or resize engine state.

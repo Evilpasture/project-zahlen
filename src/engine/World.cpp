@@ -4,6 +4,7 @@
 #include "ArticulationSystem.hpp"
 #include "Hierarchy.hpp"
 #include "EngineGlobals.hpp"
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
@@ -37,6 +38,7 @@ struct World::Impl {
 
     VisibilityList visibleEntities;
     VisibilityList visibleShadowEntities;
+    CullingStats   cullingStats {};
 
     bool joltAcquired = false;
 };
@@ -50,13 +52,8 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
     instance->_impl = std::make_unique<Impl>();
     auto& impl      = *instance->_impl;
 
+    impl.registry.RegisterAllComponentsIn<Components>();
     impl.registry.Create(Components::InputStateComponent {});
-
-    // The culling counters are world data (see Components::CullingStatsComponent), so
-    // the world owns them from the moment it exists rather than from whenever a scene
-    // happens to be initialized. Scene resets clear the registry and re-seed them in
-    // InitializeDefaultScene; GetCullingStats() is total either way.
-    impl.registry.Create(Components::CullingStatsComponent {});
 
     AcquireJoltRegistration();
     impl.joltAcquired = true;
@@ -132,20 +129,12 @@ auto World::GetArticulationSystem() -> ArticulationSystem& {
     return *_impl->articulationSystem;
 }
 
-auto World::GetCullingStats() -> CullingStats& {
-    // The culling pass publishes here: its counters are read by the overlay, the
-    // crash dump and the render tests, so they are world data. The rest of the
-    // culler is the pass's own state and stays on the pass.
-    //
-    // Total on purpose. World::Create() creates the singleton and a scene reset
-    // re-seeds it in InitializeDefaultScene, but neither is a precondition a caller
-    // can check: this used to assert on the missing singleton, and ZHLN::Assert is
-    // only a panic in dev builds -- in a ship build it is [[assume(false)]] and the
-    // dereference below it is undefined behaviour. Creating it on first access keeps
-    // the promise the return type makes. A zeroed CullingStats is the honest value
-    // for "no cull has run yet"; it is the same value the render tests assign to
-    // reset the counters.
-    return _impl->registry.GetOrEmplaceSingleton<Components::CullingStatsComponent>().stats;
+auto World::GetCullingStats() noexcept -> CullingStats& {
+    return _impl->cullingStats;
+}
+
+auto World::GetCullingStats() const noexcept -> const CullingStats& {
+    return _impl->cullingStats;
 }
 
 auto World::VisibleEntitiesForServices() noexcept -> VisibilityList& {

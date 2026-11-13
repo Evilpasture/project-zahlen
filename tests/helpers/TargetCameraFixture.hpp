@@ -29,11 +29,8 @@ inline void InstallTargetCameraRig(ZHLN::Engine& engine) {
     ZHLN::CameraRig::Install(engine);
 
     engine.ClearScene();
-    engine.InitializeDefaultScene();
 
-    // The camera lives in an entity, so the reset has to follow the rebuild above:
-    // before it there is no camera entity to write, and Patch reports that rather
-    // than panicking. Reset it the way ResetScene does so the rig starts from the
+    // Reset the camera the way ResetScene does so the rig starts from the
     // authored framing regardless of what an earlier suite left behind.
     auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();

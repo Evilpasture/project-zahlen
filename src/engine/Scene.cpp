@@ -153,11 +153,12 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     auto entities = engine.Entities();
 
-    // The description's camera applies when the world has a main camera entity to
-    // keep it. A world without one still instantiates its entities, lights and
-    // environment: the camera block is one field of the description, not the scene,
-    // and a caller that wants it applied builds the scene first.
-    const auto cameraEntity = entities.SingletonEntity<Components::MainCameraTagComponent>();
+    // Ensure a main camera entity exists in the world, creating one when a
+    // caller despawned it before instantiating this description.
+    Entity cameraEntity = entities.SingletonEntity<Components::MainCameraTagComponent>();
+    if (cameraEntity == Entity::Null()) {
+        cameraEntity = entities.Spawn(Components::MainCameraTagComponent {}, Components::CameraComponent {});
+    }
     entities.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
         c.camera.position = FVec3 {description.camera.position};
         c.camera.yaw      = DegF{description.camera.yaw};

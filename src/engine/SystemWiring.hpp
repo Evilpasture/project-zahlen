@@ -16,6 +16,9 @@ class Registry;
 void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep);
 void BuildSystemGraphs(Engine& engine);
 
-auto InitializeDefaultScene(Engine& engine, ECS::Registry& reg) -> bool;
+// Ensures core's components are registered and the baseline empty-world
+// entities (InputStateComponent, MainCameraTagComponent + CameraComponent,
+// DebugSettingsComponent) exist.
+void SeedBaselineScene(ECS::Registry& reg);
 
 }

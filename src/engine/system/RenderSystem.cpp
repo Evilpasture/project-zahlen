@@ -442,7 +442,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     auto scene = engine.Debug();
     scene.SetFrameDelta(dt);
     SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), scene);
-    RenderDebug(engine, query.As<RenderDebugQuery>(), outPhysicsDrawMode);
+    RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), outPhysicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
@@ -611,10 +611,10 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     return {};
 }
 
-void RenderSystem::RenderDebug(Engine& engine, RenderDebugQuery query, int physicsDrawMode) {
+void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats, RenderDebugQuery query, int physicsDrawMode) {
     auto scene = engine.Debug();
 
-    CullingSystem::DrawDebugFrustum(query, scene);
+    CullingSystem::DrawDebugFrustum(cullingStats, query, scene);
 
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");

@@ -858,6 +858,64 @@ struct SystemGraphTestSuite {
             }
             return {};
         }
+
+        // --- ResetLocals reconstructs Local<T> blocks in place without tearing down the graph ---
+        std::expected<void, ZHLN::ErrorCode> reset_locals_reinitializes_node_state_without_rebuilding_graph() {
+            static std::atomic<int> constructions {0};
+            static std::atomic<int> destructions {0};
+            static std::atomic<int> observedTicks {0};
+
+            struct TrackedLocal {
+                int ticks = 0;
+                TrackedLocal() noexcept { constructions.fetch_add(1, std::memory_order_relaxed); }
+                ~TrackedLocal() noexcept { destructions.fetch_add(1, std::memory_order_relaxed); }
+            };
+
+            constructions.store(0);
+            destructions.store(0);
+            observedTicks.store(0);
+
+            static constexpr auto stepLocal = [](ZHLN::ECS::Local<TrackedLocal> state) {
+                observedTicks.store(++state->ticks, std::memory_order_relaxed);
+            };
+
+            {
+                ZHLN::ECS::Registry                             reg;
+                ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
+                graph.AddSystem<stepLocal>();
+                graph.Compile();
+
+                if (!ZHLN::Test::ExpectEq(constructions.load(), 1) || !ZHLN::Test::ExpectEq(destructions.load(), 0)) {
+                    return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+                }
+
+                const ZHLN::Frame frame {.frame = {1}, .alpha = {0.0f}, .dt = {TestDeltaTime}};
+                graph.Execute(frame);
+                graph.Execute(frame);
+                if (!ZHLN::Test::ExpectEq(observedTicks.load(), 2)) {
+                    return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+                }
+
+                // ResetLocals must destroy and default-construct the Local<T>
+                // slot while keeping the compiled node in the graph.
+                graph.ResetLocals();
+                if (!ZHLN::Test::ExpectEq(graph.GetSystemCount(), size_t {1}) ||
+                    !ZHLN::Test::ExpectEq(constructions.load(), 2) ||
+                    !ZHLN::Test::ExpectEq(destructions.load(), 1)) {
+                    return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+                }
+
+                graph.Execute(frame);
+                if (!ZHLN::Test::ExpectEq(observedTicks.load(), 1)) {
+                    return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+                }
+            }
+
+            if (!ZHLN::Test::ExpectEq(destructions.load(), 2)) {
+                return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
+            }
+            return {};
+        }
     };
 };
 

@@ -136,7 +136,6 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
     }
 
     auto engine = std::move(engineRes.value());
-    engine->InitializeDefaultScene();
     return engine;
 }
 
@@ -146,30 +145,15 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     // 1. Reset UI callbacks
     engine.SetUICallback(nullptr);
 
-    // 2. Clear ECS entities and Command Buffer
+    // 2. Clear ECS entities, reset graph locals, reset World culling counters,
+    //    and re-seed the baseline camera/input/debug entities.
     engine.ClearScene();
 
-    // 3. Clear System Graphs before rebuilding default scene
-    engine.GetUpdateGraph().Clear();
-    engine.GetRenderGraph().Clear();
-
-    // 4. Clear GPU resource caches & temporary buffers
+    // 3. Clear GPU resource caches & temporary buffers
     rc.ClearCaches();
     engine.ClearVisibilityLists();
 
-    // 5. Rebuild the clean default scene: the camera entity, the settings-tag
-    //    singletons, the font atlas. This has to run before the two resets below,
-    //    because the camera and the culling counters are components now --
-    //    InitializeDefaultScene is what creates their entities, and a reset
-    //    ahead of it asks a just-cleared registry for state that does not exist
-    //    yet.
-    engine.InitializeDefaultScene();
-
-    // 6. Reset what a scene clear leaves behind: the camera to defaults, and the
-    //    culling statistics (per-world rather than process-global, so this is
-    //    what kept them from leaking between cases). The camera lives in an entity
-    //    the rebuild above created; Patch reports a world without one instead of
-    //    panicking, and the (void) is the claim that the rebuild did its part.
+    // 4. Reset the main camera framing to defaults.
     auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     (void) camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });

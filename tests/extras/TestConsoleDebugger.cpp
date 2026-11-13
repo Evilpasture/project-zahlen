@@ -198,7 +198,7 @@ struct ConsoleDebuggerTestSuite {
             ZHLN::ECS::Registry reg;
             // get/set resolve the component by name through
             // Registry::GetFamilyIDFromName, which is filled by RegisterComponent
-            // (Engine::InitializeDefaultScene does RegisterAllComponentsIn).
+            // (World::Create and Engine::Create do RegisterAllComponentsIn).
             // A bare Add() stores the component but does not map the name, so
             // ScriptECSBridge would report ComponentNotFound.
             reg.RegisterAllComponentsIn<ZHLN::Components>();

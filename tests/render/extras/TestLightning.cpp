@@ -77,7 +77,6 @@ struct LightningTestSuite {
             }
 
             const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
             auto reg = engine->Entities();
 
@@ -181,7 +180,6 @@ struct LightningTestSuite {
             }
 
             const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
             auto reg = engine->Entities();
 
@@ -234,7 +232,6 @@ struct LightningTestSuite {
             auto result = ZHLN::Engine::Create(cfg);
             if (!ZHLN::Test::ExpectTrue(result.has_value())) return std::unexpected(LightningTestError::EngineInitFailed);
             auto engine = std::move(*result);
-            engine->InitializeDefaultScene();
             auto reg = engine->Entities();
             auto rc = engine->Graphics();
             rc.PatchSettings([](auto& settings) { settings.environment.ambientExposure = 6.0f; });
@@ -301,7 +298,6 @@ struct LightningTestSuite {
                 return std::unexpected(LightningTestError::EngineInitFailed);
             }
             auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
             auto reg = engine->Entities();
             auto rc = engine->Graphics();
 

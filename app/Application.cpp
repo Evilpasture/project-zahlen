@@ -70,10 +70,6 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     for (const auto& install: _installers) {
         install(*engine);
     }
-    if (!engine->InitializeDefaultScene()) {
-        LogError("[Application] initial scene failed");
-        return std::unexpected(AppError::SceneInitFailed);
-    }
     // Core has one host UI step; dispatch the UI-capable layers there in
     // registration order. Snapshot their slots so the Engine's callback owns
     // their (possibly move-only) state for this Run.

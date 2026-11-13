@@ -1415,8 +1415,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
     ZHLN::Animation::Install(*engine);
 
-    engine->InitializeDefaultScene();
-
     SampleState state;
     state.rayTraced   = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");
     state.frameBudget = EnvironmentU32("ZHLN_REMOTE_GLB_FRAMES", 0);

@@ -412,10 +412,10 @@ Two consequences are worth stating, because they are what the design buys:
 * **The plan is composable, and its vocabulary is public.** Anchor names are the
   contract between a module and core. A rename in `BuildCoreFramePlan` is a
   breaking change, and it is reported rather than absorbed.
-* **The plan is not rebuilt with the scene.** `InitializeDefaultScene` rebuilds
-  the graphs because they are scene state; the timeline is composition state and
-  is built once. Rebuilding it per scene was how a replayed module step could
-  accumulate a second copy.
+* **Neither the plan nor the compiled system graphs are rebuilt with the scene.**
+  `Engine::Create` compiles core's system graphs (and marks them dirty when a
+  module installs graph systems); `ClearScene` keeps both the frame plan and the
+  compiled system graphs intact and resets each node's `Local<T>` state in place.
 
 An ordinary game's C++ source is compiled into its executable. `Application`
 runs its callback **before** the engine's frame plan. System-driven games may
@@ -673,16 +673,17 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | header | contents |
 | :--- | :--- |
 | `COMTypes.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
-| `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`, `InitializeDefaultScene`) and borrowed accessors for the six capability interfaces |
+| `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`) and borrowed accessors for the seven capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, chained `ApplySettings` / `GetSettings` (full `GraphicsSettings` or sub-slices), buffers, textures, PBR materials, procedural & stream meshes, mesh registries and BLAS builds |
-| `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 35 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
+| `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 34 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
 | `ISimulation.hpp` | chained rigid-body (`BoxShapeDesc`, `SphereShapeDesc`, `CapsuleShapeDesc`, `CylinderShapeDesc`, `PlaneShapeDesc`, `MeshShapeDesc`, `HeightFieldShapeDesc`, `CompoundShapeDesc` + pose/surface/filter) and character creation, raycasts, sphere queries, velocities, kinematic poses, collision filters and debug geometry |
 | `IAudioDevice.hpp` | chained `PostEvent` (`AudioEvent`) and `CreateVoice` (`VoiceDesc`) plus voice playback, volume, looping and spatial position controls |
 | `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
 | `IActionContext.hpp` | raw device injection, chained action-map / action / binding / rebind / multi-seat routing configuration, default-binding snapshots/resets, virtual actions and physical state |
+| `IState.hpp` | engine-level `CullingStats` readback, reset, and `SetCullingEnabled` / `SetFreezeFrustum` toggles |
 | `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`EngineAppConfig`, `EngineWindowConfig`, `EngineRenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
 
-One `EngineCOM` implements all seven interfaces, so `engine->Graphics()` and
+One `EngineCOM` implements all eight interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
 accessors are **borrows** and must not be released; `Query` / `As` take a
 reference the way COM expects.

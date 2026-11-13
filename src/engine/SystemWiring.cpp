@@ -188,25 +188,13 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.Compile();
 }
 
-auto InitializeDefaultScene(Engine& engine, ECS::Registry& reg) -> bool {
+void SeedBaselineScene(ECS::Registry& reg) {
     reg.RegisterAllComponentsIn<ZHLN::Components>();
-
     reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
-
-    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
-
-    // A scene reset clears the registry, so the engine-level singletons World::Create()
-    // seeds are re-seeded here alongside the rest of the scene's settings.
-    reg.Create(Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0});
-
-    engine.EnsureFontAtlas();
-
-    // The graphs are rebuilt per scene; the frame plan is not. A scene reset
-    // clears the registry and rebuilds the graphs, and both are scene state --
-    // the timeline is composition state, installed once by the application, and
-    // rebuilding it per scene was how a replayed module step could land twice.
-    BuildSystemGraphs(engine);
-    return true;
+    if (reg.SingletonEntity<Components::MainCameraTagComponent>() == Entity::Null()) {
+        reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
+    }
+    reg.GetOrEmplaceSingleton<Components::DebugSettingsComponent>();
 }
 
 } // namespace ZHLN

@@ -202,6 +202,7 @@ my %FIRST_PARTY = (
     'ZHLN::COM::IAudioDevice'        => ['include/Zahlen/COM/IAudioDevice.hpp'],
     'ZHLN::COM::IAssetLibrary'       => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     'ZHLN::COM::IActionContext'      => ['include/Zahlen/COM/IActionContext.hpp'],
+    'ZHLN::COM::IState'              => ['include/Zahlen/COM/IState.hpp'],
     'ZHLN::COM::PrefabInfo'          => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     'ZHLN::COM::EnvironmentImageInfo' => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],

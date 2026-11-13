@@ -492,7 +492,6 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         }
 
         auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
         return engine;
     }
 

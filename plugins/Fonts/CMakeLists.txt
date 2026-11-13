@@ -12,7 +12,7 @@
 #   * cooked 'FNT0' containers from a mounted pak or from disk.
 #
 # InstallBakedFontLoader (Fonts.hpp) installs core's BakedFontLoader hook; the
-# composition root calls it before InitializeDefaultScene and core takes over.
+# composition root calls it before the first frame and core takes over.
 # stb_image is not compiled here -- STB_IMAGE_IMPLEMENTATION lives in
 # src/engine/stbi_impl.c inside zahlen_engine, so the decode symbols arrive through
 # the engine link, the same way plugins/glTF gets them.

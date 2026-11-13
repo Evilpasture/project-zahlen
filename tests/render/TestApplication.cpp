@@ -15,9 +15,11 @@
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #if defined(ZHLN_HAS_EDITOR)
 #include <editor/GUIEditor.hpp>
@@ -450,17 +452,17 @@ void test_presentation_draws_frozen_frustum_from_camera_query() {
     app.OnStart([&](Engine& engine) {
         const auto* present = FindStep(engine, "RenderSystem");
         auto reg = engine.Entities();
-        auto stats = reg.GetSingleton<Components::CullingStatsComponent>();
+        auto state = engine.State();
         auto camera = reg.GetSingleton<Components::CameraComponent>();
-        Expect(present && present->run && stats && camera);
-        if (!present || !present->run || !stats || !camera) return;
+        Expect(present && present->run && camera);
+        if (!present || !present->run || !camera) return;
         auto debug = engine.Debug();
         FrameContext frame;
-        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = false; });
+        state.SetFreezeFrustum(false);
         debug.Clear();
         present->run(engine, 0.0f, frame);
         Expect(debug.Lines().empty());
-        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = true; });
+        state.SetFreezeFrustum(true);
         reg.PatchSingleton<Components::CameraComponent>([](auto& c) { c.frozenViewProj = Mat4x4::Identity(); });
         debug.Clear();
         present->run(engine, 0.0f, frame);
@@ -470,7 +472,7 @@ void test_presentation_draws_frozen_frustum_from_camera_query() {
             Expect(lines[0].start == FVec3 {-1.0f, -1.0f, 0.0f});
             Expect(lines[0].end == FVec3 {1.0f, -1.0f, 0.0f});
         }
-        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = false; });
+        state.SetFreezeFrustum(false);
         ran = true;
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
@@ -864,6 +866,74 @@ void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
     ExpectUserClosed(result);
     Expect(started && inputReset && updated && shutdown);
     Expect(!rendered);
+}
+
+struct ModuleSceneProbeLocal {
+    int runs = 0;
+};
+static int g_moduleSceneProbeRuns = 0;
+void ModuleSceneProbeSystem(ECS::Local<ModuleSceneProbeLocal> local) {
+    g_moduleSceneProbeRuns = ++local->runs;
+}
+void AddModuleSceneProbe(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
+    updateGraph.AddSystem<&ModuleSceneProbeSystem>();
+}
+
+void test_clear_scene_preserves_graphs_resets_locals_and_scene_instantiate_recreates_camera() {
+    g_moduleSceneProbeRuns = 0;
+    auto app = App(EngineConfig {
+        .appName        = "SceneLifecycleSplitTest",
+        .width          = 320,
+        .height         = 180,
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+    });
+    app.Install([](Engine& engine) {
+        Expect(engine.InstallModule(Module {
+            .name             = "SceneLifecycleProbe",
+            .addGraphSystems  = &AddModuleSceneProbe,
+        }).has_value());
+    });
+    bool ran = false;
+    app.OnStart([&](Engine& engine) {
+        const size_t updateCount = engine.GetUpdateGraph().GetSystemCount();
+        Expect(updateCount > 0);
+
+        engine.GetUpdateGraph().Execute(engine.MakeFrame(0.016f, FrameAlpha {0.0f}));
+        engine.GetUpdateGraph().Execute(engine.MakeFrame(0.016f, FrameAlpha {0.0f}));
+        Expect(g_moduleSceneProbeRuns == 2);
+
+        engine.State().SetFreezeFrustum(true);
+        Expect(engine.State().CullingStats().FreezeFrustum);
+
+        // ClearScene keeps the compiled graphs intact, resets Local<T> blocks,
+        // resets World culling stats, and re-seeds the baseline camera entity.
+        engine.ClearScene();
+        Expect(engine.GetUpdateGraph().GetSystemCount() == updateCount);
+        Expect(!engine.State().CullingStats().FreezeFrustum);
+        Expect(engine.Entities().SingletonEntity<Components::MainCameraTagComponent>() != Entity::Null());
+
+        engine.GetUpdateGraph().Execute(engine.MakeFrame(0.016f, FrameAlpha {0.0f}));
+        Expect(g_moduleSceneProbeRuns == 1);
+
+        // Even if a caller despawns the main camera entity explicitly,
+        // Scene::Instantiate recreates it and applies the authored pose.
+        const Entity oldCam = engine.Entities().SingletonEntity<Components::MainCameraTagComponent>();
+        engine.Entities().Despawn(oldCam);
+        engine.ProcessPendingDestroy();
+        Expect(engine.Entities().SingletonEntity<Components::MainCameraTagComponent>() == Entity::Null());
+
+        Scene::Scene desc {};
+        desc.camera.position = {3.0f, 4.0f, 5.0f};
+        desc.camera.fov      = 72.0f;
+        const auto instantiated = Scene::Instantiate(engine, desc);
+        Expect(instantiated.has_value());
+        const auto restoredCam = engine.Entities().GetSingleton<Components::CameraComponent>();
+        Expect(restoredCam.has_value() && restoredCam->camera.position == FVec3 {3.0f, 4.0f, 5.0f});
+        ran = true;
+    });
+    ExpectUserClosed(app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); }));
+    Expect(ran);
 }
 
 } // namespace ZHLN::Test

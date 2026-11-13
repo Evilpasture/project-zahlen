@@ -20,7 +20,6 @@ int main() {
     return ZHLN::COM::App()
         .Title("My COM Game")
         .Headless(true)
-        .DefaultScene(true)
         .OnStart([](ZHLN::COM::IEngine& engine) {
             (void)engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f});
             engine.RequestClose();
@@ -32,10 +31,10 @@ int main() {
 Include the relevant capability headers (`<Zahlen/COM/IGraphicsDevice.hpp>`,
 `<Zahlen/COM/IEntities.hpp>`, `<Zahlen/COM/ISimulation.hpp>`,
 `<Zahlen/COM/IAudioDevice.hpp>`, `<Zahlen/COM/IAssetLibrary.hpp>`,
-`<Zahlen/COM/IActionContext.hpp>`) separately to call methods on
-`engine.Graphics()`, `engine.Entities()`, `engine.Simulation()`,
-`engine.Audio()`, `engine.Assets()`, and `engine.Actions()`. They are forward
-declared by `IEngine`. `RequestClose()` takes effect on the next
+`<Zahlen/COM/IActionContext.hpp>`, `<Zahlen/COM/IState.hpp>`) separately to call
+methods on `engine.Graphics()`, `engine.Entities()`, `engine.Simulation()`,
+`engine.Audio()`, `engine.Assets()`, `engine.Actions()`, and `engine.State()`.
+They are forward declared by `IEngine`. `RequestClose()` takes effect on the next
 `ProcessEvents()`, so a close requested during an update may still be followed
 by that frame's `Tick`. Layers start and tick in
 registration order and stop in reverse order, before engine release, including
@@ -55,7 +54,7 @@ any subset of configuration slices via `ZHLN::COM::InChain(...)`:
 #include <Zahlen/COM/EngineFactory.hpp>
 
 auto engine = ZHLN::COM::CreateEngineRef(ZHLN::COM::InChain(
-    ZHLN::COM::EngineAppConfig{.appName = ZHLN::String64("CustomHost"), .initializeDefaultScene = true},
+    ZHLN::COM::EngineAppConfig{.appName = ZHLN::String64("CustomHost")},
     ZHLN::COM::EngineWindowConfig{.width = 1920, .height = 1080, .vsync = true}
 ));
 ```

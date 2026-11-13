@@ -32,12 +32,6 @@ namespace ZHLN::Tools {
             return false;
         }
         engine.ClearScene();
-        // Scene cleanup removes the camera and settings singletons. Rebuild
-        // them and their per-scene graphs before instantiating the document.
-        if (!engine.InitializeDefaultScene()) {
-            LogError("[Scene] could not initialize scene before '{}'", path.string());
-            return false;
-        }
         auto inst = Scene::Instantiate(engine, *parsed);
         if (!inst) {
             LogError("[Scene] failed to instantiate TOML scene '{}': {}", path.string(), inst.error());
@@ -54,12 +48,6 @@ namespace ZHLN::Tools {
             return false;
         }
         engine.ClearScene();
-        // Scene cleanup removes the camera and settings singletons. Rebuild
-        // them and their per-scene graphs before instantiating the document.
-        if (!engine.InitializeDefaultScene()) {
-            LogError("[Scene] could not initialize scene before '{}'", path.string());
-            return false;
-        }
         auto inst = Scene::Instantiate(engine, *parsed);
         if (!inst) {
             LogError("[Scene] failed to instantiate Lua scene '{}': {}", path.string(), inst.error());

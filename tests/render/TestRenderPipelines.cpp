@@ -165,7 +165,6 @@ struct RenderPipelinesTestSuite {
 
             auto engine = std::move(engineRes.value());
             ZHLN::Test::ExpectTrue(engine != nullptr);
-            engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!engine->Entities().EntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
             // Before the first presented frame, the headless image is still
@@ -512,23 +511,16 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
-        // Scene Reset Is A Rebuild, Not An Append
+        // Scene Reset Preserves Compiled Graphs Without Accumulating State
         // ====================================================================
         //
-        // InitializeDefaultScene is called again every time the pool hands a
-        // reused engine to the next test. BuildSystemGraphs used to push its
-        // systems onto whatever was already in the graphs, so a thirty-test
-        // binary ended up with thirty CullingSystems and thirty DecalSystems.
-        // Compile() only orders nodes whose access patterns conflict, and
-        // those two declare nothing or reads only --
-        // so the duplicates had no edges between them and were dispatched to
-        // run concurrently over the same engine state. It surfaced as a
-        // SIGSEGV deep inside the allocator, in whatever unlucky call site
-        // allocated next.
+        // ResetScene clears the scene every time the pool hands a reused engine
+        // to the next test. Engine::Create compiles the system graphs once and
+        // ClearScene resets each node's Local<T> state in place without
+        // tearing down or appending duplicate nodes across resets.
         //
-        // The font atlas is the same shape of bug without the race: a fresh
-        // 1024x1024 bindless texture per reset, none of them released. It is
-        // device state now, built once on Engine and preserved across scene resets.
+        // The font atlas is device state too, built once on Engine and
+        // preserved across scene resets.
         std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -667,7 +659,6 @@ struct RenderPipelinesTestSuite {
                 return std::unexpected(firstRes.error());
             }
             auto first = std::move(firstRes.value());
-            first->InitializeDefaultScene();
 
             // 1. A second engine is refused rather than half-built.
             {
@@ -711,7 +702,6 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
             auto second = std::move(secondRes.value());
-            second->InitializeDefaultScene();
 
             const ZHLN::Entity fallingB = ZHLN::PrefabFactory::CreateBox(
                 *second, {0.5f, 0.5f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}

@@ -34,10 +34,9 @@
 namespace ZHLN::COM {
 
 struct EngineAppConfig {
-    String64 appName                {"Zahlen Engine"};
-    LogLevel logLevel               = LogLevel::Moderate;
-    uint32_t maxFramesPerSecond     = 0;
-    bool     initializeDefaultScene = false;
+    String64 appName            {"Zahlen Engine"};
+    LogLevel logLevel           = LogLevel::Moderate;
+    uint32_t maxFramesPerSecond = 0;
 };
 
 struct EngineWindowConfig {

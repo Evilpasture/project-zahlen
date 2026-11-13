@@ -385,6 +385,15 @@ bool SystemGraphCore::IsEmpty() const noexcept {
     return _nodes.empty();
 }
 
+void SystemGraphCore::ResetLocals() {
+    for (auto& node: _nodes) {
+        node.local.Reinitialize();
+        if (node.ecb != nullptr) {
+            node.ecb->Reset();
+        }
+    }
+}
+
 void SystemGraphCore::Clear() noexcept {
     // Clearing the nodes destroys the state each one owned, because the storage
     // lives in the node rather than beside it.

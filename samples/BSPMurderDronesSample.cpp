@@ -1555,7 +1555,6 @@ auto main(int argc, char* argv[]) -> int {
     // hand-rolled one: FreeCamTag on the main camera is the switch both halves
     // already read -- its Camera-phase step drives the pose, and the controller
     // extension's PlayerIntent step freezes the character while the tag is on.
-    // Install before InitializeDefaultScene, like the two above.
     ZHLN::FreeCam::Install(*engine);
 
     // The T toggle's third-person rig, same reasoning: TargetCameraComponent on
@@ -1586,13 +1585,10 @@ auto main(int argc, char* argv[]) -> int {
     }
 #endif
 
-    engine->InitializeDefaultScene();
-
-    // The procedural rig: an optional engine extension, registered after the
-    // scene exists so its evaluator enters the update graph ahead of the core
-    // ArticulationSystem, exactly as ProceduralAnimationSample does it. The
-    // glTF device-lost handler keeps the imported rig's GPU resources alive
-    // across a device reset.
+    // The procedural rig: an optional engine extension whose evaluator enters
+    // the update graph ahead of the core ArticulationSystem, exactly as
+    // ProceduralAnimationSample does it. The glTF device-lost handler keeps the
+    // imported rig's GPU resources alive across a device reset.
     ZHLN::ProceduralAnimation::Register(*engine);
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
 

@@ -5,6 +5,7 @@
 #include <Zahlen/COM/App.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <chrono>
 #include <memory>
@@ -32,14 +33,15 @@ void test_com_app_runs_layers_and_update() {
     std::vector<std::string> events;
     COM::App app;
     app.Title("COM App test").Resolution(320, 240).Headless(true).Validation(false)
-        .VSync(false).MeshShading(false).MaxFPS(0).DefaultScene(true)
+        .VSync(false).MeshShading(false).MaxFPS(0)
         .PhysicsLimits(100, 200, 200, 8 * 1024 * 1024)
         .AddLayer(Layer{1, &events}).AddLayer(Layer{2, &events})
         .OnStart([&](COM::IEngine& engine) {
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::CameraComponent").HasValue());
-            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::CullingStatsComponent").HasValue());
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::InputStateComponent").HasValue());
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::DebugSettingsComponent").HasValue());
+            ExpectTrue(engine.State() != nullptr && engine.State()->CullingStats().EnableCulling);
             events.push_back("onstart");
         });
     int updates = 0;
