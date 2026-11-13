@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "EngineAccess.hpp"
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -111,8 +111,8 @@ consteval auto SharesEveryField() -> bool {
     return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
 
-[[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
-    return ctx.CreateMaterial(
+[[nodiscard]] auto BuildMaterial(GraphicsDevice gfx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
+    return gfx.CreateMaterial(
         MaterialDesc {
             .metallic  = material.metallic,
             .roughness = material.roughness,
@@ -122,18 +122,18 @@ consteval auto SharesEveryField() -> bool {
     );
 }
 
-void NameEntity(ECS::Registry& registry, Entity entity, std::string_view name) {
+void NameEntity(Entities entities, Entity entity, std::string_view name) {
     if (name.empty() || entity == Entity::Null()) {
         return;
     }
-    registry.Assign<Components::NameComponent>(entity, String64(name));
+    entities.Attach(entity, Components::NameComponent {.name = String64(name)});
 }
 
-void StampSource(ECS::Registry& registry, Entity entity, const SceneEntity& description) {
+void StampSource(Entities entities, Entity entity, const SceneEntity& description) {
     if (entity == Entity::Null()) {
         return;
     }
-    registry.Add(
+    entities.Attach(
         entity, Components::SceneSourceComponent {
                     .shape                 = description.shape,
                     .source                = ZHLN::String256 {description.source},
@@ -151,15 +151,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     instance.entities.reserve(description.entities.size());
     instance.lights.reserve(description.lights.size());
 
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     // The description's camera applies when the world has a main camera entity to
     // keep it. A world without one still instantiates its entities, lights and
     // environment: the camera block is one field of the description, not the scene,
     // and a caller that wants it applied builds the scene first.
-    auto&      sceneReg     = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
-    sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
+    const auto cameraEntity = entities.SingletonEntity<Components::MainCameraTagComponent>();
+    entities.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
         c.camera.position = FVec3 {description.camera.position};
         c.camera.yaw      = DegF{description.camera.yaw};
         c.camera.pitch    = DegF{description.camera.pitch};
@@ -181,7 +180,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         PrefabFactory::SpawnParams params = MakeSpawnParams(entity);
 
         if (NeedsMaterial(entity.material)) {
-            auto material = BuildMaterial(ZHLN::EngineAccess::RenderOf(engine), entity.material);
+            auto material = BuildMaterial(engine.Graphics(), entity.material);
             if (!material) {
                 ZHLN::Log("[Scene] entity '{}': material creation failed", entity.name);
                 return std::unexpected(SceneError::MaterialCreationFailed);
@@ -192,15 +191,15 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         switch (entity.shape) {
             case ShapeKind::Box: {
                 const Entity created = PrefabFactory::CreateBox(engine, entity.halfExtents, params);
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
             case ShapeKind::Plane: {
                 const Entity created = PrefabFactory::CreatePlane(engine, entity.extent, entity.material.baseColor, params);
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
@@ -237,16 +236,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 }
 
                 const uint32_t recorded = std::min(count, static_cast<uint32_t>(parts.size()));
-                NameEntity(registry, parts[0], entity.name);
-                StampSource(registry, parts[0], entity);
+                NameEntity(entities, parts[0], entity.name);
+                StampSource(entities, parts[0], entity);
 
                 // Every mesh part of a prop carries the same leaf ambient cube.
                 if (entity.hasAmbientCube) {
                     for (uint32_t i = 0; i < recorded; ++i) {
-                        registry.Add<Components::AmbientCubeComponent>(parts[i]);
-                        registry.Patch<Components::AmbientCubeComponent>(parts[i], [&](auto& c) {
-                            c.cube = entity.ambientCube;
-                        });
+                        entities.Attach(parts[i], Components::AmbientCubeComponent {.cube = entity.ambientCube});
                     }
                 }
 
@@ -272,7 +268,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                         Physics::MotionType::Kinematic, Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask
                     );
                     if (body != Physics::BodyID::Null()) {
-                        registry.Add(parts[0], Components::PhysicsComponent {.physicsID = body, .isStatic = true});
+                        entities.Attach(parts[0], Components::PhysicsComponent {.physicsID = body, .isStatic = true});
                     }
                 }
 
@@ -289,12 +285,12 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 const auto scale = entity.transform.scale;
                 const auto world = ComposeTransform(position, rotation, scale);
 
-                const Entity created = registry.Create(
+                const Entity created = entities.Spawn(
                     Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
                     Components::WorldTransformComponent {.world = world, .previous = world}
                 );
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
@@ -315,7 +311,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         const auto rawDirection = light.direction;
         const auto direction = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
-        const Entity created = registry.Create(
+        const Entity created = entities.Spawn(
             Components::NameComponent {.name = String64(light.name)},
             Components::TransformComponent {.position = position, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}},
             Components::WorldTransformComponent {.world = world, .previous = world},
@@ -495,20 +491,6 @@ auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Regis
         .entities    = ExtractEntities(registry, materials),
         .lights      = ExtractLights(registry),
     };
-}
-
-auto Extract(Engine& engine) -> Scene {
-    // The description's camera block is the world's main camera when there is one;
-    // a world without one describes the engine's default framing, since there is
-    // nothing else to write into that field.
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
-    const auto camera  = camComp ? camComp->camera : Camera {};
-    return Extract(
-        camera, engine.Graphics().Settings(), ZHLN::EngineAccess::RegistryOf(engine),
-        MaterialLookup {.userdata = &ZHLN::EngineAccess::RenderOf(engine), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
-                            return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
-                        }}
-    );
 }
 
 } // namespace ZHLN::Scene

@@ -19,9 +19,9 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include "EngineAccess.hpp"
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/World.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
@@ -46,7 +46,7 @@ auto Entities::IsAlive(Entity entity) const noexcept -> bool {
 auto Entities::Inspect() const noexcept -> ECS::Inspection { return ECS::Inspection {Registry()}; }
 
 auto Entities::Registry() const noexcept -> ECS::Registry& {
-    return ZHLN::EngineAccess::RegistryOf(*_engine);
+    return _engine->GetInternalRegistry();
 }
 
 // --- GraphicsDevice -----------------------------------------------------------
@@ -141,12 +141,29 @@ auto GraphicsDevice::CreateTexture(std::string_view name, std::span<const std::b
     -> std::expected<TextureID, ErrorCode> {
     return _ctx->CreateTexture(name, rgba, extent, isSRGB, generateMips);
 }
+auto GraphicsDevice::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode> {
+    return _ctx->CreateTextureCube(faces, faceSize);
+}
+auto GraphicsDevice::CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent, bool generateMips)
+    -> std::expected<TextureID, ErrorCode> {
+    return _ctx->CreateTextureHDR(name, rgba16f, extent, generateMips);
+}
+auto GraphicsDevice::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
+    -> std::expected<TextureID, ErrorCode> {
+    return _ctx->BakeProceduralTexture(width, height, variantIdx, scale, randomness);
+}
 auto GraphicsDevice::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips)
     -> TextureID {
     return _ctx->CreateProceduralTexture(name, extent, pixels, isSRGB, generateMips);
 }
 void GraphicsDevice::UnloadTexture(TextureID handle) {
     _ctx->UnloadTexture(handle);
+}
+auto GraphicsDevice::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureID, ErrorCode> {
+    return _ctx->CreateRenderTexture(width, height, hdr);
+}
+void GraphicsDevice::DestroyRenderTexture(TextureID handle) noexcept {
+    _ctx->DestroyRenderTexture(handle);
 }
 auto GraphicsDevice::Mesh(AssetID id) const noexcept -> std::optional<ZHLN::Mesh> {
     return _ctx->GetGPUMesh(id);
@@ -205,6 +222,9 @@ auto Simulation::BodyPosition(Physics::BodyID handle) const noexcept -> std::opt
 auto Simulation::BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot> {
     return _ctx->BodyState(handle);
 }
+auto Simulation::BodyLinearVelocity(Physics::BodyID handle) const noexcept -> std::optional<FVec3> {
+    return _ctx->BodyLinearVelocity(handle);
+}
 void Simulation::ClearMeshShapeCache() noexcept {
     _ctx->ClearMeshShapeCache();
 }
@@ -256,6 +276,9 @@ void DebugDraw::AddLine(const FVec3& start, const FVec3& end, const FVec4& color
 void DebugDraw::AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd) {
     _scene->AddLine(start, end, colorStart, colorEnd);
 }
+auto DebugDraw::Lines() const noexcept -> std::span<const LineSegment> {
+    return std::span<const LineSegment> {_scene->lines.data(), _scene->lines.size()};
+}
 void DebugDraw::AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive) {
     _scene->AddBillboards(texture, quads, additive);
 }
@@ -295,6 +318,32 @@ void AssetLibrary::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
 }
 void AssetLibrary::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab) {
     _assets->CachePrefab(hash, std::move(prefab));
+}
+auto AssetLibrary::CachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) -> uint32_t {
+    return _assets->GetCachedPrefabs(outPrefabs, maxCount);
+}
+void AssetLibrary::UseGraphicsDevice(GraphicsDevice graphics) noexcept {
+    _assets->UseRenderContext(*graphics._ctx);
+}
+void AssetLibrary::CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font) {
+    _assets->CacheFont(hash, std::move(font));
+}
+auto AssetLibrary::ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>> {
+    AssetLoadRequest req;
+    req.assetID = HashAssetPath(path);
+    if (!_assets->LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
+        return std::nullopt;
+    }
+    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
+    std::vector<uint8_t> out(bytes, bytes + req.outSize);
+    _assets->FreeMemory(req);
+    return out;
+}
+auto AssetLibrary::VFS() noexcept -> FS::VirtualFileSystem& {
+    return _assets->VFS();
+}
+auto AssetLibrary::VFS() const noexcept -> const FS::VirtualFileSystem& {
+    return _assets->VFS();
 }
 auto AssetLibrary::CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool {
     return _assets->CacheCollisionMesh(id, std::move(geometry));
@@ -343,18 +392,6 @@ void AudioEngine::SetVoiceLooping(VoiceID handle, bool looping) {
 }
 void AudioEngine::SetVoicePosition(VoiceID handle, const FVec3& position) {
     _ctx->SetVoicePosition(handle, position);
-}
-
-// --- Diagnostics --------------------------------------------------------------
-
-auto EngineState::CullingStats() const noexcept -> ZHLN::CullingStats {
-    return ZHLN::EngineAccess::WorldOf(*_engine).GetCullingStats();
-}
-void EngineState::ResetCullingStats() noexcept {
-    ZHLN::EngineAccess::WorldOf(*_engine).GetCullingStats() = {};
-}
-auto EngineState::Configuration() const noexcept -> EngineConfig {
-    return ZHLN::EngineAccess::KernelOf(*_engine).GetConfig();
 }
 
 } // namespace ZHLN

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -10,6 +9,7 @@
 #include <Animation/ProceduralMath.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -180,7 +180,7 @@ struct FirstPersonViewState {
 }
 
 void CollectFirstPersonHeadMeshes(
-    ZHLN::ECS::Registry&          registry,
+    ZHLN::Entities                entities,
     const ZHLN::ModelPrefab&      prefab,
     std::span<const ZHLN::Entity> visualParts,
     FirstPersonViewState&         state
@@ -203,12 +203,12 @@ void CollectFirstPersonHeadMeshes(
 
     state.headMeshes.clear();
     for (ZHLN::Entity entity: visualParts) {
-        auto mesh = registry.Get<ZHLN::Components::MeshComponent>(entity);
+        auto mesh = entities.Get<ZHLN::Components::MeshComponent>(entity);
         if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
         const bool underHead       = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
-        const auto skeletalMesh    = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
+        const auto skeletalMesh    = entities.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
         const bool headSkin        = skeletalMesh && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
         bool        compactNearHead = false;
         for (const ZHLN::ModelPart& part: prefab.parts) {
@@ -237,19 +237,19 @@ void CollectFirstPersonHeadMeshes(
 }
 
 void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonViewState& state, bool enabled) {
-    auto& registry       = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  cameraEntities = registry.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+    auto entities       = engine.Entities();
+    auto cameraEntities = entities.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
         return;
     }
     state.cameraEntity = cameraEntities[0];
 
     if (enabled) {
-        auto targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
+        auto targetCamera = entities.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
         if (!targetCamera) {
             return;
         }
-        auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>();
+        auto cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
         if (!cameraComp) {
             return; // Nothing to save and nothing to pose for third person.
         }
@@ -258,38 +258,38 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.thirdPersonSaved  = true;
         state.lookYawOffset     = 0.0f;
         state.lookPitchOffset   = 0.0f;
-        registry.Remove<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
-        if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
-            state.thirdPersonLookAtWeight = lookAt->weight;
+        entities.Detach<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
+        entities.Patch<ZHLN::ProceduralLookAtComponent>(player, [&](auto& lookAt) {
+            state.thirdPersonLookAtWeight = lookAt.weight;
             state.lookAtWeightSaved       = true;
-            lookAt->weight                = 0.0f;
-        }
-        cameraComp->camera.fov   = ZHLN::DegF{75.0f};
-        cameraComp->camera.nearZ = 0.03f;
+            lookAt.weight                 = 0.0f;
+        });
+        entities.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& cc) {
+            cc.camera.fov   = ZHLN::DegF{75.0f};
+            cc.camera.nearZ = 0.03f;
+        });
     } else if (state.thirdPersonSaved) {
         ZHLN::CameraRig::TargetCameraComponent restored = state.thirdPersonCamera;
         restored.hasInitSmoothTarget                     = 0;
-        if (auto targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity)) {
-            *targetCamera = restored;
-        } else {
-            registry.Add(state.cameraEntity, std::move(restored));
+        if (!entities.Patch<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity, [&](auto& targetCamera) { targetCamera = restored; })) {
+            entities.Attach(state.cameraEntity, std::move(restored));
         }
-        if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
-            cameraComp->camera.yaw   = ZHLN::DegF{state.thirdPersonCamera.yaw};
-            cameraComp->camera.pitch = ZHLN::DegF{state.thirdPersonCamera.pitch};
-            cameraComp->camera.fov   = ZHLN::DegF{state.thirdPersonCamera.fov};
-            cameraComp->camera.nearZ = state.thirdPersonNearZ;
-        }
+        entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+            cameraComp.camera.yaw   = ZHLN::DegF{state.thirdPersonCamera.yaw};
+            cameraComp.camera.pitch = ZHLN::DegF{state.thirdPersonCamera.pitch};
+            cameraComp.camera.fov   = ZHLN::DegF{state.thirdPersonCamera.fov};
+            cameraComp.camera.nearZ = state.thirdPersonNearZ;
+        });
         if (state.lookAtWeightSaved) {
-            if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
-                lookAt->weight = state.thirdPersonLookAtWeight;
-            }
+            entities.Patch<ZHLN::ProceduralLookAtComponent>(player, [&](auto& lookAt) {
+                lookAt.weight = state.thirdPersonLookAtWeight;
+            });
             state.lookAtWeightSaved = false;
         }
         state.thirdPersonSaved = false;
     }
 
-    registry.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
+    entities.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
         visibility.eyeOffsetModel = {0.0f, state.eyeUpOffset, state.eyeForwardOffset};
         visibility.lookYawDegrees    = state.lookYawOffset;
         visibility.lookPitchDegrees  = state.lookPitchOffset;
@@ -299,9 +299,9 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         visibility.cameraInitialized = false;
     });
     for (const HiddenHeadMesh& hidden: state.headMeshes) {
-        if (auto mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
-            mesh->flags = enabled ? hidden.originalFlags | ZHLN::DrawFlags::Hidden : hidden.originalFlags;
-        }
+        entities.Patch<ZHLN::Components::MeshComponent>(hidden.entity, [&](auto& mesh) {
+            mesh.flags = enabled ? hidden.originalFlags | ZHLN::DrawFlags::Hidden : hidden.originalFlags;
+        });
     }
     state.enabled = enabled;
     ZHLN::Log("[Sample] Camera mode: {}.", enabled ? "FIRST PERSON / HEAD-CONSTRAINED FULL BODY" : "THIRD PERSON / ORBIT");
@@ -327,7 +327,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
 }
 
 auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     // 1. Configure Post-Processing Atmosphere via ECS Patch
     engine.Graphics().PatchSettings([](auto& gfx) {
@@ -403,7 +403,7 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     }
 
     // 7. Directional Sunlight via Variadic Create
-    reg.Create(
+    entities.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = FVec3{0.45f, 1.00f, 0.30f}.Normalized()
@@ -411,11 +411,11 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     );
 }
 
-void SetHandgunVisibility(ZHLN::ECS::Registry& registry, ZHLN::Entity handgunRoot, bool visible) {
-    for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-        const auto hier = registry.Get<ZHLN::Components::HierarchyComponent>(e);
+void SetHandgunVisibility(ZHLN::Entities entities, ZHLN::Entity handgunRoot, bool visible) {
+    for (ZHLN::Entity e: entities.EntitiesWith<ZHLN::Components::MeshComponent>()) {
+        const auto hier = entities.Get<ZHLN::Components::HierarchyComponent>(e);
         if (hier && hier->parent == handgunRoot) {
-            registry.Patch<ZHLN::Components::MeshComponent>(e, [visible](auto& mesh) {
+            entities.Patch<ZHLN::Components::MeshComponent>(e, [visible](auto& mesh) {
                 if (visible) {
                     mesh.flags &= ~ZHLN::DrawFlags::Hidden;
                 } else {
@@ -427,9 +427,9 @@ void SetHandgunVisibility(ZHLN::ECS::Registry& registry, ZHLN::Entity handgunRoo
 }
 
 auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScale) -> ZHLN::Entity {
-    auto&              reg     = ZHLN::EngineAccess::RegistryOf(engine);
-    const float        scale   = std::clamp(itemScale, 0.10f, 4.0f);
-    const ZHLN::Entity handgun = reg.Create(
+    auto               entities = engine.Entities();
+    const float        scale    = std::clamp(itemScale, 0.10f, 4.0f);
+    const ZHLN::Entity handgun  = entities.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("ProceduralTestHandgun")}, ZHLN::Components::TransformComponent {},
         ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::HierarchyComponent {.parent = player}
     );
@@ -445,12 +445,12 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
             engine, FVec3{halfExtents} * scale,
             ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = material}
         );
-        reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
-        reg.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
+        entities.Attach(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
+        entities.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
             transform.position = FVec3{localPosition} * scale;
             transform.rotation = localRotation;
         });
-        reg.Patch<ZHLN::Components::NameComponent>(part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
+        entities.Patch<ZHLN::Components::NameComponent>(part, [&](auto& component) -> auto { component.name = ZHLN::String64(name); });
     };
 
     const FVec4 darkMetal{0.10f, 0.12f, 0.15f, 1.0f};
@@ -529,7 +529,7 @@ auto AttachCharacterRig(
     ZHLN::Animation::ItemHandlingComponent itemHandling,
     FirstPersonViewState&                  viewState
 ) -> void {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -737,7 +737,7 @@ auto main(int argc, char* argv[]) -> int {
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), rigPath);
+    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(*engine, rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds =
         prefab.transform([](const ZHLN::ModelPrefab& p) { return ZHLN::Locomotion::EstimateCharacterBounds(p); })
@@ -772,7 +772,7 @@ auto main(int argc, char* argv[]) -> int {
     viewState.eyeForwardOffset = std::clamp(characterHeight * 0.040f, 0.04f, 0.10f);
     AttachCharacterRig(*engine, player, rigPath, prefab, BuildTestHandgunHandling(handgun, handgunScale), viewState);
 
-    SetHandgunVisibility(ZHLN::EngineAccess::RegistryOf(*engine), handgun, false);
+    SetHandgunVisibility(engine->Entities(), handgun, false);
 
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool        handgunEquipped = false;
@@ -789,14 +789,14 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
+        auto entities = engine->Entities();
 
         // 1. Mouse Look and edge-triggered handgun equip input.
         bool equipKeyDown = false;
         bool viewKeyDown  = false;
         bool tabKeyDown   = false;
-        for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
+        for (ZHLN::Entity e: entities.EntitiesWith<ZHLN::Components::InputStateComponent>()) {
+            entities.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
                 equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
                 viewKeyDown  = viewKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
                 tabKeyDown   = tabKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Tab));
@@ -811,16 +811,18 @@ auto main(int argc, char* argv[]) -> int {
                     if (viewState.enabled) {
                         viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
                         viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);
-                    } else if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
-                        cameraComp->camera.yaw += ZHLN::DegF{st.GetMouseDeltaX() * 0.15f};
-                        cameraComp->camera.pitch = std::clamp(cameraComp->camera.pitch - ZHLN::DegF{st.GetMouseDeltaY() * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
+                    } else {
+                        entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+                            cameraComp.camera.yaw += ZHLN::DegF{st.GetMouseDeltaX() * 0.15f};
+                            cameraComp.camera.pitch = std::clamp(cameraComp.camera.pitch - ZHLN::DegF{st.GetMouseDeltaY() * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
+                        });
                     }
                 }
             });
         }
         if (equipKeyDown && !equipKeyWasDown) {
             handgunEquipped = !handgunEquipped;
-            registry.Patch<ZHLN::Animation::ItemHandlingComponent>(player, [&](auto& handling) -> auto {
+            entities.Patch<ZHLN::Animation::ItemHandlingComponent>(player, [&](auto& handling) -> auto {
                 handling.driverMode    = handgunEquipped ? ZHLN::Animation::ItemDriverMode::AimGuided : ZHLN::Animation::ItemDriverMode::BodyMounted;
                 handling.aimProgress   = handgunEquipped ? 1.0f : 0.0f;
                 const size_t gripCount = std::min(handling.gripCount, handling.grips.size());
@@ -828,7 +830,7 @@ auto main(int argc, char* argv[]) -> int {
                     handling.grips[gripIndex].ikWeight = handgunEquipped ? 1.0f : 0.0f;
                 }
             });
-            SetHandgunVisibility(registry, handgun, handgunEquipped);
+            SetHandgunVisibility(entities, handgun, handgunEquipped);
             ZHLN::Log("[Sample] Test handgun: {}.", handgunEquipped ? "EQUIPPED / AIM-GUIDED" : "RESTING / BODY-MOUNTED");
         }
         equipKeyWasDown = equipKeyDown;
@@ -843,7 +845,7 @@ auto main(int argc, char* argv[]) -> int {
         }
         tabKeyWasDown = tabKeyDown;
         if (viewState.enabled) {
-            registry.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
+            entities.Patch<ZHLN::FirstPersonVisibilityComponent>(player, [&](auto& visibility) -> auto {
                 visibility.lookYawDegrees   = viewState.lookYawOffset;
                 visibility.lookPitchDegrees = viewState.lookPitchOffset;
             });
@@ -851,10 +853,13 @@ auto main(int argc, char* argv[]) -> int {
 
         // 2. Update Procedural Look-At Orbit via Multi-Component Patch
         const auto sampleTime = static_cast<float>(clock.UnscaledElapsedTime());
-        registry.Patch<ZHLN::Components::TransformComponent, ZHLN::ProceduralLookAtComponent>(player, [&](const auto& trans, auto& lookAt) -> auto {
-            const Quat rotation {trans.rotation};
-            lookAt.targetWorldPos    = FVec3{trans.position} + rotation * FVec3{std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f};
-        });
+        if (const auto trans = entities.Get<ZHLN::Components::TransformComponent>(player)) {
+            const FVec3 pos = trans->position;
+            const Quat  rot {trans->rotation};
+            entities.Patch<ZHLN::ProceduralLookAtComponent>(player, [&](auto& lookAt) {
+                lookAt.targetWorldPos = pos + rot * FVec3{std::sin(sampleTime * 0.65f) * 2.2f, 1.65f, 4.0f};
+            });
+        }
 
         // 3. Synchronized Engine Tick (uses Clock's scaled DeltaTime)
         const auto result = engine->Tick(clock.DeltaTime());
@@ -865,25 +870,26 @@ auto main(int argc, char* argv[]) -> int {
 
         // 4. Render diagnostic hull/skeleton only in third person; first person
         // keeps the actual full body and arms without debug geometry at the face.
-        if (!viewState.enabled) {
+        if (!viewState.enabled && entities.IsAlive(player)) {
             // The completed Tick is an externally ordered debug boundary.
-            const ZHLN::ECS::Query<const ZHLN::Components::TransformComponent, const ZHLN::Character::MovementComponent> query {registry};
-            if (query.IsAlive(player)) {
-                const auto transform = query.Get<ZHLN::Components::TransformComponent>(player);
-                const auto movement = query.Get<ZHLN::Character::MovementComponent>(player);
-                if (transform) {
-                    FVec3 velocity = FVec3::Zero();
-                    if (movement) {
-                        const float speed = movement->speed * (movement->isSprinting ? std::max(movement->sprintMultiplier, 1.0f) : 1.0f);
-                        velocity = FVec3 {movement->inputX * speed, movement->currentYVel, movement->inputZ * speed};
-                    }
-                    ZHLN::Locomotion::RenderDebugRig(engine->Debug(), transform->position, velocity, dualShapeConfig);
+            if (const auto transform = entities.Get<ZHLN::Components::TransformComponent>(player)) {
+                const auto movement = entities.Get<ZHLN::Character::MovementComponent>(player);
+                FVec3      velocity = FVec3::Zero();
+                if (movement) {
+                    const float speed = movement->speed * (movement->isSprinting ? std::max(movement->sprintMultiplier, 1.0f) : 1.0f);
+                    velocity          = FVec3 {movement->inputX * speed, movement->currentYVel, movement->inputZ * speed};
+                }
+                ZHLN::Locomotion::RenderDebugRig(engine->Debug(), transform->position, velocity, dualShapeConfig);
+
+                if (const auto rig = entities.Get<ZHLN::RigBoneMap>(player)) {
+                    const auto gait = entities.Get<ZHLN::ProceduralLocomotionComponent>(player);
+                    ZHLN::ProceduralAnimation::DrawDebugRig(engine->Debug(), transform->position, Quat{transform->rotation}, *rig, gait ? &*gait : nullptr);
                 }
             }
-            registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
-                const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-                ZHLN::ProceduralAnimation::DrawDebugRig(ZHLN::EngineAccess::SceneOf(*engine), trans.position, Quat{trans.rotation}, rig, gait ? &*gait : nullptr);
-            });
+        }
+    }
+    return EXIT_SUCCESS;
+}
         }
     }
     return EXIT_SUCCESS;

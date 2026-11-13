@@ -10,7 +10,6 @@
 // re-push the per-frame device-address block via vkCmdPushDataEXT, and draw
 // with heap pipelines. 400 cubes in 4 shared materials verify the pipeline.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -95,15 +94,16 @@ struct DescriptorHeapsParallelSuite {
 
             engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 6.0f, 13.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = {0.0f, 6.0f, 13.0f};
-            cam.yaw      = ZHLN::DegF{-90.0f};
-            cam.pitch    = ZHLN::DegF{0.0f};
-            cam.fov      = ZHLN::DegF{60.0f};
 
             // 4 strongly separated material colors.
             struct TestMaterial {

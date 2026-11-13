@@ -10,7 +10,6 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -50,7 +49,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -87,8 +86,8 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *blueMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})
@@ -102,8 +101,8 @@ struct ClusteredLightingTestSuite {
                 );
 
                 auto addPointLight = [&](const ZHLN::FVec3& pos, const ZHLN::FVec3& color, float intensity) {
-                    const ZHLN::Entity e = reg.Create();
-                    reg.Add(
+                    const ZHLN::Entity e = reg.Spawn();
+                    reg.Attach(
                         e, ZHLN::Components::TransformComponent {.position = pos},
                         ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = 30.0f}
                     );
@@ -111,15 +110,16 @@ struct ClusteredLightingTestSuite {
                 addPointLight(ZHLN::FVec3{-4.0f, 3.0f, 2.0f}, ZHLN::FVec3{1.0f, 0.55f, 0.3f}, 800.0f);
                 addPointLight(ZHLN::FVec3{4.0f, 3.0f, -3.0f}, ZHLN::FVec3{0.3f, 0.5f, 1.0f}, 800.0f);
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 2.5f, 8.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{-12.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 2.5f, 8.0f};
-                cam.yaw      = ZHLN::DegF{-90.0f};
-                cam.pitch    = ZHLN::DegF{-12.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -240,7 +240,7 @@ struct ClusteredLightingTestSuite {
 
             ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -265,8 +265,8 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{30.0f, 0.0f, 0.0f}})
@@ -279,23 +279,24 @@ struct ClusteredLightingTestSuite {
                     }
                 );
 
-                redLight = reg.Create();
-                reg.Add(
+                redLight = reg.Spawn();
+                reg.Attach(
                     redLight, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{-6.4f, 2.4f, 5.5f}},
                     ZHLN::Components::LightComponent {
                         .type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.06f, 0.03f}, .intensity = 1600.0f, .range = 40.0f
                     }
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 2.6f, -4.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-8.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 2.6f, -4.0f};
-                cam.yaw      = ZHLN::DegF{90.0f};
-                cam.pitch    = ZHLN::DegF{-8.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -314,7 +315,7 @@ struct ClusteredLightingTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
                     lightCullingPop = false;
-                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
+                    auto reg = eng.Entities();
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
 
                     std::vector<double>   redCounts;
@@ -475,7 +476,7 @@ struct ClusteredLightingTestSuite {
             const ZHLN::FVec3 lightPos{6.4f, 2.4f, 5.0f};
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -500,8 +501,8 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{30.0f, 0.0f, 0.0f}})
@@ -513,22 +514,23 @@ struct ClusteredLightingTestSuite {
                         .direction = ZHLN::FVec3{0.0f, 0.5f, 0.85f}.Normalized()
                     }
                 );
-                const ZHLN::Entity redLight = reg.Create();
-                reg.Add(
+                const ZHLN::Entity redLight = reg.Spawn();
+                reg.Attach(
                     redLight, ZHLN::Components::TransformComponent {.position = lightPos},
                     ZHLN::Components::LightComponent {
                         .type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.06f, 0.03f}, .intensity = 1600.0f, .range = 40.0f
                     }
                 );
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 2.6f, -4.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-8.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 2.6f, -4.0f};
-                cam.yaw      = ZHLN::DegF{90.0f};
-                cam.pitch    = ZHLN::DegF{-8.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -607,7 +609,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -620,8 +622,8 @@ struct ClusteredLightingTestSuite {
                 });
 
                 // Explicit 0-intensity Sun to suppress the default 180-nit white sun injection
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})
@@ -674,8 +676,8 @@ struct ClusteredLightingTestSuite {
                             lightColor = {1.0f, 0.85f, 0.15f}; // Amber -> Screen Bottom-Right
                         }
 
-                        const ZHLN::Entity lt = reg.Create();
-                        reg.Add(
+                        const ZHLN::Entity lt = reg.Spawn();
+                        reg.Attach(
                             lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{posX, posY, posZ}},
                             ZHLN::Components::LightComponent {
                                 .type      = ZHLN::LightType::Point,
@@ -687,15 +689,16 @@ struct ClusteredLightingTestSuite {
                     }
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 22.0f, -24.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-42.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 22.0f, -24.0f};
-                cam.yaw      = ZHLN::DegF{90.0f};
-                cam.pitch    = ZHLN::DegF{-42.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -865,7 +868,7 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -897,8 +900,8 @@ struct ClusteredLightingTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *matRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{35.0f, 0.0f, 0.0f}})
@@ -913,22 +916,23 @@ struct ClusteredLightingTestSuite {
 
                 // Add a few point lights to force cluster culling to write tiles
                 for (int i = 0; i < 4; ++i) {
-                    const ZHLN::Entity e = reg.Create();
-                    reg.Add(
+                    const ZHLN::Entity e = reg.Spawn();
+                    reg.Attach(
                         e, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{-6.0f + i * 4.0f, 2.5f, 2.0f}},
                         ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.8f, 0.6f}, .intensity = 600.0f, .range = 20.0f}
                     );
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 4.0f, -8.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-20.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 4.0f, -8.0f};
-                cam.yaw      = ZHLN::DegF{90.0f};
-                cam.pitch    = ZHLN::DegF{-20.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;

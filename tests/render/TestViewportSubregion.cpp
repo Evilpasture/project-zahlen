@@ -19,7 +19,6 @@
 // The subject is a saturated red material under fullBright, so the mask is a
 // colour test and every background/tone-map concern cancels out.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -121,14 +120,14 @@ struct BBox {
 }
 
 void DisableJitterVignetteAndTargetDrive(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+    auto reg = engine.Entities();
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives the main camera through the registry; the target-orbit lerp
         // would fight it. The rig component is an extras component
         // (extensions/Camera); removing it is inert when no sibling suite
         // installed the rig, and when the rig is present its frame step
         // re-seeds the boot default -- a Null target that takes no drive anyway.
-        reg.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
+        reg.Detach<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
     }
     // AA off so the static scene is actually static.
     engine.Graphics().PatchSettings([](auto& gfx) {
@@ -178,7 +177,7 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             // The engine is pooled across suites; whatever band this test
@@ -191,18 +190,19 @@ struct ViewportSubregionTestSuite {
 
             DisableJitterVignetteAndTargetDrive(*engine);
 
-            if (!ZHLN::Test::ExpectTrue(!reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty())) {
+            if (!ZHLN::Test::ExpectTrue(!reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty())) {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 0.0f, 4.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = {0.0f, 0.0f, 4.0f};
-            cam.yaw      = ZHLN::DegF{-90.0f};
-            cam.pitch    = ZHLN::DegF{0.0f};
 
             auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             if (!matRes) {

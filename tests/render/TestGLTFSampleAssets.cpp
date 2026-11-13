@@ -15,7 +15,6 @@
 // (an A/B capture against the empty scene differs). No pixel goldens, no
 // absolute counts: a fidelity improvement must not fail this suite.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -155,7 +154,7 @@ struct GLTFSampleAssetsTestSuite {
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.
             constexpr ZHLN::GLTF::ImportOptions fidelity {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), bytes, modelPath, modelPath, fidelity);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, modelPath, modelPath, fidelity);
             if (!prefab || !ZHLN::Test::ExpectGt(prefab->parts.size(), size_t {0})) {
                 return std::unexpected(SampleAssetsError::ImportFailed);
             }
@@ -168,11 +167,10 @@ struct GLTFSampleAssetsTestSuite {
                 return std::unexpected(SampleAssetsError::RenderDegenerate);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>(
+                    [&](auto& c) { FitCameraToPrefab(c.camera, *prefab, 50.0f); }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            FitCameraToPrefab(camComp->camera, *prefab, 50.0f);
 
             std::vector<ZHLN::Entity> instances(1u + prefab->parts.size());
             const uint32_t            spawned = ZHLN::PrefabFactory::InstantiatePrefab(

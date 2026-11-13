@@ -14,7 +14,6 @@
 // fall back to SSR. No RT support → skip. A blank capture after RTR is on
 // is a failure, not a retry.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -175,8 +174,8 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void DisableAAAndFreeCam(ZHLN::Engine& engine) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+        auto reg = engine.Entities();
+        for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
             engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
         }
         engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
@@ -198,11 +197,11 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static void PlaceSunAndCamera(ZHLN::Engine& engine) {
-        auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
-        const ZHLN::Entity sunEnt = reg.Create();
+        auto reg = engine.Entities();
+        const ZHLN::Entity sunEnt = reg.Spawn();
         // Intensity 0: LightingSystem falls back to a 180-nit default sun if
         // no Sun exists, which floods dielectric albedo and hides F0 tint.
-        reg.Add(
+        reg.Attach(
             sunEnt,
             ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})},
             ZHLN::Components::LightComponent {
@@ -210,15 +209,16 @@ struct RTRPBRReflectionTestSuite {
             }
         );
 
-        const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-        if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+        const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            auto& cam = c.camera;
+            cam.position = {0.0f, 5.5f, 11.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{-28.0f};
+            cam.fov      = ZHLN::DegF{55.0f};
+        });
+        if (!ZHLN::Test::ExpectTrue(camOk)) {
             return;
         }
-        ZHLN::Camera& cam = camComp->camera;
-        cam.position = {0.0f, 5.5f, 11.0f};
-        cam.yaw      = ZHLN::DegF{-90.0f};
-        cam.pitch    = ZHLN::DegF{-28.0f};
-        cam.fov      = ZHLN::DegF{55.0f};
     }
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::FVec4 base, ZHLN::FVec4 emissive = ZHLN::FVec4 {0.0f, 0.0f, 0.0f, 1.0f})
@@ -543,7 +543,7 @@ struct RTRPBRReflectionTestSuite {
                 return rtrOn;
             }
 
-            auto& reg         = ZHLN::EngineAccess::RegistryOf(*s.engine);
+            auto reg = s.engine->Entities();
             auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::ErrorCode> {
                 if (!reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
                         pbr.metallic  = metallic;

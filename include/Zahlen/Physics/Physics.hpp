@@ -258,6 +258,7 @@ class ZHLN_API PhysicsContext {
     // validity; a stale handle simply has no value to hand back.
     [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3>;
     [[nodiscard]] auto BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
+    [[nodiscard]] auto BodyLinearVelocity(Physics::BodyID handle) const noexcept -> std::optional<FVec3>;
     void FillBodyStates(std::span<const Physics::BodyID> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     [[nodiscard]] bool GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 

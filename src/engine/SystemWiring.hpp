@@ -3,15 +3,19 @@
 
 #pragma once
 
+#include <Zahlen/Engine/FramePlan.hpp>
+
 namespace ZHLN {
 
 class Engine;
-class FramePlan;
+namespace ECS {
+class Registry;
+}
 
 // Core's own frame steps. Runs once per engine; see the definition.
-void BuildCoreFramePlan(FramePlan& plan);
+void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep);
 void BuildSystemGraphs(Engine& engine);
 
-auto InitializeDefaultScene(Engine& engine) -> bool;
+auto InitializeDefaultScene(Engine& engine, ECS::Registry& reg) -> bool;
 
 }

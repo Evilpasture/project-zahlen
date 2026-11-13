@@ -8,7 +8,6 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -50,7 +49,7 @@ struct RayTracedShadowsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -69,8 +68,8 @@ struct RayTracedShadowsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{60.0f, 45.0f, 0.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 90.0f, 0.0f}})
@@ -83,15 +82,16 @@ struct RayTracedShadowsTestSuite {
                     }
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {-10.0f, 6.0f, -8.0f};
+                    cam.yaw      = ZHLN::DegF{0.0f};
+                    cam.pitch    = ZHLN::DegF{-20.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {-10.0f, 6.0f, -8.0f};
-                cam.yaw      = ZHLN::DegF{0.0f};
-                cam.pitch    = ZHLN::DegF{-20.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -103,7 +103,7 @@ struct RayTracedShadowsTestSuite {
                 *engine, 8, "raytraced_shadow_occlusion_and_stability",
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
-                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
+                    auto reg = eng.Entities();
 
                     const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
                         eng, {0.5f, 3.0f, 4.0f},

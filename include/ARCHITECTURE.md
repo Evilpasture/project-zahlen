@@ -575,11 +575,9 @@ replacement is chosen by semantics rather than by a blanket naming rule.
 does not include `<Zahlen/ECS/ECS.hpp>` or `<Zahlen/Engine/PoseUploads.hpp>`.
 Engine implementation headers live under `src/engine` and are included locally;
 no engine-internal directory is exposed to build-tree or installed consumers.
-External code must use the public capabilities or typed queries instead of
-including engine implementation headers. `EngineAccess` is a remaining internal
-migration seam, not a supported interface: existing external references must be
-removed, and those targets will not compile until they are migrated. The goal
-is to delete the seam, not preserve it as an extension point.
+External code must use the public capabilities, `InstallModule`, or typed
+queries instead of including engine implementation headers; no `EngineAccess`
+backdoor or raw-registry accessor is exposed on `Engine`.
 
 ### 3.5 Frame outcome
 

@@ -17,11 +17,21 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
 class AssetManager;
+class GraphicsDevice;
 struct ModelPrefab;
+
+namespace FS {
+class VirtualFileSystem;
+}
+
+namespace GUI {
+struct BakedFontAsset;
+}
 
 namespace Remote {
 class AsyncAssetFetcher;
@@ -62,6 +72,12 @@ class ZHLN_API AssetLibrary {
 
     void               CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void               CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
+    [[nodiscard]] auto CachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) -> uint32_t;
+    void               UseGraphicsDevice(GraphicsDevice graphics) noexcept;
+    void               CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
+    [[nodiscard]] auto ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>>;
+    [[nodiscard]] auto VFS() noexcept -> FS::VirtualFileSystem&;
+    [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem&;
     [[nodiscard]] auto CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool;
     [[nodiscard]] auto FindCollisionMesh(CollisionAssetID id) const noexcept -> std::shared_ptr<const Physics::MeshGeometry>;
     [[nodiscard]] auto CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool;

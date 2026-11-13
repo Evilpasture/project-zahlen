@@ -3,12 +3,25 @@
 
 #include <VFX/LightningUpdate.hpp>
 #include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
 namespace ZHLN::Lightning {
 namespace {
+struct LightningPhaseCapabilities {
+    GraphicsDevice graphics;
+    AudioEngine    audio;
+    Entities       entities;
+};
+
+void RunUpdateFromSimGraph(LightningUpdateQuery query, ECS::ResMut<ECS::ExtensionServices> extensions, FrameDt dt) {
+    if (auto caps = extensions->Get<LightningPhaseCapabilities>()) {
+        Update(query, ECS::ResMut<GraphicsDevice> {&caps->graphics}, ECS::ResMut<AudioEngine> {&caps->audio}, ECS::ResMut<Entities> {&caps->entities}, dt);
+    }
+}
+
 auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float {
     if (tUs <= 0.0f || i0 <= 0.0f) {
         return 0.0f;
@@ -179,4 +192,14 @@ void Update(LightningUpdateQuery query, ECS::ResMut<GraphicsDevice> graphics, EC
         setAmbientExposure(unflashedBaseExposure);
     }
 }
+
+void Step(Engine& engine, float dt) {
+    engine.EmplaceService<LightningPhaseCapabilities>(LightningPhaseCapabilities {
+        .graphics = engine.Graphics(),
+        .audio    = engine.Audio(),
+        .entities = engine.Entities(),
+    });
+    engine.GetUpdateGraph().InvokeSequential<&RunUpdateFromSimGraph>(Frame {.dt = {dt}});
+}
+
 } // namespace ZHLN::Lightning

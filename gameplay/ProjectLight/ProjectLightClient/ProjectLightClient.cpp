@@ -2,10 +2,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
 
@@ -1247,11 +1247,11 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 
 void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    auto input = registry.GetSingleton<Components::InputStateComponent>();
+    auto entities = engine.Entities();
+    auto input = entities.GetSingleton<Components::InputStateComponent>();
     m_lastControls = {};
     // No main camera entity means no view to report; the zeroed controls above stand.
-    if (const auto cameraComp = registry.GetSingleton<Components::CameraComponent>()) {
+    if (const auto cameraComp = entities.GetSingleton<Components::CameraComponent>()) {
         m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
     if (input) {
@@ -1272,13 +1272,13 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
+    auto physics = engine.Physics();
     if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyID::Null()) {
-        auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-        const auto movement = registry.Get<Character::MovementComponent>(m_localController);
+        const auto movement = entities.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
             const Quat rotation = (movement ? movement->orientation : Quat{state.currentRotation}).Normalized();
-            const auto velocity = Physics::FromJoltVector(physics.GetCharacterVelocity(m_localControllerBody));
+            const auto velocity = physics.CharacterLinearVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.x, rotation.y, rotation.z, rotation.w,
@@ -1293,7 +1293,6 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         }
     }
 
-    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     for (auto& [uid, object]: m_objects) {
         if (m_localPlayerUid == 0 || object.removalPending || !IsPartClass(object.className)
             || object.networkOwnerUid != m_localPlayerUid) continue;
@@ -1301,15 +1300,14 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         bool haveState = false;
         if (IsLocalCharacterPart(uid)) {
             haveState = true;
-        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && registry.IsAlive(entity)) {
-            const auto body = registry.Get<Components::PhysicsComponent>(entity);
+        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && entities.IsAlive(entity)) {
+            const auto body = entities.Get<Components::PhysicsComponent>(entity);
             if (body) {
                 if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
                     const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
                     transform.rotation = Quat{snapshot.currentRotation};
-                    const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
-                    if (!bodyID.IsInvalid()) transform.linearVelocity = Physics::FromJoltVector(physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID));
+                    if (const auto vel = physics.BodyLinearVelocity(body->physicsID)) transform.linearVelocity = *vel;
                     haveState = true;
                 }
             }

@@ -26,6 +26,8 @@
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -38,11 +40,14 @@
 
 namespace ZHLN {
 
+class AssetLibrary;
 class RenderContext;
 struct EnvironmentRadianceDesc;
 
 class ZHLN_API GraphicsDevice {
   public:
+    [[nodiscard]] auto operator==(const GraphicsDevice&) const noexcept -> bool = default;
+
     // --- Device state ---------------------------------------------------------
     void SetResolution(Extent2D resolution);
     void SetViewport(const ViewportRect& rect) noexcept;
@@ -89,9 +94,24 @@ class ZHLN_API GraphicsDevice {
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode>;
     [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true,
                                      bool generateMips = true) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent,
+                                        bool generateMips = false) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
+        -> std::expected<TextureID, ErrorCode>;
     [[nodiscard]] auto CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true,
                                                bool generateMips = true) -> TextureID;
+    template <typename Func>
+        requires std::invocable<Func&, std::span<uint32_t>>
+    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureID, ErrorCode> {
+        std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
+        std::forward<Func>(callback)(std::span<uint32_t> {pixels});
+        return CreateTexture(std::span<const uint32_t> {pixels}, extent, isSRGB);
+    }
     void UnloadTexture(TextureID handle);
+
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureID, ErrorCode>;
+    void               DestroyRenderTexture(TextureID handle) noexcept;
 
     [[nodiscard]] auto Mesh(AssetID id) const noexcept -> std::optional<ZHLN::Mesh>;
     [[nodiscard]] auto Material(MaterialID id) const noexcept -> std::optional<ZHLN::Material>;
@@ -141,6 +161,7 @@ class ZHLN_API GraphicsDevice {
 
   private:
     friend class Engine;
+    friend class AssetLibrary;
     explicit GraphicsDevice(RenderContext& ctx) noexcept: _ctx(&ctx) {
     }
     RenderContext* _ctx;

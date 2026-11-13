@@ -50,6 +50,7 @@ class ZHLN_API Simulation {
     [[nodiscard]] auto DebugDrawData(bool shapes = true, bool constraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
     [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3>;
     [[nodiscard]] auto BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
+    [[nodiscard]] auto BodyLinearVelocity(Physics::BodyID handle) const noexcept -> std::optional<FVec3>;
     [[nodiscard]] auto CharacterVelocity(Physics::BodyID handle) const -> FVec3;
     [[nodiscard]] auto IsCharacterOnGround(Physics::BodyID handle) const -> bool;
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyID handle) const -> bool;
@@ -66,7 +67,6 @@ class ZHLN_API Simulation {
 
   private:
     friend class Engine;
-    friend struct EngineAccess;
     explicit Simulation(PhysicsContext& ctx) noexcept: _ctx(&ctx) {
     }
     PhysicsContext* _ctx;

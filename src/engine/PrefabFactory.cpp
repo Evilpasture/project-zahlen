@@ -11,9 +11,9 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include "EngineAccess.hpp"
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Log.hpp>
@@ -412,7 +412,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-static auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBoxInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
     auto boxColor = params.materialOverride.baseColorFactor;
     if (!(boxColor.w >= 0.0f)) {
         boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -471,10 +471,6 @@ static auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Phy
     }
 
     return e;
-}
-
-auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBox(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), halfExtents, params);
 }
 
 namespace {
@@ -542,7 +538,7 @@ auto SpawnPrimitive(
 
 } // namespace
 
-static auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
+auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -554,11 +550,7 @@ static auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<
     );
 }
 
-auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphere(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, params);
-}
-
-static auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
+auto CreateCylinderInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
     -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
@@ -572,11 +564,7 @@ static auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optiona
     );
 }
 
-auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinder(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
-}
-
-static auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateConeInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
@@ -588,11 +576,7 @@ static auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Ph
     );
 }
 
-auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCone(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
-}
-
-static auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
+auto CreatePlaneInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
     -> Entity {
     Mesh mesh = CreatePlaneMesh(gfx, extent, color);
 
@@ -643,11 +627,7 @@ static auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<P
     return e;
 }
 
-auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
-    return CreatePlane(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
-}
-
-static auto InstantiatePrefab(
+auto InstantiatePrefabInternal(
     GraphicsDevice      gfx,
     ECS::Registry&      reg,
     PhysicsContext&     pc,
@@ -849,17 +829,6 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
             }
         }
     }
-}
-
-auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadModelPrefab(engine.Graphics(), ZHLN::EngineAccess::AssetsOf(engine), path);
-}
-
-auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
-    return InstantiatePrefab(
-        engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), ZHLN::EngineAccess::ArticulationOf(engine), prefab,
-        params, outBuffer, maxCount
-    );
 }
 
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {

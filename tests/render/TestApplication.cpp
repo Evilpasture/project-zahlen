@@ -3,7 +3,7 @@
 
 // Opt-in local GPU test: whole application launches. Most stop before the
 // first Tick; a failure probe runs a UI-only frame without GPU rendering.
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -115,10 +115,11 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         Expect(FindStep(engine, "GameplayModule") == nullptr);
         // ProcessEvents begins an input frame. If update runs before it, the
         // deliberately stale mouse delta below is still visible to gameplay.
-        auto input = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>();
-        input->mouseDeltaX = 123.0f;
-        // A resize is consumed during Engine::ProcessEvents, not by App's loop.
-        input->ApplyResize({.width = 800, .height = 600});
+        engine.Entities().PatchSingleton<Components::InputStateComponent>([](auto& input) {
+            input.mouseDeltaX = 123.0f;
+            // A resize is consumed during Engine::ProcessEvents, not by App's loop.
+            input.ApplyResize({.width = 800, .height = 600});
+        });
         const auto modules = engine.GetInstalledModules();
         Expect(std::ranges::any_of(modules, [](const Module& module) { return module.name == "AppTestModule"; }));
         Expect(!std::ranges::any_of(modules, [](const Module& module) { return module.name == "FallbackScene"; }));
@@ -222,7 +223,7 @@ static SubstepProbe* activeSubstepProbe = nullptr;
 
 void ProbePreStep(Engine& engine, float dt) {
     auto& probe = *activeSubstepProbe;
-    auto& reg = EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     probe.valid = probe.valid && dt == kFixedStepDt && probe.preCount == probe.postCount;
     if (probe.preCount == 0) {
         probe.valid = probe.valid && reg.Get<Components::ImpulseCommand>(probe.bodyEntity).has_value();
@@ -230,14 +231,14 @@ void ProbePreStep(Engine& engine, float dt) {
         // Previous substep must already have consumed its impulse. A new
         // command issued now belongs to this substep, not the next frame.
         probe.valid = probe.valid && !reg.Get<Components::ImpulseCommand>(probe.bodyEntity);
-        reg.Add(probe.bodyEntity, Components::ImpulseCommand {.linear = {10.0f, 0.0f, 0.0f}});
+        reg.Attach(probe.bodyEntity, Components::ImpulseCommand {.linear = {10.0f, 0.0f, 0.0f}});
     }
     ++probe.preCount;
 }
 
 void ProbePostStep(Engine& engine) {
     auto& probe = *activeSubstepProbe;
-    auto& reg = EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     probe.valid = probe.valid && probe.preCount == probe.postCount + 1 &&
         !reg.Get<Components::ImpulseCommand>(probe.bodyEntity) &&
         !reg.Get<Components::ImpulseCommand>(probe.zeroEntity) &&
@@ -256,15 +257,15 @@ void test_physics_substeps_consume_impulses_before_step_and_keep_main_buffer_def
         const auto* physicsStep = FindStep(engine, "PhysicsSystem");
         Expect(physicsStep && physicsStep->phase == FramePhase::Physics && physicsStep->run);
         if (!physicsStep || !physicsStep->run) return;
-        auto& reg = EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
         const auto body = engine.Physics().CreateRigidBody(Physics::Shape<Physics::Sphere> {}, {0, 10, 0}, {0, 0, 0, 1},
                                                            Physics::MotionType::Dynamic, Physics::ObjectLayer::Moving);
         Expect(body != Physics::BodyID::Null());
         SubstepProbe probe {
-            .bodyEntity = reg.Create(Components::PhysicsComponent {.physicsID = body, .isStatic = false},
-                                     Components::ImpulseCommand {.linear = {10.0f, 0.0f, 0.0f}}),
-            .zeroEntity = reg.Create(Components::PhysicsComponent {.physicsID = body, .isStatic = false}, Components::ImpulseCommand {}),
-            .orphanEntity = reg.Create(Components::ImpulseCommand {.linear = {5.0f, 0.0f, 0.0f}}),
+            .bodyEntity = reg.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false},
+                                    Components::ImpulseCommand {.linear = {10.0f, 0.0f, 0.0f}}),
+            .zeroEntity = reg.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false}, Components::ImpulseCommand {}),
+            .orphanEntity = reg.Spawn(Components::ImpulseCommand {.linear = {5.0f, 0.0f, 0.0f}}),
             .body = body,
         };
         const auto unrelated = reg.Create();
@@ -311,11 +312,10 @@ void test_camera_and_history_phase_calls_preserve_order_and_live_data() {
         Expect(began && began->has_value());
         if (!began || !began->has_value()) return;
         (**began).Cancel();
-        auto& reg = EngineAccess::RegistryOf(engine);
-        const auto cameraEntity = reg.Create(Components::CameraComponent {});
-        const auto transformEntity = reg.Create(Components::WorldTransformComponent {});
+        auto reg = engine.Entities();
+        const auto cameraEntity = reg.Spawn(Components::CameraComponent {});
+        const auto transformEntity = reg.Spawn(Components::WorldTransformComponent {.world = CreateTranslation(FVec3 {3.0f, 2.0f, 1.0f})});
         auto world = reg.Get<Components::WorldTransformComponent>(transformEntity);
-        world->world = CreateTranslation(FVec3 {3.0f, 2.0f, 1.0f});
         const auto savedViewport = engine.Graphics().Viewport();
         engine.Graphics().SetViewport({.width = 320, .height = 200});
         FrameContext context;
@@ -353,17 +353,15 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
         const auto hotReload = index("StateAndShaderReload"), intentStep = index("PlayerInputTranslate"), physics = index("PhysicsSystem");
         Expect(inputStep < ui && hotReload < intentStep && intentStep < physics && physics < steps.size());
         if (inputStep >= steps.size() || intentStep >= steps.size() || physics >= steps.size()) return;
-        auto& reg = EngineAccess::RegistryOf(engine);
-        auto raw = reg.GetSingleton<Components::InputStateComponent>();
-        auto cam = reg.GetSingleton<Components::CameraComponent>();
-        Expect(raw && cam);
-        if (!raw || !cam) return;
-        raw->SetKey(KeyCode::W, true);
-        cam->camera.yaw = DegF {0.0f};
+        auto reg = engine.Entities();
+        Expect(reg.GetSingleton<Components::InputStateComponent>() && reg.GetSingleton<Components::CameraComponent>());
+        if (!reg.GetSingleton<Components::InputStateComponent>() || !reg.GetSingleton<Components::CameraComponent>()) return;
+        reg.PatchSingleton<Components::InputStateComponent>([](auto& raw) { raw.SetKey(KeyCode::W, true); });
+        reg.PatchSingleton<Components::CameraComponent>([](auto& cam) { cam.camera.yaw = DegF {0.0f}; });
         const auto character = engine.Physics().CreateCharacter({0.0, 10.0, 0.0});
         Expect(character != Physics::BodyID::Null());
-        const auto entity = reg.Create(Character::InputComponent {}, Character::MovementComponent {.isGrounded = false, .wasGrounded = false},
-                                       Components::PhysicsComponent {.physicsID = character, .isStatic = false});
+        const auto entity = reg.Spawn(Character::InputComponent {}, Character::MovementComponent {.isGrounded = false, .wasGrounded = false},
+                                      Components::PhysicsComponent {.physicsID = character, .isStatic = false});
         FrameContext frame;
         steps[inputStep].run(engine, 0.0f, frame);
         Expect(reg.Get<Character::InputComponent>(entity)->localMoveZ == 1.0f);
@@ -373,7 +371,7 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
         steps[physics].run(engine, 0.0f, frame);
         const auto move = reg.Get<Character::MovementComponent>(entity);
         Expect(move->currentVelX > 0.0f && move->currentYVel < -0.5f && !move->isGrounded);
-        raw->SetKey(KeyCode::W, false);
+        reg.PatchSingleton<Components::InputStateComponent>([](auto& raw) { raw.SetKey(KeyCode::W, false); });
         ran = true;
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
@@ -392,7 +390,7 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         const auto* rigStep = FindStep(engine, "TargetCameraSystem");
         Expect(freeStep && rigStep && freeStep->run && rigStep->run);
         if (!freeStep || !rigStep || !freeStep->run || !rigStep->run) return;
-        auto& reg = EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
         const Entity main = reg.SingletonEntity<Components::MainCameraTagComponent>();
         auto input = reg.GetSingleton<Components::InputStateComponent>();
         Expect(main != Entity::Null() && input);
@@ -413,13 +411,15 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         auto rig = reg.Get<CameraRig::TargetCameraComponent>(main);
         Expect(rig.has_value() && !reg.Get<PendingPhaseMarker>(unrelated) && !engine.Commands().Empty());
         if (!rig) return;
-        const auto target = reg.Create(Components::TransformComponent {.position = {4.0f, 3.0f, 2.0f}});
-        rig->target = target;
-        rig->stiffness = 0.0f;
-        rig->yaw = 0.0f;
-        rig->pitch = 0.0f;
-        rig->targetOffset = FVec3::Zero();
-        rig->distance = rig->targetDistance = 2.0f;
+        const auto target = reg.Spawn(Components::TransformComponent {.position = {4.0f, 3.0f, 2.0f}});
+        reg.Patch<CameraRig::TargetCameraComponent>(main, [&](auto& r) {
+            r.target = target;
+            r.stiffness = 0.0f;
+            r.yaw = 0.0f;
+            r.pitch = 0.0f;
+            r.targetOffset = FVec3::Zero();
+            r.distance = r.targetDistance = 2.0f;
+        });
         rigStep->run(engine, 0.1f, frame);
         Expect(camera->camera.position == originalPosition); // FreeCam owns the pose.
         FreeCam::Detach(engine);
@@ -428,11 +428,11 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         rigStep->run(engine, 0.1f, frame);
         Expect((camera->camera.position - FVec3 {2.0f, 3.0f, 2.0f}).LengthSquared() < 1e-6f);
         FreeCam::Attach(engine, 4.0f, false);
-        input->SetKey(KeyCode::W, true);
+        reg.PatchSingleton<Components::InputStateComponent>([](auto& st) { st.SetKey(KeyCode::W, true); });
         const auto before = camera->camera.position;
         FreeCam::Apply(engine, 0.25f); // paused-editor direct call remains supported
         Expect((camera->camera.position - before).LengthSquared() > 0.9f);
-        input->SetKey(KeyCode::W, false);
+        reg.PatchSingleton<Components::InputStateComponent>([](auto& st) { st.SetKey(KeyCode::W, false); });
         Expect(!reg.Get<PendingPhaseMarker>(unrelated));
         engine.Commands().Playback();
         Expect(reg.Get<PendingPhaseMarker>(unrelated).has_value());
@@ -449,25 +449,26 @@ void test_presentation_draws_frozen_frustum_from_camera_query() {
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         const auto* present = FindStep(engine, "RenderSystem");
-        auto& reg = EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
         auto stats = reg.GetSingleton<Components::CullingStatsComponent>();
         auto camera = reg.GetSingleton<Components::CameraComponent>();
         Expect(present && present->run && stats && camera);
         if (!present || !present->run || !stats || !camera) return;
-        auto& scene = EngineAccess::SceneOf(engine);
+        auto debug = engine.Debug();
         FrameContext frame;
-        stats->stats.FreezeFrustum = false;
-        scene.Clear();
+        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = false; });
+        debug.Clear();
         present->run(engine, 0.0f, frame);
-        Expect(scene.lines.empty());
-        stats->stats.FreezeFrustum = true;
-        camera->frozenViewProj = Mat4x4::Identity();
-        scene.Clear();
+        Expect(debug.Lines().empty());
+        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = true; });
+        reg.PatchSingleton<Components::CameraComponent>([](auto& c) { c.frozenViewProj = Mat4x4::Identity(); });
+        debug.Clear();
         present->run(engine, 0.0f, frame);
-        Expect(scene.lines.size() == 12);
-        if (scene.lines.size() == 12) {
-            Expect(scene.lines[0].start == FVec3 {-1.0f, -1.0f, 0.0f});
-            Expect(scene.lines[0].end == FVec3 {1.0f, -1.0f, 0.0f});
+        const auto lines = debug.Lines();
+        Expect(lines.size() == 12);
+        if (lines.size() == 12) {
+            Expect(lines[0].start == FVec3 {-1.0f, -1.0f, 0.0f});
+            Expect(lines[0].end == FVec3 {1.0f, -1.0f, 0.0f});
         }
         stats->stats.FreezeFrustum = false;
         ran = true;
@@ -490,7 +491,7 @@ static CleanupProbe* activeCleanupProbe = nullptr;
 void ProbeCleanup(Engine& engine, bool all) {
     if (!activeCleanupProbe) return;
     auto& probe = *activeCleanupProbe;
-    auto& reg = EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     if (!all) {
         ++probe.pendingCalls;
         const auto parent = reg.Get<Components::PhysicsComponent>(probe.parent);
@@ -512,7 +513,7 @@ void test_cleanup_releases_expanded_hierarchy_before_callbacks_and_clears_comman
     auto app = App(EngineConfig {.appName = "TypedCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
-        auto& reg = EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
         auto createBody = [&] {
             return engine.Physics().CreateRigidBody(Physics::Shape<Physics::Sphere> {}, {0, 10, 0}, {0, 0, 0, 1},
                                                      Physics::MotionType::Dynamic, Physics::ObjectLayer::Moving);
@@ -520,9 +521,9 @@ void test_cleanup_releases_expanded_hierarchy_before_callbacks_and_clears_comman
         const auto body1 = createBody(), body2 = createBody(), body3 = createBody();
         Expect(body1 != Physics::BodyID::Null() && body2 != Physics::BodyID::Null() && body3 != Physics::BodyID::Null());
         CleanupProbe probe;
-        probe.parent = reg.Create(Components::PhysicsComponent {.physicsID = body1});
-        probe.child = reg.Create(Components::HierarchyComponent {.parent = probe.parent}, Components::PhysicsComponent {.physicsID = body2});
-        probe.survivor = reg.Create(Components::PhysicsComponent {.physicsID = body3});
+        probe.parent = reg.Spawn(Components::PhysicsComponent {.physicsID = body1});
+        probe.child = reg.Spawn(Components::HierarchyComponent {.parent = probe.parent}, Components::PhysicsComponent {.physicsID = body2});
+        probe.survivor = reg.Spawn(Components::PhysicsComponent {.physicsID = body3});
         activeCleanupProbe = &probe;
         Expect(engine.AddSceneCleanupPass(&ProbeCleanup));
         engine.Commands().DestroyEntity(probe.parent);
@@ -552,12 +553,12 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
         auto animations = engine.Service<Animation::AnimationContext>();
         Expect(animations.has_value());
         if (!animations) return;
-        auto& registry = EngineAccess::RegistryOf(engine);
+        auto registry = engine.Entities();
         const auto deadID = animations->Create(1);
         const auto liveID = animations->Create(2);
         const auto orphanID = animations->Create(3);
-        const auto dead = registry.Create(Components::AnimatorComponent {.animationID = deadID});
-        const auto live = registry.Create(Components::AnimatorComponent {.animationID = liveID});
+        const auto dead = registry.Spawn(Components::AnimatorComponent {.animationID = deadID});
+        const auto live = registry.Spawn(Components::AnimatorComponent {.animationID = liveID});
         engine.Commands().DestroyEntity(dead);
         engine.Commands().Playback();
         engine.ProcessPendingDestroy();
@@ -612,12 +613,17 @@ void test_editor_capability_crud_is_immediate_and_destruction_is_deferred() {
 #endif
 
 #if defined(ZHLN_HAS_TERRAIN)
+static float observedTerrainHeight = 0.0f;
+void ObserveTerrainHeight(Terrain::TerrainHeightQuery query) {
+    observedTerrainHeight = Terrain::TerrainSystem::SampleHeightAtWithQuery(query, 10.0f, 20.0f);
+}
+
 void test_terrain_typed_sampling_and_scene_cleanup() {
     auto app = App(EngineConfig {.appName = "TerrainQueryBoundaryTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         using namespace Terrain;
-        auto& registry = EngineAccess::RegistryOf(engine);
+        auto registry = engine.Entities();
         TerrainSystem::RegisterCleanup(engine);
         TerrainData data;
         data.sampleCount = 2;
@@ -635,8 +641,8 @@ void test_terrain_typed_sampling_and_scene_cleanup() {
             TerrainSystem::UnregisterTerrainData(survivor);
             return;
         }
-        const Entity dead = registry.Create(TerrainComponent {.terrainID = retired}, Components::TransformComponent {.position = {10.0f, 4.0f, 20.0f}});
-        const Entity live = registry.Create(TerrainComponent {.terrainID = survivor}, Components::TransformComponent {.position = {500.0f, 0.0f, 0.0f}});
+        const Entity dead = registry.Spawn(TerrainComponent {.terrainID = retired}, Components::TransformComponent {.position = {10.0f, 4.0f, 20.0f}});
+        const Entity live = registry.Spawn(TerrainComponent {.terrainID = survivor}, Components::TransformComponent {.position = {500.0f, 0.0f, 0.0f}});
         const Entity attached = registry.Create();
         const auto first = TerrainSystem::RegisterTerrainData({});
         const auto replacement = TerrainSystem::RegisterTerrainData({});
@@ -647,8 +653,9 @@ void test_terrain_typed_sampling_and_scene_cleanup() {
         TerrainSystem::Detach(engine, attached);
         Expect(TerrainSystem::GetTerrainData(replacement) == nullptr);
         Expect(!registry.Get<TerrainComponent>(attached));
-        const float typed = TerrainSystem::SampleHeightAtWithQuery(TerrainHeightQuery {registry}, 10.0f, 20.0f);
-        Expect(typed == 8.0f);
+        observedTerrainHeight = 0.0f;
+        engine.GetUpdateGraph().InvokeSequential<&ObserveTerrainHeight>(Frame {});
+        Expect(observedTerrainHeight == 8.0f);
         engine.Commands().DestroyEntity(dead);
         engine.Commands().Playback();
         engine.ProcessPendingDestroy();
@@ -673,14 +680,23 @@ void test_render_graph_rebinds_renderer_after_device_recovery() {
     app.OnStart([&](Engine& engine) {
         auto& graph = engine.GetRenderGraph();
         const auto frame = engine.MakeFrame(0.0f, FrameAlpha {0.0f});
+        const AssetID beforeProbe = HashAssetID("render_service_recovery_before");
+        engine.Graphics().RegisterMesh(beforeProbe, Mesh {});
         graph.InvokeSequential<&ObserveRenderContext>(frame);
-        Expect(observedRenderContext == &EngineAccess::RenderOf(engine));
+        Expect(observedRenderContext != nullptr && observedRenderContext->GetGPUMesh(beforeProbe).has_value());
+        engine.Graphics().UnregisterMesh(beforeProbe);
+        const uint64_t genBefore = engine.DeviceGeneration();
         const auto recovered = engine.HandleDeviceLost();
         Expect(recovered.has_value());
         if (!recovered) return;
+        Expect(engine.DeviceGeneration() == genBefore + 1);
+        const AssetID afterProbe = HashAssetID("render_service_recovery_after");
+        engine.Graphics().RegisterMesh(afterProbe, Mesh {});
         observedRenderContext = nullptr;
         graph.InvokeSequential<&ObserveRenderContext>(frame);
-        Expect(observedRenderContext == &EngineAccess::RenderOf(engine));
+        Expect(observedRenderContext != nullptr && observedRenderContext->GetGPUMesh(afterProbe).has_value() &&
+               !observedRenderContext->GetGPUMesh(beforeProbe).has_value());
+        engine.Graphics().UnregisterMesh(afterProbe);
         observedRenderContext = nullptr;
         ran = true;
     });
@@ -739,18 +755,19 @@ void test_app_stops_layers_on_typed_frame_failure() {
     });
     app.AddLayer(UILifecycleLayer {.state = std::make_unique<int>(1), .calls = &calls});
     app.OnStart([&](Engine& engine) {
-        // Replace the plan with a single deterministic failing UI step. This
-        // tests the frame-error result and cleanup without a GPU frame.
-        // Failure injection is in-tree tooling: the mutable plan is reachable
-        // only through the build-tree-only seam, never from the public API.
-        auto& plan = ZHLN::EngineAccess::FramePlanOf(engine);
-        plan.Clear();
-        const auto placed = plan.Append(FramePhase::UI, "EmitUIAndFail", +[](Engine& active, float, FrameContext& frame) {
-            if (const auto cb = active.GetUICallback()) {
-                (*cb)(active);
-            }
-            frame.error = ZHLN::ErrorCode(ZHLN::FrameError::StepFailed);
-        });
+        // Compose a deterministic failing step right after HostUICallback in
+        // FramePhase::UI. FramePlan::Execute aborts at the first engaged error,
+        // so UI runs and no GPU frame executes.
+        static constexpr ModuleStep kFailSteps[] {
+            ModuleStep {
+                .phase     = FramePhase::UI,
+                .name      = "AbortAfterHostUI",
+                .run       = +[](Engine&, float, FrameContext& frame) { frame.error = ZHLN::ErrorCode(ZHLN::FrameError::StepFailed); },
+                .placement = StepPlacement::After,
+                .anchor    = "HostUICallback",
+            },
+        };
+        const auto placed = engine.InstallModule(Module {.name = "FailAfterUI", .frameSteps = kFailSteps});
         Expect(placed.has_value());
     });
     const auto result = app.Run([&](Engine&, float) { calls.push_back("update"); });

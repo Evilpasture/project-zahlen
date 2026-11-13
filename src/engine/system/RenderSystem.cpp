@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../EngineAccess.hpp"
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -149,9 +148,8 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
 }
 
 // The palettes the simulation pushed this frame, applied in order.
-void UploadPosePalettes(Engine& engine) {
-    auto rc = engine.Graphics();
-    ZHLN::EngineAccess::PoseUploadsOf(engine).Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
+void UploadPosePalettes(GraphicsDevice rc, PoseUploadQueue& poseUploads) {
+    poseUploads.Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
 using MeshSubmitQuery = ECS::Query<
@@ -389,11 +387,13 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
 
 }
 
-std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
+std::expected<void, ErrorCode> RenderSystem::Update(
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
+) {
     int        physicsDrawMode = 0;
     auto shadowProjView = Mat4x4::Identity();
 
-    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
+    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, cullingStats, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
         return std::unexpected(mainResult.error());
     }
@@ -404,9 +404,11 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     return {};
 }
 
-FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
+    int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt
+) {
     auto rc = engine.Graphics();
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
     const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
@@ -529,13 +531,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     scene.SetFrameDelta(dt);
 
-    UploadPosePalettes(engine);
+    UploadPosePalettes(rc, poseUploads);
 
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(query.As<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
-    if (auto sim_res = gpuFrame.DispatchSimulations(ZHLN::EngineAccess::SceneOf(engine), dt); !sim_res) {
+    if (auto sim_res = gpuFrame.DispatchSimulations(sceneData, dt); !sim_res) {
         return std::unexpected(sim_res.error());
     }
 
@@ -556,7 +558,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             SceneRenderPass {
                 .view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx
             },
-            ZHLN::EngineAccess::SceneOf(engine)
+            sceneData
         );
         !scene_res) {
         return std::unexpected(scene_res.error());
@@ -603,9 +605,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(end_res.error());
     }
 
-    auto& cstats = ZHLN::EngineAccess::WorldOf(engine).GetCullingStats();
-    cstats.TotalObjects  = query.Entities<Components::MeshComponent>().size();
-    cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
+    cullingStats.TotalObjects  = query.Entities<Components::MeshComponent>().size();
+    cullingStats.CulledObjects = cullingStats.TotalObjects - visibleEntities.size();
 
     return {};
 }

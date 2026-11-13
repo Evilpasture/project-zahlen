@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include "EngineAccess.hpp"
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -39,16 +39,17 @@ namespace ZHLN {
 namespace { namespace Steps {
 
 void HostUICallback(Engine& engine, float, FrameContext&) {
+    auto entities = engine.Entities();
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
         if (engine.GetPendingUIData().Empty()) {
-            if (auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
-                st->wantCaptureKeyboard = false;
-                st->wantCaptureMouse    = false;
-            }
+            entities.PatchSingleton<Components::InputStateComponent>([](Components::InputStateComponent& st) {
+                st.wantCaptureKeyboard = false;
+                st.wantCaptureMouse    = false;
+            });
         }
     }
-    if (const auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
+    if (const auto st = entities.GetSingleton<Components::InputStateComponent>()) {
         engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
         engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
     }
@@ -110,22 +111,6 @@ void RenderGraph(Engine& engine, float dt, FrameContext& ctx) {
     engine.GetRenderGraph().Execute(frame);
 }
 
-void Present(Engine& engine, float dt, FrameContext& ctx) {
-    // Ordered presentation barrier after the render graph, not an ECS graph node.
-    auto render_res = RenderSystem::Update(engine, dt);
-    if (!render_res) {
-        if (render_res.error().Is(FrameResult::DeviceLost)) {
-            if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
-                // Carry the recovery failure out of the frame: the caller
-                // gets the real ErrorCode instead of a C-style -1.
-                ctx.error = lost_res.error();
-                engine.GetPlatformHost().Close();
-            }
-        }
-    }
-}
-
 void TransformHistory(Engine& engine, float dt, FrameContext& ctx) {
     ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
     engine.GetUpdateGraph().InvokeSequential<&TransformSystem::UpdateTransformHistory>(engine.MakeFrame(dt, ctx.alpha));
@@ -142,7 +127,7 @@ void TransformHistory(Engine& engine, float dt, FrameContext& ctx) {
 // relative to one of these is depending on this function, so a rename here is a
 // breaking change to every module that anchored to it, reported as
 // FramePlanError::AnchorMissing rather than absorbed.
-void BuildCoreFramePlan(FramePlan& plan) {
+void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep) {
     using Phase = FramePhase;
 
     // A core step that cannot be placed is a programming error in this function,
@@ -163,7 +148,7 @@ void BuildCoreFramePlan(FramePlan& plan) {
     require(plan.Append(Phase::Camera, "CameraSystems", Steps::Camera));
     require(plan.Append(Phase::Camera, "LODSystem", Steps::LOD));
     require(plan.Append(Phase::Visibility, "RenderGraph", Steps::RenderGraph));
-    require(plan.Append(Phase::Present, "RenderSystem", Steps::Present));
+    require(plan.Append(Phase::Present, "RenderSystem", presentStep));
     require(plan.Append(Phase::History, "TransformHistory", Steps::TransformHistory));
 }
 
@@ -203,9 +188,7 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.Compile();
 }
 
-auto InitializeDefaultScene(Engine& engine) -> bool {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
+auto InitializeDefaultScene(Engine& engine, ECS::Registry& reg) -> bool {
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
     reg.GetOrEmplaceSingleton<Components::InputStateComponent>();

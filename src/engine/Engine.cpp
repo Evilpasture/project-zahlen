@@ -6,6 +6,7 @@
 #include "EngineGlobals.hpp"
 #include "Hierarchy.hpp"
 #include "Platform.hpp"
+#include "RenderSystem.hpp"
 #include "SceneCleanupSystem.hpp"
 #include "SystemWiring.hpp"
 #include <Zahlen/Audio/Audio.hpp>
@@ -29,11 +30,11 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include "EngineAccess.hpp"
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include "PrefabFactoryInternal.hpp"
+#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -77,6 +78,7 @@ struct EngineImpl {
     Engine::UICallback                      uiCallback = nullptr;
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
+    uint64_t                                deviceGeneration = 0;
 
     // The composition: what the application installed, in install order, and the
     // timeline those modules' declared steps resolved into. The engine keeps the
@@ -218,6 +220,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
+    ++_impl->deviceGeneration;
     // RenderServices stores references and the graph holds a reference to the
     // bundle. Reconstruct the bundle in place after a successful replacement:
     // this rebinds the renderer without rebuilding either graph (and losing
@@ -503,47 +506,87 @@ auto Engine::State() noexcept -> ZHLN::EngineState {
     return ZHLN::EngineState {*this};
 }
 
-// Build-tree-only seam for engine implementation units and in-repo tooling.
-auto ZHLN::EngineAccess::KernelOf(Engine& e) noexcept -> Kernel& {
-    return *e._impl->kernel;
+auto EngineState::CullingStats() const noexcept -> ZHLN::CullingStats {
+    return _engine->_impl->world->GetCullingStats();
 }
-auto ZHLN::EngineAccess::WorldOf(Engine& e) noexcept -> World& {
-    return *e._impl->world;
+void EngineState::ResetCullingStats() noexcept {
+    _engine->_impl->world->GetCullingStats() = {};
 }
-auto ZHLN::EngineAccess::RenderOf(Engine& e) noexcept -> RenderContext& {
-    return e._impl->kernel->GetRenderContext();
+auto EngineState::Configuration() const noexcept -> EngineConfig {
+    return _engine->_impl->kernel->GetConfig();
 }
-auto ZHLN::EngineAccess::PhysicsOf(Engine& e) noexcept -> PhysicsContext& {
-    return e._impl->world->GetPhysics();
+
+struct EngineCore {
+    static auto Registry(Engine& e) noexcept -> ECS::Registry& {
+        return e.GetInternalRegistry();
+    }
+    static auto Assets(Engine& e) noexcept -> AssetManager& {
+        return e._impl->kernel->GetAssetManager();
+    }
+    static auto Physics(Engine& e) noexcept -> PhysicsContext& {
+        return e._impl->world->GetPhysics();
+    }
+    static auto Articulation(Engine& e) noexcept -> ArticulationSystem& {
+        return e._impl->world->GetArticulationSystem();
+    }
+    static auto Present(Engine& engine, float dt, FrameContext& ctx) -> void {
+        auto render_res = RenderSystem::Update(
+            engine, engine.GetInternalRegistry(), engine._impl->sceneData, engine._impl->poseUploads, engine._impl->world->GetCullingStats(), dt
+        );
+        if (!render_res) {
+            if (render_res.error().Is(FrameResult::DeviceLost)) {
+                if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
+                    ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
+                    ctx.error = lost_res.error();
+                    engine.GetPlatformHost().Close();
+                }
+            }
+        }
+    }
+};
+
+namespace PrefabFactory {
+auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode> {
+    return LoadFontAsset(EngineCore::Assets(engine), path);
 }
-auto ZHLN::EngineAccess::AssetsOf(Engine& e) noexcept -> AssetManager& {
-    return e._impl->kernel->GetAssetManager();
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+    return CreateBoxInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params);
 }
-auto ZHLN::EngineAccess::AudioOf(Engine& e) noexcept -> AudioContext& {
-    return e._impl->kernel->GetAudioContext();
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+    return CreateSphereInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params);
 }
-auto ZHLN::EngineAccess::SceneOf(Engine& e) noexcept -> SceneData& {
-    return e._impl->sceneData;
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCylinderInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
 }
-auto ZHLN::EngineAccess::PhysicsOf(Simulation& sim) noexcept -> PhysicsContext& {
-    return *sim._ctx;
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateConeInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
 }
-auto ZHLN::EngineAccess::RegistryOf(Engine& e) noexcept -> ECS::Registry& {
-    return e.GetInternalRegistry();
+auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
+    return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
 }
-auto ZHLN::EngineAccess::RegistryOf(const Engine& e) noexcept -> const ECS::Registry& {
-    return e.GetInternalRegistry();
+auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
+    return LoadModelPrefab(engine.Graphics(), EngineCore::Assets(engine), path);
 }
-auto ZHLN::EngineAccess::PoseUploadsOf(Engine& e) noexcept -> PoseUploadQueue& {
-    return e._impl->poseUploads;
+auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
+    return InstantiatePrefabInternal(
+        engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), EngineCore::Articulation(engine), prefab, params, outBuffer, maxCount
+    );
 }
-auto ZHLN::EngineAccess::ArticulationOf(Engine& e) noexcept -> ArticulationSystem& {
-    return e._impl->world->GetArticulationSystem();
+} // namespace PrefabFactory
+
+namespace Scene {
+auto Extract(Engine& engine) -> Scene {
+    const auto camComp = EngineCore::Registry(engine).GetSingleton<Components::CameraComponent>();
+    const auto camera  = camComp ? camComp->camera : Camera {};
+    auto       gfx     = engine.Graphics();
+    return Extract(
+        camera, gfx.Settings(), EngineCore::Registry(engine),
+        MaterialLookup {.userdata = &gfx, .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
+                            return static_cast<const GraphicsDevice*>(userdata)->Material(id);
+                        }}
+    );
 }
-auto ZHLN::EngineAccess::FramePlanOf(Engine& e) -> FramePlan& {
-    e.EnsureFramePlan();
-    return e._impl->framePlan;
-}
+} // namespace Scene
 
 namespace {
 // Per-worker scratch. A system's SoAScratch allocation is capped by this, so it
@@ -648,11 +691,11 @@ auto Engine::GetEventBus() const noexcept -> const ECS::EventBus& {
 }
 
 void Engine::ProcessPendingDestroy() {
-    SceneCleanupSystem::ProcessPending(*this);
+    SceneCleanupSystem::ProcessPending(*this, GetInternalRegistry());
 }
 
 void Engine::ClearScene() {
-    SceneCleanupSystem::ClearAll(*this);
+    SceneCleanupSystem::ClearAll(*this, GetInternalRegistry());
     // Queued destroys and any surviving bodies retain their own shapes.
     Physics().ClearMeshShapeCache();
     ClearVisibilityLists();
@@ -790,6 +833,10 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
     return _impl->deviceLostCallbacks.size();
 }
 
+auto Engine::DeviceGeneration() const noexcept -> uint64_t {
+    return _impl->deviceGeneration;
+}
+
 auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePlanError> {
     if (!module.name.empty() && std::ranges::any_of(_impl->modules, [&](const Module& existing) { return existing.name == module.name; })) {
         return {};
@@ -837,7 +884,7 @@ void Engine::EnsureFramePlan() {
         return;
     }
     _impl->framePlanBuilt = true;
-    BuildCoreFramePlan(_impl->framePlan);
+    BuildCoreFramePlan(_impl->framePlan, &EngineCore::Present);
 }
 
 void Engine::SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks) {
@@ -871,7 +918,7 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
-    return ZHLN::InitializeDefaultScene(*this);
+    return ZHLN::InitializeDefaultScene(*this, GetInternalRegistry());
 }
 
 auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {

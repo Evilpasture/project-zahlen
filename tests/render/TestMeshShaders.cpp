@@ -14,7 +14,6 @@
 // Every GPU test degrades to a skip (not a failure) when the device does not
 // expose mesh shading, so this binary stays green on lavapipe/older hardware.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -477,15 +476,16 @@ struct MeshShaderTestSuite {
                 engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
                 rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 1.0f, 4.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{0.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 1.0f, 4.0f};
-                cam.yaw      = ZHLN::DegF{-90.0f};
-                cam.pitch    = ZHLN::DegF{0.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
 
                 // Boxes at different depths and offsets: covers front faces, faces
                 // rejected by the task shader's normal cone, and partial overlap.
@@ -681,26 +681,28 @@ struct MeshShaderTestSuite {
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
-                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
-                }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.yaw = ZHLN::DegF{-90.0f};
-                cam.pitch = ZHLN::DegF{0.0f};
-                cam.fov = ZHLN::DegF{30.0f};
-                cam.nearZ = 0.01f;
-                cam.farZ = 10.0f;
-
                 const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = {0, 0, 0}, .createPhysics = false};
+                ZHLN::FVec3 closeupPos {};
                 if (subject.sphere) {
                     // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
-                    cam.position = {0.0f, 0.0f, 0.70f};
+                    closeupPos = {0.0f, 0.0f, 0.70f};
                     ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, atOrigin);
                 } else {
                     // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
-                    cam.position = {0.0f, 0.0f, 0.60f};
+                    closeupPos = {0.0f, 0.0f, 0.60f};
                     ZHLN::PrefabFactory::CreateBox(engine, {0.5f, 0.5f, 0.5f}, atOrigin);
+                }
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([closeupPos](auto& c) {
+                    auto& cam = c.camera;
+                    cam.yaw = ZHLN::DegF{-90.0f};
+                    cam.pitch = ZHLN::DegF{0.0f};
+                    cam.fov = ZHLN::DegF{30.0f};
+                    cam.nearZ = 0.01f;
+                    cam.farZ = 10.0f;
+                    cam.position = closeupPos;
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 // The closeup pose is chosen by the branch above: the write-back belongs
                 // after it, or the engine renders the pre-branch framing.
@@ -835,7 +837,7 @@ struct MeshShaderTestSuite {
 
             auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
                 ZHLN::Test::Headless::DisableAA(engine);
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+                auto reg = engine.Entities();
                 engine.Graphics().PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 1;
                     gfx.post.vignetteIntensity       = 0.0f;
@@ -855,15 +857,16 @@ struct MeshShaderTestSuite {
                     return false;
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 0.0f, 4.0f};
+                    cam.yaw = ZHLN::DegF{-90.0f};
+                    cam.pitch = ZHLN::DegF{0.0f};
+                    cam.fov = ZHLN::DegF{45.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return false;
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 0.0f, 4.0f};
-                cam.yaw = ZHLN::DegF{-90.0f};
-                cam.pitch = ZHLN::DegF{0.0f};
-                cam.fov = ZHLN::DegF{45.0f};
 
                 // CreatePlaneMesh winds toward +Y. Rotate -90 degrees about X
                 // to make it face -Z, away from the camera; leave room for the

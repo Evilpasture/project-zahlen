@@ -55,9 +55,13 @@ namespace GUI {
 struct UIInput;
 }
 
+namespace COM {
+class EngineCOM;
+}
+
 class ArticulationSystem;
 class Engine;
-struct EngineAccess;
+struct EngineCore;
 class GraphicsDevice;
 class Simulation;
 class DebugDraw;
@@ -243,6 +247,7 @@ class ZHLN_API Engine {
     void AddTeardownHook(TeardownHook hook);
 
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
+    [[nodiscard]] auto DeviceGeneration() const noexcept -> uint64_t;
     [[nodiscard]] auto GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&>;
 
     void ProvokeDeviceLost();
@@ -278,7 +283,11 @@ class ZHLN_API Engine {
             -> std::expected<void, ErrorCode>;
 
   private:
-    friend struct ZHLN::EngineAccess;
+    friend struct EngineCore;
+    friend class Entities;
+    friend class EngineState;
+    friend class COM::EngineCOM;
+    friend void DespawnEntity(Engine& engine, Entity entity);
 
     // Cold-start / build-tree-only path to the concrete registry. API consumers
     // get Entities() and Commands() instead.

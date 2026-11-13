@@ -24,7 +24,6 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -183,7 +182,7 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // alone, and the sample budget is raised so the GTAO branch (steps =
 // giSamples/6) gets more than its minimum.
 void BuildAoScene(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     engine.Graphics().PatchSettings([](auto& gfx) {
@@ -223,8 +222,8 @@ void BuildAoScene(ZHLN::Engine& engine) {
         engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}
     );
 
-    const ZHLN::Entity sunEnt = reg.Create();
-    reg.Add(
+    const ZHLN::Entity sunEnt = reg.Spawn();
+    reg.Attach(
         sunEnt,
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})},
         ZHLN::Components::LightComponent {
@@ -232,15 +231,16 @@ void BuildAoScene(ZHLN::Engine& engine) {
         }
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 2.5f, 8.0f};
+        cam.yaw           = ZHLN::DegF{-90.0f};
+        cam.pitch         = ZHLN::DegF{-12.0f};
+        cam.fov           = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return;
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 2.5f, 8.0f};
-    cam.yaw           = ZHLN::DegF{-90.0f};
-    cam.pitch         = ZHLN::DegF{-12.0f};
-    cam.fov           = ZHLN::DegF{60.0f};
 }
 
 void SetGiMode(ZHLN::Engine& engine, int mode) {

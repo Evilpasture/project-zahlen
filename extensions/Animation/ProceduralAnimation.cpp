@@ -21,6 +21,7 @@ module;
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Log.hpp>
@@ -2568,8 +2569,9 @@ void ProceduralAnimationSystem(
     }
 }
 
+template <typename LineSink>
 void DrawProceduralDebugRig(
-    SceneData&                           scene,
+    LineSink&&                           scene,
     FVec3                         rootPosition,
     Quat                         rootRotation,
     const RigBoneMap&                    boneMap,
@@ -2677,6 +2679,16 @@ void ProceduralAnimation::DrawDebugRig(
     const ProceduralLocomotionComponent* gait
 ) noexcept {
     DrawProceduralDebugRig(scene, rootPosition, rootRotation, boneMap, gait);
+}
+
+void ProceduralAnimation::DrawDebugRig(
+    DebugDraw                            debug,
+    FVec3                                rootPosition,
+    Quat                                 rootRotation,
+    const RigBoneMap&                    boneMap,
+    const ProceduralLocomotionComponent* gait
+) noexcept {
+    DrawProceduralDebugRig(debug, rootPosition, rootRotation, boneMap, gait);
 }
 
 } // namespace ZHLN

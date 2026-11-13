@@ -21,6 +21,7 @@ struct Capsule {};
 struct Cylinder {};
 struct Plane {};
 struct Mesh {};
+struct HeightField {};
 struct Compound {};
 
 template <typename Tag> struct Shape;
@@ -84,7 +85,16 @@ template <> struct Shape<Mesh> {
 // The returned immutable snapshot pins asset data across cache clears/reloads.
 using CollisionAssetResolver = std::shared_ptr<const MeshGeometry> (*)(void*, CollisionAssetID) noexcept;
 
-using AnyPrimitiveShape = std::variant<Shape<Box>, Shape<Sphere>, Shape<Capsule>, Shape<Cylinder>, Shape<Plane>, Shape<Mesh>>;
+template <> struct Shape<HeightField> {
+    using Tag = HeightField;
+    std::span<const float> heights {};
+    uint32_t sampleCount = 0;
+    float worldSize = 0.0f;
+    constexpr Shape() noexcept = default;
+    constexpr Shape(std::span<const float> h, uint32_t samples, float size) noexcept: heights(h), sampleCount(samples), worldSize(size) {}
+};
+
+using AnyPrimitiveShape = std::variant<Shape<Box>, Shape<Sphere>, Shape<Capsule>, Shape<Cylinder>, Shape<Plane>, Shape<Mesh>, Shape<HeightField>>;
 template <> struct Shape<Compound> {
     using Tag = Compound;
     struct Child {
@@ -103,6 +113,6 @@ template <> struct Shape<Compound> {
 template <typename T> inline constexpr bool IsShape = false;
 template <typename Tag> inline constexpr bool IsShape<Shape<Tag>> = true;
 template <typename S> concept PhysicsShape = IsShape<std::remove_cvref_t<S>>;
-using AnyShape = std::variant<Shape<Box>, Shape<Sphere>, Shape<Capsule>, Shape<Cylinder>, Shape<Plane>, Shape<Mesh>, Shape<Compound>>;
+using AnyShape = std::variant<Shape<Box>, Shape<Sphere>, Shape<Capsule>, Shape<Cylinder>, Shape<Plane>, Shape<Mesh>, Shape<HeightField>, Shape<Compound>>;
 
 } // namespace ZHLN::Physics

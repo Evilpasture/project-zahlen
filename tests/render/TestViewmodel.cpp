@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -67,11 +66,11 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = engine->Entities().GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
+            ZHLN::Camera cam = camComp->camera;
             const float aspect = 1280.0f / 720.0f;
 
             // Compute expected fixed 58-degree viewmodel projection
@@ -117,11 +116,11 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // 1. Sun light
-            const ZHLN::Entity sunEnt = reg.Create();
-            reg.Add(
+            const ZHLN::Entity sunEnt = reg.Spawn();
+            reg.Attach(
                 sunEnt, ZHLN::Components::TransformComponent {.position = {0.0f, 10.0f, 0.0f}},
                 ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = {1.0f, 1.0f, 1.0f}, .intensity = 150.0f}
             );
@@ -165,17 +164,17 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
             engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Setup Camera looking along standard forward direction (-Z)
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
+            const auto camComp = engine->Entities().GetSingleton<ZHLN::Components::CameraComponent>();
             if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
+            ZHLN::Camera cam = camComp->camera;
             cam.position = {0.0f, 1.5f, 2.0f};
             cam.yaw      = ZHLN::DegF{-90.0f}; // Look directly along -Z
             cam.pitch    = ZHLN::DegF{0.0f};

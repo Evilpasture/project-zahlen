@@ -7,13 +7,15 @@
 // state; nothing in this file opens a socket, reads a packet or owns a session
 // member. See SceneMirror.hpp for the split and the per-frame ordering.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Physics/Jolt.hpp>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <ProjectLightClient/SceneMirror.hpp>
 
 #include <Camera/TargetCamera.hpp>
@@ -163,11 +165,10 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVe
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-        transform->position = object.position;
-        transform->rotation = object.rotationQuat;
-    }
+    engine.Entities().Patch<Components::TransformComponent>(entity, [&](auto& transform) {
+        transform.position = object.position;
+        transform.rotation = object.rotationQuat;
+    });
 }
 
 void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
@@ -177,10 +178,10 @@ void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity
     object.renderRotation = rotation.Normalized();
     object.transformDirty = true;
     if (entity == Entity::Null()) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-        transform->position = object.renderPosition;
-        transform->rotation = object.renderRotation;
+    if (engine.Entities().Patch<Components::TransformComponent>(entity, [&](auto& transform) {
+            transform.position = object.renderPosition;
+            transform.rotation = object.renderRotation;
+        })) {
         object.transformDirty = false;
     }
 }
@@ -196,15 +197,15 @@ auto ShouldCreatePhysics(const SceneMirrorState& state, const ReplicatedObject& 
     return !state.serverAuthority && state.localPlayerUid != 0 && object.networkOwnerUid == state.localPlayerUid;
 }
 void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     const FVec3 size = {std::clamp(std::abs(object.size.x), 0.001f, 100000.0f),
     std::clamp(std::abs(object.size.y), 0.001f, 100000.0f),
     std::clamp(std::abs(object.size.z), 0.001f, 100000.0f)};
     const bool createPhysics = ShouldCreatePhysics(state, object);
     const bool blendMaterial = object.transparency > 0.001f;
     Entity     entity        = state.index.Find(object.uid);
-    const bool liveEntity    = entity != Entity::Null() && registry.IsAlive(entity)
-                            && !registry.Get<Components::PendingDestroy>(entity).has_value();
+    const bool liveEntity    = entity != Entity::Null() && entities.IsAlive(entity)
+                            && !entities.Get<Components::PendingDestroy>(entity).has_value();
     // A dead or half-destroyed entity is stale bookkeeping, not a scene object:
     // drop the binding so the mirror cannot hand out an entity the registry has
     // already retired.
@@ -270,7 +271,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
                 break;
         }
 
-        if (entity == Entity::Null() || !registry.IsAlive(entity)) {
+        if (entity == Entity::Null() || !entities.IsAlive(entity)) {
             object.materialId = InvalidMaterialID;
             object.hasPhysicsBody = false;
             return;
@@ -280,26 +281,26 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         // answers "which instance am I" and "who owns me" on its own; the index
         // is the only place the reverse question is answered.
         state.index.Bind(object.uid, entity);
-        registry.Add(
+        entities.Attach(
             entity,
             ProjectLightInstanceComponent {.uid = object.uid},
             ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
             ProjectLightReplicaTag {}
         );
 
-        registry.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
-        if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = object.renderPosition;
-            transform->rotation = object.renderRotation.Normalized();
-            transform->scale    = size;
-        }
-        if (auto world = registry.Get<Components::WorldTransformComponent>(entity)) {
+        entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
+        entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
+            transform.position = object.renderPosition;
+            transform.rotation = object.renderRotation.Normalized();
+            transform.scale    = size;
+        });
+        entities.Patch<Components::WorldTransformComponent>(entity, [&](auto& world) {
             const auto matrix = ComposeTransform(object.renderPosition, object.renderRotation.Normalized(), size);
-            world->world            = matrix;
-            world->previous         = matrix;
-        }
-        if (auto mesh = registry.Get<Components::MeshComponent>(entity)) object.materialId = mesh->materialAsset;
-        object.hasPhysicsBody  = registry.Get<Components::PhysicsComponent>(entity).has_value();
+            world.world    = matrix;
+            world.previous = matrix;
+        });
+        if (auto mesh = entities.Get<Components::MeshComponent>(entity)) object.materialId = mesh->materialAsset;
+        object.hasPhysicsBody  = entities.Get<Components::PhysicsComponent>(entity).has_value();
         object.spawnedSize     = size;
         object.spawnedShape    = object.shape;
         object.spawnedAnchored = object.anchored;
@@ -310,20 +311,20 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         object.transformDirty  = false;
     }
 
-    if (entity == Entity::Null() || !registry.IsAlive(entity)) return;
+    if (entity == Entity::Null() || !entities.IsAlive(entity)) return;
 
     // Ownership moves without a rebuild in the mirror's view (the rebuild above
     // covers the geometry case), so the component is refreshed on every pass.
-    if (auto owner = registry.Get<ProjectLightNetworkOwnerComponent>(entity)) {
-        owner->ownerUid = object.networkOwnerUid;
-    }
+    entities.Patch<ProjectLightNetworkOwnerComponent>(entity, [&](auto& owner) {
+        owner.ownerUid = object.networkOwnerUid;
+    });
 
     if (object.transformDirty) {
-        if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = object.renderPosition;
-            transform->rotation = object.renderRotation.Normalized();
-            transform->scale    = size;
-        }
+        entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
+            transform.position = object.renderPosition;
+            transform.rotation = object.renderRotation.Normalized();
+            transform.scale    = size;
+        });
         object.transformDirty = false;
     }
 
@@ -336,16 +337,16 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
             material->metallicFactor  = object.metallic;
             engine.Graphics().RegisterMaterial(object.materialId, *material);
         }
-        registry.Patch<Components::PBRComponent>(entity, [&](auto& pbr) {
+        entities.Patch<Components::PBRComponent>(entity, [&](auto& pbr) {
             pbr.roughness = object.roughness;
             pbr.metallic  = object.metallic;
         });
-        registry.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
+        entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
         object.visualDirty = false;
     }
 }
 void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     const bool directional = object.className == "DirectionalLight";
     const ReplicatedObject* lighting = directional ? FindObject(state, state.lightingUid) : nullptr;
     const ResolvedDirectionalLight resolved = directional
@@ -353,10 +354,10 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
         : ResolvedDirectionalLight {.direction = object.direction, .color = object.color, .intensity = object.intensity};
     const float rendererIntensity = object.enabled ? resolved.intensity * (directional ? 180.0f : 1.0f) : 0.0f;
     Entity      entity            = state.index.Find(object.uid);
-    if (entity == Entity::Null() || !registry.IsAlive(entity) || registry.Get<Components::PendingDestroy>(entity).has_value()) {
-        entity = registry.Create();
+    if (entity == Entity::Null() || !entities.IsAlive(entity) || entities.Get<Components::PendingDestroy>(entity).has_value()) {
+        entity = entities.Create();
         const auto matrix = ComposeTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
-        registry.Add(
+        entities.Attach(
             entity, ProjectLightInstanceComponent {.uid = object.uid}, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
             ProjectLightReplicaTag {}, Components::NameComponent {.name = String64(object.name)},
             Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)},
@@ -375,25 +376,25 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
         object.visualDirty = true;
     }
 
-    if (directional && object.isMain && !registry.Get<Components::SunTagComponent>(entity)) {
-        registry.Add(entity, Components::SunTagComponent {});
-    } else if (directional && !object.isMain && registry.Get<Components::SunTagComponent>(entity)) {
-        registry.Remove<Components::SunTagComponent>(entity);
+    if (directional && object.isMain && !entities.Get<Components::SunTagComponent>(entity)) {
+        entities.Attach(entity, Components::SunTagComponent {});
+    } else if (directional && !object.isMain && entities.Get<Components::SunTagComponent>(entity)) {
+        entities.Detach<Components::SunTagComponent>(entity);
     }
 
-    if (auto name = registry.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
-    if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-        transform->position = object.position;
-        transform->rotation = object.rotationQuat;
-    }
-    if (auto light = registry.Get<Components::LightComponent>(entity)) {
-        light->type      = directional ? LightType::Sun : LightType::Point;
-        light->color     = resolved.color;
-        light->intensity = rendererIntensity;
-        light->radius    = object.sourceRadius;
-        light->direction = resolved.direction;
-        light->range     = object.range;
-    }
+    entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
+    entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
+        transform.position = object.position;
+        transform.rotation = object.rotationQuat;
+    });
+    entities.Patch<Components::LightComponent>(entity, [&](auto& light) {
+        light.type      = directional ? LightType::Sun : LightType::Point;
+        light.color     = resolved.color;
+        light.intensity = rendererIntensity;
+        light.radius    = object.sourceRadius;
+        light.direction = resolved.direction;
+        light.range     = object.range;
+    });
     object.transformDirty = false;
     object.visualDirty = false;
 }
@@ -506,7 +507,7 @@ void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
 } // namespace
 
 void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     for (uint64_t uid: state.pendingRemovals) {
         auto found = state.objects.find(uid);
@@ -517,12 +518,12 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
             object.audioID = VoiceID::Invalid;
         }
         const Entity entity = state.index.Take(uid);
-        if (entity != Entity::Null() && registry.IsAlive(entity)) {
+        if (entity != Entity::Null() && entities.IsAlive(entity)) {
             // The instance is gone as of this frame, so say so on the entity
             // before it dies: anything running later in the frame (and the
             // socket-free mirror test) can read the removal off the registry
             // instead of asking the session what it just did.
-            registry.Add<ProjectLightRemovalPending>(entity);
+            entities.Attach(entity, ProjectLightRemovalPending {});
             DespawnEntity(engine, entity);
         }
         state.controllerStates.erase(object.userId);
@@ -566,7 +567,7 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
             const Entity bound = state.index.Find(uid);
             if (bound != Entity::Null()) {
                 ++boundEntityCount;
-                if (registry.IsAlive(bound)) ++liveEntityCount;
+                if (entities.IsAlive(bound)) ++liveEntityCount;
             }
         }
         Log("[ProjectLight][scene] initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}",
@@ -595,11 +596,11 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
     }
 }
 void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     auto bindCamera = [&](Entity target) -> void {
         if (target == Entity::Null()) return;
-        for (Entity camera: registry.GetEntitiesWith<Components::MainCameraTagComponent>()) {
-            registry.Patch<CameraRig::TargetCameraComponent>(camera, [&](auto& rig) {
+        for (Entity camera: entities.EntitiesWith<Components::MainCameraTagComponent>()) {
+            entities.Patch<CameraRig::TargetCameraComponent>(camera, [&](auto& rig) {
                 if (rig.target != target) {
                     rig.target = target;
                     rig.hasInitSmoothTarget = 0;
@@ -612,7 +613,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
             engine.Physics().DestroyBody(state.localControllerBody);
             state.localControllerBody = Physics::BodyID::Null();
         }
-        if (state.localController != Entity::Null() && registry.IsAlive(state.localController)) {
+        if (state.localController != Entity::Null() && entities.IsAlive(state.localController)) {
             DespawnEntity(engine, state.localController);
         }
         state.localController = Entity::Null();
@@ -624,7 +625,7 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         // The server drives the character, so the camera follows the root part's
         // entity; the mirror is only consulted for the uid, never for the entity.
         const Entity rootEntity = state.index.Find(state.localRootPartUid);
-        if (rootEntity != Entity::Null() && registry.IsAlive(rootEntity)) bindCamera(rootEntity);
+        if (rootEntity != Entity::Null() && entities.IsAlive(rootEntity)) bindCamera(rootEntity);
         return;
     }
     if (state.localRootPartUid == 0) {
@@ -632,11 +633,13 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         return;
     }
     if (state.controllerForRootUid == state.localRootPartUid && state.localController != Entity::Null()
-        && registry.IsAlive(state.localController) && state.localControllerBody != Physics::BodyID::Null()) {
+        && entities.IsAlive(state.localController) && state.localControllerBody != Physics::BodyID::Null()) {
         const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
-        if (auto move = registry.Get<Character::MovementComponent>(state.localController); move && humanoid != nullptr) {
-            move->speed = std::max(0.0f, humanoid->walkSpeed);
-            move->jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
+        if (humanoid != nullptr) {
+            entities.Patch<Character::MovementComponent>(state.localController, [&](auto& move) {
+                move.speed = std::max(0.0f, humanoid->walkSpeed);
+                move.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
+            });
         }
         bindCamera(state.localController);
         return;
@@ -646,9 +649,10 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     const ReplicatedObject* rootPart = FindObject(state, state.localRootPartUid);
     if (rootPart == nullptr) return;
 
-    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
+    auto physics = engine.Physics();
     Physics::CharacterParams params;
-    params.shape = physics.GetOrCreateShape(Physics::ShapeType::Capsule, 2.0f, 0.5f);
+    const auto capsuleResult = JPH::CapsuleShapeSettings(2.0f, 0.5f).Create();
+    if (capsuleResult.IsValid()) params.shape = capsuleResult.Get();
     params.maxSlopeAngle = (std::numbers::pi_v<float> / 4.0f);
     state.localControllerBody = physics.CreateCharacter(rootPart->position.Cast<double>(), params);
     if (state.localControllerBody == Physics::BodyID::Null()) {
@@ -656,11 +660,11 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         return;
     }
 
-    registry.RegisterComponent<Character::MovementComponent>();
-    registry.RegisterComponent<Character::InputComponent>();
-    const Entity controller = registry.Create();
+    entities.Register<Character::MovementComponent>();
+    entities.Register<Character::InputComponent>();
+    const Entity controller = entities.Create();
     const auto matrix = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
-    registry.Add(
+    entities.Attach(
         controller, Components::NameComponent {.name = String64("ProjectLightLocalController")},
         Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)},
         Components::WorldTransformComponent {.world = matrix, .previous = matrix},
@@ -671,30 +675,32 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     state.controllerForRootUid = state.localRootPartUid;
 
     const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
-    if (auto move = registry.Get<Character::MovementComponent>(controller); move && humanoid != nullptr) {
-        move->speed = std::max(0.0f, humanoid->walkSpeed);
-        move->jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
+    if (humanoid != nullptr) {
+        entities.Patch<Character::MovementComponent>(controller, [&](auto& move) {
+            move.speed = std::max(0.0f, humanoid->walkSpeed);
+            move.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
+        });
     }
 
     bindCamera(controller);
 }
 void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
     if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyID::Null()) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    auto movement = registry.Get<Character::MovementComponent>(state.localController);
+    auto entities = engine.Entities();
+    auto movement = entities.Get<Character::MovementComponent>(state.localController);
     if (!movement) return;
 
     // `bodyState` rather than `state`: in this file `state` is the session view.
-    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
+    auto physics = engine.Physics();
     const auto bodyStateResult = physics.BodyState(state.localControllerBody);
     if (!bodyStateResult || !bodyStateResult->valid) return;
     const auto& bodyState = *bodyStateResult;
     const FVec3 rootPosition = bodyState.currentPosition;
     const Quat rootRotation = movement->orientation.Normalized();
-    const auto velocity = Physics::FromJoltVector(physics.GetCharacterVelocity(state.localControllerBody));
+    const auto velocity = physics.CharacterLinearVelocity(state.localControllerBody);
     (void)dt;
 
-    if (auto input = registry.GetSingleton<Components::InputStateComponent>()) {
+    if (auto input = entities.GetSingleton<Components::InputStateComponent>()) {
         const bool jumpDown = input->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
         if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
         state.wasJumpDown = jumpDown;

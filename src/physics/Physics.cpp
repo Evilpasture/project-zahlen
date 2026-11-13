@@ -900,6 +900,15 @@ auto PhysicsContext::BodyState(Physics::BodyID handle) const noexcept -> std::op
     return std::nullopt;
 }
 
+auto PhysicsContext::BodyLinearVelocity(Physics::BodyID handle) const noexcept -> std::optional<FVec3> {
+    const auto&       world  = _impl->world;
+    const JPH::BodyID bodyID = Physics::GetBodyID(world, handle);
+    if (bodyID.IsInvalid()) {
+        return std::nullopt;
+    }
+    return Physics::FromJoltVector(_impl->physicsSystem.GetBodyInterface().GetLinearVelocity(bodyID));
+}
+
 void PhysicsContext::FillBodyStates(std::span<const Physics::BodyID> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept {
     if (outStates.size() != handles.size()) {
         for (auto& state: outStates) {

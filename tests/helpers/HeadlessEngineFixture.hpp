@@ -19,8 +19,11 @@
 
 #pragma once
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -196,7 +199,7 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // (position and yaw but not fov, say), and inheriting the previous test's
     // framing is exactly the kind of order-dependent difference a pooled engine
     // must not introduce.
-    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 
@@ -514,21 +517,21 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
 
         const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
-        ZHLN::RenderContext* const preWarmup = &ZHLN::EngineAccess::RenderOf(engine);
+        const uint64_t preWarmup = engine.DeviceGeneration();
         TickFrames(engine, warmupFrames);
-        if (&ZHLN::EngineAccess::RenderOf(engine) != preWarmup) {
+        if (engine.DeviceGeneration() != preWarmup) {
             continue;
         }
 
-        ZHLN::RenderContext* const preWork = &ZHLN::EngineAccess::RenderOf(engine);
-        const bool                 ok      = sceneFn(engine);
-        if (ok && &ZHLN::EngineAccess::RenderOf(engine) == preWork) {
+        const uint64_t preWork = engine.DeviceGeneration();
+        const bool     ok      = sceneFn(engine);
+        if (ok && engine.DeviceGeneration() == preWork) {
             if (outValidationDelta != nullptr) {
                 *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
-        if (&ZHLN::EngineAccess::RenderOf(engine) == preWork) {
+        if (engine.DeviceGeneration() == preWork) {
             return StableRunResult::AssertionsFailed;
         }
     }

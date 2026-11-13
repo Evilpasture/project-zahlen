@@ -15,7 +15,6 @@
 // does for alphaMode 2, so the glass mesh is patched after spawn. AA is off
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -73,7 +72,7 @@ enum class PaneKind : uint8_t { None, Glass, Opaque };
 enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
 [[nodiscard]] auto SpawnWallAndPane(ZHLN::Engine& engine, PaneKind pane) -> SceneBuild {
-    auto& registry  = ZHLN::EngineAccess::RegistryOf(engine);
+    auto registry = engine.Entities();
     auto renderCtx = engine.Graphics();
 
     engine.Graphics().PatchSettings([](auto& gfx) {
@@ -91,8 +90,8 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
     // ForwardPass still shades; a sun on the camera-facing +Z faces keeps the
     // glass from compositing as an unlit black film on top of the wall albedo.
-    const ZHLN::Entity sun = registry.Create();
-    registry.Add(
+    const ZHLN::Entity sun = registry.Spawn();
+    registry.Attach(
         sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f}, .intensity = 220.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}
@@ -135,15 +134,16 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         }
     }
 
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& camera = c.camera;
+        camera.position = {0.0f, 0.0f, 5.0f};
+        camera.yaw      = ZHLN::DegF{-90.0f};
+        camera.pitch    = ZHLN::DegF{0.0f};
+        camera.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return SceneBuild::Camera;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = {0.0f, 0.0f, 5.0f};
-    camera.yaw      = ZHLN::DegF{-90.0f};
-    camera.pitch    = ZHLN::DegF{0.0f};
-    camera.fov      = ZHLN::DegF{60.0f};
     return SceneBuild::Ok;
 }
 
@@ -274,7 +274,7 @@ struct TransparentMaterialsTestSuite {
             if (!engine.Valid()) return std::unexpected(TransparentMaterialError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
             auto rc = engine->Graphics();
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             engine->Graphics().PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
@@ -287,15 +287,16 @@ struct TransparentMaterialsTestSuite {
                 gfx.post.bloomStrength           = 0.0f;
                 gfx.post.tonemapper              = 3;
             });
-            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& camera = c.camera;
+                camera.position = {0.0f, 0.0f, 5.0f};
+                camera.yaw = ZHLN::DegF{-90.0f};
+                camera.pitch = ZHLN::DegF{0.0f};
+                camera.fov = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = {0.0f, 0.0f, 5.0f};
-            camera.yaw = ZHLN::DegF{-90.0f};
-            camera.pitch = ZHLN::DegF{0.0f};
-            camera.fov = ZHLN::DegF{60.0f};
 
             constexpr uint32_t side = 64;
             std::vector<uint8_t> maskPixels(side * side * 4u, 255u);

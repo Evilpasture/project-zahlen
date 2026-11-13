@@ -63,6 +63,11 @@ class ZHLN_API Entities {
         return std::as_const(Registry()).GetSingleton<T>();
     }
 
+    template <typename T>
+    [[nodiscard]] auto SingletonEntity() const noexcept -> Entity {
+        return std::as_const(Registry()).SingletonEntity<T>();
+    }
+
     // Synchronous, unscheduled access for editor tools and lifecycle passes.
     // The caller must exclude graph execution and structural mutations while
     // retaining a returned span or running a patch callback.
@@ -73,6 +78,13 @@ class ZHLN_API Entities {
         requires (!SceneResources::OwnsExternalResource<T>)
     auto Patch(Entity entity, Fn&& fn) -> bool {
         return Registry().Patch<T>(entity, std::forward<Fn>(fn));
+    }
+
+    template <typename T, typename Fn>
+        requires (!SceneResources::OwnsExternalResource<T>)
+    auto PatchSingleton(Fn&& fn) -> bool {
+        const Entity entity = SingletonEntity<T>();
+        return entity != Entity::Null() && Patch<T>(entity, std::forward<Fn>(fn));
     }
 
     // --- Component attachment / detachment -------------------------------------

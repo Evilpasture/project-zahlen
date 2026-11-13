@@ -10,7 +10,6 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -47,7 +46,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -77,8 +76,8 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
@@ -91,15 +90,16 @@ struct ReflectionsTestSuite {
                     }
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 5.0f, 14.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 5.0f, 14.0f};
-                cam.yaw      = ZHLN::DegF{-90.0f};
-                cam.pitch    = ZHLN::DegF{-22.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -208,7 +208,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -220,8 +220,8 @@ struct ReflectionsTestSuite {
                 });
 
                 // Sun illumination to support scene depth and HDR tone mapping
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
@@ -280,15 +280,16 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 5.0f, 14.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 5.0f, 14.0f};
-                cam.yaw      = ZHLN::DegF{-90.0f};
-                cam.pitch    = ZHLN::DegF{-22.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;
@@ -493,7 +494,7 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
                 engine->Graphics().PatchSettings([](auto& gfx) {
@@ -547,8 +548,8 @@ struct ReflectionsTestSuite {
 
                     ZHLN::FVec3 lightCol{std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f};
 
-                    const ZHLN::Entity lt = reg.Create();
-                    reg.Add(
+                    const ZHLN::Entity lt = reg.Spawn();
+                    reg.Attach(
                         lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{lx, ly, lz}},
                         ZHLN::Components::LightComponent {
                             .type      = ZHLN::LightType::Point,
@@ -559,15 +560,16 @@ struct ReflectionsTestSuite {
                     );
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 8.0f, -18.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = {0.0f, 8.0f, -18.0f};
-                cam.yaw      = ZHLN::DegF{90.0f};
-                cam.pitch    = ZHLN::DegF{-22.0f};
-                cam.fov      = ZHLN::DegF{60.0f};
             }
 
             uint32_t validationRaised = 0;

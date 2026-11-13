@@ -27,6 +27,7 @@
 
 namespace ZHLN {
 class AudioContext;
+class Engine;
 
 namespace Interaction {
 
@@ -50,6 +51,7 @@ uint32_t FireEntityOutputs(DispatchQuery query, Entity entity, std::string_view 
 // button's 3 s reset, a trigger's 0.2 s re-arm), because those are rules of
 // this game, not conventions of the file format.
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& instance, const BSP::ImportOptions& options = {});
+void InitializeBSPEntities(Engine& engine, const BSP::BSPMap& map, const Scene::Instance& instance, const BSP::ImportOptions& options = {});
 
 } // namespace Interaction
 } // namespace ZHLN

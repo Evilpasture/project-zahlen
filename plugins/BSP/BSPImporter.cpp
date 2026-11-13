@@ -17,6 +17,9 @@
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -55,7 +58,15 @@ inline constexpr float kMissingTextureDim          = 0.25f;
 // exposure and contributes to bloom instead of stopping at the bloom threshold.
 inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
+auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.GetCachedPrefab(hash);
+}
+auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.CachedPrefab(hash);
+}
+
+template <typename Gfx>
+auto LoadTextureFromBytes(Gfx& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
     // 1. Try VTF first
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
@@ -222,7 +233,8 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
     return std::ranges::any_of(names, [shader](std::string_view name) { return ShaderNameEquals(shader, name); });
 }
 
-auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
+template <typename Gfx>
+auto ResolveMaterialDesc(Gfx& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
@@ -379,7 +391,8 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> sur
 // Uploads each packed VRAD page exactly once for this imported prefab. The
 // pages remain linear RGBA16F: Source's RGBExp luxels are already linear
 // radiance and must not take the sRGB texture path or the old VPL gain.
-auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureID> {
+template <typename Gfx>
+auto UploadVradLightmaps(Gfx& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureID> {
     std::vector<TextureID> handles(atlas.pages.size(), TextureID::Invalid);
     for (size_t pageIndex = 0; pageIndex < atlas.pages.size(); ++pageIndex) {
         const VradLightmapPage& page = atlas.pages[pageIndex];
@@ -398,9 +411,9 @@ auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std
 }
 
 // Shared by the world prefab and the interactive submodel prefabs.
+template <typename Gfx>
 void AssemblePrefabParts(
-    RenderContext&         ctx,
-    PhysicsContext&        physics,
+    Gfx&                   ctx,
     const SourceVFS&       vfs,
     const ImportedMapData& data,
     std::string_view       prefabPath,
@@ -418,10 +431,10 @@ void AssemblePrefabParts(
             continue;
         }
 
-        const BufferID   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
-        const BufferID   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
-        const BufferID   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
-        const BufferID   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
+        const BufferID   posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
+        const BufferID   frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
+        const BufferID   surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
+        const BufferID   ibo        = ctx.template CreateBuffer<BufferUsage::Index>(std::span {part.indices});
         const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {part.indices}, std::span {part.positions}));
 
         Mesh subMesh = {
@@ -563,7 +576,8 @@ void ShiftImportedGeometry(ImportedMapData& data, FVec3 offset) {
     data.boundsMax.z += offset.z;
 }
 
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
+template <typename Gfx, typename Assets>
+auto BuildModelPrefab(Gfx& ctx, Assets& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
     -> ZHLN::Optional<ModelPrefab&> {
     // Interactive brush submodels (doors, buttons) get their own prefabs
     // below; excluding them here keeps their faces out of the static world
@@ -665,7 +679,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
     // resolves position through its node chain.
     prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false});
 
-    AssemblePrefabParts(ctx, physics, vfs, imported, virtualPath, options, *prefab);
+    AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, *prefab);
 
     for (const BspPointLight& light: imported.lights) {
         ModelNode node;
@@ -747,12 +761,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext
         subPrefab->nodes.push_back(
             ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false}
         );
-        AssemblePrefabParts(ctx, physics, vfs, subImported, subPath, options, *subPrefab);
+        AssemblePrefabParts(ctx, vfs, subImported, subPath, options, *subPrefab);
         assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));
         Log("BSP Importer: {} -> interactive submodel prefab ({}, {} parts)", subPath, sub.rotating ? "rotating" : "sliding", subImported.parts.size());
     }
 
-    return assetMgr.GetCachedPrefab(HashAssetPath(virtualPath));
+    return LookupPrefab(assetMgr, HashAssetPath(virtualPath));
 }
 
 } // namespace
@@ -912,10 +926,26 @@ auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& p
     return LoadBSPPrefabFromMemory(ctx, assetMgr, physics, *bytes, path, options);
 }
 
+auto LoadBSPPrefab(Engine& engine, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash   = HashAssetPath(path);
+    auto           assets = engine.Assets();
+    const auto     cached = assets.CachedPrefab(hash);
+    if (cached) {
+        return cached;
+    }
+
+    const auto bytes = ReadWholeFile(path);
+    if (!bytes) {
+        LogWarning("BSP Importer: failed to read {}", path);
+        return std::nullopt;
+    }
+    return LoadBSPPrefabFromMemory(engine, *bytes, path, options);
+}
+
 auto LoadBSPPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
-    PhysicsContext&            physics,
+    PhysicsContext&            /*physics*/,
     std::span<const std::byte> bytes,
     std::string_view           virtualPath,
     const ImportOptions&       options
@@ -931,7 +961,29 @@ auto LoadBSPPrefabFromMemory(
         LogWarning("BSP Importer: {}: {}", virtualPath, parsed.error());
         return std::nullopt;
     }
-    return BuildModelPrefab(ctx, assetMgr, physics, *parsed, virtualPath, options);
+    return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
+}
+
+auto LoadBSPPrefabFromMemory(
+    Engine&                    engine,
+    std::span<const std::byte> bytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options
+) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash   = HashAssetPath(virtualPath);
+    auto           assets = engine.Assets();
+    const auto     cached = assets.CachedPrefab(hash);
+    if (cached) {
+        return cached;
+    }
+
+    const auto parsed = ParseBsp(bytes);
+    if (!parsed) {
+        LogWarning("BSP Importer: {}: {}", virtualPath, parsed.error());
+        return std::nullopt;
+    }
+    auto gfx = engine.Graphics();
+    return BuildModelPrefab(gfx, assets, *parsed, virtualPath, options);
 }
 
 auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, const ImportOptions& options) -> size_t {
@@ -953,6 +1005,33 @@ auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, PhysicsConte
         const std::string_view model = ent.Find("model");
         if (model.ends_with(".mdl")) {
             if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, model, options); m.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+
+    return loaded;
+}
+
+auto PreloadStaticProps(Engine& engine, const BSPMap& map, const ImportOptions& options) -> size_t {
+    SourceVFS vfs;
+    if (!options.assetRoot.empty()) {
+        vfs.AddSearchPath(options.assetRoot);
+    }
+
+    size_t loaded = 0;
+    for (const auto& sp: map.staticProps) {
+        if (!sp.modelName.empty()) {
+            if (const auto model = LoadStudioModelPrefab(engine, vfs, sp.modelName, options); model.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+
+    for (const auto& ent: map.entities) {
+        const std::string_view model = ent.Find("model");
+        if (model.ends_with(".mdl")) {
+            if (const auto m = LoadStudioModelPrefab(engine, vfs, model, options); m.has_value()) {
                 ++loaded;
             }
         }

@@ -43,6 +43,7 @@ auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_vie
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
 
 auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
 auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::BakedFontAsset&>;
 auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&>;

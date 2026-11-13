@@ -15,7 +15,6 @@
 // ambient turned all the way down. Whatever the emissive box shows in that
 // frame can only have come from the emissive term.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -162,15 +161,16 @@ constexpr float kHaloBloomStrength = 0.003f;
         engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}
     );
 
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& camera = c.camera;
+        camera.position = {0.0f, 0.0f, 6.0f};
+        camera.yaw      = ZHLN::DegF{-90.0f};
+        camera.pitch    = ZHLN::DegF{0.0f};
+        camera.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return false;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = {0.0f, 0.0f, 6.0f};
-    camera.yaw      = ZHLN::DegF{-90.0f};
-    camera.pitch    = ZHLN::DegF{0.0f};
-    camera.fov      = ZHLN::DegF{60.0f};
     return true;
 }
 

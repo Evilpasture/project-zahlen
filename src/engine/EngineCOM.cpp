@@ -33,7 +33,6 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include "EngineAccess.hpp"
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -254,14 +253,14 @@ public:
     }
 
     [[nodiscard]] void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment) noexcept override {
-        auto&          registry = EngineAccess::RegistryOf(*m_engine);
+        auto&          registry = m_engine->GetInternalRegistry();
         const uint32_t family   = FamilyFor(registry, typeName, size, alignment);
         if (family == kInvalidFamily) return nullptr;
         return registry.AddDynamic(entity, family);
     }
 
     bool DetachRaw(Entity entity, StringView typeName) noexcept override {
-        auto&          registry = EngineAccess::RegistryOf(*m_engine);
+        auto&          registry = m_engine->GetInternalRegistry();
         const uint32_t family   = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return false;
         return registry.RemoveDynamic(entity, family);
@@ -270,7 +269,7 @@ public:
     [[nodiscard]] void* GetRaw(Entity entity, StringView typeName) const noexcept override {
         const uint32_t family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return nullptr;
-        return EngineAccess::RegistryOf(*m_engine).GetRawByFamily(entity, family);
+        return m_engine->GetInternalRegistry().GetRawByFamily(entity, family);
     }
 
     [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
@@ -286,7 +285,7 @@ public:
         if (published->size != size || published->alignment != alignment || published->layoutHash != layoutHash) {
             return nullptr;
         }
-        auto& registry = EngineAccess::RegistryOf(*m_engine);
+        auto& registry = m_engine->GetInternalRegistry();
         if (!registry.IsAlive(entity)) return nullptr;
         return published->ensure(registry, entity);
     }
@@ -294,7 +293,7 @@ public:
     bool DetachEngineRaw(Entity entity, StringView typeName) noexcept override {
         const PublishedComponent* published = FindPublished(typeName);
         if (published == nullptr) return false;
-        auto& registry = EngineAccess::RegistryOf(*m_engine);
+        auto& registry = m_engine->GetInternalRegistry();
         if (!registry.IsAlive(entity)) return false;
         return published->remove(registry, entity);
     }
@@ -302,7 +301,7 @@ public:
     [[nodiscard]] void* GetEngineRaw(Entity entity, StringView typeName) const noexcept override {
         const PublishedComponent* published = FindPublished(typeName);
         if (published == nullptr) return nullptr;
-        return published->fetch(EngineAccess::RegistryOf(*m_engine), entity);
+        return published->fetch(m_engine->GetInternalRegistry(), entity);
     }
 
     // ------------------------------------------------------------ ISimulation

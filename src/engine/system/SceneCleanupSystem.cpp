@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../EngineAccess.hpp"
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
@@ -68,11 +67,10 @@ void ReleasePhysics(Engine& engine, PhysicsCleanupQuery query, bool all) {
     }
 }
 
-void ReleaseOwnedResources(Engine& engine, bool all) {
+void ReleaseOwnedResources(Engine& engine, ECS::Registry& registry, bool all) {
     // This lifecycle boundary must also work before graph initialization and
     // during teardown. Construct narrow queries here rather than scheduling
     // cleanup into a graph or playing an unrelated command buffer.
-    auto& registry = EngineAccess::RegistryOf(engine);
     ReleasePhysics(engine, PhysicsCleanupQuery {registry}, all);
     ReleaseSelected<Components::AudioSourceComponent>(engine, ECS::Query<Components::AudioSourceComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::OwnedMeshComponent>(engine, ECS::Query<Components::OwnedMeshComponent&, const Components::PendingDestroy> {registry}, all);
@@ -82,8 +80,7 @@ void ReleaseOwnedResources(Engine& engine, bool all) {
 
 } // namespace
 
-void SceneCleanupSystem::ProcessPending(Engine& engine) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+void SceneCleanupSystem::ProcessPending(Engine& engine, ECS::Registry& registry) {
     const auto marked = registry.GetEntitiesWith<Components::PendingDestroy>();
     if (marked.empty()) {
         return;
@@ -92,7 +89,7 @@ void SceneCleanupSystem::ProcessPending(Engine& engine) {
     // Expand all marked roots in one hierarchy pass (also catches children
     // attached after a parent was marked), then query the intact owners.
     ExpandPendingDestroy(registry);
-    ReleaseOwnedResources(engine, false);
+    ReleaseOwnedResources(engine, registry, false);
 
     // Destroy compacts the PendingDestroy sparse set: snapshot it first.
     const auto pending = registry.GetEntitiesWith<Components::PendingDestroy>();
@@ -102,10 +99,10 @@ void SceneCleanupSystem::ProcessPending(Engine& engine) {
     }
 }
 
-void SceneCleanupSystem::ClearAll(Engine& engine) {
-    ReleaseOwnedResources(engine, true);
+void SceneCleanupSystem::ClearAll(Engine& engine, ECS::Registry& registry) {
+    ReleaseOwnedResources(engine, registry, true);
     engine.Commands().Reset();
-    ZHLN::EngineAccess::RegistryOf(engine).Clear();
+    registry.Clear();
 }
 
 } // namespace ZHLN

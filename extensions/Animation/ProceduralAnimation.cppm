@@ -11,6 +11,7 @@ module;
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -715,6 +716,13 @@ void   DrawDebugRig(
     SceneData&                           scene,
     FVec3                         rootPosition,
     Quat                         rootRotation,
+    const RigBoneMap&                    boneMap,
+    const ProceduralLocomotionComponent* gait = nullptr
+) noexcept;
+void   DrawDebugRig(
+    DebugDraw                            debug,
+    FVec3                                rootPosition,
+    Quat                                 rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr
 ) noexcept;

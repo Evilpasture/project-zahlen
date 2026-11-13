@@ -85,13 +85,13 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
@@ -504,9 +504,9 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax
 }
 
 void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
-        if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
+        if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -524,7 +524,7 @@ void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
 // Draco-compressed asset this importer cannot decode, a binary it cannot parse --
 // leaves the previous subject on screen instead of an empty turntable.
 auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine, bytes, virtualPath);
     if (!prefab) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
@@ -605,9 +605,8 @@ struct Studio {
     float            range,
     FVec3     direction
 ) -> ZHLN::Entity {
-    auto&            reg   = ZHLN::EngineAccess::RegistryOf(engine);
     const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), FVec3::One());
-    return reg.Create(
+    return engine.Entities().Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
         ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
         ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
@@ -616,9 +615,9 @@ struct Studio {
 }
 
 void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: {studio.sun, studio.fill, studio.rim, studio.floor}) {
-        if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
+        if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -629,7 +628,7 @@ void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
 }
 
 void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
-    ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
+    engine.Entities().Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
         if (studio.floorOn) {
             mesh.flags &= ~ZHLN::DrawFlags::Hidden;
         } else {
@@ -642,8 +641,9 @@ void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
 // The floor-shimmer diagnostic: if the flicker follows the subject into
 // invisibility, it is the subject's shadow or reflection, not the floor.
 void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studio& studio) {
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
-        ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
+        entities.Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
             if (studio.subjectOn) {
                 mesh.flags &= ~ZHLN::DrawFlags::Hidden;
             } else {
@@ -658,7 +658,7 @@ void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studi
 // function is what lets a device-lost recovery rebuild it in one call.
 void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     ClearStudio(engine, studio);
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     const float     radius = subject.radius;
     const FVec3 center = subject.center;
@@ -698,7 +698,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
             .materialOverride = floorMaterial,
         }
     );
-    reg.Assign<ZHLN::Components::NameComponent>(studio.floor, "StudioFloor");
+    entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
     SetFloorVisible(engine, studio);
 }
 
@@ -930,23 +930,21 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
 }
 
 void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& subject) {
-    auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
-        return;
-    }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
-    camera.yaw           = ZHLN::DegF{orbit.yaw};
-    camera.pitch         = ZHLN::DegF{orbit.pitch};
-    camera.fov           = ZHLN::DegF{orbit.fov};
+    engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+        ZHLN::Camera& camera = cameraComp.camera;
+        camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
+        camera.yaw           = ZHLN::DegF{orbit.yaw};
+        camera.pitch         = ZHLN::DegF{orbit.pitch};
+        camera.fov           = ZHLN::DegF{orbit.fov};
 
-    // The cascade splits are fractions of [near, far], so a far plane that reaches
-    // the horizon puts the subject in a cascade fitted to kilometres. Keeping it
-    // just past the floor is what buys the shadow its texel density, and a near
-    // plane scaled to the orbit keeps the depth range narrow enough to resolve a
-    // millimetre of it.
-    camera.nearZ = std::clamp(orbit.distance * kNearPlaneScale, 0.01f, 0.5f);
-    camera.farZ  = FrameFarPlane(orbit.distance, orbit.maxDistance, subject.radius);
+        // The cascade splits are fractions of [near, far], so a far plane that reaches
+        // the horizon puts the subject in a cascade fitted to kilometres. Keeping it
+        // just past the floor is what buys the shadow its texel density, and a near
+        // plane scaled to the orbit keeps the depth range narrow enough to resolve a
+        // millimetre of it.
+        camera.nearZ = std::clamp(orbit.distance * kNearPlaneScale, 0.01f, 0.5f);
+        camera.farZ  = FrameFarPlane(orbit.distance, orbit.maxDistance, subject.radius);
+    });
 }
 
 // ============================================================================
@@ -1161,19 +1159,19 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void HandleInput(ZHLN::Engine& engine, SampleState& state) {
-    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto         entities = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+    auto       ents     = engine.Entities();
+    const auto entities = ents.EntitiesWith<ZHLN::Components::InputStateComponent>();
     if (entities.empty()) {
         return;
     }
-    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(entities[0]);
+    const auto input = ents.Get<ZHLN::Components::InputStateComponent>(entities[0]);
     if (!input) {
         return;
     }
 
     if (input->needsResize) {
         engine.Graphics().SetResolution(input->newSize);
-        reg.Patch<ZHLN::Components::InputStateComponent>(entities[0], [](auto& st) -> auto { st.needsResize = false; });
+        ents.Patch<ZHLN::Components::InputStateComponent>(entities[0], [](auto& st) -> auto { st.needsResize = false; });
     }
 
     // The panel owns input inside its strip, the way the inspector's explorer
@@ -1435,8 +1433,7 @@ auto main(int argc, char* argv[]) -> int {
     // The turntable owns the camera, so core's WASD free-cam has to come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              reg    = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = engine->Entities().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
         }
     }
@@ -1531,6 +1528,12 @@ auto main(int argc, char* argv[]) -> int {
     state.catalog.worker.request_stop();
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();
+    }
+    return EXIT_SUCCESS;
+}
+  return EXIT_SUCCESS;
+}
+     state.catalog.worker.join();
     }
     return EXIT_SUCCESS;
 }

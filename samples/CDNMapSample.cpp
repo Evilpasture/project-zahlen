@@ -9,12 +9,12 @@
 //
 // WASD + mouse: the default-scene free-cam. Escape / window close to quit.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
@@ -157,7 +157,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     ZHLN::Log("[CDNMap] {} KiB", bytes->size() / 1024U);
 
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), ZHLN::EngineAccess::PhysicsOf(*engine), std::span<const uint8_t>(*bytes), kAsset);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, std::span<const uint8_t>(*bytes), kAsset);
     if (!prefab) {
         ZHLN::LogError("[CDNMap] glTF import failed for '{}'", kAsset);
         return EXIT_FAILURE;
@@ -187,7 +187,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
 
     {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+        auto entities = engine->Entities();
         // Default exposure is 1.0; a sun of 60 (the studio number at exposure 0.08)
         // clips the whole framebuffer to white. Grade for an outdoor map.
         engine->Graphics().PatchSettings([radius](auto& gfx) {
@@ -200,7 +200,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const FVec3  sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
         const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
-        reg.Create(
+        entities.Spawn(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
             ZHLN::Components::TransformComponent {.position = sunPos, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
@@ -212,13 +212,13 @@ auto main(int argc, char* argv[]) -> int {
             }
         );
 
-        const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = entities.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
             const FVec3 eye   = center + FVec3(radius * 0.9f, std::max(radius * 0.35f, 8.0f), radius * 0.9f);
             const FVec3 dir   = (center - eye).Normalized();
             const float     yaw   = ZHLN::RadF {std::atan2(dir.z, dir.x)}.ToDegrees().value;
             const float     pitch = ZHLN::RadF {std::asin(std::clamp(dir.y, -0.99f, 0.99f))}.ToDegrees().value;
-            reg.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
+            entities.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
                 cc.camera.position = eye;
                 cc.camera.yaw      = ZHLN::DegF{yaw};
                 cc.camera.pitch    = ZHLN::DegF{pitch};
@@ -235,10 +235,14 @@ auto main(int argc, char* argv[]) -> int {
         const float dt = clock.Tick();
 
         {
-            auto& r = ZHLN::EngineAccess::RegistryOf(*engine);
-            if (auto st = r.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
+            auto entities = engine->Entities();
+            bool resized  = false;
+            if (const auto st = entities.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
                 engine->Graphics().SetResolution(st->newSize);
-                st->needsResize = false;
+                entities.PatchSingleton<ZHLN::Components::InputStateComponent>([](auto& input) { input.needsResize = false; });
+                resized = true;
+            }
+            if (resized) {
                 continue;
             }
         }

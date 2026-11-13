@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Camera/TargetCamera.hpp>
 
@@ -35,7 +35,7 @@ inline void InstallTargetCameraRig(ZHLN::Engine& engine) {
     // before it there is no camera entity to write, and Patch reports that rather
     // than panicking. Reset it the way ResetScene does so the rig starts from the
     // authored framing regardless of what an earlier suite left behind.
-    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 }

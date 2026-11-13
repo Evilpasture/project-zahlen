@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -171,9 +170,9 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     //    what kept them from leaking between cases). The camera lives in an entity
     //    the rebuild above created; Patch reports a world without one instead of
     //    panicking, and the (void) is the claim that the rebuild did its part.
-    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-    camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
+    (void) camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
     engine.State().ResetCullingStats();
 }
 
@@ -198,7 +197,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     engine.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
@@ -235,24 +234,27 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         }
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam    = c.camera;
+        cam.position = {0.0f, 25.0f, -50.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-30.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 25.0f, -50.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{-30.0f};
-    cam.fov      = ZHLN::DegF{60.0f};
 
     uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
-        float angle  = static_cast<float>(f) * 0.05f;
-        cam.position = {std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f};
-        cam.yaw      = ZHLN::RadF{std::atan2(-cam.position.z, -cam.position.x)}.ToDegrees();
+        float angle = static_cast<float>(f) * 0.05f;
+        reg.PatchSingleton<ZHLN::Components::CameraComponent>([angle](auto& c) {
+            c.camera.position = {std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f};
+            c.camera.yaw      = ZHLN::RadF{std::atan2(-c.camera.position.z, -c.camera.position.x)}.ToDegrees();
+        });
 
         // The orbit moves the camera every frame, and the engine renders from the
         // registry's copy: the pose is written back before the tick.
@@ -287,7 +289,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
 
     engine.Graphics().PatchSettings([](auto& gfx) {
         gfx.environment.fullBright      = 0;
@@ -307,7 +309,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         float     hue = static_cast<float>(i) / static_cast<float>(kLightCount);
         ZHLN::FVec3 color{std::sin(hue * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.33f) * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.66f) * 6.28f) * 0.5f + 0.5f};
 
-        auto l = reg.Create(
+        auto l = reg.Spawn(
             ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 2.0f, 0.0f}}, ZHLN::Components::LightComponent {
                                                                                                 .type      = ZHLN::LightType::Point,
                                                                                                 .color     = color,
@@ -318,14 +320,15 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         lightEntities.push_back(l);
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 12.0f, -30.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-20.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 12.0f, -30.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{-20.0f};
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -360,13 +363,13 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     constexpr uint32_t  kMaxParticles = 20000;
     ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -4.0f, 0.0f},
@@ -391,14 +394,15 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
                                                                                         }
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 8.0f, -20.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-15.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 8.0f, -20.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{-15.0f};
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -417,16 +421,16 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
 
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 0.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.95f, 0.85f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.8f, 0.3f}.Normalized()
         }
     );
 
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.05f,
             .heightFalloff   = 0.02f,
@@ -444,14 +448,15 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false}
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 3.0f, -25.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 3.0f, -25.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{0.0f};
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -470,7 +475,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     ZHLN::PrefabFactory::CreateBox(
@@ -488,21 +493,22 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
         const ZHLN::FVec3  pos{posX, posY, 0.0f};
         const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        reg.Create(
+        reg.Spawn(
             ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = decalTex, .roughness = 0.8f, .metallic = 0.1f}
         );
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 7.5f, -18.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 7.5f, -18.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{0.0f};
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -576,9 +582,9 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
 
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
@@ -619,7 +625,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
 
     engine.Graphics().PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0;
@@ -629,7 +635,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         gfx.post.mode                    = 0;
     });
 
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{40.0f, 50.0f, 30.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.94f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.7f, 0.35f}.Normalized()
@@ -667,15 +673,16 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat}
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 14.0f, -32.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-22.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = {0.0f, 14.0f, -32.0f};
-    cam.yaw      = ZHLN::DegF{90.0f};
-    cam.pitch    = ZHLN::DegF{-22.0f};
-    cam.fov      = ZHLN::DegF{60.0f};
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -719,7 +726,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     const bool useHardwareRT = rc.Info().rayTracingSupported;
@@ -753,7 +760,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 3. Clustered Forward+ Multi-Light Grid (48 Dynamic Point Lights + Sun)
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 0.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.92f}, .intensity = 160.0f, .direction = ZHLN::FVec3{0.6f, 0.75f, 0.4f}.Normalized()
@@ -766,7 +773,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     for (size_t i = 0; i < kLightCount; ++i) {
         float hue = static_cast<float>(i) / static_cast<float>(kLightCount);
-        auto  l   = reg.Create(
+        auto  l   = reg.Spawn(
             ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 2.0f, 0.0f}},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Point,
@@ -780,7 +787,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // 4. GPU Particle Emitter (10,000 Particles)
     auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 1.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -2.5f, 0.0f},
@@ -806,7 +813,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     );
 
     // 5. Volumetric Fog Environment
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.035f,
             .heightFalloff   = 0.025f,
@@ -827,7 +834,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         const ZHLN::FVec3  pos   = {posX, 0.01f, posZ};
         const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        reg.Create(
+        reg.Spawn(
             ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = sparkTex, .roughness = 0.9f, .metallic = 0.0f}
@@ -867,7 +874,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     });
 
     // 8. Configure Post-Processing
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
@@ -879,12 +886,12 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         gfx.rayTracing.enableReflections = useHardwareRT;
     });
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        c.camera.fov = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.fov   = ZHLN::DegF{60.0f};
 
     uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
@@ -901,10 +908,12 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                      .AvgLimit(avgLimitPct)
                      .P99Limit(50.0)
                      .Run([&](uint32_t f) {
-                         float t      = static_cast<float>(f) * 0.035f;
-                         cam.position = {std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f};
-                         cam.yaw      = ZHLN::RadF{std::atan2(-cam.position.z, -cam.position.x)}.ToDegrees();
-                         cam.pitch    = ZHLN::DegF{-18.0f + std::sin(t * 2.0f) * 4.0f};
+                         float t = static_cast<float>(f) * 0.035f;
+                         reg.PatchSingleton<ZHLN::Components::CameraComponent>([t](auto& c) {
+                             c.camera.position = {std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f};
+                             c.camera.yaw      = ZHLN::RadF{std::atan2(-c.camera.position.z, -c.camera.position.x)}.ToDegrees();
+                             c.camera.pitch    = ZHLN::DegF{-18.0f + std::sin(t * 2.0f) * 4.0f};
+                         });
 
                          // The orbit moves the camera every frame, and the engine renders
                          // from the registry's copy: the pose is written back before the tick.

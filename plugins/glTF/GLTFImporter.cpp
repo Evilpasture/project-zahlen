@@ -2,7 +2,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -1040,7 +1039,45 @@ auto ProcessCPUTasks(
     return outTextureJobs;
 }
 
-auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::span<CPUTextureJob> textureJobs)
+void BindRender(AssetManager& assets, RenderContext& ctx) noexcept {
+    assets.UseRenderContext(ctx);
+}
+void BindRender(AssetLibrary& assets, GraphicsDevice ctx) noexcept {
+    assets.UseGraphicsDevice(ctx);
+}
+auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.GetCachedPrefab(hash);
+}
+auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.CachedPrefab(hash);
+}
+auto CollectPrefabs(AssetManager& assets, ModelPrefab** out, uint32_t maxCount) -> uint32_t {
+    return assets.GetCachedPrefabs(out, maxCount);
+}
+auto CollectPrefabs(AssetLibrary& assets, ModelPrefab** out, uint32_t maxCount) -> uint32_t {
+    return assets.CachedPrefabs(out, maxCount);
+}
+void RegisterMeshEntry(RenderContext& ctx, AssetID id, Mesh mesh) noexcept {
+    ctx.RegisterGPUMesh(id, mesh);
+}
+void RegisterMeshEntry(GraphicsDevice& ctx, AssetID id, Mesh mesh) noexcept {
+    ctx.RegisterMesh(id, mesh);
+}
+void UnregisterMeshEntry(RenderContext& ctx, AssetID id) noexcept {
+    ctx.UnregisterGPUMesh(id);
+}
+void UnregisterMeshEntry(GraphicsDevice& ctx, AssetID id) noexcept {
+    ctx.UnregisterMesh(id);
+}
+void RegisterMaterialEntry(RenderContext& ctx, MaterialID id, Material mat) noexcept {
+    ctx.RegisterGPUMaterial(id, mat);
+}
+void RegisterMaterialEntry(GraphicsDevice& ctx, MaterialID id, Material mat) noexcept {
+    ctx.RegisterMaterial(id, mat);
+}
+
+template <typename Gfx>
+auto UploadTexturesToGPU(Gfx& ctx, std::string_view virtualPath, std::span<CPUTextureJob> textureJobs)
     -> std::unordered_map<cgltf_image*, std::array<TextureID, 2>> {
     std::unordered_map<cgltf_image*, std::array<TextureID, 2>> imageToID;
     imageToID.reserve(textureJobs.size());
@@ -1077,8 +1114,9 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::
     return imageToID;
 }
 
+template <typename Gfx>
 auto GetOrCreateCompiledPrimitive(
-    RenderContext&                                                        ctx,
+    Gfx&                                                                  ctx,
     const CPUPrimitiveJob&                                                primJob,
     const std::unordered_map<cgltf_image*, std::array<TextureID, 2>>& imageToID,
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive>&        primCache
@@ -1087,13 +1125,13 @@ auto GetOrCreateCompiledPrimitive(
         return it->second;
     }
 
-    const BufferID posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
-    const BufferID frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
-    const BufferID surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
+    const BufferID posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
+    const BufferID frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
+    const BufferID surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
 
-    const BufferID skinVbo = !primJob.skins.empty() ? ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) : BufferID::Invalid;
+    const BufferID skinVbo = !primJob.skins.empty() ? ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) : BufferID::Invalid;
 
-    const BufferID ibo = (primJob.indexCount > 0) ? ctx.CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
+    const BufferID ibo = (primJob.indexCount > 0) ? ctx.template CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
                                                         BufferID::Invalid;
 
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
@@ -1201,10 +1239,10 @@ auto GetOrCreateCompiledPrimitive(
  * @brief Common builder that constructs and caches a ModelPrefab from loaded cgltf_data.
  * Adheres strictly to aggregate initialization and DRY across disk & memory pathways.
  */
+template <typename Gfx, typename Assets>
 auto BuildModelPrefab(
-    RenderContext&   ctx,
-    AssetManager&    cwMgr,
-    PhysicsContext&  physics,
+    Gfx&             ctx,
+    Assets&          cwMgr,
     cgltf_data*      data,
     std::string_view virtualPath,
     std::string_view textureSearchPath,
@@ -1509,7 +1547,7 @@ auto BuildModelPrefab(
 
     // The asset cache, not the renderer's AssetID lookup, owns the uploaded
     // buffers. One compiled primitive can be referenced by several parts.
-    cwMgr.UseRenderContext(ctx);
+    BindRender(cwMgr, ctx);
     ModelPrefab& raw = *prefab;
     cwMgr.CachePrefab(HashAssetPath(virtualPath), std::move(prefab));
     return raw;
@@ -1518,11 +1556,12 @@ auto BuildModelPrefab(
 // Cached parts share uploaded primitives across all of their instances. Reuse
 // the same ModelPrefab object on a GPU refresh so live animator pointers stay
 // valid; release old aliases before new allocations may reuse pool slots.
-void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_data* data, std::string_view rawPath) {
+template <typename Gfx>
+void RefreshPrefabGPUResources(Gfx& ctx, ModelPrefab& prefab, cgltf_data* data, std::string_view rawPath) {
     // This can also be invoked for a still-live cache: retire every old
     // alias before any replacement allocation can reuse its pool slot.
     for (const auto& part: prefab.parts) {
-        ctx.UnregisterGPUMesh(part.meshAsset);
+        UnregisterMeshEntry(ctx, part.meshAsset);
     }
     for (auto& part: prefab.parts) {
         ctx.DestroyMesh(part.mesh);
@@ -1566,24 +1605,20 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     return true;
 }
 
-void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
+template <typename Gfx>
+void RegisterPrefabGPUResources(Gfx& ctx, const ModelPrefab& prefab) {
     for (const auto& part: prefab.parts) {
         if (part.mesh.posBuffer != BufferID::Invalid) {
-            ctx.RegisterGPUMesh(part.meshAsset, part.mesh);
+            RegisterMeshEntry(ctx, part.meshAsset, part.mesh);
             if (part.defaultMaterial.pipeline != PipelineID::Invalid) {
-                ctx.RegisterGPUMaterial(part.materialAsset, part.defaultMaterial);
+                RegisterMaterialEntry(ctx, part.materialAsset, part.defaultMaterial);
             }
         }
     }
 }
 
-} // namespace
-
-// ============================================================================
-// Public Entry Points
-// ============================================================================
-
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& physics, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
+template <typename Gfx, typename Assets>
+auto LoadGLBPrefabImpl(Gfx& ctx, Assets& cwMgr, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
     if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", path, options.emissiveFactorScale);
         return std::nullopt;
@@ -1593,7 +1628,7 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& phys
         return std::nullopt;
     }
     const uint64_t hash   = HashAssetPath(path);
-    const auto     cached = cwMgr.GetCachedPrefab(hash);
+    const auto     cached = LookupPrefab(cwMgr, hash);
     if (!MatchesCachedImportOptions(cached, path, options)) {
         return std::nullopt;
     }
@@ -1621,19 +1656,19 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& phys
     ValidateFeatureUsage(*data, path);
 
     if (cached) {
-        cwMgr.UseRenderContext(ctx);
+        BindRender(cwMgr, ctx);
         RefreshPrefabGPUResources(ctx, *cached, data, rawPath);
         cgltf_free(data);
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, physics, data, path, rawPath, options);
+    return BuildModelPrefab(ctx, cwMgr, data, path, rawPath, options);
 }
 
-auto LoadGLBPrefabFromMemory(
-    RenderContext&           ctx,
-    AssetManager&            cwMgr,
-    PhysicsContext&          physics,
+template <typename Gfx, typename Assets>
+auto LoadGLBPrefabFromMemoryImpl(
+    Gfx&                     ctx,
+    Assets&                  cwMgr,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
     std::string_view         bytesPath,
@@ -1648,7 +1683,7 @@ auto LoadGLBPrefabFromMemory(
         return std::nullopt;
     }
     const uint64_t hash   = HashAssetPath(virtualPath);
-    const auto     cached = cwMgr.GetCachedPrefab(hash);
+    const auto     cached = LookupPrefab(cwMgr, hash);
     if (!MatchesCachedImportOptions(cached, virtualPath, options)) {
         return std::nullopt;
     }
@@ -1656,9 +1691,6 @@ auto LoadGLBPrefabFromMemory(
         return cached;
     }
 
-    // cgltf resolves external .bin buffers and image/GLB URIs relative to the
-    // path handed to cgltf_load_buffers; a split .gltf therefore needs its
-    // own on-disk location, while a self-contained in-memory .glb needs none.
     const std::string basePath(bytesPath);
 
     cgltf_options opts {};
@@ -1678,16 +1710,17 @@ auto LoadGLBPrefabFromMemory(
     ValidateFeatureUsage(*data, virtualPath);
 
     if (cached) {
-        cwMgr.UseRenderContext(ctx);
+        BindRender(cwMgr, ctx);
         RefreshPrefabGPUResources(ctx, *cached, data, basePath);
         cgltf_free(data);
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, physics, data, virtualPath, basePath, options);
+    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, basePath, options);
 }
 
-void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
+template <typename Gfx>
+void RebuildPrefabGPUResourcesImpl(Gfx& ctx, ModelPrefab* prefab) {
     if (prefab == nullptr) {
         return;
     }
@@ -1711,6 +1744,71 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
     cgltf_free(data);
 }
 
+template <typename Gfx, typename Assets>
+void RebuildCachedPrefabsImpl(Gfx& ctx, Assets& cwMgr) {
+    BindRender(cwMgr, ctx);
+    const uint32_t count = CollectPrefabs(cwMgr, nullptr, 0);
+    if (count == 0) {
+        return;
+    }
+
+    std::vector<ModelPrefab*> prefabs(count);
+    CollectPrefabs(cwMgr, prefabs.data(), count);
+
+    for (auto* prefab: prefabs) {
+        RebuildPrefabGPUResourcesImpl(ctx, prefab);
+        RegisterPrefabGPUResources(ctx, *prefab);
+    }
+}
+
+} // namespace
+
+// ============================================================================
+// Public Entry Points
+// ============================================================================
+
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& /*physics*/, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
+    return LoadGLBPrefabImpl(ctx, cwMgr, path, options);
+}
+
+auto LoadGLBPrefab(Engine& engine, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
+    auto gfx    = engine.Graphics();
+    auto assets = engine.Assets();
+    return LoadGLBPrefabImpl(gfx, assets, path, options);
+}
+
+auto LoadGLBPrefabFromMemory(
+    RenderContext&           ctx,
+    AssetManager&            cwMgr,
+    PhysicsContext&          /*physics*/,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    std::string_view         bytesPath,
+    ImportOptions            options
+) -> ZHLN::Optional<ModelPrefab&> {
+    return LoadGLBPrefabFromMemoryImpl(ctx, cwMgr, bytes, virtualPath, bytesPath, options);
+}
+
+auto LoadGLBPrefabFromMemory(
+    Engine&                  engine,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    std::string_view         bytesPath,
+    ImportOptions            options
+) -> ZHLN::Optional<ModelPrefab&> {
+    auto gfx    = engine.Graphics();
+    auto assets = engine.Assets();
+    return LoadGLBPrefabFromMemoryImpl(gfx, assets, bytes, virtualPath, bytesPath, options);
+}
+
+void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
+    RebuildPrefabGPUResourcesImpl(ctx, prefab);
+}
+
+void RebuildPrefabGPUResources(GraphicsDevice ctx, ModelPrefab* prefab) {
+    RebuildPrefabGPUResourcesImpl(ctx, prefab);
+}
+
 auto InstantiatePrefabFromMemory(
     Engine&                           engine,
     std::span<const uint8_t>          bytes,
@@ -1719,7 +1817,7 @@ auto InstantiatePrefabFromMemory(
     Entity*                           outBuffer,
     uint32_t                          maxCount
 ) -> uint32_t {
-    const auto prefab = LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath);
+    const auto prefab = LoadGLBPrefabFromMemory(engine, bytes, virtualPath);
     if (!prefab) {
         return 0;
     }
@@ -1727,25 +1825,17 @@ auto InstantiatePrefabFromMemory(
 }
 
 void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr) {
-    cwMgr.UseRenderContext(ctx);
-    const uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
-    if (count == 0) {
-        return;
-    }
+    RebuildCachedPrefabsImpl(ctx, cwMgr);
+}
 
-    std::vector<ModelPrefab*> prefabs(count);
-    cwMgr.GetCachedPrefabs(prefabs.data(), count);
-
-    for (auto* prefab: prefabs) {
-        RebuildPrefabGPUResources(ctx, prefab);
-        // Use the same IDs used at instantiation, never a second key derived
-        // from node names (which would leave stale registrations).
-        RegisterPrefabGPUResources(ctx, *prefab);
-    }
+void RebuildCachedPrefabs(Engine& engine) {
+    auto gfx    = engine.Graphics();
+    auto assets = engine.Assets();
+    RebuildCachedPrefabsImpl(gfx, assets);
 }
 
 void InstallDeviceLostHandler(Engine& engine) {
-    engine.AddDeviceLostCallback([](Engine& e) { RebuildCachedPrefabs(ZHLN::EngineAccess::RenderOf(e), ZHLN::EngineAccess::AssetsOf(e)); });
+    engine.AddDeviceLostCallback([](Engine& e) { RebuildCachedPrefabs(e); });
 }
 
 } // namespace ZHLN::GLTF

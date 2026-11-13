@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -74,7 +73,7 @@ struct CameraLookAtTestSuite {
             // scene rebuilds so the contributed frame step takes its place).
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
             DisableJitterAndVignette(*engine);
 
@@ -96,7 +95,7 @@ struct CameraLookAtTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
-            auto cameras  = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            auto cameras  = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!ZHLN::Test::ExpectTrue(!cameras.empty())) {
                 return std::unexpected(CameraLookAtError::NoCameraFound);
             }
@@ -104,7 +103,7 @@ struct CameraLookAtTestSuite {
             // The rig component is authored explicitly (the frame step only
             // re-seeds the boot camera's defaults when the component is
             // missing, so this survives the first tick).
-            reg.Add(
+            reg.Attach(
                 cameras[0],
                 ZHLN::CameraRig::TargetCameraComponent {
                     .target              = target,

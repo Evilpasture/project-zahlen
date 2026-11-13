@@ -8,7 +8,6 @@
 // lit box verifies both that lighting actually changed and that full-strength
 // lit anisotropy never aliases the reserved unlit code.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -91,14 +90,13 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         gfx.post.glowIntensity           = 0.0f;
         gfx.post.bloomStrength           = 0.0f;
     });
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    if (!ZHLN::Test::ExpectTrue(engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            c.camera.position = {0.0f, 0.0f, 7.0f}; // Same orbit the retired Khronos sample used, so the face windows below hold.
+            c.camera.yaw      = ZHLN::DegF{-90.0f};
+            c.camera.pitch    = ZHLN::DegF{0.0f};
+        }))) {
         return;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = {0.0f, 0.0f, 7.0f}; // Same orbit the retired Khronos sample used, so the face windows below hold.
-    camera.yaw      = ZHLN::DegF{-90.0f};
-    camera.pitch    = ZHLN::DegF{0.0f};
     camera.fov      = ZHLN::DegF{45.0f};
 }
 
@@ -106,7 +104,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
 // rendered pixels equal the materials' base colors exactly: the shader
 // multiplies albedo x baseColor x vertex color, and unlit has no albedo map.
 // Meshlets and the BLAS mirror MeshBuilder so every draw path stays valid.
-[[nodiscard]] auto UploadChamferedMesh(ZHLN::RenderContext& rc) -> ZHLN::Mesh {
+[[nodiscard]] auto UploadChamferedMesh(ZHLN::GraphicsDevice rc) -> ZHLN::Mesh {
     const auto box = ZHLN::Test::GltfFixtures::BuildChamferedBox();
     std::vector<ZHLN::VertexPosition>     positions;
     std::vector<ZHLN::VertexTangentFrame> frames;
@@ -182,8 +180,8 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
 // assets and components, but Shape::None because no rebuild recipe exists.
 auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
     auto rc = engine.Graphics();
-    auto&            reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Mesh mesh = UploadChamferedMesh(ZHLN::EngineAccess::RenderOf(engine));
+    auto             reg  = engine.Entities();
+    const ZHLN::Mesh mesh = UploadChamferedMesh(rc);
     if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
         return ZHLN::Entity::Null();
     }
@@ -197,18 +195,18 @@ auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& mate
 
     const ZHLN::FVec3  position = {x, 0.0f, 0.0f};
     const auto worldMat = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), {1.0f, 1.0f, 1.0f});
-    reg.Add(e, ZHLN::Components::NameComponent {.name = ZHLN::String64("UnlitChamfer_" + tag)});
-    reg.Add(e, ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = ZHLN::FVec3::Splat(1.0f)});
-    reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-    reg.Add(e, ZHLN::Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = 2.0f});
-    reg.Add(
-        e, ZHLN::Components::OwnedMeshComponent {.meshAsset = meshAsset,
-                                                 .mesh      = mesh,
-                                                 .shape     = ZHLN::Components::OwnedMeshComponent::Shape::None,
-                                                 .dimensions = ZHLN::FVec3::Zero(),
-                                                 .color      = ZHLN::FVec4{1.0f, 1.0f, 1.0f, 1.0f}}
+    reg.Attach(
+        e, ZHLN::Components::NameComponent {.name = ZHLN::String64("UnlitChamfer_" + tag)},
+        ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = ZHLN::FVec3::Splat(1.0f)},
+        ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
+        ZHLN::Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = 2.0f},
+        ZHLN::Components::OwnedMeshComponent {.meshAsset = meshAsset,
+                                              .mesh      = mesh,
+                                              .shape     = ZHLN::Components::OwnedMeshComponent::Shape::None,
+                                              .dimensions = ZHLN::FVec3::Zero(),
+                                              .color      = ZHLN::FVec4{1.0f, 1.0f, 1.0f, 1.0f}},
+        ZHLN::Components::PBRComponent {.roughness = material.roughnessFactor, .metallic = material.metallicFactor}
     );
-    reg.Add(e, ZHLN::Components::PBRComponent {.roughness = material.roughnessFactor, .metallic = material.metallicFactor});
     return e;
 }
 
@@ -251,11 +249,12 @@ struct UnlitMaterialsTestSuite {
                 return std::unexpected(UnlitMaterialError::AssetUnavailable);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
-            const ZHLN::Entity sun = reg.Create();
-            reg.Add(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
-                    ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
-                                                      .intensity = 0.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}});
+            auto reg = engine->Entities();
+            reg.Spawn(
+                ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
+                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
+                                                  .intensity = 0.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}}
+            );
             const auto controlMaterial = engine->Graphics().CreateMaterial(
                 ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}, .anisotropyStrength = 1.0f}
             );
@@ -307,13 +306,12 @@ struct UnlitMaterialsTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless unlit texture coverage");
             if (!engine.Valid()) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
-            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    c.camera.position = {0.0f, 0.0f, 5.0f};
+                    c.camera.fov      = ZHLN::DegF{60.0f};
+                }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = {0.0f, 0.0f, 5.0f};
-            camera.fov = ZHLN::DegF{60.0f};
             auto rc = engine->Graphics();
 
             constexpr uint32_t side = 64;

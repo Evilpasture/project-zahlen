@@ -32,4 +32,6 @@ using LightningUpdateQuery = ECS::ExclusiveQuery<LightningComponent&, const Comp
 void Update(LightningUpdateQuery query, ECS::ResMut<GraphicsDevice> graphics, ECS::ResMut<AudioEngine> audio,
             ECS::ResMut<Entities> entities, FrameDt dt);
 
+void Step(Engine& engine, float dt);
+
 } // namespace ZHLN::Lightning

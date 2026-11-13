@@ -18,6 +18,8 @@
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <numbers>
 #include <cmath>
@@ -260,12 +262,37 @@ constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brus
     return flags;
 }
 
-[[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> FVec3 {
-    const auto source = registry.Get<Components::SceneSourceComponent>(e);
+auto MakeResolutionQuery(ECS::Registry& registry) noexcept -> BSP::ResolutionQuery {
+    return BSP::ResolutionQuery {registry};
+}
+auto MakeResolutionQuery(Entities& entities) noexcept -> BSP::ResolutionQuery {
+    return entities.Inspect<const Components::SceneSourceComponent, const Components::NameComponent>();
+}
+template <typename... Cs>
+void SpawnEntity(ECS::Registry& registry, Cs&&... cs) {
+    registry.Create(std::forward<Cs>(cs)...);
+}
+template <typename... Cs>
+void SpawnEntity(Entities& entities, Cs&&... cs) {
+    entities.Spawn(std::forward<Cs>(cs)...);
+}
+template <typename C>
+void AttachComponent(ECS::Registry& registry, Entity e, C&& c) {
+    registry.Add(e, std::forward<C>(c));
+}
+template <typename C>
+void AttachComponent(Entities& entities, Entity e, C&& c) {
+    entities.Attach(e, std::forward<C>(c));
+}
+
+template <typename World>
+[[nodiscard]] auto HalfExtentsOf(World& registry, Entity e) -> FVec3 {
+    const auto source = registry.template Get<Components::SceneSourceComponent>(e);
     return source ? FVec3{source->halfExtents} : FVec3::Zero();
 }
 
-void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
+template <typename World>
+void AttachOutputs(World& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
     if (outputs.empty()) {
         return;
     }
@@ -285,12 +312,13 @@ void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::Ent
         );
     }
     if (conn.outputCount > 0) {
-        registry.Add(e, std::move(conn));
+        AttachComponent(registry, e, std::move(conn));
     }
 }
 
+template <typename World>
 void AttachDoor(
-    ECS::Registry& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, Components::TransformComponent* transform
+    World& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, bool hasTransform, FVec3 initialPos, Quat initialRot
 ) {
     const bool       rotating = record.kind == BSP::InteractiveKind::DoorRotating;
     const DoorFlags  flags    = DoorFlagsFrom(*record.door, rotating);
@@ -299,12 +327,8 @@ void AttachDoor(
     const float wait     = record.wait.value_or(kDefaultDoorWait);
     const float lip      = record.lip.value_or(0.0f);
 
-    FVec3 closedPos = FVec3::Zero();
-    Quat closedRot = Quat::Identity();
-    if (transform) {
-        closedPos = transform->position;
-        closedRot = transform->rotation;
-    }
+    FVec3 closedPos = hasTransform ? initialPos : FVec3::Zero();
+    Quat  closedRot = hasTransform ? initialRot : Quat::Identity();
     FVec3       openPos   = closedPos;
     Quat       openRot   = closedRot;
     FVec3       rotAxis   = FVec3::UnitY();
@@ -336,19 +360,22 @@ void AttachDoor(
     if ((flags & DoorFlags::StartsOpen) != DoorFlags::None) {
         state    = DoorState::Open;
         progress = 1.0f;
-        if (transform != nullptr) {
+        if (hasTransform) {
             // The instance is authoritative for where the geometry is: a door
             // that starts open has to *be* open, not animate open on the first
             // frame.
-            if (rotating) {
-                transform->rotation = openRot;
-            } else {
-                transform->position = openPos;
-            }
+            registry.template Patch<Components::TransformComponent>(record.entity, [&](auto& transform) {
+                if (rotating) {
+                    transform.rotation = openRot;
+                } else {
+                    transform.position = openPos;
+                }
+            });
         }
     }
 
-    registry.Add<DoorComponent>(
+    AttachComponent(
+        registry,
         record.entity,
         DoorComponent {
             .state          = state,
@@ -371,22 +398,21 @@ void AttachDoor(
     );
 }
 
-void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, Components::TransformComponent* transform) {
+template <typename World>
+void AttachButton(World& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, bool hasTransform, FVec3 initialPos) {
     const ButtonFlags flags = ButtonFlagsFrom(*record.button);
 
     const float speed = record.speed.value_or(kDefaultButtonSpeed);
     const float wait  = record.wait.value_or(kDefaultButtonWait);
     const float lip   = record.lip.value_or(0.0f);
 
-    FVec3 unpressed = FVec3::Zero();
-    if (transform) {
-        unpressed = transform->position;
-    }
+    FVec3 unpressed = hasTransform ? initialPos : FVec3::Zero();
     const float     travel    = (lip > 0.0f) ? (lip * options.unitScale) : kDefaultButtonTravel;
     const FVec3 pressed =
         ((flags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + record.moveDirection * travel);
 
-    registry.Add<ButtonComponent>(
+    AttachComponent(
+        registry,
         record.entity,
         ButtonComponent {
             .state             = ButtonState::Off,
@@ -403,14 +429,16 @@ void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, cons
     );
 }
 
-void AttachTrigger(ECS::Registry& registry, const BSP::EntityRecord& record, Components::TransformComponent* /*transform*/) {
+template <typename World>
+void AttachTrigger(World& registry, const BSP::EntityRecord& record) {
     const float     wait  = record.wait.value_or(kDefaultTriggerWait);
     const TriggerFlags flags = TriggerFlagsFrom(record.kind);
 
     const FVec3 half   = HalfExtentsOf(registry, record.entity);
     const float     radius = (half.LengthSquared() > 0.0f) ? half.Length() : 2.0f;
 
-    registry.Add<TriggerComponent>(
+    AttachComponent(
+        registry,
         record.entity,
         TriggerComponent {
             .radius      = radius,
@@ -427,17 +455,17 @@ void AttachTrigger(ECS::Registry& registry, const BSP::EntityRecord& record, Com
     );
 }
 
-} // namespace
-
-void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(BSP::ResolutionQuery {registry}, map, options)) {
+template <typename World>
+void InitializeBSPEntitiesImpl(World& registry, const BSP::BSPMap& map, const BSP::ImportOptions& options) {
+    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(MakeResolutionQuery(registry), map, options)) {
         // A teleport landing point is pure logic and has nothing in the scene:
         // DescribeScene keeps info_* classes out of the spawned entities, so
         // this layer creates the lightweight entity the trigger resolves its
         // `target` against. The quaternion is already the conjugated Source
         // rotation, which TeleportPlayer reads off the transform's +X axis.
         if (record.kind == BSP::InteractiveKind::TeleportDestination) {
-            registry.Create(
+            SpawnEntity(
+                registry,
                 Components::NameComponent {.name = String64(record.targetName)},
                 Components::TransformComponent {
                     .position = record.origin.value_or(FVec3::Zero()),
@@ -454,7 +482,8 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             continue;
         }
 
-        registry.Add<BSPEntityMetadataComponent>(
+        AttachComponent(
+            registry,
             e,
             BSPEntityMetadataComponent {
                 .className  = String64(record.className),
@@ -466,25 +495,34 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
 
         AttachOutputs(registry, e, record.outputs);
 
-        // The instantiator owns the transform. This pass reads it, except in
-        // the "starts open" case, where the geometry has to actually start open
-        // rather than animate open on the first frame -- hence a pointer and not
-        // the borrowed optional Registry::Get hands back.
-        const auto transformView = registry.Get<Components::TransformComponent>(e);
-        auto*      transform     = transformView ? transformView.operator->() : nullptr;
+        const auto transformView = registry.template Get<Components::TransformComponent>(e);
+        const bool hasTransform  = static_cast<bool>(transformView);
+        const FVec3 initialPos   = hasTransform ? transformView->position : FVec3::Zero();
+        const Quat  initialRot   = hasTransform ? transformView->rotation : Quat::Identity();
 
         switch (record.kind) {
             case BSP::InteractiveKind::Door:
-            case BSP::InteractiveKind::DoorRotating: AttachDoor(registry, record, options, transform); break;
+            case BSP::InteractiveKind::DoorRotating: AttachDoor(registry, record, options, hasTransform, initialPos, initialRot); break;
             case BSP::InteractiveKind::Button:
-            case BSP::InteractiveKind::ButtonRotating: AttachButton(registry, record, options, transform); break;
+            case BSP::InteractiveKind::ButtonRotating: AttachButton(registry, record, options, hasTransform, initialPos); break;
             case BSP::InteractiveKind::Trigger:
             case BSP::InteractiveKind::TriggerOnce:
-            case BSP::InteractiveKind::TriggerTeleport: AttachTrigger(registry, record, transform); break;
+            case BSP::InteractiveKind::TriggerTeleport: AttachTrigger(registry, record); break;
             case BSP::InteractiveKind::TeleportDestination:
             case BSP::InteractiveKind::None: break;
         }
     }
+}
+
+} // namespace
+
+void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
+    InitializeBSPEntitiesImpl(registry, map, options);
+}
+
+void InitializeBSPEntities(Engine& engine, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
+    auto entities = engine.Entities();
+    InitializeBSPEntitiesImpl(entities, map, options);
 }
 
 } // namespace ZHLN::Interaction

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include "TestsFramework.hpp"
@@ -74,7 +73,7 @@ struct ExplosionTestSuite {
         auto crater_components_follow_existing_playback_boundary() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) return std::unexpected(ExplosionTestError::EngineInitFailed);
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             const auto root = ZHLN::ExplosionSystem::Spawn(*engine, {0.0f, 0.0f, 0.0f}, 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
             engine->Commands().Playback();
             auto explosion = reg.Get<ZHLN::ExplosionComponent>(root);
@@ -82,10 +81,10 @@ struct ExplosionTestSuite {
             Step(*engine, 0.21f);
             explosion = reg.Get<ZHLN::ExplosionComponent>(root);
             ZHLN::Test::ExpectTrue(explosion->craterSpawned);
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::CraterDecalComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::CraterDecalComponent>().empty());
             ZHLN::Test::ExpectFalse(engine->Commands().Empty());
             engine->Commands().Playback();
-            const auto craters = reg.GetEntitiesWith<ZHLN::CraterDecalComponent>();
+            const auto craters = reg.EntitiesWith<ZHLN::CraterDecalComponent>();
             if (!ZHLN::Test::ExpectEq(craters.size(), size_t {1})) return std::unexpected(ExplosionTestError::CraterDecalSpawnFailed);
             const auto crater = craters.front();
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::CraterDecalComponent>(crater)->age, 0.0f);
@@ -112,7 +111,7 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // Spawn omnidirectional fireball
             const ZHLN::FVec3    origin{0.0f, 5.0f, 0.0f};
@@ -154,7 +153,7 @@ struct ExplosionTestSuite {
 
             // Invariant: Root entity and all particles must be destroyed cleanly
             ZHLN::Test::ExpectFalse(reg.IsAlive(expRoot));
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::ExplosionComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::ExplosionComponent>().empty());
             // The scene removed the authoring components without owning or
             // explicitly releasing their GPU storage; the renderer retires idle
             // emitter buffers on its own after the configured inactivity window.
@@ -171,7 +170,7 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // 2. Detonate Artillery Mortar at (0, 0, 0)
             const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, {0.0f, 0.0f, 0.0f}, 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
@@ -196,7 +195,7 @@ struct ExplosionTestSuite {
                 engine->ProcessEvents();
                 Step(*engine, dt);
                 (void) engine->Tick(dt);
-                const auto craters = reg.GetEntitiesWith<ZHLN::CraterDecalComponent>();
+                const auto craters = reg.EntitiesWith<ZHLN::CraterDecalComponent>();
                 if (!craters.empty()) {
                     craterObserved = true;
                     foundCrater    = craters[0];
@@ -233,11 +232,11 @@ struct ExplosionTestSuite {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // Spawn a test crater with initial scale (6.8, 6.8, 5.0)
-            const ZHLN::Entity craterEnt = reg.Create();
-            reg.Add(
+            const ZHLN::Entity craterEnt = reg.Spawn();
+            reg.Attach(
                 craterEnt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 0.0f}, .scale = ZHLN::FVec3{6.8f, 6.8f, 5.0f}},
                 ZHLN::Components::WorldTransformComponent {}, ZHLN::Components::DecalComponent {},
                 ZHLN::CraterDecalComponent {
@@ -276,7 +275,7 @@ struct ExplosionTestSuite {
 
             // Invariant 2: Crater entity is destroyed via ECB playback
             ZHLN::Test::ExpectFalse(reg.IsAlive(craterEnt));
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::CraterDecalComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::CraterDecalComponent>().empty());
 
             return {};
         }

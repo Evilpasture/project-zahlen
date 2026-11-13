@@ -120,6 +120,10 @@ auto ShapeCache::Resolve(const AnyPrimitiveShape& shape) -> JPH::ShapeRefC {
         else if constexpr (std::is_same_v<S, Shape<Capsule>>) return GetOrCreate(ShapeType::Capsule, s.halfHeight, s.radius, 0, 0);
         else if constexpr (std::is_same_v<S, Shape<Cylinder>>) return GetOrCreate(ShapeType::Cylinder, s.halfHeight, s.radius, 0, 0);
         else if constexpr (std::is_same_v<S, Shape<Plane>>) return GetOrCreate(ShapeType::Plane, s.normal.x, s.normal.y, s.normal.z, s.constant);
+        else if constexpr (std::is_same_v<S, Shape<HeightField>>) {
+            if (s.sampleCount < 2 || s.heights.size() < static_cast<size_t>(s.sampleCount) * s.sampleCount) return nullptr;
+            return Physics::CreateHeightFieldShape(s.heights.data(), static_cast<int>(s.sampleCount), s.worldSize);
+        }
         else {
             if (s.asset != CollisionAssetID::Invalid) {
                 CollisionAssetResolver lookup;

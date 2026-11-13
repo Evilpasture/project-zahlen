@@ -6,7 +6,6 @@
 // test the SV_IsFrontFace normal orientation. The vertex/indirect and meshlet
 // paths must agree without making mirrored materials double-sided.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -64,7 +63,7 @@ struct CaptureResult {
 
 // Indices and meshlets both use these CCW (+Z) faces. Each entity below uses
 // this *same* mesh. No parity-dependent copies of its indices or pipelines.
-[[nodiscard]] auto MakePanel(ZHLN::RenderContext& rc) -> ZHLN::Mesh {
+[[nodiscard]] auto MakePanel(ZHLN::GraphicsDevice rc) -> ZHLN::Mesh {
     const std::array<ZHLN::VertexPosition, 4> positions {{
         {{-0.45f, 0.45f, 0.0f}},
         {{-0.45f, -0.45f, 0.0f}},
@@ -118,7 +117,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     if (!engine.Valid()) return std::unexpected(NegativeScaleError::EngineInitFailed);
 
     auto rc = engine->Graphics();
-    auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+    auto reg = engine->Entities();
     const auto info = rc.Info();
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
@@ -138,14 +137,15 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         gfx.environment.skyHorizon = {0, 0, 0, 1};
         gfx.environment.skyGround = {0, 0, 0, 1};
     });
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    ZHLN::DegF cameraFov {};
+    if (!ZHLN::Test::ExpectTrue(reg.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& c) {
+            c.camera.position = {0.0f, 0.0f, kCameraDistance};
+            c.camera.yaw      = ZHLN::DegF{-90.0f};
+            c.camera.pitch    = ZHLN::DegF{0.0f};
+            cameraFov         = c.camera.fov;
+        }))) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = {0.0f, 0.0f, kCameraDistance};
-    camera.yaw      = ZHLN::DegF{-90.0f};
-    camera.pitch    = ZHLN::DegF{0.0f};
     camera.fov      = ZHLN::DegF{45.0f};
 
     const ZHLN::Entity sun = reg.Create();
@@ -174,7 +174,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     rc.RegisterMaterial(doubleSidedID, *doubleSided);
     hasDoubleSided = true;
 
-    ZHLN::Mesh mesh = MakePanel(ZHLN::EngineAccess::RenderOf(*engine));
+    ZHLN::Mesh mesh = MakePanel(rc);
     if (!Complete(mesh)) {
         rc.DestroyMesh(mesh);
         return std::unexpected(NegativeScaleError::ResourceCreationFailed);
@@ -189,14 +189,15 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         const auto rotation = i == 2 ? ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float>}) : ZHLN::Quat::Identity();
         const ZHLN::FVec3 scale{mirrored ? -1.0f : 1.0f, 1.0f, 1.0f};
         const auto world = ZHLN::ComposeTransform(kCenters[i], rotation, scale);
-        const ZHLN::Entity e     = reg.Create();
-        reg.Add(e, ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale});
-        reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = world, .previous = world});
-        reg.Add(e, ZHLN::Components::MeshComponent {
-            .meshAsset = meshID,
-            .materialAsset = i < 3 ? oneSidedID : doubleSidedID,
-            .cullRadius = 0.65f,
-        });
+        const ZHLN::Entity e = reg.Spawn(
+            ZHLN::Components::TransformComponent {.position = kCenters[i], .rotation = rotation, .scale = scale},
+            ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
+            ZHLN::Components::MeshComponent {
+                .meshAsset = meshID,
+                .materialAsset = i < 3 ? oneSidedID : doubleSidedID,
+                .cullRadius = 0.65f,
+            }
+        );
         if (i == 0) { // Other instances only borrow the registered mesh.
             engine->Entities().Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
         }
@@ -207,7 +208,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     if (!image.Valid()) return std::unexpected(NegativeScaleError::CaptureFailed);
 
     CaptureResult result {.meshShadingSupported = info.meshShadingSupported};
-    const double halfHeight = kCameraDistance * std::tan(camera.fov.ToRadians().value * 0.5);
+    const double halfHeight = kCameraDistance * std::tan(cameraFov.ToRadians().value * 0.5);
     const double halfWidth = halfHeight * image.width / image.height;
     for (size_t i = 0; i < kCenters.size(); ++i) {
         const double u = 0.5 + kCenters[i].x / (2.0 * halfWidth);

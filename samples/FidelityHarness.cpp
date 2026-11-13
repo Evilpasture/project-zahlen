@@ -33,10 +33,10 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/QualityPresets.hpp>
@@ -266,7 +266,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // authored 2048px shoe/cloth normal and color textures in fidelity stills;
     // the renderer's trilinear/aniso samplers select the right mip at a distance.
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), bytes, virtualPath, virtualPath,
+        engine, bytes, virtualPath, virtualPath,
         ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
     );
     if (!prefab) {
@@ -293,7 +293,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // settle ticks advance "Individuals" in MorphStressTest: its first target
     // lifts the yellow block while the untouched blocks stay level.
     if (written > 0 && !prefab->animations.empty() &&
-        !ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
+        !engine.Entities().Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
             animator.currentTrackIdx = -1;
         })) {
         ZHLN::Log("[Fidelity] Animated prefab '{}' has no animator root.", virtualPath);
@@ -422,9 +422,9 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 // normally data-only lights, but the Engine path also safely releases any
 // owners attached to a light entity.
 void StripSceneLights(ZHLN::Engine& engine) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto lightSpan = registry.GetEntitiesWith<ZHLN::Components::LightComponent>();
-    const auto sunSpan   = registry.GetEntitiesWith<ZHLN::Components::SunTagComponent>();
+    auto       entities  = engine.Entities();
+    const auto lightSpan = entities.EntitiesWith<ZHLN::Components::LightComponent>();
+    const auto sunSpan   = entities.EntitiesWith<ZHLN::Components::SunTagComponent>();
     const auto lights    = std::vector<ZHLN::Entity>(lightSpan.begin(), lightSpan.end());
     const auto suns      = std::vector<ZHLN::Entity>(sunSpan.begin(), sunSpan.end());
     for (const ZHLN::Entity e: lights) {
@@ -473,14 +473,14 @@ enum class DiagnosticCapture {
         return true;
     }
 
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     auto renderer = engine.Graphics();
     uint32_t transmitting = 0;
     uint32_t opaque       = 0;
     uint32_t iridescent   = 0;
 
-    for (const ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-        const auto mesh = registry.Get<ZHLN::Components::MeshComponent>(e);
+    for (const ZHLN::Entity e: entities.EntitiesWith<ZHLN::Components::MeshComponent>()) {
+        const auto mesh = entities.Get<ZHLN::Components::MeshComponent>(e);
         if (!mesh) {
             return false;
         }
@@ -496,7 +496,7 @@ enum class DiagnosticCapture {
                 // Hiding the entire forward draw preserves the opaque scene and
                 // the actual occlusion of the olives; it does not pretend that
                 // zeroing transmission turns glass into a missing surface.
-                if (!registry.Patch<ZHLN::Components::MeshComponent>(e, [](auto& part) { part.flags |= ZHLN::DrawFlags::Hidden; })) {
+                if (!entities.Patch<ZHLN::Components::MeshComponent>(e, [](auto& part) { part.flags |= ZHLN::DrawFlags::Hidden; })) {
                     return false;
                 }
             } else if (mode == DiagnosticCapture::TransmissionCoverage) {
@@ -704,8 +704,7 @@ auto main(int argc, char* argv[]) -> int {
     // The harness owns the camera, so core's WASD free-cam must come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity camera   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = engine->Entities().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
         }
         // Before the import, so a light the default scene attached cannot
@@ -731,7 +730,7 @@ auto main(int argc, char* argv[]) -> int {
             return EXIT_FAILURE;
         }
         auto assets = engine->Assets();
-        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(ZHLN::EngineAccess::AssetsOf(*engine).VFS(), scenario.lighting);
+        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets, scenario.lighting);
         if (!decoded) {
             ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
             return EXIT_FAILURE;
@@ -745,18 +744,21 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Components::EnvironmentMapComponent env;
         env.source.assign(scenario.lighting);
         env.renderSkybox = scenario.renderSkybox;
-        ZHLN::EngineAccess::RegistryOf(*engine).Create(std::move(env));
+        engine->Entities().Spawn(std::move(env));
     }
 
-    auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
+    bool cameraValid = false;
+    const bool hasCamera = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](ZHLN::Components::CameraComponent& cameraComp) {
+        ZHLN::Camera& camera = cameraComp.camera;
+        SetFidelityCamera(camera, scenario);
+        cameraValid = std::isfinite(camera.position.x) && std::isfinite(camera.position.y) && std::isfinite(camera.position.z) &&
+                      std::isfinite(camera.yaw.value) && std::isfinite(camera.pitch.value);
+    });
+    if (!hasCamera) {
         ZHLN::Log("[Fidelity] No main camera entity for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    SetFidelityCamera(camera, scenario);
-    if (!std::isfinite(camera.position.x) || !std::isfinite(camera.position.y) || !std::isfinite(camera.position.z) ||
-        !std::isfinite(camera.yaw.value) || !std::isfinite(camera.pitch.value)) {
+    if (!cameraValid) {
         ZHLN::Log("[Fidelity] Invalid camera for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
@@ -796,9 +798,9 @@ auto main(int argc, char* argv[]) -> int {
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
-        if (auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>()) {
-            SetFidelityCamera(cameraComp->camera, scenario);
-        }
+        engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+            SetFidelityCamera(cameraComp.camera, scenario);
+        });
         const auto result = engine->Tick(dt);
         if (!result) {
             ZHLN::Log("[Fidelity] Render tick failed: {}; refusing an incomplete capture.", result.error());

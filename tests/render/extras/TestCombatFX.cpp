@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -72,7 +71,7 @@ struct CombatFXTestSuite {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             ZHLN::CombatFX::System combatFX;
             combatFX.Init(*engine);
@@ -107,11 +106,11 @@ struct CombatFXTestSuite {
 
             // The bare entity exists immediately, but decal components remain
             // invisible until the caller-owned main buffer is played back.
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::Components::DecalComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::Components::DecalComponent>().empty());
             ZHLN::Test::ExpectTrue(!engine->Commands().Empty());
             engine->Commands().Playback();
 
-            const auto decalEntities = reg.GetEntitiesWith<ZHLN::Components::DecalComponent>();
+            const auto decalEntities = reg.EntitiesWith<ZHLN::Components::DecalComponent>();
 
             // Invariant: Exactly 1 decal entity spawned (from Preset 0)
             ZHLN::Test::ExpectEq(decalEntities.size(), 1u);

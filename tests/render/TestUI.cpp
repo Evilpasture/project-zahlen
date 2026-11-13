@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -175,10 +174,11 @@ struct UITestSuite {
             }
 
             auto setInput = [&](float mx, float my, bool lbutton) {
-                auto& in = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                in.mouseX = mx;
-                in.mouseY = my;
-                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+                engine->Entities().PatchSingleton<ZHLN::Components::InputStateComponent>([&](auto& in) {
+                    in.mouseX = mx;
+                    in.mouseY = my;
+                    in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+                });
             };
 
             uint32_t clickCountA = 0;
@@ -420,9 +420,6 @@ struct UITestSuite {
             }
 
             auto rc = engine->Graphics();
-            // Render targets, cube maps and procedural bakes are not on the
-            // GraphicsDevice capability facade; reach the context for those.
-            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
 
             ZHLN::Test::Headless::TickFrames(*engine, 2);
 
@@ -432,14 +429,14 @@ struct UITestSuite {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            const auto textureRes = rctx.CreateRenderTexture(160, 160, false);
+            const auto textureRes = rc.CreateRenderTexture(160, 160, false);
             if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::TextureID texture = *textureRes;
-            const auto hdrTextureRes = rctx.CreateRenderTexture(160, 160, true);
+            const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
             if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
-                rctx.DestroyRenderTexture(texture);
+                rc.DestroyRenderTexture(texture);
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::TextureID hdrTexture = *hdrTextureRes;
@@ -491,8 +488,8 @@ struct UITestSuite {
             }
 
             const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_window_and_second_destination.ppm");
-            rctx.DestroyRenderTexture(hdrTexture);
-            rctx.DestroyRenderTexture(texture);
+            rc.DestroyRenderTexture(hdrTexture);
+            rc.DestroyRenderTexture(texture);
             if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
@@ -517,9 +514,6 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
             auto rc = engine->Graphics();
-            // Render targets, cube maps and procedural bakes are not on the
-            // GraphicsDevice capability facade; reach the context for those.
-            auto& rctx = ZHLN::EngineAccess::RenderOf(*engine);
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             const SolidPayload payload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 80.0f);
             if (!ZHLN::Test::ExpectTrue(!payload.View().Empty())) {
@@ -564,12 +558,12 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(!staleUI && !staleScene)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto texture = rctx.CreateRenderTexture(32, 32);
+            const auto texture = rc.CreateRenderTexture(32, 32);
             if (!texture) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::FrameTarget retiredTexture = (**second).ForTexture(*texture);
-            rctx.DestroyRenderTexture(*texture);
+            rc.DestroyRenderTexture(*texture);
             const auto retiredResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
             if (!ZHLN::Test::ExpectTrue(!retiredResult)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
@@ -589,9 +583,10 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& host  = engine->GetPlatformHost();
-            auto& input = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-            input.ApplyLocalMotion(320.0f, 240.0f);
+            auto& host = engine->GetPlatformHost();
+            engine->Entities().PatchSingleton<ZHLN::Components::InputStateComponent>([](auto& input) {
+                input.ApplyLocalMotion(320.0f, 240.0f);
+            });
 
             if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
                 !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||

@@ -8,6 +8,9 @@
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -19,7 +22,15 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
+auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.GetCachedPrefab(hash);
+}
+auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.CachedPrefab(hash);
+}
+
+template <typename Gfx>
+auto LoadTextureFromBytes(Gfx& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
         if (vtfExp.has_value()) {
@@ -51,7 +62,8 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     return TextureID::Invalid;
 }
 
-auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string_view materialName, const ImportOptions& options) -> MaterialDesc {
+template <typename Gfx>
+auto ResolveStudioMaterial(Gfx& ctx, const SourceVFS& vfs, std::string_view materialName, const ImportOptions& options) -> MaterialDesc {
     MaterialDesc desc = MaterialDesc::Basic({1.0f, 1.0f, 1.0f, 1.0f}, 0.8f, 0.0f, false);
     const auto vmtPath = vfs.ResolveMaterial(materialName);
     if (!vmtPath.has_value()) {
@@ -123,14 +135,14 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
     return desc;
 }
 
-static auto CreateFallbackModelPrefab(
-    AssetManager&        assetMgr,
-    PhysicsContext&      physics,
+template <typename Assets>
+auto CreateFallbackModelPrefab(
+    Assets&              assetMgr,
     std::string_view     virtualPath,
     const ImportOptions& options
 ) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash = HashAssetPath(virtualPath);
-    if (const auto cached = assetMgr.GetCachedPrefab(hash)) {
+    if (const auto cached = LookupPrefab(assetMgr, hash)) {
         return cached;
     }
 
@@ -165,70 +177,13 @@ static auto CreateFallbackModelPrefab(
 
     prefab->parts.push_back(std::move(fallbackPart));
     assetMgr.CachePrefab(hash, std::move(prefab));
-    return assetMgr.GetCachedPrefab(hash);
+    return LookupPrefab(assetMgr, hash);
 }
 
-} // namespace
-
-auto LoadStudioModelPrefab(
-    RenderContext&       ctx,
-    AssetManager&        assetMgr,
-    PhysicsContext&      physics,
-    const SourceVFS&     vfs,
-    std::string_view     path,
-    const ImportOptions& options
-) -> ZHLN::Optional<ModelPrefab&> {
-    const uint64_t hash = HashAssetPath(path);
-    if (const auto cached = assetMgr.GetCachedPrefab(hash)) {
-        return cached;
-    }
-
-    const auto resolvedMdl = vfs.ResolveModel(path);
-    if (!resolvedMdl.has_value()) {
-        LogWarning("StudioModel: failed to resolve MDL path {}", path);
-        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
-    }
-
-    const auto mdlBytes = vfs.ReadFile(*resolvedMdl);
-    if (!mdlBytes.has_value()) {
-        LogWarning("StudioModel: failed to read MDL {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
-    }
-
-    std::string basePath = *resolvedMdl;
-    if (basePath.ends_with(".mdl")) {
-        basePath.resize(basePath.size() - 4);
-    }
-
-    const std::string vvdPath = basePath + ".vvd";
-    std::string       vtxPath = basePath + ".dx90.vtx";
-    if (!vfs.Exists(vtxPath)) {
-        vtxPath = basePath + ".vtx";
-    }
-    const std::string phyPath = basePath + ".phy";
-
-    const auto vvdBytes = vfs.ReadFile(vvdPath);
-    if (!vvdBytes.has_value()) {
-        LogWarning("StudioModel: missing VVD file for {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
-    }
-
-    const auto vtxBytes = vfs.ReadFile(vtxPath);
-    if (!vtxBytes.has_value()) {
-        LogWarning("StudioModel: missing VTX file for {}", *resolvedMdl);
-        return CreateFallbackModelPrefab(assetMgr, physics, path, options);
-    }
-
-    const auto                       phyBytes = vfs.ReadFile(phyPath);
-    const std::span<const std::byte> phySpan  = phyBytes.has_value() ? std::span<const std::byte>(*phyBytes) : std::span<const std::byte>();
-
-    return LoadStudioModelPrefabFromMemory(ctx, assetMgr, physics, vfs, *mdlBytes, *vvdBytes, *vtxBytes, phySpan, path, options);
-}
-
-auto LoadStudioModelPrefabFromMemory(
-    RenderContext&             ctx,
-    AssetManager&              assetMgr,
-    PhysicsContext&            physics,
+template <typename Gfx, typename Assets>
+auto LoadStudioModelPrefabFromMemoryImpl(
+    Gfx&                       ctx,
+    Assets&                    assetMgr,
     const SourceVFS&           vfs,
     std::span<const std::byte> mdlBytes,
     std::span<const std::byte> vvdBytes,
@@ -238,14 +193,14 @@ auto LoadStudioModelPrefabFromMemory(
     const ImportOptions&       options
 ) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash = HashAssetPath(virtualPath);
-    if (const auto cached = assetMgr.GetCachedPrefab(hash)) {
+    if (const auto cached = LookupPrefab(assetMgr, hash)) {
         return cached;
     }
 
     const auto parsedExp = ParseStudioModel(mdlBytes, vvdBytes, vtxBytes, phyBytes, options);
     if (!parsedExp.has_value()) {
         LogWarning("StudioModel: failed to parse model {}: {}", virtualPath, parsedExp.error());
-        return CreateFallbackModelPrefab(assetMgr, physics, virtualPath, options);
+        return CreateFallbackModelPrefab(assetMgr, virtualPath, options);
     }
 
     const auto& data            = *parsedExp;
@@ -265,10 +220,10 @@ auto LoadStudioModelPrefabFromMemory(
             continue;
         }
 
-        const BufferID   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
-        const BufferID   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
-        const BufferID   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
-        const BufferID   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
+        const BufferID       posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {partData.positions});
+        const BufferID       frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {partData.tangentFrames});
+        const BufferID       surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {partData.surfaces});
+        const BufferID       ibo        = ctx.template CreateBuffer<BufferUsage::Index>(std::span {partData.indices});
         const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {partData.indices}, std::span {partData.positions}));
 
         Mesh subMesh = {
@@ -323,7 +278,116 @@ auto LoadStudioModelPrefabFromMemory(
     }
 
     assetMgr.CachePrefab(hash, std::move(prefab));
-    return assetMgr.GetCachedPrefab(hash);
+    return LookupPrefab(assetMgr, hash);
+}
+
+template <typename Gfx, typename Assets>
+auto LoadStudioModelPrefabImpl(
+    Gfx&                 ctx,
+    Assets&              assetMgr,
+    const SourceVFS&     vfs,
+    std::string_view     path,
+    const ImportOptions& options
+) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash = HashAssetPath(path);
+    if (const auto cached = LookupPrefab(assetMgr, hash)) {
+        return cached;
+    }
+
+    const auto resolvedMdl = vfs.ResolveModel(path);
+    if (!resolvedMdl.has_value()) {
+        LogWarning("StudioModel: failed to resolve MDL path {}", path);
+        return CreateFallbackModelPrefab(assetMgr, path, options);
+    }
+
+    const auto mdlBytes = vfs.ReadFile(*resolvedMdl);
+    if (!mdlBytes.has_value()) {
+        LogWarning("StudioModel: failed to read MDL {}", *resolvedMdl);
+        return CreateFallbackModelPrefab(assetMgr, path, options);
+    }
+
+    std::string basePath = *resolvedMdl;
+    if (basePath.ends_with(".mdl")) {
+        basePath.resize(basePath.size() - 4);
+    }
+
+    const std::string vvdPath = basePath + ".vvd";
+    std::string       vtxPath = basePath + ".dx90.vtx";
+    if (!vfs.Exists(vtxPath)) {
+        vtxPath = basePath + ".vtx";
+    }
+    const std::string phyPath = basePath + ".phy";
+
+    const auto vvdBytes = vfs.ReadFile(vvdPath);
+    if (!vvdBytes.has_value()) {
+        LogWarning("StudioModel: missing VVD file for {}", *resolvedMdl);
+        return CreateFallbackModelPrefab(assetMgr, path, options);
+    }
+
+    const auto vtxBytes = vfs.ReadFile(vtxPath);
+    if (!vtxBytes.has_value()) {
+        LogWarning("StudioModel: missing VTX file for {}", *resolvedMdl);
+        return CreateFallbackModelPrefab(assetMgr, path, options);
+    }
+
+    const auto                       phyBytes = vfs.ReadFile(phyPath);
+    const std::span<const std::byte> phySpan  = phyBytes.has_value() ? std::span<const std::byte>(*phyBytes) : std::span<const std::byte>();
+
+    return LoadStudioModelPrefabFromMemoryImpl(ctx, assetMgr, vfs, *mdlBytes, *vvdBytes, *vtxBytes, phySpan, path, options);
+}
+
+} // namespace
+
+auto LoadStudioModelPrefab(
+    RenderContext&       ctx,
+    AssetManager&        assetMgr,
+    PhysicsContext&      /*physics*/,
+    const SourceVFS&     vfs,
+    std::string_view     path,
+    const ImportOptions& options
+) -> ZHLN::Optional<ModelPrefab&> {
+    return LoadStudioModelPrefabImpl(ctx, assetMgr, vfs, path, options);
+}
+
+auto LoadStudioModelPrefab(
+    Engine&              engine,
+    const SourceVFS&     vfs,
+    std::string_view     path,
+    const ImportOptions& options
+) -> ZHLN::Optional<ModelPrefab&> {
+    auto gfx    = engine.Graphics();
+    auto assets = engine.Assets();
+    return LoadStudioModelPrefabImpl(gfx, assets, vfs, path, options);
+}
+
+auto LoadStudioModelPrefabFromMemory(
+    RenderContext&             ctx,
+    AssetManager&              assetMgr,
+    PhysicsContext&            /*physics*/,
+    const SourceVFS&           vfs,
+    std::span<const std::byte> mdlBytes,
+    std::span<const std::byte> vvdBytes,
+    std::span<const std::byte> vtxBytes,
+    std::span<const std::byte> phyBytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options
+) -> ZHLN::Optional<ModelPrefab&> {
+    return LoadStudioModelPrefabFromMemoryImpl(ctx, assetMgr, vfs, mdlBytes, vvdBytes, vtxBytes, phyBytes, virtualPath, options);
+}
+
+auto LoadStudioModelPrefabFromMemory(
+    Engine&                    engine,
+    const SourceVFS&           vfs,
+    std::span<const std::byte> mdlBytes,
+    std::span<const std::byte> vvdBytes,
+    std::span<const std::byte> vtxBytes,
+    std::span<const std::byte> phyBytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options
+) -> ZHLN::Optional<ModelPrefab&> {
+    auto gfx    = engine.Graphics();
+    auto assets = engine.Assets();
+    return LoadStudioModelPrefabFromMemoryImpl(gfx, assets, vfs, mdlBytes, vvdBytes, vtxBytes, phyBytes, virtualPath, options);
 }
 
 } // namespace ZHLN::BSP

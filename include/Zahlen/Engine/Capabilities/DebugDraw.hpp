@@ -14,6 +14,7 @@
 namespace ZHLN {
 
 struct SceneData;
+struct LineSegment;
 struct BillboardQuad;
 struct ParticleEmitterSubmission;
 struct MeshParticleEmitterSubmission;
@@ -24,6 +25,7 @@ class ZHLN_API DebugDraw {
   public:
     void AddLine(const FVec3& start, const FVec3& end, const FVec4& color);
     void AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd);
+    [[nodiscard]] auto Lines() const noexcept -> std::span<const LineSegment>;
     void AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive);
     void AddDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces);
     void Clear() noexcept;

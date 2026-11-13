@@ -11,6 +11,12 @@
 
 namespace ZHLN {
 class Engine;
+class PoseUploadQueue;
+struct SceneData;
+struct CullingStats;
+namespace ECS {
+class Registry;
+}
 
 class ZHLN_API RenderSystem {
   public:
@@ -28,10 +34,15 @@ class ZHLN_API RenderSystem {
         const Components::SunTagComponent, const Components::EnvironmentSunTagComponent,
         const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
 
-    static std::expected<void, ErrorCode> Update(Engine& engine, float dt);
+    static std::expected<void, ErrorCode> Update(
+        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
+    );
 
   private:
-    static FrameOutcome<FrameSkipped> RenderMain(Engine& engine, int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt);
+    static FrameOutcome<FrameSkipped> RenderMain(
+        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
+        int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt
+    );
 
     using RenderDebugQuery = ECS::Query<const Components::CullingStatsComponent, const Components::CameraComponent>;
     static void RenderDebug(Engine& engine, RenderDebugQuery query, int physicsDrawMode);

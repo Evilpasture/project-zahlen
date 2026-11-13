@@ -13,11 +13,11 @@
 
 module;
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Quat.h>
@@ -118,12 +118,12 @@ struct InspectorState {
 }
 
 void AddInspectorLighting(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     const FVec3  sunPos   = {15.0f, 30.0f, 15.0f};
     const auto sunRot = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}});
     const auto sunWorld = ZHLN::ComposeTransform(sunPos, sunRot, FVec3::One());
-    reg.Create(
+    entities.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
         ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::Splat(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
@@ -135,7 +135,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
         engine, 40.0f, {0.12f, 0.14f, 0.18f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .roughness = 0.9f, .metallic = 0.0f}
     );
-    reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
+    entities.Attach(ground, ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorGround")});
 
     engine.EnsureFontAtlas();
 }
@@ -171,9 +171,9 @@ void ClearInstances(InspectorState& state) {
     if (state.engine == nullptr) {
         return;
     }
-    auto& reg = ZHLN::EngineAccess::RegistryOf(*state.engine);
+    auto entities = state.engine->Entities();
     for (ZHLN::Entity e: state.instances) {
-        if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
+        if (e != ZHLN::Entity::Null() && entities.IsAlive(e)) {
             DespawnEntity(*state.engine, e);
         }
     }
@@ -197,17 +197,17 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if ((state.engine == nullptr) || state.instances.empty()) {
         return;
     }
-    auto&              reg  = ZHLN::EngineAccess::RegistryOf(*state.engine);
-    const ZHLN::Entity root = state.instances[0];
-    if (root == ZHLN::Entity::Null() || !reg.IsAlive(root)) {
+    auto               entities = state.engine->Entities();
+    const ZHLN::Entity root     = state.instances[0];
+    if (root == ZHLN::Entity::Null() || !entities.IsAlive(root)) {
         return;
     }
-    if (!reg.Get<ZHLN::Components::AnimatorComponent>(root)) {
+    if (!entities.Get<ZHLN::Components::AnimatorComponent>(root)) {
         return;
     }
 
     const bool stopping = (state.playingClip == clipIndex);
-    reg.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
+    entities.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
         anim.currentTrackIdx      = stopping ? -1 : clipIndex;
         anim.currentTrackTime     = 0.0f;
         anim.currentPlaybackSpeed = 1.0f;
@@ -633,7 +633,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     ClearInstances(state);
 
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+        engine, std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
     if (!prefab) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
@@ -691,12 +691,12 @@ void OnFileDropped(void* userdata, const ZHLN::FileDrop* files, uint32_t count) 
 }
 
 void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
-    auto& reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
+    auto entities = engine.Entities();
+    auto ents     = entities.EntitiesWith<ZHLN::Components::InputStateComponent>();
     if (ents.empty()) {
         return;
     }
-    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+    const auto input = entities.Get<ZHLN::Components::InputStateComponent>(ents[0]);
     if (!input) {
         return;
     }
@@ -738,15 +738,13 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 
-    const FVec3 dir        = OrbitDirection(state.yaw, state.pitch);
-    auto            cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
-        return;
-    }
-    ZHLN::Camera& cam = cameraComp->camera;
-    cam.position      = state.target - dir * state.distance;
-    cam.yaw           = ZHLN::DegF{state.yaw};
-    cam.pitch         = ZHLN::DegF{state.pitch};
+    const FVec3 dir = OrbitDirection(state.yaw, state.pitch);
+    entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](ZHLN::Components::CameraComponent& cameraComp) {
+        ZHLN::Camera& cam = cameraComp.camera;
+        cam.position      = state.target - dir * state.distance;
+        cam.yaw           = ZHLN::DegF{state.yaw};
+        cam.pitch         = ZHLN::DegF{state.pitch};
+    });
 }
 
 void DrawDropPrompt(ZHLN::GUI::Frame& ui) {
