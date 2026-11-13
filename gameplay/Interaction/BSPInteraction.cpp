@@ -18,6 +18,7 @@
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -262,11 +263,16 @@ constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brus
     return flags;
 }
 
-auto MakeResolutionQuery(ECS::Registry& registry) noexcept -> BSP::ResolutionQuery {
-    return BSP::ResolutionQuery {registry};
-}
-auto MakeResolutionQuery(Entities& entities) noexcept -> BSP::ResolutionQuery {
-    return entities.Inspect<const Components::SceneSourceComponent, const Components::NameComponent>();
+struct BSPResolutionRequest {
+    const BSP::BSPMap*        map     = nullptr;
+    const BSP::ImportOptions* options = nullptr;
+    std::vector<BSP::EntityRecord>* out = nullptr;
+};
+
+void CollectInteractiveEntityRecords(BSP::ResolutionQuery query, ECS::ResMut<ECS::ExtensionServices> ext) {
+    if (auto req = ext->Get<BSPResolutionRequest>(); req && req->map && req->options && req->out) {
+        *req->out = BSP::DescribeInteractiveEntities(query, *req->map, *req->options);
+    }
 }
 template <typename... Cs>
 void SpawnEntity(ECS::Registry& registry, Cs&&... cs) {
@@ -456,8 +462,8 @@ void AttachTrigger(World& registry, const BSP::EntityRecord& record) {
 }
 
 template <typename World>
-void InitializeBSPEntitiesImpl(World& registry, const BSP::BSPMap& map, const BSP::ImportOptions& options) {
-    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(MakeResolutionQuery(registry), map, options)) {
+void InitializeBSPEntitiesImpl(World& registry, const std::vector<BSP::EntityRecord>& records, const BSP::ImportOptions& options) {
+    for (const BSP::EntityRecord& record: records) {
         // A teleport landing point is pure logic and has nothing in the scene:
         // DescribeScene keeps info_* classes out of the spawned entities, so
         // this layer creates the lightweight entity the trigger resolves its
@@ -517,12 +523,16 @@ void InitializeBSPEntitiesImpl(World& registry, const BSP::BSPMap& map, const BS
 } // namespace
 
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    InitializeBSPEntitiesImpl(registry, map, options);
+    const auto records = BSP::DescribeInteractiveEntities(BSP::ResolutionQuery {registry}, map, options);
+    InitializeBSPEntitiesImpl(registry, records, options);
 }
 
 void InitializeBSPEntities(Engine& engine, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
+    std::vector<BSP::EntityRecord> records;
+    engine.EmplaceService<BSPResolutionRequest>(BSPResolutionRequest {.map = &map, .options = &options, .out = &records});
+    engine.GetUpdateGraph().InvokeSequential<&CollectInteractiveEntityRecords>(Frame {});
     auto entities = engine.Entities();
-    InitializeBSPEntitiesImpl(entities, map, options);
+    InitializeBSPEntitiesImpl(entities, records, options);
 }
 
 } // namespace ZHLN::Interaction

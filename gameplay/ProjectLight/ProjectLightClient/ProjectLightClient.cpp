@@ -1278,7 +1278,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
             const Quat rotation = (movement ? movement->orientation : Quat{state.currentRotation}).Normalized();
-            const auto velocity = physics.CharacterLinearVelocity(m_localControllerBody);
+            const auto velocity = physics.CharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.x, rotation.y, rotation.z, rotation.w,

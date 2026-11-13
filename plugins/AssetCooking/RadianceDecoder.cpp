@@ -500,17 +500,6 @@ auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> 
     return ReadUnpackedBytes(path);
 }
 
-auto ReadAssetBytes(AssetLibrary assets, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
-    const size_t vfsSize = assets.ReadVirtualFile(path, nullptr, 0);
-    if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
-        std::vector<std::byte> bytes(vfsSize);
-        if (assets.ReadVirtualFile(path, bytes.data(), bytes.size()) == vfsSize) {
-            return bytes;
-        }
-    }
-    return ReadUnpackedBytes(path);
-}
-
 }
 
 auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode> {
@@ -550,14 +539,7 @@ auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view pat
 }
 
 auto ReadEnvironmentImage(AssetLibrary assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
-    if (path.empty()) {
-        return std::unexpected(RadianceAssetError::NotFound);
-    }
-    auto bytes = ReadAssetBytes(assets, path);
-    if (!bytes) {
-        return std::unexpected(bytes.error());
-    }
-    return DecodeRadiance(*bytes);
+    return ReadEnvironmentImage(assets.VFS(), path);
 }
 
 } // namespace ZHLN::AssetCooking

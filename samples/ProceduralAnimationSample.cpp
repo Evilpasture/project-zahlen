@@ -529,7 +529,7 @@ auto AttachCharacterRig(
     ZHLN::Animation::ItemHandlingComponent itemHandling,
     FirstPersonViewState&                  viewState
 ) -> void {
-    auto entities = engine.Entities();
+    auto reg = engine.Entities();
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -635,7 +635,7 @@ auto AttachCharacterRig(
         }
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery
-        reg.Add(
+        reg.Attach(
             player,
             ZHLN::Components::AnimatorComponent {
                 .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
@@ -656,7 +656,7 @@ auto AttachCharacterRig(
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
-        reg.Add(
+        reg.Attach(
             player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
@@ -886,10 +886,6 @@ auto main(int argc, char* argv[]) -> int {
                     ZHLN::ProceduralAnimation::DrawDebugRig(engine->Debug(), transform->position, Quat{transform->rotation}, *rig, gait ? &*gait : nullptr);
                 }
             }
-        }
-    }
-    return EXIT_SUCCESS;
-}
         }
     }
     return EXIT_SUCCESS;

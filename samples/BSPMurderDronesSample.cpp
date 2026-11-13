@@ -56,6 +56,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>

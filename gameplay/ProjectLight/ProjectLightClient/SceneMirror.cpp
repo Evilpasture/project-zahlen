@@ -660,8 +660,8 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         return;
     }
 
-    entities.Register<Character::MovementComponent>();
-    entities.Register<Character::InputComponent>();
+    entities.Register<Character::MovementComponent>("MovementComponent");
+    entities.Register<Character::InputComponent>("InputComponent");
     const Entity controller = entities.Create();
     const auto matrix = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
     entities.Attach(
@@ -697,7 +697,7 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     const auto& bodyState = *bodyStateResult;
     const FVec3 rootPosition = bodyState.currentPosition;
     const Quat rootRotation = movement->orientation.Normalized();
-    const auto velocity = physics.CharacterLinearVelocity(state.localControllerBody);
+    const auto velocity = physics.CharacterVelocity(state.localControllerBody);
     (void)dt;
 
     if (auto input = entities.GetSingleton<Components::InputStateComponent>()) {

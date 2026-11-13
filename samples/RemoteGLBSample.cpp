@@ -1531,9 +1531,3 @@ auto main(int argc, char* argv[]) -> int {
     }
     return EXIT_SUCCESS;
 }
-  return EXIT_SUCCESS;
-}
-     state.catalog.worker.join();
-    }
-    return EXIT_SUCCESS;
-}
