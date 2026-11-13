@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/COM/Types.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/LayoutHash.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -43,6 +49,56 @@ struct ITestMissing : ZHLN::COM::IObject {
     virtual int32_t Missing() const noexcept = 0;
 };
 
+struct ChainNodeA {
+    uint32_t width  = 0;
+    uint32_t height = 0;
+};
+
+struct ChainNodeB {
+    float exposure = 1.0F;
+    bool  hdr      = false;
+};
+
+struct ChainNodeUnknown {
+    uint64_t secret = 42;
+};
+
+// Recursive leaf LayoutHash checks: same outer sizeof/alignof with altered
+// nested subobject leaf geometry must produce distinct hashes, while restated
+// identical leaf layouts (e.g. 4x4 float matrix vs flat float[16]) must agree.
+struct NestedSliceV1 {
+    uint32_t count = 0;
+    float    scale = 1.0F;
+};
+struct NestedSliceDrifted {
+    float    scale = 1.0F;
+    uint16_t flags = 0;
+    uint16_t extra = 0;
+};
+struct OuterV1 {
+    uint64_t      header = 0;
+    NestedSliceV1 nested {};
+};
+struct OuterDrifted {
+    uint64_t           header = 0;
+    NestedSliceDrifted nested {};
+};
+
+struct MatrixRows {
+    float rows[4][4] {};
+};
+struct MatrixFlat {
+    float elems[16] {};
+};
+struct WrapMatrixRows {
+    MatrixRows world {};
+    MatrixRows prev {};
+};
+struct WrapMatrixFlat {
+    MatrixFlat world {};
+    MatrixFlat prev {};
+};
+
 } // namespace COMIdentityTest
 
 namespace {
@@ -51,6 +107,10 @@ using namespace COMIdentityTest;
 static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>().high == ZHLN::Hash64("COMIdentityTest::ITestMath"));
 static_assert(ZHLN::COM::InterfaceIdOf<ITestMath>() != ZHLN::COM::InterfaceIdOf<ITestExtended>());
 static_assert(ZHLN::COM::InterfaceIdOf<ITemplate<int>>() != ZHLN::COM::InterfaceIdOf<ITemplate<float>>());
+
+static_assert(sizeof(OuterV1) == sizeof(OuterDrifted) && alignof(OuterV1) == alignof(OuterDrifted));
+static_assert(ZHLN::Reflect::LayoutHash<OuterV1>() != ZHLN::Reflect::LayoutHash<OuterDrifted>());
+static_assert(ZHLN::Reflect::LayoutHash<WrapMatrixRows>() == ZHLN::Reflect::LayoutHash<WrapMatrixFlat>());
 
 // Watches the assignment that destroys it. Release has to happen last, so the
 // slot being assigned already names its new object by the time this runs.
@@ -133,6 +193,7 @@ struct LateViolationParamInterface {
 struct CompliantParamInterface {
     virtual void Apply(const TestTransform& transform, int32_t count) noexcept = 0;
     virtual void Store(TestTransform value, const char* label, void* opaque) noexcept = 0;
+    virtual void Configure(const ZHLN::COM::ChainInNode* inChain, ZHLN::COM::ChainOutNode* outChain) noexcept = 0;
     virtual void Nothing() noexcept = 0;
 };
 
@@ -157,6 +218,8 @@ static_assert(ZHLN::COM::ComParameterCompliant<int32_t>());
 static_assert(ZHLN::COM::ComParameterCompliant<const TestTransform&>());
 static_assert(ZHLN::COM::ComParameterCompliant<TestTransform>());
 static_assert(ZHLN::COM::ComParameterCompliant<void*>());
+static_assert(ZHLN::COM::ComParameterCompliant<const ZHLN::COM::ChainInNode*>());
+static_assert(ZHLN::COM::ComParameterCompliant<ZHLN::COM::ChainOutNode*>());
 static_assert(ZHLN::COM::ComParameterCompliant<const std::string*>());
 static_assert(!ZHLN::COM::ComParameterCompliant<std::string>());
 static_assert(!ZHLN::COM::ComParameterCompliant<const std::string&>());
@@ -179,6 +242,8 @@ static_assert(std::is_standard_layout_v<ZHLN::COM::StringView>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Span<const std::byte>>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Result<int32_t>>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Result<void>>);
+static_assert(std::is_standard_layout_v<ZHLN::COM::ChainInNode>);
+static_assert(std::is_standard_layout_v<ZHLN::COM::ChainOutNode>);
 static_assert(sizeof(ZHLN::COM::InterfaceID) == 2 * sizeof(uint64_t));
 static_assert(sizeof(ZHLN::COM::StringView) == sizeof(const char*) + sizeof(size_t));
 static_assert(sizeof(ZHLN::COM::Span<const std::byte>) == sizeof(const std::byte*) + sizeof(size_t));
@@ -345,6 +410,117 @@ struct COMTestSuite {
             ZHLN::Test::ExpectTrue(static_cast<bool>(queried));
             queried = Ref<ITestMath> {};
             ZHLN::Test::ExpectFalse(static_cast<bool>(queried));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> chain_protocol_dispatches_and_rejects_drift() {
+            // Empty input chain succeeds as a no-op.
+            int visited = 0;
+            const ZHLN::COM::Result<void> emptyOutcome =
+                ZHLN::COM::DispatchInChain<ChainNodeA, ChainNodeB>(
+                    ZHLN::COM::InChain(), [&](const auto&) -> ZHLN::COM::Result<void> {
+                        ++visited;
+                        return {};
+                    });
+            ZHLN::Test::ExpectTrue(emptyOutcome.HasValue());
+            ZHLN::Test::ExpectEq(visited, 0);
+
+            // Multi-node input chain forwards both lvalue and rvalue nodes.
+            const ChainNodeA lvalueA {.width = 1920, .height = 1080};
+            uint32_t         gotW        = 0;
+            uint32_t         gotH        = 0;
+            float            gotExposure = 0.0F;
+            bool             gotHdr      = false;
+
+            const ZHLN::COM::Result<void> validOutcome = ZHLN::COM::DispatchInChain<ChainNodeA, ChainNodeB>(
+                ZHLN::COM::InChain(lvalueA, ChainNodeB {.exposure = 2.25F, .hdr = true}),
+                [&]<typename NodeT>(const NodeT& node) -> ZHLN::COM::Result<void> {
+                    if constexpr (std::is_same_v<NodeT, ChainNodeA>) {
+                        gotW = node.width;
+                        gotH = node.height;
+                    } else if constexpr (std::is_same_v<NodeT, ChainNodeB>) {
+                        gotExposure = node.exposure;
+                        gotHdr      = node.hdr;
+                    }
+                    return {};
+                });
+            ZHLN::Test::ExpectTrue(validOutcome.HasValue());
+            ZHLN::Test::ExpectEq(gotW, uint32_t {1920});
+            ZHLN::Test::ExpectEq(gotH, uint32_t {1080});
+            ZHLN::Test::ExpectEq(gotExposure, 2.25F);
+            ZHLN::Test::ExpectTrue(gotHdr);
+
+            // Unknown extension node is rejected with ComError::UnsupportedExtension.
+            const ZHLN::COM::Result<void> unknownOutcome = ZHLN::COM::DispatchInChain<ChainNodeA>(
+                ZHLN::COM::InChain(ChainNodeA {.width = 1, .height = 1}, ChainNodeUnknown {}),
+                [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(unknownOutcome.HasValue());
+            ZHLN::Test::ExpectTrue(unknownOutcome.error.Is(ZHLN::COM::ComError::UnsupportedExtension));
+
+            // Duplicate node type in manual chain is rejected with ComError::DuplicateExtension.
+            ChainNodeA             dupPayload {.width = 1, .height = 1};
+            ZHLN::COM::ChainInNode tailNode {
+                .sType      = ZHLN::COM::ChainTypeID<ChainNodeA>(),
+                .layoutHash = ZHLN::Reflect::LayoutHash<ChainNodeA>(),
+                .size       = sizeof(ChainNodeA),
+                .reserved   = 0,
+                .data       = &dupPayload,
+                .pNext      = nullptr,
+            };
+            ZHLN::COM::ChainInNode headNode = tailNode;
+            headNode.pNext                  = &tailNode;
+            const ZHLN::COM::Result<void> dupOutcome = ZHLN::COM::DispatchInChain<ChainNodeA>(
+                &headNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(dupOutcome.HasValue());
+            ZHLN::Test::ExpectTrue(dupOutcome.error.Is(ZHLN::COM::ComError::DuplicateExtension));
+
+            // Tampered layoutHash or size is rejected with ComError::LayoutMismatch.
+            ZHLN::COM::ChainInNode driftedNode = tailNode;
+            driftedNode.layoutHash ^= 0x1ULL;
+            const ZHLN::COM::Result<void> hashMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
+                &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(hashMismatch.HasValue());
+            ZHLN::Test::ExpectTrue(hashMismatch.error.Is(ZHLN::COM::ComError::LayoutMismatch));
+
+            driftedNode.layoutHash = tailNode.layoutHash;
+            driftedNode.size       = sizeof(ChainNodeA) + 4U;
+            const ZHLN::COM::Result<void> sizeMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
+                &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(sizeMismatch.HasValue());
+            ZHLN::Test::ExpectTrue(sizeMismatch.error.Is(ZHLN::COM::ComError::LayoutMismatch));
+
+            // Null payload pointer is rejected with ComError::NullArgument.
+            driftedNode.size = sizeof(ChainNodeA);
+            driftedNode.data = nullptr;
+            const ZHLN::COM::Result<void> nullData = ZHLN::COM::DispatchInChain<ChainNodeA>(
+                &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(nullData.HasValue());
+            ZHLN::Test::ExpectTrue(nullData.error.Is(ZHLN::COM::ComError::NullArgument));
+
+            // Output chain rejects null head and populates caller-owned nodes in place.
+            const ZHLN::COM::Result<void> nullOutHead = ZHLN::COM::DispatchOutChain<ChainNodeA>(
+                nullptr, [&](ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
+            ZHLN::Test::ExpectFalse(nullOutHead.HasValue());
+            ZHLN::Test::ExpectTrue(nullOutHead.error.Is(ZHLN::COM::ComError::NullArgument));
+
+            ChainNodeA outA {};
+            ChainNodeB outB {};
+            const ZHLN::COM::Result<void> outOutcome = ZHLN::COM::DispatchOutChain<ChainNodeA, ChainNodeB>(
+                ZHLN::COM::OutChain(outA, outB), [&]<typename NodeT>(NodeT& dst) -> ZHLN::COM::Result<void> {
+                    if constexpr (std::is_same_v<NodeT, ChainNodeA>) {
+                        dst.width  = 2560;
+                        dst.height = 1440;
+                    } else if constexpr (std::is_same_v<NodeT, ChainNodeB>) {
+                        dst.exposure = 0.75F;
+                        dst.hdr      = true;
+                    }
+                    return {};
+                });
+            ZHLN::Test::ExpectTrue(outOutcome.HasValue());
+            ZHLN::Test::ExpectEq(outA.width, uint32_t {2560});
+            ZHLN::Test::ExpectEq(outA.height, uint32_t {1440});
+            ZHLN::Test::ExpectEq(outB.exposure, 0.75F);
+            ZHLN::Test::ExpectTrue(outB.hdr);
             return {};
         }
     };

@@ -246,6 +246,18 @@ auto Simulation::IsBodyDynamic(Physics::BodyID handle) const -> bool {
 void Simulation::AddImpulse(Physics::BodyID handle, FVec3 impulse) {
     _ctx->AddImpulse(handle, impulse);
 }
+void Simulation::SetLinearVelocity(Physics::BodyID handle, FVec3 velocity) {
+    _ctx->SetLinearVelocity(handle, velocity);
+}
+void Simulation::SetKinematicPose(Physics::BodyID handle, DVec3 position, FVec4 rotation) {
+    _ctx->SetKinematicPose(handle, position, rotation);
+}
+void Simulation::SetCollisionFilter(Physics::BodyID handle, uint32_t category, uint32_t mask) {
+    _ctx->SetCollisionFilter(handle, category, mask);
+}
+void Simulation::RegisterMaterial(uint32_t id, float friction, float restitution) {
+    _ctx->RegisterMaterial(id, friction, restitution);
+}
 void Simulation::DestroyBody(Physics::BodyID handle) {
     _ctx->DestroyBody(handle);
 }
@@ -263,6 +275,19 @@ auto Simulation::CreateCharacter(DVec3 position) -> Physics::BodyID {
 }
 auto Simulation::CreateCharacter(DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID {
     return _ctx->CreateCharacter(position, params);
+}
+auto Simulation::CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID {
+    Physics::CharacterParams params {};
+    if (desc.useCustomCapsule && desc.capsuleRadius > 0.0F && desc.capsuleHalfHeight > 0.0F) {
+        params.shape = _ctx->GetOrCreateShape(Physics::ShapeType::Capsule, desc.capsuleRadius, desc.capsuleHalfHeight);
+    }
+    params.maxSlopeAngle            = desc.maxSlopeRadians;
+    params.maxStrength              = desc.maxStrength;
+    params.characterPadding         = desc.characterPadding;
+    params.penetrationRecoverySpeed = desc.penetrationRecoverySpeed;
+    params.category                 = desc.category;
+    params.mask                     = desc.mask;
+    return _ctx->CreateCharacter(desc.position, params);
 }
 void Simulation::DestroyRagdolls(std::span<const Physics::RagdollID> handles) noexcept {
     _ctx->DestroyRagdolls(handles);

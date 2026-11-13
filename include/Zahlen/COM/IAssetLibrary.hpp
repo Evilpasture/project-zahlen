@@ -5,27 +5,20 @@
 
 // Zahlen/COM/IAssetLibrary.hpp
 //
-// Assets as the public API sees it. ModelPrefab holds std::vector, Jolt shape
-// references and a deleted copy constructor, so the prefab itself never
-// crosses: the caller names a prefab by the hash of its virtual path, asks the
-// library what is in it, and asks the library to spawn it. The bytes stay on
-// the side that allocated them.
-//
-// That is also why the cache-filling half of the AssetLibrary facade is absent.
-// CachePrefab takes a std::unique_ptr and CacheEnvironmentImage takes a struct
-// of std::vectors; handing either across would mean one CRT allocating what
-// another frees.
-//
-// Nor is there an import call. The engine's own LoadModelPrefab is a cache
-// lookup -- every importer (glTF, BSP, StudioModel) lives in plugins/, a layer
-// above libzahlen_engine.so, so the library has nothing to call and this
-// boundary cannot invent one without inverting that dependency. What is here
-// is honest about it: resolve a path to a cache key, read what is cached, and
-// spawn it. Filling the cache stays with whoever linked the importer.
+// Assets and scene-owned primitives as the public API sees them. ModelPrefab
+// holds std::vector, Jolt shape references and a deleted copy constructor, so
+// the prefab itself never crosses: the caller names a prefab by the hash of its
+// virtual path, asks the library what is in it, and asks the library to spawn
+// it. Spawn options and procedural primitive descriptors cross via reflected
+// ChainInNode lists.
 
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 
 #include <cstdint>
 #include <string>
@@ -36,7 +29,7 @@ namespace ZHLN::COM {
 
 static_assert(std::is_standard_layout_v<PrefabFactory::SpawnParams> &&
                   std::is_trivially_copyable_v<PrefabFactory::SpawnParams>,
-              "SpawnParams crosses by const reference and must stay a fixed-layout value.");
+              "SpawnParams crosses via ChainInNode and must stay a fixed-layout value.");
 
 // What a cached prefab contains, without handing over the prefab. Enough to
 // size a scene, drive an asset browser or assert in a test.
@@ -66,6 +59,9 @@ struct EnvironmentImageInfo {
 static_assert(std::is_standard_layout_v<EnvironmentImageInfo> && std::is_trivially_copyable_v<EnvironmentImageInfo>);
 
 struct IAssetLibrary : IObject {
+    // Deterministic 64-bit asset/material key for a name or path.
+    [[nodiscard]] virtual AssetID AssetHash(StringView name) const noexcept = 0;
+
     // The cache key for a virtual path. Pure function of the string, so a
     // caller can compute it once and keep it.
     [[nodiscard]] virtual uint64_t PrefabHash(StringView virtualPath) const noexcept = 0;
@@ -80,16 +76,21 @@ struct IAssetLibrary : IObject {
     [[nodiscard]] virtual uint32_t PrefabVirtualPath(uint64_t hash, char* buffer, uint32_t capacity) const noexcept = 0;
 
     // Spawns the cached prefab and records the entities it created into
-    // `entities`, up to `capacity`. Returns how many were recorded.
+    // `entities`, up to `capacity`. `spawnChain` accepts nullptr (defaults) or
+    // PrefabFactory::SpawnParams via COM::InChain.
     //
-    // Read that twice before reusing the count-then-fill shape from the query
-    // methods: `entities` controls *recording*, not spawning. Calling this
-    // with a null buffer still instantiates the whole prefab -- it just throws
-    // away the ids. Size the buffer first (PrefabInfo gives the bound, and the
-    // inline overload below does it for you) and call this exactly once.
-    // Zero means nothing is cached under that hash.
-    [[nodiscard]] virtual uint32_t Instantiate(uint64_t hash, const PrefabFactory::SpawnParams& params, Entity* entities,
-                                               uint32_t capacity) noexcept = 0;
+    // `entities` controls *recording*, not spawning: calling this with a null
+    // buffer still instantiates the whole prefab and discards the ids. Size the
+    // buffer first from PrefabInfo (the inline overload below does this) and
+    // call once. Zero inside Result means nothing is cached under `hash`.
+    [[nodiscard]] virtual Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
+                                                       uint32_t capacity) noexcept = 0;
+
+    // Spawns a scene-owned procedural primitive entity (mesh, material,
+    // transforms, OwnedMeshComponent, and optional PhysicsComponent). Accepts
+    // exactly one shape node (BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc,
+    // CylinderMeshDesc, or ConeMeshDesc) plus optional PrefabFactory::SpawnParams.
+    [[nodiscard]] virtual Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept = 0;
 
     [[nodiscard]] virtual Option<EnvironmentImageInfo> FindEnvironmentImage(StringView key) const noexcept = 0;
 
@@ -99,17 +100,12 @@ struct IAssetLibrary : IObject {
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
-    // Path to usable key in one step: the hash if something is cached under
-    // it, ComError::AssetNotCached if not. Two virtual calls, no vtable slot.
     [[nodiscard]] auto FindPrefab(StringView virtualPath) const noexcept -> Result<uint64_t> {
         const uint64_t hash = PrefabHash(virtualPath);
         if (!HasPrefab(hash)) return ComError::AssetNotCached;
         return hash;
     }
 
-    // The library writes through std::string's own buffer, including the
-    // terminator slot at data()[size()], which is the one past-the-end byte
-    // the standard lets a caller write as long as it stays a null.
     [[nodiscard]] auto PrefabVirtualPath(uint64_t hash) const -> std::string {
         const uint32_t length = PrefabVirtualPath(hash, nullptr, 0);
         if (length == 0) return {};
@@ -119,11 +115,6 @@ struct IAssetLibrary : IObject {
         return path;
     }
 
-    // One spawn, not two. The vector is sized from the prefab's own contents
-    // -- root, one entity per part, one more per part when the spawn asks for
-    // emissive virtual lights, and one per punctual light -- so the single
-    // call to the wire method has room to record everything it creates, and
-    // the vector shrinks to what came back.
     [[nodiscard]] auto Instantiate(uint64_t hash, const PrefabFactory::SpawnParams& params = {}) -> std::vector<Entity> {
         const Option<PrefabInfo> info = DescribePrefab(hash);
         if (!info.HasValue()) return {};
@@ -131,10 +122,39 @@ struct IAssetLibrary : IObject {
         const size_t perPart = params.emissiveVirtualLights ? 2U : 1U;
         const size_t bound   = 1U + (static_cast<size_t>(info.value.partCount) * perPart) + info.value.lightCount;
 
-        std::vector<Entity> entities(bound);
-        const uint32_t      recorded = Instantiate(hash, params, entities.data(), static_cast<uint32_t>(bound));
+        std::vector<Entity>    entities(bound);
+        const Result<uint32_t> outcome = Instantiate(hash, InChain(params), entities.data(), static_cast<uint32_t>(bound));
+        if (!outcome.HasValue()) return {};
+        const uint32_t recorded = outcome.value;
         entities.resize(recorded < bound ? recorded : bound);
         return entities;
+    }
+
+    [[nodiscard]] auto SpawnBox(ZHLN::FVec3 halfExtents, const PrefabFactory::SpawnParams& params = {}) noexcept
+        -> Result<Entity> {
+        return SpawnPrimitive(InChain(BoxMeshDesc {.halfExtents = halfExtents, .color = params.color}, params));
+    }
+
+    [[nodiscard]] auto SpawnPlane(float extent = 10.0F, ZHLN::FVec4 color = {0.6F, 0.6F, 0.6F, 1.0F},
+                                  const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
+        return SpawnPrimitive(InChain(PlaneMeshDesc {.extent = extent, .color = color}, params));
+    }
+
+    [[nodiscard]] auto SpawnSphere(float radius = 0.5F, const PrefabFactory::SpawnParams& params = {}) noexcept
+        -> Result<Entity> {
+        return SpawnPrimitive(InChain(SphereMeshDesc {.radius = radius, .color = params.color}, params));
+    }
+
+    [[nodiscard]] auto SpawnCylinder(float radius = 0.5F, float height = 1.0F,
+                                     const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
+        return SpawnPrimitive(
+            InChain(CylinderMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+    }
+
+    [[nodiscard]] auto SpawnCone(float radius = 0.5F, float height = 1.0F,
+                                 const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
+        return SpawnPrimitive(
+            InChain(ConeMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
     }
 
 protected:

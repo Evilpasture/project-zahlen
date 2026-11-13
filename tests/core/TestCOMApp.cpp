@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/COM/App.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <chrono>
 #include <memory>
@@ -25,16 +26,20 @@ struct Layer {
     }
     void Stop(COM::IEngine&) { events->push_back("stop" + std::to_string(id)); }
 };
-}
+} // namespace
 
 void test_com_app_runs_layers_and_update() {
     std::vector<std::string> events;
     COM::App app;
     app.Title("COM App test").Resolution(320, 240).Headless(true).Validation(false)
-        .VSync(false).MeshShading(false).MaxFPS(0)
+        .VSync(false).MeshShading(false).MaxFPS(0).DefaultScene(true)
         .PhysicsLimits(100, 200, 200, 8 * 1024 * 1024)
         .AddLayer(Layer{1, &events}).AddLayer(Layer{2, &events})
-        .OnStart([&](COM::IEngine&) { events.push_back("onstart"); });
+        .OnStart([&](COM::IEngine& engine) {
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::SunTagComponent").HasValue());
+            events.push_back("onstart");
+        });
     int updates = 0;
     auto result = app.Run([&](COM::IEngine& engine, float dt) {
         ExpectTrue(dt >= 0);

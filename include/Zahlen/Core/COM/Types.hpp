@@ -11,9 +11,11 @@
 // disagree about. Ordinary Zahlen code keeps using std::string_view, std::span
 // and std::expected -- the conversion lives at the boundary declaration.
 
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
@@ -22,6 +24,18 @@
 #include <utility>
 
 namespace ZHLN::COM {
+
+// Failures the COM protocol or surface itself produces, distinct from the
+// subsystem ErrorCode categories forwarded from the engine.
+enum class ComError : uint8_t {
+    AllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"COM object allocation failed."> {}) = 1,
+    AssetNotCached       ZHLN_ANNOTATION(ZHLN::Description<"Requested asset is not present in the engine cache."> {}) = 2,
+    NullArgument         ZHLN_ANNOTATION(ZHLN::Description<"Required COM pointer or chain node payload is null."> {}) = 3,
+    LayoutMismatch       ZHLN_ANNOTATION(ZHLN::Description<"COM chain node size or reflected layout hash disagrees with the library."> {}) = 4,
+    UnsupportedExtension ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains an unrecognized structure type."> {}) = 5,
+    DuplicateExtension   ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains duplicate structure types or a cycle."> {}) = 6,
+    InvalidArgument      ZHLN_ANNOTATION(ZHLN::Description<"COM descriptor arguments are incomplete or invalid."> {}) = 7,
+};
 
 struct StringView {
     const char* data = nullptr;

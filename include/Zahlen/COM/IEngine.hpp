@@ -31,6 +31,11 @@ struct IEngine : IObject {
     [[nodiscard]] virtual Result<void> Tick(float dt) noexcept = 0;
     virtual void                       ClearScene() noexcept = 0;
 
+    // Registers core ECS components, seeds the default camera/input/culling/debug
+    // singletons, and compiles the simulation and render system graphs so a
+    // standalone COM host can populate entities and step Tick(dt).
+    [[nodiscard]] virtual Result<void> InitializeDefaultScene() noexcept = 0;
+
     // Borrowed, not retained. These are the same object as this IEngine, so
     // they live exactly as long as the reference you already hold and must not
     // be Released. Use Query<T>() / Ref<T>::As<T>() when you want to own one

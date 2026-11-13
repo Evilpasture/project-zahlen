@@ -601,8 +601,9 @@ container object, allocator or exception crosses the boundary.
 
 | header | contents |
 | :--- | :--- |
-| `Types.hpp` | `StringView`, `Span<T>`, `Result<T>` / `Result<void>` -- fixed-layout scalars that convert to and from `std::string_view`, `std::span` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
-| `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the *qualified* type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
+| `Types.hpp` | `ComError`, `StringView`, `Span<T>`, `Option<T>`, `Result<T>` / `Result<void>` -- fixed-layout values that convert to and from `std::string_view`, `std::span`, `std::optional` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
+| `Chain.hpp` | `ChainInNode` / `ChainOutNode`, `ChainTypeID<T>()`, caller-side `COM::InChain(...)` / `COM::OutChain(...)`, and callee-side `COM::DispatchInChain` / `COM::DispatchOutChain`. Non-intrusive `sType`/`layoutHash`/`size`/`pNext` linked lists keep plain value structs standard-layout while allowing configuration and resource descriptors to evolve without shifting vtable slots or reading past caller-owned structs. |
+| `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the canonical type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
 | `Reflect.hpp` | `Implements<Derived, Interfaces...>` and `AuditInterfaceABI<I>()`. Reflection walks the whole base graph to build `QueryRaw`'s dispatch; there is no interface map, no switch and no macro. |
 | `Ref.hpp` | `Ref<T>`, an owning reference. `Adopt` takes a reference `QueryRaw` already added; the explicit constructor adds one. Assignment acquires before it releases. |
 
@@ -671,25 +672,40 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 
 | header | contents |
 | :--- | :--- |
-| `COMTypes.hpp` | `EngineConfigCOM`, `ComError`, and the static asserts that keep the reused engine value types (`Extent2D`, `Entity`, `BufferID`, ...) fixed-layout |
-| `IEngine.hpp` | lifecycle, `Tick`, and borrowed accessors for the capability interfaces |
-| `IGraphicsDevice.hpp` | resolution, viewport, buffers, textures |
-| `IEntities.hpp` | type-erased ECS operations plus the consumer-side typed templates |
-| `ISimulation.hpp` | raycasts, body queries and impulses; `COM::Option` returns for the queries that may miss, caller-buffer virtuals with inline `std::vector` overloads for the ones that may be plural |
-| `IAudioDevice.hpp` | voices and posted events, described by `VoiceDesc` / `AudioEvent` |
-| `IAssetLibrary.hpp` | prefab cache interrogation and instantiation, plus borrowed environment-image pixels |
-| `IActionContext.hpp` | raw device injection in, virtual actions and physical state out |
-| `EngineFactory.hpp` | `CreateEngine`, the single exported symbol, and the inline `CreateEngineRef` wrapper |
+| `COMTypes.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
+| `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`, `InitializeDefaultScene`) and borrowed accessors for the six capability interfaces |
+| `IGraphicsDevice.hpp` | resolution, viewport, chained `ApplySettings` / `GetSettings` (full `GraphicsSettings` or sub-slices), buffers, textures, PBR materials, procedural & stream meshes, mesh registries and BLAS builds |
+| `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 35 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
+| `ISimulation.hpp` | chained rigid-body (`BoxShapeDesc`, `SphereShapeDesc`, `CapsuleShapeDesc`, `CylinderShapeDesc`, `PlaneShapeDesc`, `MeshShapeDesc`, `HeightFieldShapeDesc`, `CompoundShapeDesc` + pose/surface/filter) and character creation, raycasts, sphere queries, velocities, kinematic poses, collision filters and debug geometry |
+| `IAudioDevice.hpp` | chained `PostEvent` (`AudioEvent`) and `CreateVoice` (`VoiceDesc`) plus voice playback, volume, looping and spatial position controls |
+| `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
+| `IActionContext.hpp` | raw device injection, chained action-map / action / binding / rebind / multi-seat routing configuration, default-binding snapshots/resets, virtual actions and physical state |
+| `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`EngineAppConfig`, `EngineWindowConfig`, `EngineRenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
 
 One `EngineCOM` implements all seven interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
 accessors are **borrows** and must not be released; `Query` / `As` take a
 reference the way COM expects.
 
+**Extensible descriptors via non-intrusive reflected chains.** Raw aggregate
+descriptors passed directly in vtable slots freeze forever or break binary
+callers when fields are appended, while append-only builder vtables accumulate
+combinatorial setter debt. Instead, configuration and descriptor-taking vtable
+slots accept `const ChainInNode*` / `ChainOutNode*`. Callers pass plain
+standard-layout structs (`COM::InChain(appCfg, winCfg, renderCfg)` or
+`COM::OutChain(aaOut, shadowOut)`), and the engine validates each node's
+`sType` (`CanonicalTypeName<T>()`), `size`, and leaf-recursive
+`Reflect::LayoutHash<T>()` before reading or writing it. Shipped node structs
+remain frozen -- new fields ship in new extension structs chained via `pNext` --
+while `LayoutHash<T>()` catches accidental inner-struct drift with
+`ComError::LayoutMismatch` and unknown extensions with
+`ComError::UnsupportedExtension`. Single-struct ergonomics remain inline
+methods compiled in the consumer's own TU.
+
 There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
 implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
 calling convention already agree:
-`_ZN4ZHLN3COM12CreateEngineERKNS0_15EngineConfigCOME` is defined in the shared
+`CreateEngine(const ChainInNode*)` is defined in the shared
 library and undefined in every consumer. What the boundary refuses to carry is
 the *standard library*, not C++ itself.
 
@@ -705,14 +721,16 @@ Every method is `noexcept`, which costs nothing to honour: Zahlen compiles with
 `static_cast` chain rather than `dynamic_cast`.
 
 **The ECS seam.** A virtual function cannot be a template, so the vtable
-carries `AttachRaw` / `GetRaw` / `DetachRaw` keyed on a component's qualified
-type name, and `IEntities` rebuilds the typed API from inline templates that
-compile in the consumer's own TU. The storage behind them is the registry's
-dynamic-component path, which holds raw bytes and runs no destructor -- hence
-the `ComComponent` constraint, which is the storage's real contract and not a
-boundary formality. `Registry::RemoveDynamic` was added as the erase half of
-`AddDynamic`; `Remove<T>()` resolves its family from a compile-time type and
-cannot serve a type-erased caller.
+carries `AttachRaw` / `GetRaw` / `DetachRaw` plus `AttachEngineRaw` /
+`GetEngineRaw` / `DetachEngineRaw` / `EntitiesWithRaw` keyed on a component's
+canonical type name and recursive leaf `LayoutHash<T>()`, and `IEntities`
+rebuilds the typed API (`Attach<T>`, `Get<T>`, `Detach<T>`, `EntitiesWith<T>`,
+`SingletonEntity<T>`) from inline templates that compile in the consumer's own
+TU. Thirty-five fixed-layout `ZHLN::Components` are published directly to their
+typed ECS families (releasing owned Jolt/audio/GPU handles via `SceneResources`
+on overwrite or detach); consumer-defined components fall through to the
+registry's dynamic-component path, which holds raw bytes and runs no destructor
+-- hence the `ComComponent` constraint.
 
 Interface IDs are a hash of the qualified type name, so adding a capability
 interface needs no GUID and no registry.

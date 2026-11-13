@@ -11,10 +11,11 @@
 // own translation unit. Nothing about the caller's component type needs to be
 // known inside the library.
 //
-// The storage behind these is the registry's dynamic-component path, which
-// holds raw bytes and runs no destructor. That is why the templates below
-// require a trivially copyable component: it is the actual contract of the
-// storage, not a boundary formality.
+// The storage behind consumer components is the registry's dynamic-component
+// path, which holds raw bytes and runs no destructor. Published engine
+// components route to the engine's own typed SparseSets after verifying size,
+// alignment and recursive leaf LayoutHash, and honour SceneResources ownership
+// on replacement and detach.
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <new>
 #include <type_traits>
+#include <vector>
 
 namespace ZHLN::COM {
 
@@ -58,6 +60,12 @@ struct IEntities : IObject {
     virtual bool                DetachEngineRaw(Entity entity, StringView typeName) noexcept = 0;
     [[nodiscard]] virtual void* GetEngineRaw(Entity entity, StringView typeName) const noexcept = 0;
 
+    // Writes up to `capacity` entities owning `typeName` (published engine
+    // component or dynamic consumer component) and returns the total count in
+    // storage. Pass nullptr / 0 to query the count first.
+    [[nodiscard]] virtual uint32_t EntitiesWithRaw(StringView typeName, Entity* outEntities,
+                                                   uint32_t capacity) const noexcept = 0;
+
     // Compiled in the consumer's TU; not part of the vtable. The audit ignores
     // templates, and these never cross the boundary as symbols.
     template <ComComponent T>
@@ -91,6 +99,31 @@ struct IEntities : IObject {
             return DetachEngineRaw(entity, ComponentName<T>());
         }
         return DetachRaw(entity, ComponentName<T>());
+    }
+
+    [[nodiscard]] auto EntitiesWith(StringView typeName) const -> std::vector<Entity> {
+        const uint32_t total = EntitiesWithRaw(typeName, nullptr, 0);
+        if (total == 0) return {};
+
+        std::vector<Entity> found(total);
+        found.resize(EntitiesWithRaw(typeName, found.data(), total));
+        return found;
+    }
+
+    template <ComComponent T>
+    [[nodiscard]] auto EntitiesWith() const -> std::vector<Entity> {
+        return EntitiesWith(ComponentName<T>());
+    }
+
+    [[nodiscard]] auto SingletonEntity(StringView typeName) const noexcept -> Option<Entity> {
+        Entity first {};
+        if (EntitiesWithRaw(typeName, &first, 1) == 0) return std::nullopt;
+        return first;
+    }
+
+    template <ComComponent T>
+    [[nodiscard]] auto SingletonEntity() const noexcept -> Option<Entity> {
+        return SingletonEntity(ComponentName<T>());
     }
 
     // The qualified name, so two components called Transform in different

@@ -6,16 +6,18 @@
 // Zahlen/Input/ActionValues.hpp
 //
 // The virtual-input vocabulary: what an action is called, what state it is in,
-// and which physical input produces it. Split out of InputContext.hpp the way
-// PhysicsValues.hpp was split out of Physics.hpp -- naming an action or
-// describing a binding should not require the router, its action-map storage
-// or <vector> and <string>. InputContext.hpp includes this file, so every
-// existing spelling still resolves.
+// which physical input produces it, and the fixed-layout configuration nodes
+// that set up action maps across the COM boundary. Split out of
+// InputContext.hpp the way PhysicsValues.hpp was split out of Physics.hpp --
+// naming an action or describing a binding should not require the router, its
+// action-map storage or <vector> and <string>. InputContext.hpp includes this
+// file, so every existing spelling still resolves.
 //
 // Every type here is a fixed layout of scalars, which is what lets them cross
-// the COM boundary by value.
+// the COM boundary.
 
 #include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <cmath>
 #include <cstdint>
@@ -310,11 +312,46 @@ struct InputBinding {
     constexpr auto operator==(const InputBinding&) const noexcept -> bool = default;
 };
 
-static_assert(std::is_trivially_copyable_v<InputBinding>);
+// --- Chainable fixed-layout action map & routing descriptors -----------------
 
+struct ActionMapConfig {
+    String64 name {};
+    int32_t  priority              = 0;
+    uint8_t  seatMask              = static_cast<uint8_t>((1U << kMaxPlayerSeats) - 1U);
+    bool     enabled               = true;
+    bool     blocksLowerPriority   = false;
+    bool     consumePhysicalInputs = true;
+};
+
+struct ActionConfig {
+    String64            mapName {};
+    String64            actionName {};
+    ActionKind          kind               = ActionKind::Digital;
+    float               actuationThreshold = 0.50f;
+    bool                clampUnitCircle    = true;
+    bool                replaceBindings    = true;
+    const InputBinding* bindings           = nullptr;
+    uint32_t            bindingCount       = 0;
+};
+
+struct ActionRebindConfig {
+    uint32_t     slotIndex = 0;
+    InputBinding binding {};
+};
+
+struct InputRoutingConfig {
+    SeatRoutingPolicy policy                = SeatRoutingPolicy::SharePrimarySeat;
+    uint8_t           keyboardMouseSeatMask = static_cast<uint8_t>(1U << kPrimarySeat);
+};
+
+static_assert(std::is_trivially_copyable_v<InputBinding>);
 static_assert(std::is_standard_layout_v<ActionID> && std::is_trivially_copyable_v<ActionID>);
 static_assert(std::is_standard_layout_v<ActionState> && std::is_trivially_copyable_v<ActionState>);
 static_assert(std::is_standard_layout_v<Axis2DValue> && std::is_trivially_copyable_v<Axis2DValue>);
 static_assert(std::is_standard_layout_v<InputBinding>);
+static_assert(std::is_standard_layout_v<ActionMapConfig> && std::is_trivially_copyable_v<ActionMapConfig>);
+static_assert(std::is_standard_layout_v<ActionConfig> && std::is_trivially_copyable_v<ActionConfig>);
+static_assert(std::is_standard_layout_v<ActionRebindConfig> && std::is_trivially_copyable_v<ActionRebindConfig>);
+static_assert(std::is_standard_layout_v<InputRoutingConfig> && std::is_trivially_copyable_v<InputRoutingConfig>);
 
 } // namespace ZHLN

@@ -5,26 +5,17 @@
 
 // Zahlen/COM/ISimulation.hpp
 //
-// Physics as the public API sees it. The engine's Simulation facade answers
-// three queries with std::vector and std::optional, which cannot cross a
-// shared-library boundary; each is restated here in the shape the boundary
-// can carry -- a caller-owned buffer, or a COM::Option.
-//
-// The interface has two tiers. The virtuals are the wire: fixed-layout
-// scalars, audited by AuditInterfaceABI, agreed on byte for byte by two
-// separately compiled binaries. The non-virtual inline overloads beneath them
-// are ergonomics, and they are compiled in the *consumer's* translation unit
-// from this header -- so they may allocate a std::vector or a std::string,
-// hand the library a bare pointer into it, and destroy it again, all on one
-// side of the boundary. No allocator and no container layout ever crosses.
-//
-// No virtual takes a default argument either. A default is baked into the
-// caller's translation unit, so changing one would silently change the
-// meaning of already-compiled consumer code while the vtable stayed valid.
-// Where the facade had a useful default, the inline tier supplies it.
+// Physics as the public API sees it. Creation descriptors travel via reflected
+// ChainInNode lists (Physics::BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc,
+// CylinderShapeDesc, PlaneShapeDesc, MeshShapeDesc, HeightFieldShapeDesc,
+// CompoundShapeDesc + optional RigidBodyPose, RigidBodySurface, RigidBodyFilter)
+// so new body properties or shape families never shift the vtable or read past
+// caller-owned structs.
 
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 
@@ -41,6 +32,7 @@ static_assert(std::is_standard_layout_v<Physics::BodyStateSnapshot> && std::is_t
 static_assert(std::is_standard_layout_v<Physics::DebugDrawData> && std::is_trivially_copyable_v<Physics::DebugDrawData>);
 static_assert(std::is_standard_layout_v<FVec3> && std::is_trivially_copyable_v<FVec3>);
 static_assert(std::is_standard_layout_v<DVec3> && std::is_trivially_copyable_v<DVec3>);
+static_assert(std::is_standard_layout_v<Quat> && std::is_trivially_copyable_v<Quat>);
 
 struct ISimulation : IObject {
     [[nodiscard]] virtual Physics::RaycastResult Raycast(DVec3 origin, FVec3 direction, float maxDistance,
@@ -56,25 +48,39 @@ struct ISimulation : IObject {
     // COM::Option is the boundary's spelling of the facade's std::optional:
     // a fixed layout of the value plus a flag, returned by value, with an
     // implicit conversion to std::optional in the caller's own TU.
-    [[nodiscard]] virtual Option<DVec3> BodyPosition(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual Option<DVec3>                      BodyPosition(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual Option<Physics::BodyStateSnapshot> BodyState(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual Option<FVec3>                      BodyLinearVelocity(Physics::BodyID body) const noexcept = 0;
 
     [[nodiscard]] virtual FVec3 CharacterVelocity(Physics::BodyID body) const noexcept = 0;
-    [[nodiscard]] virtual bool   IsCharacterOnGround(Physics::BodyID body) const noexcept = 0;
-    [[nodiscard]] virtual bool   IsBodyDynamic(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual bool  IsCharacterOnGround(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual bool  IsBodyDynamic(Physics::BodyID body) const noexcept = 0;
 
     virtual void AddImpulse(Physics::BodyID body, FVec3 impulse) noexcept = 0;
+    virtual void SetBodyLinearVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
+    virtual void SetKinematicPose(Physics::BodyID body, DVec3 position, Quat rotation) noexcept = 0;
+    virtual void SetCollisionFilter(Physics::BodyID body, uint32_t category, uint32_t mask) noexcept = 0;
+    virtual void RegisterPhysicsMaterial(uint32_t materialID, float friction, float restitution) noexcept = 0;
     virtual void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
     virtual void DestroyBody(Physics::BodyID body) noexcept = 0;
     virtual void DestroyBodies(Span<const Physics::BodyID> bodies) noexcept = 0;
     virtual void DestroyRagdolls(Span<const Physics::RagdollID> ragdolls) noexcept = 0;
+    virtual void ClearMeshShapeCache() noexcept = 0;
 
     // Advances physics by one step. Note that IEngine::Tick already steps the
     // simulation on its fixed-timestep schedule; call this only when driving
     // physics yourself.
     virtual void Step(float deltaTime) noexcept = 0;
 
-    [[nodiscard]] virtual Physics::BodyID CreateCharacter(DVec3 position) noexcept = 0;
+    // Requires exactly one shape node (BoxShapeDesc, SphereShapeDesc,
+    // CapsuleShapeDesc, CylinderShapeDesc, PlaneShapeDesc, MeshShapeDesc,
+    // HeightFieldShapeDesc, or CompoundShapeDesc) plus any subset of
+    // RigidBodyPose, RigidBodySurface and RigidBodyFilter.
+    [[nodiscard]] virtual Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept = 0;
+
+    // Accepts Physics::CharacterCreateDesc in `descChain` (nullptr uses defaults
+    // at the origin).
+    [[nodiscard]] virtual Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept = 0;
 
     // Borrowed vertex spans owned by the engine's debug buffers. They stay
     // valid until the next call or the next step, and are never freed by the
@@ -82,6 +88,22 @@ struct ISimulation : IObject {
     [[nodiscard]] virtual Physics::DebugDrawData DebugGeometry(bool shapes, bool constraints, bool wireframe) noexcept = 0;
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
+
+    [[nodiscard]] auto CreateCharacter(DVec3 position) noexcept -> Physics::BodyID {
+        const Result<Physics::BodyID> created =
+            CreateCharacter(InChain(Physics::CharacterCreateDesc {.position = position}));
+        return created.HasValue() ? created.value : Physics::BodyID::Null();
+    }
+
+    [[nodiscard]] auto CreateBoxBody(FVec3 halfExtents, const Physics::RigidBodyPose& pose = {}) noexcept
+        -> Result<Physics::BodyID> {
+        return CreateRigidBody(InChain(Physics::BoxShapeDesc {.halfExtents = halfExtents}, pose));
+    }
+
+    [[nodiscard]] auto CreateSphereBody(float radius, const Physics::RigidBodyPose& pose = {}) noexcept
+        -> Result<Physics::BodyID> {
+        return CreateRigidBody(InChain(Physics::SphereShapeDesc {.radius = radius}, pose));
+    }
 
     [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction) const noexcept -> Physics::RaycastResult {
         return Raycast(origin, direction, 1000.0F, Physics::BodyID {});

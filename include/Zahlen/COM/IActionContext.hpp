@@ -5,23 +5,14 @@
 
 // Zahlen/COM/IActionContext.hpp
 //
-// Input as the public API sees it: raw device events in, virtual actions out.
-// Both halves are here deliberately. A consumer that owns its own window loop
-// needs to feed the router, and a consumer that only reads actions needs the
-// queries -- splitting them would leave neither side able to prove the other
-// works.
-//
-// GamepadState does not cross. It holds std::bitset, whose layout libstdc++
-// builds out of a base class, so it is not standard layout and the ABI audit
-// is right to refuse it. The scalar queries below answer the same questions
-// without shipping a container across the line.
-//
-// The derived reads -- down, pressed, held, released, 1D and 2D axes -- are
-// non-virtual inline wrappers over the single Action() dispatch, exactly as
-// the InputContext facade spells them. Six fewer vtable slots, and the caller
-// pays one virtual call instead of one per question.
+// Input as the public API sees it: action-map setup, raw device events in,
+// virtual actions and physical state out. Configuration descriptors
+// (ActionMapConfig, ActionConfig, InputBinding, ActionRebindConfig,
+// InputRoutingConfig) travel via reflected ChainInNode / ChainOutNode lists so
+// future input options extend by chaining rather than changing vtable slots.
 
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
 #include <Zahlen/Input/Input.hpp>
@@ -62,6 +53,35 @@ struct IActionContext : IObject {
     virtual void InjectGamepadButton(uint8_t slot, GamepadButton button, bool down) noexcept = 0;
     virtual void InjectGamepadAxis(uint8_t slot, GamepadAxis axis, float value) noexcept = 0;
 
+    // --- Action-map & binding setup -----------------------------------------
+
+    // Creates or updates an action map. Supported node: ActionMapConfig.
+    [[nodiscard]] virtual Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept = 0;
+    virtual bool                       RemoveActionMap(StringView mapName) noexcept = 0;
+    [[nodiscard]] virtual bool         HasActionMap(StringView mapName) const noexcept = 0;
+    [[nodiscard]] virtual bool         IsActionMapEnabled(StringView mapName) const noexcept = 0;
+    virtual bool                       SetActionMapEnabled(StringView mapName, bool enabled) noexcept = 0;
+    virtual bool                       SetActionMapEnabledForSeat(StringView mapName, PlayerSeat seat,
+                                                                  bool enabled) noexcept = 0;
+
+    // Creates or updates an action within a map and returns its ActionID.
+    // Supported node: ActionConfig.
+    [[nodiscard]] virtual Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept = 0;
+
+    // Appends or rebinds a binding on an existing action.
+    // Supported nodes: InputBinding (append) or ActionRebindConfig (replace slot).
+    [[nodiscard]] virtual Result<void> BindAction(StringView mapName, ActionID action,
+                                                  const ChainInNode* bindingChain) noexcept = 0;
+    virtual bool                       ClearBindings(StringView mapName, ActionID action) noexcept = 0;
+
+    virtual void SnapshotDefaults() noexcept = 0;
+    virtual bool ResetActionMapToDefaults(StringView mapName) noexcept = 0;
+    virtual void ResetAllToDefaults() noexcept = 0;
+
+    // Multi-seat routing configuration. Supported node: InputRoutingConfig.
+    [[nodiscard]] virtual Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept = 0;
+    [[nodiscard]] virtual Result<void> GetRouting(ChainOutNode* routingChain) const noexcept = 0;
+
     // --- Virtual actions ----------------------------------------------------
 
     // A zeroed state for an action no enabled map defines, which is the same
@@ -87,7 +107,63 @@ struct IActionContext : IObject {
     [[nodiscard]] virtual PlayerSeat GamepadSeat(uint8_t slot) const noexcept = 0;
     virtual bool                     AssignGamepadToSeat(uint8_t slot, PlayerSeat seat) noexcept = 0;
 
-    // --- Derived reads: not in the vtable -----------------------------------
+    // --- Ergonomics & derived reads: not in the vtable ----------------------
+
+    [[nodiscard]] auto CreateActionMap(StringView name, int32_t priority = 0, bool enabled = true) noexcept
+        -> Result<void> {
+        return ConfigureActionMap(InChain(ActionMapConfig {
+            .name     = String64(std::string_view(name)),
+            .priority = priority,
+            .enabled  = enabled,
+        }));
+    }
+
+    [[nodiscard]] auto AddAction(StringView mapName, StringView actionName, ActionKind kind = ActionKind::Digital,
+                                 Span<const InputBinding> bindings = {}) noexcept -> Result<ActionID> {
+        return ConfigureAction(InChain(ActionConfig {
+            .mapName         = String64(std::string_view(mapName)),
+            .actionName      = String64(std::string_view(actionName)),
+            .kind            = kind,
+            .replaceBindings = true,
+            .bindings        = bindings.data,
+            .bindingCount    = static_cast<uint32_t>(bindings.size),
+        }));
+    }
+
+    [[nodiscard]] auto AddBinding(StringView mapName, ActionID action, const InputBinding& binding) noexcept
+        -> Result<void> {
+        return BindAction(mapName, action, InChain(binding));
+    }
+
+    [[nodiscard]] auto Rebind(StringView mapName, ActionID action, uint32_t slotIndex,
+                              const InputBinding& binding) noexcept -> Result<void> {
+        return BindAction(mapName, action, InChain(ActionRebindConfig {.slotIndex = slotIndex, .binding = binding}));
+    }
+
+    [[nodiscard]] auto SetRoutingPolicy(SeatRoutingPolicy policy) noexcept -> Result<void> {
+        InputRoutingConfig current {};
+        (void)GetRouting(OutChain(current));
+        current.policy = policy;
+        return ConfigureRouting(InChain(current));
+    }
+
+    [[nodiscard]] auto RoutingPolicy() const noexcept -> SeatRoutingPolicy {
+        InputRoutingConfig current {};
+        (void)GetRouting(OutChain(current));
+        return current.policy;
+    }
+
+    [[nodiscard]] auto SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept -> Result<void> {
+        if (seat >= kMaxPlayerSeats) return ComError::InvalidArgument;
+        InputRoutingConfig current {};
+        (void)GetRouting(OutChain(current));
+        if (enabled) {
+            current.keyboardMouseSeatMask = static_cast<uint8_t>(current.keyboardMouseSeatMask | (1U << seat));
+        } else {
+            current.keyboardMouseSeatMask = static_cast<uint8_t>(current.keyboardMouseSeatMask & ~(1U << seat));
+        }
+        return ConfigureRouting(InChain(current));
+    }
 
     [[nodiscard]] auto ActionDown(ActionID id, PlayerSeat seat = kPrimarySeat) const noexcept -> bool {
         return Action(id, seat).down;

@@ -56,12 +56,17 @@ class ZHLN_API Simulation {
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyID handle) const -> bool;
 
     void AddImpulse(Physics::BodyID handle, FVec3 impulse);
+    void SetLinearVelocity(Physics::BodyID handle, FVec3 velocity);
+    void SetKinematicPose(Physics::BodyID handle, DVec3 position, FVec4 rotation);
+    void SetCollisionFilter(Physics::BodyID handle, uint32_t category, uint32_t mask);
+    void RegisterMaterial(uint32_t id, float friction, float restitution);
     void DestroyBody(Physics::BodyID handle);
     void DestroyBodies(std::span<const Physics::BodyID> handles);
     void SetCharacterVelocity(Physics::BodyID handle, FVec3 velocity);
     void Step(float deltaTime);
     [[nodiscard]] auto CreateCharacter(DVec3 position) -> Physics::BodyID;
     [[nodiscard]] auto CreateCharacter(DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID;
+    [[nodiscard]] auto CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID;
     void               DestroyRagdolls(std::span<const Physics::RagdollID> handles) noexcept;
 
 
