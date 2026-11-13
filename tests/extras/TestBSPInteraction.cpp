@@ -21,6 +21,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -739,7 +740,6 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Components::TransformComponent>();
             reg.RegisterComponent<ZHLN::Interaction::TriggerComponent>();
             reg.RegisterComponent<ZHLN::Interaction::EntityConnectionComponent>();
-            reg.RegisterComponent<ZHLN::Components::InputStateComponent>();
             reg.RegisterComponent<ZHLN::Interaction::PickupComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ItemBaseComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ContainerComponent>();
@@ -802,18 +802,18 @@ struct BSPInteractionTestSuite {
             using namespace ZHLN;
             using namespace ZHLN::Interaction;
             ECS::Registry reg;
+            InputContext  input;
             const Entity player = reg.Create(Character::MovementComponent {}, Components::TransformComponent {});
-            const Entity input = reg.Create(Components::InputStateComponent {});
             const Entity first = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
             const Entity second = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
             InteractionQuery query {reg};
             ECS::EntityCommandBuffer commands {reg};
 
             // Establish an unpressed prior frame, independent of earlier tests.
-            InteractionSystem::Update(query, commands);
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
             commands.Playback();
-            reg.Get<Components::InputStateComponent>(input)->SetKey(static_cast<uint8_t>(KeyCode::E), true);
-            InteractionSystem::Update(query, commands);
+            input.InjectKey(KeyCode::E, true);
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
             ZHLN::Test::ExpectFalse(reg.Get<ContainerComponent>(player).has_value());
             ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(first).has_value());
             ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(second).has_value());
@@ -828,8 +828,8 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectFalse(reg.Get<Components::MeshComponent>(second).has_value());
             // The legacy input edge state is shared by invocations; release it
             // before the next direct-call test.
-            reg.Get<Components::InputStateComponent>(input)->SetKey(static_cast<uint8_t>(KeyCode::E), false);
-            InteractionSystem::Update(query, commands);
+            input.InjectKey(KeyCode::E, false);
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
             commands.Playback();
             return {};
         }
@@ -840,7 +840,6 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Components::TransformComponent>();
             reg.RegisterComponent<ZHLN::Interaction::TriggerComponent>();
             reg.RegisterComponent<ZHLN::Interaction::EntityConnectionComponent>();
-            reg.RegisterComponent<ZHLN::Components::InputStateComponent>();
             reg.RegisterComponent<ZHLN::Interaction::PickupComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ItemBaseComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ContainerComponent>();
@@ -851,11 +850,9 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Interaction::ButtonComponent>();
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
 
-            // Create input singleton with E key down
-            const auto                            inputEnt = reg.Create();
-            ZHLN::Components::InputStateComponent inputState {};
-            inputState.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::E), true);
-            reg.Add(inputEnt, std::move(inputState));
+            // Create input context with E key down
+            ZHLN::InputContext input;
+            input.InjectKey(ZHLN::KeyCode::E, true);
 
             // Create player at (0, 0, 0)
             const auto playerEnt = reg.Create();
@@ -879,7 +876,7 @@ struct BSPInteractionTestSuite {
 
             ZHLN::Interaction::InteractionQuery query(reg);
             ZHLN::ECS::EntityCommandBuffer commands(reg);
-            ZHLN::Interaction::InteractionSystem::Update(query, commands);
+            ZHLN::Interaction::InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
             commands.Playback();
 
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);

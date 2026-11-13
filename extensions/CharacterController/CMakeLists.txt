@@ -7,7 +7,7 @@
 # WASD intent, camera-relative translation, jump/gravity integration, sprint
 # and yaw slewing over CharacterVirtual bodies: a game controller, not engine
 # substrate. Core keeps PhysicsContext::CreateCharacter and the raw
-# InputStateComponent; this target owns the interpretation.
+# InputContext / InputState; this target owns the interpretation.
 #
 # Public headers are reached as <CharacterController/...>.
 
@@ -44,10 +44,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# CharacterComponents.hpp reaches InputStateComponent through Components.hpp,
-# whose key bitset is sized by Reflect::EnumCount<KeyCode>(). Reflection is
-# not a per-target feature -- without the flags that count is 0 instead of 72
-# and mouseX moves four bytes, a silent wrong-offset read.
+# Enable reflection on this target so reflected component layouts and
+# system parameter inspection match zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

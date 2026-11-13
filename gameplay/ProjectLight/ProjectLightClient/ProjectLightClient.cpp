@@ -15,6 +15,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -1247,20 +1248,18 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 
 void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
-    auto entities = engine.Entities();
-    auto input = entities.GetSingleton<Components::InputStateComponent>();
-    m_lastControls = {};
+    auto        entities = engine.Entities();
+    const auto& input    = engine.GetInput().SeatKeyboardMouse();
+    m_lastControls       = {};
     // No main camera entity means no view to report; the zeroed controls above stand.
     if (const auto cameraComp = entities.GetSingleton<Components::CameraComponent>()) {
         m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
-    if (input) {
-        m_lastControls.forward  = input->IsKeyDown(static_cast<uint8_t>(KeyCode::W));
-        m_lastControls.backward = input->IsKeyDown(static_cast<uint8_t>(KeyCode::S));
-        m_lastControls.left     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::A));
-        m_lastControls.right    = input->IsKeyDown(static_cast<uint8_t>(KeyCode::D));
-        m_lastControls.jump     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
-    }
+    m_lastControls.forward  = input.IsKeyDown(static_cast<uint8_t>(KeyCode::W));
+    m_lastControls.backward = input.IsKeyDown(static_cast<uint8_t>(KeyCode::S));
+    m_lastControls.left     = input.IsKeyDown(static_cast<uint8_t>(KeyCode::A));
+    m_lastControls.right    = input.IsKeyDown(static_cast<uint8_t>(KeyCode::D));
+    m_lastControls.jump     = input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
 
     MsgPackValue inputs = MsgPackValue::Map();
     inputs.Set("forward", MsgPackValue::Bool(m_lastControls.forward));

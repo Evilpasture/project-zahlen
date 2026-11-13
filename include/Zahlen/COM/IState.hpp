@@ -21,6 +21,8 @@ struct IState : IObject {
     virtual void                             ResetCullingStats() noexcept = 0;
     virtual void                             SetCullingEnabled(bool enabled) noexcept = 0;
     virtual void                             SetFreezeFrustum(bool freeze) noexcept = 0;
+    [[nodiscard]] virtual int                PhysicsDrawMode() const noexcept = 0;
+    virtual void                             SetPhysicsDrawMode(int mode) noexcept = 0;
 
 protected:
     ~IState() = default;

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -13,14 +12,12 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
-#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -28,7 +25,6 @@
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <algorithm>
 #include <array>
-#include <bitset>
 #include <span>
 
 namespace ZHLN {
@@ -199,9 +195,6 @@ struct Components {
         ZHLN::String256 source;
         int             renderSkybox = 0;
     };
-    struct DebugSettingsComponent {
-        int physicsDrawMode = 0;
-    };
     struct AnimatorComponent {
         AnimationID animationID      = AnimationID::Null();
         AssetID         prefabAsset          = InvalidAssetID;
@@ -244,305 +237,6 @@ struct Components {
     };
     static_assert(std::is_trivially_copyable_v<PlayerSeatComponent>);
 
-    struct InputStateComponent {
-        static_assert(Reflect::EnumCount<KeyCode>() == kKeyCodeCount, "KeyCode enumerators must stay contiguous with kKeyCodeCount");
-        static_assert(Reflect::EnumCount<GamepadButton>() == kGamepadButtonCount, "GamepadButton enumerators must stay contiguous");
-        static_assert(Reflect::EnumCount<GamepadAxis>() == kGamepadAxisCount, "GamepadAxis enumerators must stay contiguous");
-
-        PlayerSeat seat = kPrimarySeat;
-
-        std::bitset<kKeyCodeCount> keys {};
-        std::bitset<kKeyCodeCount> prevKeys {};
-        std::bitset<kKeyCodeCount> pressedKeys {};
-        std::bitset<kKeyCodeCount> releasedKeys {};
-
-        float mouseX      = 0.0f;
-        float mouseY      = 0.0f;
-        float mouseDeltaX = 0.0f;
-        float mouseDeltaY = 0.0f;
-        float mouseWheel  = 0.0f;
-
-        float lastX      = 0.0f;
-        float lastY      = 0.0f;
-        bool  firstMouse = true;
-
-        bool wantCaptureKeyboard = false;
-        bool wantCaptureMouse    = false;
-
-        bool     needsResize = false;
-        Extent2D newSize {.width = 0, .height = 0};
-
-        void BeginFrame() noexcept {
-            prevKeys = keys;
-            pressedKeys.reset();
-            releasedKeys.reset();
-            ResetDeltas();
-        }
-
-        void SetKey(uint8_t key, bool down) noexcept {
-            if (key == 0 || key >= keys.size()) {
-                return;
-            }
-            const bool wasDown = keys.test(key);
-            if (down && !wasDown) {
-                pressedKeys.set(key);
-            } else if (!down && wasDown) {
-                releasedKeys.set(key);
-            }
-            keys.set(key, down);
-        }
-
-        void SetKey(KeyCode key, bool down) noexcept {
-            SetKey(static_cast<uint8_t>(key), down);
-        }
-
-        void ApplyLocalMotion(float x, float y) noexcept {
-            mouseX = x;
-            mouseY = y;
-            if (firstMouse) {
-                lastX      = x;
-                lastY      = y;
-                firstMouse = false;
-            }
-            mouseDeltaX += (x - lastX);
-            mouseDeltaY += (y - lastY);
-            lastX = x;
-            lastY = y;
-        }
-
-        void ApplyRelativeMotion(float x, float y, float dx, float dy) noexcept {
-            mouseX     = x;
-            mouseY     = y;
-            lastX      = x;
-            lastY      = y;
-            firstMouse = false;
-            mouseDeltaX += dx;
-            mouseDeltaY += dy;
-        }
-
-        void ApplyWheel(float delta) noexcept {
-            mouseWheel += delta;
-        }
-
-        void ApplyResize(Extent2D extent) noexcept {
-            newSize     = extent;
-            needsResize = true;
-        }
-
-        struct QueuedInput {
-            uint32_t value  = 0;
-            bool     isChar = false;
-        };
-        static constexpr size_t                  kMaxQueuedInput = 64;
-        std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
-        uint8_t                                  queuedInputCount = 0;
-
-        void QueueChar(uint32_t codepoint) noexcept {
-            if (queuedInputCount < kMaxQueuedInput) {
-                queuedInput[queuedInputCount++] = QueuedInput {.value = codepoint, .isChar = true};
-            }
-        }
-
-        void QueueKeyPress(KeyCode key) noexcept {
-            if (queuedInputCount < kMaxQueuedInput) {
-                queuedInput[queuedInputCount++] = QueuedInput {.value = static_cast<uint32_t>(key), .isChar = false};
-            }
-        }
-
-        void ClearQueuedInput() noexcept {
-            queuedInputCount = 0;
-        }
-
-        void ResetDeltas() noexcept {
-            mouseDeltaX = 0.0f;
-            mouseDeltaY = 0.0f;
-            mouseWheel  = 0.0f;
-        }
-
-        // --- Key Level & Edge Queries (Capture-Aware) ------------------------
-
-        [[nodiscard]] bool IsKeyDown(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return keys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept {
-            return IsKeyDown(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressed(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressed(KeyCode key) const noexcept {
-            return IsKeyPressed(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyHeld(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return keys.test(key) && prevKeys.test(key) && !pressedKeys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyHeld(KeyCode key) const noexcept {
-            return IsKeyHeld(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyReleased(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return releasedKeys.test(key) || (!keys.test(key) && prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyReleased(KeyCode key) const noexcept {
-            return IsKeyReleased(static_cast<uint8_t>(key));
-        }
-
-        // --- Mouse Button Level & Edge Queries (Capture-Aware) ---------------
-
-        [[nodiscard]] bool IsMouseButtonDown(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return keys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept {
-            return IsMouseButtonDown(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonDown(MouseButton button) const noexcept {
-            return IsMouseButtonDown(ToKeyCode(button));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressed(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressed(MouseButton button) const noexcept {
-            return IsMouseButtonPressed(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        [[nodiscard]] bool IsMouseButtonHeld(MouseButton button) const noexcept {
-            const auto key = static_cast<uint8_t>(ToKeyCode(button));
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return keys.test(key) && prevKeys.test(key) && !pressedKeys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleased(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return releasedKeys.test(key) || (!keys.test(key) && prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleased(MouseButton button) const noexcept {
-            return IsMouseButtonReleased(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        // --- Raw Uncaptured Level & Edge Queries -----------------------------
-
-        [[nodiscard]] bool IsKeyDownRaw(uint8_t key) const noexcept {
-            return key != 0 && key < keys.size() && keys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyDownRaw(KeyCode key) const noexcept {
-            return IsKeyDownRaw(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressedRaw(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size()) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressedRaw(KeyCode key) const noexcept {
-            return IsKeyPressedRaw(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyHeldRaw(KeyCode key) const noexcept {
-            const auto k = static_cast<uint8_t>(key);
-            return k != 0 && k < keys.size() && keys.test(k) && prevKeys.test(k) && !pressedKeys.test(k);
-        }
-
-        [[nodiscard]] bool IsKeyReleasedRaw(KeyCode key) const noexcept {
-            const auto k = static_cast<uint8_t>(key);
-            if (k == 0 || k >= keys.size()) {
-                return false;
-            }
-            return releasedKeys.test(k) || (!keys.test(k) && prevKeys.test(k));
-        }
-
-        [[nodiscard]] bool IsMouseButtonDownRaw(uint8_t key) const noexcept {
-            return key != 0 && key < keys.size() && keys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonDownRaw(MouseButton button) const noexcept {
-            return IsMouseButtonDownRaw(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressedRaw(MouseButton button) const noexcept {
-            return IsKeyPressedRaw(ToKeyCode(button));
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleasedRaw(MouseButton button) const noexcept {
-            return IsKeyReleasedRaw(ToKeyCode(button));
-        }
-
-        // --- Modifiers -------------------------------------------------------
-
-        [[nodiscard]] auto ModifiersRaw() const noexcept -> KeyModifiers {
-            KeyModifiers mods = KeyModifiers::None;
-            if (IsKeyDownRaw(KeyCode::LShift) || IsKeyDownRaw(KeyCode::RShift)) {
-                mods |= KeyModifiers::Shift;
-            }
-            if (IsKeyDownRaw(KeyCode::LControl) || IsKeyDownRaw(KeyCode::RControl)) {
-                mods |= KeyModifiers::Ctrl;
-            }
-            if (IsKeyDownRaw(KeyCode::LAlt) || IsKeyDownRaw(KeyCode::RAlt)) {
-                mods |= KeyModifiers::Alt;
-            }
-            if (IsKeyDownRaw(KeyCode::LSuper) || IsKeyDownRaw(KeyCode::RSuper)) {
-                mods |= KeyModifiers::Super;
-            }
-            return mods;
-        }
-
-        [[nodiscard]] auto Modifiers() const noexcept -> KeyModifiers {
-            return wantCaptureKeyboard ? KeyModifiers::None : ModifiersRaw();
-        }
-
-        [[nodiscard]] auto HasModifiers(KeyModifiers required, bool exact = true) const noexcept -> bool {
-            const KeyModifiers current = Modifiers();
-            return exact ? (current == required) : ((current & required) == required);
-        }
-
-        [[nodiscard]] float GetMouseDeltaX() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseDeltaX;
-        }
-
-        [[nodiscard]] float GetMouseDeltaY() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseDeltaY;
-        }
-
-        [[nodiscard]] float GetMouseWheel() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseWheel;
-        }
-    };
-    static_assert(std::is_trivially_copyable_v<InputStateComponent>);
     struct LightComponent {
         LightType    type;
         ZHLN::FVec3 color     = {};

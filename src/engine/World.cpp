@@ -6,6 +6,7 @@
 #include "EngineGlobals.hpp"
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/EngineServices.hpp>
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/World.hpp>
@@ -39,6 +40,7 @@ struct World::Impl {
     VisibilityList visibleEntities;
     VisibilityList visibleShadowEntities;
     CullingStats   cullingStats {};
+    DebugSettings  debugSettings {};
 
     bool joltAcquired = false;
 };
@@ -53,7 +55,6 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
     auto& impl      = *instance->_impl;
 
     impl.registry.RegisterAllComponentsIn<Components>();
-    impl.registry.Create(Components::InputStateComponent {});
 
     AcquireJoltRegistration();
     impl.joltAcquired = true;
@@ -135,6 +136,14 @@ auto World::GetCullingStats() noexcept -> CullingStats& {
 
 auto World::GetCullingStats() const noexcept -> const CullingStats& {
     return _impl->cullingStats;
+}
+
+auto World::GetDebugSettings() noexcept -> DebugSettings& {
+    return _impl->debugSettings;
+}
+
+auto World::GetDebugSettings() const noexcept -> const DebugSettings& {
+    return _impl->debugSettings;
 }
 
 auto World::VisibleEntitiesForServices() noexcept -> VisibilityList& {

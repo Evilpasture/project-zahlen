@@ -23,6 +23,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -790,33 +791,23 @@ auto main(int argc, char* argv[]) -> int {
         auto entities = engine->Entities();
 
         // 1. Mouse Look and edge-triggered handgun equip input.
-        bool equipKeyDown = false;
-        bool viewKeyDown  = false;
-        bool tabKeyDown   = false;
-        for (ZHLN::Entity e: entities.EntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            entities.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
-                equipKeyDown = equipKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
-                viewKeyDown  = viewKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
-                tabKeyDown   = tabKeyDown || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Tab));
-                if (viewState.enabled) {
-                    st.mouseWheel = 0.0f;
-                }
-                if (st.needsResize) {
-                    engine->Graphics().SetResolution(st.newSize);
-                    st.needsResize = false;
-                }
-                if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
-                    if (viewState.enabled) {
-                        viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
-                        viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);
-                    } else {
-                        entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
-                            cameraComp.camera.yaw += ZHLN::DegF{st.GetMouseDeltaX() * 0.15f};
-                            cameraComp.camera.pitch = std::clamp(cameraComp.camera.pitch - ZHLN::DegF{st.GetMouseDeltaY() * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
-                        });
-                    }
-                }
-            });
+        auto& st           = engine->GetInput().MutableSeatKeyboardMouse();
+        bool  equipKeyDown = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
+        bool  viewKeyDown  = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+        bool  tabKeyDown   = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Tab));
+        if (viewState.enabled) {
+            st.mouseWheel = 0.0f;
+        }
+        if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+            if (viewState.enabled) {
+                viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
+                viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);
+            } else {
+                entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+                    cameraComp.camera.yaw += ZHLN::DegF{st.GetMouseDeltaX() * 0.15f};
+                    cameraComp.camera.pitch = std::clamp(cameraComp.camera.pitch - ZHLN::DegF{st.GetMouseDeltaY() * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
+                });
+            }
         }
         if (equipKeyDown && !equipKeyWasDown) {
             handgunEquipped = !handgunEquipped;

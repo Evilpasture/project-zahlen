@@ -26,6 +26,7 @@ module;
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -691,27 +692,19 @@ void OnFileDropped(void* userdata, const ZHLN::FileDrop* files, uint32_t count) 
 }
 
 void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
-    auto entities = engine.Entities();
-    auto ents     = entities.EntitiesWith<ZHLN::Components::InputStateComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    const auto input = entities.Get<ZHLN::Components::InputStateComponent>(ents[0]);
-    if (!input) {
-        return;
-    }
+    const auto& input = engine.GetInput().SeatKeyboardMouse();
 
     // The scene explorer panel owns input inside its screen region (once shown).
-    const bool overExplorer = state.loaded && (input->mouseX >= 0.0f) && (input->mouseX <= kExplorerWidth);
+    const bool overExplorer = state.loaded && (input.mouseX >= 0.0f) && (input.mouseX <= kExplorerWidth);
     if (overExplorer) {
         return;
     }
 
-    const float dx  = input->mouseDeltaX;
-    const float dy  = input->mouseDeltaY;
-    const bool  lmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool  rmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    const bool  mmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
+    const float dx  = input.mouseDeltaX;
+    const float dy  = input.mouseDeltaY;
+    const bool  lmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
+    const bool  rmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
+    const bool  mmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
 
     constexpr float kOrbitSpeed = 0.30f;
     constexpr float kPanSpeed   = 0.0015f;
@@ -733,13 +726,13 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.target += (-camRight * dx + camUp * dy) * scale;
     }
 
-    if (input->mouseWheel != 0.0f) {
-        state.distance *= std::exp(-input->mouseWheel * kZoomSpeed);
+    if (input.mouseWheel != 0.0f) {
+        state.distance *= std::exp(-input.mouseWheel * kZoomSpeed);
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 
     const FVec3 dir = OrbitDirection(state.yaw, state.pitch);
-    entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](ZHLN::Components::CameraComponent& cameraComp) {
+    engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](ZHLN::Components::CameraComponent& cameraComp) {
         ZHLN::Camera& cam = cameraComp.camera;
         cam.position      = state.target - dir * state.distance;
         cam.yaw           = ZHLN::DegF{state.yaw};

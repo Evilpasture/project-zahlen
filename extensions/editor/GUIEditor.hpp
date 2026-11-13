@@ -41,6 +41,7 @@ namespace ZHLN {
 class Engine;
 class Entities;
 struct Camera;
+struct InputState;
 }
 
 namespace ZHLN::GUI {
@@ -184,9 +185,9 @@ struct ComponentKind {
 // Runs the Blender-style modal transform for this frame: enters a mode on
 // G/R/S press edges (plain S only -- a Ctrl+S save chord never starts Scale),
 // manipulates the captured entity from the mouse ray, and confirms or cancels
-// it. Reads raw input levels from the registry's InputStateComponent
-// singleton and writes the entity's TransformComponent live, so the world
-// preview follows the pointer before confirmation.
+// it. Reads raw input levels from `input` and writes the entity's
+// TransformComponent live, so the world preview follows the pointer before
+// confirmation.
 //
 // Call once per frame BEFORE camera control and viewport picking: cancel and
 // confirm then win over the global Escape / click-to-select bindings on the
@@ -207,11 +208,12 @@ struct SceneViewport {
 };
 
 ZHLN_STATIC_API void UpdateTransformMode(
-    ZHLN::Entities& reg,
-    EditorState&         state,
-    const Camera&        camera,
-    const SceneViewport& viewport,
-    bool                 uiOwnsInput
+    ZHLN::Entities&          reg,
+    const ZHLN::InputState&  input,
+    EditorState&             state,
+    const Camera&            camera,
+    const SceneViewport&     viewport,
+    bool                     uiOwnsInput
 ) noexcept;
 
 // Draws the scene hierarchy: one selectable row per named entity that is not

@@ -233,19 +233,6 @@ auto main(int argc, char* argv[]) -> int {
         engine->ProcessEvents();
         const float dt = clock.Tick();
 
-        {
-            auto entities = engine->Entities();
-            bool resized  = false;
-            if (const auto st = entities.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
-                engine->Graphics().SetResolution(st->newSize);
-                entities.PatchSingleton<ZHLN::Components::InputStateComponent>([](auto& input) { input.needsResize = false; });
-                resized = true;
-            }
-            if (resized) {
-                continue;
-            }
-        }
-
         const auto result = engine->Tick(dt);
         if (!result) {
             ZHLN::LogError("[CDNMap] frame failed: {}", result.error());

@@ -184,7 +184,6 @@ constexpr std::array kPublishedComponents {
     Publish<Components::AudioSourceComponent>(),
     Publish<Components::PlayerTagComponent>(),
     Publish<Components::PlayerSeatComponent>(),
-    Publish<Components::DebugSettingsComponent>(),
 };
 
 [[nodiscard]] auto FindPublished(StringView typeName) noexcept -> const PublishedComponent* {
@@ -309,6 +308,14 @@ public:
 
     void SetFreezeFrustum(bool freeze) noexcept override {
         m_engine->State().SetFreezeFrustum(freeze);
+    }
+
+    [[nodiscard]] int PhysicsDrawMode() const noexcept override {
+        return m_engine->State().PhysicsDrawMode();
+    }
+
+    void SetPhysicsDrawMode(int mode) noexcept override {
+        m_engine->State().SetPhysicsDrawMode(mode);
     }
 
     // -------------------------------------------------------- IGraphicsDevice

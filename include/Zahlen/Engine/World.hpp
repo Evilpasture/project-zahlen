@@ -20,6 +20,7 @@ class PhysicsContext;
 class InputContext;
 class ArticulationSystem;
 struct CullingStats;
+struct DebugSettings;
 
 namespace ECS {
 class Registry;
@@ -53,6 +54,8 @@ class ZHLN_API World {
     auto GetArticulationSystem() -> ArticulationSystem&;
     auto GetCullingStats() noexcept -> CullingStats&;
     [[nodiscard]] auto GetCullingStats() const noexcept -> const CullingStats&;
+    auto GetDebugSettings() noexcept -> DebugSettings&;
+    [[nodiscard]] auto GetDebugSettings() const noexcept -> const DebugSettings&;
 
     // Read-only views onto the engine-owned visibility lists. No container type
     // crosses this boundary, and no caller can clear or resize engine state.

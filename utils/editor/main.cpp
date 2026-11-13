@@ -22,6 +22,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -109,13 +110,9 @@ constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
-    auto reg = engine.Entities();
-    float mouseX = 0.0f;
-    float mouseY = 0.0f;
-    if (auto st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
-        mouseX = st->mouseX;
-        mouseY = st->mouseY;
-    }
+    const auto& st     = engine.GetInput().SeatKeyboardMouse();
+    const float mouseX = st.mouseX;
+    const float mouseY = st.mouseY;
 
     if (vp.width == 0 || vp.height == 0) {
         return {};
@@ -260,7 +257,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         engine.ProcessEvents();
         if (!engine.IsRunning()) break;
 
-        auto  state = entities.GetSingleton<ZHLN::Components::InputStateComponent>();
+        const auto* state = &engine.GetInput().SeatKeyboardMouse();
         const auto cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
         if (!cameraComp) return std::unexpected(ZHLN::AppError::SceneInitFailed);
         const ZHLN::Camera cam = cameraComp->camera;
@@ -327,8 +324,8 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // the user meant as "abort the manipulation".
         const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
         ZHLN::Editor::UpdateTransformMode(
-            entities, s_NativeEditorState, cam, ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height},
-            uiCapturesKeyboard
+            entities, *state, s_NativeEditorState, cam,
+            ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height}, uiCapturesKeyboard
         );
 
         // Escape never quits the session -- quitting belongs to the window's
@@ -343,7 +340,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         escWasDown = escDown;
 
         // Ctrl+S saves the world as a scene document. Edge-detected by hand:
-        // InputStateComponent carries key *levels*, not presses, so a held
+        // InputState carries key *levels*, not presses, so a held
         // chord would write the file once per frame. Gated on the same keyboard
         // capture as Escape and the camera, or Ctrl+S typed into a text field
         // would save too.
@@ -425,13 +422,6 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             if (spawned != ZHLN::Entity::Null()) {
                 s_NativeEditorState.selectedEntity = spawned;
             }
-        }
-
-        if (state && state->needsResize) {
-            engine.Graphics().SetResolution(state->newSize);
-            const auto inputs = entities.EntitiesWith<ZHLN::Components::InputStateComponent>();
-            if (!inputs.empty()) entities.Patch<ZHLN::Components::InputStateComponent>(inputs.front(), [](auto& input) { input.needsResize = false; });
-            continue;
         }
 
         {

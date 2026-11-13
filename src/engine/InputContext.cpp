@@ -12,6 +12,10 @@
 
 namespace ZHLN {
 
+static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<KeyCode>() == kKeyCodeCount, "KeyCode enumerators must stay contiguous with kKeyCodeCount");
+static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<GamepadButton>() == kGamepadButtonCount, "GamepadButton enumerators must stay contiguous");
+static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<GamepadAxis>() == kGamepadAxisCount, "GamepadAxis enumerators must stay contiguous");
+
 namespace {
 
 [[nodiscard]] constexpr auto IsModifierKeyCode(KeyCode key) noexcept -> bool {
@@ -47,10 +51,10 @@ struct BindingEvalSample {
 };
 
 [[nodiscard]] auto CheckBindingModifiers(
-    const Components::InputStateComponent& kbm,
-    KeyModifiers                           required,
-    bool                                   strict,
-    bool                                   rawBypass
+    const InputState& kbm,
+    KeyModifiers      required,
+    bool              strict,
+    bool              rawBypass
 ) noexcept -> bool {
     const KeyModifiers current = rawBypass ? kbm.ModifiersRaw() : kbm.Modifiers();
     if (strict) {
@@ -59,7 +63,7 @@ struct BindingEvalSample {
     return (current & required) == required;
 }
 
-[[nodiscard]] auto KeyDownForBinding(const Components::InputStateComponent& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
+[[nodiscard]] auto KeyDownForBinding(const InputState& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
     if (key == 0 || key >= kKeyCodeCount) {
         return false;
     }
@@ -70,7 +74,7 @@ struct BindingEvalSample {
     return rawBypass ? kbm.IsKeyDownRaw(key) : kbm.IsKeyDown(key);
 }
 
-[[nodiscard]] auto KeyPressedEdgeForBinding(const Components::InputStateComponent& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
+[[nodiscard]] auto KeyPressedEdgeForBinding(const InputState& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
     if (key == 0 || key >= kKeyCodeCount) {
         return false;
     }
@@ -82,12 +86,12 @@ struct BindingEvalSample {
 }
 
 [[nodiscard]] auto EvaluateSingleBinding(
-    const InputBinding&                    binding,
-    ActionKind                             actionKind,
-    float                                  actionThreshold,
-    const Components::InputStateComponent* kbm,
-    std::span<const GamepadState* const>   seatGamepads,
-    const SeatConsumptionMask&             consumed
+    const InputBinding&                  binding,
+    ActionKind                           actionKind,
+    float                                actionThreshold,
+    const InputState*                    kbm,
+    std::span<const GamepadState* const> seatGamepads,
+    const SeatConsumptionMask&           consumed
 ) noexcept -> BindingEvalSample {
     BindingEvalSample out {};
 
@@ -422,10 +426,10 @@ struct BindingEvalSample {
 }
 
 void MarkBindingConsumed(
-    const InputBinding&                    binding,
-    const Components::InputStateComponent* kbm,
-    std::span<const GamepadState* const>   seatGamepads,
-    SeatConsumptionMask&                   consumed
+    const InputBinding&                  binding,
+    const InputState*                    kbm,
+    std::span<const GamepadState* const> seatGamepads,
+    SeatConsumptionMask&                 consumed
 ) noexcept {
     const auto markKey = [&](uint8_t k) noexcept {
         if (k != 0 && k < kKeyCodeCount) {
@@ -916,6 +920,18 @@ void InputContext::InjectChar(uint32_t codepoint, PlayerSeat targetSeat) noexcep
     _seats[targetSeat].kbm.QueueChar(codepoint);
 }
 
+void InputContext::InjectResize(Extent2D extent) noexcept {
+    _pendingResize = extent;
+}
+
+auto InputContext::ConsumePendingResize() noexcept -> Optional<Extent2D> {
+    return std::exchange(_pendingResize, Optional<Extent2D> {});
+}
+
+auto InputContext::HasPendingResize() const noexcept -> bool {
+    return _pendingResize.has_value();
+}
+
 void InputContext::SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat) noexcept {
     if (seat >= kMaxPlayerSeats) {
         return;
@@ -1167,7 +1183,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
     for (PlayerSeat seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
         SeatRuntime& seat = _seats[seatIdx];
 
-        const Components::InputStateComponent* kbm = seat.receivesKeyboardMouse ? &seat.kbm : nullptr;
+        const InputState* kbm = seat.receivesKeyboardMouse ? &seat.kbm : nullptr;
 
         std::array<const GamepadState*, kMaxGamepads> seatPadBuf {};
         size_t                                        seatPadCount = 0;
@@ -1370,11 +1386,11 @@ auto InputContext::SeatReceivesKeyboardMouse(PlayerSeat seat) const noexcept -> 
     return seat < kMaxPlayerSeats && _seats[seat].receivesKeyboardMouse;
 }
 
-auto InputContext::SeatKeyboardMouse(PlayerSeat seat) const noexcept -> const Components::InputStateComponent& {
+auto InputContext::SeatKeyboardMouse(PlayerSeat seat) const noexcept -> const InputState& {
     return (seat < kMaxPlayerSeats) ? _seats[seat].kbm : _nullKbm;
 }
 
-auto InputContext::MutableSeatKeyboardMouse(PlayerSeat seat) noexcept -> Components::InputStateComponent& {
+auto InputContext::MutableSeatKeyboardMouse(PlayerSeat seat) noexcept -> InputState& {
     return (seat < kMaxPlayerSeats) ? _seats[seat].kbm : _nullKbm;
 }
 

@@ -13,6 +13,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -27,7 +28,7 @@ namespace {
 
 struct FreeCamOptOutComponent {};
 
-void Drive(Components::CameraComponent& cc, const Components::InputStateComponent& input, const FreeCamComponent& knobs, float dt) {
+void Drive(Components::CameraComponent& cc, const InputState& input, const FreeCamComponent& knobs, float dt) {
     if (!knobs.enabled) {
         return;
     }
@@ -98,18 +99,14 @@ void SeedBootCamera(SeedQuery query, ECS::EntityCommandBuffer& commands) {
     }
 }
 
-using FreeCamQuery = ECS::Query<const Components::InputStateComponent, const FreeCamTagComponent,
-                                const FreeCamComponent, Components::CameraComponent&>;
-void ApplyTyped(FreeCamQuery query, FrameDt frameDt) {
-    const auto input = query.GetSingleton<Components::InputStateComponent>();
-    if (!input) {
-        return;
-    }
+using FreeCamQuery = ECS::Query<const FreeCamTagComponent, const FreeCamComponent, Components::CameraComponent&>;
+void ApplyTyped(FreeCamQuery query, ECS::Res<InputContext> input, FrameDt frameDt) {
+    const InputState& kbm = input->SeatKeyboardMouse();
     for (Entity e: query.Entities<FreeCamTagComponent>()) {
         const auto knobs = query.Get<FreeCamComponent>(e);
         const FreeCamComponent defaults {};
         const FreeCamComponent& cfg = knobs ? *knobs : defaults;
-        query.Patch<Components::CameraComponent>(e, [&](auto& cc) { Drive(cc, *input, cfg, frameDt.value); });
+        query.Patch<Components::CameraComponent>(e, [&](auto& cc) { Drive(cc, kbm, cfg, frameDt.value); });
     }
 }
 

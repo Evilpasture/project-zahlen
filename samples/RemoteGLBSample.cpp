@@ -107,6 +107,7 @@
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -890,7 +891,7 @@ void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
     orbit.maxDistance    = std::max(subject.radius * 60.0f, 100.0f);
 }
 
-void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent& input, float dt) {
+void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
     const bool  lmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
     const bool  rmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
     const bool  mmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
@@ -1090,7 +1091,7 @@ void SelectModel(SampleState& state, int index) {
 
 // Edge detection for the handful of keys the sample owns: the level is in the
 // input singleton, the previous frame's level is here.
-[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::Components::InputStateComponent& input, ZHLN::KeyCode key) -> bool {
+[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::InputState& input, ZHLN::KeyCode key) -> bool {
     const uint8_t code = static_cast<uint8_t>(key);
     const bool    down = input.IsKeyDownRaw(code);
     const bool    was  = state.keyWasDown[code];
@@ -1159,20 +1160,7 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void HandleInput(ZHLN::Engine& engine, SampleState& state) {
-    auto       ents     = engine.Entities();
-    const auto entities = ents.EntitiesWith<ZHLN::Components::InputStateComponent>();
-    if (entities.empty()) {
-        return;
-    }
-    const auto input = ents.Get<ZHLN::Components::InputStateComponent>(entities[0]);
-    if (!input) {
-        return;
-    }
-
-    if (input->needsResize) {
-        engine.Graphics().SetResolution(input->newSize);
-        ents.Patch<ZHLN::Components::InputStateComponent>(entities[0], [](auto& st) -> auto { st.needsResize = false; });
-    }
+    const ZHLN::InputState* input = &engine.GetInput().SeatKeyboardMouse();
 
     // The panel owns input inside its strip, the way the inspector's explorer
     // does: a drag that starts on the HUD is not a drag around the subject.

@@ -19,14 +19,8 @@ namespace ZHLN::Character {
 namespace {
 [[nodiscard]] auto ResolveSeatInputState(
     const InputContext& input,
-    PlayerInputSystem::InputQuery query,
     PlayerSeat seat
-) noexcept -> const Components::InputStateComponent* {
-    if (seat == kPrimarySeat) {
-        if (const auto singleton = query.GetSingleton<Components::InputStateComponent>()) {
-            return &(*singleton);
-        }
-    }
+) noexcept -> const InputState* {
     if (input.SeatReceivesKeyboardMouse(seat)) {
         return &input.SeatKeyboardMouse(seat);
     }
@@ -43,7 +37,7 @@ void PlayerInputSystem::Update(InputQuery query, ECS::Res<InputContext> input) {
                                             .transform([](const Components::PlayerSeatComponent& s) { return s.seat; })
                                             .value_or(kPrimarySeat);
 
-            const auto* kbm     = ResolveSeatInputState(inputCtx, query, seatComp);
+            const auto* kbm     = ResolveSeatInputState(inputCtx, seatComp);
             const auto  gamepad = inputCtx.PrimaryGamepadForSeat(seatComp);
 
             float moveX = 0.0f;

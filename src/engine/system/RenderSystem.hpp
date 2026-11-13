@@ -26,8 +26,8 @@ class ZHLN_API RenderSystem {
     // It is not a scheduler access declaration. A future extraction boundary
     // can move scene gathering out of presentation without changing frame order.
     using RenderFrameQuery = ECS::Query<
-        const Components::CameraComponent, const Components::MainCameraTagComponent, const Components::DebugSettingsComponent,
-        const Components::EnvironmentMapComponent, const Components::InputStateComponent, const Components::MeshComponent,
+        const Components::CameraComponent, const Components::MainCameraTagComponent,
+        const Components::EnvironmentMapComponent, const Components::MeshComponent,
         const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&, const Components::MorphTargetComponent,
         const Components::WorldTransformComponent, const Components::TransformComponent, const Components::PBRComponent,
         const Components::CSGComponent, const Components::AmbientCubeComponent, const Components::LightComponent,
@@ -41,7 +41,7 @@ class ZHLN_API RenderSystem {
   private:
     static FrameOutcome<FrameSkipped> RenderMain(
         Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
-        int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt
+        Mat4x4& outShadowProjView, float dt
     );
 
     using RenderDebugQuery = ECS::Query<const Components::CameraComponent>;

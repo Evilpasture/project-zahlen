@@ -700,9 +700,17 @@ struct COMBoundarySuite {
                 state->ResetCullingStats();
                 ZHLN::Test::ExpectTrue(state->CullingStats().EnableCulling);
                 ZHLN::Test::ExpectFalse(state->CullingStats().FreezeFrustum);
+
+                ZHLN::Test::ExpectEq(state->PhysicsDrawMode(), 0);
+                state->SetPhysicsDrawMode(2);
+                ZHLN::Test::ExpectEq(state->PhysicsDrawMode(), 2);
+                state->SetPhysicsDrawMode(0);
+                ZHLN::Test::ExpectEq(state->PhysicsDrawMode(), 0);
             }
 
             ZHLN::Test::ExpectTrue(entities->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
+            ZHLN::Test::ExpectFalse(entities->SingletonEntity("ZHLN::Components::InputStateComponent").HasValue());
+            ZHLN::Test::ExpectFalse(entities->SingletonEntity("ZHLN::Components::DebugSettingsComponent").HasValue());
             engine->ClearScene();
             ZHLN::Test::ExpectTrue(entities->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
             return {};

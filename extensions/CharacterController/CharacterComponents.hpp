@@ -12,7 +12,7 @@ namespace ZHLN::Character {
 // substep. The constants (speed 7, sprint 1.65x, jump force 12, gravity 32
 // in the integrator) are this controller's tuning, not engine substrate --
 // core keeps PhysicsContext::CreateCharacter / CharacterVirtual and the raw
-// InputStateComponent; interpreting keys into this state lives here.
+// InputState; interpreting keys into this state lives here.
 struct MovementComponent {
     Quat orientation     = Quat::Identity();
     Quat prevOrientation = Quat::Identity();

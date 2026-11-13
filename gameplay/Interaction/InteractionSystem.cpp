@@ -13,6 +13,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -114,7 +115,8 @@ void InteractionSystem::Update(
     InteractionQuery query,
     ECS::EntityCommandBuffer& commands,
     ZHLN::Optional<PhysicsContext&> physics,
-    ZHLN::Optional<AudioContext&> audio
+    ZHLN::Optional<AudioContext&> audio,
+    ZHLN::Optional<const InputContext&> input
 ) {
     const auto dispatch = query.As<DispatchQuery>();
 
@@ -136,8 +138,7 @@ void InteractionSystem::Update(
 
     const FVec3 playerPos = playerTrans->position;
 
-    auto        inputState          = query.GetSingleton<Components::InputStateComponent>();
-    const bool  interactPressed     = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
+    const bool  interactPressed     = input && input->SeatKeyboardMouse().IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     const bool  interactJustPressed = interactPressed && !wasInteractPressed;
     wasInteractPressed              = interactPressed;

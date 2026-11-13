@@ -26,6 +26,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -700,11 +701,10 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     const auto velocity = physics.CharacterVelocity(state.localControllerBody);
     (void)dt;
 
-    if (auto input = entities.GetSingleton<Components::InputStateComponent>()) {
-        const bool jumpDown = input->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
-        if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
-        state.wasJumpDown = jumpDown;
-    }
+    const auto& input    = engine.GetInput().SeatKeyboardMouse();
+    const bool  jumpDown = input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
+    if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
+    state.wasJumpDown = jumpDown;
     state.jumpRemaining = std::max(0.0f, state.jumpRemaining - std::max(0.0f, dt));
     HumanoidState stateValue = HumanoidState::Idle;
     if (!movement->isGrounded) stateValue = state.jumpRemaining > 0.0f ? HumanoidState::Jumping : HumanoidState::Freefall;

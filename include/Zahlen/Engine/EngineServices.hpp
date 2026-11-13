@@ -28,6 +28,10 @@ class AudioContext;
 class InputContext;
 class ArticulationSystem;
 
+struct DebugSettings {
+    int physicsDrawMode = 0;
+};
+
 // Distinct parameter types for the two otherwise identically typed output
 // lists. They are bundle members of the render domain, so a system resolves one
 // by its type rather than by position. `values` is the engine-owned producer,
@@ -65,8 +69,10 @@ struct RenderServices {
     RenderContext&          render;
     SceneData&              scene;
     AssetManager&           assets;
+    InputContext&           input;
     ECS::ExtensionServices& extensions;
     CullingStats&           cullingStats;
+    DebugSettings&          debugSettings;
     VisibleEntities         visible;
     VisibleShadowEntities   shadow;
 };

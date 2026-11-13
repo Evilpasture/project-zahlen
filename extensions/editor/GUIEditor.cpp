@@ -249,7 +249,7 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 // ============================================================================
 //
 // The mode is a small state machine over raw input LEVELS, edge-detected
-// against EditorState::transformPrevInput: InputStateComponent carries key
+// against EditorState::transformPrevInput: InputState carries key
 // levels, not presses, exactly like the host's Ctrl+S handling.
 //
 // All manipulation math is camera-ray based (the same unproject
@@ -258,12 +258,9 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 
 namespace {
 
-auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) noexcept -> TransformInput {
-    if (!input) {
-        return TransformInput::None;
-    }
+auto ReadTransformInput(const ZHLN::InputState& input) noexcept -> TransformInput {
     TransformInput bits = TransformInput::None;
-    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
+    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input.IsKeyDownRaw(static_cast<uint8_t>(k)); };
     if (key(ZHLN::KeyCode::G))
         bits |= TransformInput::G;
     if (key(ZHLN::KeyCode::R))
@@ -282,9 +279,9 @@ auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) 
         bits |= TransformInput::Esc;
     if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl))
         bits |= TransformInput::Ctrl;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)))
+    if (input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)))
         bits |= TransformInput::LMB;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))
+    if (input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))
         bits |= TransformInput::RMB;
     return bits;
 }
@@ -374,8 +371,9 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
     return kSpawnShapeNames;
 }
 
-void UpdateTransformMode(ZHLN::Entities& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput) noexcept {
-    const auto input = reg.GetSingleton<Comp::InputStateComponent>();
+void UpdateTransformMode(
+    ZHLN::Entities& reg, const ZHLN::InputState& input, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput
+) noexcept {
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
         // held when the field lost focus is not seen as a fresh press.
@@ -384,14 +382,14 @@ void UpdateTransformMode(ZHLN::Entities& reg, EditorState& state, const Camera& 
     }
     const TransformInput level   = ReadTransformInput(input);
     const TransformInput pressed = level & ~state.transformPrevInput;
-    const float          mx      = input ? input->mouseX : -1.0f;
-    const float          my      = input ? input->mouseY : -1.0f;
+    const float          mx      = input.mouseX;
+    const float          my      = input.mouseY;
 
     if (state.transformMode == EditorState::TransformMode::None) {
         // Enter a mode only on a live selection. Plain S starts Scale, but a
         // Ctrl+S is the save chord and must never grab the object.
         EditorState::TransformMode mode = EditorState::TransformMode::None;
-        if (input && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
+        if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
             if ((pressed & TransformInput::G) != TransformInput::None) {
                 mode = EditorState::TransformMode::Move;
             } else if ((pressed & TransformInput::R) != TransformInput::None) {

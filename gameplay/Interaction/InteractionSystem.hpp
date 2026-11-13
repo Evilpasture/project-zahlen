@@ -15,6 +15,7 @@ namespace ZHLN {
 class Engine;
 class PhysicsContext;
 class AudioContext;
+class InputContext;
 namespace ECS { class EntityCommandBuffer; }
 
 namespace Interaction {
@@ -22,7 +23,7 @@ namespace Interaction {
 // Every family read or written by interaction, including teleport and labels.
 using InteractionQuery = ECS::Query<
     const Character::MovementComponent, Components::TransformComponent&, TriggerComponent&,
-    const Components::InputStateComponent, PickupComponent&, const ItemBaseComponent,
+    PickupComponent&, const ItemBaseComponent,
     ContainerComponent&, Components::PhysicsComponent&, const Components::MeshComponent,
     const UsableComponent, DoorComponent&, ButtonComponent&,
     const BSPEntityMetadataComponent, const Components::NameComponent,
@@ -33,7 +34,8 @@ using InteractionQuery = ECS::Query<
 class InteractionSystem {
   public:
     static void Update(InteractionQuery query, ECS::EntityCommandBuffer& commands,
-                       ZHLN::Optional<PhysicsContext&> physics = std::nullopt, ZHLN::Optional<AudioContext&> audio = std::nullopt);
+                       ZHLN::Optional<PhysicsContext&> physics = std::nullopt, ZHLN::Optional<AudioContext&> audio = std::nullopt,
+                       ZHLN::Optional<const InputContext&> input = std::nullopt);
 };
 
 // Simulates linear (sliding) and angular (rotating) door movement,

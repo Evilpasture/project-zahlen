@@ -18,7 +18,7 @@ namespace Character {
 // intent translation remains in PlayerIntent before the fixed substeps.
 class PlayerInputSystem {
   public:
-    using InputQuery = ECS::Query<InputComponent&, const Components::PlayerSeatComponent, const Components::InputStateComponent>;
+    using InputQuery = ECS::Query<InputComponent&, const Components::PlayerSeatComponent>;
     using IntentQuery = ECS::Query<MovementComponent&, const InputComponent, const Components::CameraComponent,
                                    const Components::MainCameraTagComponent, const FreeCam::FreeCamTagComponent>;
     static void Update(InputQuery query, ECS::Res<InputContext> input);

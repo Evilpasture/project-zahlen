@@ -224,13 +224,15 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     if (_impl->renderServices != nullptr) {
         std::destroy_at(_impl->renderServices.get());
         std::construct_at(_impl->renderServices.get(), RenderServices {
-            .render       = _impl->kernel->GetRenderContext(),
-            .scene        = _impl->sceneData,
-            .assets       = _impl->kernel->GetAssetManager(),
-            .extensions   = _impl->extensions,
-            .cullingStats = _impl->world->GetCullingStats(),
-            .visible      = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow       = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+            .render        = _impl->kernel->GetRenderContext(),
+            .scene         = _impl->sceneData,
+            .assets        = _impl->kernel->GetAssetManager(),
+            .input         = _impl->world->GetInput(),
+            .extensions    = _impl->extensions,
+            .cullingStats  = _impl->world->GetCullingStats(),
+            .debugSettings = _impl->world->GetDebugSettings(),
+            .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
         });
     }
     PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
@@ -273,52 +275,27 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->world = std::move(world_res.value());
 
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        auto* world = static_cast<World*>(userdata);
-        auto* reg   = &world->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->SetKey(static_cast<uint8_t>(key), pressed);
-        if (pressed) {
-            state->QueueKeyPress(key);
-        }
-        world->GetInput().InjectKey(key, pressed);
+        static_cast<World*>(userdata)->GetInput().InjectKey(key, pressed);
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        auto* world = static_cast<World*>(userdata);
-        auto* reg   = &world->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->ApplyLocalMotion(x, y);
-        world->GetInput().InjectMouseMove(x, y);
+        static_cast<World*>(userdata)->GetInput().InjectMouseMove(x, y);
     };
 
     auto onMouseRelative = [](void* userdata, float x, float y, float dx, float dy) -> void {
-        auto* world = static_cast<World*>(userdata);
-        auto* reg   = &world->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->ApplyRelativeMotion(x, y, dx, dy);
-        world->GetInput().InjectMouseRelative(x, y, dx, dy);
+        static_cast<World*>(userdata)->GetInput().InjectMouseRelative(x, y, dx, dy);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
-        auto* world = static_cast<World*>(userdata);
-        auto* reg   = &world->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->ApplyWheel(delta);
-        world->GetInput().InjectMouseScroll(delta);
+        static_cast<World*>(userdata)->GetInput().InjectMouseScroll(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
-        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->ApplyResize(extent);
+        static_cast<World*>(userdata)->GetInput().InjectResize(extent);
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* world = static_cast<World*>(userdata);
-        auto* reg   = &world->GetRegistry();
-        auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
-        state->QueueChar(codepoint);
-        world->GetInput().InjectChar(codepoint);
+        static_cast<World*>(userdata)->GetInput().InjectChar(codepoint);
     };
 
     auto onGamepadConnection = [](void* userdata, uint8_t slot, bool connected, std::string_view name) -> void {
@@ -398,46 +375,30 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    auto& reg        = _impl->world->GetRegistry();
-    auto& input      = _impl->world->GetInput();
-    auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
-
+    auto& input = _impl->world->GetInput();
     input.BeginFrame();
-    if (inputState) {
-        inputState->BeginFrame();
-    }
-
     _impl->kernel->ProcessEvents();
     SynchronizeResize();
-
-    if (inputState) {
-        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
-    }
     input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 void Engine::SynchronizeResize() {
-    auto state = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>();
-    if (!state || !state->needsResize) {
+    const auto resized = _impl->world->GetInput().ConsumePendingResize();
+    if (!resized) {
         return;
     }
     const Extent2D actual = _impl->kernel->GetPlatformHost().GetSize();
-    if (state->newSize.width != actual.width || state->newSize.height != actual.height) {
+    if (resized->width != actual.width || resized->height != actual.height) {
         // Headless/TTY receivers can submit a size without a primary-window
         // extent change; windowed targets were already handled by the Kernel.
-        _impl->kernel->GetRenderContext().SetResolution(state->newSize);
+        _impl->kernel->GetRenderContext().SetResolution(*resized);
     }
-    state->needsResize = false;
 }
 
 void Engine::PollLateInput() {
     _impl->kernel->ProcessEvents();
     SynchronizeResize();
-    auto& input = _impl->world->GetInput();
-    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
-        input.SyncCaptureFlags(inputState->wantCaptureKeyboard, inputState->wantCaptureMouse);
-    }
-    input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
+    _impl->world->GetInput().RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
@@ -519,6 +480,12 @@ void EngineState::SetCullingEnabled(bool enabled) noexcept {
 }
 void EngineState::SetFreezeFrustum(bool freeze) noexcept {
     _engine->_impl->world->GetCullingStats().FreezeFrustum = freeze;
+}
+auto EngineState::PhysicsDrawMode() const noexcept -> int {
+    return _engine->_impl->world->GetDebugSettings().physicsDrawMode;
+}
+void EngineState::SetPhysicsDrawMode(int mode) noexcept {
+    _engine->_impl->world->GetDebugSettings().physicsDrawMode = mode;
 }
 auto EngineState::Configuration() const noexcept -> EngineConfig {
     return _engine->_impl->kernel->GetConfig();
@@ -619,13 +586,15 @@ void Engine::EnsureSystemGraphs() {
         });
 
         _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
-            .render       = render,
-            .scene        = _impl->sceneData,
-            .assets       = _impl->kernel->GetAssetManager(),
-            .extensions   = _impl->extensions,
-            .cullingStats = _impl->world->GetCullingStats(),
-            .visible      = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow       = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+            .render        = render,
+            .scene         = _impl->sceneData,
+            .assets        = _impl->kernel->GetAssetManager(),
+            .input         = _impl->world->GetInput(),
+            .extensions    = _impl->extensions,
+            .cullingStats  = _impl->world->GetCullingStats(),
+            .debugSettings = _impl->world->GetDebugSettings(),
+            .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+            .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
         });
 
         _impl->updateGraph       = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
@@ -800,39 +769,38 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
         },
     };
 
-    if (auto input = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
-        out.mouseX       = input->mouseX;
-        out.mouseY       = input->mouseY;
-        out.mouseScroll  = input->mouseWheel;
-        out.mouseDown[0] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
-        out.mouseDown[1] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
-        out.mouseDown[2] = input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
+    auto& input      = _impl->world->GetInput().MutableSeatKeyboardMouse();
+    out.mouseX       = input.mouseX;
+    out.mouseY       = input.mouseY;
+    out.mouseScroll  = input.mouseWheel;
+    out.mouseDown[0] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    out.mouseDown[1] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
+    out.mouseDown[2] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
 
-        KeyModifiers mods = KeyModifiers::None;
-        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift))) {
-            mods |= KeyModifiers::Shift;
-        }
-        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl))) {
-            mods |= KeyModifiers::Ctrl;
-        }
-        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LAlt)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RAlt))) {
-            mods |= KeyModifiers::Alt;
-        }
-        if (input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LSuper)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RSuper))) {
-            mods |= KeyModifiers::Super;
-        }
-        out.modifiers = mods;
-
-        for (size_t i = 0; i < input->queuedInputCount; ++i) {
-            const auto& queued = input->queuedInput[i];
-            if (queued.isChar) {
-                _impl->uiCharacterStream.push_back(queued.value);
-            } else {
-                _impl->uiPressedKeys.push_back(static_cast<KeyCode>(queued.value));
-            }
-        }
-        input->ClearQueuedInput();
+    KeyModifiers mods = KeyModifiers::None;
+    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift))) {
+        mods |= KeyModifiers::Shift;
     }
+    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl))) {
+        mods |= KeyModifiers::Ctrl;
+    }
+    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LAlt)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RAlt))) {
+        mods |= KeyModifiers::Alt;
+    }
+    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LSuper)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RSuper))) {
+        mods |= KeyModifiers::Super;
+    }
+    out.modifiers = mods;
+
+    for (size_t i = 0; i < input.queuedInputCount; ++i) {
+        const auto& queued = input.queuedInput[i];
+        if (queued.isChar) {
+            _impl->uiCharacterStream.push_back(queued.value);
+        } else {
+            _impl->uiPressedKeys.push_back(static_cast<KeyCode>(queued.value));
+        }
+    }
+    input.ClearQueuedInput();
 
     out.pressedKeys     = _impl->uiPressedKeys;
     out.characterStream = _impl->uiCharacterStream;
@@ -841,10 +809,6 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
 
 void Engine::SubmitUI(UIDrawData uiData) noexcept {
     SetPendingUIData(uiData);
-    if (auto inputState = _impl->world->GetRegistry().GetSingleton<Components::InputStateComponent>()) {
-        inputState->wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
-        inputState->wantCaptureMouse    = uiData.wantsCaptureMouse;
-    }
     _impl->world->GetInput().SyncCaptureFlags(uiData.wantsCaptureKeyboard, uiData.wantsCaptureMouse);
 }
 

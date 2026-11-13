@@ -16,9 +16,8 @@ class Registry;
 void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep);
 void BuildSystemGraphs(Engine& engine);
 
-// Ensures core's components are registered and the baseline empty-world
-// entities (InputStateComponent, MainCameraTagComponent + CameraComponent,
-// DebugSettingsComponent) exist.
+// Ensures the baseline default camera entity (MainCameraTagComponent +
+// CameraComponent) exists when the world is created or cleared.
 void SeedBaselineScene(ECS::Registry& reg);
 
 }

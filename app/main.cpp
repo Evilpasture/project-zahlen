@@ -10,6 +10,7 @@
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Zahlen.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
@@ -110,11 +111,8 @@ struct SandboxGame {
             });
         }
 
-        const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-        if (!input) {
-            return;
-        }
-        if (input->IsKeyPressed(ZHLN::KeyCode::Escape)) {
+        const auto& input = engine.GetInput().SeatKeyboardMouse();
+        if (input.IsKeyPressed(ZHLN::KeyCode::Escape)) {
             engine.GetPlatformHost().Close();
             return;
         }
@@ -122,7 +120,7 @@ struct SandboxGame {
         if (!camera) {
             return;
         }
-        if (input->IsKeyPressed(ZHLN::KeyCode::R)) {
+        if (input.IsKeyPressed(ZHLN::KeyCode::R)) {
             const auto cameras = reg.EntitiesWith<ZHLN::Components::CameraComponent>();
             if (!cameras.empty()) reg.Patch<ZHLN::Components::CameraComponent>(cameras.front(), [](auto& cc) {
                 cc.camera.position = {0.0f, 3.0f, 11.0f};
@@ -131,7 +129,7 @@ struct SandboxGame {
             });
         }
         // F rather than E: the optional FreeCam already uses E to fly up.
-        if (!input->IsKeyPressed(ZHLN::KeyCode::F)) {
+        if (!input.IsKeyPressed(ZHLN::KeyCode::F)) {
             return;
         }
 

@@ -166,7 +166,7 @@ enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 struct WindowUIInputCollector {
     static constexpr size_t kQueueCap = 64;
 
-    ZHLN::Components::InputStateComponent state {};
+    ZHLN::InputState                      state {};
     std::array<ZHLN::KeyCode, kQueueCap>  pressedKeys {};
     std::array<uint32_t, kQueueCap>       charStream {};
     std::array<ZHLN::KeyCode, kQueueCap>  latchedKeys {};
@@ -608,7 +608,7 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent& state, bool uiOwnsKeyboard) {
+void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::InputState& state, bool uiOwnsKeyboard) {
     const float mx = state.mouseX;
     const float my = state.mouseY;
     const bool controlDown =

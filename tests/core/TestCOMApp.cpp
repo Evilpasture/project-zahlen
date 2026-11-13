@@ -39,9 +39,10 @@ void test_com_app_runs_layers_and_update() {
         .OnStart([&](COM::IEngine& engine) {
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::CameraComponent").HasValue());
-            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::InputStateComponent").HasValue());
-            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::DebugSettingsComponent").HasValue());
+            ExpectFalse(engine.Entities()->SingletonEntity("ZHLN::Components::InputStateComponent").HasValue());
+            ExpectFalse(engine.Entities()->SingletonEntity("ZHLN::Components::DebugSettingsComponent").HasValue());
             ExpectTrue(engine.State() != nullptr && engine.State()->CullingStats().EnableCulling);
+            ExpectEq(engine.State()->PhysicsDrawMode(), 0);
             events.push_back("onstart");
         });
     int updates = 0;

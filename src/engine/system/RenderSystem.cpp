@@ -19,6 +19,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -390,10 +391,9 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
 std::expected<void, ErrorCode> RenderSystem::Update(
     Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
 ) {
-    int        physicsDrawMode = 0;
     auto shadowProjView = Mat4x4::Identity();
 
-    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, cullingStats, physicsDrawMode, shadowProjView, dt);
+    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, cullingStats, shadowProjView, dt);
     if (!mainResult) {
         return std::unexpected(mainResult.error());
     }
@@ -406,7 +406,7 @@ std::expected<void, ErrorCode> RenderSystem::Update(
 
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
-    int& outPhysicsDrawMode, Mat4x4& outShadowProjView, float dt
+    Mat4x4& outShadowProjView, float dt
 ) {
     auto rc = engine.Graphics();
     const RenderFrameQuery query {reg};
@@ -432,17 +432,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     auto cameraEntities = query.Entities<Components::MainCameraTagComponent>();
 
     // The graphics owner is authoritative; nothing scrapes the registry for it.
-    const GraphicsSettings gfx = engine.Graphics().Settings();
-
-    outPhysicsDrawMode = 0;
-    if (const auto dbg = query.GetSingleton<Components::DebugSettingsComponent>()) {
-        outPhysicsDrawMode = dbg->physicsDrawMode;
-    }
+    const GraphicsSettings gfx             = engine.Graphics().Settings();
+    const int              physicsDrawMode = engine.State().PhysicsDrawMode();
 
     auto scene = engine.Debug();
     scene.SetFrameDelta(dt);
     SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), scene);
-    RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), outPhysicsDrawMode);
+    RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), physicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
@@ -533,7 +529,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
 
     UploadPosePalettes(rc, poseUploads);
 
-    if (outPhysicsDrawMode == 0) {
+    if (physicsDrawMode == 0) {
         SubmitVisibleMeshes(query.As<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
@@ -580,10 +576,10 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
-        const auto     input    = query.GetSingleton<Components::InputStateComponent>();
+        const auto&    input    = engine.GetInput().SeatKeyboardMouse();
         const Extent2D hostSize = host.GetSize();
-        const float    rawX     = input ? input->mouseX : static_cast<float>(hostSize.width) * 0.5f;
-        const float    rawY     = input ? input->mouseY : static_cast<float>(hostSize.height) * 0.5f;
+        const float    rawX     = input.mouseX;
+        const float    rawY     = input.mouseY;
         const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
         const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
 

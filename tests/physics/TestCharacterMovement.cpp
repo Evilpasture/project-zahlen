@@ -173,11 +173,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
         void test_typed_player_input_and_intent_seat_and_freecam(Fixture::TaskSystemAndJoltScope&) {
             ECS::Registry reg;
             InputContext input;
-            auto state = Components::InputStateComponent {};
-            state.SetKey(KeyCode::W, true);
-            state.SetKey(KeyCode::Space, true);
-            state.SetKey(KeyCode::LShift, true);
-            reg.Create(state);
+            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::W, true);
+            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::Space, true);
+            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::LShift, true);
             input.SetKeyboardMouseSeat(1, true);
             input.MutableSeatKeyboardMouse(1).SetKey(KeyCode::D, true);
             const auto primary = reg.Create(Character::InputComponent {}, Character::MovementComponent {});

@@ -67,10 +67,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# CombatFX.cppm, Explosion.cppm and Lightning.cpp all include
-# <Zahlen/ECS/Components.hpp>, whose InputStateComponent sizes its key bitset with
-# Reflect::EnumCount<KeyCode>(). Build without the reflection flags and that
-# count is 0 instead of 72, which shifts every following member.
+# Enable reflection on this target so reflected component layouts and
+# module interfaces match zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

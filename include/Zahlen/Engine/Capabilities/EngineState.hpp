@@ -19,6 +19,8 @@ class ZHLN_API EngineState {
     void               ResetCullingStats() noexcept;
     void               SetCullingEnabled(bool enabled) noexcept;
     void               SetFreezeFrustum(bool freeze) noexcept;
+    [[nodiscard]] auto PhysicsDrawMode() const noexcept -> int;
+    void               SetPhysicsDrawMode(int mode) noexcept;
     [[nodiscard]] auto Configuration() const noexcept -> EngineConfig;
 
   private:

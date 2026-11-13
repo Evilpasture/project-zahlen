@@ -7,6 +7,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/GUI/GUI.hpp>
@@ -174,11 +175,10 @@ struct UITestSuite {
             }
 
             auto setInput = [&](float mx, float my, bool lbutton) {
-                engine->Entities().PatchSingleton<ZHLN::Components::InputStateComponent>([&](auto& in) {
-                    in.mouseX = mx;
-                    in.mouseY = my;
-                    in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
-                });
+                auto& in  = engine->GetInput().MutableSeatKeyboardMouse();
+                in.mouseX = mx;
+                in.mouseY = my;
+                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
             };
 
             uint32_t clickCountA = 0;
@@ -584,9 +584,7 @@ struct UITestSuite {
             }
 
             auto& host = engine->GetPlatformHost();
-            engine->Entities().PatchSingleton<ZHLN::Components::InputStateComponent>([](auto& input) {
-                input.ApplyLocalMotion(320.0f, 240.0f);
-            });
+            engine->GetInput().MutableSeatKeyboardMouse().ApplyLocalMotion(320.0f, 240.0f);
 
             if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
                 !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||

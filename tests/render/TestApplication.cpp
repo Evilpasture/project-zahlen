@@ -19,6 +19,7 @@
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #if defined(ZHLN_HAS_EDITOR)
@@ -117,11 +118,10 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         Expect(FindStep(engine, "GameplayModule") == nullptr);
         // ProcessEvents begins an input frame. If update runs before it, the
         // deliberately stale mouse delta below is still visible to gameplay.
-        engine.Entities().PatchSingleton<Components::InputStateComponent>([](auto& input) {
-            input.mouseDeltaX = 123.0f;
-            // A resize is consumed during Engine::ProcessEvents, not by App's loop.
-            input.ApplyResize({.width = 800, .height = 600});
-        });
+        engine.GetInput().MutableSeatKeyboardMouse().mouseDeltaX = 123.0f;
+        // A resize is consumed during Engine::ProcessEvents, not by App's loop.
+        engine.GetInput().InjectResize({.width = 800, .height = 600});
+        Expect(engine.GetInput().HasPendingResize());
         const auto modules = engine.GetInstalledModules();
         Expect(std::ranges::any_of(modules, [](const Module& module) { return module.name == "AppTestModule"; }));
         Expect(!std::ranges::any_of(modules, [](const Module& module) { return module.name == "FallbackScene"; }));
@@ -138,11 +138,11 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         ++updates;
         Expect(*state == 42);
         Expect(dt >= 0.0f);
-        const auto input = engine.Entities().GetSingleton<Components::InputStateComponent>();
-        Expect(input.has_value());
-        Expect(input->mouseDeltaX == 0.0f);
-        Expect(!input->needsResize);
-        Expect(input->newSize.width == 800u);
+        const auto& input = engine.GetInput().SeatKeyboardMouse();
+        Expect(input.mouseDeltaX == 0.0f);
+        Expect(!engine.GetInput().HasPendingResize());
+        const auto fbSize = engine.Graphics().FramebufferSize();
+        Expect(fbSize.has_value() && fbSize->width == 800u && fbSize->height == 600u);
         Expect(engine.GetCurrentFrame() == 0);
         calls.push_back("update");
         engine.GetPlatformHost().Close();
@@ -356,9 +356,9 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
         Expect(inputStep < ui && hotReload < intentStep && intentStep < physics && physics < steps.size());
         if (inputStep >= steps.size() || intentStep >= steps.size() || physics >= steps.size()) return;
         auto reg = engine.Entities();
-        Expect(reg.GetSingleton<Components::InputStateComponent>() && reg.GetSingleton<Components::CameraComponent>());
-        if (!reg.GetSingleton<Components::InputStateComponent>() || !reg.GetSingleton<Components::CameraComponent>()) return;
-        reg.PatchSingleton<Components::InputStateComponent>([](auto& raw) { raw.SetKey(KeyCode::W, true); });
+        Expect(reg.GetSingleton<Components::CameraComponent>().has_value());
+        if (!reg.GetSingleton<Components::CameraComponent>()) return;
+        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, true);
         reg.PatchSingleton<Components::CameraComponent>([](auto& cam) { cam.camera.yaw = DegF {0.0f}; });
         const auto character = engine.Physics().CreateCharacter({0.0, 10.0, 0.0});
         Expect(character != Physics::BodyID::Null());
@@ -373,7 +373,7 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
         steps[physics].run(engine, 0.0f, frame);
         const auto move = reg.Get<Character::MovementComponent>(entity);
         Expect(move->currentVelX > 0.0f && move->currentYVel < -0.5f && !move->isGrounded);
-        reg.PatchSingleton<Components::InputStateComponent>([](auto& raw) { raw.SetKey(KeyCode::W, false); });
+        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, false);
         ran = true;
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
@@ -394,9 +394,8 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         if (!freeStep || !rigStep || !freeStep->run || !rigStep->run) return;
         auto reg = engine.Entities();
         const Entity main = reg.SingletonEntity<Components::MainCameraTagComponent>();
-        auto input = reg.GetSingleton<Components::InputStateComponent>();
-        Expect(main != Entity::Null() && input);
-        if (main == Entity::Null() || !input) return;
+        Expect(main != Entity::Null());
+        if (main == Entity::Null()) return;
         auto camera = reg.Get<Components::CameraComponent>(main);
         Expect(camera.has_value());
         if (!camera) return;
@@ -430,11 +429,11 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         rigStep->run(engine, 0.1f, frame);
         Expect((camera->camera.position - FVec3 {2.0f, 3.0f, 2.0f}).LengthSquared() < 1e-6f);
         FreeCam::Attach(engine, 4.0f, false);
-        reg.PatchSingleton<Components::InputStateComponent>([](auto& st) { st.SetKey(KeyCode::W, true); });
+        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, true);
         const auto before = camera->camera.position;
         FreeCam::Apply(engine, 0.25f); // paused-editor direct call remains supported
         Expect((camera->camera.position - before).LengthSquared() > 0.9f);
-        reg.PatchSingleton<Components::InputStateComponent>([](auto& st) { st.SetKey(KeyCode::W, false); });
+        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, false);
         Expect(!reg.Get<PendingPhaseMarker>(unrelated));
         engine.Commands().Playback();
         Expect(reg.Get<PendingPhaseMarker>(unrelated).has_value());
@@ -904,13 +903,16 @@ void test_clear_scene_preserves_graphs_resets_locals_and_scene_instantiate_recre
         Expect(g_moduleSceneProbeRuns == 2);
 
         engine.State().SetFreezeFrustum(true);
+        engine.State().SetPhysicsDrawMode(2);
         Expect(engine.State().CullingStats().FreezeFrustum);
+        Expect(engine.State().PhysicsDrawMode() == 2);
 
         // ClearScene keeps the compiled graphs intact, resets Local<T> blocks,
-        // resets World culling stats, and re-seeds the baseline camera entity.
+        // resets World culling/debug state, and re-seeds the baseline camera entity.
         engine.ClearScene();
         Expect(engine.GetUpdateGraph().GetSystemCount() == updateCount);
         Expect(!engine.State().CullingStats().FreezeFrustum);
+        Expect(engine.State().PhysicsDrawMode() == 0);
         Expect(engine.Entities().SingletonEntity<Components::MainCameraTagComponent>() != Entity::Null());
 
         engine.GetUpdateGraph().Execute(engine.MakeFrame(0.016f, FrameAlpha {0.0f}));

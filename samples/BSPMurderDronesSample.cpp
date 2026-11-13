@@ -60,6 +60,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -216,10 +217,10 @@ CrosshairPick g_pick;
 
 // The captured mouse. Window::CaptureMouse is GLFW_CURSOR_DISABLED: the cursor
 // is hidden and the window is handed raw deltas, so looking around no longer
-// needs a button held down. InputStateComponent keeps reporting motion either
+// needs a button held down. InputState keeps reporting motion either
 // way -- this flag is only what stops the look code from *gating* on RMB.
 //
-// Note the trap this does NOT trip: InputStateComponent::wantCaptureMouse also
+// Note the trap this does NOT trip: InputState::wantCaptureMouse also
 // suppresses every delta and button read, but it is an editor concept
 // (app/main.cpp) and Engine::ProcessEvents clears it for any host with a real
 // window, so a sample never sees it set.
@@ -1205,10 +1206,10 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [&](auto& cc) -> auto {
         // Captured mouse: look every frame, no button. Uncaptured: keep the
         // RMB drag so a host that never captures still works exactly as before.
-        if (const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-            input && (g_mouseCaptured || input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))) {
-            g_view.yaw += input->GetMouseDeltaX() * kLookSensitivity;
-            g_view.pitch = std::clamp(g_view.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
+        const auto& input = engine.GetInput().SeatKeyboardMouse();
+        if (g_mouseCaptured || input.IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+            g_view.yaw += input.GetMouseDeltaX() * kLookSensitivity;
+            g_view.pitch = std::clamp(g_view.pitch - (input.GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
         }
         cc.camera.yaw      = ZHLN::DegF{g_view.yaw};
         cc.camera.pitch    = ZHLN::DegF{g_view.pitch};
@@ -1889,15 +1890,10 @@ auto main(int argc, char* argv[]) -> int {
         g_frameDt      = dt;
 
         // Hoisted out of the block that used to own it: the free-camera, mouse
-        // capture and crosshair-pick toggles all read the same singleton, and
+        // capture and crosshair-pick toggles all read the same seat state, and
         // they are three separate blocks now.
         auto       reg   = engine->Entities();
-        const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-        if (input && input->needsResize) {
-            engine->Graphics().SetResolution(input->newSize);
-            reg.PatchSingleton<ZHLN::Components::InputStateComponent>([](auto& st) { st.needsResize = false; });
-            continue;
-        }
+        const auto* input = &engine->GetInput().SeatKeyboardMouse();
 
         {
             // Raw, like the other samples' edge detection: no console or text

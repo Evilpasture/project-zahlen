@@ -47,11 +47,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
-# InteractionComponents.hpp is registered through the ECS name table and the
-# system reaches InputStateComponent, whose key bitset is sized by
-# Reflect::EnumCount<KeyCode>(). Reflection is not a per-target feature --
-# without the flags that count is 0 instead of 72 and mouseX moves four
-# bytes, which is a silent wrong-offset read rather than a compile error.
+# InteractionComponents.hpp is registered through the reflected ECS name table.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

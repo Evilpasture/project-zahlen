@@ -52,7 +52,7 @@ inline void ObserveInputSystem(
 }
 
 void test_input_state_component_edges_and_subframe_taps() {
-    Components::InputStateComponent state {};
+    InputState state {};
 
     // Frame 1: rising edge on W + accumulated mouse deltas + side button X1.
     state.BeginFrame();
@@ -415,8 +415,8 @@ void test_ecs_system_graph_input_context_service_resolution() {
 }
 
 void test_relative_mouse_motion_preserves_deltas_when_cursor_clamped() {
-    Components::InputStateComponent kbm {};
-    static_assert(std::is_trivially_copyable_v<Components::InputStateComponent>);
+    InputState kbm {};
+    static_assert(std::is_trivially_copyable_v<InputState>);
 
     // Initial center seed (dx=0, dy=0) sets cursor coordinates without spurious jump delta.
     kbm.ApplyRelativeMotion(960.0f, 540.0f, 0.0f, 0.0f);

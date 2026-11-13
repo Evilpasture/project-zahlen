@@ -43,10 +43,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# TerrainSystem.cpp reaches Components.hpp, whose key bitset is sized by
-# Reflect::EnumCount<KeyCode>(). Reflection is not a per-target feature --
-# without the flags that count is 0 instead of 72 and any component after it
-# moves, a silent wrong-offset read.
+# Reflection is a whole-program ABI contract across targets that share ECS
+# component registration and reflected type names with zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

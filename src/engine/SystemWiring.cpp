@@ -39,20 +39,13 @@ namespace ZHLN {
 namespace { namespace Steps {
 
 void HostUICallback(Engine& engine, float, FrameContext&) {
-    auto entities = engine.Entities();
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
         if (engine.GetPendingUIData().Empty()) {
-            entities.PatchSingleton<Components::InputStateComponent>([](Components::InputStateComponent& st) {
-                st.wantCaptureKeyboard = false;
-                st.wantCaptureMouse    = false;
-            });
+            engine.GetInput().SyncCaptureFlags(false, false);
         }
     }
-    if (const auto st = entities.GetSingleton<Components::InputStateComponent>()) {
-        engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
-        engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
-    }
+    engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
 }
 
 void HotReload(Engine& engine, float, FrameContext&) {
@@ -189,12 +182,9 @@ void BuildSystemGraphs(Engine& engine) {
 }
 
 void SeedBaselineScene(ECS::Registry& reg) {
-    reg.RegisterAllComponentsIn<ZHLN::Components>();
-    reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
     if (reg.SingletonEntity<Components::MainCameraTagComponent>() == Entity::Null()) {
         reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
     }
-    reg.GetOrEmplaceSingleton<Components::DebugSettingsComponent>();
 }
 
 } // namespace ZHLN

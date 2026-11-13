@@ -4,7 +4,6 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Optional.hpp>
@@ -13,6 +12,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -201,6 +201,9 @@ class ZHLN_API InputContext {
     void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseScroll(float delta, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectChar(uint32_t codepoint, PlayerSeat targetSeat = kPrimarySeat) noexcept;
+    void InjectResize(Extent2D extent) noexcept;
+    [[nodiscard]] auto ConsumePendingResize() noexcept -> Optional<Extent2D>;
+    [[nodiscard]] auto HasPendingResize() const noexcept -> bool;
     void SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat = kPrimarySeat) noexcept;
 
     void InjectGamepadConnection(uint8_t slot, bool connected, std::string_view name = {}) noexcept;
@@ -229,8 +232,8 @@ class ZHLN_API InputContext {
     void SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept;
     [[nodiscard]] auto SeatReceivesKeyboardMouse(PlayerSeat seat) const noexcept -> bool;
 
-    [[nodiscard]] auto SeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) const noexcept -> const Components::InputStateComponent&;
-    [[nodiscard]] auto MutableSeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) noexcept -> Components::InputStateComponent&;
+    [[nodiscard]] auto SeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) const noexcept -> const InputState&;
+    [[nodiscard]] auto MutableSeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) noexcept -> InputState&;
 
     auto AssignGamepadToSeat(uint8_t gamepadSlot, PlayerSeat seat) noexcept -> bool;
     void UnassignGamepad(uint8_t gamepadSlot) noexcept;
@@ -327,7 +330,7 @@ class ZHLN_API InputContext {
     };
 
     struct SeatRuntime {
-        Components::InputStateComponent kbm {};
+        InputState                      kbm {};
         bool                            receivesKeyboardMouse = false;
         InputDeviceKind                 lastActiveDevice      = InputDeviceKind::KeyboardMouse;
         std::vector<EvaluatedActionEntry> actions;
@@ -353,7 +356,8 @@ class ZHLN_API InputContext {
     void FlushPendingHotplugEvents(ECS::EventBus* eventBus);
 
     SeatRoutingPolicy                           _routingPolicy = SeatRoutingPolicy::SharePrimarySeat;
-    Components::InputStateComponent             _nullKbm {};
+    InputState                                  _nullKbm {};
+    Optional<Extent2D>                          _pendingResize {};
     std::array<SeatRuntime, kMaxPlayerSeats>    _seats {};
     std::array<GamepadState, kMaxGamepads>      _gamepads {};
     std::array<RumbleChannel, kMaxGamepads>     _rumble {};
