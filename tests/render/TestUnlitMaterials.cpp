@@ -94,10 +94,10 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
             c.camera.position = {0.0f, 0.0f, 7.0f}; // Same orbit the retired Khronos sample used, so the face windows below hold.
             c.camera.yaw      = ZHLN::DegF{-90.0f};
             c.camera.pitch    = ZHLN::DegF{0.0f};
+            c.camera.fov      = ZHLN::DegF{45.0f};
         }))) {
         return;
     }
-    camera.fov      = ZHLN::DegF{45.0f};
 }
 
 // Uploads the authored chamfered solid with white vertex colors, so the
@@ -250,7 +250,7 @@ struct UnlitMaterialsTestSuite {
             }
 
             auto reg = engine->Entities();
-            reg.Spawn(
+            const ZHLN::Entity sun = reg.Spawn(
                 ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
                 ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                                                   .intensity = 0.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}}

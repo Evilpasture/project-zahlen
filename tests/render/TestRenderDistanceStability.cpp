@@ -1010,9 +1010,11 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
 
                 // The loop's last sample is f=79, not f=80: sin(79*2pi/80)
                 // leaves the camera about 2.35 m from home. Return to the baseline
-                // position before measuring post-sweep parity: cam borrows the
-                // registry's camera, so this is the pose Phase D measures from.
-                cam.position = {0.0f, kEyeHeight, 0.0f};
+                // position before measuring post-sweep parity: Phase D measures
+                // from the registry's baseline camera pose.
+                eng.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    c.camera.position = {0.0f, kEyeHeight, 0.0f};
+                });
 
                 // ---------------- Phase D: post-sweep parity ---------------
                 failedPhase = "parity";

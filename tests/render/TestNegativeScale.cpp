@@ -142,16 +142,16 @@ const std::array<ZHLN::FVec3, 5> kCenters {
             c.camera.position = {0.0f, 0.0f, kCameraDistance};
             c.camera.yaw      = ZHLN::DegF{-90.0f};
             c.camera.pitch    = ZHLN::DegF{0.0f};
+            c.camera.fov      = ZHLN::DegF{45.0f};
             cameraFov         = c.camera.fov;
         }))) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    camera.fov      = ZHLN::DegF{45.0f};
 
     const ZHLN::Entity sun = reg.Create();
-    reg.Add(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
-            ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1, 1, 1},
-                                               .intensity = 220.0f, .direction = ZHLN::FVec3{0, 0, 1}});
+    reg.Attach(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
+               ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1, 1, 1},
+                                                 .intensity = 220.0f, .direction = ZHLN::FVec3{0, 0, 1}});
 
     constexpr auto meshID = ZHLN::HashAssetID("negative_scale_shared_panel");
     constexpr auto oneSidedID = ZHLN::HashAssetID("negative_scale_one_sided");

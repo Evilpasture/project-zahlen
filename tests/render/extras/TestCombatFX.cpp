@@ -5,6 +5,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

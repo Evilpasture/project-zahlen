@@ -152,10 +152,10 @@ struct DescriptorHeapsSuite {
                     c.camera.position = {0.0f, 4.45f, 11.0f};
                     c.camera.yaw      = ZHLN::DegF{-90.0f};
                     c.camera.pitch    = ZHLN::DegF{0.0f};
+                    c.camera.fov      = ZHLN::DegF{60.0f};
                 }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            cam.fov      = ZHLN::DegF{60.0f};
 
             // Palette: 64 well-separated HSV hues -> solid RGBA textures.
             std::array<std::array<uint8_t, 3>, kTextureCount> palette {};

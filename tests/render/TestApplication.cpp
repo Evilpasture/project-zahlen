@@ -470,7 +470,7 @@ void test_presentation_draws_frozen_frustum_from_camera_query() {
             Expect(lines[0].start == FVec3 {-1.0f, -1.0f, 0.0f});
             Expect(lines[0].end == FVec3 {1.0f, -1.0f, 0.0f});
         }
-        stats->stats.FreezeFrustum = false;
+        reg.PatchSingleton<Components::CullingStatsComponent>([](auto& s) { s.stats.FreezeFrustum = false; });
         ran = true;
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });

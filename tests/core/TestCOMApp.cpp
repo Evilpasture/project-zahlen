@@ -37,7 +37,9 @@ void test_com_app_runs_layers_and_update() {
         .AddLayer(Layer{1, &events}).AddLayer(Layer{2, &events})
         .OnStart([&](COM::IEngine& engine) {
             ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::MainCameraTagComponent").HasValue());
-            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::SunTagComponent").HasValue());
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::CameraComponent").HasValue());
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::CullingStatsComponent").HasValue());
+            ExpectTrue(engine.Entities()->SingletonEntity("ZHLN::Components::DebugSettingsComponent").HasValue());
             events.push_back("onstart");
         });
     int updates = 0;

@@ -350,6 +350,9 @@ auto AssetLibrary::CachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) ->
 void AssetLibrary::UseGraphicsDevice(GraphicsDevice graphics) noexcept {
     _assets->UseRenderContext(*graphics._ctx);
 }
+void AssetLibrary::ClearCache() noexcept {
+    _assets->ClearCache();
+}
 void AssetLibrary::CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font) {
     _assets->CacheFont(hash, std::move(font));
 }

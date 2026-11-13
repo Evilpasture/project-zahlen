@@ -1913,12 +1913,10 @@ struct GLTFImportTestSuite {
 
             // Insert a transformless parent between the prefab root and its
             // part. It should contribute identity while preserving ancestry.
-            const ZHLN::Entity bridgeEntity  = registry.Create(ZHLN::Components::HierarchyComponent {.parent = rootEntity});
-            auto               partHierarchy = registry.Get<ZHLN::Components::HierarchyComponent>(partEntity);
-            if (!partHierarchy) {
+            const ZHLN::Entity bridgeEntity = registry.Spawn(ZHLN::Components::HierarchyComponent {.parent = rootEntity});
+            if (!registry.Patch<ZHLN::Components::HierarchyComponent>(partEntity, [bridgeEntity](auto& h) { h.parent = bridgeEntity; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            partHierarchy->parent = bridgeEntity;
 
             // The stored transform is a local offset. The triangle's bounds sit
             // within a unit box at the origin, so a spawn four metres away must
@@ -1946,13 +1944,11 @@ struct GLTFImportTestSuite {
             // 3. Move the prefab root; the light has to move with it by the same
             //    delta rather than staying behind at the spawn point.
             const FVec3 delta{10.0f, 0.0f, 7.0f};
-            auto            rootTransform = registry.Get<ZHLN::Components::TransformComponent>(rootEntity);
-            if (!rootTransform) {
+            // Write the public field directly: transform propagation must not
+            // depend on a setter or caller-maintained dirty bit.
+            if (!registry.Patch<ZHLN::Components::TransformComponent>(rootEntity, [delta](auto& t) { t.position = FVec3{t.position} + delta; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            // Write the public field directly: transform propagation must not
-            // depend on a setter, Patch hook, or caller-maintained dirty bit.
-            rootTransform->position = FVec3{rootTransform->position} + delta;
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1970,12 +1966,14 @@ struct GLTFImportTestSuite {
             // that parent output and dirty its descendants, even though local TRS
             // is unchanged. This exercises root -> transformless bridge -> part -> light.
             const FVec3 parentWorldDelta{0.5f, 0.0f, 0.0f};
-            auto            rootWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(rootEntity);
+            const auto  rootWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(rootEntity);
             if (!rootWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
             const auto externallyMovedParent = ZHLN::CreateTranslation(parentWorldDelta) * rootWorld->world;
-            rootWorld->world                       = externallyMovedParent;
+            if (!registry.Patch<ZHLN::Components::WorldTransformComponent>(rootEntity, [&](auto& w) { w.world = externallyMovedParent; })) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1991,18 +1989,16 @@ struct GLTFImportTestSuite {
 
             // A leaf's direct world write and a world-transform-only entity have
             // no TransformSystem writer to notify the history pass.
-            const FVec3  leafWorldDelta{-0.25f, 0.0f, 0.0f};
-            const auto externallyMovedGlow = ZHLN::CreateTranslation(leafWorldDelta) * parentMovedGlow->world;
-            auto             mutableGlowWorld    = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (!mutableGlowWorld) {
+            const FVec3 leafWorldDelta{-0.25f, 0.0f, 0.0f};
+            const auto  externallyMovedGlow = ZHLN::CreateTranslation(leafWorldDelta) * parentMovedGlow->world;
+            if (!registry.Patch<ZHLN::Components::WorldTransformComponent>(glowEntity, [&](auto& w) { w.world = externallyMovedGlow; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            mutableGlowWorld->world = externallyMovedGlow;
 
             const auto previousWorldOnly = ZHLN::CreateTranslation(FVec3{-1.0f, 0.0f, 0.0f});
             const auto currentWorldOnly = ZHLN::CreateTranslation(FVec3{3.0f, 0.0f, 0.0f});
             const ZHLN::Entity worldOnlyEntity =
-                registry.Create(ZHLN::Components::WorldTransformComponent {.world = currentWorldOnly, .previous = previousWorldOnly});
+                registry.Spawn(ZHLN::Components::WorldTransformComponent {.world = currentWorldOnly, .previous = previousWorldOnly});
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 

@@ -74,6 +74,7 @@ class ZHLN_API AssetLibrary {
     void               CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
     [[nodiscard]] auto CachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) -> uint32_t;
     void               UseGraphicsDevice(GraphicsDevice graphics) noexcept;
+    void               ClearCache() noexcept;
     void               CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
     [[nodiscard]] auto ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>>;
     [[nodiscard]] auto VFS() noexcept -> FS::VirtualFileSystem&;

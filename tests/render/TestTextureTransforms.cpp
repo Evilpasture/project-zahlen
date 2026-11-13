@@ -166,11 +166,11 @@ struct TextureTransformsTestSuite {
                     c.camera.position = {0.0f, 0.0f, kCameraDistance};
                     c.camera.yaw      = ZHLN::DegF{-90.0f};
                     c.camera.pitch    = ZHLN::DegF{0.0f};
+                    c.camera.fov      = ZHLN::DegF{45.0f};
                     cameraFov         = c.camera.fov;
                 }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            camera.fov      = ZHLN::DegF{45.0f};
 
             const auto atlas = MakeAtlas();
             const auto texture = rc.CreateTexture(std::span {atlas}, {128, 128});
