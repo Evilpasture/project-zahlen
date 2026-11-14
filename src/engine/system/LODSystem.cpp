@@ -1,11 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "LODSystem.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
@@ -40,10 +39,10 @@ void LODSystem::GraphUpdate(LODQuery query) {
                 continue;
             }
 
-            JPH::Vec3 worldPos = JPH::Vec3::sZero();
+            FVec3 worldPos = FVec3::Zero();
             if (auto worldTrans = query.Get<Components::WorldTransformComponent>(e)) {
-                const JPH::Mat44 world = worldTrans->world;
-                worldPos               = world.GetTranslation();
+                const auto& world = worldTrans->world;
+                worldPos = {world[0, 3], world[1, 3], world[2, 3]};
             } else if (auto trans = query.Get<Components::TransformComponent>(e)) {
                 worldPos = trans->position;
             }
@@ -65,10 +64,6 @@ void LODSystem::GraphUpdate(LODQuery query) {
             }
         }
     });
-}
-
-void LODSystem::Update(Engine& engine) {
-    GraphUpdate(LODQuery {ZHLN::EngineAccess::RegistryOf(engine)});
 }
 
 }

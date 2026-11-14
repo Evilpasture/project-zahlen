@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "FreeCam.hpp"
 
 #include <Zahlen/Math/Camera.hpp>
@@ -11,9 +13,11 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 
-#include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
 #include <cmath>
@@ -24,97 +28,106 @@ namespace {
 
 struct FreeCamOptOutComponent {};
 
-void Drive(Components::CameraComponent& cc, const Components::InputStateComponent& input, const FreeCamComponent& knobs, float dt) {
+void Drive(Components::CameraComponent& cc, const InputReader& input, const FreeCamComponent& knobs, float dt) {
     if (!knobs.enabled) {
         return;
     }
-    Camera&     cam  = cc.camera;
-    const float look = knobs.lookSensitivity;
-    const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton)) : true;
+    Camera&     cam        = cc.camera;
+    const float look       = knobs.lookSensitivity;
+    const bool  lookButton = knobs.lookRequiresButton ? input.MouseButtonDown(MouseButton::Right) : true;
     if (lookButton) {
-        cam.yaw += input.GetMouseDeltaX() * look;
-        cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * look), -89.0f, 89.0f);
+        const Axis2DValue delta = input.MouseDelta();
+        cam.yaw += DegF{delta.x * look};
+        cam.pitch = std::clamp(cam.pitch - DegF{delta.y * look}, DegF{-89.0f}, DegF{89.0f});
     }
 
-    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    JPH::Vec3   forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+    const float yawRad   = cam.yaw.ToRadians().value;
+    const float pitchRad = cam.pitch.ToRadians().value;
+    FVec3   forward{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)};
     forward         = forward.Normalized();
-    JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY());
-    if (right.LengthSq() > 1e-8f) {
+    FVec3 right = Cross(forward, FVec3::UnitY());
+    if (right.LengthSquared() > 1e-8f) {
         right = right.Normalized();
     }
-    const JPH::Vec3 up    = JPH::Vec3::sAxisY();
-    const float     speed = input.IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
+    const FVec3 up    = FVec3::UnitY();
+    const float speed = input.KeyDown(KeyCode::LShift) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
 
-    JPH::Vec3 move = JPH::Vec3::sZero();
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
+    FVec3 move = FVec3::Zero();
+    if (input.KeyDown(KeyCode::W)) {
         move += forward;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
+    if (input.KeyDown(KeyCode::S)) {
         move -= forward;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
+    if (input.KeyDown(KeyCode::A)) {
         move -= right;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
+    if (input.KeyDown(KeyCode::D)) {
         move += right;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::E)) || input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space))) {
+    if (input.KeyDown(KeyCode::E) || input.KeyDown(KeyCode::Space)) {
         move += up;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::Q))) {
+    if (input.KeyDown(KeyCode::Q)) {
         move -= up;
     }
-    if (move.LengthSq() > 0.0f && dt > 0.0f) {
+    if (move.LengthSquared() > 0.0f && dt > 0.0f) {
         cam.position += move.Normalized() * speed * dt;
     }
 }
 
-Entity MainCamera(ECS::Registry& reg) {
-    return reg.SingletonEntity<Components::MainCameraTagComponent>();
+Entity MainCamera(const Entities& entities) {
+    const auto cameras = entities.EntitiesWith<Components::MainCameraTagComponent>();
+    return cameras.empty() ? Entity::Null() : cameras.front();
 }
 
-void SeedBootCamera(ECS::Registry& reg) {
-    const Entity camera = MainCamera(reg);
-    if (camera == Entity::Null()) {
+using SeedQuery = ECS::Query<const Components::MainCameraTagComponent, const FreeCamOptOutComponent,
+                             const FreeCamTagComponent, const FreeCamComponent>;
+void SeedBootCamera(SeedQuery query, ECS::EntityCommandBuffer& commands) {
+    const auto cameras = query.Entities<Components::MainCameraTagComponent>();
+    if (cameras.empty()) {
         return;
     }
-    if (reg.Get<FreeCamOptOutComponent>(camera)) {
+    const Entity camera = cameras.front();
+    if (query.Get<FreeCamOptOutComponent>(camera)) {
         return;
     }
-    if (!reg.Get<FreeCamTagComponent>(camera)) {
-        reg.Add(camera, FreeCamTagComponent {});
+    if (!query.Get<FreeCamTagComponent>(camera)) {
+        commands.AddComponent(camera, FreeCamTagComponent {});
     }
-    if (!reg.Get<FreeCamComponent>(camera)) {
-        reg.Add(camera, FreeCamComponent {});
+    if (!query.Get<FreeCamComponent>(camera)) {
+        commands.AddComponent(camera, FreeCamComponent {});
+    }
+}
+
+using FreeCamQuery = ECS::Query<const FreeCamTagComponent, const FreeCamComponent, Components::CameraComponent&>;
+void ApplyTyped(FreeCamQuery query, ECS::Res<InputReader> input, FrameDt frameDt) {
+    const InputReader& kbm = *input;
+    for (Entity e: query.Entities<FreeCamTagComponent>()) {
+        const auto knobs = query.Get<FreeCamComponent>(e);
+        const FreeCamComponent defaults {};
+        const FreeCamComponent& cfg = knobs ? *knobs : defaults;
+        query.Patch<Components::CameraComponent>(e, [&](auto& cc) { Drive(cc, kbm, cfg, frameDt.value); });
     }
 }
 
 } // namespace
 
 void Apply(Engine& engine, float dt) {
-    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  input = reg.GetSingleton<Components::InputStateComponent>();
-    if (!input) {
-        return;
-    }
-    for (Entity e: reg.GetEntitiesWith<FreeCamTagComponent>()) {
-        auto                   knobs = reg.Get<FreeCamComponent>(e);
-        const FreeCamComponent defaults {};
-        const FreeCamComponent& cfg = knobs ? *knobs : defaults;
-        reg.Patch<Components::CameraComponent>(e, [&](auto& cc) -> auto { Drive(cc, *input, cfg, dt); });
-    }
+    engine.GetRenderGraph().InvokeSequential<&ApplyTyped>(engine.MakeFrame(dt, FrameAlpha {}));
 }
 
 namespace {
 
-void FreeCamStep(Engine& engine, float dt, FrameContext&) {
-    SeedBootCamera(ZHLN::EngineAccess::RegistryOf(engine));
+void FreeCamStep(Engine& engine, float dt, FrameContext& ctx) {
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
+    auto& graph = engine.GetRenderGraph();
+    // The pose pass below must see the newly seeded components this frame.
+    graph.InvokeSequentialAndPlayback<&SeedBootCamera>(frame);
     if (dt <= 0.0f) {
         return;
     }
-    Apply(engine, dt);
+    graph.InvokeSequential<&ApplyTyped>(frame);
 }
 
 // Declared, and placed before the core "CameraSystems" step so the matrices it
@@ -154,34 +167,34 @@ void Install(Engine& engine) {
 }
 
 void Attach(Engine& engine, float speed, bool lookRequiresButton) {
-    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto         reg    = engine.Entities();
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
     }
-    reg.Remove<FreeCamOptOutComponent>(camera);
+    reg.Detach<FreeCamOptOutComponent>(camera);
     if (!reg.Get<FreeCamTagComponent>(camera)) {
-        reg.Add(camera, FreeCamTagComponent {});
+        reg.Attach(camera, FreeCamTagComponent {});
     }
     if (!reg.Patch<FreeCamComponent>(camera, [speed, lookRequiresButton](auto& fc) -> auto {
             fc.speed              = speed;
             fc.lookRequiresButton = lookRequiresButton;
         })) {
-        reg.Add(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton});
+        reg.Attach(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton});
     }
 }
 
 void Detach(Engine& engine) {
-    auto&        reg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto         reg    = engine.Entities();
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
     }
     if (!reg.Get<FreeCamOptOutComponent>(camera)) {
-        reg.Add(camera, FreeCamOptOutComponent {});
+        reg.Attach(camera, FreeCamOptOutComponent {});
     }
-    reg.Remove<FreeCamTagComponent>(camera);
-    reg.Remove<FreeCamComponent>(camera);
+    reg.Detach<FreeCamTagComponent>(camera);
+    reg.Detach<FreeCamComponent>(camera);
 }
 
 } // namespace ZHLN::FreeCam

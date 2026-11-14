@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -10,13 +10,14 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <VFX/LightningUpdate.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <expected>
 #include <random>
 
-import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
     StrikeSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Lightning::Spawn failed to instantiate ECS entity and flash lights.">{}) = 1,
@@ -38,7 +39,22 @@ struct LightningTestSuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
+    // Ordered phase boundary: all three capabilities belong to this world.
+    static void Step(ZHLN::Engine& engine, float dt) {
+        ZHLN::Lightning::Step(engine, dt);
+    }
+
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> update_declares_exclusive_world_hazard() {
+            using namespace ZHLN::ECS;
+            const auto access = SystemSignature<&ZHLN::Lightning::Update>::PopulateAccessPattern();
+            const bool exclusive = std::ranges::any_of(access, [](const ComponentAccess& entry) {
+                return entry.familyId == AllComponents && entry.mode == Access::Write;
+            });
+            if (!exclusive) return std::unexpected(LightningTestError::StrikeLifecycleDesync);
+            return {};
+        }
+
         // ====================================================================
         // 1. Full Headless Engine Strike Lifecycle & Ambience Flashing
         // ====================================================================
@@ -53,7 +69,6 @@ struct LightningTestSuite {
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On,
                 .headless       = true,
-                .enableFallbackScene = false,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
@@ -62,19 +77,16 @@ struct LightningTestSuite {
             }
 
             const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // Set clean baseline ambient exposure
             constexpr float kInitialBaselineExposure = 6.0f;
-            const auto      settingsEnts             = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            ZHLN::Test::ExpectTrue(!settingsEnts.empty());
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kInitialBaselineExposure; });
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kInitialBaselineExposure; });
 
             // 1. Spawn Lightning Strike
-            const JPH::RVec3 cloudPos(0.0, 180.0, 0.0);
-            const JPH::RVec3 groundPos(25.0, 0.0, -15.0);
+            const ZHLN::DVec3 cloudPos{0.0, 180.0, 0.0};
+            const ZHLN::DVec3 groundPos{25.0, 0.0, -15.0};
 
             const ZHLN::Entity boltEntity =
                 ZHLN::Lightning::Spawn(*engine, cloudPos, groundPos, ZHLN::LightningConfig {.eta = 2.0f, .timeDilation = 1.0f, .subdivisions = 4});
@@ -107,7 +119,7 @@ struct LightningTestSuite {
                 engine->ProcessEvents();
 
                 // Advance lightning visual system
-                ZHLN::Lightning::Update(*engine, dt);
+                Step(*engine, dt);
 
                 if (reg.IsAlive(boltEntity)) {
                     if (const auto activeBolt = reg.Get<ZHLN::LightningComponent>(boltEntity)) {
@@ -115,11 +127,9 @@ struct LightningTestSuite {
                             returnStrokeObserved = true;
                             if (activeBolt->flashLuminance > 0.01f) {
                                 // Check if post-process exposure flashed
-                                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                                    if (pp.ambientExposure > kInitialBaselineExposure + 5.0f) {
-                                        exposureSpikeObserved = true;
-                                    }
-                                });
+                                if (engine->Graphics().Settings().environment.ambientExposure > kInitialBaselineExposure + 5.0f) {
+                                    exposureSpikeObserved = true;
+                                }
                             }
                         }
                     }
@@ -136,16 +146,14 @@ struct LightningTestSuite {
 
             // Invariant 2: Strike entity must be fully expired and destroyed after 120 frames (~2.0s)
             ZHLN::Test::ExpectFalse(reg.IsAlive(boltEntity));
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::LightningComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::LightningComponent>().empty());
 
             // Invariant 3: Sub-entities (flash & impact point lights) must be cleaned up
             ZHLN::Test::ExpectFalse(reg.IsAlive(flashLight));
             ZHLN::Test::ExpectFalse(reg.IsAlive(impactLight));
 
             // Invariant 4: Ambient exposure must be cleanly restored to un-flashed baseline
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                ZHLN::Test::ExpectEq(pp.ambientExposure, kInitialBaselineExposure);
-            });
+            ZHLN::Test::ExpectEq(engine->Graphics().Settings().environment.ambientExposure, kInitialBaselineExposure);
 
             return {};
         }
@@ -164,7 +172,6 @@ struct LightningTestSuite {
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On,
                 .headless       = true,
-                .enableFallbackScene = false,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
@@ -173,21 +180,19 @@ struct LightningTestSuite {
             }
 
             const auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             constexpr float kBaselineExposure = 5.0f;
-            const auto      settingsEnts      = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.ambientExposure = kBaselineExposure; });
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.ambientExposure = kBaselineExposure; });
 
             // Spawn first strike
             const ZHLN::Entity bolt1 = ZHLN::Lightning::Spawn(*engine, {0, 150, 0}, {-10, 0, 0});
 
             // Advance 2 frames
             constexpr float dt = 1.0f / 60.0f;
-            ZHLN::Lightning::Update(*engine, dt);
-            ZHLN::Lightning::Update(*engine, dt);
+            Step(*engine, dt);
+            Step(*engine, dt);
 
             // Spawn second strike while first strike is active (Tests baseline exposure inheritance)
             const ZHLN::Entity bolt2 = ZHLN::Lightning::Spawn(*engine, {30, 160, 20}, {40, 0, 25});
@@ -205,18 +210,76 @@ struct LightningTestSuite {
             // Run until both completely expire
             for (uint32_t frame = 0; frame < 150; ++frame) {
                 engine->ProcessEvents();
-                ZHLN::Lightning::Update(*engine, dt);
+                Step(*engine, dt);
                 (void) engine->Tick(dt);
             }
 
             // Both strikes expired
-            ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::LightningComponent>().empty());
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::LightningComponent>().empty());
 
             // Exposure returned to 5.0f without compound accumulation
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [&](const auto& pp) {
-                ZHLN::Test::ExpectEq(pp.ambientExposure, kBaselineExposure);
-            });
+            ZHLN::Test::ExpectEq(engine->Graphics().Settings().environment.ambientExposure, kBaselineExposure);
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> expiration_immediately_marks_children_before_resource_cleanup() {
+            const ZHLN::EngineConfig cfg {
+                .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
+                .appName = "Lightning Query Boundary Test", .width = 320, .height = 240, .vsync = false,
+                .fullscreen = false, .validationMode = ZHLN::ValidationMode::Off, .headless = true,
+            };
+            auto result = ZHLN::Engine::Create(cfg);
+            if (!ZHLN::Test::ExpectTrue(result.has_value())) return std::unexpected(LightningTestError::EngineInitFailed);
+            auto engine = std::move(*result);
+            auto reg = engine->Entities();
+            auto rc = engine->Graphics();
+            rc.PatchSettings([](auto& settings) { settings.environment.ambientExposure = 6.0f; });
+            const auto first = ZHLN::Lightning::Spawn(*engine, {0, 80, 0}, {0, 0, 0});
+            const auto second = ZHLN::Lightning::Spawn(*engine, {10, 80, 0}, {10, 0, 0});
+            auto bolt = reg.Get<ZHLN::LightningComponent>(first);
+            auto active = reg.Get<ZHLN::LightningComponent>(second);
+            if (!ZHLN::Test::ExpectTrue(bolt.has_value() && active.has_value())) return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            const auto flash = bolt->flashLightEntity;
+            const auto impact = bolt->impactLightEntity;
+            const auto mesh = bolt->meshAssetId;
+            const auto material = bolt->matAssetId;
+            reg.Patch<ZHLN::LightningComponent>(first, [](auto& b) {
+                b.phase = ZHLN::LightningPhase::Dissipating;
+                b.phaseTime = 1.0f;
+            });
+            reg.Patch<ZHLN::LightningComponent>(second, [](auto& b) {
+                b.phase = ZHLN::LightningPhase::ReturnStroke;
+                b.phaseTime = 0.0f;
+            });
+            Step(*engine, 0.01f);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(first) && reg.IsAlive(flash) && reg.IsAlive(impact));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(first).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(flash).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(impact).has_value());
+            ZHLN::Test::ExpectTrue(rc.Mesh(mesh).has_value() && rc.Material(material).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::LightningComponent>(second)->phaseTime > 0.0f);
+            ZHLN::Test::ExpectTrue(rc.Settings().environment.ambientExposure > 6.0f);
+            // A pending bolt is skipped even if another owner leaves it active.
+            reg.Patch<ZHLN::LightningComponent>(first, [](auto& b) {
+                b.phase = ZHLN::LightningPhase::ReturnStroke;
+            });
+            const float pendingPhaseTime = reg.Get<ZHLN::LightningComponent>(first)->phaseTime;
+            reg.Patch<ZHLN::LightningComponent>(second, [](auto& b) {
+                b.phase = ZHLN::LightningPhase::Dissipating;
+                b.phaseTime = 1.0f;
+            });
+            Step(*engine, 0.01f);
+            ZHLN::Test::ExpectEq(rc.Settings().environment.ambientExposure, 6.0f);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(first)->phaseTime, pendingPhaseTime);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(second).has_value());
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(first));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(second));
+            ZHLN::Test::ExpectFalse(rc.Mesh(mesh).has_value());
+            ZHLN::Test::ExpectFalse(rc.Material(material).has_value());
             return {};
         }
 
@@ -228,7 +291,6 @@ struct LightningTestSuite {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
                 .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true,
-                .enableFallbackScene = false,
             };
 
             auto engineRes = ZHLN::Engine::Create(engineCfg);
@@ -236,8 +298,7 @@ struct LightningTestSuite {
                 return std::unexpected(LightningTestError::EngineInitFailed);
             }
             auto engine = std::move(engineRes.value());
-            engine->InitializeDefaultScene();
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, {0, 80, 0}, {0, 0, 0});
@@ -301,7 +362,7 @@ struct LightningTestSuite {
             rc.ClearCaches(); // the lookup disappears, but the component still owns its VBOs
             ZHLN::Test::ExpectFalse(rc.Mesh(meshID).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
-            ZHLN::Lightning::Update(*engine, 0.01f);
+            Step(*engine, 0.01f);
             ZHLN::Test::ExpectTrue(rc.Mesh(meshID).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
             ZHLN::DespawnEntity(*engine, cachedBolt);

@@ -4,10 +4,7 @@
 // extensions/CharacterController/CharacterComponents.hpp
 #pragma once
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Quat.h>
+#include <Zahlen/Math/Quat.hpp>
 
 namespace ZHLN::Character {
 
@@ -15,10 +12,10 @@ namespace ZHLN::Character {
 // substep. The constants (speed 7, sprint 1.65x, jump force 12, gravity 32
 // in the integrator) are this controller's tuning, not engine substrate --
 // core keeps PhysicsContext::CreateCharacter / CharacterVirtual and the raw
-// InputStateComponent; interpreting keys into this state lives here.
+// InputState; interpreting keys into this state lives here.
 struct MovementComponent {
-    JPH::Quat orientation     = JPH::Quat::sIdentity();
-    JPH::Quat prevOrientation = JPH::Quat::sIdentity();
+    Quat orientation     = Quat::Identity();
+    Quat prevOrientation = Quat::Identity();
 
     float inputX           = 0.0f;
     float inputZ           = 0.0f;

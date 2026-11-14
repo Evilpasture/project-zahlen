@@ -8,18 +8,18 @@
 // about this door", and the caller answers "what does a door do".
 
 #include "BSPInteraction.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
 
 namespace ZHLN::BSP {
 namespace {
-
-constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
 
 // Source's sentinels for the first movedir component: not angles, directions.
 constexpr float kMoveDirSentinelUp   = -1.0f;
@@ -32,12 +32,12 @@ constexpr float kSentinelEpsilon     = 0.01f;
 
 // The three components of a space separated keyvalue, or nothing when the key
 // is absent or unparseable.
-[[nodiscard]] auto OptionalVec3(const BSPEntity& entity, std::string_view key) -> std::optional<JPH::Vec3> {
+[[nodiscard]] auto OptionalVec3(const BSPEntity& entity, std::string_view key) -> std::optional<FVec3> {
     const auto arr = entity.FindVector(key);
     if (!arr) {
         return std::nullopt;
     }
-    return JPH::Vec3((*arr)[0], (*arr)[1], (*arr)[2]);
+    return FVec3{(*arr)[0], (*arr)[1], (*arr)[2]};
 }
 
 } // namespace
@@ -138,10 +138,10 @@ auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput> {
     return outputs;
 }
 
-auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> JPH::Vec3 {
+auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3 {
     const std::string_view movedirStr = entity.Find("movedir");
     if (movedirStr.empty()) {
-        return ConvertDirection(options, JPH::Vec3::sAxisX());
+        return ConvertDirection(options, FVec3::UnitX());
     }
 
     float       v[3] = {0.0f, 0.0f, 0.0f};
@@ -164,25 +164,25 @@ auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -
     // The sentinels are checked before the angle reading: reading -1 as a pitch
     // would aim the mover at 359 degrees instead of straight up.
     if (IsSentinel(v, kMoveDirSentinelUp)) {
-        return ConvertDirection(options, JPH::Vec3(0.0f, 0.0f, 1.0f));
+        return ConvertDirection(options, FVec3{0.0f, 0.0f, 1.0f});
     }
     if (IsSentinel(v, kMoveDirSentinelDown)) {
-        return ConvertDirection(options, JPH::Vec3(0.0f, 0.0f, -1.0f));
+        return ConvertDirection(options, FVec3{0.0f, 0.0f, -1.0f});
     }
 
-    const float     pitch = v[0] * kDegreesToRadians;
-    const float     yaw   = v[1] * kDegreesToRadians;
-    const float     cp    = std::cos(pitch);
-    const JPH::Vec3 sourceDir(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-    if (sourceDir.LengthSq() < 1e-4f) {
-        return ConvertDirection(options, JPH::Vec3(1.0f, 0.0f, 0.0f));
+    const auto pitch = DegF{v[0]}.ToRadians();
+    const auto yaw = DegF{v[1]}.ToRadians();
+    const float     cp    = Cos(pitch);
+    const FVec3 sourceDir{cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
+    if (sourceDir.LengthSquared() < 1e-4f) {
+        return ConvertDirection(options, FVec3{1.0f, 0.0f, 0.0f});
     }
     return ConvertDirection(options, sourceDir.Normalized());
 }
 
 // --- Resolution -------------------------------------------------------------
 
-auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity {
+auto FindMatchingEntity(ResolutionQuery query, std::string_view matchName, std::string_view modelSource) -> Entity {
     if (!modelSource.empty()) {
         // A targetname is not an entity identity: Source deliberately allows
         // many brush entities to share one so an input can address the whole
@@ -192,8 +192,8 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
         if (modelSource.starts_with('*')) {
             modelSuffix = "#model_" + std::string(modelSource.substr(1));
         }
-        for (const Entity e: registry.GetEntitiesWith<Components::SceneSourceComponent>()) {
-            const auto srcComp = registry.Get<Components::SceneSourceComponent>(e);
+        for (const Entity e: query.Entities<Components::SceneSourceComponent>()) {
+            const auto srcComp = query.Get<Components::SceneSourceComponent>(e);
             if (!srcComp) {
                 continue;
             }
@@ -203,8 +203,8 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
             }
         }
     }
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
+    for (const Entity e: query.Entities<Components::NameComponent>()) {
+        const auto nameComp = query.Get<Components::NameComponent>(e);
         if (nameComp && std::string_view(nameComp->name) == matchName) {
             return e;
         }
@@ -292,7 +292,7 @@ namespace {
 
 } // namespace
 
-auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, const ImportOptions& options) -> std::vector<EntityRecord> {
+auto DescribeInteractiveEntities(ResolutionQuery query, const BSPMap& map, const ImportOptions& options) -> std::vector<EntityRecord> {
     std::vector<EntityRecord> records;
     records.reserve(map.entities.size() / 4);
 
@@ -328,17 +328,17 @@ auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, con
             }
             // Source stores the origin at the feet; it stays there, and the
             // teleport lifts the character by its own ground offset.
-            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(JPH::Vec3::sZero()));
+            record.origin = ConvertPosition(options, OptionalVec3(entity, "origin").value_or(FVec3::Zero()));
             // The exact conjugated Source rotation: TeleportPlayer recovers the
             // post-teleport view direction from this transform's +X axis.
-            const JPH::Vec3 angles = OptionalVec3(entity, "angles").value_or(JPH::Vec3::sZero());
-            record.orientation     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
+            const FVec3 angles = OptionalVec3(entity, "angles").value_or(FVec3::Zero());
+            record.orientation     = Quat::FromEulerDegrees({EngineEulerAnglesFromSourceAngles(angles, options)});
             records.push_back(std::move(record));
             continue;
         }
 
         record.matchName = record.targetName.empty() ? FallbackMatchName(className, record.model) : record.targetName;
-        record.entity    = FindMatchingEntity(registry, record.matchName, record.model);
+        record.entity    = FindMatchingEntity(query, record.matchName, record.model);
         if (record.entity == Entity::Null()) {
             continue;
         }

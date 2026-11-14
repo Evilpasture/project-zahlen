@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsStateSystem.hpp"
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <algorithm>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
@@ -52,15 +54,13 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
         if (!trans) {
             continue;
         }
-        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snapshots[j].previousPosition);
-        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snapshots[j].currentPosition);
-        JPH::Vec3 expected = previous + clampedAlpha * (current - previous);
-        JPH::Vec3 actual(trans->position[0], trans->position[1], trans->position[2]);
-        if ((actual - expected).LengthSq() > 1e-3f) {
+        const auto expected = Lerp(snapshots[j].previousPosition, snapshots[j].currentPosition, clampedAlpha);
+        const auto actual = trans->position;
+        if ((actual - expected).LengthSquared() > 1e-3f) {
             ZHLN::Log(
                 "[Test Fail] Real Visual Interpolation Invariant Failure on Entity {}: "
                 "Expected position ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
-                e.index, expected.GetX(), expected.GetY(), expected.GetZ(), actual.GetX(), actual.GetY(), actual.GetZ(), clampedAlpha
+                e.index, expected.x, expected.y, expected.z, actual.x, actual.y, actual.z, clampedAlpha
             );
         }
     }
@@ -106,11 +106,8 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
         }
 
         const auto& snap = snapshots[j];
-        const JPH::Vec3 previous = static_cast<JPH::Vec3>(snap.previousPosition);
-        const JPH::Vec3 current  = static_cast<JPH::Vec3>(snap.currentPosition);
-        trans->position  = previous + clampedAlpha * (current - previous);
-
-        trans->rotation = static_cast<JPH::Quat>(snap.previousRotation).SLERP(static_cast<JPH::Quat>(snap.currentRotation), clampedAlpha);
+        trans->position = Lerp(snap.previousPosition, snap.currentPosition, clampedAlpha);
+        trans->rotation = Slerp(Quat{snap.previousRotation}, Quat{snap.currentRotation}, clampedAlpha);
     }
 
     if constexpr (isDev) {

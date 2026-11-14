@@ -10,16 +10,13 @@
 // from this interface.
 #pragma once
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <cstdint>
 #include <memory>
@@ -49,7 +46,7 @@ struct PlaybackState {
 
 struct MorphSample {
     uint32_t     activeCount = 0;
-    ZHLN::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 weights     = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct SkeletonBinding {
@@ -62,9 +59,9 @@ struct IKChain {
     int32_t   upperNodeIndex    = -1;
     int32_t   lowerNodeIndex    = -1;
     int32_t   endNodeIndex      = -1;
-    JPH::Vec3 targetPosition    = JPH::Vec3::sZero();
-    JPH::Quat targetRotation    = JPH::Quat::sIdentity();
-    JPH::Vec3 poleVector        = JPH::Vec3(0.0f, -1.0f, 0.0f);
+    FVec3 targetPosition    = FVec3::Zero();
+    Quat  targetRotation = Quat::Identity();
+    FVec3 poleVector        = {0.0f, -1.0f, 0.0f};
     float     weight            = 1.0f;
     bool      orientEndEffector = true;
 };
@@ -94,9 +91,9 @@ class AnimationContext {
 
     [[nodiscard]] auto Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState>;
     [[nodiscard]] auto Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;
-    [[nodiscard]] auto RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<Math::TransformTRS>;
-    [[nodiscard]] auto LocalPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
-    [[nodiscard]] auto ModelPose(AnimationID handle) const noexcept -> std::span<const JPH::Mat44>;
+    [[nodiscard]] auto RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<TransformParts>;
+    [[nodiscard]] auto LocalPose(AnimationID handle) const noexcept -> std::span<const Mat4x4>;
+    [[nodiscard]] auto ModelPose(AnimationID handle) const noexcept -> std::span<const Mat4x4>;
 
   private:
     struct Impl;

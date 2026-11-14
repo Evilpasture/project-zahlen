@@ -28,14 +28,22 @@ set(ZHLN_ZSHADER_SOURCES
 # The tool reads the engine's headers -- Reflect::EnumToString for the enumerator
 # names it writes, ZHLN::Ranges for the walk over its arguments -- but it cannot
 # link the engine: zahlen_engine links zahlen_render, which compiles the catalog
-# this tool writes, so an edge back would be a cycle. What it shares with the
-# engine instead is the build's reflection story, and it shares it the same way:
-# through zahlen_transpile_sources(). Under a compiler without -freflection this
-# rewrites the EnumToString calls into the switch they stand for, which is the
-# difference between a catalog of real names and one whose every descriptor type
-# is the sentinel -- Reflect.cpp asks once, up front, and refuses to write the
-# second kind (see NamesEnumerators()).
-zahlen_transpile_sources(ZHLN_ZSHADER_SOURCES ${ZHLN_ZSHADER_SOURCES})
+# this tool writes, so an edge back would be a cycle.
+#
+# It used to run its sources through zahlen_transpile_sources() for the benefit
+# of a compiler without -freflection. That path is gone: the reflection headers
+# require -freflection outright (Core/Reflection/Core.hpp takes the no-reflection
+# branch only so the *error* is comprehensible), the root CMakeLists rejects
+# toolchains that cannot do it, and zshader is compiled with
+# zahlen_enable_reflection like every other target that reads a reflected
+# header. Wrapping in the transpiler here also had a side effect nobody wanted:
+# under COMPILER_HAS_REFLECTION the function returns its arguments untouched but
+# the call site still reads as if a rewrite might happen.
+#
+# The reflection flags themselves -- -freflection, -fannotation-attributes and
+# __cpp_impl_reflection -- arrive from zahlen_enable_reflection below, which is
+# applied after this directory is configured. That is why the root CMakeLists
+# names zshader in its own list rather than calling the function here.
 
 set(ZHLN_ZSHADER_IMAGE_COOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ImageCook.cpp")
 set_source_files_properties("${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}" PROPERTIES
@@ -110,15 +118,16 @@ target_compile_options(zshader PRIVATE
 # vulkan_core.h IS safe here: with no Rendering.hpp in the PCH there is no
 # volk in it either, so real prototypes first is the only order present --
 # exactly what Reflect.cpp compiles today.
-target_precompile_headers(zshader PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
-    "<slang.h>"
-    "<vulkan/vulkan_core.h>"
-)
+#
+# Gated exactly like every other PCH in the tree: ZHLN_ENABLE_PCH is a build
+# option, and clang-p2996's PCH ASTReader crashes on P2996 reflection
+# expressions, so the compiler gate is the one src/render, src/physics and
+# src/vulkan already use. Ungated, this target ignored both.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_precompile_headers(zshader PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
+        "<slang.h>"
+        "<vulkan/vulkan_core.h>"
+    )
+endif()
 
-# The reflection flags themselves -- -freflection, -fannotation-attributes and
-# __cpp_impl_reflection -- come from the root CMakeLists' zahlen_enable_reflection
-# list, where every target that includes a reflection header is named. That
-# function does not exist yet while this directory is configured (ShaderCompilation
-# is included above it), so the call sits in that list, next to zcook's. There is
-# no stub fallback anymore: the reflection headers require -freflection outright.

@@ -7,6 +7,7 @@
 
 #include "vulkan/core/Handles.hpp"
 #include "vulkan/execution/CommandRecorder.hpp"
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Error.hpp>
 #include <array>
 #include <cstdint>
@@ -153,8 +154,26 @@ enum class BarrierAccess : VkAccessFlags2 {
     AccelerationStructureWrite = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR
 };
 
-[[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage;
-[[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
+} // namespace ZHLN::Vk
+
+namespace ZHLN {
+template <>
+inline constexpr bool EnableEnumFlags<Vk::BarrierStage> = true;
+template <>
+inline constexpr bool EnableEnumFlags<Vk::BarrierAccess> = true;
+} // namespace ZHLN
+
+namespace ZHLN::Vk {
+
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
 
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 

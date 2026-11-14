@@ -73,15 +73,15 @@ auto RagdollManager::CreateSkeletalRagdoll(
         settings->mParts[jointIdx].mMassPropertiesOverride.mMass = part.mass;
         settings->mParts[jointIdx].mMotionType                   = JPH::EMotionType::Dynamic;
         settings->mParts[jointIdx].mObjectLayer                  = static_cast<JPH::ObjectLayer>(Layers::ID::MOVING);
-        settings->mParts[jointIdx].mPosition                     = part.position;
+        settings->mParts[jointIdx].mPosition                     = JPH::RVec3(part.position.x, part.position.y, part.position.z);
         settings->mParts[jointIdx].mRotation                     = part.rotation;
 
         if (part.parentJointIndex >= 0) {
             JPH::SwingTwistConstraintSettings twistSettings;
             twistSettings.mSpace               = JPH::EConstraintSpace::LocalToBodyCOM;
             twistSettings.mPosition1           = twistSettings.mPosition2 = JPH::RVec3::sZero();
-            twistSettings.mTwistAxis1          = twistSettings.mTwistAxis2 = part.twistAxis;
-            twistSettings.mPlaneAxis1          = twistSettings.mPlaneAxis2 = part.planeNormal;
+            twistSettings.mTwistAxis1          = twistSettings.mTwistAxis2 = JPH::Vec3(part.twistAxis.x, part.twistAxis.y, part.twistAxis.z);
+            twistSettings.mPlaneAxis1          = twistSettings.mPlaneAxis2 = JPH::Vec3(part.planeNormal.x, part.planeNormal.y, part.planeNormal.z);
             twistSettings.mNormalHalfConeAngle = part.coneAngle;
             twistSettings.mPlaneHalfConeAngle  = part.coneAngle;
             twistSettings.mTwistMinAngle       = part.twistMin;

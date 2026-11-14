@@ -35,6 +35,13 @@ def main() -> int:
                 failures.append(f"{relative}:{number}: Platform.hpp must be included unconditionally; it owns its platform guards")
             if relative.parts[0] in APPLICATION_ROOTS and DIRECT_JOLT.match(line):
                 failures.append(f"{relative}:{number}: application code must include <Zahlen/Physics/Jolt.hpp>, not <Jolt/Jolt.h>")
+            # The old public-looking prefix hid a private implementation seam
+            # from the layer checks. Reject it everywhere except the engine
+            # implementation itself.
+            if relative.parts[:2] != ("src", "engine") and (
+                "Zahlen/Engine/Internal/" in line or re.search(r"\bEngineAccess\b", line)
+            ):
+                failures.append(f"{relative}:{number}: engine internals are private; use capabilities or typed queries")
             if CONDITIONAL.match(line):
                 depth += 1
     if failures:

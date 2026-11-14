@@ -18,7 +18,9 @@
 // include/ names a generated type, which is what lets the engine build with no shader
 // tool having run: the engine is a producer of scene terms, not a consumer of the ABI.
 
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <array>
 #include <cstdint>
@@ -26,26 +28,26 @@
 namespace ZHLN {
 
 struct FrameData {
-    ZHLN::Mat44 viewProj {};
-    ZHLN::Mat44 unjitteredViewProj {};
-    ZHLN::Mat44 prevUnjitteredViewProj {};
-    ZHLN::Mat44 invViewProj {};
+    ZHLN::Mat4x4 viewProj {};
+    ZHLN::Mat4x4 unjitteredViewProj {};
+    ZHLN::Mat4x4 prevUnjitteredViewProj {};
+    ZHLN::Mat4x4 invViewProj {};
 
-    ZHLN::Float3 camPosition {};
+    ZHLN::FVec3 camPosition {};
     float        frameClock = 0.0f; // seconds, wrapped: the clock shaders animate from
 
-    ZHLN::Float3 sunDirection {0.0f, -1.0f, 0.0f};
+    ZHLN::FVec3 sunDirection {0.0f, -1.0f, 0.0f};
     float        sunIntensity = 0.0f;
-    ZHLN::Float3 sunRadiance {};
+    ZHLN::FVec3 sunRadiance {};
 
     // The IBL probe the frame was authored with, if any.
-    ZHLN::Float3 probeMin {};
-    ZHLN::Float3 probeMax {};
-    ZHLN::Float3 probePos {};
+    ZHLN::FVec3 probeMin {};
+    ZHLN::FVec3 probeMax {};
+    ZHLN::FVec3 probePos {};
 
-    ZHLN::Float4 skyZenith {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float4 skyHorizon {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float4 skyGround {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4 skyZenith {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4 skyHorizon {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec4 skyGround {0.0f, 0.0f, 0.0f, 1.0f};
 
     // The settings the frame was authored with; the same member types
     // GraphicsSettings holds, so nothing is converted on the way in.
@@ -66,14 +68,14 @@ struct FrameData {
 // space.
 struct LightDesc {
     LightType    type = LightType::Directional;
-    ZHLN::Float3 position {};
-    ZHLN::Float3 direction {};
-    ZHLN::Float3 color {};
+    ZHLN::FVec3 position {};
+    ZHLN::FVec3 direction {};
+    ZHLN::FVec3 color {};
     float        intensity = 0.0f;
     float        radius    = 0.0f;
     float        range     = 1000.0f;
     // An area light's quad: one column per lane of the shader's four points.
-    ZHLN::Mat44 points = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4 points = ZHLN::Mat4x4::Identity();
     // Asks for a shadow-atlas tile. A light that does not ask is never
     // allocated one, so a scene's shadow cost stays an authored decision.
     bool     castsShadow = false;

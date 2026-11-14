@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
@@ -9,6 +8,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <span>
@@ -19,46 +19,46 @@ namespace ZHLN {
 namespace {
 
 template <typename T>
-void ReleaseSelected(Engine& engine, bool all) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto entities = registry.GetEntitiesWith<T>();
+void ReleaseSelected(Engine& engine, ECS::Query<T&, const Components::PendingDestroy> query, bool all) {
+    const auto entities = query.template Entities<T>();
     if (entities.empty()) {
         return;
     }
-    auto components = registry.GetRawArray<T>();
+    auto components = query.template Raw<T>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        if (all || registry.Get<Components::PendingDestroy>(entities[i]).has_value()) {
+        if (all || query.template Get<Components::PendingDestroy>(entities[i]).has_value()) {
             SceneResources::Release(engine, components[i]);
         }
     }
 }
 
-void ReleasePhysics(Engine& engine, bool all) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+using PhysicsCleanupQuery = ECS::Query<Components::PhysicsComponent&, Components::RagdollComponent&, const Components::PendingDestroy>;
+
+void ReleasePhysics(Engine& engine, PhysicsCleanupQuery query, bool all) {
     auto physics = engine.Physics();
 
     // Queue all body releases under one physics shadow lock while components
     // remain readable; ragdoll instances are released in a second bulk call.
-    const auto bodyOwners = registry.GetEntitiesWith<Components::PhysicsComponent>();
+    const auto bodyOwners = query.Entities<Components::PhysicsComponent>();
     if (!bodyOwners.empty()) {
         std::vector<Physics::BodyID> bodies;
         bodies.reserve(bodyOwners.size());
-        auto components = registry.GetRawArray<Components::PhysicsComponent>();
+        auto components = query.Raw<Components::PhysicsComponent>();
         for (size_t i = 0; i < bodyOwners.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(bodyOwners[i]).has_value()) {
+            if (all || query.Get<Components::PendingDestroy>(bodyOwners[i]).has_value()) {
                 bodies.push_back(std::exchange(components[i].physicsID, Physics::BodyID::Null()));
             }
         }
         physics.DestroyBodies(std::span<const Physics::BodyID> {bodies});
     }
 
-    const auto ragdollOwners = registry.GetEntitiesWith<Components::RagdollComponent>();
+    const auto ragdollOwners = query.Entities<Components::RagdollComponent>();
     if (!ragdollOwners.empty()) {
         std::vector<Physics::RagdollID> ragdolls;
         ragdolls.reserve(ragdollOwners.size());
-        auto components = registry.GetRawArray<Components::RagdollComponent>();
+        auto components = query.Raw<Components::RagdollComponent>();
         for (size_t i = 0; i < ragdollOwners.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(ragdollOwners[i]).has_value()) {
+            if (all || query.Get<Components::PendingDestroy>(ragdollOwners[i]).has_value()) {
                 ragdolls.push_back(std::exchange(components[i].ragdollID, Physics::RagdollID::Invalid));
                 components[i].isAddedToPhysics = false;
             }
@@ -67,18 +67,20 @@ void ReleasePhysics(Engine& engine, bool all) {
     }
 }
 
-void ReleaseOwnedResources(Engine& engine, bool all) {
-    ReleasePhysics(engine, all);
-    ReleaseSelected<Components::AudioSourceComponent>(engine, all);
-    ReleaseSelected<Components::OwnedMeshComponent>(engine, all);
-    ReleaseSelected<Components::SkeletalMeshComponent>(engine, all);
+void ReleaseOwnedResources(Engine& engine, ECS::Registry& registry, bool all) {
+    // This lifecycle boundary must also work before graph initialization and
+    // during teardown. Construct narrow queries here rather than scheduling
+    // cleanup into a graph or playing an unrelated command buffer.
+    ReleasePhysics(engine, PhysicsCleanupQuery {registry}, all);
+    ReleaseSelected<Components::AudioSourceComponent>(engine, ECS::Query<Components::AudioSourceComponent&, const Components::PendingDestroy> {registry}, all);
+    ReleaseSelected<Components::OwnedMeshComponent>(engine, ECS::Query<Components::OwnedMeshComponent&, const Components::PendingDestroy> {registry}, all);
+    ReleaseSelected<Components::SkeletalMeshComponent>(engine, ECS::Query<Components::SkeletalMeshComponent&, const Components::PendingDestroy> {registry}, all);
     engine.RunSceneCleanupPasses(all);
 }
 
 } // namespace
 
-void SceneCleanupSystem::ProcessPending(Engine& engine) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+void SceneCleanupSystem::ProcessPending(Engine& engine, ECS::Registry& registry) {
     const auto marked = registry.GetEntitiesWith<Components::PendingDestroy>();
     if (marked.empty()) {
         return;
@@ -87,7 +89,7 @@ void SceneCleanupSystem::ProcessPending(Engine& engine) {
     // Expand all marked roots in one hierarchy pass (also catches children
     // attached after a parent was marked), then query the intact owners.
     ExpandPendingDestroy(registry);
-    ReleaseOwnedResources(engine, false);
+    ReleaseOwnedResources(engine, registry, false);
 
     // Destroy compacts the PendingDestroy sparse set: snapshot it first.
     const auto pending = registry.GetEntitiesWith<Components::PendingDestroy>();
@@ -97,10 +99,10 @@ void SceneCleanupSystem::ProcessPending(Engine& engine) {
     }
 }
 
-void SceneCleanupSystem::ClearAll(Engine& engine) {
-    ReleaseOwnedResources(engine, true);
+void SceneCleanupSystem::ClearAll(Engine& engine, ECS::Registry& registry) {
+    ReleaseOwnedResources(engine, registry, true);
     engine.Commands().Reset();
-    ZHLN::EngineAccess::RegistryOf(engine).Clear();
+    registry.Clear();
 }
 
 } // namespace ZHLN

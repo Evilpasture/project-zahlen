@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Terrain/TerrainFactory.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TerrainFactory.hpp"
@@ -11,7 +12,9 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -23,7 +26,10 @@
 
 namespace ZHLN::Terrain {
 
-auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
+namespace {
+
+template <typename Gfx>
+auto BuildTerrainMeshFromDataImpl(Gfx&& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
     float halfSize = worldSize / 2.0f;
     float dx       = worldSize / (sampleCount - 1);
     float dz       = worldSize / (sampleCount - 1);
@@ -34,12 +40,12 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         return heights[x + z * sampleCount];
     };
 
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
+    auto get_normal = [&](int x, int z) -> FVec3 {
         float hL = get_height(x - 1, z);
         float hR = get_height(x + 1, z);
         float hD = get_height(x, z - 1);
         float hU = get_height(x, z + 1);
-        return JPH::Vec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
+        return FVec3{hL - hR, 2.0f * dx, hD - hU}.Normalized();
     };
 
     std::vector<VertexPosition>     positions;
@@ -66,10 +72,10 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             float dx_ = -halfSize + (x + 1) * dx;
             float dz_ = -halfSize + (z + 1) * dz;
 
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
+            FVec3 nA = get_normal(x, z);
+            FVec3 nB = get_normal(x + 1, z);
+            FVec3 nC = get_normal(x, z + 1);
+            FVec3 nD = get_normal(x + 1, z + 1);
 
             auto fetch_color = [&](int idx) -> PackedRGBA8 {
                 if (colorsRGBA == nullptr) {
@@ -80,23 +86,23 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
             };
 
             VertexPosition     posA {{ax, heights[idxA], az}};
-            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.x, nA.y, nA.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxA)};
 
             VertexPosition     posB {{bx, heights[idxB], bz}};
-            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.x, nB.y, nB.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceB = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxB)
             };
 
             VertexPosition     posC {{cx, heights[idxC], cz}};
-            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.x, nC.y, nC.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceC = {
                      .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxC)
             };
 
             VertexPosition     posD {{dx_, heights[idxD], dz_}};
-            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.x, nD.y, nD.z), .tangent = Math::PackNormal(1, 0, 0, 1)};
             VertexSurface      surfaceD = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxD)
             };
@@ -122,9 +128,9 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         }
     }
 
-    BufferID         posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferID         frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
-    BufferID         surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    BufferID         posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferID         frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferID         surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
     const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(positions));
 
     Mesh finalMesh {
@@ -145,7 +151,8 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
     return finalMesh;
 }
 
-auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
+template <typename Gfx>
+auto BuildTerrainMeshImpl(Gfx&& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
     auto noise = [&](float x, float y) -> float {
         float ix = std::floor(x);
         float iy = std::floor(y);
@@ -216,14 +223,14 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     tangentFrames.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
     surfaces.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
 
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
+    auto get_normal = [&](int x, int z) -> FVec3 {
         float     posX = -halfSize + x * dx;
         float     posZ = -halfSize + z * dz;
         float     hL   = (x > 0) ? outHeights[(x - 1) + z * sampleCount] : get_height(posX - dx, posZ);
         float     hR   = (x < sampleCount - 1) ? outHeights[(x + 1) + z * sampleCount] : get_height(posX + dx, posZ);
         float     hD   = (z > 0) ? outHeights[x + (z - 1) * sampleCount] : get_height(posX, posZ - dz);
         float     hU   = (z < sampleCount - 1) ? outHeights[x + (z + 1) * sampleCount] : get_height(posX, posZ + dz);
-        JPH::Vec3 normal(hL - hR, 2.0f * dx, hD - hU);
+        FVec3 normal{hL - hR, 2.0f * dx, hD - hU};
         return normal.Normalized();
     };
 
@@ -248,13 +255,13 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             float cy = outHeights[idxC];
             float dy = outHeights[idxD];
 
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
+            FVec3 nA = get_normal(x, z);
+            FVec3 nB = get_normal(x + 1, z);
+            FVec3 nC = get_normal(x, z + 1);
+            FVec3 nD = get_normal(x + 1, z + 1);
 
-            auto get_color = [&](float y, JPH::Vec3 normal) -> PackedRGBA8 {
-                float slope = normal.GetY();
+            auto get_color = [&](float y, FVec3 normal) -> PackedRGBA8 {
+                float slope = normal.y;
                 float normY = y / maxHeight;
 
                 if (type == TerrainType::Snow) {
@@ -291,23 +298,23 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
             };
 
             VertexPosition     posA = {{ax, ay, az}};
-            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.x, nA.y, nA.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(ay, nA)};
 
             VertexPosition     vB = {{bx, by, bz}};
-            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.x, nB.y, nB.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceB = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(by, nB)
             };
 
             VertexPosition     vC = {{cx, cy, cz}};
-            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.x, nC.y, nC.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceC = {
                      .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(cy, nC)
             };
 
             VertexPosition     vD = {{dx_, dy, dz_}};
-            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.x, nD.y, nD.z), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
             VertexSurface      surfaceD = {
                      .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(dy, nD)
             };
@@ -338,9 +345,9 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
 
-    BufferID posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
-    BufferID frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
-    BufferID surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
+    BufferID posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferID frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferID surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
 
     const MeshletStreams ml = ctx.UploadMeshlets(BuildMeshlets(positions));
     auto finalMesh = Mesh {
@@ -363,6 +370,16 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
     return finalMesh;
+}
+
+} // namespace
+
+auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
+    return BuildTerrainMeshFromDataImpl(ctx, sampleCount, worldSize, heights, colorsRGBA);
+}
+
+auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
+    return BuildTerrainMeshImpl(ctx, sampleCount, worldSize, maxHeight, outHeights, type);
 }
 
 auto CreateTerrainFromData(
@@ -403,10 +420,13 @@ auto CreateTerrainFromData(
         tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
     }
     TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    // ECS render transforms use float positions; physics below retains the
+    // original double-precision spawn position.
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto worldMat = ComposeTransform(position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
@@ -426,7 +446,7 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }
 
@@ -442,9 +462,67 @@ auto CreateTerrainFromData(
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
-    return CreateTerrainFromData(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::RegistryOf(engine), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, heights, colorsRGBA, params
+    auto   entities = engine.Entities();
+    auto   gfx      = engine.Graphics();
+    Entity e        = entities.Create();
+
+    Mesh mesh = BuildTerrainMeshFromDataImpl(gfx, sampleCount, worldSize, heights, colorsRGBA);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineID::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
+        mat                 = mat_res.value_or(Material {});
+        mat.roughnessFactor = 0.85f;
+        mat.metallicFactor  = 0.05f;
+    }
+
+    AssetID    meshAsset = HashAssetID("prefab_terraindata_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_terraindata_mat_" + std::to_string(e.index));
+
+    gfx.RegisterMesh(meshAsset, mesh);
+    gfx.RegisterMaterial(matAsset, mat);
+
+    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = 35.0f, .heights = {}, .colors = {}};
+    if (heights != nullptr) {
+        tData.heights.assign(heights, heights + (static_cast<ptrdiff_t>(sampleCount * sampleCount)));
+    }
+    if (colorsRGBA != nullptr) {
+        tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
+    }
+    TerrainID   tID      = TerrainSystem::RegisterTerrainData(std::move(tData));
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto  worldMat = ComposeTransform(position, params.rotation, params.scale);
+
+    entities.Attach(
+        e,
+        Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))},
+        Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale},
+        Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
+        Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f},
+        Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh},
+        Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor},
+        TerrainComponent {
+            .sampleCount = static_cast<uint32_t>(sampleCount),
+            .worldSize   = worldSize,
+            .maxHeight   = 35.0f,
+            .roughness   = mat.roughnessFactor,
+            .metallic    = mat.metallicFactor,
+            .terrainID   = tID
+        }
     );
+
+    if (params.createPhysics && heights != nullptr && sampleCount >= 2) {
+        const size_t count = static_cast<size_t>(sampleCount) * static_cast<size_t>(sampleCount);
+        const auto   body  = engine.Physics().CreateRigidBody(
+            Physics::Shape<Physics::HeightField> {std::span<const float> {heights, count}, static_cast<uint32_t>(sampleCount), worldSize},
+            params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving
+        );
+        entities.Attach(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
+    }
+
+    return e;
 }
 
 auto CreateTerrain(
@@ -481,10 +559,13 @@ auto CreateTerrain(
     ctx.RegisterGPUMaterial(matAsset, mat);
 
     TerrainID tID  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    // ECS render transforms use float positions; physics below retains the
+    // original double-precision spawn position.
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto worldMat = ComposeTransform(position, params.rotation, params.scale);
 
     reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
@@ -506,7 +587,7 @@ auto CreateTerrain(
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
             auto body =
-                pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+                pc->CreateRigidBody(shape, params.position, params.rotation.AsVec4(), JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
             reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
         }
     }
@@ -516,7 +597,65 @@ auto CreateTerrain(
 
 auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const PrefabFactory::SpawnParams& params) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
-    return CreateTerrain(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::RegistryOf(engine), &ZHLN::EngineAccess::PhysicsOf(engine), sampleCount, worldSize, maxHeight, type, params);
+    auto   entities = engine.Entities();
+    auto   gfx      = engine.Graphics();
+    Entity e        = entities.Create();
+
+    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
+    tData.heights.resize(static_cast<size_t>(sampleCount) * static_cast<size_t>(sampleCount));
+
+    Mesh mesh = BuildTerrainMeshImpl(gfx, sampleCount, worldSize, maxHeight, tData.heights.data(), type);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineID::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
+        mat                 = mat_res.value_or(Material {});
+        mat.roughnessFactor = 0.85f;
+        mat.metallicFactor  = 0.05f;
+    }
+
+    AssetID    meshAsset = HashAssetID("prefab_terrain_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_terrain_mat_" + std::to_string(e.index));
+
+    gfx.RegisterMesh(meshAsset, mesh);
+    gfx.RegisterMaterial(matAsset, mat);
+
+    TerrainID   tID      = TerrainSystem::RegisterTerrainData(std::move(tData));
+    const FVec3 position {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)};
+    const auto  worldMat = ComposeTransform(position, params.rotation, params.scale);
+
+    entities.Attach(
+        e,
+        Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))},
+        Components::TransformComponent {.position = position, .rotation = params.rotation, .scale = params.scale},
+        Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
+        Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f},
+        Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh},
+        Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f},
+        TerrainComponent {
+            .sampleCount = static_cast<uint32_t>(sampleCount),
+            .worldSize   = worldSize,
+            .maxHeight   = maxHeight,
+            .roughness   = 0.85f,
+            .metallic    = 0.05f,
+            .terrainID   = tID
+        }
+    );
+
+    if (params.createPhysics) {
+        const TerrainData* stored = TerrainSystem::GetTerrainData(tID);
+        if (stored != nullptr && !stored->heights.empty()) {
+            const auto body = engine.Physics().CreateRigidBody(
+                Physics::Shape<Physics::HeightField> {std::span<const float> {stored->heights}, static_cast<uint32_t>(sampleCount), worldSize},
+                params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving
+            );
+            entities.Attach(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
+        }
+    }
+
+    return e;
 }
 
 } // namespace ZHLN::Terrain

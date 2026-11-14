@@ -19,6 +19,10 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -43,6 +47,8 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
 
 enum class Difficulty : uint8_t { Casual, Normal, Brutal };
 
@@ -367,7 +373,7 @@ intensity = 250.0
             ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
             // ... and only in that form.
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
-            // A Float3 accepts the integers a person types.
+            // A FVec3 accepts the integers a person types.
             const auto integral = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
             ZHLN::Test::ExpectTrue(integral.has_value()) && ZHLN::Test::ExpectEq(integral->camera.position.z, 12.0f);
 
@@ -586,35 +592,33 @@ onClickAction = "editor.save_scene"
         std::expected<void, ZHLN::ErrorCode> extract_reads_a_world_back_into_a_description() {
             ZHLN::ECS::Registry registry;
 
-            // The settings entity is how a scene owns the environment.
-            registry.Create(
-                ZHLN::Components::GlobalSettingsTagComponent {}, ZHLN::Components::PostProcessSettingsComponent {
-                                                                     .giIntensity     = 2.5f,
-                                                                     .enableSSR       = 0,
-                                                                     .enableRTR       = 1,
-                                                                     .exposure        = 0.02f,
-                                                                     .bloomStrength   = 0.75f,
-                                                                     .contrast        = 1.15f,
-                                                                     .saturation      = 0.8f,
-                                                                     .tonemapper      = 3,
-                                                                     .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
-                                                                     .ambientExposure = 40.0f,
-                                                                     .probeMin        = {1.0f, 2.0f, 3.0f},
-                                                                     .probeMax        = {4.0f, 5.0f, 6.0f},
-                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 0.3f),
-                                                                     .skyHorizon      = {0.6f, 0.7f, 0.8f, 0.2f},
-                                                                     .skyGround       = {0.1f, 0.2f, 0.3f, 0.4f},
-                                                                 }
-            );
+            // The environment is the graphics owner's, so it is handed to Extract
+            // rather than seeded into the world.
+            ZHLN::GraphicsSettings gfx {};
+            gfx.post.giIntensity             = 2.5f;
+            gfx.post.enableSSR               = 0;
+            gfx.rayTracing.enableReflections = true;
+            gfx.post.exposure                = 0.02f;
+            gfx.post.bloomStrength           = 0.75f;
+            gfx.post.contrast                = 1.15f;
+            gfx.post.saturation              = 0.8f;
+            gfx.post.tonemapper              = 3;
+            gfx.post.colorFilter             = {1.0f, 0.9f, 0.8f};
+            gfx.environment.ambientExposure  = 40.0f;
+            gfx.environment.probeMin         = {1.0f, 2.0f, 3.0f};
+            gfx.environment.probeMax         = {4.0f, 5.0f, 6.0f};
+            gfx.environment.skyZenith        = {0.5f, 0.25f, 0.125f, 0.3f};
+            gfx.environment.skyHorizon       = {0.6f, 0.7f, 0.8f, 0.2f};
+            gfx.environment.skyGround        = {0.1f, 0.2f, 0.3f, 0.4f};
 
             // A dynamic box: everything the live components can answer for
             // itself, plus the provenance record for what they cannot.
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(1.0f, 2.0f, 3.0f),
-                    .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 45.0f, 0.0f}),
-                    .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
+                    .position = FVec3{1.0f, 2.0f, 3.0f},
+                    .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 45.0f, 0.0f}}),
+                    .scale    = FVec3{2.0f, 2.0f, 2.0f}
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
                 ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {.isStatic = false},
@@ -642,14 +646,14 @@ onClickAction = "editor.save_scene"
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f})
+                    .position = FVec3{4.0f, 5.0f, 6.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}})
                 },
                 ZHLN::Components::LightComponent {
                     .type        = ZHLN::LightType::Sun,
-                    .color       = JPH::Vec3(1.0f, 0.5f, 0.25f),
+                    .color       = FVec3{1.0f, 0.5f, 0.25f},
                     .intensity   = 180.0f,
                     .radius      = 0.0f,
-                    .direction   = JPH::Vec3(0.4f, 1.0f, 0.3f),
+                    .direction   = FVec3{0.4f, 1.0f, 0.3f},
                     .range       = 0.0f,
                     .castsShadow = true
                 },
@@ -661,22 +665,22 @@ onClickAction = "editor.save_scene"
             registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
 
             ZHLN::Camera camera;
-            camera.position = JPH::Vec3(0.0f, 3.8f, 7.5f);
-            camera.yaw      = -90.0f;
-            camera.pitch    = -14.0f;
-            camera.fov      = 52.0f;
+            camera.position = {0.0f, 3.8f, 7.5f};
+            camera.yaw      = ZHLN::DegF{-90.0f};
+            camera.pitch    = ZHLN::DegF{-14.0f};
+            camera.fov      = ZHLN::DegF{52.0f};
 
             // The one thing a registry cannot answer is a material's colour:
             // that lives in the material table. Extract asks for a lookup rather
             // than a RenderContext, so this supplies one directly -- no device.
             std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
             ZHLN::Material                                       boxMaterial {};
-            boxMaterial.baseColorFactor    = JPH::Float4 {0.1f, 0.6f, 0.95f, 1.0f};
+            boxMaterial.baseColorFactor = {0.1f, 0.6f, 0.95f, 1.0f};
             boxMaterial.emissiveFactor.x   = 80.0f;
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
-                camera, registry,
+                camera, gfx, registry,
                 ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
                                                  const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
                                                  const auto  hit   = table.find(id);
@@ -693,8 +697,8 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(scene.camera.position.y, 3.8f);
             ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
 
-            // The environment comes out of the settings component by field name,
-            // int -> bool and native Float3/Float4 -> JPH::Float3 included.
+            // The environment comes back out of the settings by field name,
+            // int -> bool and native FVec3/FVec4 -> JPH::Float3 included.
             ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
             ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
             ZHLN::Test::ExpectTrue(scene.environment.enableRTR);

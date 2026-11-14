@@ -8,7 +8,9 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -47,18 +49,15 @@ struct RayTracedShadowsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 1.5f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 1.5f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;
+                });
 
                 auto floorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {
@@ -69,29 +68,30 @@ struct RayTracedShadowsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(60.0f, 45.0f, 0.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({0.0f, 90.0f, 0.0f})
+                        .position = ZHLN::FVec3{60.0f, 45.0f, 0.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 90.0f, 0.0f}})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                         .intensity = 240.0f,
-                        .direction = JPH::Vec3(0.8f, 0.6f, 0.0f).Normalized()
+                        .direction = ZHLN::FVec3{0.8f, 0.6f, 0.0f}.Normalized()
                     }
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {-10.0f, 6.0f, -8.0f};
+                    cam.yaw      = ZHLN::DegF{0.0f};
+                    cam.pitch    = ZHLN::DegF{-20.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(-10.0f, 6.0f, -8.0f);
-                cam.yaw      = 0.0f;
-                cam.pitch    = -20.0f;
-                cam.fov      = 60.0f;
             }
 
             uint32_t validationRaised = 0;
@@ -103,7 +103,7 @@ struct RayTracedShadowsTestSuite {
                 *engine, 8, "raytraced_shadow_occlusion_and_stability",
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
-                    auto& reg = ZHLN::EngineAccess::RegistryOf(eng);
+                    auto reg = eng.Entities();
 
                     const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
                         eng, {0.5f, 3.0f, 4.0f},

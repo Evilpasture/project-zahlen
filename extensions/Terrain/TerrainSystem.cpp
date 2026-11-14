@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Terrain/TerrainSystem.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "TerrainSystem.hpp"
 #include "TerrainFactory.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -105,40 +106,40 @@ void TerrainSystem::UnregisterTerrainData(TerrainID handle) noexcept {
 }
 
 void TerrainSystem::RegisterCleanup(Engine& engine) {
-    ZHLN::EngineAccess::RegistryOf(engine).RegisterComponent<TerrainComponent>();
+    engine.Entities().Register<TerrainComponent>(ECS::BoxedName<TerrainComponent>());
     static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
 }
 
 void TerrainSystem::Detach(Engine& engine, Entity entity) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    if (auto terrain = registry.Get<TerrainComponent>(entity)) {
-        UnregisterTerrainData(std::exchange(terrain->terrainID, TerrainID::Invalid));
-        registry.Remove<TerrainComponent>(entity);
+    auto entities = engine.Entities();
+    if (entities.Patch<TerrainComponent>(entity, [](TerrainComponent& terrain) {
+            UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
+        })) {
+        entities.Detach<TerrainComponent>(entity);
     }
 }
 
 void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
     RegisterCleanup(engine);
     Detach(engine, entity);
-    ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
+    engine.Entities().Attach(entity, std::move(component));
 }
 
-void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
-    if (registry.GetEntitiesWith<TerrainComponent>().empty()) {
+void TerrainSystem::ReleaseTerrainDataWithQuery(TerrainReleaseQuery query) {
+    if (query.Entities<TerrainComponent>().empty()) {
         return;
     }
-    for (auto& terrain: registry.GetRawArray<TerrainComponent>()) {
+    for (auto& terrain: query.Raw<TerrainComponent>()) {
         UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
     }
 }
 
-void TerrainSystem::Cleanup(Engine& engine, bool all) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto entities = registry.GetEntitiesWith<TerrainComponent>();
+void TerrainSystem::CleanupWithQuery(TerrainCleanupQuery query, bool all) {
+    const auto entities = query.Entities<TerrainComponent>();
     if (!entities.empty()) {
-        auto terrains = registry.GetRawArray<TerrainComponent>();
+        auto terrains = query.Raw<TerrainComponent>();
         for (size_t i = 0; i < entities.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(entities[i])) {
+            if (all || query.Get<Components::PendingDestroy>(entities[i])) {
                 UnregisterTerrainData(std::exchange(terrains[i].terrainID, TerrainID::Invalid));
             }
         }
@@ -146,6 +147,18 @@ void TerrainSystem::Cleanup(Engine& engine, bool all) {
     if (all) {
         Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
     }
+}
+
+void TerrainSystem::Cleanup(Engine& engine, bool all) {
+    auto entities = engine.Entities();
+    for (const Entity e: entities.EntitiesWith<TerrainComponent>()) {
+        if (all || entities.Get<Components::PendingDestroy>(e)) {
+            entities.Patch<TerrainComponent>(e, [](TerrainComponent& terrain) {
+                UnregisterTerrainData(std::exchange(terrain.terrainID, TerrainID::Invalid));
+            });
+        }
+    }
+    if (all) Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 }
 
 void TerrainSystem::Update(
@@ -220,34 +233,35 @@ void TerrainSystem::Update(
     }
 }
 
-float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept {
-    const auto& reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto  entities = reg.GetEntitiesWith<TerrainComponent>();
-    const auto  terrains = reg.GetRawArray<TerrainComponent>();
+namespace {
+// Shared by the read-only typed view and the const Engine adapter. Query is
+// deliberately not constructed from a const Registry via const_cast.
+template <typename Terrains, typename TransformLookup>
+float SampleHeight(std::span<const Entity> entities, Terrains terrains, TransformLookup&& lookup, float worldX, float worldZ) noexcept {
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e       = entities[i];
         const auto& terrain = terrains[i];
 
         // Lock-free O(1) slot resolution
-        const TerrainData* tData = GetTerrainData(terrain.terrainID);
+        const TerrainData* tData = TerrainSystem::GetTerrainData(terrain.terrainID);
         if (tData == nullptr) {
             continue;
         }
 
-        const auto trans    = reg.Get<Components::TransformComponent>(e);
-        JPH::Vec3  pos      = JPH::Vec3::sZero();
+        const auto trans    = lookup(e);
+        FVec3  pos      = FVec3::Zero();
         if (trans) {
             pos = trans->position;
         }
         float       halfSize = tData->worldSize * 0.5f;
 
-        float localX = worldX - pos.GetX();
-        float localZ = worldZ - pos.GetZ();
+        float localX = worldX - pos.x;
+        float localZ = worldZ - pos.z;
 
         if (localX >= -halfSize && localX <= halfSize && localZ >= -halfSize && localZ <= halfSize) {
             if (tData->heights.empty() || tData->sampleCount < 2) {
-                return pos.GetY();
+                return pos.y;
             }
 
             // Map [-halfSize, halfSize] -> [0, sampleCount - 1]
@@ -270,11 +284,18 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
             float h0 = h00 + tx * (h10 - h00);
             float h1 = h01 + tx * (h11 - h01);
 
-            return pos.GetY() + (h0 + tz * (h1 - h0));
+            return pos.y + (h0 + tz * (h1 - h0));
         }
     }
 
     return 0.0f;
+}
+
+} // namespace
+
+float TerrainSystem::SampleHeightAtWithQuery(TerrainHeightQuery query, float worldX, float worldZ) noexcept {
+    return SampleHeight(query.Entities<TerrainComponent>(), query.Raw<TerrainComponent>(),
+                        [&](Entity e) { return query.Get<Components::TransformComponent>(e); }, worldX, worldZ);
 }
 
 namespace {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Text.hpp"
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/Font.hpp>
@@ -65,7 +66,7 @@ uint32_t AppendTextVertices(
     float            x,
     float            y,
     float            scale,
-    const JPH::Vec4& color
+    const FVec4& color
 ) {
     if (text.empty()) {
         return 0;
@@ -74,7 +75,7 @@ uint32_t AppendTextVertices(
     float         currentX     = x;
     float         currentY     = y;
     float         lineHeight   = TextLineHeight(font, scale);
-    PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    PackedRGBA8   packedColor  = Math::PackColor(color.x, color.y, color.z, color.w);
 
     uint32_t writtenCount = 0;
 

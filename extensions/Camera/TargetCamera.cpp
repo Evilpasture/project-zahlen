@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Camera/TargetCamera.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include "TargetCamera.hpp"
 
@@ -12,9 +13,12 @@
 #include "Zahlen/Engine/FramePlan.hpp"
 #include "Zahlen/Engine/GameModule.hpp"
 #include "Zahlen/Input/Input.hpp"
+#include "Zahlen/Engine/Capabilities/InputReader.hpp"
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <algorithm>
 #include <cmath>
 #include <string_view>
@@ -27,18 +31,18 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
     }
     testsRun = true;
 
-    if (!std::isfinite(cam.position.GetX()) || !std::isfinite(cam.position.GetY()) || !std::isfinite(cam.position.GetZ())) {
+    if (!std::isfinite(cam.position.x) || !std::isfinite(cam.position.y) || !std::isfinite(cam.position.z)) {
         ZHLN::Log(
             "[Test Fail] Camera Interpolation: Camera position contains NaN/Inf "
             "({:.3f}, {:.3f}, {:.3f})",
-            cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()
+            cam.position.x, cam.position.y, cam.position.z
         );
     }
-    if (cam.fov < 1.0f || cam.fov > 180.0f) {
-        ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov);
+    if (cam.fov < DegF{1.0f} || cam.fov > DegF{180.0f}) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: FOV out of range: {:.2f}", cam.fov.value);
     }
-    if (cam.pitch < -90.0f || cam.pitch > 90.0f) {
-        ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch);
+    if (cam.pitch < DegF{-90.0f} || cam.pitch > DegF{90.0f}) {
+        ZHLN::Log("[Test Fail] Camera Interpolation: Pitch out of range: {:.2f}", cam.pitch.value);
     }
     if (alpha < 0.0f || alpha > 1.0f) {
         ZHLN::Log("[Test Fail] Camera Interpolation: Alpha out of bounds [0,1]: {:.4f}", alpha);
@@ -48,46 +52,52 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 
 namespace ZHLN::CameraRig {
 
-void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept {
-    auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
+void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputReader> input, FrameDt frameDt, FrameAlpha frameAlpha) noexcept {
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    Camera& cam = camera->camera;
+    const float dt = frameDt.value;
+    const float alpha = frameAlpha.value;
+    auto cameraEntities = query.Entities<TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
     }
 
     Entity camEnt = cameraEntities[0];
 
-    reg.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
+    query.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
         // Fly-cam owns pose while the tag is present; skip the orbit.
-        if (reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
+        if (query.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
             return;
         }
 
         Entity targetEnt = camComp.target;
-        if (!reg.IsAlive(targetEnt)) {
+        if (!query.IsAlive(targetEnt)) {
             return;
         }
 
-        JPH::Vec3 targetPos = JPH::Vec3::sZero();
+        FVec3 targetPos = FVec3::Zero();
 
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
-        bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
-            const JPH::Mat44 world = worldTrans.world;
-            targetPos              = world.GetTranslation();
+        bool foundPos = query.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
+            const auto& world = worldTrans.world;
+            targetPos = {world[0, 3], world[1, 3], world[2, 3]};
         });
 
         if (!foundPos) {
-            reg.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
+            query.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
         }
 
         // 3. ZOOM & FOV SMOOTHING
-        auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
-        float wheelDelta = inputState ? inputState->GetMouseWheel() : 0.0f;
+        float wheelDelta = input->MouseWheel();
         if (std::abs(wheelDelta) > 0.01f) {
-            camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
+            camComp.targetDistance = std::clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
 
         if (camComp.stiffness > 0.0f) {
-            float factor = JPH::Clamp(camComp.stiffness * dt, 0.0f, 1.0f);
+            float factor = std::clamp(camComp.stiffness * dt, 0.0f, 1.0f);
             camComp.distance += (camComp.targetDistance - camComp.distance) * factor;
             camComp.fov += (camComp.targetFov - camComp.fov) * factor;
         } else {
@@ -97,26 +107,27 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 
         // 4. MOUSE LOOK ORBITING
         const float sensitivity = 0.15f;
-        if (inputState && inputState->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
-            camComp.yaw += inputState->GetMouseDeltaX() * sensitivity;
-            camComp.pitch = std::clamp(camComp.pitch - (inputState->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
+        if (input->MouseButtonDown(MouseButton::Right)) {
+            const Axis2DValue look = input->MouseDelta();
+            camComp.yaw += look.x * sensitivity;
+            camComp.pitch = std::clamp(camComp.pitch - (look.y * sensitivity), -89.0f, 89.0f);
         }
 
-        cam.yaw   = camComp.yaw;
-        cam.pitch = camComp.pitch;
-        cam.fov   = camComp.fov;
+        cam.yaw   = DegF{camComp.yaw};
+        cam.pitch = DegF{camComp.pitch};
+        cam.fov   = DegF{camComp.fov};
 
         // 5. EXPONENTIAL SMOOTHING & FINAL POSITION
-        float     yawRad   = JPH::DegreesToRadians(camComp.yaw);
-        float     pitchRad = JPH::DegreesToRadians(camComp.pitch);
-        JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+        float     yawRad   = DegF{camComp.yaw}.ToRadians().value;
+        float     pitchRad = DegF{camComp.pitch}.ToRadians().value;
+        FVec3 offsetDir{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)};
 
         if (camComp.hasInitSmoothTarget == 0) {
             camComp.smoothTargetPos     = targetPos;
             camComp.hasInitSmoothTarget = 1;
         }
 
-        if ((targetPos - camComp.smoothTargetPos).LengthSq() > 100.0f) {
+        if ((targetPos - camComp.smoothTargetPos).LengthSquared() > 100.0f) {
             camComp.smoothTargetPos = targetPos; // Teleport instantly on large displacements
         } else if (camComp.stiffness > 0.0f) {
             float factor = 1.0f - std::exp(-camComp.stiffness * dt);
@@ -138,42 +149,21 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 namespace ZHLN {
 namespace {
 
-// The rig's frame step: keep the boot camera's component present (core no
-// longer creates any camera rig -- that is gameplay policy), then resolve
-// the orbit before the core CameraSystem projects the matrices.
+using RigSeedQuery = ECS::Query<const Components::MainCameraTagComponent, const CameraRig::TargetCameraComponent>;
+void SeedTargetCamera(RigSeedQuery query, ECS::EntityCommandBuffer& commands) {
+    const auto cameras = query.Entities<Components::MainCameraTagComponent>();
+    if (!cameras.empty() && !query.Get<CameraRig::TargetCameraComponent>(cameras.front())) {
+        commands.AddComponent(cameras.front(), CameraRig::TargetCameraComponent {});
+    }
+}
+
+// Seed and play back before resolving the orbit, still ahead of core camera
+// projection. The first rig and first camera retain their original semantics.
 void TargetCameraStep(Engine& engine, float dt, FrameContext& ctx) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
-        const Entity camEnt = mainCams[0];
-        if (!reg.Get<CameraRig::TargetCameraComponent>(camEnt)) {
-            // Boot rig: the same defaults the core default scene used to
-            // create, so the default view (a free-cam host keeps its
-            // FreeCamTag) keeps its pre-decomposition framing.
-            reg.Add(
-                camEnt,
-                CameraRig::TargetCameraComponent {
-                    .distance          = 4.5f,
-                    .targetDistance    = 4.5f,
-                    .yaw               = -90.0f,
-                    .pitch             = -10.0f,
-                    .stiffness         = 15.0f,
-                    .vignetteIntensity = 1.10f,
-                    .vignettePower     = 1.50f,
-                    .fov               = 45.0f,
-                    .targetFov         = 45.0f
-                }
-            );
-        }
-    }
-
-    static CameraRig::TargetCameraSystem sys;
-    // The rig drives the world's camera; a world without one has nothing to drive.
-    // The borrow is the component itself, so the system's updates land in the
-    // registry without a copy to hand back.
-    if (const auto camera = reg.GetSingleton<Components::CameraComponent>()) {
-        sys.Update(reg, camera->camera, dt, ctx.alpha);
-    }
+    const Frame frame = engine.MakeFrame(dt, ctx.alpha);
+    auto& graph = engine.GetRenderGraph();
+    graph.InvokeSequentialAndPlayback<&SeedTargetCamera>(frame);
+    graph.InvokeSequential<&CameraRig::TargetCameraSystem::Update>(frame);
 }
 
 // The rig's step, declared. It runs before the core "CameraSystems" step

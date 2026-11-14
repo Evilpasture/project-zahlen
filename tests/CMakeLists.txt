@@ -31,6 +31,8 @@ set(ZHLN_CPU_TEST_SOURCES
     assets/TestPackaging.cpp
     audio/TestsAudio.cpp
     core/TestCOM.cpp
+    core/TestCOMApp.cpp
+    core/TestCOMBoundary.cpp
     core/TestClock.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
@@ -43,6 +45,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestGUIContext.cpp
     core/TestGraphicsSettings.cpp
     core/TestInput.cpp
+    core/TestInputLive.cpp
     core/TestMath.cpp
     core/TestNamespaceFixture.cpp
     core/TestOptional.cpp
@@ -101,6 +104,7 @@ target_link_libraries(ztest_cpu PRIVATE
 # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(ztest_cpu PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/app/include
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/plugins
     ${PROJECT_SOURCE_DIR}/extensions
@@ -156,7 +160,10 @@ zahlen_register_ztest_target(ztest_cpu
 
 zahlen_add_runtime_dlls(ztest_cpu)
 
-if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+# Was `ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras`. The option alone is the
+# right test: zahlen_extras no longer exists (root CMakeLists), and this block
+# is the only thing that ever read it.
+if(ZHLN_BUILD_EXTRAS)
     add_subdirectory(extras)
 endif()
 

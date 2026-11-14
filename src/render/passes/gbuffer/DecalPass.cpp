@@ -21,7 +21,7 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     Vk::CommandEncoder encoder(cmd);
     encoder.BindPipeline(decals.pass.Get());
 
-    const auto invViewProj = frame.unjitteredViewProj.Inversed();
+    const auto invViewProj = Inverse(frame.unjitteredViewProj);
 
     for (const auto& decalCmd: frame.renderer.queues.Decals()) {
         const DecalPushConstants decalPC {

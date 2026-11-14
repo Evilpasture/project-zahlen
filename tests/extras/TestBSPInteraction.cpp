@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <BSP/BSPGeometry.hpp>
+#include <BSP/BSPInteraction.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
 #include <CharacterController/CharacterComponents.hpp>
@@ -17,10 +21,16 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -31,7 +41,7 @@ void Release(PhysicsContext&, Components::PhysicsComponent&) {
 } // namespace SceneResources
 void AudioContext::PostEvent(const AudioEvent&) noexcept {
 }
-void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::Double3) {
+void PhysicsContext::SetCharacterPosition(Physics::BodyID, ZHLN::DVec3) {
 }
 auto Engine::GetInternalRegistry() noexcept -> ECS::Registry& {
     static ECS::Registry reg;
@@ -44,6 +54,8 @@ auto Engine::GetInternalRegistry() const noexcept -> const ECS::Registry& {
 } // namespace ZHLN
 
 namespace {
+
+using ZHLN::FVec3;
 
 auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
     ZHLN::BSP::BSPMap map;
@@ -179,6 +191,19 @@ namespace {
 
 struct BSPInteractionTestSuite {
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> typed_resolution_prefers_unique_brush_model() {
+            ZHLN::ECS::Registry registry;
+            const auto first = registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
+                ZHLN::Components::SceneSourceComponent {.source = ZHLN::String256 {"maps/example.bsp#model_1"}});
+            const auto second = registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
+                ZHLN::Components::SceneSourceComponent {.source = ZHLN::String256 {"maps/example.bsp#model_2"}});
+            const ZHLN::BSP::ResolutionQuery query {registry};
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "shared", "*2") == second);
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "shared", "") == first);
+            ZHLN::Test::ExpectTrue(ZHLN::BSP::FindMatchingEntity(query, "absent", "*99") == ZHLN::Entity::Null());
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> describe_scene_converts_interactive_entities() {
             const auto map   = BuildSyntheticMap();
             const auto scene = ZHLN::BSP::DescribeScene(map, "maps/test.bsp");
@@ -229,6 +254,42 @@ struct BSPInteractionTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> teleport_destination_preserves_decoded_rotation() {
+            ZHLN::BSP::BSPMap map;
+            ZHLN::BSP::BSPEntity destination;
+            destination.keys = {{"classname", "info_teleport_destination"}, {"targetname", "landing"},
+                                {"origin", "100 200 300"}, {"angles", "15 75 20"}};
+            map.entities.push_back(destination);
+
+            ZHLN::ECS::Registry registry;
+            registry.RegisterComponent<ZHLN::Components::NameComponent>();
+            registry.RegisterComponent<ZHLN::Components::TransformComponent>();
+            registry.RegisterComponent<ZHLN::Interaction::TeleportDestinationComponent>();
+            const ZHLN::BSP::ImportOptions options {};
+            const auto decoded = ZHLN::BSP::DescribeInteractiveEntities(ZHLN::BSP::ResolutionQuery {registry}, map, options);
+            ZHLN::Test::ExpectEq(decoded.size(), size_t {1});
+            if (decoded.size() != 1) return {};
+
+            // Compare the new native decode against the former Jolt Euler path.
+            const auto angles = ZHLN::BSP::EngineEulerAnglesFromSourceAngles(FVec3 {15.0f, 75.0f, 20.0f}, options);
+            const auto reference = ZHLN::Math::EulerDegreesToQuat(angles);
+            const auto actual = decoded[0].orientation;
+            ZHLN::Test::ExpectLt(std::abs(actual.x - reference.GetX()), 1e-5f);
+            ZHLN::Test::ExpectLt(std::abs(actual.y - reference.GetY()), 1e-5f);
+            ZHLN::Test::ExpectLt(std::abs(actual.z - reference.GetZ()), 1e-5f);
+            ZHLN::Test::ExpectLt(std::abs(actual.w - reference.GetW()), 1e-5f);
+
+            ZHLN::Interaction::InitializeBSPEntities(registry, map, ZHLN::Scene::Instance {}, options);
+            const auto entities = registry.GetEntitiesWith<ZHLN::Interaction::TeleportDestinationComponent>();
+            ZHLN::Test::ExpectEq(entities.size(), size_t {1});
+            if (entities.size() == 1) {
+                const auto transform = registry.Get<ZHLN::Components::TransformComponent>(entities[0]);
+                ZHLN::Test::ExpectTrue(transform.has_value());
+                if (transform) ZHLN::Test::ExpectTrue(transform->rotation == actual);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> initialize_bsp_entities_attaches_components() {
             const auto map   = BuildSyntheticMap();
             const auto scene = ZHLN::BSP::DescribeScene(map, "maps/test.bsp");
@@ -250,7 +311,7 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(sceneEnt.transform.position), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                        .position = FVec3{sceneEnt.transform.position}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                     }
                 );
                 reg.Add<ZHLN::Components::SceneSourceComponent>(
@@ -278,7 +339,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectTrue((door->flags & ZHLN::Interaction::DoorFlags::UseOpens) != ZHLN::Interaction::DoorFlags::None);
             ZHLN::Test::ExpectGt(door->speed, 0.0f);
             ZHLN::Test::ExpectEq(door->wait, 2.0f);
-            ZHLN::Test::ExpectGt((door->openPosition - door->closedPosition).LengthSq(), 0.0f);
+            ZHLN::Test::ExpectGt((door->openPosition - door->closedPosition).LengthSquared(), 0.0f);
             ZHLN::Test::ExpectEq(doorMeta->className, ZHLN::String64("func_door"));
             ZHLN::Test::ExpectEq(doorConn->outputCount, uint32_t {1});
             ZHLN::Test::ExpectEq(doorConn->outputs[0].event, ZHLN::String64("OnOpen"));
@@ -387,9 +448,9 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2});
 
             const auto& gateDesc   = scene.entities[1];
-            const JPH::Vec3 pivot {gateDesc.transform.position.x, gateDesc.transform.position.y, gateDesc.transform.position.z};
+            const FVec3 pivot {gateDesc.transform.position.x, gateDesc.transform.position.y, gateDesc.transform.position.z};
             // The gate sits well off the origin in this synthetic map.
-            ZHLN::Test::ExpectGt((pivot - JPH::Vec3::sZero()).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((pivot - FVec3::Zero()).Length(), 1e-3f);
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
@@ -409,9 +470,9 @@ struct BSPInteractionTestSuite {
                 reg.Add<ZHLN::Components::TransformComponent>(
                     e,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(sceneEnt.transform.position),
-                        .rotation = JPH::Quat::sIdentity(),
-                        .scale    = JPH::Vec3::sReplicate(1.0f),
+                        .position = FVec3{sceneEnt.transform.position},
+                        .rotation = ZHLN::Quat::Identity(),
+                        .scale    = FVec3::Splat(1.0f),
                     }
                 );
                 reg.Add<ZHLN::Components::SceneSourceComponent>(
@@ -448,7 +509,7 @@ struct BSPInteractionTestSuite {
             // measures the 2.5 m use radius from, and the value the movement
             // system interpolates from -- a zero here is the regression.
             ZHLN::Test::ExpectLt((door.closedPosition - pivot).Length(), 1e-3f);
-            ZHLN::Test::ExpectGt((door.closedPosition - JPH::Vec3::sZero()).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((door.closedPosition - FVec3::Zero()).Length(), 1e-3f);
             ZHLN::Test::ExpectGt((door.openPosition - door.closedPosition).Length(), 0.0f);
 
             // The door actually slides: opening moves it, in place, along movedir.
@@ -456,8 +517,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
                 const ZHLN::Components::PhysicsComponent>
                 query(reg);
-            ZHLN::Interaction::FireEntityInput(reg, "gate", "Open");
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "gate", "Open");
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.5f});
 
             const auto moved = reg.Get<ZHLN::Components::TransformComponent>(gate);
             if (!ZHLN::Test::ExpectTrue(moved.has_value())) {
@@ -465,7 +526,7 @@ struct BSPInteractionTestSuite {
             }
             // Half a speed-step of travel away from the gate, still nowhere near
             // the origin.
-            const JPH::Vec3 movedPos = moved->position;
+            const FVec3 movedPos = moved->position;
             ZHLN::Test::ExpectGt((movedPos - pivot).Length(), 0.0f);
             ZHLN::Test::ExpectGt(movedPos.Length(), 0.0f);
 
@@ -485,7 +546,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 doorEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                    .position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                 }
             );
             reg.Add<ZHLN::Interaction::DoorComponent>(
@@ -493,8 +554,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::None,
-                    .closedPosition = JPH::Vec3(0.0f, 0.0f, 0.0f),
-                    .openPosition   = JPH::Vec3(0.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3{0.0f, 0.0f, 0.0f},
+                    .openPosition   = FVec3{0.0f, 2.0f, 0.0f},
                     .speed          = 2.0f, // 0.5s to open
                     .progress       = 0.0f,
                     .wait           = 1.0f, // 1s wait before auto-closing
@@ -504,7 +565,7 @@ struct BSPInteractionTestSuite {
             );
 
             // 1. Send "Open" input
-            ZHLN::Interaction::FireEntityInput(reg, "sliding_door", "Open");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "sliding_door", "Open");
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
 
@@ -513,7 +574,7 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
                 const ZHLN::Components::PhysicsComponent>
                 query(reg);
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.25f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.25f});
 
             auto trans = reg.Get<ZHLN::Components::TransformComponent>(doorEnt);
             door       = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
@@ -522,7 +583,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectLt(std::abs(trans->position.y - 1.0f), 1e-3f);
 
             // 3. Step another 0.25s -> reaches Open
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.25f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.25f});
             door  = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             trans = reg.Get<ZHLN::Components::TransformComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Open);
@@ -531,12 +592,12 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(door->waitTimer, 1.0f);
 
             // 4. Wait 1.0s -> transitions to Closing
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {1.0f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {1.0f});
             door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Closing);
 
             // 5. Step 0.5s -> reaches Closed
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.5f});
             door  = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             trans = reg.Get<ZHLN::Components::TransformComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Closed);
@@ -558,11 +619,11 @@ struct BSPInteractionTestSuite {
             reg.Add(rotDoorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("rot_door")});
             reg.Add<ZHLN::Components::TransformComponent>(
                 rotDoorEnt,
-                ZHLN::Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)}
+                ZHLN::Components::TransformComponent {.position = FVec3::Zero(), .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)}
             );
 
-            const JPH::Quat closedQ = JPH::Quat::sIdentity();
-            const JPH::Quat openQ   = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(90.0f));
+            const auto closedQ = ZHLN::Quat::Identity();
+            const auto openQ = ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::RadF{std::numbers::pi_v<float> * 0.5f});
 
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 rotDoorEnt,
@@ -571,7 +632,7 @@ struct BSPInteractionTestSuite {
                     .flags          = ZHLN::Interaction::DoorFlags::Rotating,
                     .closedRotation = closedQ,
                     .openRotation   = openQ,
-                    .rotationAxis   = JPH::Vec3::sAxisY(),
+                    .rotationAxis   = FVec3::UnitY(),
                     .rotationAngle  = 90.0f,
                     .speed          = 1.0f, // 1s to open
                     .progress       = 0.0f,
@@ -580,29 +641,29 @@ struct BSPInteractionTestSuite {
                 }
             );
 
-            ZHLN::Interaction::FireEntityInput(reg, "rot_door", "Open");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "rot_door", "Open");
             ZHLN::ECS::Query<
                 ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
                 const ZHLN::Components::PhysicsComponent>
                 query(reg);
 
             // Step 0.5s -> 45 degrees
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.5f});
             auto trans = reg.Get<ZHLN::Components::TransformComponent>(rotDoorEnt);
             auto door  = reg.Get<ZHLN::Interaction::DoorComponent>(rotDoorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
             ZHLN::Test::ExpectLt(std::abs(door->progress - 0.5f), 1e-3f);
 
             // Quat length remains 1.0
-            const JPH::Quat doorRot = trans->rotation;
+            const ZHLN::Quat doorRot{trans->rotation};
             ZHLN::Test::ExpectLt(std::abs(doorRot.Length() - 1.0f), 1e-3f);
 
             // Complete open
-            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
+            ZHLN::Interaction::DoorMovementSystem::Update(query, ZHLN::Interaction::DispatchQuery {reg}, ZHLN::FrameDt {0.5f});
             trans = reg.Get<ZHLN::Components::TransformComponent>(rotDoorEnt);
             door  = reg.Get<ZHLN::Interaction::DoorComponent>(rotDoorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Open);
-            ZHLN::Test::ExpectLt(std::abs((trans->rotation.y - openQ.GetY())), 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs((trans->rotation.y - openQ.y)), 1e-3f);
 
             return {};
         }
@@ -625,8 +686,8 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::Toggle,
-                    .closedPosition = JPH::Vec3::sZero(),
-                    .openPosition   = JPH::Vec3(0.0f, 3.0f, 0.0f),
+                    .closedPosition = FVec3::Zero(),
+                    .openPosition   = FVec3{0.0f, 3.0f, 0.0f},
                     .speed          = 2.0f,
                     .wait           = -1.0f,
                     .targetname     = ZHLN::String64("secure_vault"),
@@ -656,7 +717,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Closed);
 
             // Press the button via input
-            ZHLN::Interaction::FireEntityInput(reg, "vault_button", "Press");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "vault_button", "Press");
 
             // Button is pressed and fired its output to the door!
             auto button = reg.Get<ZHLN::Interaction::ButtonComponent>(btnEnt);
@@ -666,7 +727,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);
 
             // Test door locking: lock door and verify input ignored
-            ZHLN::Interaction::FireEntityInput(reg, "secure_vault", "Lock");
+            ZHLN::Interaction::FireEntityInput(ZHLN::Interaction::DispatchQuery {reg}, "secure_vault", "Lock");
             door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectTrue((door->flags & ZHLN::Interaction::DoorFlags::Locked) != ZHLN::Interaction::DoorFlags::None);
 
@@ -679,7 +740,6 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Components::TransformComponent>();
             reg.RegisterComponent<ZHLN::Interaction::TriggerComponent>();
             reg.RegisterComponent<ZHLN::Interaction::EntityConnectionComponent>();
-            reg.RegisterComponent<ZHLN::Components::InputStateComponent>();
             reg.RegisterComponent<ZHLN::Interaction::PickupComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ItemBaseComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ContainerComponent>();
@@ -695,7 +755,7 @@ struct BSPInteractionTestSuite {
             reg.Add<ZHLN::Components::TransformComponent>(
                 playerEnt,
                 ZHLN::Components::TransformComponent {
-                    .position = JPH::Vec3(0.0f, 0.0f, 0.0f), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)
+                    .position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                 }
             );
 
@@ -707,18 +767,15 @@ struct BSPInteractionTestSuite {
                 ZHLN::Interaction::TriggerComponent {
                     .radius      = 2.0f,
                     .flags       = ZHLN::Interaction::TriggerFlags::Active | ZHLN::Interaction::TriggerFlags::TriggerOnce,
-                    .halfExtents = JPH::Vec3(2.0f, 2.0f, 2.0f),
+                    .halfExtents = FVec3{2.0f, 2.0f, 2.0f},
                 }
             );
 
             // Update interaction system
-            ZHLN::ECS::Query<
-                const ZHLN::Character::MovementComponent, const ZHLN::Components::TransformComponent, ZHLN::Interaction::TriggerComponent&,
-                const ZHLN::Components::InputStateComponent, ZHLN::Interaction::PickupComponent&, const ZHLN::Interaction::ItemBaseComponent,
-                ZHLN::Interaction::ContainerComponent&, const ZHLN::Components::PhysicsComponent, const ZHLN::Components::MeshComponent,
-                const ZHLN::Interaction::UsableComponent, ZHLN::Interaction::DoorComponent&, ZHLN::Interaction::ButtonComponent&>
-                query(reg);
-            ZHLN::Interaction::InteractionSystem::Update(query, reg, std::nullopt, std::nullopt);
+            ZHLN::Interaction::InteractionQuery query(reg);
+            ZHLN::ECS::EntityCommandBuffer commands(reg);
+            ZHLN::Interaction::InteractionSystem::Update(query, commands);
+            commands.Playback();
 
             auto trig = reg.Get<ZHLN::Interaction::TriggerComponent>(trigEnt);
             ZHLN::Test::ExpectTrue((trig->flags & ZHLN::Interaction::TriggerFlags::PlayerInside) != ZHLN::Interaction::TriggerFlags::None);
@@ -728,13 +785,67 @@ struct BSPInteractionTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> interaction_graph_declares_dispatch_hazards() {
+            using namespace ZHLN::ECS;
+            // The name is overloaded (intent form and device form), so the
+            // signature names the node overload explicitly -- the same cast
+            // InteractionSystem's own AddSystems makes.
+            constexpr auto kInteractionNode =
+                static_cast<void (*)(ZHLN::Interaction::InteractionQuery, EntityCommandBuffer&, ZHLN::Optional<ZHLN::PhysicsContext&>,
+                                     ZHLN::Optional<ZHLN::AudioContext&>, Res<ZHLN::InputReader>,
+                                     Local<ZHLN::Interaction::InteractionSystem::UseLatch>)>(
+                    &ZHLN::Interaction::InteractionSystem::Update);
+            const SystemInfo interaction {.access_pattern = SystemSignature<kInteractionNode>::PopulateAccessPattern()};
+            const SystemInfo door {.access_pattern = SystemSignature<&ZHLN::Interaction::DoorMovementSystem::Update>::PopulateAccessPattern()};
+            const SystemInfo button {.access_pattern = SystemSignature<&ZHLN::Interaction::ButtonMovementSystem::Update>::PopulateAccessPattern()};
+            for (const auto* info : {&interaction, &door, &button}) {
+                for (const auto& access : info->access_pattern) ZHLN::Test::ExpectTrue(access.familyId != AllComponents);
+            }
+            ZHLN::Test::ExpectTrue(SystemGraphCore::HasConflict(interaction, door));
+            ZHLN::Test::ExpectTrue(SystemGraphCore::HasConflict(door, button));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> pickups_accumulate_before_command_playback() {
+            using namespace ZHLN;
+            using namespace ZHLN::Interaction;
+            ECS::Registry reg;
+            const Entity player = reg.Create(Character::MovementComponent {}, Components::TransformComponent {});
+            const Entity first = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
+            const Entity second = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
+            InteractionQuery query {reg};
+            ECS::EntityCommandBuffer commands {reg};
+
+            // Establish an unpressed prior frame, then the rising edge. The intent
+            // is a value -- no router, no injected keystroke, and (unlike the old
+            // function-local latch) no state shared with any other test.
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = false, .wasUseDown = false});
+            commands.Playback();
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = true, .wasUseDown = false});
+            ZHLN::Test::ExpectFalse(reg.Get<ContainerComponent>(player).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(first).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(second).has_value());
+            commands.Playback();
+            auto container = reg.Get<ContainerComponent>(player);
+            if (ZHLN::Test::ExpectTrue(container.has_value())) {
+                ZHLN::Test::ExpectEq(container->count, uint32_t {2});
+                ZHLN::Test::ExpectTrue(container->slots[0] == first);
+                ZHLN::Test::ExpectTrue(container->slots[1] == second);
+            }
+            ZHLN::Test::ExpectFalse(reg.Get<Components::MeshComponent>(first).has_value());
+            ZHLN::Test::ExpectFalse(reg.Get<Components::MeshComponent>(second).has_value());
+            // Release the edge; held-but-not-newly-pressed must not fire twice.
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = true, .wasUseDown = true});
+            commands.Playback();
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> player_use_interaction_and_locking() {
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ZHLN::Character::MovementComponent>();
             reg.RegisterComponent<ZHLN::Components::TransformComponent>();
             reg.RegisterComponent<ZHLN::Interaction::TriggerComponent>();
             reg.RegisterComponent<ZHLN::Interaction::EntityConnectionComponent>();
-            reg.RegisterComponent<ZHLN::Components::InputStateComponent>();
             reg.RegisterComponent<ZHLN::Interaction::PickupComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ItemBaseComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ContainerComponent>();
@@ -745,12 +856,6 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Interaction::ButtonComponent>();
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
 
-            // Create input singleton with E key down
-            const auto                            inputEnt = reg.Create();
-            ZHLN::Components::InputStateComponent inputState {};
-            inputState.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::E), true);
-            reg.Add(inputEnt, std::move(inputState));
-
             // Create player at (0, 0, 0)
             const auto playerEnt = reg.Create();
             reg.Add<ZHLN::Character::MovementComponent>(playerEnt, ZHLN::Character::MovementComponent {});
@@ -759,25 +864,24 @@ struct BSPInteractionTestSuite {
             // Create unlocked door near player
             const auto doorEnt = reg.Create();
             reg.Add(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("interact_door")});
-            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(1.0f, 0.0f, 0.0f)});
+            reg.Add<ZHLN::Components::TransformComponent>(doorEnt, ZHLN::Components::TransformComponent {.position = FVec3{1.0f, 0.0f, 0.0f}});
             reg.Add<ZHLN::Interaction::DoorComponent>(
                 doorEnt,
                 ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
                     .flags          = ZHLN::Interaction::DoorFlags::UseOpens | ZHLN::Interaction::DoorFlags::Toggle,
-                    .closedPosition = JPH::Vec3(1.0f, 0.0f, 0.0f),
-                    .openPosition   = JPH::Vec3(1.0f, 2.0f, 0.0f),
+                    .closedPosition = FVec3{1.0f, 0.0f, 0.0f},
+                    .openPosition   = FVec3{1.0f, 2.0f, 0.0f},
                     .targetname     = ZHLN::String64("interact_door"),
                 }
             );
 
-            ZHLN::ECS::Query<
-                const ZHLN::Character::MovementComponent, const ZHLN::Components::TransformComponent, ZHLN::Interaction::TriggerComponent&,
-                const ZHLN::Components::InputStateComponent, ZHLN::Interaction::PickupComponent&, const ZHLN::Interaction::ItemBaseComponent,
-                ZHLN::Interaction::ContainerComponent&, const ZHLN::Components::PhysicsComponent, const ZHLN::Components::MeshComponent,
-                const ZHLN::Interaction::UsableComponent, ZHLN::Interaction::DoorComponent&, ZHLN::Interaction::ButtonComponent&>
-                query(reg);
-            ZHLN::Interaction::InteractionSystem::Update(query, reg, std::nullopt, std::nullopt);
+            ZHLN::Interaction::InteractionQuery query(reg);
+            ZHLN::ECS::EntityCommandBuffer commands(reg);
+            ZHLN::Interaction::InteractionSystem::Update(
+                query, commands, std::nullopt, std::nullopt, ZHLN::Interaction::InteractionSystem::UseIntent {.use = true, .wasUseDown = false}
+            );
+            commands.Playback();
 
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
             ZHLN::Test::ExpectEq(door->state, ZHLN::Interaction::DoorState::Opening);

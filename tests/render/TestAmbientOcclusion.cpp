@@ -24,7 +24,9 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -180,24 +182,21 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // alone, and the sample budget is raised so the GTAO branch (steps =
 // giSamples/6) gets more than its minimum.
 void BuildAoScene(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
-    const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settingsEnts.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 50.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 0;
-            pp.giMode          = 0;
-            pp.giSamples       = 24;
-            pp.aoRadius        = 1.0f;
-            pp.aoBias          = 0.05f;
-            pp.aoPower         = 1.8f;
-            pp.giIntensity     = 1.2f;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 50.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.post.mode                    = 0;
+        gfx.post.giSamples               = 24;
+        gfx.post.aoRadius                = 1.0f;
+        gfx.post.aoBias                  = 0.05f;
+        gfx.post.aoPower                 = 1.8f;
+        gfx.post.giIntensity             = 1.2f;
+    });
 
     ZHLN::PrefabFactory::CreatePlane(
         engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
@@ -223,42 +222,33 @@ void BuildAoScene(ZHLN::Engine& engine) {
         engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}
     );
 
-    const ZHLN::Entity sunEnt = reg.Create();
-    reg.Add(
+    const ZHLN::Entity sunEnt = reg.Spawn();
+    reg.Attach(
         sunEnt,
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 30.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({45.0f, 0.0f, 0.0f})},
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = JPH::Vec3(0.0f, 0.6f, 0.8f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f}, .intensity = 220.0f, .direction = ZHLN::FVec3{0.0f, 0.6f, 0.8f}.Normalized()
         }
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 2.5f, 8.0f};
+        cam.yaw           = ZHLN::DegF{-90.0f};
+        cam.pitch         = ZHLN::DegF{-12.0f};
+        cam.fov           = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return;
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position      = JPH::Vec3(0.0f, 2.5f, 8.0f);
-    cam.yaw           = -90.0f;
-    cam.pitch         = -12.0f;
-    cam.fov           = 60.0f;
 }
 
 void SetGiMode(ZHLN::Engine& engine, int mode) {
-    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(ents[0], [mode](auto& pp) { pp.giMode = mode; });
+    engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
 }
 
 void SetAoRadius(ZHLN::Engine& engine, float radius) {
-    auto&      reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto ents = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(ents[0], [radius](auto& pp) { pp.aoRadius = radius; });
+    engine.Graphics().PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
 }
 
 } // namespace

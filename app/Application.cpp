@@ -3,16 +3,18 @@
 
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
+#include <Zahlen/App.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/App.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <optional>
+#include <print>
+#include <ranges>
 #include <span>
 #include <utility>
 #include <vector>
@@ -22,12 +24,18 @@ namespace ZHLN {
 auto Application::RunFromCLI(EngineConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult {
     auto parsed = ParseEngineConfig(args, config, _cli.Flags());
     if (!parsed) {
-        LogError("[Application] command line: {}", parsed.error());
+        std::println(stderr, "Error: {}", parsed.error());
         return std::unexpected(parsed.error());
     }
-    if (parsed->helpRequested) return AppExitReason::CliHelpRequested;
-    if (parsed->versionRequested) return AppExitReason::CliVersionRequested;
-    if (parsed->graphRequested) return AppExitReason::CliGraphRequested;
+    if (parsed->helpRequested) {
+        return AppExitReason::CliHelpRequested;
+    }
+    if (parsed->versionRequested) {
+        return AppExitReason::CliVersionRequested;
+    }
+    if (parsed->graphRequested) {
+        return AppExitReason::CliGraphRequested;
+    }
     return RunConfigured(config, update);
 }
 
@@ -62,10 +70,6 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     for (const auto& install: _installers) {
         install(*engine);
     }
-    if (!engine->InitializeDefaultScene()) {
-        LogError("[Application] initial scene failed");
-        return std::unexpected(AppError::SceneInitFailed);
-    }
     // Core has one host UI step; dispatch the UI-capable layers there in
     // registration order. Snapshot their slots so the Engine's callback owns
     // their (possibly move-only) state for this Run.
@@ -91,20 +95,20 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         _start(*engine);
     }
 
-    FramePacer pacer(config.fpsLimit);
+    FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
     bool       frameFailed = false;
     while (engine->IsRunning()) {
         const auto frameStart = FramePacer::BeginFrame();
-        process.PollCrashes(engine.get());
+        ProcessScope::PollCrashes(engine.get());
         engine->ProcessEvents(); // includes input and renderer resize synchronization
         if (!engine->IsRunning()) {
             break;
         }
 
-        const float rawDt = runClock.Tick();
+        const float                rawDt   = runClock.Tick();
         const std::optional<float> pacedDt = engine->Graphics().PacedDeltaTime();
-        const float dt = pacer.SelectDelta(rawDt, pacedDt);
+        const float                dt      = pacer.SelectDelta(rawDt, pacedDt);
         for (const auto& layer: _layers) {
             if (layer.tick != nullptr) {
                 layer.tick(layer.state.get(), *engine, dt);
@@ -131,9 +135,9 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     }
     // Every successfully initialized layer gets Stop while the Engine is still
     // alive, even if events, a layer/update, or a failed frame ended the loop.
-    for (auto it = _layers.rbegin(); it != _layers.rend(); ++it) {
-        if (it->stop != nullptr) {
-            it->stop(it->state.get(), *engine);
+    for (const auto& _layer: std::ranges::reverse_view(_layers)) {
+        if (_layer.stop != nullptr) {
+            _layer.stop(_layer.state.get(), *engine);
         }
     }
     if (frameFailed) {

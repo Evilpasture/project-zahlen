@@ -7,8 +7,8 @@
 // This tag used to live in core Components as a marker CameraSystem ignored.
 // The policy (speed / look / sprint) and the Camera-phase step that writes
 // Camera pose live here. Core's default scene no longer attaches the tag;
-// hosts that want a fly cam Install (before InitializeDefaultScene) and Attach
-// (after the scene exists, or let the frame step seed the boot camera).
+// hosts that want a fly cam Install and Attach (or let the frame step seed the
+// boot camera).
 #pragma once
 
 #include <Zahlen/Engine/GameModule.hpp>

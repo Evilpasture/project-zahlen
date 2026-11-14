@@ -73,7 +73,28 @@ my %FIRST_PARTY = (
     InvalidMaterialID => ['include/Zahlen/Core/AssetID.hpp'],
     HashAssetID      => ['include/Zahlen/Core/AssetID.hpp'],
     EnableEnumFlags  => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumBitMask      => ['include/Zahlen/Core/EnumFlags.hpp'],
     EnumFlag         => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumIndex        => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasAnyFlags      => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasFlag          => ['include/Zahlen/Core/EnumFlags.hpp'],
+    # Native math values
+    FVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    DVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    FVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    DVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    FVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    DVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    Mat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    Mat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DegF => ['include/Zahlen/Math/Angles.hpp'],
+    DegD => ['include/Zahlen/Math/Angles.hpp'],
+    RadF => ['include/Zahlen/Math/Angles.hpp'],
+    RadD => ['include/Zahlen/Math/Angles.hpp'],
+    EulerDegrees => ['include/Zahlen/Math/EulerAngles.hpp'],
+    EulerRadians => ['include/Zahlen/Math/EulerAngles.hpp'],
     # Geometry
     Extent2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
     Offset2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
@@ -150,7 +171,18 @@ my %FIRST_PARTY = (
     IObject          => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceID      => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceIdOf    => ['include/Zahlen/Core/COM/IObject.hpp'],
-    Implements       => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Implements'     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Option'         => ['include/Zahlen/Core/COM/Types.hpp'],
+    ChainInNode                 => ['include/Zahlen/Core/COM/Chain.hpp'],
+    ChainOutNode                => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::COM::InChain'        => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::COM::OutChain'       => ['include/Zahlen/Core/COM/Chain.hpp'],
+    DispatchInChain             => ['include/Zahlen/Core/COM/Chain.hpp'],
+    DispatchOutChain            => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::Reflect::LayoutHash' => ['include/Zahlen/Core/Reflection/LayoutHash.hpp'],
+    EngineAppConfig             => ['include/Zahlen/COM/EngineFactory.hpp'],
+    EngineWindowConfig          => ['include/Zahlen/COM/EngineFactory.hpp'],
+    EngineRenderConfig          => ['include/Zahlen/COM/EngineFactory.hpp'],
     QualifiedTypeName     => ['include/Zahlen/Core/Reflection/Core.hpp'],
     MethodSignature       => ['include/Zahlen/Core/Reflection/Class.hpp'],
     ForEachMethodSignature => ['include/Zahlen/Core/Reflection/Class.hpp'],
@@ -158,6 +190,25 @@ my %FIRST_PARTY = (
     ComParameterCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
     ComReturnCompliant    => ['include/Zahlen/Core/COM/Reflect.hpp'],
     ComParameterAudit     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    IEngine          => ['include/Zahlen/COM/IEngine.hpp'],
+    IGraphicsDevice  => ['include/Zahlen/COM/IGraphicsDevice.hpp'],
+    IEntities        => ['include/Zahlen/COM/IEntities.hpp'],
+    ComComponent     => ['include/Zahlen/COM/IEntities.hpp'],
+    # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
+    # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every
+    # call to it -- including the unqualified ones a `using` makes possible.
+    'ZHLN::COM::CreateEngine'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::CreateEngineRef' => ['include/Zahlen/COM/EngineFactory.hpp'],
+    # Qualified for the same reason: Simulation, Audio, Assets and Actions are
+    # ordinary words elsewhere in this tree, and PrefabInfo is the kind of name
+    # a tool or importer invents independently.
+    'ZHLN::COM::ISimulation'         => ['include/Zahlen/COM/ISimulation.hpp'],
+    'ZHLN::COM::IAudioDevice'        => ['include/Zahlen/COM/IAudioDevice.hpp'],
+    'ZHLN::COM::IAssetLibrary'       => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::IActionContext'      => ['include/Zahlen/COM/IActionContext.hpp'],
+    'ZHLN::COM::IState'              => ['include/Zahlen/COM/IState.hpp'],
+    'ZHLN::COM::PrefabInfo'          => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::EnvironmentImageInfo' => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
     CliFlag           => ['extensions/CommandLine/CommandLine.hpp'],
     ConfigCli         => ['app/include/Zahlen/ConfigCli.hpp'],
@@ -208,7 +259,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp', 'ValueTypes.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a
@@ -384,7 +435,7 @@ my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
     my ($suffix) = /(\.[^.]*)$/;
     defined $suffix && $HEADER_SUFFIXES{lc $suffix};
 } keys %tree_files));
-my $CACHE_SCHEMA = 2;
+my $CACHE_SCHEMA = 4;
 
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
 

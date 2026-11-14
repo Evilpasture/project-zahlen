@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/EulerAngles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 // The wire side of the replication bridge: what the server last said about an
 // instance, and the short history that is sampled to smooth it.
 //
@@ -18,7 +20,7 @@
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -30,14 +32,14 @@
 namespace ZHLN::ProjectLight {
 
 struct TransformState {
-    JPH::Vec3 position       = JPH::Vec3::sZero();
-    JPH::Quat rotation       = JPH::Quat::sIdentity();
-    JPH::Vec3 linearVelocity = JPH::Vec3::sZero();
+    FVec3 position       = FVec3::Zero();
+    Quat rotation       = Quat::Identity();
+    FVec3 linearVelocity = FVec3::Zero();
 };
 
 struct NetworkTransformSample {
-    JPH::Vec3                             position = JPH::Vec3::sZero();
-    JPH::Quat                             rotation = JPH::Quat::sIdentity();
+    FVec3                             position = FVec3::Zero();
+    Quat                             rotation = Quat::Identity();
     std::chrono::steady_clock::time_point receivedAt;
 };
 
@@ -64,7 +66,7 @@ struct NetworkTransformHistory {
     // Position and rotation at `renderTime`, interpolated between the two
     // samples that straddle it. Returns false only when there is nothing to
     // sample; the caller decides whether to fall back to the authoritative pose.
-    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, JPH::Vec3& position, JPH::Quat& rotation) const noexcept -> bool {
+    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, FVec3& position, Quat& rotation) const noexcept -> bool {
         if (Empty()) return false;
 
         const std::size_t oldest = (m_next + Capacity - m_count) % Capacity;
@@ -97,7 +99,7 @@ struct NetworkTransformHistory {
             }
             alpha    = std::clamp(alpha, 0.0f, 1.0f);
             position = previous.position + (current.position - previous.position) * alpha;
-            rotation = previous.rotation.SLERP(current.rotation, alpha).Normalized();
+            rotation = Slerp(previous.rotation, current.rotation, alpha).Normalized();
             return true;
         }
 
@@ -136,16 +138,16 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     std::string name      = "Instance";
     uint64_t    parentUid = 0u;
 
-    JPH::Vec3               position         = JPH::Vec3::sZero();
-    JPH::Vec3               rotationEulerDeg = JPH::Vec3::sZero();
-    JPH::Quat               rotationQuat     = JPH::Quat::sIdentity();
-    JPH::Vec3               linearVelocity   = JPH::Vec3::sZero();
-    JPH::Vec3               renderPosition   = JPH::Vec3::sZero();
-    JPH::Quat               renderRotation   = JPH::Quat::sIdentity();
+    FVec3               position         = FVec3::Zero();
+    EulerDegrees       rotationEulerDeg{};
+    Quat               rotationQuat     = Quat::Identity();
+    FVec3               linearVelocity   = FVec3::Zero();
+    FVec3               renderPosition   = FVec3::Zero();
+    Quat               renderRotation   = Quat::Identity();
     NetworkTransformHistory physicsHistory {};
     bool                    hasPhysicsSample = false;
-    JPH::Vec3               size             = JPH::Vec3(4.0f, 1.0f, 2.0f);
-    JPH::Vec3               color            = JPH::Vec3(0.75f, 0.75f, 0.75f);
+    FVec3               size             = {4.0f, 1.0f, 2.0f};
+    FVec3               color            = {0.75f, 0.75f, 0.75f};
     float                   transparency     = 0.0f;
     float                   metallic         = 0.0f;
     float                   roughness        = 0.5f;
@@ -155,7 +157,7 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     uint64_t                networkOwnerUid  = 0u;
     PartShape               shape            = PartShape::Cube;
     std::string             meshId;
-    JPH::Vec3               meshScale = JPH::Vec3::sReplicate(1.0f);
+    FVec3               meshScale = FVec3::Splat(1.0f);
 
     uint64_t      primaryPartUid = 0u;
     uint64_t      rootPartUid    = 0u;
@@ -169,10 +171,10 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
 
     uint64_t  part1Uid        = 0u;
     uint64_t  part2Uid        = 0u;
-    JPH::Vec3 offset1         = JPH::Vec3::sZero();
-    JPH::Vec3 offset2         = JPH::Vec3::sZero();
-    JPH::Vec3 rotationOffset1 = JPH::Vec3::sZero();
-    JPH::Vec3 rotationOffset2 = JPH::Vec3::sZero();
+    FVec3 offset1         = FVec3::Zero();
+    FVec3 offset2         = FVec3::Zero();
+    FVec3 rotationOffset1 = FVec3::Zero();
+    FVec3 rotationOffset2 = FVec3::Zero();
     float     currentAngle    = 0.0f;
     float     desiredAngle    = 0.0f;
     float     maxVelocity     = 30.0f;
@@ -183,8 +185,8 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     float sourceRadius = 0.0f;
     // ProjectLight directional vectors describe ray travel; the renderer-facing
     // conversion to a toward-source vector is done at the ECS boundary.
-    JPH::Vec3 direction       = JPH::Vec3(0.0f, -1.0f, 0.0f);
-    JPH::Vec3 nightColor      = JPH::Vec3(0.45f, 0.55f, 0.8f);
+    FVec3 direction       = {0.0f, -1.0f, 0.0f};
+    FVec3 nightColor      = {0.45f, 0.55f, 0.8f};
     float     nightIntensity  = 0.35f;
     bool      isMain          = false;
     float     range           = 16.0f;
@@ -204,7 +206,7 @@ struct ReplicatedObject : ProjectLightInstanceComponent {
     // changed something that needs a rebuild" from "nothing to do", and they are
     // refreshed from the entity on every spawn.
     MaterialID  materialId        = InvalidMaterialID;
-    JPH::Vec3   spawnedSize       = JPH::Vec3::sZero();
+    FVec3   spawnedSize       = FVec3::Zero();
     PartShape   spawnedShape      = PartShape::Cube;
     uint64_t    spawnedOwnerUid   = 0u;
     bool        hasPhysicsBody    = false;

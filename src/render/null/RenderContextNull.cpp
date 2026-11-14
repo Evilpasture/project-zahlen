@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "presentation/PresentationTarget.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -467,7 +468,7 @@ void RenderContext::UnloadTexture(TextureID handle) {
     }
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t /*offset*/, std::span<const ZHLN::Mat44> /*matrices*/) {
+void RenderContext::UpdateJointMatrices(uint32_t /*offset*/, std::span<const ZHLN::Mat4x4> /*matrices*/) {
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
@@ -582,7 +583,7 @@ auto RenderContext::DispatchSimulations(float /*dt*/) noexcept -> RenderResult {
 }
 
 void RenderContext::SetFrameData(
-    const Camera& /*cam*/, const FrameData& /*frame*/, const ZHLN::Mat44& /*shadowProjView*/, std::span<const LightDesc> /*lights*/, float /*dt*/
+    const Camera& /*cam*/, const FrameData& /*frame*/, const ZHLN::Mat4x4& /*shadowProjView*/, std::span<const LightDesc> /*lights*/, float /*dt*/
 ) noexcept {
 }
 

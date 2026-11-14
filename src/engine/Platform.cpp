@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
+#include <GLFW/glfw3.h>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <chrono>
 #include <thread>
-
-#include <GLFW/glfw3.h>
-#include <Zahlen/Core/Platform.hpp>
 
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -71,7 +70,7 @@ void FocusWindow(Window& window) {
     }
 #else
     auto* glfwHandle = static_cast<GLFWwindow*>(window.GetNativeHandle());
-    if (glfwHandle) {
+    if (glfwHandle != nullptr) {
         glfwFocusWindow(glfwHandle);
     }
 #endif
@@ -87,8 +86,9 @@ float GetDisplayScale(Window& window) {
     return static_cast<float>(GetDpiForWindow(hwnd)) / 96.0f;
 #else
     auto* glfwHandle = static_cast<GLFWwindow*>(window.GetNativeHandle());
-    if (glfwHandle) {
-        float xscale, yscale;
+    if (glfwHandle != nullptr) {
+        float xscale = 0.0f;
+        float yscale = 0.0f;
         glfwGetWindowContentScale(glfwHandle, &xscale, &yscale);
         return xscale;
     }
@@ -100,4 +100,4 @@ void Sleep(uint32_t milliseconds) {
     std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
 }
 
-}
+} // namespace ZHLN::Platform

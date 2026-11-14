@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "helpers/CommonFixtures.hpp"
 
 // clang-format off
@@ -10,12 +12,17 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Skeleton/Skeleton.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Body/BodyInterface.h>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <atomic>
 #include <cmath>
 #include <expected>
@@ -32,6 +39,231 @@ enum class PhysicsTestError : uint32_t {
 
 namespace ZHLN::Test {
 namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
+
+        std::expected<void, ZHLN::ErrorCode> test_collision_asset_ids_resolution_and_replacement(Fixture::TaskSystemAndJoltScope&) {
+            static_assert(!std::is_same_v<CollisionAssetID, AssetID>);
+            static_assert(InvalidCollisionAssetID == CollisionAssetID::Invalid);
+            PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            AssetManager assets; // outlives the context and its resolver binding
+            PhysicsContext pc(cfg);
+            const auto id = HashCollisionAssetID("tests/collision/triangle");
+            auto create = [&](CollisionAssetID shape) {
+                return pc.CreateRigidBody(Physics::Shape<Physics::Mesh> {shape}, {0, 0, 0}, {0, 0, 0, 1},
+                                          Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            };
+            ExpectTrue(create(CollisionAssetID::Invalid) == Physics::BodyID::Null());
+            ExpectTrue(create(id) == Physics::BodyID::Null()); // no resolver
+            pc.BindCollisionAssetResolver([](void* ctx, CollisionAssetID key) noexcept {
+                return static_cast<AssetManager*>(ctx)->FindCollisionMesh(key);
+            }, &assets);
+            ExpectTrue(create(id) == Physics::BodyID::Null()); // cache miss
+            Physics::MeshGeometry triangle {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,2}};
+            ExpectTrue(!assets.CacheCollisionMesh(CollisionAssetID::Invalid, triangle));
+            auto bad = triangle; bad.indices[2] = 4;
+            ExpectTrue(!assets.CacheCollisionMesh(id, std::move(bad)));
+            ExpectTrue(assets.CacheCollisionMesh(id, triangle));
+            auto original = assets.FindCollisionMesh(id);
+            ExpectTrue(original && original->vertices[0].x == 0.0f);
+            Physics::MeshGeometry invalidReplacement {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,9}};
+            ExpectTrue(!assets.CacheCollisionMesh(id, std::move(invalidReplacement)));
+            ExpectTrue(assets.FindCollisionMesh(id) == original);
+            const auto body1 = create(id);
+            const auto body2 = create(id);
+            ExpectTrue(body1 != Physics::BodyID::Null() && body2 != Physics::BodyID::Null());
+            pc.Step(1.0f / 60.0f);
+            JPH::BodyIDVector ids;
+            pc.GetInternalSystem().GetBodies(ids);
+            auto& bi = pc.GetInternalSystem().GetBodyInterface();
+            JPH::ShapeRefC s1, s2;
+            for (auto native: ids) {
+                if (bi.GetUserData(native) == body1.Pack()) s1 = bi.GetShape(native);
+                if (bi.GetUserData(native) == body2.Pack()) s2 = bi.GetShape(native);
+            }
+            ExpectTrue(s1 && s1 == s2); // same ID and same snapshot: interned
+            for (auto& v: triangle.vertices) v.x += 10.0f;
+            ExpectTrue(assets.CacheCollisionMesh(id, std::move(triangle)));
+            ExpectTrue(original && original->vertices[0].x == 0.0f); // old pinned snapshot
+            const auto replacement = create(id);
+            ExpectTrue(replacement != Physics::BodyID::Null());
+            pc.Step(1.0f / 60.0f);
+            auto oldHit = pc.Raycast({0.2, 0.2, 5}, {0, 0, -1}, 10);
+            auto newHit = pc.Raycast({10.2, 0.2, 5}, {0, 0, -1}, 10);
+            ExpectTrue(oldHit.hasHit && (oldHit.bodyID == body1 || oldHit.bodyID == body2));
+            ExpectTrue(newHit.hasHit && newHit.bodyID == replacement);
+            assets.ClearCache();
+            ExpectTrue(!assets.FindCollisionMesh(id));
+            ExpectTrue(create(id) == Physics::BodyID::Null());
+            ExpectTrue(pc.Raycast({10.2, 0.2, 5}, {0, 0, -1}, 10).hasHit); // body pins baked shape
+            ExpectTrue(original && original->vertices.size() == 3); // snapshots survive clear
+            Physics::MeshGeometry reloaded {.vertices = {{20,0,0}, {21,0,0}, {20,1,0}}, .indices = {0,1,2}};
+            ExpectTrue(assets.CacheCollisionMesh(id, std::move(reloaded)));
+            const auto reloadedBody = create(id);
+            ExpectTrue(reloadedBody != Physics::BodyID::Null());
+            pc.Step(1.0f / 60.0f);
+            const auto reloadedHit = pc.Raycast({20.2, 0.2, 5}, {0,0,-1}, 10);
+            ExpectTrue(reloadedHit.hasHit && reloadedHit.bodyID == reloadedBody);
+            Physics::Shape<Physics::Compound> validCompound;
+            validCompound.Add(Physics::Shape<Physics::Mesh> {id}, {30, 0, 0});
+            const auto compoundBody = pc.CreateRigidBody(Physics::AnyShape(validCompound), {0,0,0}, {0,0,0,1},
+                                                         Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            ExpectTrue(compoundBody != Physics::BodyID::Null());
+            validCompound.children.clear();
+            pc.Step(1.0f / 60.0f);
+            const auto compoundHit = pc.Raycast({50.2, 0.2, 5}, {0,0,-1}, 10);
+            ExpectTrue(compoundHit.hasHit && compoundHit.bodyID == compoundBody);
+            assets.ClearCache();
+            ExpectTrue(pc.Raycast({50.2, 0.2, 5}, {0,0,-1}, 10).bodyID == compoundBody);
+            Physics::Shape<Physics::Compound> compound;
+            compound.Add(Physics::Shape<Physics::Mesh> {id});
+            ExpectTrue(pc.CreateRigidBody(Physics::AnyShape(compound), {0,0,0}, {0,0,0,1},
+                                          Physics::MotionType::Static, Physics::ObjectLayer::NonMoving) == Physics::BodyID::Null());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_collision_asset_snapshots_during_concurrent_updates(Fixture::TaskSystemAndJoltScope&) {
+            AssetManager assets;
+            const auto id = HashCollisionAssetID("tests/concurrent-collision");
+            std::atomic<bool> healthy {true};
+            std::thread writer([&] {
+                for (int i = 0; i < 1000; ++i) {
+                    const float x = static_cast<float>(i);
+                    Physics::MeshGeometry g {.vertices = {{x,0,0}, {x+1,0,0}, {x,1,0}}, .indices = {0,1,2}};
+                    if (!assets.CacheCollisionMesh(id, std::move(g))) healthy.store(false);
+                    if (i % 17 == 0) assets.ClearCache();
+                }
+            });
+            std::thread reader([&] {
+                for (int i = 0; i < 3000; ++i) {
+                    const auto snapshot = assets.FindCollisionMesh(id);
+                    if (!snapshot) continue; // ClearCache may have removed it.
+                    if (snapshot->vertices.size() != 3 || snapshot->indices.size() != 3 ||
+                        snapshot->vertices[1].x != snapshot->vertices[0].x + 1 ||
+                        snapshot->vertices[2].x != snapshot->vertices[0].x) healthy.store(false);
+                }
+            });
+            writer.join(); reader.join();
+            ExpectTrue(healthy.load());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_declarative_shapes_and_lifetime(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            PhysicsContext pc(cfg);
+            Physics::Shape<Physics::Compound> compound;
+            compound.Add(Physics::Shape<Physics::Box> {1, 1, 1});
+            compound.Add(Physics::Shape<Physics::Sphere> {0.5f}, {3, 0, 0});
+            const auto body = pc.CreateRigidBody(Physics::AnyShape(compound), {0, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            ExpectTrue(body != Physics::BodyID::Null());
+            compound.children.clear();
+            pc.Step(1.0f / 60.0f);
+            const auto hit = pc.Raycast({0, 5, 0}, {0, -1, 0}, 10);
+            ExpectTrue(hit.hasHit && hit.bodyID == body);
+            const auto sphere = pc.CreateRigidBody(Physics::Shape<Physics::Sphere> {0.5f}, {10, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            ExpectTrue(sphere != Physics::BodyID::Null());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_declarative_shape_flyweights(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            PhysicsContext pc(cfg);
+            const auto create = [&](const Physics::AnyShape& shape, double x) {
+                return pc.CreateRigidBody(shape, {x, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            };
+            const FVec3 vertices[] = {{0, 0, 0}, {1, 0, 0}, {0, 0, 1}};
+            const uint32_t indices[] = {0, 1, 2};
+            const auto b1 = create(Physics::Shape<Physics::Box> {1, 2, 3}, 0);
+            const auto b2 = create(Physics::Shape<Physics::Box> {1, 2, 3}, 10);
+            const auto m1 = create(Physics::Shape<Physics::Mesh> {vertices, indices}, 20);
+            const auto m2 = create(Physics::Shape<Physics::Mesh> {vertices, indices}, 30);
+            pc.Step(1.0f / 60.0f);
+            JPH::BodyIDVector ids;
+            pc.GetInternalSystem().GetBodies(ids);
+            auto& bodies = pc.GetInternalSystem().GetBodyInterface();
+            JPH::ShapeRefC shapes[4];
+            for (const auto id: ids) {
+                const auto user = bodies.GetUserData(id);
+                const Physics::BodyID requested[] = {b1, b2, m1, m2};
+                for (size_t i = 0; i < 4; ++i) if (user == requested[i].Pack()) shapes[i] = bodies.GetShape(id);
+            }
+            ExpectTrue(shapes[0] != nullptr && shapes[0] == shapes[1]);
+            ExpectTrue(shapes[2] != nullptr && shapes[2] == shapes[3]);
+            pc.ClearMeshShapeCache();
+            // Clearing the cache must not invalidate existing bodies.
+            if (!ids.empty()) ExpectTrue(bodies.GetShape(ids[0]) != nullptr);
+            const auto m3 = create(Physics::Shape<Physics::Mesh> {vertices, indices}, 40);
+            ExpectTrue(m3 != Physics::BodyID::Null());
+            pc.Step(1.0f / 60.0f);
+            JPH::BodyIDVector after;
+            pc.GetInternalSystem().GetBodies(after);
+            bool foundM3 = false;
+            for (auto id: after) if (bodies.GetUserData(id) == m3.Pack()) {
+                foundM3 = true;
+                ExpectTrue(bodies.GetShape(id) != shapes[2]);
+            }
+            ExpectTrue(foundM3);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_prefab_collider_owns_mesh_and_scales(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            PhysicsContext pc(cfg);
+            std::optional<Physics::AnyShape> mesh;
+            {
+                std::vector<VertexPosition> v {{{0, 0, 0}}, {{1, 0, 0}}, {{0, 0, 1}}};
+                std::vector<uint32_t> idx {0, 1, 2};
+                mesh = MakePrefabMeshCollider(v, idx);
+            }
+            ExpectTrue(mesh.has_value());
+            if (!mesh) return {};
+            const auto body = pc.CreateRigidBody(*mesh, {0, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            mesh.reset();
+            ExpectTrue(body != Physics::BodyID::Null());
+            auto box = MakePrefabBoxCollider({1, 1, 1}, {3, 0, 0});
+            const auto scaled = pc.CreateRigidBody(box, {0, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving,
+                                                    0, 0xFFFFFFFF, 0xFFFFFFFF, Physics::Activation::Activate, {2, 1, 1});
+            ExpectTrue(scaled != Physics::BodyID::Null());
+            pc.Step(1.0f / 60.0f);
+            const auto hit = pc.Raycast({7.5, 5, 0}, {0, -1, 0}, 10);
+            ExpectTrue(hit.hasHit && hit.bodyID == scaled);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_declarative_mesh_validation(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            PhysicsContext pc(cfg);
+            const FVec3 vertices[] = {{0, 0, 0}, {1, 0, 0}, {0, 0, 1}};
+            const uint32_t good[] = {0, 1, 2}, bad[] = {0, 1, 3};
+            auto goodBody = pc.CreateRigidBody(Physics::Shape<Physics::Mesh> {vertices, good}, {0, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            auto badBody = pc.CreateRigidBody(Physics::Shape<Physics::Mesh> {vertices, bad}, {0, 0, 0}, {0, 0, 0, 1}, Physics::MotionType::Static, Physics::ObjectLayer::NonMoving);
+            ExpectTrue(goodBody != Physics::BodyID::Null());
+            ExpectTrue(badBody == Physics::BodyID::Null());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_explicit_physics_math_conversions(Fixture::TaskSystemAndJoltScope&) {
+            constexpr FVec3 velocity {1.25f, -2.5f, 3.75f};
+            constexpr DVec3 position {123456789.25, -7654321.75, 0.125};
+            const auto roundTrip = Physics::FromJoltPosition(Physics::ToJoltPosition(position));
+            ExpectTrue(Physics::FromJoltVector(Physics::ToJoltVector(velocity)) == velocity);
+            ExpectTrue(roundTrip.x == static_cast<double>(static_cast<JPH::Real>(position.x)));
+            ExpectTrue(roundTrip.y == static_cast<double>(static_cast<JPH::Real>(position.y)));
+            ExpectTrue(roundTrip.z == static_cast<double>(static_cast<JPH::Real>(position.z)));
+
+            // An asymmetric matrix checks column and row ordering, including translation.
+            auto matrix = Mat4x4::Zero();
+            for (size_t row = 0; row < 4; ++row) {
+                for (size_t column = 0; column < 4; ++column) {
+                    matrix[row, column] = static_cast<float>(row * 4 + column + 1);
+                }
+            }
+            const auto joltMatrix = Physics::ToJoltMatrix(matrix);
+            for (size_t row = 0; row < 4; ++row) {
+                for (size_t column = 0; column < 4; ++column) {
+                    ExpectTrue(joltMatrix(static_cast<int>(row), static_cast<int>(column)) == matrix[row, column]);
+                }
+            }
+            return {};
+        }
 
         // The explicit fixture parameter guarantees workers and Jolt types
         // even when an unnamed namespace's ambient mark is not reflected.
@@ -56,10 +288,48 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Test::Expect(hit.position.y) == ZHLN::Test::Approx(1.0f, 0.05f);
             ZHLN::Test::Expect(hit.normal.y) > 0.9f;
 
+            // The multi-hit path must preserve all position and normal lanes
+            // when crossing from Jolt into the public query result.
+            const auto hits = pc.RaycastAll({2.5, 10.0, 3.0}, {0.0f, -1.0f, 0.0f}, 20.0f);
+            ZHLN::Test::ExpectTrue(!hits.empty());
+            if (!hits.empty()) {
+                const auto& first = hits.front();
+                ZHLN::Test::Expect(first.bodyID.Pack()) == ground.Pack();
+                ZHLN::Test::Expect(first.position.x) == ZHLN::Test::Approx(2.5, 0.05);
+                ZHLN::Test::Expect(first.position.y) == ZHLN::Test::Approx(1.0, 0.05);
+                ZHLN::Test::Expect(first.position.z) == ZHLN::Test::Approx(3.0, 0.05);
+                ZHLN::Test::Expect(first.normal.x) == ZHLN::Test::Approx(0.0f, 0.05f);
+                ZHLN::Test::Expect(first.normal.y) > 0.9f;
+                ZHLN::Test::Expect(first.normal.z) == ZHLN::Test::Approx(0.0f, 0.05f);
+            }
+
             // 2. Sphere overlap at (0, 0, 0)
             const std::vector<ZHLN::Physics::BodyID> overlapResults = pc.OverlapSphere({0, 0, 0}, 5.0f);
             ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> test_shape_factory_offset_and_compound(Fixture::TaskSystemAndJoltScope&) {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+            const auto box = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.01f, 0.2f, 0.3f);
+            ZHLN::Test::ExpectTrue(box != nullptr);
+            if (box == nullptr) return {};
+            const auto shifted = pc.CreateTranslatedShape(box, {2.0f, 0.0f, 0.0f});
+            const auto compound = pc.CreateCompoundShape(box, shifted);
+            ZHLN::Test::ExpectTrue(shifted != nullptr);
+            ZHLN::Test::ExpectTrue(compound != nullptr);
+            if (shifted != nullptr && compound != nullptr) {
+                const auto shiftedBounds = shifted->GetLocalBounds();
+                const auto compoundBounds = compound->GetLocalBounds();
+                const auto shiftedCenter = shifted->GetCenterOfMass();
+                const auto compoundCenter = compound->GetCenterOfMass();
+                ZHLN::Test::Expect(shiftedBounds.mMin.GetX() + shiftedCenter.GetX()) == ZHLN::Test::Approx(1.99f, 0.001f);
+                ZHLN::Test::Expect(shiftedBounds.mMax.GetX() + shiftedCenter.GetX()) == ZHLN::Test::Approx(2.01f, 0.001f);
+                ZHLN::Test::Expect(compoundBounds.mMin.GetX() + compoundCenter.GetX()) == ZHLN::Test::Approx(-0.01f, 0.001f);
+                ZHLN::Test::Expect(compoundBounds.mMax.GetX() + compoundCenter.GetX()) == ZHLN::Test::Approx(2.01f, 0.001f);
+            }
             return {};
         }
 
@@ -73,6 +343,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Physics::BodyID sphere =
                 pc.CreateRigidBody(sphereShape, {0, 10, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyID::Null());
+
+            const auto pendingPosition = pc.BodyPosition(sphere);
+            ZHLN::Test::ExpectTrue(pendingPosition.has_value());
+            if (pendingPosition) {
+                ZHLN::Test::ExpectTrue(*pendingPosition == ZHLN::DVec3 {0.0, 10.0, 0.0});
+            }
 
             pc.OptimizeBroadphase();
 
@@ -91,7 +367,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
             const auto synchronizedPosition = pc.BodyPosition(sphere);
             ZHLN::Test::ExpectTrue(synchronizedPosition.has_value());
-            ZHLN::Test::ExpectLt(synchronizedPosition->GetY(), 9.0);
+            ZHLN::Test::ExpectLt(synchronizedPosition->y, 9.0);
 
             const auto bodyState = pc.BodyState(sphere);
             ZHLN::Test::ExpectTrue(bodyState.has_value());
@@ -336,7 +612,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                     }
 
                     const auto charPos = pc.BodyPosition(character);
-                    if (!charPos.has_value() || !std::isfinite(static_cast<double>(charPos->GetY()))) {
+                    if (!charPos.has_value() || !std::isfinite(static_cast<double>(charPos->y))) {
                         workerFailed.store(true, std::memory_order::release);
                         return;
                     }

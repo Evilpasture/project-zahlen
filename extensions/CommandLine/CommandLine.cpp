@@ -4,7 +4,6 @@
 #include <CommandLine/CommandLine.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Print.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -18,23 +17,23 @@
 #include <vector>
 
 #ifndef ZHLN_GIT_COMMIT_HASH
-    #define ZHLN_GIT_COMMIT_HASH "unknown"
+#define ZHLN_GIT_COMMIT_HASH "unknown"
 #endif
 
 #ifndef ZHLN_COMPILER_FLAGS
-    #define ZHLN_COMPILER_FLAGS "unknown"
+#define ZHLN_COMPILER_FLAGS "unknown"
 #endif
 
 #ifndef ZHLN_META_BUILDER
-    #define ZHLN_META_BUILDER "unknown"
+#define ZHLN_META_BUILDER "unknown"
 #endif
 
 #ifndef ZHLN_BUILD_TOOL
-    #define ZHLN_BUILD_TOOL "unknown"
+#define ZHLN_BUILD_TOOL "unknown"
 #endif
 
 #ifndef ZHLN_LINKER_NAME
-    #define ZHLN_LINKER_NAME "unknown"
+#define ZHLN_LINKER_NAME "unknown"
 #endif
 
 namespace ZHLN {
@@ -73,28 +72,34 @@ auto ToFlagDescs(std::span<const CliFlag> flags, bool includeHelp, bool includeV
     std::vector<CliFlagDesc> descs;
     descs.reserve(flags.size() + 2);
     if (includeHelp) {
-        descs.push_back(CliFlagDesc {
-            .key         = "--help",
-            .shortKey    = "-h",
-            .placeholder = "",
-            .description = "Display this help menu and exit",
-        });
+        descs.push_back(
+            CliFlagDesc {
+                .key         = "--help",
+                .shortKey    = "-h",
+                .placeholder = "",
+                .description = "Display this help menu and exit",
+            }
+        );
     }
     if (includeVersion) {
-        descs.push_back(CliFlagDesc {
-            .key         = "--version",
-            .shortKey    = "",
-            .placeholder = "",
-            .description = "Display build version and compiler metadata",
-        });
+        descs.push_back(
+            CliFlagDesc {
+                .key         = "--version",
+                .shortKey    = "",
+                .placeholder = "",
+                .description = "Display build version and compiler metadata",
+            }
+        );
     }
     for (const auto& flag: flags) {
-        descs.push_back(CliFlagDesc {
-            .key         = flag.key,
-            .shortKey    = flag.shortKey,
-            .placeholder = flag.placeholder,
-            .description = flag.description,
-        });
+        descs.push_back(
+            CliFlagDesc {
+                .key         = flag.key,
+                .shortKey    = flag.shortKey,
+                .placeholder = flag.placeholder,
+                .description = flag.description,
+            }
+        );
     }
     return descs;
 }
@@ -139,18 +144,8 @@ auto ExtractExecutableName(std::span<char* const> args, std::string_view fallbac
 
 void PrintBuildVersion(std::string_view programTitle) {
     std::println(
-        "\n{}{}{} - version {}{}.{}.{}{} ({}{}{})",
-        Color::BCyan,
-        programTitle,
-        Color::Reset,
-        Color::BYellow,
-        EngineVersion.major,
-        EngineVersion.minor,
-        EngineVersion.patch,
-        Color::Reset,
-        Color::BGreen,
-        ZHLN_GIT_COMMIT_HASH,
-        Color::Reset
+        "\n{}{}{} - version {}{}.{}.{}{} ({}{}{})", Color::BCyan, programTitle, Color::Reset, Color::BYellow, EngineVersion.major, EngineVersion.minor,
+        EngineVersion.patch, Color::Reset, Color::BGreen, ZHLN_GIT_COMMIT_HASH, Color::Reset
     );
     std::println("  {}Target Triple:{}  {}", Color::Gray, Color::Reset, ZHLN_TARGET_TRIPLE);
     std::println("  {}Standard Lib:{}   {}", Color::Gray, Color::Reset, GetSTLVersion());
@@ -163,11 +158,7 @@ void PrintBuildVersion(std::string_view programTitle) {
     std::println("  {}Copyright (C){}   2026 Evilpasture <evilpasture+github@proton.me>", Color::Gray, Color::Reset);
 
     std::println(
-        "\n{}License GPLv3+:{} GNU GPL version 3 or later {}<https://gnu.org/licenses/gpl.html>{}.",
-        Color::BCyan,
-        Color::Reset,
-        Color::Cyan,
-        Color::Reset
+        "\n{}License GPLv3+:{} GNU GPL version 3 or later {}<https://gnu.org/licenses/gpl.html>{}.", Color::BCyan, Color::Reset, Color::Cyan, Color::Reset
     );
     std::println("This is free software: you are free to change and redistribute it.");
     std::println("There is {}NO WARRANTY{}, to the extent permitted by law.\n", Color::BYellow, Color::Reset);
@@ -177,18 +168,10 @@ void PrintCliHelp(
     std::string_view             exeName,
     std::span<const CliFlagDesc> primaryFlags,
     std::span<const CliFlagDesc> secondaryFlags,
-    const CliParseConfig&        config
+    const CliParseConfig         config
 ) {
     std::println(
-        "\n{}Usage:{} {}{}{} {}{}{}\n",
-        Color::BCyan,
-        Color::Reset,
-        Color::BYellow,
-        exeName,
-        Color::Reset,
-        Color::Gray,
-        config.usageSuffix,
-        Color::Reset
+        "\n{}Usage:{} {}{}{} {}{}{}\n", Color::BCyan, Color::Reset, Color::BYellow, exeName, Color::Reset, Color::Gray, config.usageSuffix, Color::Reset
     );
 
     if (!primaryFlags.empty()) {
@@ -208,41 +191,23 @@ void PrintCliHelp(
     if (!config.environmentDocs.empty()) {
         std::println("\n{}Environment Variables:{}", Color::BCyan, Color::Reset);
         for (const auto& env: config.environmentDocs) {
-            const size_t     rawLen       = env.name.size() + 1 + env.value.size();
-            constexpr size_t kTargetWidth = 32;
-            const size_t     padLen       = (rawLen < kTargetWidth) ? (kTargetWidth - rawLen) : 2;
+            const size_t      rawLen       = env.name.size() + 1 + env.value.size();
+            constexpr size_t  kTargetWidth = 32;
+            const size_t      padLen       = (rawLen < kTargetWidth) ? (kTargetWidth - rawLen) : 2;
             const std::string padding(padLen, ' ');
-            std::println(
-                "  {}{}{}={}{}{}{}{}",
-                Color::BYellow,
-                env.name,
-                Color::Reset,
-                Color::Cyan,
-                env.value,
-                Color::Reset,
-                padding,
-                env.description
-            );
+            std::println("  {}{}{}={}{}{}{}{}", Color::BYellow, env.name, Color::Reset, Color::Cyan, env.value, Color::Reset, padding, env.description);
         }
     }
     std::println("");
 }
 
-auto ParseCli(
-    std::span<char* const>   args,
-    std::span<const CliFlag> flags,
-    const CliParseConfig&    config
-) -> std::expected<CliParseResult, CommandLineError> {
-    CliParseResult             result {.args = args};
-    const std::string_view     exeName = ExtractExecutableName(args, "zahlen");
-    const std::vector<CliToken> tokens = TokenizeCliArgs(args);
+auto ParseCli(std::span<char* const> args, std::span<const CliFlag> flags, const CliParseConfig& config) -> std::expected<CliParseResult, CommandLineError> {
+    CliParseResult              result {.args = args};
+    const std::string_view      exeName = ExtractExecutableName(args, "zahlen");
+    const std::vector<CliToken> tokens  = TokenizeCliArgs(args);
 
-    const bool userDefinesHelp = std::ranges::any_of(flags, [](const CliFlag& f) {
-        return MatchesFlag(f, "--help") || MatchesFlag(f, "-h");
-    });
-    const bool userDefinesVersion = std::ranges::any_of(flags, [](const CliFlag& f) {
-        return MatchesFlag(f, "--version");
-    });
+    const bool userDefinesHelp    = std::ranges::any_of(flags, [](const CliFlag& f) { return MatchesFlag(f, "--help") || MatchesFlag(f, "-h"); });
+    const bool userDefinesVersion = std::ranges::any_of(flags, [](const CliFlag& f) { return MatchesFlag(f, "--version"); });
 
     for (const auto& tok: tokens) {
         if (config.addHelpFlag && !userDefinesHelp && (tok.key == "--help" || tok.key == "-h")) {
@@ -266,11 +231,7 @@ auto ParseCli(
         } else {
             if (config.printHelpOnError) {
                 std::println(stderr, "{}Error: Unknown argument: '{}'{}\n", Color::BYellow, tok.key, Color::Reset);
-                const auto descs = ToFlagDescs(
-                    flags,
-                    config.addHelpFlag && !userDefinesHelp,
-                    config.addVersionFlag && !userDefinesVersion
-                );
+                const auto descs = ToFlagDescs(flags, config.addHelpFlag && !userDefinesHelp, config.addVersionFlag && !userDefinesVersion);
                 PrintCliHelp(exeName, descs, {}, config);
             }
             return std::unexpected(CommandLineError::UnknownArgument);

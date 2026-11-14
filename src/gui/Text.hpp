@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/Font.hpp>
-#include <Jolt/Math/Vec4.h>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -21,6 +21,6 @@ auto AppendTextVertices(
     float            x,
     float            y,
     float            scale,
-    const JPH::Vec4& color
+    const FVec4& color
 ) -> uint32_t;
 }

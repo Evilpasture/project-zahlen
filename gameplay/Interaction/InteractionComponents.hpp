@@ -4,11 +4,8 @@
 // gameplay/Interaction/InteractionComponents.hpp
 #pragma once
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -19,6 +16,8 @@
 
 namespace ZHLN::Interaction {
 
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
 using ZHLN::operator|;
 using ZHLN::operator&;
 using ZHLN::operator^;
@@ -76,7 +75,7 @@ enum class TriggerFlags : uint32_t {
 struct TriggerComponent {
     float        radius      = 2.0f;
     TriggerFlags flags       = TriggerFlags::Active;
-    JPH::Vec3    halfExtents = JPH::Vec3::sZero(); // If > 0, evaluated as an AABB trigger volume
+    FVec3    halfExtents = FVec3::Zero(); // If > 0, evaluated as an AABB trigger volume
     float        wait        = 0.2f;
     float        waitTimer   = 0.0f;
 
@@ -112,13 +111,13 @@ struct DoorComponent {
     DoorFlags flags = DoorFlags::None;
 
     // Linear motion (func_door)
-    JPH::Vec3 closedPosition = JPH::Vec3::sZero();
-    JPH::Vec3 openPosition   = JPH::Vec3::sZero();
+    FVec3 closedPosition = FVec3::Zero();
+    FVec3 openPosition   = FVec3::Zero();
 
     // Angular motion (func_door_rotating, prop_door_rotating)
-    JPH::Quat closedRotation = JPH::Quat::sIdentity();
-    JPH::Quat openRotation   = JPH::Quat::sIdentity();
-    JPH::Vec3 rotationAxis   = JPH::Vec3::sAxisY();
+    Quat closedRotation = Quat::Identity();
+    Quat openRotation   = Quat::Identity();
+    FVec3 rotationAxis   = FVec3::UnitY();
     float     rotationAngle  = 90.0f; // degrees
 
     float speed     = 2.0f; // travel progress speed (1.0 / duration)
@@ -150,8 +149,8 @@ struct ButtonComponent {
     ButtonState state = ButtonState::Off;
     ButtonFlags flags = ButtonFlags::UseActivates;
 
-    JPH::Vec3 unpressedPosition = JPH::Vec3::sZero();
-    JPH::Vec3 pressedPosition   = JPH::Vec3::sZero();
+    FVec3 unpressedPosition = FVec3::Zero();
+    FVec3 pressedPosition   = FVec3::Zero();
 
     float speed     = 2.0f;
     float progress  = 0.0f; // 0.0 (unpressed) -> 1.0 (pressed)

@@ -46,7 +46,7 @@
 // (up to four targets). This fixture exercises the same instantiate -> pose ->
 // extract -> shader path with a predictable authored base pose.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -144,8 +144,8 @@ struct MorphPosePassSuite {
         return engine;
     }
 
-    [[nodiscard]] static auto CreateMorphMaterial(ZHLN::RenderContext& rc) -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
-        return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.85f, 0.45f, 0.2f, 1.0f}});
+    [[nodiscard]] static auto CreateMorphMaterial(ZHLN::GraphicsDevice gfx) -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
+        return gfx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.85f, 0.45f, 0.2f, 1.0f}});
     }
 
     // One box part under one root node, `kMorphTargets` morph targets with real
@@ -165,7 +165,7 @@ struct MorphPosePassSuite {
         auto rc = engine.Graphics();
         auto  prefab = std::make_unique<ZHLN::ModelPrefab>();
 
-        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads
@@ -180,7 +180,7 @@ struct MorphPosePassSuite {
         ZHLN::ModelPart part {};
         part.name                  = ZHLN::String64("MorphBody");
         part.nodeIndex             = 1;
-        part.localTransform        = JPH::Mat44::sIdentity();
+        part.localTransform        = ZHLN::Mat4x4::Identity();
         part.mesh                  = box;
         part.meshAsset             = ZHLN::HashAssetID(degenerateClip ? "zahlen_test_morph_pose_box_mesh_deg" : "zahlen_test_morph_pose_box_mesh");
         part.materialAsset         = ZHLN::HashAssetID("zahlen_test_morph_pose_box_material");
@@ -196,11 +196,11 @@ struct MorphPosePassSuite {
         prefab->nodes.resize(2);
         prefab->nodes[0].name           = ZHLN::String64("MorphRoot");
         prefab->nodes[0].parentIndex    = -1;
-        prefab->nodes[0].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[0].localTransform = ZHLN::Mat4x4::Identity();
         prefab->nodes[0].hasMesh        = false;
         prefab->nodes[1].name           = ZHLN::String64("MorphBody");
         prefab->nodes[1].parentIndex    = 0;
-        prefab->nodes[1].localTransform = JPH::Mat44::sIdentity();
+        prefab->nodes[1].localTransform = ZHLN::Mat4x4::Identity();
         prefab->nodes[1].hasMesh        = true;
 
         ZHLN::AnimationClip weightsClip;
@@ -247,7 +247,7 @@ struct MorphPosePassSuite {
     [[nodiscard]] static auto SpawnInstances(
         ZHLN::Engine& engine, const ZHLN::ModelPrefab& prefab, const ZHLN::Material& material, uint32_t count
     ) -> std::vector<Instance> {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
 
         for (uint32_t i = 0; i < count; ++i) {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
@@ -261,7 +261,7 @@ struct MorphPosePassSuite {
         // entities and keeping the ones whose parent carries *this* prefab.
         const ZHLN::AssetID   expectedAsset = ZHLN::HashAssetPath(std::string_view(prefab.virtualPath));
         std::vector<Instance> instances;
-        for (ZHLN::Entity mesh: reg.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
+        for (ZHLN::Entity mesh: reg.EntitiesWith<ZHLN::Components::MeshComponent>()) {
             auto hier = reg.Get<ZHLN::Components::HierarchyComponent>(mesh);
             if (!hier || hier->parent == ZHLN::Entity::Null()) {
                 continue;
@@ -279,10 +279,11 @@ struct MorphPosePassSuite {
         std::expected<void, ZHLN::ErrorCode> draw_params_own_morph_weights() {
             ZHLN::Components::MorphTargetComponent morph {.weights = {0.25f, 0.5f, 0.75f, 1.0f}};
             const ZHLN::DrawParams params {.morphWeights = morph.weights};
-            morph.weights = ZHLN::Float4 {};
+            const auto expected = morph.weights;
+            morph.weights = {};
 
-            if (!ZHLN::Test::ExpectEq(params.morphWeights, ZHLN::Float4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
-                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, ZHLN::Float4 {})) {
+            if (!ZHLN::Test::ExpectEq(params.morphWeights, expected) ||
+                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, morph.weights)) {
                 return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
             }
             return {};
@@ -298,7 +299,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
             if (!material) {
@@ -325,9 +326,8 @@ struct MorphPosePassSuite {
             if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
-            const auto expected = ZHLN::Float4 {
-                MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f
-            };
+            auto expected = morph->weights;
+            expected = {MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f};
             if (!ZHLN::Test::ExpectEq(morph->weights, expected)) {
                 return std::unexpected(MorphPosePassTestError::IdleMorphWeightsChanged);
             }
@@ -343,7 +343,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
@@ -365,7 +365,7 @@ struct MorphPosePassSuite {
             // remaining components without re-attaching any that were removed.
             const size_t stripped = instances.size() / 2;
             for (size_t i = 0; i < stripped; ++i) {
-                reg.Remove<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
+                reg.Detach<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
             }
             ZHLN::Test::Headless::TickFrames(*engine, MorphPosePassSuite::kStressFrames);
 
@@ -408,7 +408,7 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());
@@ -488,20 +488,21 @@ struct MorphPosePassSuite {
                 return std::unexpected(MorphPosePassTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             // Straight-on view of the only mesh in the scene, so the frame is a
             // silhouette comparison and nothing else moves between captures.
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 1.0f, 4.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
             ZHLN::Test::Headless::DisableAA(*engine);
 
             auto material = MorphPosePassSuite::CreateMorphMaterial(engine->Graphics());

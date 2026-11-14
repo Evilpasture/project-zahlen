@@ -3,28 +3,16 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 
 namespace ZHLN {
-class Engine;
-namespace ECS {
-class Registry;
-}
+class RenderContext;
 
-struct Extent2D;
-
-// A pass, not an object: both entry points are static, so a caller that holds no
-// state has nothing to keep alive. (The frame step used to hide an instance in a
-// function-local static, which is state smuggled past everything that could see
-// it -- see the camera fold for why the camera itself is data now.)
+// Frame-plan camera projection. The phase owner invokes it sequentially before
+// the render graph, with only the camera data and render service it needs.
 class CameraSystem {
   public:
-    static void Update(Engine& engine, float dt, float alpha);
-
-    // Projects each camera entity's own pose into that entity's matrices: the
-    // camera is component state, so there is no engine camera to read.
-    static void Update(ECS::Registry& reg, Extent2D res, float dt, float alpha);
+    static void Update(ECS::Query<Components::CameraComponent&> cameras, ECS::Res<RenderContext> render);
 };
-}
+} // namespace ZHLN

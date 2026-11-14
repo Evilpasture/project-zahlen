@@ -2,134 +2,143 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/CharacterController/PlayerInput.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "PlayerInput.hpp"
 
 #include "CharacterComponents.hpp"
 #include "Zahlen/Math/Camera.hpp"
 #include "Zahlen/ECS/Components.hpp"
-#include "Zahlen/Engine/Engine.hpp"
 #include "Zahlen/ECS/Entity.hpp"
 #include "Zahlen/Input/Input.hpp"
-#include "Zahlen/Input/InputContext.hpp"
+#include "Zahlen/Engine/Capabilities/InputReader.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cmath>
 
 namespace ZHLN::Character {
 
-namespace {
-[[nodiscard]] auto ResolveSeatInputState(
-    const Engine&        engine,
-    const ECS::Registry& reg,
-    PlayerSeat           seat
-) noexcept -> const Components::InputStateComponent* {
-    if (seat == kPrimarySeat) {
-        if (const auto singleton = reg.GetSingleton<Components::InputStateComponent>()) {
-            return &(*singleton);
+auto ResolvePrimaryGamepad(const InputReader& input, PlayerSeat seat) noexcept -> GamepadSlot {
+    // The router picks the assignment (an explicit AssignGamepadToSeat, or the
+    // automatic policy), so this asks it rather than deciding: which slot belongs
+    // to a seat is routing state, not a system's guess.
+    for (size_t i = 0; i < kMaxGamepads; ++i) {
+        const GamepadSlot slot {static_cast<uint8_t>(i)};
+        if (input.GamepadConnected(slot) && input.GamepadSeat(slot) == seat) {
+            return slot;
         }
     }
-    if (engine.GetInput().SeatReceivesKeyboardMouse(seat)) {
-        return &engine.GetInput().SeatKeyboardMouse(seat);
-    }
-    return nullptr;
+    return GamepadSlot {static_cast<uint8_t>(kMaxGamepads)};
 }
-} // namespace
 
-void PlayerInputSystem::Update(Engine& engine) {
-    auto&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const InputContext& inputCtx = engine.GetInput();
+auto TranslateSeatIntent(const InputState& keyboardMouse, bool seatHasKeyboardMouse, const InputReader& input, GamepadSlot gamepadSlot) noexcept
+    -> SeatIntent {
+    SeatIntent intent {};
+    const bool padValid = gamepadSlot.IsValid();
 
-    for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
-        if (auto ic = reg.Get<InputComponent>(e)) {
-            const PlayerSeat seatComp = reg.Get<Components::PlayerSeatComponent>(e)
-                                            .transform([](const Components::PlayerSeatComponent& s) { return s.seat; })
-                                            .value_or(kPrimarySeat);
-
-            const auto* kbm     = ResolveSeatInputState(engine, reg, seatComp);
-            const auto  gamepad = inputCtx.PrimaryGamepadForSeat(seatComp);
-
-            float moveX = 0.0f;
-            float moveZ = 0.0f;
-            if (kbm != nullptr) {
-                if (kbm->IsKeyDown(KeyCode::W)) {
-                    moveZ += 1.0f;
-                }
-                if (kbm->IsKeyDown(KeyCode::S)) {
-                    moveZ -= 1.0f;
-                }
-                if (kbm->IsKeyDown(KeyCode::A)) {
-                    moveX -= 1.0f;
-                }
-                if (kbm->IsKeyDown(KeyCode::D)) {
-                    moveX += 1.0f;
-                }
-            }
-            if (gamepad) {
-                const StickSample left = gamepad->LeftStick();
-                moveX += left.x;
-                moveZ += left.y;
-            }
-
-            float len = std::sqrt(moveX * moveX + moveZ * moveZ);
-            if (len > 1.0f) {
-                moveX /= len;
-                moveZ /= len;
-            }
-            ic->localMoveX = moveX;
-            ic->localMoveZ = moveZ;
-
-            float yawDelta   = 0.0f;
-            float pitchDelta = 0.0f;
-            if (kbm != nullptr && kbm->IsMouseButtonDown(MouseButton::Right)) {
-                constexpr float kMouseSensitivity = 0.15f;
-                yawDelta += kbm->GetMouseDeltaX() * kMouseSensitivity;
-                pitchDelta += kbm->GetMouseDeltaY() * kMouseSensitivity;
-            }
-            if (gamepad) {
-                constexpr float kStickDegreesPerTick = 2.5f;
-                const StickSample right              = gamepad->RightStick();
-                yawDelta += right.x * kStickDegreesPerTick;
-                pitchDelta -= right.y * kStickDegreesPerTick;
-            }
-            ic->lookYawDelta   = yawDelta;
-            ic->lookPitchDelta = pitchDelta;
-
-            float zoom = 0.0f;
-            if (kbm != nullptr) {
-                const float wheel = kbm->GetMouseWheel();
-                if (std::abs(wheel) > 0.01f) {
-                    zoom += wheel * 0.5f;
-                }
-            }
-            if (gamepad) {
-                if (gamepad->IsButtonDown(GamepadButton::DPadUp)) {
-                    zoom += 0.25f;
-                }
-                if (gamepad->IsButtonDown(GamepadButton::DPadDown)) {
-                    zoom -= 0.25f;
-                }
-            }
-            ic->zoomDelta = zoom;
-
-            const bool kbmJump    = (kbm != nullptr) && kbm->IsKeyDown(KeyCode::Space);
-            const bool kbmSprint  = (kbm != nullptr) && kbm->IsKeyDown(KeyCode::LShift);
-            const bool padJump    = gamepad && gamepad->IsButtonDown(GamepadButton::South);
-            const bool padSprint  = gamepad && (gamepad->IsButtonDown(GamepadButton::LeftThumb) || gamepad->IsTriggerDown(GamepadAxis::LeftTrigger));
-            ic->wantsToJump       = kbmJump || padJump;
-            ic->wantsToSprint     = kbmSprint || padSprint;
+    if (seatHasKeyboardMouse) {
+        if (keyboardMouse.IsKeyDown(KeyCode::W)) {
+            intent.moveZ += 1.0f;
+        }
+        if (keyboardMouse.IsKeyDown(KeyCode::S)) {
+            intent.moveZ -= 1.0f;
+        }
+        if (keyboardMouse.IsKeyDown(KeyCode::A)) {
+            intent.moveX -= 1.0f;
+        }
+        if (keyboardMouse.IsKeyDown(KeyCode::D)) {
+            intent.moveX += 1.0f;
         }
     }
+    if (padValid) {
+        const StickSample left = input.GamepadLeftStick(gamepadSlot);
+        intent.moveX += left.x;
+        intent.moveZ += left.y;
+    }
+
+    const float len = std::sqrt(intent.moveX * intent.moveX + intent.moveZ * intent.moveZ);
+    if (len > 1.0f) {
+        intent.moveX /= len;
+        intent.moveZ /= len;
+    }
+
+    if (seatHasKeyboardMouse && keyboardMouse.IsMouseButtonDown(MouseButton::Right)) {
+        constexpr float kMouseSensitivity = 0.15f;
+        intent.lookYaw += keyboardMouse.mouseDeltaX * kMouseSensitivity;
+        intent.lookPitch += keyboardMouse.mouseDeltaY * kMouseSensitivity;
+    }
+    if (padValid) {
+        constexpr float kStickDegreesPerTick = 2.5f;
+        const StickSample right              = input.GamepadRightStick(gamepadSlot);
+        intent.lookYaw += right.x * kStickDegreesPerTick;
+        intent.lookPitch -= right.y * kStickDegreesPerTick;
+    }
+
+    if (seatHasKeyboardMouse) {
+        const float wheel = keyboardMouse.mouseWheel;
+        if (std::abs(wheel) > 0.01f) {
+            intent.zoom += wheel * 0.5f;
+        }
+    }
+    if (padValid) {
+        if (input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadUp)) {
+            intent.zoom += 0.25f;
+        }
+        if (input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadDown)) {
+            intent.zoom -= 0.25f;
+        }
+    }
+
+    const bool kbmJump   = seatHasKeyboardMouse && keyboardMouse.IsKeyDown(KeyCode::Space);
+    const bool kbmSprint = seatHasKeyboardMouse && keyboardMouse.IsKeyDown(KeyCode::LShift);
+    const bool padJump   = padValid && input.GamepadButtonDown(gamepadSlot, GamepadButton::South);
+    // The capability has no "trigger held" predicate, and it does not need one:
+    // the left trigger is an axis, and the router's trigger-button threshold was
+    // always 0.50, so this is the same comparison written where a caller can see
+    // what it means.
+    const bool padSprint =
+        padValid && (input.GamepadButtonDown(gamepadSlot, GamepadButton::LeftThumb) || input.GamepadLeftTrigger(gamepadSlot) >= 0.50f);
+    intent.jump   = kbmJump || padJump;
+    intent.sprint = kbmSprint || padSprint;
+    return intent;
 }
 
-void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+void PlayerInputSystem::Update(InputQuery query, ECS::Res<InputReader> input) {
+    for (Entity e: query.Entities<InputComponent>()) {
+        auto ic = query.Get<InputComponent>(e);
+        if (!ic) {
+            continue;
+        }
+        const PlayerSeat seat = query.Get<Components::PlayerSeatComponent>(e)
+                                    .transform([](const Components::PlayerSeatComponent& s) { return s.seat; })
+                                    .value_or(kPrimarySeat);
 
-    Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
-    if (camEnt != Entity::Null() && reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
+        // Routing decides whether this seat's keyboard and mouse are its own;
+        // the seat's physical state is then a value, read once for the frame.
+        const bool        kbmSeated = input->SeatReceivesKeyboardMouse(seat);
+        const InputState  kbm       = input->Snapshot(seat);
+        const SeatIntent  intent    = TranslateSeatIntent(kbm, kbmSeated, *input, ResolvePrimaryGamepad(*input, seat));
+
+        ic->localMoveX    = intent.moveX;
+        ic->localMoveZ    = intent.moveZ;
+        ic->lookYawDelta  = intent.lookYaw;
+        ic->lookPitchDelta= intent.lookPitch;
+        ic->zoomDelta     = intent.zoom;
+        ic->wantsToJump   = intent.jump;
+        ic->wantsToSprint = intent.sprint;
+    }
+}
+
+void PlayerInputSystem::PlayerInputTranslate(IntentQuery query) {
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    const Camera& cam = camera->camera;
+    const auto mainCameras = query.Entities<Components::MainCameraTagComponent>();
+    const Entity camEnt = mainCameras.empty() ? Entity::Null() : mainCameras.front();
+    if (camEnt != Entity::Null() && query.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
         // Zero out player intent so they stand frozen in an Idle pose
-        for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-            if (auto move = reg.Get<MovementComponent>(e)) {
+        for (Entity e: query.Entities<MovementComponent>()) {
+            if (auto move = query.Get<MovementComponent>(e)) {
                 move->inputX        = 0.0f;
                 move->inputZ        = 0.0f;
                 move->jumpRequested = false;
@@ -138,14 +147,14 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
         return;
     }
 
-    for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-        auto move  = reg.Get<MovementComponent>(e);
-        auto input = reg.Get<InputComponent>(e);
+    for (Entity e: query.Entities<MovementComponent>()) {
+        auto move  = query.Get<MovementComponent>(e);
+        auto input = query.Get<InputComponent>(e);
         if (!move || !input) {
             continue;
         }
 
-        float yawRad    = JPH::DegreesToRadians(cam.yaw);
+        float yawRad    = cam.yaw.ToRadians().value;
         float forward_x = std::cos(yawRad);
         float forward_z = std::sin(yawRad);
         float right_x   = -std::sin(yawRad);

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // gameplay/FallbackScene/FallbackScene.cpp
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "FallbackScene.hpp"
 #include <Zahlen/ECS/Components.hpp>
@@ -12,8 +13,9 @@
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -151,18 +153,6 @@ void DefaultPreset::BuildFallbackScene(Engine& engine) {
 
     Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    // ========================================================================
-    // 0. THE SETTINGS ENTITY
-    // ========================================================================
-    // Scene::Instantiate writes the environment onto whatever carries the
-    // global settings tag, so the entity has to exist before it runs. In the
-    // default scene layout it already does.
-    if (reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>().empty()) {
-        reg.Create(Components::GlobalSettingsTagComponent {});
-    }
-
     engine.EnsureFontAtlas();
     s_FallbackGui = std::make_unique<GUI::Context>(engine.GetFontAtlas());
 
@@ -204,12 +194,12 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 
     s_AccumTime += dt;
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto reg = engine.Entities();
     auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    auto        inputState = reg.GetSingleton<Components::InputStateComponent>();
-    bool        escDown    = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
+    const auto input       = std::as_const(engine).Input();
+    bool       escDown     = input.KeyDown(KeyCode::Escape);
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {
@@ -221,15 +211,15 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // 1. Animate 3D Emblem & Orbit Light
     if (s_AnimateScene) {
         reg.Patch<Components::TransformComponent>(s_CubeEntity, [&](auto& trans) -> auto {
-            JPH::Vec3 euler(s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f);
-            trans.rotation = Math::EulerDegreesToQuat(euler);
+            FVec3 euler{s_AccumTime * 25.0f, s_AccumTime * 45.0f, s_AccumTime * 15.0f};
+            trans.rotation = Quat::FromEulerDegrees({euler});
             trans.position.y = 2.0f + std::sin(s_AccumTime * 2.0f) * 0.25f;
         });
 
         reg.Patch<Components::TransformComponent>(s_PointLight, [&](auto& trans) -> auto {
             float orbitX   = std::cos(s_AccumTime * 1.5f) * 3.5f;
             float orbitZ   = std::sin(s_AccumTime * 1.5f) * 3.5f;
-            trans.position = JPH::Vec3(orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ);
+            trans.position = {orbitX, 2.5f + std::sin(s_AccumTime * 3.0f) * 0.5f, orbitZ};
         });
     }
 
@@ -333,10 +323,6 @@ namespace {
 
 // The standalone scene host installs this only when no document was requested.
 void FallbackStep(Engine& engine, float dt, FrameContext&) {
-    if (!engine.FallbackSceneEnabled()) {
-        return;
-    }
-
     if (!DefaultPreset::IsActive()) {
         DefaultPreset::BuildFallbackScene(engine);
     }

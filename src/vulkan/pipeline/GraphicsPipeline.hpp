@@ -6,6 +6,7 @@
 #include "vulkan/VulkanHeader.hpp"
 
 #include "vulkan/pipeline/PipelineBuilder.hpp"
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -24,32 +25,33 @@ enum class MaterialFlags : uint8_t {
     DepthWrite       = 1U << 3U,
 };
 
-[[nodiscard]] constexpr auto operator|(MaterialFlags left, MaterialFlags right) noexcept -> MaterialFlags {
-    return static_cast<MaterialFlags>(static_cast<uint8_t>(left) | static_cast<uint8_t>(right));
-}
+} // namespace ZHLN::Vk
 
-[[nodiscard]] constexpr auto operator&(MaterialFlags left, MaterialFlags right) noexcept -> MaterialFlags {
-    return static_cast<MaterialFlags>(static_cast<uint8_t>(left) & static_cast<uint8_t>(right));
-}
+namespace ZHLN {
+template <>
+inline constexpr bool EnableEnumFlags<Vk::MaterialFlags> = true;
+} // namespace ZHLN
 
-constexpr auto operator|=(MaterialFlags& left, MaterialFlags right) noexcept -> MaterialFlags& {
-    left = left | right;
-    return left;
-}
+namespace ZHLN::Vk {
 
-[[nodiscard]] constexpr auto HasFlag(MaterialFlags flags, MaterialFlags flag) noexcept -> bool {
-    return (flags & flag) != MaterialFlags::None;
-}
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
 
 // None, translucent, translucent+depth, additive, additive+depth, opaque+depth.
 // DoubleSided only changes culling and deliberately shares these state variants.
 inline constexpr size_t k_material_flag_variant_count = 6;
 
 [[nodiscard]] constexpr auto MaterialFlagVariantIndex(MaterialFlags flags) noexcept -> size_t {
-    constexpr uint8_t k_known_mask = static_cast<uint8_t>(MaterialFlags::DoubleSided) | static_cast<uint8_t>(MaterialFlags::TranslucentBlend) |
-                                     static_cast<uint8_t>(MaterialFlags::AdditiveBlend) | static_cast<uint8_t>(MaterialFlags::DepthWrite);
-    const auto        bits         = static_cast<uint8_t>(flags);
-    if ((bits & static_cast<uint8_t>(~k_known_mask)) != 0) {
+    constexpr MaterialFlags k_known_mask =
+        MaterialFlags::DoubleSided | MaterialFlags::TranslucentBlend | MaterialFlags::AdditiveBlend | MaterialFlags::DepthWrite;
+    if (HasAnyFlags(flags, ~k_known_mask)) {
         return k_material_flag_variant_count;
     }
 

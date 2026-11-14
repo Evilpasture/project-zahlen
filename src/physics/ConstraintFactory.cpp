@@ -25,16 +25,16 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
         case ConstraintType::Point: {
             JPH::PointConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = p.pivot;
+            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Hinge: {
             JPH::HingeConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = p.pivot;
-            settings.mHingeAxis1 = settings.mHingeAxis2 = p.axis;
+            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mHingeAxis1 = settings.mHingeAxis2 = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
 
-            const JPH::Vec3 normal = static_cast<JPH::Vec3>(p.axis).GetNormalizedPerpendicular();
+            const auto normal = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z).GetNormalizedPerpendicular();
             settings.mNormalAxis1  = settings.mNormalAxis2 = normal;
 
             settings.mLimitsMin = p.limitMin;
@@ -51,8 +51,8 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
         case ConstraintType::Slider: {
             JPH::SliderConstraintSettings settings;
             settings.mSpace       = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = p.pivot;
-            settings.mSliderAxis1 = settings.mSliderAxis2 = p.axis;
+            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mSliderAxis1 = settings.mSliderAxis2 = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
             settings.mLimitsMin                          = p.limitMin;
             settings.mLimitsMax                          = p.limitMax;
             return settings.Create(*b1, *b2);
@@ -60,9 +60,9 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
         case ConstraintType::Cone: {
             JPH::ConeConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = p.pivot;
+            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
 
-            JPH::Vec3   axis  = p.axis;
+            auto axis = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
             const float lenSq = axis.LengthSq();
             if (lenSq < 1e-6f) {
                 axis = JPH::Vec3::sAxisY();
@@ -78,8 +78,8 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
             JPH::DistanceConstraintSettings settings;
             settings.mSpace = JPH::EConstraintSpace::WorldSpace;
 
-            if (static_cast<JPH::Vec3>(p.pivot).LengthSq() > 1e-6f) {
-                settings.mPoint1 = settings.mPoint2 = p.pivot;
+            if (JPH::Vec3(p.pivot.x, p.pivot.y, p.pivot.z).LengthSq() > 1e-6f) {
+                settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
             } else {
                 settings.mPoint1 = b1->GetPosition();
                 settings.mPoint2 = b2->GetPosition();

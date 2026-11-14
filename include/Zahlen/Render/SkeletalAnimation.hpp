@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
 #include <Zahlen/Core/String.hpp>
 #include <vector>
@@ -46,7 +47,7 @@ struct Joint {
     String64   name;
     int32_t    parentIndex       = -1;
     int32_t    nodeIndex         = -1;
-    ZHLN::Mat44 inverseBindMatrix = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4 inverseBindMatrix = ZHLN::Mat4x4::Identity();
 };
 
 struct Skeleton {

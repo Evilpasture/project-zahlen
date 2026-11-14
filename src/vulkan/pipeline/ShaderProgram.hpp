@@ -4,9 +4,8 @@
 #pragma once
 
 #include "vulkan/VulkanHeader.hpp"
-
+#include "vulkan/execution/GpuPayload.hpp"
 #include <Zahlen/Core/Description.hpp>
-
 #include <array>
 #include <cstdint>
 #include <span>
@@ -14,13 +13,12 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include "vulkan/execution/GpuPayload.hpp"
 
 namespace ZHLN::Vk {
 
 struct ShaderDesc {
-    const uint32_t* code = nullptr;
-    size_t          size = 0;
+    const uint32_t* code        = nullptr;
+    size_t          size        = 0;
     const char*     entry_point = nullptr;
 };
 
@@ -41,7 +39,7 @@ struct SamplerSlot {
     static constexpr uint32_t         binding = Binding;
 };
 
-}
+} // namespace Declared
 
 struct ResourceBindings {
     template <typename Program>
@@ -117,7 +115,9 @@ template <typename CppPush, ShaderProgram... Modules>
     static_assert(
         sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushConstantLayoutMatchesAll<PushT, Shaders::Modules::X>()"
     );
-    static_assert((DeclaresPushBlock<Modules> || ...), "none of the named shader modules declares a push-constant block: the bytes would be written for no one");
+    static_assert(
+        (DeclaresPushBlock<Modules> || ...), "none of the named shader modules declares a push-constant block: the bytes would be written for no one"
+    );
     static_assert(GpuTriviallyCopyable<CppPush>, "a push payload is copied to the device as bytes: it must be trivially copyable and standard-layout");
     return true;
 }
@@ -163,11 +163,7 @@ template <typename Half, typename Program, typename... Slots>
 
 template <typename Set, typename Half, uint64_t Mask, typename... Slots, size_t... Index>
 consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
-    (static_cast<void>(sizeof(std::conditional_t<
-                           ((Mask >> Index) & 1u) != 0,
-                           std::true_type,
-                           UndeclaredBinding<Set, Half, Slots...[Index]::literal>
-                       >)), ...);
+    (static_cast<void>(sizeof(std::conditional_t<((Mask >> Index) & 1u) != 0, std::true_type, UndeclaredBinding<Set, Half, Slots...[Index] ::literal>>)), ...);
 }
 
 template <typename DeclaredSlot, typename... Slots>
@@ -176,20 +172,18 @@ template <typename DeclaredSlot, typename... Slots>
 }
 
 template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
-consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
+consteval void RequireSpelledBindings(std::index_sequence<Index...> /*unused*/) {
     using List = DeclaredList<Half, Program>;
     [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
         // A write block spells only the bindings of the set it fills (Set 0).
         // Declarations of the module's other sets are served by
         // shared mapping bundles at pipeline build (VUID-...-11312), never by
         // this per-pass slot list, so they must not be forced into it.
-        (static_cast<void>(sizeof(DeclarationSpelledBy<
-                               Set,
-                               Half,
-                               Program,
-                               Declared...[Index]::binding,
-                               (Declared...[Index]::set != 0) || SpellsDeclaredSlot<Declared...[Index], Slots...>()
-                           >)), ...);
+        (static_cast<void>(sizeof(
+             DeclarationSpelledBy < Set, Half, Program, Declared...[Index] ::binding,
+             (Declared...[Index] ::set != 0) || SpellsDeclaredSlot<Declared...[Index], Slots...>() >
+         )),
+         ...);
     }(std::type_identity<SlotsOfT<List>> {});
 }
 
@@ -231,7 +225,7 @@ template <typename Check, typename Half, typename Program, typename... Slots>
     return (ModuleSatisfiesCheck<Check, Half, Program, Slots>() && ...);
 }
 
-}
+} // namespace TemplatedDetail
 
 template <ShaderProgram... Programs>
 struct ShaderSet {
@@ -309,8 +303,8 @@ template <typename Set, typename Half, typename Check, typename... Slots>
 
 template <ShaderProgram Program>
 [[nodiscard]] auto CreateShaderDesc() noexcept -> ShaderDesc {
-    const std::span<const uint8_t> bytes = Program::Bytes();
-    const std::string_view entryPoint = Program::EntryPoint;
+    const std::span<const uint8_t> bytes      = Program::Bytes();
+    const std::string_view         entryPoint = Program::EntryPoint;
     return ShaderDesc {
         .code        = std::bit_cast<const uint32_t*>(bytes.data()),
         .size        = bytes.size_bytes(),
@@ -323,4 +317,4 @@ template <ShaderProgram Program>
     return Program::Stage;
 }
 
-}
+} // namespace ZHLN::Vk

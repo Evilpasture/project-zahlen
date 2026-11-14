@@ -4,7 +4,6 @@
 module;
 
 // clang-format off
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
@@ -14,7 +13,11 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
@@ -35,16 +38,16 @@ export namespace ZHLN::Locomotion {
 inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
 
 struct CharacterBoundsEstimate {
-    ZHLN::Float3 min   = {};
-    ZHLN::Float3 max   = {};
+    ZHLN::FVec3 min   = {};
+    ZHLN::FVec3 max   = {};
     bool         valid = false;
 
-    [[nodiscard]] auto Size() const noexcept -> JPH::Vec3 {
+    [[nodiscard]] auto Size() const noexcept -> FVec3 {
         if (!valid) {
-            return JPH::Vec3::sZero();
+            return FVec3::Zero();
         }
-        const JPH::Vec3 low  = min;
-        const JPH::Vec3 high = max;
+        const FVec3 low  = min;
+        const FVec3 high = max;
         return high - low;
     }
 };
@@ -62,28 +65,27 @@ struct DualShapeFitOptions {
 // No Detail wrapper here: this file is a single `export namespace` block, so a
 // nested `namespace Detail` would be exported along with everything inside it.
 // It would hide nothing and only add a name claiming the opposite.
-[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
+[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return Mat4x4::Identity();
     }
-
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
-    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
+    auto transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
+    auto parent = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
-        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+        transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
+        parent = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
 }
 
 /** Estimates the imported visual envelope from every transformed mesh AABB. */
 [[nodiscard]] auto
-    EstimateCharacterBounds(const ModelPrefab& prefab, JPH::Vec3Arg modelScale = JPH::Vec3::sReplicate(1.0f)) noexcept -> CharacterBoundsEstimate {
+    EstimateCharacterBounds(const ModelPrefab& prefab, FVec3 modelScale = FVec3::Splat(1.0f)) noexcept -> CharacterBoundsEstimate {
     CharacterBoundsEstimate estimate;
-    const JPH::Mat44        scaleTransform = JPH::Mat44::sScale(modelScale);
+    const auto scaleTransform = CreateScale(modelScale);
 
-    auto expand = [&](JPH::Vec3Arg point) {
-        if (!std::isfinite(point.GetX()) || !std::isfinite(point.GetY()) || !std::isfinite(point.GetZ())) {
+    auto expand = [&](FVec3 point) {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
             return;
         }
         if (!estimate.valid) {
@@ -92,23 +94,23 @@ struct DualShapeFitOptions {
             estimate.valid = true;
             return;
         }
-        estimate.min = {std::min(estimate.min.x, point.GetX()), std::min(estimate.min.y, point.GetY()), std::min(estimate.min.z, point.GetZ())};
-        estimate.max = {std::max(estimate.max.x, point.GetX()), std::max(estimate.max.y, point.GetY()), std::max(estimate.max.z, point.GetZ())};
+        estimate.min = {std::min(estimate.min.x, point.x), std::min(estimate.min.y, point.y), std::min(estimate.min.z, point.z)};
+        estimate.max = {std::max(estimate.max.x, point.x), std::max(estimate.max.y, point.y), std::max(estimate.max.z, point.z)};
     };
 
     for (const ModelPart& part: prefab.parts) {
         if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
-        const JPH::Mat44 transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const auto transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * PrefabMatrixToNative(part.localTransform);
+        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         for (uint32_t corner = 0; corner < 8; ++corner) {
-            const JPH::Vec3 localPoint(
-                (corner & 1u) != 0u ? localMax.GetX() : localMin.GetX(), (corner & 2u) != 0u ? localMax.GetY() : localMin.GetY(),
-                (corner & 4u) != 0u ? localMax.GetZ() : localMin.GetZ()
+            const FVec3 localPoint(
+                (corner & 1u) != 0u ? localMax.x : localMin.x, (corner & 2u) != 0u ? localMax.y : localMin.y,
+                (corner & 4u) != 0u ? localMax.z : localMin.z
             );
-            expand(transform.Multiply3x3(localPoint) + transform.GetTranslation());
+            expand((transform * FVec4 {localPoint.x, localPoint.y, localPoint.z, 1.0f}).XYZ());
         }
     }
     return estimate;
@@ -122,8 +124,8 @@ struct DualShapeFitOptions {
         return fallback;
     }
 
-    const JPH::Vec3 size = bounds.Size();
-    if (size.GetX() <= 0.0f || size.GetY() <= 0.0f || size.GetZ() <= 0.0f) {
+    const FVec3 size = bounds.Size();
+    if (size.x <= 0.0f || size.y <= 0.0f || size.z <= 0.0f) {
         return fallback;
     }
 
@@ -134,7 +136,7 @@ struct DualShapeFitOptions {
     // use a configurable fraction of lateral reach rather than swallowing the
     // complete animation silhouette.
     const float horizontalExtent = std::max(maxAbsX * std::clamp(options.lateralCoverage, 0.1f, 1.0f), maxAbsZ);
-    const float targetTop        = std::max(bounds.max.y, size.GetY()) * std::max(options.verticalPadding, 1.0f);
+    const float targetTop        = std::max(bounds.max.y, size.y) * std::max(options.verticalPadding, 1.0f);
     if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
         return fallback;
     }
@@ -159,7 +161,7 @@ struct DualShapeFitOptions {
 
 [[nodiscard]] auto EstimateDualShapeConfig(
     const ModelPrefab&              prefab,
-    JPH::Vec3Arg                    modelScale = JPH::Vec3::sReplicate(1.0f),
+    FVec3                    modelScale = FVec3::Splat(1.0f),
     const Physics::DualShapeConfig& fallback   = {},
     const DualShapeFitOptions&      options    = {}
 ) noexcept -> Physics::DualShapeConfig {
@@ -174,19 +176,19 @@ struct EllipsoidDesc {
     int   segments = 36;
 };
 
-auto DrawWireframeEllipsoid(DebugDraw scene, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
+auto DrawWireframeEllipsoid(DebugDraw scene, const FVec3& center, const EllipsoidDesc& desc, const FVec4& color) noexcept -> void {
     // 1. Latitudinal Parallel Rings
     for (int lat = 1; lat < desc.latRings; ++lat) {
         const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
-        const auto ringY      = center.GetY() + (std::sin(phi) * desc.radiusY);
+        const auto ringY      = center.y + (std::sin(phi) * desc.radiusY);
         const auto ringRadius = desc.radiusXZ * std::cos(phi);
 
         for (int i = 0; i < desc.segments; ++i) {
             const auto t0 = (static_cast<float>(i) / static_cast<float>(desc.segments)) * kTwoPi;
             const auto t1 = (static_cast<float>(i + 1) / static_cast<float>(desc.segments)) * kTwoPi;
 
-            const JPH::Vec3 p0(center.GetX() + (std::cos(t0) * ringRadius), ringY, center.GetZ() + (std::sin(t0) * ringRadius));
-            const JPH::Vec3 p1(center.GetX() + (std::cos(t1) * ringRadius), ringY, center.GetZ() + (std::sin(t1) * ringRadius));
+            const FVec3 p0(center.x + (std::cos(t0) * ringRadius), ringY, center.z + (std::sin(t0) * ringRadius));
+            const FVec3 p1(center.x + (std::cos(t1) * ringRadius), ringY, center.z + (std::sin(t1) * ringRadius));
 
             scene.AddLine(p0, p1, color);
         }
@@ -203,12 +205,12 @@ auto DrawWireframeEllipsoid(DebugDraw scene, const JPH::Vec3& center, const Elli
             const auto t1 = (static_cast<float>(i + 1) / static_cast<float>(desc.segments)) * kTwoPi;
 
             const auto r0 = desc.radiusXZ * std::cos(t0);
-            const auto y0 = center.GetY() + (desc.radiusY * std::sin(t0));
+            const auto y0 = center.y + (desc.radiusY * std::sin(t0));
             const auto r1 = desc.radiusXZ * std::cos(t1);
-            const auto y1 = center.GetY() + (desc.radiusY * std::sin(t1));
+            const auto y1 = center.y + (desc.radiusY * std::sin(t1));
 
-            const JPH::Vec3 p0(center.GetX() + (r0 * cosLon), y0, center.GetZ() + (r0 * sinLon));
-            const JPH::Vec3 p1(center.GetX() + (r1 * cosLon), y1, center.GetZ() + (r1 * sinLon));
+            const FVec3 p0(center.x + (r0 * cosLon), y0, center.z + (r0 * sinLon));
+            const FVec3 p1(center.x + (r1 * cosLon), y1, center.z + (r1 * sinLon));
 
             scene.AddLine(p0, p1, color);
         }
@@ -217,9 +219,9 @@ auto DrawWireframeEllipsoid(DebugDraw scene, const JPH::Vec3& center, const Elli
 
 auto DrawWireframeSphere(
     DebugDraw        scene,
-    const JPH::Vec3& center,
+    const FVec3& center,
     float            radius,
-    const JPH::Vec4& color,
+    const FVec4& color,
     int              latRings = 10,
     int              lonRings = 10,
     int              segments = 36
@@ -228,9 +230,9 @@ auto DrawWireframeSphere(
 }
 
 struct DebugPalette {
-    ZHLN::Float4 colorBumper        = {0.10f, 1.00f, 0.20f, 1.0f}; // Vibrant Green
-    ZHLN::Float4 colorLifter        = {1.00f, 1.00f, 1.00f, 1.0f}; // Pure White
-    ZHLN::Float4 colorVelocityDebug = {1.00f, 0.90f, 0.10f, 1.0f}; // Yellow
+    ZHLN::FVec4 colorBumper        = {0.10f, 1.00f, 0.20f, 1.0f}; // Vibrant Green
+    ZHLN::FVec4 colorLifter        = {1.00f, 1.00f, 1.00f, 1.0f}; // Pure White
+    ZHLN::FVec4 colorVelocityDebug = {1.00f, 0.90f, 0.10f, 1.0f}; // Yellow
 };
 
 /**
@@ -238,79 +240,19 @@ struct DebugPalette {
  */
 auto SpawnCharacter(
     Engine&                         engine,
-    const JPH::Vec3&                spawnPosition = {0.0f, 2.0f, 0.0f},
+    const FVec3&                spawnPosition = {0.0f, 2.0f, 0.0f},
     const Physics::DualShapeConfig& config        = {},
     float                           speed         = 14.5f,
     float                           jumpForce     = 14.8f
-) -> Entity {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto pc = engine.Physics();
-
-    // Create physics first, then publish the complete gameplay entity in one
-    // atomic ECS insertion. No system can observe a partially assembled player.
-    // The two-part hull is authored here (a gameplay decision) and passed to
-    // the generic core API; the supporting volume keeps the whole lower
-    // lifter sphere in contact with the ground.
-    const Physics::CharacterParams characterParams {
-        .shape            = Physics::CreateDualShape(config),
-        .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
-    };
-    const Physics::BodyID charPhys = pc.CreateCharacter(spawnPosition, characterParams);
-    const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, {0.0f, 0.0f, 0.0f, 1.0f});
-    const Entity              player   = reg.Create(
-        Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
-        Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
-        Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
-        Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
-    );
-    // Configure third-person follow camera and strip FreeCam. The rig
-    // component lives in extensions/Camera: this is gameplay camera policy the
-    // spawner authors explicitly (a host that wants no follow camera removes
-    // the component afterwards; nothing in core re-creates one it was given).
-    FreeCam::Detach(engine);
-    for (Entity camEnt: reg.GetEntitiesWith<Components::MainCameraTagComponent>()) {
-        reg.Add(
-            camEnt,
-            CameraRig::TargetCameraComponent {
-                .target            = player,
-                .distance          = 5.50f,
-                .targetDistance    = 5.50f,
-                .yaw               = 90.0f,
-                .pitch             = -14.0f,
-                .targetOffset      = JPH::Vec3(0.0f, 0.80f, 0.0f),
-                .stiffness         = 24.0f,
-                .vignetteIntensity = 1.10f,
-                .vignettePower     = 1.50f,
-                .fov               = 52.0f,
-                .targetFov         = 52.0f
-            },
-            Character::InputComponent {}
-        );
-    }
-
-    return player;
-}
+) -> Entity;
 
 /**
  * @brief Renders the visual dual-shape rig 1:1 anchored to the smoothed character transform.
  */
-auto
-    RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto scene = engine.Debug();
-
-    if (!reg.IsAlive(playerEntity)) {
-        return;
-    }
-
-    const auto trans = reg.Get<Components::TransformComponent>(playerEntity);
-    if (!trans) {
-        return;
-    }
-
-    const JPH::Vec3 pos               = trans->position;
-    const JPH::Vec3 finalLifterCenter = pos + JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f);
-    const JPH::Vec3 finalBumperCenter = pos + JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f);
+auto RenderDebugRig(DebugDraw scene, FVec3 pos, FVec3 velocity,
+                    const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
+    const FVec3 finalLifterCenter = pos + FVec3{0.0f, config.GetLifterOffsetY(), 0.0f};
+    const FVec3 finalBumperCenter = pos + FVec3{0.0f, config.GetBumperOffsetY(), 0.0f};
 
     // 1. Draw Upper Bumper Oval (Green)
     DrawWireframeEllipsoid(scene, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
@@ -320,13 +262,8 @@ auto
     DrawWireframeSphere(scene, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector
-    const auto move = reg.Get<Character::MovementComponent>(playerEntity);
-    if (move) {
-        const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
-        const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
-        if (vel.LengthSq() > 0.01f) {
-            scene.AddLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
-        }
+    if (velocity.LengthSquared() > 0.01f) {
+        scene.AddLine(finalBumperCenter, finalBumperCenter + (velocity * 0.25f), palette.colorVelocityDebug);
     }
 }
 

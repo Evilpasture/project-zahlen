@@ -45,7 +45,7 @@ class Application {
     explicit Application(EngineConfig config = {}): _config(std::move(config)) {}
 
     // Retained for source compatibility. The base defaults are empty; use
-    // Install() to compose modules before InitializeDefaultScene builds graphs.
+    // Install() to compose modules before the first frame executes.
     auto WithDefaultModules(bool enabled = true) noexcept -> Application& {
         _defaultModules = enabled;
         return *this;

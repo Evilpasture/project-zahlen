@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -33,19 +33,14 @@ enum class CameraLookAtError : uint8_t {
 
 namespace {
 
-void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
-    }
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-        });
-    }
+void DisableJitterAndVignette(ZHLN::Engine& engine) {
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.antiAliasing.mode            = ZHLN::AAMode::None;
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+    });
 }
 
 } // namespace
@@ -78,9 +73,9 @@ struct CameraLookAtTestSuite {
             // scene rebuilds so the contributed frame step takes its place).
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
-            DisableJitterAndVignette(reg);
+            DisableJitterAndVignette(*engine);
 
             auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
@@ -100,7 +95,7 @@ struct CameraLookAtTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
-            auto cameras  = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            auto cameras  = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!ZHLN::Test::ExpectTrue(!cameras.empty())) {
                 return std::unexpected(CameraLookAtError::NoCameraFound);
             }
@@ -108,7 +103,7 @@ struct CameraLookAtTestSuite {
             // The rig component is authored explicitly (the frame step only
             // re-seeds the boot camera's defaults when the component is
             // missing, so this survives the first tick).
-            reg.Add(
+            reg.Attach(
                 cameras[0],
                 ZHLN::CameraRig::TargetCameraComponent {
                     .target              = target,
@@ -116,7 +111,7 @@ struct CameraLookAtTestSuite {
                     .targetDistance      = 5.0f,
                     .yaw                 = -90.0f,
                     .pitch               = 0.0f,
-                    .targetOffset        = JPH::Vec3::sZero(),
+                    .targetOffset        = ZHLN::FVec3::Zero(),
                     .stiffness           = 0.0f,
                     .vignetteIntensity   = 0.0f,
                     .fov                 = 45.0f,

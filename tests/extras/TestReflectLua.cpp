@@ -5,7 +5,7 @@
 //
 // Exercises plugins/lua/ReflectLua.hpp + SceneLua.hpp:
 //   * Reflection-driven evaluation into scalars, FixedString<N>, std::array,
-//     std::vector, maps, Optional, enums, JPH::Float3/Vec3/Vec4/Quat,
+//     std::vector, maps, Optional, enums, JPH::Float3/FVec3/FVec4/Quat,
 //     GraphicsSettings, and ZHLN::Scene::Scene.
 //   * Computed expressions (loops, math, helpers) and pure function reducers
 //     (EvaluateCallString).
@@ -15,6 +15,9 @@
 //     and deterministic instruction + memory budgets.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 
 #include <RagdollAuthoring/RagdollAuthoring.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -196,7 +199,6 @@ struct ReflectLuaSuite {
                     post = {
                         exposure  = 1.25,
                         mode      = rt and 2 or 0,
-                        enableRTR = rt and 1 or 0,
                     },
                     rayTracing = {
                         enableReflections = rt,
@@ -217,7 +219,7 @@ struct ReflectLuaSuite {
         if (hi->qualityPreset != ZHLN::QualityLevel::Ultra || hi->antiAliasing.mode != ZHLN::AAMode::SMAA) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
-        if (!Near(hi->post.exposure, 1.25f) || hi->post.mode != 2 || hi->post.enableRTR != 1 || !hi->rayTracing.enableDiffuseGI) {
+        if (!Near(hi->post.exposure, 1.25f) || hi->post.mode != 2 || !hi->rayTracing.enableReflections || !hi->rayTracing.enableDiffuseGI) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
@@ -228,7 +230,7 @@ struct ReflectLuaSuite {
         if (!lo) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (lo->qualityPreset != ZHLN::QualityLevel::Medium || lo->post.enableRTR != 0 || lo->rayTracing.enableReflections) {
+        if (lo->qualityPreset != ZHLN::QualityLevel::Medium || lo->rayTracing.enableReflections) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
         return {};
@@ -269,38 +271,76 @@ struct ReflectLuaSuite {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
-        // 4. Native Float3 / Float4 accept both sequence and named forms.
-        ZHLN::Components::PostProcessSettingsComponent postComp {};
-        postComp.exposure = 1.5f;
+        // 4. Native FVec3 / FVec4 accept both sequence and named forms.
+        ZHLN::EnvironmentSettings envComp {};
+        envComp.ambientExposure = 1.5f;
         if (auto vecOk = ZHLN::ReflectLua::ApplyPatchString(
-                postComp,
-                "return { colorFilter = { 0.9, 0.8, 0.7 }, skyZenith = { x = 0.1, y = 0.2, z = 0.3, w = 1.0 } }"
+                envComp,
+                "return { probeMin = { 0.9, 0.8, 0.7 }, skyZenith = { x = 0.1, y = 0.2, z = 0.3, w = 1.0 } }"
             );
             !vecOk) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.y, 0.8f) || !Near(postComp.skyZenith.z, 0.3f)) {
+        if (!Near(envComp.ambientExposure, 1.5f) || !Near(envComp.probeMin.y, 0.8f) || !Near(envComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
         // Named and short sequence patches preserve untouched coordinates;
-        // an invalid coordinate rolls back the entire component.
+        // an invalid coordinate rolls back the entire struct.
         if (auto ok = ZHLN::ReflectLua::ApplyPatchString(
-                postComp, "return { colorFilter = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
+                envComp, "return { probeMin = { x = 0.4 }, skyZenith = { 0.6 } }"); !ok) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
-        if (!Near(postComp.colorFilter.x, 0.4f) || !Near(postComp.colorFilter.y, 0.8f) ||
-            !Near(postComp.skyZenith.x, 0.6f) || !Near(postComp.skyZenith.z, 0.3f)) {
+        if (!Near(envComp.probeMin.x, 0.4f) || !Near(envComp.probeMin.y, 0.8f) ||
+            !Near(envComp.skyZenith.x, 0.6f) || !Near(envComp.skyZenith.z, 0.3f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
         if (auto bad = ZHLN::ReflectLua::ApplyPatchString(
-                postComp, "return { exposure = 8, colorFilter = { x = 'bad' } }"); bad) {
+                envComp, "return { ambientExposure = 8, probeMin = { x = 'bad' } }"); bad) {
             return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
         }
-        if (!Near(postComp.exposure, 1.5f) || !Near(postComp.colorFilter.x, 0.4f)) {
+        if (!Near(envComp.ambientExposure, 1.5f) || !Near(envComp.probeMin.x, 0.4f)) {
             return std::unexpected(LuaSuiteFail::WrongValue);
         }
 
+        return {};
+    }
+
+    auto TestNativeVectorPatchRollback() -> std::expected<void, ZHLN::ErrorCode> {
+        ZHLN::FVec3 position{1.0f, 2.0f, 3.0f};
+        auto named = ZHLN::ReflectLua::ApplyPatchString(position, "return { y = 9 }");
+        if (!named || !Near(position.x, 1.0f) || !Near(position.y, 9.0f) || !Near(position.z, 3.0f))
+            return std::unexpected(LuaSuiteFail::WrongValue);
+
+        ZHLN::FVec4 color{1.0f, 2.0f, 3.0f, 4.0f};
+        auto shortSeq = ZHLN::ReflectLua::ApplyPatchString(color, "return { 7, 8 }");
+        if (!shortSeq || !Near(color.x, 7.0f) || !Near(color.y, 8.0f) || !Near(color.z, 3.0f) || !Near(color.w, 4.0f))
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        auto bad = ZHLN::ReflectLua::ApplyPatchString(color, "return { 5, 'bad' }");
+        if (bad || !bad.error().Is(ZHLN::LuaError::TypeMismatch) || !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+        auto longSeq = ZHLN::ReflectLua::ApplyPatchString(color, "return { 1, 2, 3, 4, 5 }");
+        if (longSeq || !longSeq.error().Is(ZHLN::LuaError::OutOfRange) || !Near(color.x, 7.0f))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+
+        // Constructing a new vector retains the full-sequence value contract.
+        auto incomplete = ZHLN::ReflectLua::EvaluateString<ZHLN::FVec4>("return { 1, 2 }");
+        if (incomplete || !incomplete.error().Is(ZHLN::LuaError::OutOfRange))
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
+        return {};
+    }
+
+    auto TestNativeMatrixSequence() -> std::expected<void, ZHLN::ErrorCode> {
+        auto matrix = ZHLN::ReflectLua::EvaluateString<ZHLN::Mat4x4>(
+            "return { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }");
+        if (!matrix || (*matrix)[0, 1] != 5.0f || (*matrix)[2, 3] != 15.0f)
+            return std::unexpected(LuaSuiteFail::WrongValue);
+        auto roundTrip = ZHLN::ReflectLua::EvaluateCallString<ZHLN::Mat4x4>(
+            "return function(m) return m end", "matrix_roundtrip", ZHLN::LuaBudget {}, *matrix);
+        if (!roundTrip || roundTrip->elements != matrix->elements) return std::unexpected(LuaSuiteFail::WrongValue);
+        auto bad = ZHLN::ReflectLua::ApplyPatchString(*matrix, "return { 1, 2 }");
+        if (bad || !bad.error().Is(ZHLN::LuaError::OutOfRange) || (*matrix)[0, 1] != 5.0f)
+            return std::unexpected(LuaSuiteFail::WrongErrorCode);
         return {};
     }
 
@@ -391,7 +431,7 @@ struct ReflectLuaSuite {
                 *gfxSrc, "@config/graphics.lua", ZHLN::LuaBudget {}, rtDesktop
             );
             if (!ultraGfx || ultraGfx->qualityPreset != ZHLN::QualityLevel::Ultra ||
-                ultraGfx->post.enableRTR != 1 || !ultraGfx->rayTracing.enableDiffuseGI ||
+                !ultraGfx->rayTracing.enableReflections || !ultraGfx->rayTracing.enableDiffuseGI ||
                 ultraGfx->shadows.resolution != 4096) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }

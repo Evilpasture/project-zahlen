@@ -62,7 +62,6 @@ bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
         .validationMode = ValidationMode::On,
         .headless = true,
         .enableMeshShading = false,
-        .enableFallbackScene = false,
     };
     bool captured = false;
     SetLogObserver(&ObserveLog);

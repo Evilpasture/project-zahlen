@@ -116,6 +116,8 @@ class EntityCommandBuffer {
         _commands.push_back({CommandType::RemoveComponent, e, familyId, nullptr, nullptr, applyFn});
     }
 
+    [[nodiscard]] auto Targets(const Registry& registry) const noexcept -> bool { return _registry == &registry; }
+
     [[nodiscard]] auto Empty() const noexcept -> bool {
         return _commands.empty();
     }

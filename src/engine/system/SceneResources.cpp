@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -39,11 +38,13 @@ void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component)
 }
 
 void Release(Engine& engine, Components::PhysicsComponent& component) {
-    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
+    engine.Physics().DestroyBody(std::exchange(component.physicsID, Physics::BodyID::Null()));
 }
 
 void Release(Engine& engine, Components::RagdollComponent& component) {
-    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
+    const auto id = std::exchange(component.ragdollID, Physics::RagdollID::Invalid);
+    engine.Physics().DestroyRagdolls(std::span {&id, 1});
+    component.isAddedToPhysics = false;
 }
 
 void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
@@ -51,7 +52,7 @@ void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
 }
 
 void Release(Engine& engine, Components::AudioSourceComponent& component) {
-    Release(ZHLN::EngineAccess::AudioOf(engine), component);
+    engine.Audio().StopVoice(std::exchange(component.voiceID, VoiceID::Invalid), component.fadeOut);
 }
 
 void Release(Engine& engine, Components::OwnedMeshComponent& component) {

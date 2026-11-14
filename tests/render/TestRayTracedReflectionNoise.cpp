@@ -25,7 +25,10 @@
 //                    radiance cache both light up the glossy band without
 //                    isolated ray debris.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
@@ -129,36 +132,29 @@ struct RayTracedReflectionNoiseTestSuite {
     }
 
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
-                aa.state.mode        = mode;
-            });
+        auto reg = engine.Entities();
+        for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+            engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
         engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
-    // Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
-    // PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
-    // which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
-    // and to select the RTR pipeline variants for lighting and reflection.
+    // Same switch the shadow suite drives: rayTracing.enableReflections is the
+    // one stored fact, which RenderGraphBuilder ANDs with a non-null TLAS to
+    // form pc.enableRTR and to select the RTR pipeline variants for lighting
+    // and reflection.
     static void SetRTR(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings.empty()) {
-            return;
-        }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableSSR, enableRTR](auto& pp) {
-            pp.fullBright        = 0;
-            pp.enableSSR         = enableSSR;
-            pp.enableRTR         = enableRTR;
-            pp.giMode            = 0;
-            pp.giIntensity       = 0.0f;
-            pp.vignetteIntensity = 0.0f;
-            pp.ambientExposure   = 3.0f;
-            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+        engine.Graphics().PatchSettings([enableSSR, enableRTR](auto& gfx) {
+            gfx.environment.fullBright       = 0;
+            gfx.post.enableSSR               = enableSSR;
+            gfx.rayTracing.enableReflections = enableRTR != 0;
+            gfx.post.mode                    = 0;
+            gfx.post.giIntensity             = 0.0f;
+            gfx.post.vignetteIntensity       = 0.0f;
+            gfx.environment.ambientExposure  = 3.0f;
+            gfx.environment.skyZenith = {0.001f, 0.002f, 0.006f, 1.0f};
+            gfx.environment.skyHorizon = {0.004f, 0.006f, 0.012f, 1.0f};
+            gfx.environment.skyGround = {0.001f, 0.001f, 0.002f, 1.0f};
         });
     }
 
@@ -182,7 +178,7 @@ struct RayTracedReflectionNoiseTestSuite {
     // and the reflection of every surface -- rendered black, so the RTR term
     // had nothing to add. The switch worked; the scene was black-on-black.
     static bool BuildReflectionScene(ZHLN::Engine& engine) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+        auto reg = engine.Entities();
 
         auto floorMat =
             engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}});
@@ -236,24 +232,25 @@ struct RayTracedReflectionNoiseTestSuite {
             engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 6.0, 6.0}, .createPhysics = false, .materialOverride = *boxMat}
         );
 
-        const ZHLN::Entity sunEnt = reg.Create();
-        reg.Add(
+        const ZHLN::Entity sunEnt = reg.Spawn();
+        reg.Attach(
             sunEnt,
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})},
             ZHLN::Components::LightComponent {
-                .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 120.0f, .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f}, .intensity = 120.0f, .direction = ZHLN::FVec3{0.0f, 0.75f, 0.66f}.Normalized()
             }
         );
 
-        const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-        if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+        const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            auto& cam = c.camera;
+            cam.position = {0.0f, 5.0f, 20.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{-22.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
+        });
+        if (!ZHLN::Test::ExpectTrue(camOk)) {
             return false;
         }
-        ZHLN::Camera& cam = camComp->camera;
-        cam.position = JPH::Vec3(0.0f, 5.0f, 20.0f);
-        cam.yaw      = -90.0f;
-        cam.pitch    = -22.0f;
-        cam.fov      = 60.0f;
         return true;
     }
 

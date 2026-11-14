@@ -2,23 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
-#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -26,7 +25,6 @@
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <algorithm>
 #include <array>
-#include <bitset>
 #include <span>
 
 namespace ZHLN {
@@ -46,37 +44,35 @@ struct Components {
         float metallic  = 0.0f;
     };
     struct TransformComponent {
-        ZHLN::Float3 position = {};
-        ZHLN::Float4 rotation = {0.0f, 0.0f, 0.0f, 1.0f};
-        ZHLN::Float3 scale    = {1.0f, 1.0f, 1.0f};
+        ZHLN::FVec3 position = {};
+        ZHLN::Quat rotation = ZHLN::Quat::Identity();
+        ZHLN::FVec3 scale    = {1.0f, 1.0f, 1.0f};
 
-        // The calculation loads the Jolt types; the component is storage. The
-        // parameters are Vec3Arg/QuatArg, so the members convert on the way in.
-        [[nodiscard]] JPH::Mat44 GetLocalMatrix() const {
-            return JPH::Mat44::sRotationTranslation(rotation, position) * JPH::Mat44::sScale(scale);
+        [[nodiscard]] Mat4x4 GetLocalMatrix() const noexcept {
+            return ComposeTransform(position, rotation, scale);
         }
 
-        [[nodiscard]] JPH::Mat44 GetMatrix() const {
+        [[nodiscard]] Mat4x4 GetMatrix() const noexcept {
             return GetLocalMatrix();
         }
     };
 
     struct WorldTransformComponent {
-        ZHLN::Mat44 world    = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 previous = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4 world    = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 previous = ZHLN::Mat4x4::Identity();
     };
 
     // Per-entity ambient cube (see DrawParams::ambientCube). Presence enables the
     // cube term in the material shader for this entity's mesh parts.
     struct AmbientCubeComponent {
-        std::array<ZHLN::Float4, 6> cube {};
+        std::array<ZHLN::FVec4, 6> cube {};
     };
 
     struct MeshComponent {
         AssetID      meshAsset     = InvalidAssetID;
         MaterialID   materialAsset = InvalidMaterialID;
         float        cullRadius    = 1.0f;
-        ZHLN::Float3 localCenter   = {};
+        ZHLN::FVec3 localCenter   = {};
         DrawFlags    flags         = DrawFlags::None;
         int32_t      nodeIndex     = -1;
     };
@@ -91,8 +87,8 @@ struct Components {
         AssetID      meshAsset  = InvalidAssetID;
         Mesh         mesh       = {};
         Shape        shape      = Shape::None;
-        JPH::Vec3    dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
-        ZHLN::Float4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
+        FVec3    dimensions = FVec3::Zero(); // box: half extents; others: radius/extent, height
+        ZHLN::FVec4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
     };
 
     struct SkeletalMeshComponent {
@@ -105,7 +101,7 @@ struct Components {
     struct MorphTargetComponent {
         uint32_t    offset      = 0;
         uint32_t    activeCount = 0;
-        ZHLN::Float4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
+        ZHLN::FVec4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
     };
 
     struct LODComponent {
@@ -124,11 +120,8 @@ struct Components {
         bool                isStatic      = true;
     };
 
-    struct RayTracingSettingsComponent {
-        RayTracingConfig config {};
-    };
     struct ImpulseCommand {
-        ZHLN::Float3 linear = {};
+        ZHLN::FVec3 linear = {};
     };
     struct RagdollHitReactionCommand {
         uint32_t jointIndex = 0;
@@ -139,7 +132,7 @@ struct Components {
 
     struct RagdollImpulseCommand {
         uint32_t     jointIndex = 0;
-        ZHLN::Float3 impulse    = {};
+        ZHLN::FVec3 impulse    = {};
     };
 
     struct RagdollComponent {
@@ -163,10 +156,10 @@ struct Components {
     struct CameraComponent {
         Camera camera {};
 
-        ZHLN::Mat44 viewProj               = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 unjitteredViewProj     = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 prevUnjitteredViewProj = ZHLN::Mat44::sIdentity();
-        ZHLN::Mat44 frozenViewProj         = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4 viewProj               = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 unjitteredViewProj     = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 prevUnjitteredViewProj = ZHLN::Mat4x4::Identity();
+        ZHLN::Mat4x4 frozenViewProj         = ZHLN::Mat4x4::Identity();
         uint32_t    frameCounter           = 0;
     };
     // The pose rides in the same storage as the matrices, so it must stay a pod
@@ -182,7 +175,7 @@ struct Components {
     struct SceneSourceComponent {
         Scene::ShapeKind shape = Scene::ShapeKind::Box;
         ZHLN::String256  source;
-        ZHLN::Float3     halfExtents           = {0.5f, 0.5f, 0.5f};
+        ZHLN::FVec3     halfExtents           = {0.5f, 0.5f, 0.5f};
         float            extent                = 10.0f;
         bool             emissiveVirtualLights = false;
     };
@@ -195,68 +188,12 @@ struct Components {
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
     struct SunTagComponent {};
-    struct GlobalSettingsTagComponent {};
-    struct AASettingsComponent {
-        AAState state {};
-    };
-    struct ShadowSettingsComponent {
-        float shadowWidth      = 200.0f;
-        int   shadowResolution = 2048;
-        float sunSize          = 0.05f;
-    };
-    // The culling pass's published counters. Its *scratch* -- the derived planes
-    // and the freeze-frame corners -- is node state and lives in CullingScratch on
-    // the pass itself. These counters are read by the debug overlay, the crash
-    // dump and the render tests, so they are world data and live here.
-    //
-    // World::Create() creates the singleton, so a world has culling counters from
-    // the moment it exists; a scene reset re-seeds it in InitializeDefaultScene, and
-    // World::GetCullingStats() creates it if neither has happened.
-    struct CullingStatsComponent {
-        CullingStats stats;
-    };
-    struct PostProcessSettingsComponent {
-        int   giMode            = 0;
-        float aoRadius          = 0.5f;
-        float aoBias            = 0.05f;
-        float aoPower           = 1.8f;
-        float giIntensity       = 1.0f;
-        int   giSamples         = 8;
-        int   useLocalProbe     = 0;
-        float vignetteIntensity = 0.0f;
-        float vignettePower     = 1.50f;
-        float glowIntensity     = 0.0f;
-        int   enableSSR         = 0;
-        int   enableRTR         = 0;
-        int   fullBright        = 0;
-
-        float        exposure      = 1.0f;
-        float        bloomStrength = 0.0f;
-        float        contrast      = 1.0f;
-        float        saturation    = 1.0f;
-        int          tonemapper    = 3;
-        ZHLN::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
-        // Mirrors GISettings::rcasSharpness; 0.0 disables the post-AA RCAS pass.
-        float        rcasSharpness = 0.8705505632961241f;
-
-        float        ambientExposure = 1.0f;
-        ZHLN::Float3 probeMin        = {-22.0f, 0.0f, -22.0f};
-        ZHLN::Float3 probeMax        = {22.0f, 12.0f, 22.0f};
-        ZHLN::Float3 probePos        = {0.0f, 4.0f, 0.0f};
-
-        ZHLN::Float4 skyZenith  = {0.003f, 0.008f, 0.020f, 1.0f};
-        ZHLN::Float4 skyHorizon = {0.015f, 0.035f, 0.080f, 1.0f};
-        ZHLN::Float4 skyGround  = {0.001f, 0.001f, 0.003f, 1.0f};
-    };
 
     struct EnvironmentMapComponent {
         // Key for linear pixels supplied through AssetManager; not a file path
         // that RenderSystem will read or decode.
         ZHLN::String256 source;
         int             renderSkybox = 0;
-    };
-    struct DebugSettingsComponent {
-        int physicsDrawMode = 0;
     };
     struct AnimatorComponent {
         AnimationID animationID      = AnimationID::Null();
@@ -272,7 +209,7 @@ struct Components {
 
     struct AudioListenerComponent {
         bool         isPrimary = true;
-        ZHLN::Float3 velocity  = {};
+        ZHLN::FVec3 velocity  = {};
     };
     static_assert(std::is_trivially_copyable_v<AudioListenerComponent>);
 
@@ -288,7 +225,7 @@ struct Components {
         AudioBusID           bus           = AudioBus::SFX;
         AudioPlaybackMode    playbackMode  = AudioPlaybackMode::Decompressed;
         float                reverbSend    = 0.0f;
-        ZHLN::Float3         velocity      = {};
+        ZHLN::FVec3         velocity      = {};
         AudioAttenuationDesc attenuation {};
         AudioOcclusionDesc   occlusion {};
 
@@ -300,313 +237,14 @@ struct Components {
     };
     static_assert(std::is_trivially_copyable_v<PlayerSeatComponent>);
 
-    struct InputStateComponent {
-        static_assert(Reflect::EnumCount<KeyCode>() == kKeyCodeCount, "KeyCode enumerators must stay contiguous with kKeyCodeCount");
-        static_assert(Reflect::EnumCount<GamepadButton>() == kGamepadButtonCount, "GamepadButton enumerators must stay contiguous");
-        static_assert(Reflect::EnumCount<GamepadAxis>() == kGamepadAxisCount, "GamepadAxis enumerators must stay contiguous");
-
-        PlayerSeat seat = kPrimarySeat;
-
-        std::bitset<kKeyCodeCount> keys {};
-        std::bitset<kKeyCodeCount> prevKeys {};
-        std::bitset<kKeyCodeCount> pressedKeys {};
-        std::bitset<kKeyCodeCount> releasedKeys {};
-
-        float mouseX      = 0.0f;
-        float mouseY      = 0.0f;
-        float mouseDeltaX = 0.0f;
-        float mouseDeltaY = 0.0f;
-        float mouseWheel  = 0.0f;
-
-        float lastX      = 0.0f;
-        float lastY      = 0.0f;
-        bool  firstMouse = true;
-
-        bool wantCaptureKeyboard = false;
-        bool wantCaptureMouse    = false;
-
-        bool     needsResize = false;
-        Extent2D newSize {.width = 0, .height = 0};
-
-        void BeginFrame() noexcept {
-            prevKeys = keys;
-            pressedKeys.reset();
-            releasedKeys.reset();
-            ResetDeltas();
-        }
-
-        void SetKey(uint8_t key, bool down) noexcept {
-            if (key == 0 || key >= keys.size()) {
-                return;
-            }
-            const bool wasDown = keys.test(key);
-            if (down && !wasDown) {
-                pressedKeys.set(key);
-            } else if (!down && wasDown) {
-                releasedKeys.set(key);
-            }
-            keys.set(key, down);
-        }
-
-        void SetKey(KeyCode key, bool down) noexcept {
-            SetKey(static_cast<uint8_t>(key), down);
-        }
-
-        void ApplyLocalMotion(float x, float y) noexcept {
-            mouseX = x;
-            mouseY = y;
-            if (firstMouse) {
-                lastX      = x;
-                lastY      = y;
-                firstMouse = false;
-            }
-            mouseDeltaX += (x - lastX);
-            mouseDeltaY += (y - lastY);
-            lastX = x;
-            lastY = y;
-        }
-
-        void ApplyRelativeMotion(float x, float y, float dx, float dy) noexcept {
-            mouseX     = x;
-            mouseY     = y;
-            lastX      = x;
-            lastY      = y;
-            firstMouse = false;
-            mouseDeltaX += dx;
-            mouseDeltaY += dy;
-        }
-
-        void ApplyWheel(float delta) noexcept {
-            mouseWheel += delta;
-        }
-
-        void ApplyResize(Extent2D extent) noexcept {
-            newSize     = extent;
-            needsResize = true;
-        }
-
-        struct QueuedInput {
-            uint32_t value  = 0;
-            bool     isChar = false;
-        };
-        static constexpr size_t                  kMaxQueuedInput = 64;
-        std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
-        uint8_t                                  queuedInputCount = 0;
-
-        void QueueChar(uint32_t codepoint) noexcept {
-            if (queuedInputCount < kMaxQueuedInput) {
-                queuedInput[queuedInputCount++] = QueuedInput {.value = codepoint, .isChar = true};
-            }
-        }
-
-        void QueueKeyPress(KeyCode key) noexcept {
-            if (queuedInputCount < kMaxQueuedInput) {
-                queuedInput[queuedInputCount++] = QueuedInput {.value = static_cast<uint32_t>(key), .isChar = false};
-            }
-        }
-
-        void ClearQueuedInput() noexcept {
-            queuedInputCount = 0;
-        }
-
-        void ResetDeltas() noexcept {
-            mouseDeltaX = 0.0f;
-            mouseDeltaY = 0.0f;
-            mouseWheel  = 0.0f;
-        }
-
-        // --- Key Level & Edge Queries (Capture-Aware) ------------------------
-
-        [[nodiscard]] bool IsKeyDown(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return keys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept {
-            return IsKeyDown(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressed(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressed(KeyCode key) const noexcept {
-            return IsKeyPressed(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyHeld(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return keys.test(key) && prevKeys.test(key) && !pressedKeys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyHeld(KeyCode key) const noexcept {
-            return IsKeyHeld(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyReleased(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
-                return false;
-            }
-            return releasedKeys.test(key) || (!keys.test(key) && prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyReleased(KeyCode key) const noexcept {
-            return IsKeyReleased(static_cast<uint8_t>(key));
-        }
-
-        // --- Mouse Button Level & Edge Queries (Capture-Aware) ---------------
-
-        [[nodiscard]] bool IsMouseButtonDown(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return keys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonDown(KeyCode key) const noexcept {
-            return IsMouseButtonDown(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonDown(MouseButton button) const noexcept {
-            return IsMouseButtonDown(ToKeyCode(button));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressed(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressed(MouseButton button) const noexcept {
-            return IsMouseButtonPressed(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        [[nodiscard]] bool IsMouseButtonHeld(MouseButton button) const noexcept {
-            const auto key = static_cast<uint8_t>(ToKeyCode(button));
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return keys.test(key) && prevKeys.test(key) && !pressedKeys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleased(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size() || wantCaptureMouse) {
-                return false;
-            }
-            return releasedKeys.test(key) || (!keys.test(key) && prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleased(MouseButton button) const noexcept {
-            return IsMouseButtonReleased(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        // --- Raw Uncaptured Level & Edge Queries -----------------------------
-
-        [[nodiscard]] bool IsKeyDownRaw(uint8_t key) const noexcept {
-            return key != 0 && key < keys.size() && keys.test(key);
-        }
-
-        [[nodiscard]] bool IsKeyDownRaw(KeyCode key) const noexcept {
-            return IsKeyDownRaw(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressedRaw(uint8_t key) const noexcept {
-            if (key == 0 || key >= keys.size()) {
-                return false;
-            }
-            return pressedKeys.test(key) || (keys.test(key) && !prevKeys.test(key));
-        }
-
-        [[nodiscard]] bool IsKeyPressedRaw(KeyCode key) const noexcept {
-            return IsKeyPressedRaw(static_cast<uint8_t>(key));
-        }
-
-        [[nodiscard]] bool IsKeyHeldRaw(KeyCode key) const noexcept {
-            const auto k = static_cast<uint8_t>(key);
-            return k != 0 && k < keys.size() && keys.test(k) && prevKeys.test(k) && !pressedKeys.test(k);
-        }
-
-        [[nodiscard]] bool IsKeyReleasedRaw(KeyCode key) const noexcept {
-            const auto k = static_cast<uint8_t>(key);
-            if (k == 0 || k >= keys.size()) {
-                return false;
-            }
-            return releasedKeys.test(k) || (!keys.test(k) && prevKeys.test(k));
-        }
-
-        [[nodiscard]] bool IsMouseButtonDownRaw(uint8_t key) const noexcept {
-            return key != 0 && key < keys.size() && keys.test(key);
-        }
-
-        [[nodiscard]] bool IsMouseButtonDownRaw(MouseButton button) const noexcept {
-            return IsMouseButtonDownRaw(static_cast<uint8_t>(ToKeyCode(button)));
-        }
-
-        [[nodiscard]] bool IsMouseButtonPressedRaw(MouseButton button) const noexcept {
-            return IsKeyPressedRaw(ToKeyCode(button));
-        }
-
-        [[nodiscard]] bool IsMouseButtonReleasedRaw(MouseButton button) const noexcept {
-            return IsKeyReleasedRaw(ToKeyCode(button));
-        }
-
-        // --- Modifiers -------------------------------------------------------
-
-        [[nodiscard]] auto ModifiersRaw() const noexcept -> KeyModifiers {
-            KeyModifiers mods = KeyModifiers::None;
-            if (IsKeyDownRaw(KeyCode::LShift) || IsKeyDownRaw(KeyCode::RShift)) {
-                mods |= KeyModifiers::Shift;
-            }
-            if (IsKeyDownRaw(KeyCode::LControl) || IsKeyDownRaw(KeyCode::RControl)) {
-                mods |= KeyModifiers::Ctrl;
-            }
-            if (IsKeyDownRaw(KeyCode::LAlt) || IsKeyDownRaw(KeyCode::RAlt)) {
-                mods |= KeyModifiers::Alt;
-            }
-            if (IsKeyDownRaw(KeyCode::LSuper) || IsKeyDownRaw(KeyCode::RSuper)) {
-                mods |= KeyModifiers::Super;
-            }
-            return mods;
-        }
-
-        [[nodiscard]] auto Modifiers() const noexcept -> KeyModifiers {
-            return wantCaptureKeyboard ? KeyModifiers::None : ModifiersRaw();
-        }
-
-        [[nodiscard]] auto HasModifiers(KeyModifiers required, bool exact = true) const noexcept -> bool {
-            const KeyModifiers current = Modifiers();
-            return exact ? (current == required) : ((current & required) == required);
-        }
-
-        [[nodiscard]] float GetMouseDeltaX() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseDeltaX;
-        }
-
-        [[nodiscard]] float GetMouseDeltaY() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseDeltaY;
-        }
-
-        [[nodiscard]] float GetMouseWheel() const noexcept {
-            return wantCaptureMouse ? 0.0f : mouseWheel;
-        }
-    };
-    static_assert(std::is_trivially_copyable_v<InputStateComponent>);
     struct LightComponent {
         LightType    type;
-        ZHLN::Float3 color     = {};
+        ZHLN::FVec3 color     = {};
         float        intensity = 0.0f;
         float        radius    = 0.0f;
-        ZHLN::Float3 direction = {};
+        ZHLN::FVec3 direction = {};
         float        range     = 0.0f;
-        ZHLN::Mat44  points    = ZHLN::Mat44::sIdentity();
+        ZHLN::Mat4x4  points    = ZHLN::Mat4x4::Identity();
         uint32_t     twoSided  = 0;
         // Asks the shadow atlas for a tile. How many lights get one is not
         // capped here: the atlas sub-allocates from one depth image and steps
@@ -671,9 +309,9 @@ struct Components {
         float        heightFalloff   = 0.035f;
         float        heightOffset    = 0.0f;
         float        anisotropy      = 0.5f;
-        ZHLN::Float3 scatteringColor = {0.91f, 0.95f, 1.0f};
-        ZHLN::Float3 absorptionColor = {0.015f, 0.015f, 0.015f};
-        ZHLN::Float3 emissiveColor   = {};
+        ZHLN::FVec3 scatteringColor = {0.91f, 0.95f, 1.0f};
+        ZHLN::FVec3 absorptionColor = {0.015f, 0.015f, 0.015f};
+        ZHLN::FVec3 emissiveColor   = {};
         float        noiseScale      = 0.035f;
         float        noiseSpeed      = 1.0f;
         float        noiseIntensity  = 0.5f;
@@ -682,10 +320,10 @@ struct Components {
 
     struct VolumetricVolumeComponent {
         VolumetricVolumeType type       = VolumetricVolumeType::Box;
-        ZHLN::Float3         extents    = {5.0f, 5.0f, 5.0f};
+        ZHLN::FVec3         extents    = {5.0f, 5.0f, 5.0f};
         float                density    = 0.1f;
-        ZHLN::Float3         color      = {1.0f, 1.0f, 1.0f};
-        ZHLN::Float3         emissive   = {};
+        ZHLN::FVec3         color      = {1.0f, 1.0f, 1.0f};
+        ZHLN::FVec3         emissive   = {};
         float                anisotropy = 0.5f;
         float                blendEdge  = 0.2f;
     };

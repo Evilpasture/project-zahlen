@@ -3,19 +3,16 @@
 
 #pragma once
 
-#include "vulkan/VulkanHeader.hpp"
-
-#include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Core/Reflection/Enums.hpp>
 #include "vulkan/PresentationOutcome.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <cstdint>
 #include <string_view>
-#include <vulkan/vulkan_core.h>
 
 namespace ZHLN::Vk {
 
-inline constexpr uint32_t      kCategoryHash = Hash32("ZHLN::Vk::Error");
+inline constexpr uint32_t      kCategoryHash = Hash32(Reflect::TypeName<VkResult>());
 inline constexpr ErrorCategory kCategory     = {
     .name      = "Vk",
     .to_string = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
@@ -29,7 +26,7 @@ inline constexpr ErrorCategory kCategory     = {
     if !consteval {
         ZHLN::RegisterErrorCategory(kCategoryHash, &kCategory);
     }
-    return ErrorCode{kCategoryHash, static_cast<uint32_t>(result)};
+    return ErrorCode {kCategoryHash, static_cast<uint32_t>(result)};
 }
 
 } // namespace ZHLN::Vk

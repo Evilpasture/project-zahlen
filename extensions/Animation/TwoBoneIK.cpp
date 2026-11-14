@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "IK.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "AnimationContext.hpp"
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine/Engine.hpp>
@@ -37,12 +41,11 @@ void TwoBoneIKSystem::Update(
             continue;
         }
 
-        JPH::Mat44 invEntityLocal = JPH::Mat44::sIdentity();
-        JPH::Quat  invEntityRot   = JPH::Quat::sIdentity();
+        auto invEntityLocal = Mat4x4::Identity();
+        auto invEntityRot = Quat::Identity();
         if (const auto entityTr = query.Get<Components::TransformComponent>(entity)) {
-            invEntityLocal = entityTr->GetLocalMatrix().Inversed();
-            const JPH::Quat entityRotation = entityTr->rotation;
-            invEntityRot                   = entityRotation.Normalized().Conjugated();
+            invEntityLocal = Inverse(ComposeTransform(entityTr->position, entityTr->rotation, entityTr->scale));
+            invEntityRot = entityTr->rotation.Normalized().Conjugated();
         }
 
         std::array<Animation::IKChain, kMaxTwoBoneIKChains> translated {};
@@ -52,15 +55,14 @@ void TwoBoneIKSystem::Update(
             if (count >= translated.size()) {
                 break;
             }
-            JPH::Vec3 targetPosModel = src.targetPosition;
-            JPH::Quat targetRotModel = src.targetRotation;
+            FVec3 targetPosModel = src.targetPosition;
+            auto targetRotModel = src.targetRotation;
 
             if (src.targetEntity != Entity::Null()) {
                 if (const auto targetTr = query.Get<Components::TransformComponent>(src.targetEntity)) {
-                    const JPH::Mat44 targetInModel = invEntityLocal * targetTr->GetLocalMatrix();
-                    targetPosModel                 = targetInModel * src.targetOffset;
-                    const JPH::Quat targetRotation = targetTr->rotation;
-                    targetRotModel                 = (invEntityRot * targetRotation).Normalized();
+                    const auto targetInModel = invEntityLocal * ComposeTransform(targetTr->position, targetTr->rotation, targetTr->scale);
+                    targetPosModel = (targetInModel * FVec4 {src.targetOffset.x, src.targetOffset.y, src.targetOffset.z, 1.0f}).XYZ();
+                    targetRotModel = (invEntityRot * targetTr->rotation).Normalized();
                 }
             }
 

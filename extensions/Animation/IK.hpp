@@ -8,12 +8,11 @@
 // TwoBoneIKSystem forwards chains into AnimationContext prior to Step().
 #pragma once
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -45,12 +44,12 @@ struct TwoBoneIKChain {
     int32_t lowerNodeIndex = -1;
     int32_t endNodeIndex   = -1;
 
-    JPH::Vec3 targetPosition = JPH::Vec3::sZero();
-    JPH::Quat targetRotation = JPH::Quat::sIdentity();
-    JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f);
+    FVec3 targetPosition = FVec3::Zero();
+    Quat  targetRotation = Quat::Identity();
+    FVec3 poleVector     = {0.0f, -1.0f, 0.0f};
 
     Entity    targetEntity = Entity::Null();
-    JPH::Vec3 targetOffset = JPH::Vec3::sZero();
+    FVec3 targetOffset = FVec3::Zero();
 
     float weight            = 1.0f;
     bool  orientEndEffector = true;
@@ -91,19 +90,19 @@ struct TwoBoneIKSystem {
 void               Install(Engine& engine);
 
 struct TwoBoneIKSolverInput {
-    JPH::Vec3 upperPosition;
-    JPH::Vec3 targetPosition;
-    JPH::Vec3 poleVector; // Direction hint for middle joint (elbow/knee)
+    FVec3 upperPosition;
+    FVec3 targetPosition;
+    FVec3 poleVector; // Direction hint for middle joint (elbow/knee)
     float     upperLength;
     float     lowerLength;
     float     maxExtension = 0.9999f; // < 1 keeps the middle joint from locking straight.
 };
 
 struct TwoBoneIKSolverOutput {
-    JPH::Vec3 midPosition;
-    JPH::Vec3 endPosition;
-    JPH::Vec3 upperDirection;
-    JPH::Vec3 lowerDirection;
+    FVec3 midPosition;
+    FVec3 endPosition;
+    FVec3 upperDirection;
+    FVec3 lowerDirection;
     float     requestedDistance = 0.0f;
     float     solvedDistance    = 0.0f;
     bool      reachClamped      = false;
@@ -117,7 +116,7 @@ struct TwoBoneIKSolverOutput {
 inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) noexcept {
     TwoBoneIKSolverOutput out;
 
-    const JPH::Vec3 axis              = input.targetPosition - input.upperPosition;
+    const FVec3 axis              = input.targetPosition - input.upperPosition;
     const float     requestedDistance = axis.Length();
 
     const float l1 = input.upperLength;
@@ -133,7 +132,7 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
     const float     extension = std::clamp(input.maxExtension, 0.50f, 0.9999f);
     const float     maxD      = std::max(minD, (l1 + l2) * extension);
     const float     d         = std::clamp(requestedDistance, minD, maxD);
-    const JPH::Vec3 normAxis  = axis / requestedDistance;
+    const FVec3 normAxis  = axis / requestedDistance;
     out.endPosition           = input.upperPosition + normAxis * d;
     out.requestedDistance     = requestedDistance;
     out.solvedDistance        = d;
@@ -144,9 +143,9 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
     float angleUpper = std::acos(cosUpper);
 
     // Project pole vector onto plane orthogonal to target direction axis
-    JPH::Vec3 perp = input.poleVector - normAxis * input.poleVector.Dot(normAxis);
-    if (perp.LengthSq() < 1e-6f) {
-        perp = normAxis.GetNormalizedPerpendicular();
+    FVec3 perp = input.poleVector - normAxis * Dot(input.poleVector, normAxis);
+    if (perp.LengthSquared() < 1e-6f) {
+        perp = (std::abs(normAxis.x) > std::abs(normAxis.y) ? FVec3 {normAxis.z, 0.0f, -normAxis.x} : FVec3 {0.0f, normAxis.z, -normAxis.y}).Normalized();
     } else {
         perp = perp.Normalized();
     }
@@ -154,10 +153,10 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
     // Compute solved middle joint position
     out.midPosition = input.upperPosition + (normAxis * std::cos(angleUpper) * l1) + (perp * std::sin(angleUpper) * l1);
 
-    JPH::Vec3 upperVec = out.midPosition - input.upperPosition;
-    JPH::Vec3 lowerVec = out.endPosition - out.midPosition;
+    FVec3 upperVec = out.midPosition - input.upperPosition;
+    FVec3 lowerVec = out.endPosition - out.midPosition;
 
-    if (upperVec.LengthSq() > 1e-6f && lowerVec.LengthSq() > 1e-6f) {
+    if (upperVec.LengthSquared() > 1e-6f && lowerVec.LengthSquared() > 1e-6f) {
         out.upperDirection = upperVec.Normalized();
         out.lowerDirection = lowerVec.Normalized();
         out.valid          = true;
@@ -169,20 +168,25 @@ inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) n
 /**
  * @brief Orients a node matrix so its local forward vector aligns with worldTargetDir.
  */
-inline JPH::Mat44 AlignNodeToDirection(const JPH::Mat44& currentWorldMat, JPH::Vec3Arg localBindDir, JPH::Vec3Arg worldTargetDir) noexcept {
-    JPH::Vec3 currentWorldDir = currentWorldMat.Multiply3x3(localBindDir).Normalized();
-
-    if (currentWorldDir.Dot(worldTargetDir) > 0.9999f) {
+inline auto AlignNodeToDirection(const Mat4x4& currentWorldMat, FVec3 localBindDir, FVec3 worldTargetDir) noexcept -> Mat4x4 {
+    const auto currentWorldDir = (currentWorldMat * FVec4 {localBindDir.x, localBindDir.y, localBindDir.z, 0.0f}).XYZ().Normalized();
+    if (Dot(currentWorldDir, worldTargetDir) > 0.9999f) {
         return currentWorldMat;
     }
-
-    JPH::Quat rotationAdjust = JPH::Quat::sFromTo(currentWorldDir, worldTargetDir);
-
-    JPH::Vec3 translation = currentWorldMat.GetTranslation();
-    JPH::Quat currentRot  = currentWorldMat.GetQuaternion().Normalized();
-
-    JPH::Quat newRot = (rotationAdjust * currentRot).Normalized();
-    return JPH::Mat44::sRotationTranslation(newRot, translation);
+    const auto lengthProduct = std::sqrt(currentWorldDir.LengthSquared() * worldTargetDir.LengthSquared());
+    const auto w = lengthProduct + Dot(currentWorldDir, worldTargetDir);
+    auto axis = Cross(currentWorldDir, worldTargetDir);
+    auto adjust = Quat {axis.x, axis.y, axis.z, w};
+    if (w == 0.0f) {
+        if (lengthProduct == 0.0f) return currentWorldMat;
+        axis = (std::abs(currentWorldDir.x) > std::abs(currentWorldDir.y) ?
+            FVec3 {currentWorldDir.z, 0.0f, -currentWorldDir.x} : FVec3 {0.0f, currentWorldDir.z, -currentWorldDir.y}).Normalized();
+        adjust = {axis.x, axis.y, axis.z, 0.0f};
+    } else {
+        adjust = adjust.Normalized();
+    }
+    const auto parts = DecomposeTransform(currentWorldMat);
+    return ComposeTransform(parts.translation, (adjust * parts.rotation).Normalized(), FVec3::One());
 }
 
 } // namespace IK

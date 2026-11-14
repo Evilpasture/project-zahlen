@@ -20,12 +20,12 @@ class ProcessScope {
     ProcessScope();
     ~ProcessScope();
 
-    ProcessScope(const ProcessScope&) = delete;
+    ProcessScope(const ProcessScope&)                    = delete;
     auto operator=(const ProcessScope&) -> ProcessScope& = delete;
-    ProcessScope(ProcessScope&&) = delete;
-    auto operator=(ProcessScope&&) -> ProcessScope& = delete;
+    ProcessScope(ProcessScope&&)                         = delete;
+    auto operator=(ProcessScope&&) -> ProcessScope&      = delete;
 
-    void PollCrashes(const Engine* engine = nullptr) const;
+    static void PollCrashes(const Engine* engine = nullptr);
 
   private:
     struct Impl;
@@ -37,13 +37,17 @@ class ProcessScope {
 // duplicating sleep/spin policy. A display-paced frame already meets the cap.
 class FramePacer {
   public:
-    explicit FramePacer(uint32_t fpsLimit = 0) noexcept;
+    explicit FramePacer(uint32_t maxFramesPerSecond = 0) noexcept;
 
-    [[nodiscard]] static auto BeginFrame() noexcept -> Clock::TimePoint { return Clock::SteadyClock::now(); }
-    [[nodiscard]] auto TargetFrameTime() const noexcept -> double { return _targetFrameTime; }
+    [[nodiscard]] static auto BeginFrame() noexcept -> Clock::TimePoint {
+        return Clock::SteadyClock::now();
+    }
+    [[nodiscard]] auto TargetFrameTime() const noexcept -> double {
+        return _targetFrameTime;
+    }
     [[nodiscard]] auto DisplayPaced(std::optional<float> pacedDt) const noexcept -> bool;
     [[nodiscard]] auto SelectDelta(float wallDt, std::optional<float> pacedDt) const noexcept -> float;
-    void EndFrame(Clock::TimePoint frameStart, std::optional<float> pacedDt) const noexcept;
+    void               EndFrame(Clock::TimePoint frameStart, std::optional<float> pacedDt) const noexcept;
 
   private:
     double _targetFrameTime = 0.0;

@@ -17,6 +17,7 @@
 // self-illuminated materials named after the fixtures they render.
 
 #include <BSP/BSPGeometry.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <BSP/BSPLighting.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPVradLightmap.hpp>
@@ -30,6 +31,7 @@
 
 namespace {
 
+using ZHLN::FVec3;
 using ZHLN::BSP::AmbientTerm;
 using ZHLN::BSP::BSPEntity;
 using ZHLN::BSP::BSPMap;
@@ -305,19 +307,19 @@ struct BSPLightingTestSuite {
         // The colour is linear 0-1 and the brightness stays in Source's 0-255
         // lane; the /30 ladder is the caller's job (BSPScene does it), so
         // `_ambient "64 95 166 10"` reads back as (64, 95, 166)/255 and 10.
-        if (!ZHLN::Test::ExpectInRange(ambient.color.GetX(), 0.245f, 0.255f) ||
-            !ZHLN::Test::ExpectInRange(ambient.color.GetY(), 0.365f, 0.378f) ||
-            !ZHLN::Test::ExpectInRange(ambient.color.GetZ(), 0.645f, 0.655f) ||
+        if (!ZHLN::Test::ExpectInRange(ambient.color.x, 0.245f, 0.255f) ||
+            !ZHLN::Test::ExpectInRange(ambient.color.y, 0.365f, 0.378f) ||
+            !ZHLN::Test::ExpectInRange(ambient.color.z, 0.645f, 0.655f) ||
             !ZHLN::Test::ExpectInRange(ambient.intensity, 9.9f, 10.1f)) {
             return Fail();
         }
 
         // pitch -62, yaw 87 -> a sun that points up and to the side; the
         // direction has to be a unit vector in engine space.
-        const JPH::Vec3 sun = ZHLN::BSP::EnvironmentSunDirection(map);
+        const FVec3 sun = ZHLN::BSP::EnvironmentSunDirection(map);
         if (!ZHLN::Test::ExpectInRange(sun.Length(), 0.999f, 1.001f) ||
             // pitch -62: the sun sits above the horizon in Source's Z-up space.
-            !ZHLN::Test::ExpectTrue(sun.GetZ() > 0.4f)) {
+            !ZHLN::Test::ExpectTrue(sun.z > 0.4f)) {
             return Fail();
         }
 
@@ -325,9 +327,9 @@ struct BSPLightingTestSuite {
         // zero direction that silently deletes the sun: a 45-degree elevation
         // sun, pointing up in Source's Z-up space.
         const BSPMap empty;
-        const JPH::Vec3 fallback = ZHLN::BSP::EnvironmentSunDirection(empty);
-        if (!ZHLN::Test::ExpectInRange(fallback.Length(), 0.999f, 1.001f) || !ZHLN::Test::ExpectTrue(fallback.GetZ() > 0.5f) ||
-            !ZHLN::Test::ExpectTrue(fallback.GetX() != 0.0f || fallback.GetY() != 0.0f)) {
+        const FVec3 fallback = ZHLN::BSP::EnvironmentSunDirection(empty);
+        if (!ZHLN::Test::ExpectInRange(fallback.Length(), 0.999f, 1.001f) || !ZHLN::Test::ExpectTrue(fallback.z > 0.5f) ||
+            !ZHLN::Test::ExpectTrue(fallback.x != 0.0f || fallback.y != 0.0f)) {
             return Fail();
         }
         if (!ZHLN::Test::ExpectTrue(!ZHLN::BSP::ReadEnvironmentAmbient(empty).authored)) {
@@ -414,8 +416,8 @@ struct BSPLightingTestSuite {
             surface.faceCount          = 1;
             surface.strength           = 0.5f;
             // All eight faces share a centroid: one cluster.
-            surface.position           = JPH::Vec3(2.0f, 1.0f, 0.0f);
-            surface.normal             = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            surface.position = {2.0f, 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
         for (int i = 0; i < 4; ++i) {
@@ -427,8 +429,8 @@ struct BSPLightingTestSuite {
             // Far from the first group, and from each other: four more
             // clusters. (The +1 keeps them off the coincident group's own
             // cell, which the clusterer would otherwise merge them into.)
-            surface.position         = JPH::Vec3(40.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            surface.position = {40.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
 
@@ -440,7 +442,7 @@ struct BSPLightingTestSuite {
         // The eight coincident faces collapse into one surface that keeps the
         // whole group's area and face count.
         for (const EmissiveSurface& surface: clustered) {
-            if (surface.position.GetX() < 3.0f) {
+            if (surface.position.x < 3.0f) {
                 if (!ZHLN::Test::ExpectEq(surface.faceCount, 8u) || !ZHLN::Test::ExpectInRange(surface.areaSquareMetres, 7.9f, 8.1f)) {
                     return Fail();
                 }
@@ -456,8 +458,8 @@ struct BSPLightingTestSuite {
             surface.areaSquareMetres = 1.0f;
             surface.faceCount        = 1;
             surface.strength         = 0.5f;
-            surface.position         = JPH::Vec3(2.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            surface.position = {2.0f + 20.0f * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             many.push_back(surface);
         }
         const std::vector<EmissiveSurface> capped = ZHLN::BSP::FinalizeEmissiveSurfaces(many, {}, 1.0f / 39.37f, 8u);
@@ -483,8 +485,8 @@ struct BSPLightingTestSuite {
             surface.areaSquareInches = 1024.0f;
             surface.faceCount        = 1;
             surface.strength         = 0.5f;
-            surface.position         = JPH::Vec3(0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f);
-            surface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+            surface.position = {0.5f + pitchMetres * static_cast<float>(i), 1.0f, 0.0f};
+            surface.normal = {0.0f, 1.0f, 0.0f};
             in.push_back(surface);
         }
 
@@ -509,7 +511,7 @@ struct BSPLightingTestSuite {
     [[nodiscard]] auto finalize_emissive_surfaces_damps_nearby_entity_lights() const -> std::expected<void, ZHLN::ErrorCode> {
         ZHLN::BSP::BspPointLight entity;
         entity.type     = ZHLN::LightType::Point;
-        entity.position = JPH::Vec3(0.0f, 0.0f, 0.0f);
+        entity.position = {0.0f, 0.0f, 0.0f};
 
         std::vector<EmissiveSurface> in;
         EmissiveSurface nearSurface;
@@ -519,8 +521,8 @@ struct BSPLightingTestSuite {
         nearSurface.strength         = 0.5f;
         // 24 inches from the entity light: inside the 60-inch (1.52 m) fixture
         // radius, and far enough away in X to be its own cluster.
-        nearSurface.position         = JPH::Vec3(0.0f, 0.61f, 0.0f);
-        nearSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        nearSurface.position = {0.0f, 0.61f, 0.0f};
+        nearSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(nearSurface);
 
         EmissiveSurface farSurface;
@@ -528,8 +530,8 @@ struct BSPLightingTestSuite {
         farSurface.areaSquareMetres = 1.0f;
         farSurface.faceCount        = 1;
         farSurface.strength         = 0.5f;
-        farSurface.position         = JPH::Vec3(30.0f, 0.61f, 0.0f);
-        farSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        farSurface.position = {30.0f, 0.61f, 0.0f};
+        farSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(farSurface);
 
         // 80 inches out -- the next fixture's panel on the map's 96-inch pitch.
@@ -541,8 +543,8 @@ struct BSPLightingTestSuite {
         neighbourSurface.areaSquareMetres = 1.0f;
         neighbourSurface.faceCount        = 1;
         neighbourSurface.strength         = 0.5f;
-        neighbourSurface.position         = JPH::Vec3(80.0f / 39.37f, 0.61f, 0.0f);
-        neighbourSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        neighbourSurface.position = {80.0f / 39.37f, 0.61f, 0.0f};
+        neighbourSurface.normal = {0.0f, 1.0f, 0.0f};
         in.push_back(neighbourSurface);
 
         const std::array<ZHLN::BSP::BspPointLight, 1> entityLights {entity};
@@ -551,7 +553,7 @@ struct BSPLightingTestSuite {
             return Fail();
         }
         for (const EmissiveSurface& surface: out) {
-            if (surface.position.GetX() > 1.0f) {
+            if (surface.position.x > 1.0f) {
                 // The far cluster keeps its full strength.
                 if (!ZHLN::Test::ExpectInRange(surface.fixtureDamping, 1.0f, 1.0f)) {
                     return Fail();
@@ -573,8 +575,8 @@ struct BSPLightingTestSuite {
         small.materialName     = "effects/combinedisplay002a";
         small.areaSquareMetres = 0.05f;
         small.strength         = 0.9f;
-        small.position         = JPH::Vec3(1.0f, 2.0f, 3.0f);
-        small.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
+        small.position = {1.0f, 2.0f, 3.0f};
+        small.normal = {0.0f, 1.0f, 0.0f};
 
         EmissiveSurface large = small;
         large.areaSquareMetres = 5.0f;
@@ -602,7 +604,7 @@ struct BSPLightingTestSuite {
         }
         // The proxy is offset off the surface along its normal, never buried in
         // the geometry it is lighting.
-        if (!ZHLN::Test::ExpectTrue(smallLight.position.GetY() > small.position.GetY())) {
+        if (!ZHLN::Test::ExpectTrue(smallLight.position.y > small.position.y)) {
             return Fail();
         }
         return {};
@@ -628,7 +630,7 @@ struct BSPLightingTestSuite {
             return Fail();
         }
         if (!ZHLN::Test::ExpectTrue(data.ambient.authored) ||
-            !ZHLN::Test::ExpectTrue(data.ambient.color.GetX() + data.ambient.color.GetY() + data.ambient.color.GetZ() > 0.0f) ||
+            !ZHLN::Test::ExpectTrue(data.ambient.color.x + data.ambient.color.y + data.ambient.color.z > 0.0f) ||
             !ZHLN::Test::ExpectTrue(data.lights.empty() || data.lights[0].intensity > 0.0f)) {
             return Fail();
         }
@@ -638,12 +640,12 @@ struct BSPLightingTestSuite {
         ImportedMapData lit;
         ZHLN::BSP::BspPointLight light;
         light.type      = ZHLN::LightType::Point;
-        light.position  = JPH::Vec3(0.0f, 2.0f, 0.0f);
+        light.position = {0.0f, 2.0f, 0.0f};
         light.intensity = 5.0f;
         light.range     = 8.0f;
         lit.lights.push_back(light);
         lit.ambient.authored  = true;
-        lit.ambient.color     = JPH::Vec3(0.1f, 0.1f, 0.1f);
+        lit.ambient.color = {0.1f, 0.1f, 0.1f};
         // Above the ambient floor: irradiance = luma * brightness/30 must
         // exceed kAmbientFloorRadiance, so a brightness of 10 is the minimum.
         lit.ambient.intensity = 10.0f;
@@ -803,27 +805,27 @@ struct BSPLightingTestSuite {
         //   big   -- 304in x 304in  (~59.7 m2): saturates the intensity cap
         //   small --  20in x  20in  (~0.258 m2): exercises the uncapped path
         struct Quad {
-            JPH::Vec3 centre;
+            FVec3 centre;
             float     half;
         };
-        const Quad quads[2] = {{JPH::Vec3(0.0f, 0.0f, 0.0f), 152.0f}, {JPH::Vec3(400.0f, 0.0f, 0.0f), 10.0f}};
+        const Quad quads[2] = {{FVec3{0.0f, 0.0f, 0.0f}, 152.0f}, {FVec3{400.0f, 0.0f, 0.0f}, 10.0f}};
 
         BSPMap map;
         map.version = 20;
 
         for (const Quad& q: quads) {
             const uint16_t base = static_cast<uint16_t>(map.vertices.size());
-            const JPH::Vec3 corners[4] = {
-                JPH::Vec3(q.centre.GetX() - q.half, q.centre.GetY() - q.half, q.centre.GetZ()),
-                JPH::Vec3(q.centre.GetX() + q.half, q.centre.GetY() - q.half, q.centre.GetZ()),
-                JPH::Vec3(q.centre.GetX() + q.half, q.centre.GetY() + q.half, q.centre.GetZ()),
-                JPH::Vec3(q.centre.GetX() - q.half, q.centre.GetY() + q.half, q.centre.GetZ())
+            const FVec3 corners[4] = {
+                FVec3{q.centre.x - q.half, q.centre.y - q.half, q.centre.z},
+                FVec3{q.centre.x + q.half, q.centre.y - q.half, q.centre.z},
+                FVec3{q.centre.x + q.half, q.centre.y + q.half, q.centre.z},
+                FVec3{q.centre.x - q.half, q.centre.y + q.half, q.centre.z}
             };
-            for (const JPH::Vec3& c: corners) {
+            for (const FVec3& c: corners) {
                 ZHLN::BSP::DVertex v;
-                v.point[0] = c.GetX();
-                v.point[1] = c.GetY();
-                v.point[2] = c.GetZ();
+                v.point[0] = c.x;
+                v.point[1] = c.y;
+                v.point[2] = c.z;
                 map.vertices.push_back(v);
             }
             for (int i = 0; i < 4; ++i) {
@@ -923,7 +925,7 @@ struct BSPLightingTestSuite {
         // lights (a light exactly on a surface self-shadows and reads as a dark
         // blob under RTGI). The default options convert Source Z-up to engine
         // Y-up, so the source +Z normal lands on engine +Y.
-        if (!ZHLN::Test::ExpectTrue(big.position.GetY() > 0.05f) || !ZHLN::Test::ExpectTrue(small.position.GetY() > 0.05f)) {
+        if (!ZHLN::Test::ExpectTrue(big.position.y > 0.05f) || !ZHLN::Test::ExpectTrue(small.position.y > 0.05f)) {
             return Fail();
         }
 

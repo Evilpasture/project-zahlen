@@ -141,9 +141,9 @@ struct TestLuaDataModelSuite {
 
             ZHLN::Test::ExpectTrue(torso->Anchored());
             ZHLN::Test::ExpectTrue(torso->CanCollide());
-            ZHLN::Test::ExpectTrue(torso->Position().GetX() == 1.0f && torso->Position().GetY() == 3.0f && torso->Position().GetZ() == 3.0f);
-            ZHLN::Test::ExpectTrue(torso->Size().GetX() == 2.0f && torso->Size().GetY() == 2.0f && torso->Size().GetZ() == 1.0f);
-            ZHLN::Test::ExpectTrue(torso->Color().GetX() == 1.0f && std::abs(torso->Color().GetY() - (128.0f / 255.0f)) < 0.0001f);
+            ZHLN::Test::ExpectTrue(torso->Position().x == 1.0f && torso->Position().y == 3.0f && torso->Position().z == 3.0f);
+            ZHLN::Test::ExpectTrue(torso->Size().x == 2.0f && torso->Size().y == 2.0f && torso->Size().z == 1.0f);
+            ZHLN::Test::ExpectTrue(torso->Color().x == 1.0f && std::abs(torso->Color().y - (128.0f / 255.0f)) < 0.0001f);
             ZHLN::Test::ExpectTrue(torso->Shape() == PartShape::Head);
             ZHLN::Test::ExpectTrue(torso->TopSurface() == PartSurface::Smooth);
             ZHLN::Test::ExpectTrue(character->PrimaryPart() == torso);
@@ -172,8 +172,8 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(decal->Face() == DecalFace::Front && decal->WrapMode() == DecalWrapMode::Stretch);
             ZHLN::Test::ExpectTrue(sound->Playing() && sound->Loops() && sound->Volume() == 0.75f);
             ZHLN::Test::ExpectTrue(motor->Part1() == torso && motor->Part2() == torso);
-            ZHLN::Test::ExpectTrue(motor->Offset1().GetY() == 0.5f && motor->MaxVelocity() == 12.0f);
-            ZHLN::Test::ExpectTrue(spawn->Position().GetY() == 100.0f && spawn->Rotation().GetY() == 45.0f);
+            ZHLN::Test::ExpectTrue(motor->Offset1().y == 0.5f && motor->MaxVelocity() == 12.0f);
+            ZHLN::Test::ExpectTrue(spawn->Position().y == 100.0f && spawn->Rotation().y == 45.0f);
             return {};
         }
     };

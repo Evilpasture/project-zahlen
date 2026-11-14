@@ -124,6 +124,18 @@ constexpr void ForEachMemberFunction(F&& f) {
     };
 }
 
+// The same enumeration narrowed to the virtual members. Whether a function is
+// virtual is a language property, not a policy: a caller decides what to do
+// with the distinction.
+template <typename T, typename F>
+constexpr void ForEachVirtualMemberFunction(F&& f) {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+        if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member) && std::meta::is_virtual(member)) {
+            f.template operator()<member>();
+        }
+    };
+}
+
 // A domain-neutral description of one reflected member function. Consumers
 // decide what a return type or a noexcept bit means; this library does not.
 template <typename Return, bool Noexcept, typename... Parameters>
@@ -140,6 +152,15 @@ struct MethodSignature {
 template <typename T, typename F>
 constexpr void ForEachMethodSignature(F&& f) {
     ForEachMemberFunction<T>([&]<auto member>() -> auto {
+        if constexpr (!std::meta::is_special_member_function(member)) {
+            f.template operator()<typename[:TemplatedDetail::SignatureOf<MethodSignature>(member):]>();
+        }
+    });
+}
+
+template <typename T, typename F>
+constexpr void ForEachVirtualMethodSignature(F&& f) {
+    ForEachVirtualMemberFunction<T>([&]<auto member>() -> auto {
         if constexpr (!std::meta::is_special_member_function(member)) {
             f.template operator()<typename[:TemplatedDetail::SignatureOf<MethodSignature>(member):]>();
         }

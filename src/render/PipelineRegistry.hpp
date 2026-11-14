@@ -10,6 +10,7 @@
 #include "vulkan/Rendering.hpp"
 #include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Render/Types.hpp>

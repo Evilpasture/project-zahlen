@@ -210,6 +210,31 @@ zahlen_add_gpu_test_group(GPU_Application 120
     TestApplication.cpp
 )
 target_link_libraries(GPU_Application PRIVATE zahlen_application)
+if(TARGET zahlen_editor)
+    target_link_libraries(GPU_Application PRIVATE zahlen_editor)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_EDITOR=1)
+endif()
+if(TARGET zahlen_skeletal_animation)
+    target_link_libraries(GPU_Application PRIVATE zahlen_skeletal_animation)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_ANIMATION=1)
+endif()
+if(TARGET zahlen_terrain)
+    target_link_libraries(GPU_Application PRIVATE zahlen_terrain)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_TERRAIN=1)
+endif()
+if(TARGET zahlen_character_controller)
+    target_link_libraries(GPU_Application PRIVATE zahlen_character_controller)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+endif()
+if(TARGET zahlen_camera AND TARGET zahlen_freecam)
+    target_link_libraries(GPU_Application PRIVATE zahlen_camera zahlen_freecam)
+    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
+    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CAMERA_MODULES=1)
+endif()
 
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
@@ -229,7 +254,11 @@ zahlen_add_gpu_test_group(GPU_Performance 900
 # baselines, and those live in tests/extras/profile/PerfBaseline.hpp on top of
 # plugins/json -- so this group links zahlen_serialization, the one extras
 # domain it touches.
-target_link_libraries(GPU_Performance PRIVATE zahlen_serialization)
+# TestRenderPerformance.cpp calls JPH::RegisterDefaultAllocator() from its own
+# object, so Jolt belongs on this link line for the same reason ztest_cpu
+# names it: the suite references JPH symbols directly rather than through
+# zahlen_engine.
+target_link_libraries(GPU_Performance PRIVATE Jolt zahlen_serialization)
 target_include_directories(GPU_Performance PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # --- Extras VFX & Render Tests ---

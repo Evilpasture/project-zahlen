@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
+#include <Zahlen/Math/Math3D.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -13,7 +14,8 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <optional>
@@ -71,8 +73,8 @@ class QueryFilter final: public JPH::BodyFilter {
 
 } // namespace
 
-auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const -> Physics::RaycastResult {
-    const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
+auto PhysicsContext::Raycast(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance, Physics::BodyID ignore) const -> Physics::RaycastResult {
+    const JPH::Vec3 dir   = JPH::Vec3(direction.x, direction.y, direction.z);
     const auto&     world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::acquire)) {
@@ -85,7 +87,7 @@ auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float
     }
 
     const JPH::Vec3     scaledDir = dir.Normalized() * maxDistance;
-    const JPH::RRayCast ray {static_cast<JPH::RVec3>(origin), scaledDir};
+    const JPH::RRayCast ray {JPH::RVec3(origin.x, origin.y, origin.z), scaledDir};
     JPH::RayCastResult  hit;
 
     const JPH::BodyID ignoreID = Physics::GetBodyID(world, ignore);
@@ -100,24 +102,26 @@ auto PhysicsContext::Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float
             result.bodyID   = *handle;
             result.hasHit   = true;
             result.fraction = hit.mFraction;
-            result.position = ray.GetPointOnRay(hit.mFraction);
+            const auto point = ray.GetPointOnRay(hit.mFraction);
+            result.position = {point.GetX(), point.GetY(), point.GetZ()};
 
             const auto*       lockInterface = &world.system->GetBodyLockInterfaceNoLock();
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
-                result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
+                const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+                result.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
             } else {
-                result.normal = JPH::Vec3::sAxisY();
+                result.normal = {0.0f, 1.0f, 0.0f};
             }
         }
     }
     return result;
 }
 
-auto PhysicsContext::RaycastAll(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const
+auto PhysicsContext::RaycastAll(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance, Physics::BodyID ignore) const
     -> std::vector<Physics::RaycastResult> {
     std::vector<Physics::RaycastResult> results;
-    const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
+    const JPH::Vec3 dir   = JPH::Vec3(direction.x, direction.y, direction.z);
     const auto&     world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::acquire)) {
@@ -130,7 +134,7 @@ auto PhysicsContext::RaycastAll(ZHLN::Double3 origin, ZHLN::Float3 direction, fl
     }
 
     const JPH::Vec3     scaledDir = dir.Normalized() * maxDistance;
-    const JPH::RRayCast ray {static_cast<JPH::RVec3>(origin), scaledDir};
+    const JPH::RRayCast ray {JPH::RVec3(origin.x, origin.y, origin.z), scaledDir};
 
     JPH::RayCastSettings settings;
     settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -155,13 +159,15 @@ auto PhysicsContext::RaycastAll(ZHLN::Double3 origin, ZHLN::Float3 direction, fl
                 result.bodyID   = *handle;
                 result.hasHit   = true;
                 result.fraction = hit.mFraction;
-                result.position = ray.GetPointOnRay(hit.mFraction);
+                const auto point = ray.GetPointOnRay(hit.mFraction);
+                result.position = {point.GetX(), point.GetY(), point.GetZ()};
 
                 JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
                 if (lock.Succeeded()) {
-                    result.normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, result.position);
+                    const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+                    result.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
                 } else {
-                    result.normal = JPH::Vec3::sAxisY();
+                    result.normal = {0.0f, 1.0f, 0.0f};
                 }
                 results.push_back(result);
             }
@@ -171,10 +177,10 @@ auto PhysicsContext::RaycastAll(ZHLN::Double3 origin, ZHLN::Float3 direction, fl
 }
 
 auto PhysicsContext::RaycastAllPenetrations(
-    ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore
+    ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance, Physics::BodyID ignore
 ) const -> std::vector<Physics::RaycastPenetrationResult> {
     std::vector<Physics::RaycastPenetrationResult> results;
-    const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
+    const JPH::Vec3 dir   = JPH::Vec3(direction.x, direction.y, direction.z);
     const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return results;
@@ -187,7 +193,7 @@ auto PhysicsContext::RaycastAllPenetrations(
 
     const JPH::Vec3     dirNorm   = dir.Normalized();
     const JPH::Vec3     scaledDir = dirNorm * maxDistance;
-    const JPH::RRayCast ray {static_cast<JPH::RVec3>(origin), scaledDir};
+    const JPH::RRayCast ray {JPH::RVec3(origin.x, origin.y, origin.z), scaledDir};
 
     JPH::RayCastSettings settings;
     settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
@@ -281,7 +287,7 @@ auto PhysicsContext::RaycastAllPenetrations(
                 res.exitNormal   = -dirNorm;
             }
         } else {
-            res.entryPosition = static_cast<JPH::RVec3>(origin);
+            res.entryPosition = JPH::RVec3(origin.x, origin.y, origin.z);
             res.entryNormal   = -dirNorm;
             res.entryFraction = 0.0f;
             res.exitPosition  = entryHit.position;
@@ -295,7 +301,7 @@ auto PhysicsContext::RaycastAllPenetrations(
     return results;
 }
 
-auto PhysicsContext::RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance, Physics::BodyID ignore) const
+auto PhysicsContext::RaycastPenetration(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance, Physics::BodyID ignore) const
     -> Physics::RaycastPenetrationResult {
     const auto results = RaycastAllPenetrations(origin, direction, maxDistance, ignore);
     if (!results.empty()) {
@@ -306,13 +312,13 @@ auto PhysicsContext::RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direc
 
 auto PhysicsContext::Shapecast(
     const JPH::ShapeRefC& shape,
-    ZHLN::Double3         pos,
-    ZHLN::Float4          rot,
-    ZHLN::Float3          direction,
+    ZHLN::DVec3         pos,
+    ZHLN::FVec4          rot,
+    ZHLN::FVec3          direction,
     float                 maxDistance,
     Physics::BodyID   ignore
 ) const -> Physics::ShapeCastResult {
-    const JPH::Vec3 dir   = static_cast<JPH::Vec3>(direction);
+    const JPH::Vec3 dir   = JPH::Vec3(direction.x, direction.y, direction.z);
     const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return {};
@@ -325,7 +331,7 @@ auto PhysicsContext::Shapecast(
 
     const JPH::Vec3       scaledDir = dir.Normalized() * maxDistance;
     const JPH::RShapeCast cast(
-        shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(static_cast<JPH::Quat>(rot), static_cast<JPH::RVec3>(pos)), scaledDir
+        shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(JPH::Quat(rot.x, rot.y, rot.z, rot.w), JPH::RVec3(pos.x, pos.y, pos.z)), scaledDir
     );
 
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
@@ -356,7 +362,7 @@ auto PhysicsContext::Shapecast(
     return result;
 }
 
-auto PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius) const -> std::vector<Physics::BodyID> {
+auto PhysicsContext::OverlapSphere(ZHLN::DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
     std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
@@ -369,7 +375,7 @@ auto PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius) const -> 
     JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
     const auto*                                               query = &world.system->GetNarrowPhaseQuery();
 
-    query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(static_cast<JPH::RVec3>(center)), {}, JPH::RVec3::sZero(), collector);
+    query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JPH::RVec3(center.x, center.y, center.z)), {}, JPH::RVec3::sZero(), collector);
 
     for (const auto& hit: collector.mHits) {
         if (const auto handle = FindBodyID(world, hit.mBodyID2)) {
@@ -379,14 +385,14 @@ auto PhysicsContext::OverlapSphere(ZHLN::Double3 center, float radius) const -> 
     return results;
 }
 
-auto PhysicsContext::OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox) const -> std::vector<Physics::BodyID> {
+auto PhysicsContext::OverlapAABB(ZHLN::DVec3 minBox, ZHLN::DVec3 maxBox) const -> std::vector<Physics::BodyID> {
     std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return results;
     }
 
-    const JPH::AABox                                              box {static_cast<JPH::RVec3>(minBox), static_cast<JPH::RVec3>(maxBox)};
+    const JPH::AABox                                              box {JPH::RVec3(minBox.x, minBox.y, minBox.z), JPH::RVec3(maxBox.x, maxBox.y, maxBox.z)};
     JPH::AllHitCollisionCollector<JPH::CollideShapeBodyCollector> collector;
     const auto*                                                   query = &world.system->GetBroadPhaseQuery();
 
@@ -400,14 +406,14 @@ auto PhysicsContext::OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox) con
     return results;
 }
 
-auto PhysicsContext::QueryAABB(ZHLN::Float3 min, ZHLN::Float3 max) const -> std::vector<Physics::BodyID> {
+auto PhysicsContext::QueryAABB(ZHLN::FVec3 min, ZHLN::FVec3 max) const -> std::vector<Physics::BodyID> {
     std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return results;
     }
 
-    const JPH::AABox box(static_cast<JPH::Vec3>(min), static_cast<JPH::Vec3>(max));
+    const JPH::AABox box(JPH::Vec3(min.x, min.y, min.z), JPH::Vec3(max.x, max.y, max.z));
 
     struct SimpleCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;
@@ -453,7 +459,7 @@ auto PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
                     const JPH::Vec3  center = bounds.GetCenter();
                     const float      radius = bounds.GetExtent().Length();
 
-                    if (frustumRef.IsSphereVisible(center, radius)) {
+                    if (frustumRef.IsSphereVisible({center.GetX(), center.GetY(), center.GetZ()}, radius)) {
                         out.push_back(*handle);
                     }
                 }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // gameplay/ProjectLight/DataModel/DataModel.hpp
 //
 // Project-light's native, C++-owned DataModel object graph. This layer is
@@ -395,24 +396,24 @@ class BasePart: public Instance {
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
-    [[nodiscard]] auto Position() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Position() const noexcept -> const FVec3& {
         return m_position;
     }
-    void SetPosition(const JPH::Vec3& value);
+    void SetPosition(const FVec3& value);
     // project-light scripts express rotations as Euler degrees; renderer and
     // physics adapters may convert this at their boundary to JPH::Quat.
-    [[nodiscard]] auto Rotation() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Rotation() const noexcept -> const FVec3& {
         return m_rotationEuler;
     }
-    void               SetRotation(const JPH::Vec3& value);
-    [[nodiscard]] auto Size() const noexcept -> const JPH::Vec3& {
+    void               SetRotation(const FVec3& value);
+    [[nodiscard]] auto Size() const noexcept -> const FVec3& {
         return m_size;
     }
-    void               SetSize(const JPH::Vec3& value);
-    [[nodiscard]] auto Color() const noexcept -> const JPH::Vec3& {
+    void               SetSize(const FVec3& value);
+    [[nodiscard]] auto Color() const noexcept -> const FVec3& {
         return m_color;
     }
-    void               SetColor(const JPH::Vec3& value);
+    void               SetColor(const FVec3& value);
     [[nodiscard]] auto Anchored() const noexcept -> bool {
         return m_anchored;
     }
@@ -433,11 +434,11 @@ class BasePart: public Instance {
 
   private:
     friend class DataModel;
-    JPH::Vec3 m_position = JPH::Vec3::sZero();
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    JPH::Vec3             m_rotationEuler = JPH::Vec3::sZero();
-    JPH::Vec3             m_size          = JPH::Vec3(4.0f, 1.0f, 2.0f);
-    JPH::Vec3             m_color         = JPH::Vec3(0.75f, 0.75f, 0.75f);
+    FVec3             m_rotationEuler = FVec3::Zero();
+    FVec3             m_size          = {4.0f, 1.0f, 2.0f};
+    FVec3             m_color         = {0.75f, 0.75f, 0.75f};
     InstanceId           m_networkOwnerId = 0;
     bool                  m_anchored     = false;
     bool                  m_canCollide   = true;
@@ -522,21 +523,21 @@ class MeshPart final: public BasePart {
 
 class SpawnPoint final: public Instance {
   public:
-    [[nodiscard]] auto Position() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Position() const noexcept -> const FVec3& {
         return m_position;
     }
-    void               SetPosition(const JPH::Vec3& value);
-    [[nodiscard]] auto Rotation() const noexcept -> const JPH::Vec3& {
+    void               SetPosition(const FVec3& value);
+    [[nodiscard]] auto Rotation() const noexcept -> const FVec3& {
         return m_rotation;
     }
-    void SetRotation(const JPH::Vec3& value);
+    void SetRotation(const FVec3& value);
 
   private:
     friend class DataModel;
     SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
-    JPH::Vec3 m_position = JPH::Vec3::sZero();
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    JPH::Vec3 m_rotation = JPH::Vec3::sZero();
+    FVec3 m_rotation = FVec3::Zero();
 };
 
 enum class DecalFace : uint8_t { Top, Bottom, Front, Back, Left, Right };
@@ -548,10 +549,10 @@ class Decal final: public Instance {
         return m_textureId;
     }
     void               SetTextureID(std::string value);
-    [[nodiscard]] auto Color() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Color() const noexcept -> const FVec3& {
         return m_color;
     }
-    void               SetColor(const JPH::Vec3& value);
+    void               SetColor(const FVec3& value);
     [[nodiscard]] auto Face() const noexcept -> DecalFace {
         return m_face;
     }
@@ -573,7 +574,7 @@ class Decal final: public Instance {
     friend class DataModel;
     Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string   m_textureId;
-    JPH::Vec3     m_color        = JPH::Vec3(1.0f, 1.0f, 1.0f);
+    FVec3     m_color        = {1.0f, 1.0f, 1.0f};
     DecalFace     m_face         = DecalFace::Front;
     DecalWrapMode m_wrapMode     = DecalWrapMode::Stretch;
     float         m_scale        = 1.0f;
@@ -634,14 +635,14 @@ class Motor final: public Instance {
     [[nodiscard]] auto SetPart2(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
         return SetPart2(StaticRefCast<BasePart>(part));
     }
-    [[nodiscard]] auto Offset1() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Offset1() const noexcept -> const FVec3& {
         return m_offset1;
     }
-    void               SetOffset1(const JPH::Vec3& value);
-    [[nodiscard]] auto Offset2() const noexcept -> const JPH::Vec3& {
+    void               SetOffset1(const FVec3& value);
+    [[nodiscard]] auto Offset2() const noexcept -> const FVec3& {
         return m_offset2;
     }
-    void               SetOffset2(const JPH::Vec3& value);
+    void               SetOffset2(const FVec3& value);
     [[nodiscard]] auto CurrentAngle() const noexcept -> float {
         return m_currentAngle;
     }
@@ -660,8 +661,8 @@ class Motor final: public Instance {
     Motor(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId              m_part1Id = 0;
     InstanceId              m_part2Id = 0;
-    JPH::Vec3               m_offset1      = JPH::Vec3::sZero();
-    JPH::Vec3               m_offset2      = JPH::Vec3::sZero();
+    FVec3               m_offset1      = FVec3::Zero();
+    FVec3               m_offset2      = FVec3::Zero();
     float                   m_currentAngle = 0.0f;
     float                   m_desiredAngle = 0.0f;
     float                   m_maxVelocity  = 30.0f;

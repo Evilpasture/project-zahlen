@@ -12,7 +12,8 @@
 //      must change the rendered output, proving the frame UBO/instance
 //      addresses re-pushed via vkCmdPushDataEXT are actually consumed.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -110,7 +111,7 @@ struct DescriptorHeapsSuite {
 
     // Captures a frame and returns its tightly packed RGB pixels. The pixels never
     // touch a file: `path` names the .ppm mirrored for inspection, not a source.
-    [[nodiscard]] static auto CapturePixels(ZHLN::RenderContext& rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
+    [[nodiscard]] static auto CapturePixels(ZHLN::GraphicsDevice rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
         -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
         const auto captured = rc.CaptureFrame();
         if (!captured) {
@@ -141,25 +142,20 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
             // Fullbright: raw albedo stamping so texture color is the output.
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Camera centered on the 8x8 grid, looking down -Z.
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    c.camera.position = {0.0f, 4.45f, 11.0f};
+                    c.camera.yaw      = ZHLN::DegF{-90.0f};
+                    c.camera.pitch    = ZHLN::DegF{0.0f};
+                    c.camera.fov      = ZHLN::DegF{60.0f};
+                }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 4.45f, 11.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
 
             // Palette: 64 well-separated HSV hues -> solid RGBA textures.
             std::array<std::array<uint8_t, 3>, kTextureCount> palette {};
@@ -198,11 +194,11 @@ struct DescriptorHeapsSuite {
 
                 const uint32_t  col = i % kGridCols;
                 const uint32_t  row = i / kGridCols;
-                const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
+                const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f};
 
                 ZHLN::PrefabFactory::CreateBox(
                     *engine, {halfExtent, halfExtent, halfExtent},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.GetX(), pos.GetY(), pos.GetZ()}, .createPhysics = false, .materialOverride = mat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat}
                 );
             }
 
@@ -215,7 +211,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t width = 0, height = 0;
-            auto     pixelsRes = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_array.ppm", width, height);
+            auto     pixelsRes = CapturePixels(rc, "headless_dheap_array.ppm", width, height);
             if (!pixelsRes) {
                 return std::unexpected(pixelsRes.error());
             }
@@ -325,10 +321,13 @@ struct DescriptorHeapsSuite {
             }
             auto rc = engine->Graphics();
 
+
             std::array<uint32_t, 16> texels {};
             texels.fill(0xFF3366CCu);
+            // Exercise both fixed-extent typed spans and byte spans: forwarding
+            // must erase the extent before choosing the non-template overload.
             const auto first  = rc.CreateTexture(std::span {texels}, {4, 4}, false);
-            const auto second = rc.CreateTexture(std::span {texels}, {4, 4}, false);
+            const auto second = rc.CreateTexture(std::as_bytes(std::span {texels}), {4, 4}, false);
             if (!ZHLN::Test::ExpectTrue(first.has_value() && second.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -355,7 +354,7 @@ struct DescriptorHeapsSuite {
                                    *callback != ZHLN::SystemTextures::FlatNormal);
 
             const auto named = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
-            const auto same  = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
+            const auto same  = rc.CreateTexture("dheap_named_upload", std::as_bytes(std::span {texels}), {4, 4}, false);
             if (!ZHLN::Test::ExpectTrue(named.has_value() && same.has_value())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -427,35 +426,31 @@ struct DescriptorHeapsSuite {
             // rig's frame step runs every tick.
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    c.camera.position = {0.0f, 1.5f, 6.0f};
+                    c.camera.yaw      = ZHLN::DegF{-90.0f};
+                    c.camera.pitch    = ZHLN::DegF{0.0f};
+                    c.camera.fov      = ZHLN::DegF{60.0f};
+                }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 6.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
 
             // Pin the main-camera entity to our values so the camera system
             // does not overwrite the mid-test pan. The rig component is an
             // extras component (extensions/Camera), authored here rather than
             // patched: the frame step only re-seeds it when missing.
             const auto applyCameraPose = [&](float yaw) {
-                cam.yaw = yaw;
+                reg.PatchSingleton<ZHLN::Components::CameraComponent>([yaw](auto& c) { c.camera.yaw = ZHLN::DegF{yaw}; });
                 // The engine renders from the registry's copy: the pan is written back
                 // every time the pose changes, not once at setup.
-                auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+                auto camEnts = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                 if (!camEnts.empty()) {
-                    reg.Add(
+                    reg.Attach(
                         camEnts[0],
                         ZHLN::CameraRig::TargetCameraComponent {
                             .target      = ZHLN::Entity::Null(),
@@ -495,7 +490,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t wA = 0, hA = 0;
-            auto     frameA = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_frameA.ppm", wA, hA);
+            auto     frameA = CapturePixels(rc, "headless_dheap_frameA.ppm", wA, hA);
             if (!frameA) {
                 return std::unexpected(frameA.error());
             }
@@ -511,7 +506,7 @@ struct DescriptorHeapsSuite {
             }
 
             uint32_t wB = 0, hB = 0;
-            auto     frameB = CapturePixels(ZHLN::EngineAccess::RenderOf(*engine), "headless_dheap_frameB.ppm", wB, hB);
+            auto     frameB = CapturePixels(rc, "headless_dheap_frameB.ppm", wB, hB);
             if (!frameB) {
                 return std::unexpected(frameB.error());
             }

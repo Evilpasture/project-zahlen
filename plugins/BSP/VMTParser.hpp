@@ -3,8 +3,9 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Float4.h>
+#include <Jolt/Math/Vec4.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Error.hpp>
 #include <expected>
@@ -54,7 +55,7 @@ struct VMTMaterial {
 
 // Shared Source-material rules used by importing and lighting.
 [[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float;
-[[nodiscard]] auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float;
+[[nodiscard]] auto Rec709Luma(const FVec3& rgb) noexcept -> float;
 
 // Parses a VMT KeyValues script. Nested shader-class blocks
 // ("LightmappedGeneric_DX9 { ... }") are merged into parameters, because that

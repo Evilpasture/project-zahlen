@@ -107,6 +107,23 @@ template <typename Signature>
 
 // The layout half of the audit, usable on any type so a violating
 // interface can be rejected at compile time without deriving from IObject.
+//
+// Only the virtual members are audited, because only they are the wire. A
+// virtual is a vtable slot: the library's code and the consumer's code must
+// agree on its signature byte for byte, and neither recompiles the other.
+// A non-virtual member of an interface is the opposite -- it is compiled in
+// the consumer's own translation unit from this header, calls the vtable for
+// anything it needs from the library, and its parameters and return value
+// never leave that translation unit. Auditing it would forbid the consumer
+// from using std::optional, std::vector or std::string in code the library
+// never sees, which is a restriction the ABI does not ask for. Member
+// templates were already skipped for exactly this reason; this makes the rule
+// consistent instead of accidental.
+//
+// What this trusts rather than checks: a non-virtual member declared here must
+// be *defined* here. A non-virtual member left to be defined inside the shared
+// library would be a cross-boundary symbol that no longer passes under the
+// audit's eye.
 template <typename Interface>
 [[nodiscard]] consteval bool ComInterfaceLayoutCompliant() noexcept {
     if constexpr (std::has_virtual_destructor_v<Interface>) {
@@ -114,7 +131,7 @@ template <typename Interface>
     }
 
     bool compliant = true;
-    Reflect::ForEachMethodSignature<Interface>([&]<typename Signature>() -> auto {
+    Reflect::ForEachVirtualMethodSignature<Interface>([&]<typename Signature>() -> auto {
         if constexpr (!ComMethodCompliant<Signature>()) {
             compliant = false;
         }

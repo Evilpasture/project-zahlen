@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "vulkan/VulkanHeader.hpp"
 
 #include "vulkan/Rendering.hpp"
 #include "render/features/ShadowAtlas.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <cstdint>
 #include <expected>
@@ -50,14 +51,14 @@ class ShadowRenderer {
 
     [[nodiscard]] static auto ComputeCascadeLightSpaceMatrix(
         const Camera&     cam,
-        const JPH::Mat44& lightView,
-        const JPH::Vec3&  sunDir,
+        const Mat4x4& lightView,
+        const FVec3&  sunDir,
         float             nearDist,
         float             farDist,
         float             aspect,
         float             tanHalfFov,
         uint32_t          shadowResolution
-    ) noexcept -> JPH::Mat44;
+    ) noexcept -> Mat4x4;
 
   private:
     Vk::TypedPipeline<0, true> _cascadePipeline;

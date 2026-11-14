@@ -6,7 +6,7 @@
 // Overgrowth-style character locomotion: WASD intent, camera-relative
 // translation, jump/gravity integration, sprint, yaw slewing. Core keeps
 // PhysicsContext::CreateCharacter / CharacterVirtual and the raw
-// InputStateComponent; everything that interprets keys into character
+// InputState; everything that interprets keys into character
 // movement lives here.
 #pragma once
 

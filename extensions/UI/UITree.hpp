@@ -27,15 +27,11 @@
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Float4.h>
-// clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,8 +51,8 @@ enum class TreeMode : uint8_t { Preview = 0, Design };
 struct NodeBox {
     Sizing      width        = {};
     Sizing      height       = {};
-    ZHLN::Float4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
-    ZHLN::Float4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
     float       padding      = 0.0f;
     float       gap          = 0.0f;
     Direction   direction    = Direction::Column;
@@ -84,7 +80,7 @@ struct UINode {
 
     NodeBox     box {};
     float       fontSize  = 16.0f;
-    ZHLN::Float4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
     float       minVal    = 0.0f;
     float       maxVal    = 1.0f;
 

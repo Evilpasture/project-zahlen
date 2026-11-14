@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "AnimationSystem.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -22,38 +22,18 @@ void ReleaseAnimations(Engine& engine, bool all) {
     if (!animOpt) {
         return;
     }
-
-    auto&      registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto owners   = registry.GetEntitiesWith<Components::AnimatorComponent>();
-    if (all) {
-        if (!owners.empty()) {
-            auto components = registry.GetRawArray<Components::AnimatorComponent>();
-            for (Components::AnimatorComponent& comp: components) {
-                comp.animationID = AnimationID::Null();
-            }
-        }
-        animOpt->Clear();
-        return;
-    }
-
-    if (owners.empty()) {
-        return;
-    }
-
+    auto entities = engine.Entities();
     std::vector<AnimationID> doomed;
-    doomed.reserve(owners.size());
-    auto components = registry.GetRawArray<Components::AnimatorComponent>();
-    for (size_t i = 0; i < owners.size(); ++i) {
-        if (registry.Get<Components::PendingDestroy>(owners[i]).has_value()) {
-            const AnimationID handle = std::exchange(components[i].animationID, AnimationID::Null());
-            if (handle.IsValid()) {
-                doomed.push_back(handle);
-            }
+    for (const Entity e: entities.EntitiesWith<Components::AnimatorComponent>()) {
+        if (all || entities.Get<Components::PendingDestroy>(e)) {
+            entities.Patch<Components::AnimatorComponent>(e, [&](Components::AnimatorComponent& comp) {
+                const AnimationID handle = std::exchange(comp.animationID, AnimationID::Null());
+                if (!all && handle.IsValid()) doomed.push_back(handle);
+            });
         }
     }
-    if (!doomed.empty()) {
-        animOpt->Destroy(doomed);
-    }
+    if (all) animOpt->Clear();
+    else if (!doomed.empty()) animOpt->Destroy(doomed);
 }
 
 void AddSystems(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {

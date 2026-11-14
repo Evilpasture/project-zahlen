@@ -17,6 +17,18 @@
 // Test Enums & Structs
 // ============================================================================
 
+namespace QualifiedNamesTest {
+struct Outer { struct Value {}; };
+namespace Other { struct Value {}; }
+template <typename T> struct TemplateOuter { struct Value {}; };
+}
+
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Outer::Value>() == "QualifiedNamesTest::Outer::Value");
+static_assert(ZHLN::Reflect::ScopedTypeName<const QualifiedNamesTest::Other::Value&>() == "QualifiedNamesTest::Other::Value");
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Outer::Value>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Other::Value>());
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<int>>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<float>>());
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<int>::Value>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<float>::Value>());
+
 enum class WeaponType : uint32_t {
     Pistol  ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility."> {}),
     Rifle   ZHLN_ANNOTATION(ZHLN::Description<"Standard automatic assault rifle."> {}),

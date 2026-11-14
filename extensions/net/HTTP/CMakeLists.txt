@@ -3,7 +3,7 @@
 
 # extensions/net/HTTP -- the libcurl-backed fetcher (zahlen_http).
 #
-# Not part of the zahlen_extras aggregate, and for the same reason other
+# Deliberately its own target, and for the same reason the other
 # dependency-carrying network extensions have their own target: libcurl is not
 # vendored, it drags a TLS backend in with it, and a host without it must still
 # keep the remaining optional targets available. This file lists its own sources, so nothing here is
@@ -214,11 +214,79 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 # define, without which curl.h spells every entry point __declspec(dllimport)
 # and the link fails, and the threading library.
 get_target_property(ZHLN_HTTP_LINKED ${ZHLN_HTTP_TARGET} INTERFACE_LINK_LIBRARIES)
-if(ZHLN_HTTP_BARE_LIBRARY AND NOT ZHLN_HTTP_BARE_LIBRARY MATCHES "\\.so|\\.dylib|\\.dll")
+#
+# A Windows import library is a .lib too, so the file name alone cannot answer
+# this question: `curl.lib`, `libcurl.lib` and `libcurl_imp.lib` are all the
+# *import stub* for curl.dll when curl is built shared, and setting CURL_STATICLIB
+# on one of those makes curl.h declare every entry point without
+# __declspec(dllimport) -- the headers and the DLL then disagree about the
+# calling convention and the link fails, or worse, succeeds against the wrong
+# symbol. Ask the imported target what it is instead:
+#
+#   TYPE                       SHARED_LIBRARY is decisive on its own.
+#   IMPORTED_IMPLIB            set for a DLL's stub.
+#   IMPORTED_IMPLIB_<CONFIG>   where a config package actually puts it.
+#
+# The third is not optional: curl's own curl-config.cmake (and FindCURL when it
+# routes through it) sets TYPE to SHARED_LIBRARY and populates
+# IMPORTED_IMPLIB_RELEASE / _DEBUG / _NOCONFIG, leaving the bare property unset
+# -- so a check that read only the bare one answered "not a stub" for a target
+# that plainly was one.
+#
+# On Unix the check stays a file-name test, because CMake does not model the
+# distinction the same way: a bare `find_library` result really is either the
+# .a or the .so, and the extension is the fact.
+set(_zhln_http_is_imported_stub FALSE)
+if(TARGET ${ZHLN_HTTP_TARGET})
+    get_target_property(_zhln_http_type ${ZHLN_HTTP_TARGET} TYPE)
+    if(_zhln_http_type STREQUAL "SHARED_LIBRARY")
+        set(_zhln_http_is_imported_stub TRUE)
+    else()
+        get_target_property(_zhln_http_implib ${ZHLN_HTTP_TARGET} IMPORTED_IMPLIB)
+        if(_zhln_http_implib)
+            set(_zhln_http_is_imported_stub TRUE)
+        else()
+            get_target_property(_zhln_http_cfgs ${ZHLN_HTTP_TARGET} IMPORTED_CONFIGURATIONS)
+            foreach(_zhln_cfg IN LISTS _zhln_http_cfgs)
+                string(TOUPPER "${_zhln_cfg}" _zhln_cfg_upper)
+                get_target_property(_zhln_http_implib ${ZHLN_HTTP_TARGET}
+                                    "IMPORTED_IMPLIB_${_zhln_cfg_upper}")
+                if(_zhln_http_implib)
+                    set(_zhln_http_is_imported_stub TRUE)
+                    break()
+                endif()
+            endforeach()
+        endif()
+    endif()
+endif()
+
+if(_zhln_http_is_imported_stub)
+    set(ZHLN_HTTP_STATIC FALSE)
+elseif(WIN32)
+    # No imported stub: on Windows that leaves a static curl, whose archive is
+    # curl.lib / libcurl.lib -- or, under MinGW, libcurl.a. The .a case has to be
+    # handled HERE and not by the Unix branch below, because this elseif is
+    # taken first on every Windows host: a MinGW static build used to fall in
+    # here, fail the .lib test, and leave the function without ever reaching the
+    # branch that recognizes it. (`libcurl.dll.a` is the MinGW import stub and
+    # must not match, which is why the .a pattern is anchored and excludes it.)
+    if(ZHLN_HTTP_BARE_LIBRARY AND ZHLN_HTTP_BARE_LIBRARY MATCHES "\\.([Ll][Ii][Bb]|[Aa])$"
+       AND NOT ZHLN_HTTP_BARE_LIBRARY MATCHES "\\.dll\\.a$")
+        set(ZHLN_HTTP_STATIC TRUE)
+    elseif(ZHLN_HTTP_LINKED)
+        foreach(ZHLN_HTTP_LINKED_ENTRY IN LISTS ZHLN_HTTP_LINKED)
+            if(ZHLN_HTTP_LINKED_ENTRY MATCHES "(lib)?curl[^/]*\\.lib$"
+               OR (ZHLN_HTTP_LINKED_ENTRY MATCHES "libcurl\\.a$"
+                   AND NOT ZHLN_HTTP_LINKED_ENTRY MATCHES "\\.dll\\.a$"))
+                set(ZHLN_HTTP_STATIC TRUE)
+            endif()
+        endforeach()
+    endif()
+elseif(ZHLN_HTTP_BARE_LIBRARY AND NOT ZHLN_HTTP_BARE_LIBRARY MATCHES "\\.so|\\.dylib|\\.dll")
     set(ZHLN_HTTP_STATIC TRUE)
 elseif(ZHLN_HTTP_LINKED)
     foreach(ZHLN_HTTP_LINKED_ENTRY IN LISTS ZHLN_HTTP_LINKED)
-        if(ZHLN_HTTP_LINKED_ENTRY MATCHES "libcurl\\.a$|libcurl\\.lib$|curl\\.lib$")
+        if(ZHLN_HTTP_LINKED_ENTRY MATCHES "libcurl\\.a$")
             set(ZHLN_HTTP_STATIC TRUE)
         endif()
     endforeach()

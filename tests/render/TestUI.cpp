@@ -1,12 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/GUI/GUI.hpp>
@@ -59,7 +60,7 @@ struct SolidPayload {
 // A single-colour box, plus same-colour text so the payload carries geometry
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
-[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
+[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
     ZHLN::GUI::Context gui(engine.GetFontAtlas());
     ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
@@ -173,11 +174,18 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
+            // Drive the GUI the way a host that owns its pointer does: hand the
+            // frame's UI input in, then run the frame. This is the real seam
+            // (Engine::SubmitUIInput), not a fabricated one: ConsumeUIInput
+            // returns exactly this vector for the frame it was submitted for, and
+            // the device path is not touched. A host with a compositor or a
+            // remote pointer uses the same call.
             auto setInput = [&](float mx, float my, bool lbutton) {
-                auto& in = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                in.mouseX = mx;
-                in.mouseY = my;
-                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+                ZHLN::GUI::UIInput ui {};
+                ui.mouseX       = mx;
+                ui.mouseY       = my;
+                ui.mouseDown[0] = lbutton;
+                engine->SubmitUIInput(ui);
             };
 
             uint32_t clickCountA = 0;
@@ -582,9 +590,15 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& host  = engine->GetPlatformHost();
-            auto& input = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-            input.ApplyLocalMotion(320.0f, 240.0f);
+            auto& host = engine->GetPlatformHost();
+            // The custom-cursor draw reads the seat's mouse position through the
+            // read capability, so this asserts the value path rather than
+            // writing to it: a headless host has no pointer, hence no position,
+            // and the cursor is drawn at the origin. What the test checks below
+            // is the cursor *mode* transition, which is PlatformHost state.
+            const auto cursorInput = std::as_const(*engine).Input();
+            ZHLN::Test::ExpectEq(cursorInput.MousePosition().x, 0.0f);
+            ZHLN::Test::ExpectEq(cursorInput.MousePosition().y, 0.0f);
 
             if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
                 !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||

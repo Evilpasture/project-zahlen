@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ArticulationSystem.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -10,20 +12,43 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <algorithm>
-#include <cstring>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace ZHLN {
+
+namespace {
+// Jolt's skeleton/ragdoll interfaces own JPH matrices; the animation and
+// skinning data on this side of the boundary is native and column-major.
+[[nodiscard]] auto ToJolt(const Mat4x4& matrix) -> JPH::Mat44 {
+    return {
+        JPH::Vec4(matrix[0, 0], matrix[1, 0], matrix[2, 0], matrix[3, 0]),
+        JPH::Vec4(matrix[0, 1], matrix[1, 1], matrix[2, 1], matrix[3, 1]),
+        JPH::Vec4(matrix[0, 2], matrix[1, 2], matrix[2, 2], matrix[3, 2]),
+        JPH::Vec4(matrix[0, 3], matrix[1, 3], matrix[2, 3], matrix[3, 3])
+    };
+}
+
+[[nodiscard]] auto FromJolt(const JPH::Mat44& matrix) -> Mat4x4 {
+    Mat4x4 result {};
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            result[static_cast<size_t>(row), static_cast<size_t>(column)] = matrix(row, column);
+        }
+    }
+    return result;
+}
+} // namespace
 
 namespace Tests {
 static void VerifyArticulationStateConsistency(
@@ -180,10 +205,10 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 
-        JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
+        auto capsuleWorldPos = JPH::RVec3::sZero();
         if (phys) {
             if (const auto bodyPos = pc.BodyPosition(phys->physicsID)) {
-                capsuleWorldPos = *bodyPos;
+                capsuleWorldPos = Physics::ToJoltPosition(*bodyPos);
             }
         }
 
@@ -191,12 +216,12 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         animPose.SetSkeleton(skel);
         animPose.SetRootOffset(capsuleWorldPos);
 
-        JPH::Array<JPH::Mat44> localJoints(count, JPH::Mat44::sIdentity());
+        std::vector<Mat4x4> localJoints(count, Mat4x4::Identity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = sys._jointStates.inverseBindMatrices[offset + j].Inversed();
+            localJoints[j] = Inverse(sys._jointStates.inverseBindMatrices[offset + j]);
         }
 
-        JPH::Array<JPH::Mat44> modelJoints(count, JPH::Mat44::sIdentity());
+        std::vector<Mat4x4> modelJoints(count, Mat4x4::Identity());
         for (uint32_t j = 0; j < count; ++j) {
             int parentIdx = skel->GetJoint(j).mParentJointIndex;
             if (parentIdx >= 0) {
@@ -211,13 +236,19 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             std::copy_n(kinematic.data(), overrideCount, modelJoints.data());
         }
 
-        std::memcpy(animPose.GetJointMatrices().data(), modelJoints.data(), count * sizeof(JPH::Mat44));
+        for (uint32_t j = 0; j < count; ++j) {
+            animPose.GetJointMatrices()[j] = ToJolt(modelJoints[j]);
+        }
         animPose.CalculateJointStates();
 
         if (ragComp.state != ragComp.prevState) {
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
-                    const JPH::Vec3 initialVelocity = phys ? pc.GetCharacterVelocity(phys->physicsID) : JPH::Vec3::sZero();
+                    auto initialVelocity = FVec3::Zero();
+                    if (phys) {
+                        const auto velocity = pc.GetCharacterVelocity(phys->physicsID);
+                        initialVelocity = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
+                    }
                     pc.ActivateRagdoll(ragComp.ragdollID, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;
                 }
@@ -234,7 +265,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         if (ragComp.state != RagdollState::Inactive) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
-            JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
+            auto actualRootOffset = JPH::RVec3::sZero();
 
             if (!pc.GetRagdollPose(ragComp.ragdollID, actualRootOffset, physicalWorldJoints.data())) {
                 continue;
@@ -245,19 +276,22 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                 auto skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
                 if (skelMesh && skelMesh->jointOffset == offset) {
                     if (auto trans = query.Get<Components::TransformComponent>(childEnt)) {
-                        trans->position = JPH::Vec3(actualRootOffset);
-                        trans->rotation = JPH::Quat::sIdentity();
+                        trans->position = {static_cast<float>(actualRootOffset.GetX()), static_cast<float>(actualRootOffset.GetY()),
+                                           static_cast<float>(actualRootOffset.GetZ())};
+                        trans->rotation = {0.0f, 0.0f, 0.0f, 1.0f};
                     }
                 }
             }
 
-            JPH::Array<JPH::Mat44> finalSkinningMatrices(count);
-            JPH::Mat44             invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
+            std::vector<Mat4x4> finalSkinningMatrices(count);
+            const FVec3 rootPosition {static_cast<float>(actualRootOffset.GetX()), static_cast<float>(actualRootOffset.GetY()),
+                                      static_cast<float>(actualRootOffset.GetZ())};
+            const auto invRoot = CreateTranslation(-rootPosition);
 
             for (uint32_t j = 0; j < count; ++j) {
-                JPH::Mat44 ibm       = sys._jointStates.inverseBindMatrices[offset + j];
-                JPH::Mat44 physModel = invRoot * physicalWorldJoints[j];
-                JPH::Mat44 animModel = modelJoints[j];
+                const auto& ibm = sys._jointStates.inverseBindMatrices[offset + j];
+                const auto physModel = invRoot * FromJolt(physicalWorldJoints[j]);
+                const auto& animModel = modelJoints[j];
 
                 float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : sys._jointStates.jointBlendWeights[offset + j];
 
@@ -266,20 +300,12 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                 } else if (blendWeight >= 0.999f) {
                     finalSkinningMatrices[j] = physModel * ibm;
                 } else {
-                    const Math::TransformTRS animTRS = Math::Decompose(animModel);
-                    const Math::TransformTRS physTRS = Math::Decompose(physModel);
-                    const JPH::Vec3&         tAnim   = animTRS.translation;
-                    const JPH::Quat&         rAnim   = animTRS.rotation;
-                    const JPH::Vec3&         sAnim   = animTRS.scale;
-                    const JPH::Vec3&         tPhys   = physTRS.translation;
-                    const JPH::Quat&         rPhys   = physTRS.rotation;
-                    const JPH::Vec3&         sPhys   = physTRS.scale;
-
-                    JPH::Vec3 tBlended = tAnim + blendWeight * (tPhys - tAnim);
-                    JPH::Quat rBlended = rAnim.SLERP(rPhys, blendWeight).Normalized();
-                    JPH::Vec3 sBlended = sAnim + blendWeight * (sPhys - sAnim);
-
-                    JPH::Mat44 blendedModel  = JPH::Mat44::sRotationTranslation(rBlended, tBlended).PreScaled(sBlended);
+                    const auto animTRS = DecomposeTransform(animModel);
+                    const auto physTRS = DecomposeTransform(physModel);
+                    const auto tBlended = Lerp(animTRS.translation, physTRS.translation, blendWeight);
+                    const auto rBlended = Slerp(animTRS.rotation, physTRS.rotation, blendWeight);
+                    const auto sBlended = Lerp(animTRS.scale, physTRS.scale, blendWeight);
+                    const auto blendedModel = ComposeTransform(tBlended, rBlended, sBlended);
                     finalSkinningMatrices[j] = blendedModel * ibm;
                 }
             }

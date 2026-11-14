@@ -5,7 +5,6 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -55,7 +54,7 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
 }
 
 void DespawnEntity(Engine& engine, Entity entity) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& registry = engine.GetInternalRegistry();
     if (!registry.IsAlive(entity)) {
         return;
     }

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
@@ -29,6 +30,7 @@
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <expected>
@@ -39,6 +41,14 @@
 #include <vector>
 
 namespace {
+
+void BumpSkeletalScratchCapacity(ZHLN::ECS::Query<ZHLN::Components::SkeletalMeshComponent&> query) {
+    for (const ZHLN::Entity e: query.Entities<ZHLN::Components::SkeletalMeshComponent>()) {
+        if (auto skel = query.Get<ZHLN::Components::SkeletalMeshComponent>(e)) {
+            skel->scratchVertexCount += 1;
+        }
+    }
+}
 
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
@@ -52,28 +62,45 @@ struct RenderPipelinesTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> collision_asset_resolves_before_first_frame() {
+            ZHLN::Test::Headless::ShutdownPooledEngines();
+            auto engine = ZHLN::Test::Headless::CreateEngine("CollisionAssetBeforeGraph", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) return {};
+            const auto id = ZHLN::HashCollisionAssetID("tests/before-first-frame");
+            ZHLN::Physics::MeshGeometry geometry {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,2}};
+            ZHLN::Test::ExpectTrue(engine->Assets().CacheCollisionMesh(id, std::move(geometry)));
+            auto physics = engine->Physics();
+            const auto body = physics.CreateRigidBody(ZHLN::Physics::Shape<ZHLN::Physics::Mesh> {id}, {0,0,0}, {0,0,0,1},
+                                                       ZHLN::Physics::MotionType::Static, ZHLN::Physics::ObjectLayer::NonMoving);
+            ZHLN::Test::ExpectTrue(body != ZHLN::Physics::BodyID::Null());
+            physics.Step(1.0f / 60.0f);
+            const auto hit = physics.Raycast({0.2,0.2,5}, {0,0,-1}, 10);
+            ZHLN::Test::ExpectTrue(hit.hasHit && hit.bodyID == body);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> material_cache_reset_after_submitted_draw() {
             // A submitted draw can still be in flight when its material is
             // unregistered. Use an exclusive engine because ClearGPUCaches
             // invalidates device resources the pooled engine would retain.
             ZHLN::Test::Headless::ShutdownPooledEngines();
             auto engine = ZHLN::Test::Headless::CreateEngine("PipelineLifetime", 320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
-            auto&      reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto       reg = engine->Entities();
             auto rc = engine->Graphics();
             const auto box =
                 ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 3, 0}, .createPhysics = false});
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
-            const auto camera  = reg.GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && camera.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(boxMesh.has_value() && reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    c.camera.position = {0.0f, 5.0f, 10.0f};
+                    c.camera.yaw      = ZHLN::DegF{-90.0f};
+                    c.camera.pitch    = ZHLN::DegF{-15.0f};
+                }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            camera->camera.position = JPH::Vec3(0.0f, 5.0f, 10.0f);
-            camera->camera.yaw      = -90.0f;
-            camera->camera.pitch    = -15.0f;
 
             constexpr float dt = 1.0f / 60.0f;
             for (int frame = 0; frame < 3; ++frame) {
@@ -128,7 +155,6 @@ struct RenderPipelinesTestSuite {
                 .fullscreen          = false,
                 .validationMode      = ZHLN::ValidationMode::On,
                 .headless            = true,
-                .enableFallbackScene = false,
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
@@ -138,9 +164,8 @@ struct RenderPipelinesTestSuite {
             }
 
             auto engine = std::move(engineRes.value());
-            ZHLN::Test::ExpectTrue(engine.Valid());
-            engine->InitializeDefaultScene();
-            ZHLN::Test::ExpectTrue(!ZHLN::EngineAccess::RegistryOf(*engine).GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
+            ZHLN::Test::ExpectTrue(engine != nullptr);
+            ZHLN::Test::ExpectTrue(!engine->Entities().EntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
 
             // Before the first presented frame, the headless image is still
             // UNDEFINED. A capture must fail without submitting an invalid
@@ -158,7 +183,7 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
             auto rc = engine->Graphics();
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             const auto entity = ZHLN::PrefabFactory::CreateBox(*engine, {0.5f, 0.5f, 0.5f});
             const auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(entity);
@@ -178,24 +203,30 @@ struct RenderPipelinesTestSuite {
             }
 
             // Direct component removal uses a typed owner-aware helper.
-            ZHLN::Test::ExpectTrue(engine->Entities().Detach<ZHLN::Components::OwnedMeshComponent>(entity));
+            ZHLN::Test::ExpectTrue(reg.Detach<ZHLN::Components::OwnedMeshComponent>(entity));
             ZHLN::Test::ExpectFalse(rc.Mesh(id).has_value());
-            reg.Destroy(entity); // now data-only
+            reg.Despawn(entity);
+            engine->ProcessPendingDestroy();
 
             // Unlike renderer-owned particle buffers, skinned scratch belongs to
             // its component. Detaching it must invalidate the public buffer handle.
-            const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
             const auto scratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
             if (ZHLN::Test::ExpectNe(scratch, ZHLN::BufferID::Invalid)) {
-                reg.Patch<ZHLN::Components::SkeletalMeshComponent>(skinned, [&](auto& comp) {
-                    comp.skinnedScratch     = scratch;
-                    comp.scratchVertexCount = 3;
+                const auto skinned = reg.Spawn(ZHLN::Components::SkeletalMeshComponent {
+                    .skinnedScratch     = scratch,
+                    .scratchVertexCount = 3,
                 });
-                ZHLN::Test::ExpectTrue(engine->Entities().Detach<ZHLN::Components::SkeletalMeshComponent>(skinned));
+                ZHLN::Test::ExpectTrue(reg.Detach<ZHLN::Components::SkeletalMeshComponent>(skinned));
                 const std::array<std::byte, 3> bytes {};
+                // Both typed and fixed-extent byte spans must reach the byte
+                // overload, rather than recursively selecting the template.
                 ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span {bytes}).has_value());
+                const std::array<uint32_t, 1> words {};
+                ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span {words}).has_value());
+                ZHLN::Test::ExpectFalse(rc.UpdateBuffer(scratch, std::span<const std::byte> {bytes}).has_value());
+                reg.Despawn(skinned);
+                engine->ProcessPendingDestroy();
             }
-            reg.Destroy(skinned);
 
             const auto plane      = ZHLN::PrefabFactory::CreatePlane(*engine, 2.0f);
             const auto planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
@@ -221,14 +252,77 @@ struct RenderPipelinesTestSuite {
             // An independent Registry has no Engine cleanup system. Release
             // its owned meshes explicitly before clearing its data-only ECS.
             ZHLN::ECS::Registry standalone;
-            const auto          loose      = ZHLN::PrefabFactory::CreateBox(engine->Graphics(), standalone, std::nullopt, {0.25f, 0.25f, 0.25f});
-            const auto          looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
+            auto looseMesh = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.25f, 0.25f, 0.25f});
+            const auto looseID = ZHLN::HashAssetID("standalone_owned_mesh_test");
+            rc.RegisterMesh(looseID, looseMesh);
+            const auto loose = standalone.Create(ZHLN::Components::OwnedMeshComponent {.meshAsset = looseID, .mesh = looseMesh});
+            const auto looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
             if (ZHLN::Test::ExpectTrue(looseOwner.has_value())) {
                 const auto looseID = looseOwner->meshAsset;
-                ZHLN::PrefabFactory::ReleaseOwnedMeshes(engine->Graphics(), standalone);
+                ZHLN::SceneResources::Release(engine->Graphics(), *looseOwner);
                 standalone.Clear();
                 ZHLN::Test::ExpectFalse(rc.Mesh(looseID).has_value());
             }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> visible_mesh_submission_rebinds_owner_and_updates_csg_scratch() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("TypedMeshSubmit", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine.Valid())) return {};
+            auto reg = engine->Entities();
+            auto rc = engine->Graphics();
+            const auto box = ZHLN::PrefabFactory::CreateBox(
+                *engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 3, 0}, .createPhysics = false});
+            auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
+            auto mesh = reg.Get<ZHLN::Components::MeshComponent>(box);
+            auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue(camera && mesh && owner)) return {};
+            reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                c.camera.position = {0.0f, 5.0f, 10.0f};
+                c.camera.yaw      = ZHLN::DegF {-90.0f};
+                c.camera.pitch    = ZHLN::DegF {-15.0f};
+            });
+            auto meshData = *mesh;
+            meshData.flags |= ZHLN::DrawFlags::Hidden;
+            const auto ownerMesh = owner->mesh;
+            const auto id = owner->meshAsset;
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const auto visible = engine->GetVisibleEntities();
+            if (!ZHLN::Test::ExpectTrue(std::ranges::find(visible, box) != visible.end())) return {};
+
+            // The hidden cutter is excluded from both visibility lists. Its
+            // skeletal state must nevertheless be visited through the CSG link.
+            const auto cutter = reg.Spawn(meshData, ZHLN::Components::SkeletalMeshComponent {});
+            ZHLN::Components::CSGComponent csg;
+            csg.modifiers.push_back({.operation = ZHLN::CSGOperation::Difference, .operandEntity = cutter});
+            reg.Attach(box, std::move(csg));
+            reg.Attach(box, ZHLN::Components::SkeletalMeshComponent {});
+            rc.UnregisterMesh(id);
+            ZHLN::Test::ExpectFalse(rc.Mesh(id).has_value());
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            const auto mainVisible = engine->GetVisibleEntities();
+            const auto shadowVisible = engine->GetVisibleShadowEntities();
+            ZHLN::Test::ExpectTrue(std::ranges::find(mainVisible, cutter) == mainVisible.end());
+            ZHLN::Test::ExpectTrue(std::ranges::find(shadowVisible, cutter) == shadowVisible.end());
+            const auto rebound = rc.Mesh(id);
+            const auto eyeSkeleton = reg.Get<ZHLN::Components::SkeletalMeshComponent>(box);
+            const auto cutterSkeleton = reg.Get<ZHLN::Components::SkeletalMeshComponent>(cutter);
+            if (!ZHLN::Test::ExpectTrue(rebound && eyeSkeleton && cutterSkeleton)) return {};
+            ZHLN::Test::ExpectEq(rebound->posBuffer, ownerMesh.posBuffer);
+            ZHLN::Test::ExpectTrue(eyeSkeleton->skinnedScratch != ZHLN::BufferID::Invalid && cutterSkeleton->skinnedScratch != ZHLN::BufferID::Invalid);
+            ZHLN::Test::ExpectEq(eyeSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            ZHLN::Test::ExpectEq(cutterSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+
+            // A stale recorded capacity retires and recreates both scratch buffers.
+            const auto oldEye = eyeSkeleton->skinnedScratch;
+            const auto oldCutter = cutterSkeleton->skinnedScratch;
+            engine->GetUpdateGraph().InvokeSequential<&BumpSkeletalScratchCapacity>(ZHLN::Frame {});
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            ZHLN::Test::ExpectEq(eyeSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            ZHLN::Test::ExpectEq(cutterSkeleton->scratchVertexCount, ownerMesh.vertexCount);
+            const std::array<std::byte, 1> data {};
+            ZHLN::Test::ExpectFalse(rc.UpdateBuffer(oldEye, std::span {data}).has_value());
+            ZHLN::Test::ExpectFalse(rc.UpdateBuffer(oldCutter, std::span {data}).has_value());
             return {};
         }
 
@@ -272,10 +366,10 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
 
-            auto&              reg              = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto               reg              = engine->Entities();
             const auto         validationErrors = ZHLN::Test::ValidationErrorCount();
             constexpr uint32_t maxParticles     = 8;
-            const auto         entity           = reg.Create(
+            const auto         entity           = reg.Spawn(
                 ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles},
                 ZHLN::Components::MeshParticleEmitterComponent {.maxParticles = maxParticles}
             );
@@ -293,8 +387,8 @@ struct RenderPipelinesTestSuite {
             reg.Patch<ZHLN::Components::ParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             reg.Patch<ZHLN::Components::MeshParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             ZHLN::Test::Headless::TickFrames(*engine, 2);
-            reg.Remove<ZHLN::Components::ParticleEmitterComponent>(entity);
-            reg.Add(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            reg.Detach<ZHLN::Components::ParticleEmitterComponent>(entity);
+            reg.Attach(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             // After despawn a fresh emitter can submit again without referencing
@@ -302,7 +396,7 @@ struct RenderPipelinesTestSuite {
             // PendingDestroy are checked separately by the ECS suite.
             ZHLN::DespawnEntity(*engine, entity);
             engine->ProcessPendingDestroy();
-            const auto replacement = reg.Create(ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            const auto replacement = reg.Spawn(ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             ZHLN::DespawnEntity(*engine, replacement);
             engine->ProcessPendingDestroy();
@@ -316,18 +410,18 @@ struct RenderPipelinesTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return {};
             }
-            auto&                                  reg     = ZHLN::EngineAccess::RegistryOf(*engine);
-            auto physics = engine->Physics();
-            const auto                             shape   = physics.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
-            const ZHLN::Entity                     parent  = reg.Create<ZHLN::Components::TransformComponent>();
-            std::vector<ZHLN::Entity>              children;
+            auto                               reg     = engine->Entities();
+            auto                               physics = engine->Physics();
+            const ZHLN::Physics::Shape<ZHLN::Physics::Box> shape {0.25f, 0.25f, 0.25f};
+            const ZHLN::Entity                 parent  = reg.Spawn(ZHLN::Components::TransformComponent {});
+            std::vector<ZHLN::Entity>          children;
             std::vector<ZHLN::Physics::BodyID> handles;
             for (int i = 0; i < 12; ++i) {
                 auto       double_i = static_cast<double>(i);
                 const auto handle =
-                    physics.CreateRigidBody(shape, {double_i, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+                    physics.CreateRigidBody(shape, {double_i, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, ZHLN::Physics::MotionType::Dynamic, ZHLN::Physics::ObjectLayer::Moving);
                 handles.push_back(handle);
-                children.push_back(reg.Create(
+                children.push_back(reg.Spawn(
                     ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = handle, .isStatic = false}
                 ));
             }
@@ -343,8 +437,8 @@ struct RenderPipelinesTestSuite {
             }
             // A child attached after the ECB marked its root must also be
             // discovered by the cleanup system before components are erased.
-            const auto lateID = physics.CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            const auto lateChild  = reg.Create(
+            const auto lateID = physics.CreateRigidBody(shape, {15, 1, 0}, {0.0f, 0.0f, 0.0f, 1.0f}, ZHLN::Physics::MotionType::Dynamic, ZHLN::Physics::ObjectLayer::Moving);
+            const auto lateChild  = reg.Spawn(
                 ZHLN::Components::HierarchyComponent {.parent = parent}, ZHLN::Components::PhysicsComponent {.physicsID = lateID, .isStatic = false}
             );
             children.push_back(lateChild);
@@ -417,23 +511,16 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
-        // Scene Reset Is A Rebuild, Not An Append
+        // Scene Reset Preserves Compiled Graphs Without Accumulating State
         // ====================================================================
         //
-        // InitializeDefaultScene is called again every time the pool hands a
-        // reused engine to the next test. BuildSystemGraphs used to push its
-        // systems onto whatever was already in the graphs, so a thirty-test
-        // binary ended up with thirty CullingSystems and thirty DecalSystems.
-        // Compile() only orders nodes whose access patterns conflict, and
-        // those two declare nothing or reads only --
-        // so the duplicates had no edges between them and were dispatched to
-        // run concurrently over the same engine state. It surfaced as a
-        // SIGSEGV deep inside the allocator, in whatever unlucky call site
-        // allocated next.
+        // ResetScene clears the scene every time the pool hands a reused engine
+        // to the next test. Engine::Create compiles the system graphs once and
+        // ClearScene resets each node's Local<T> state in place without
+        // tearing down or appending duplicate nodes across resets.
         //
-        // The font atlas is the same shape of bug without the race: a fresh
-        // 1024x1024 bindless texture per reset, none of them released. It is
-        // device state now, built once on Engine and preserved across scene resets.
+        // The font atlas is device state too, built once on Engine and
+        // preserved across scene resets.
         std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -524,7 +611,6 @@ struct RenderPipelinesTestSuite {
                     .fullscreen          = false,
                     .validationMode      = ZHLN::ValidationMode::On,
                     .headless            = true,
-                    .enableFallbackScene = false,
                 };
             };
 
@@ -546,7 +632,7 @@ struct RenderPipelinesTestSuite {
             // "hit near 8" means it is there but not simulating, and a low hit
             // with a high transform means the write-back never reached the ECS.
             const auto reportFall = [](ZHLN::Engine& eng, ZHLN::Entity box, const char* which) -> void {
-                auto&       reg   = ZHLN::EngineAccess::RegistryOf(eng);
+                auto        reg   = eng.Entities();
                 const auto  trans = reg.Get<ZHLN::Components::TransformComponent>(box);
                 const auto  phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
                 const char* body  = (!phys) ?
@@ -573,7 +659,6 @@ struct RenderPipelinesTestSuite {
                 return std::unexpected(firstRes.error());
             }
             auto first = std::move(firstRes.value());
-            first->InitializeDefaultScene();
 
             // 1. A second engine is refused rather than half-built.
             {
@@ -604,7 +689,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectTrue(first->Tick(dt).has_value());
             }
             reportFall(*first, falling, "engine A box");
-            if (const auto transform = ZHLN::EngineAccess::RegistryOf(*first).Get<ZHLN::Components::TransformComponent>(falling); ZHLN::Test::ExpectTrue(transform.has_value())) {
+            if (const auto transform = first->Entities().Get<ZHLN::Components::TransformComponent>(falling); ZHLN::Test::ExpectTrue(transform.has_value())) {
                 ZHLN::Test::ExpectLt(transform->position.y, 7.5f);
             }
 
@@ -617,7 +702,6 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
             auto second = std::move(secondRes.value());
-            second->InitializeDefaultScene();
 
             const ZHLN::Entity fallingB = ZHLN::PrefabFactory::CreateBox(
                 *second, {0.5f, 0.5f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}
@@ -627,7 +711,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectTrue(second->Tick(dt).has_value());
             }
             reportFall(*second, fallingB, "engine B box");
-            if (const auto transform = ZHLN::EngineAccess::RegistryOf(*second).Get<ZHLN::Components::TransformComponent>(fallingB);
+            if (const auto transform = second->Entities().Get<ZHLN::Components::TransformComponent>(fallingB);
                 ZHLN::Test::ExpectTrue(transform.has_value())) {
                 ZHLN::Test::ExpectLt(transform->position.y, 7.5f);
             }

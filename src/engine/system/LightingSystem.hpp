@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -20,8 +21,8 @@ class LightingSystem {
                                 const Components::TransformComponent, const Components::SunTagComponent,
                                 const Components::EnvironmentSunTagComponent>;
     struct SunLight {
-        JPH::Vec3 direction;
-        JPH::Vec3 color;
+        FVec3 direction;
+        FVec3 color;
         float intensity;
         bool fromEnvironment;
     };
@@ -34,6 +35,6 @@ class LightingSystem {
                        ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<SceneData> scene);
 
     static SunLight GetSun(SunQuery reg) noexcept;
-    static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery reg) noexcept;
+    static std::pair<FVec3, float> GetSunDirectionAndIntensity(SunQuery reg) noexcept;
 };
 } // namespace ZHLN

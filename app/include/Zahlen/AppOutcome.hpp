@@ -24,7 +24,7 @@ enum class AppExitReason : uint8_t {
 // (more specific) ErrorCode categories instead of erasing the underlying cause.
 enum class AppError : uint8_t {
     InvalidArguments ZHLN_ANNOTATION(ZHLN::Description<"Invalid argc or argv passed to the application"> {}) = 1,
-    SceneInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Default scene initialization failed"> {}),
+    SceneInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Scene initialization failed"> {}),
     FrameTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine tick failed during frame execution"> {}),
 };
 

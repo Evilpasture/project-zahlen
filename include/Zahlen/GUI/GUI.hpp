@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/GUI/Font.hpp>
@@ -13,7 +10,7 @@
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <concepts>
 #include <cstddef>
@@ -36,29 +33,29 @@ struct Sizing {
 };
 
 struct BoxConfig {
-    Sizing    width        = {};
-    Sizing    height       = {};
-    ZHLN::Float4 color {0.0f, 0.0f, 0.0f, 0.0f};
-    ZHLN::Float4 cornerRadius {0.0f, 0.0f, 0.0f, 0.0f};
-    float     padding      = 0.0f;
-    float     gap          = 0.0f;
-    Direction direction    = Direction::Column;
-    Alignment alignMain    = Alignment::Start;
-    Alignment alignCross   = Alignment::Start;
-    float     offsetX      = 0.0f;
-    float     offsetY      = 0.0f;
-    bool      clipVertical = false;
+    Sizing       width  = {};
+    Sizing       height = {};
+    ZHLN::FVec4 color {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 cornerRadius {0.0f, 0.0f, 0.0f, 0.0f};
+    float        padding      = 0.0f;
+    float        gap          = 0.0f;
+    Direction    direction    = Direction::Column;
+    Alignment    alignMain    = Alignment::Start;
+    Alignment    alignCross   = Alignment::Start;
+    float        offsetX      = 0.0f;
+    float        offsetY      = 0.0f;
+    bool         clipVertical = false;
 };
 
 // Appearance of the bar drawn by Frame::BeginScrollArea. Widths and heights
 // are in pixels, matching the units Clay lays out in.
 struct ScrollBarStyle {
-    float     width           = 6.0f;
-    float     minThumb        = 20.0f;
-    float     margin          = 2.0f;
-    ZHLN::Float4 trackColor {1.0f, 1.0f, 1.0f, 0.06f};
-    ZHLN::Float4 thumbColor {1.0f, 1.0f, 1.0f, 0.30f};
-    ZHLN::Float4 thumbHoverColor {1.0f, 1.0f, 1.0f, 0.55f};
+    float        width    = 6.0f;
+    float        minThumb = 20.0f;
+    float        margin   = 2.0f;
+    ZHLN::FVec4 trackColor {1.0f, 1.0f, 1.0f, 0.06f};
+    ZHLN::FVec4 thumbColor {1.0f, 1.0f, 1.0f, 0.30f};
+    ZHLN::FVec4 thumbHoverColor {1.0f, 1.0f, 1.0f, 0.55f};
 };
 
 // Resolved from the previous frame's layout. scrollY is <= 0, matching the
@@ -99,11 +96,11 @@ struct TextBounds {
 // Per-frame input snapshot consumed by Context::BeginFrame.
 // Spans are copied internally during BeginFrame and do not need to outlive the call.
 struct UIInput {
-    Extent2D     viewport    = {.width = 1920, .height = 1080};
-    float        dt          = 1.0f / 60.0f;
-    float        mouseX      = -1.0f;
-    float        mouseY      = -1.0f;
-    float        mouseScroll = 0.0f;
+    Extent2D viewport    = {.width = 1920, .height = 1080};
+    float    dt          = 1.0f / 60.0f;
+    float    mouseX      = -1.0f;
+    float    mouseY      = -1.0f;
+    float    mouseScroll = 0.0f;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
     bool         mouseDown[3] = {false, false, false};
     KeyModifiers modifiers    = KeyModifiers::None;
@@ -164,8 +161,8 @@ class ZHLN_API Frame {
   public:
     using ElementRect = GUI::ElementRect;
 
-    Frame(const Frame&)                        = delete;
-    auto operator=(const Frame&) -> Frame&     = delete;
+    Frame(const Frame&)                    = delete;
+    auto operator=(const Frame&) -> Frame& = delete;
     Frame(Frame&& other) noexcept;
     auto operator=(Frame&&) noexcept -> Frame& = delete;
     ~Frame() noexcept;
@@ -234,9 +231,9 @@ class ZHLN_API Frame {
         ScrollArea(id, cfg, ScrollBarStyle {}, content);
     }
 
-    void Text(std::string_view text, float fontSize = 16.0f, ZHLN::Float4 color = {1, 1, 1, 1}) noexcept;
+    void Text(std::string_view text, float fontSize = 16.0f, ZHLN::FVec4 color = {1, 1, 1, 1}) noexcept;
 
-    auto Button(std::string_view label, ZHLN::Float4 color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
+    auto Button(std::string_view label, ZHLN::FVec4 color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
     auto Button(std::string_view label, const Sizing& width) noexcept -> bool {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
@@ -289,7 +286,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    auto Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, OnClickFn&& onClick) -> bool {
+    auto Button(std::string_view label, ZHLN::FVec4 color, const Sizing& width, OnClickFn&& onClick) -> bool {
         if (Button(label, color, width)) {
             onClick();
             return true;
@@ -299,7 +296,7 @@ class ZHLN_API Frame {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    auto Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
+    auto Button(std::string_view label, ZHLN::FVec4 color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label, color, width);
         if (IsItemHovered()) {
             onHover();

@@ -25,7 +25,9 @@
 //   ./build/samples/DeviceLostRecoverySample --headless
 //   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -37,6 +39,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -49,10 +52,6 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -61,6 +60,9 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 std::atomic<bool> g_ProvokeRequested {false};
 
@@ -78,11 +80,11 @@ void InstallProvokeSignal() {
 
 inline constexpr float     kAmbientExposure = 10.0f;
 inline constexpr float     kSunIntensity    = 28.0f;
-inline const JPH::Vec3     kSunPosition {25.0f, 60.0f, 25.0f};
-inline const JPH::Vec3     kSunColor {1.00f, 0.96f, 0.90f};
-inline const JPH::Vec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
-inline const JPH::Vec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
-inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
+inline const FVec3     kSunPosition {25.0f, 60.0f, 25.0f};
+inline const FVec3     kSunColor {1.00f, 0.96f, 0.90f};
+inline const FVec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
+inline const FVec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
+inline const FVec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 
 [[nodiscard]] auto EnvironmentU32(const char* name) -> uint32_t {
     const char* value = std::getenv(name);
@@ -95,8 +97,9 @@ inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 }
 
 void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
+    auto ents = engine.Entities();
     for (ZHLN::Entity entity: entities) {
-        if (ZHLN::EngineAccess::RegistryOf(engine).IsAlive(entity)) {
+        if (ents.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -105,16 +108,14 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
 [[nodiscard]] auto BuildArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> previous = {}) -> std::vector<ZHLN::Entity> {
     ClearArena(engine, previous);
     std::vector<ZHLN::Entity> entities;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto ents = engine.Entities();
 
-    for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
-            pp.ambientExposure = kAmbientExposure;
-            pp.skyZenith       = kSkyZenith;
-            pp.skyHorizon      = kSkyHorizon;
-            pp.skyGround       = kSkyGround;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.ambientExposure = kAmbientExposure;
+        gfx.environment.skyZenith       = kSkyZenith;
+        gfx.environment.skyHorizon      = kSkyHorizon;
+        gfx.environment.skyGround       = kSkyGround;
+    });
 
     entities.push_back(
         ZHLN::PrefabFactory::CreatePlane(
@@ -159,10 +160,10 @@ void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
         }
     ));
 
-    entities.push_back(registry.Create(
+    entities.push_back(ents.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = JPH::Vec3(0.45f, 1.00f, 0.30f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = FVec3(0.45f, 1.00f, 0.30f).Normalized()
         }
     ));
     return entities;
@@ -174,7 +175,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
         .appName = "Zahlen :: Device Lost Recovery",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
@@ -207,16 +207,15 @@ auto main(int argc, char* argv[]) -> int {
     }
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored
-    // JetBrains Mono NF, installed before the scene boots so the atlas the
-    // engine builds at InitializeDefaultScene comes from it. Without the fonts
-    // extra -- or without the checkout's resources -- core's embedded bake is
-    // what the font-atlas rebuild below exercises.
+    // JetBrains Mono NF, installed before the first frame so the atlas the
+    // engine builds lazily comes from it. Without the fonts extra -- or without
+    // the checkout's resources -- core's embedded bake is what the font-atlas
+    // rebuild below exercises.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
     ZHLN::FreeCam::Install(*engine);
-    engine->InitializeDefaultScene();
 
     std::vector<ZHLN::Entity> arena = BuildArena(*engine);
 
@@ -246,17 +245,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        bool  f9Down   = false;
-        for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
-                f9Down = f9Down || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F9));
-                if (st.needsResize) {
-                    engine->Graphics().SetResolution(st.newSize);
-                    st.needsResize = false;
-                }
-            });
-        }
+        const bool f9Down = std::as_const(*engine).Input().KeyDown(ZHLN::KeyCode::F9);
 
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;

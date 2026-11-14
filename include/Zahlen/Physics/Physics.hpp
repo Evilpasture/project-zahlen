@@ -5,24 +5,25 @@
 
 #include <Zahlen/Math/Camera.hpp>
 #include <optional>
-#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Geometry/Plane.h>
-#include <Jolt/Math/Double3.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Quat.h>
+#include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Vec4.h>
+#include <Jolt/Math/Quat.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 // clang-format on
 
@@ -57,8 +58,8 @@ enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distanc
 struct ConstraintParams {
     // Explicitly zero: a container does not initialise itself, so the default the
     // old NSDMI gave this pivot is now spelled where the policy belongs.
-    ZHLN::Float3 pivot {};
-    ZHLN::Float3 axis {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 pivot {};
+    ZHLN::FVec3 axis {0.0f, 1.0f, 0.0f};
     float        limitMin;
     float        limitMax;
     bool  hasMotor;
@@ -80,7 +81,7 @@ struct ConstraintID {
 static_assert((std::is_trivially_default_constructible_v<ConstraintID> && std::is_trivially_copyable_v<ConstraintID>) );
 // Trivially copyable is the contract here: the struct is built at the call site
 // and handed over by value. It is no longer trivially *default* constructible,
-// because Float3/Float4 initialise their members -- which is the point of them.
+// because FVec3/FVec4 initialise their members -- which is the point of them.
 static_assert(std::is_trivially_copyable_v<ConstraintParams> && std::is_standard_layout_v<ConstraintParams>);
 
 struct RagdollPartParams {
@@ -89,11 +90,11 @@ struct RagdollPartParams {
     JPH::ShapeRefC shape            = nullptr;
     float          mass             = 10.0f;
 
-    ZHLN::Double3 position {};
+    ZHLN::DVec3 position {};
     JPH::Quat     rotation = JPH::Quat::sIdentity();
 
-    ZHLN::Float3 twistAxis {1.0f, 0.0f, 0.0f};
-    ZHLN::Float3 planeNormal {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 twistAxis {1.0f, 0.0f, 0.0f};
+    ZHLN::FVec3 planeNormal {0.0f, 1.0f, 0.0f};
 
     float coneAngle = 0.0f;
     float twistMin  = -0.1f;
@@ -196,12 +197,29 @@ class ZHLN_API PhysicsContext {
 
     void OptimizeBroadphase();
 
+    // Level-unload seam: drop cached mesh flyweights; bodies and queued
+    // commands keep their own shape references. Primitive cache is unchanged.
+    void ClearMeshShapeCache() noexcept;
+
+    // Bind only while no threads are resolving shapes. The caller keeps the
+    // resolver context alive until this PhysicsContext is destroyed or unbound.
+    void BindCollisionAssetResolver(Physics::CollisionAssetResolver resolver, void* context) noexcept;
+
+    [[nodiscard]] auto CreateRigidBody(
+        const Physics::AnyShape& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
+        uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
+    ) -> Physics::BodyID;
+
     auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
+    auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
+    auto CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC;
+    auto CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC;
 
     auto CreateRigidBody(
         const JPH::ShapeRefC& shape,
-        ZHLN::Double3         pos,
-        ZHLN::Float4          rot,
+        ZHLN::DVec3         pos,
+        ZHLN::FVec4          rot,
         JPH::EMotionType      motion,
         Layers::ID            layer,
         uint32_t              materialID = 0,
@@ -218,13 +236,13 @@ class ZHLN_API PhysicsContext {
         uint32_t              vertexCount,
         const uint32_t*       indices,
         uint32_t              indexCount,
-        ZHLN::Double3         pos,
-        ZHLN::Float4          rot,
+        ZHLN::DVec3         pos,
+        ZHLN::FVec4          rot,
         uint32_t              category = 0xFFFFFFFF,
         uint32_t              mask     = 0xFFFFFFFF
     ) -> Physics::BodyID;
 
-    auto CreateCharacter(ZHLN::Double3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyID;
+    auto CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyID;
 
     // Physics owns the Jolt instance; ECS components borrow a generational handle.
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollID;
@@ -232,14 +250,15 @@ class ZHLN_API PhysicsContext {
     void DestroyRagdolls(std::span<const Physics::RagdollID> handles) noexcept;
     // Borrowed until DestroyRagdoll; use only while the owning component is live.
     [[nodiscard]] auto GetRagdoll(Physics::RagdollID handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&>;
-    void               ActivateRagdoll(Physics::RagdollID handle, const JPH::SkeletonPose& pose, ZHLN::Float3 initialVelocity) noexcept;
+    void               ActivateRagdoll(Physics::RagdollID handle, const JPH::SkeletonPose& pose, ZHLN::FVec3 initialVelocity) noexcept;
     void               RemoveRagdoll(Physics::RagdollID handle) noexcept;
     void               DriveRagdollPose(Physics::RagdollID handle, const JPH::SkeletonPose& pose) noexcept;
-    void               AddRagdollImpulse(Physics::RagdollID handle, uint32_t jointIndex, ZHLN::Float3 impulse) noexcept;
+    void               AddRagdollImpulse(Physics::RagdollID handle, uint32_t jointIndex, ZHLN::FVec3 impulse) noexcept;
     // Generation-safe lookups: the optional ties the result to its proof of
     // validity; a stale handle simply has no value to hand back.
-    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<JPH::RVec3>;
+    [[nodiscard]] auto BodyPosition(Physics::BodyID handle) const noexcept -> std::optional<DVec3>;
     [[nodiscard]] auto BodyState(Physics::BodyID handle) const noexcept -> std::optional<Physics::BodyStateSnapshot>;
+    [[nodiscard]] auto BodyLinearVelocity(Physics::BodyID handle) const noexcept -> std::optional<FVec3>;
     void FillBodyStates(std::span<const Physics::BodyID> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     [[nodiscard]] bool GetRagdollPose(Physics::RagdollID handle, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
@@ -252,13 +271,13 @@ class ZHLN_API PhysicsContext {
     // duplicate handles are ignored using the same validation as DestroyBody.
     void DestroyBodies(std::span<const Physics::BodyID> handles);
 
-    void SetLinearVelocity(Physics::BodyID handle, ZHLN::Float3 velocity);
-    void SetCharacterVelocity(Physics::BodyID handle, ZHLN::Float3 velocity);
-    void SetCharacterPosition(Physics::BodyID handle, ZHLN::Double3 position);
+    void SetLinearVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity);
+    void SetCharacterVelocity(Physics::BodyID handle, ZHLN::FVec3 velocity);
+    void SetCharacterPosition(Physics::BodyID handle, ZHLN::DVec3 position);
     // Teleports a kinematic (scripted) rigid body. SetCharacterPosition only
     // works on CharacterVirtual bodies; rigid-body handles need this instead.
     // Ignored for static bodies, which cannot be moved in the broadphase.
-    void SetKinematicPose(Physics::BodyID handle, ZHLN::Double3 position, ZHLN::Float4 rotation);
+    void SetKinematicPose(Physics::BodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation);
 
     auto               GetCharacterVelocity(Physics::BodyID handle) const -> JPH::Vec3;
     // Vertical half-extent of a character's collision shape, i.e. the distance
@@ -271,10 +290,10 @@ class ZHLN_API PhysicsContext {
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyID handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;
     auto               GetRotation(JPH::BodyID bodyID) const -> JPH::Quat;
-    void               AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse);
-    void               AddImpulse(Physics::BodyID handle, ZHLN::Float3 impulse, ZHLN::Double3 position);
+    void               AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse);
+    void               AddImpulse(Physics::BodyID handle, ZHLN::FVec3 impulse, ZHLN::DVec3 position);
 
-    void AddRadialImpulse(ZHLN::Double3 center, float radius, float maxImpulse);
+    void AddRadialImpulse(ZHLN::DVec3 center, float radius, float maxImpulse);
 
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
@@ -283,41 +302,41 @@ class ZHLN_API PhysicsContext {
     void SetConstraintTarget(Physics::ConstraintID handle, float value);
 
     [[nodiscard]] auto
-        Raycast(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const -> Physics::RaycastResult;
+        Raycast(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const -> Physics::RaycastResult;
 
     // Queries return their own result vector. No caller-owned container
     // reference crosses this boundary: JPH::Array is a vendor type, and an
     // out-param `Container<T>&` is the same mutable-ownership leak as a
     // container-returning getter.
     [[nodiscard]] auto RaycastAll(
-        ZHLN::Double3       origin,
-        ZHLN::Float3        direction,
+        ZHLN::DVec3       origin,
+        ZHLN::FVec3        direction,
         float               maxDistance,
         Physics::BodyID ignore = {}
     ) const -> std::vector<Physics::RaycastResult>;
 
-    [[nodiscard]] auto RaycastPenetration(ZHLN::Double3 origin, ZHLN::Float3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const
+    [[nodiscard]] auto RaycastPenetration(ZHLN::DVec3 origin, ZHLN::FVec3 direction, float maxDistance = 1000.0f, Physics::BodyID ignore = {}) const
         -> Physics::RaycastPenetrationResult;
 
     [[nodiscard]] auto RaycastAllPenetrations(
-        ZHLN::Double3       origin,
-        ZHLN::Float3        direction,
+        ZHLN::DVec3       origin,
+        ZHLN::FVec3        direction,
         float               maxDistance,
         Physics::BodyID ignore = {}
     ) const -> std::vector<Physics::RaycastPenetrationResult>;
 
     [[nodiscard]] auto Shapecast(
         const JPH::ShapeRefC& shape,
-        ZHLN::Double3         pos,
-        ZHLN::Float4          rot,
-        ZHLN::Float3          direction,
+        ZHLN::DVec3         pos,
+        ZHLN::FVec4          rot,
+        ZHLN::FVec3          direction,
         float                 maxDistance = 1000.0f,
         Physics::BodyID   ignore      = {}
     ) const -> Physics::ShapeCastResult;
 
-    [[nodiscard]] auto OverlapSphere(ZHLN::Double3 center, float radius) const -> std::vector<Physics::BodyID>;
-    [[nodiscard]] auto OverlapAABB(ZHLN::Double3 minBox, ZHLN::Double3 maxBox) const -> std::vector<Physics::BodyID>;
-    [[nodiscard]] auto QueryAABB(ZHLN::Float3 min, ZHLN::Float3 max) const -> std::vector<Physics::BodyID>;
+    [[nodiscard]] auto OverlapSphere(ZHLN::DVec3 center, float radius) const -> std::vector<Physics::BodyID>;
+    [[nodiscard]] auto OverlapAABB(ZHLN::DVec3 minBox, ZHLN::DVec3 maxBox) const -> std::vector<Physics::BodyID>;
+    [[nodiscard]] auto QueryAABB(ZHLN::FVec3 min, ZHLN::FVec3 max) const -> std::vector<Physics::BodyID>;
     [[nodiscard]] auto FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum) const -> std::vector<Physics::BodyID>;
 
     [[nodiscard]] auto GetBodyID(JPH::BodyID bodyID) const -> Physics::BodyID;

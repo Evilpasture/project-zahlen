@@ -3,6 +3,7 @@
 
 #define CLAY_IMPLEMENTATION
 #include "Text.hpp"
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Format.hpp>
@@ -12,7 +13,7 @@
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -89,7 +90,7 @@ struct Context::Impl {
 
     struct PendingEvent {
         bool     isChar    = false;
-        uint32_t key       = 0;
+        KeyCode  key       = KeyCode::Unknown;
         uint32_t codepoint = 0;
         bool     consumed  = false;
     };
@@ -193,15 +194,12 @@ auto ToClaySizing(const Sizing& s) noexcept -> Clay_SizingAxis {
     return CLAY_SIZING_FIT();
 }
 
-auto ToClayColor(const ZHLN::Float4& c) noexcept -> Clay_Color {
+auto ToClayColor(const ZHLN::FVec4& c) noexcept -> Clay_Color {
     return {(c.x * 255.0f), (c.y * 255.0f), (c.z * 255.0f), (c.w * 255.0f)};
 }
 
-// The container holds the lanes; the addition is Jolt's. Callers keep writing
-// colours as ZHLN::Float4 and this puts the maths where maths lives.
-auto Brighten(const ZHLN::Float4& color, float amount) noexcept -> ZHLN::Float4 {
-    const JPH::Vec4 lifted = static_cast<JPH::Vec4>(color) + JPH::Vec4(amount, amount, amount, 0.0f);
-    return ZHLN::Float4(lifted);
+auto Brighten(const ZHLN::FVec4& color, float amount) noexcept -> ZHLN::FVec4 {
+    return {color.x + amount, color.y + amount, color.z + amount, color.w};
 }
 
 auto ToClayAlignX(Alignment align) noexcept -> Clay_LayoutAlignmentX {
@@ -398,10 +396,10 @@ auto Context::BeginFrame(const UIInput& input) noexcept -> Frame {
 
     _impl->ClearPendingEvents();
     for (const KeyCode key: input.pressedKeys) {
-        _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = static_cast<uint32_t>(key), .codepoint = 0});
+        _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = key, .codepoint = 0});
     }
     for (const uint32_t cp: input.characterStream) {
-        _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = 0, .codepoint = cp});
+        _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = KeyCode::Unknown, .codepoint = cp});
     }
 
     if (_impl->clayContext == nullptr) {
@@ -501,8 +499,8 @@ auto Frame::End() && noexcept -> UIDrawData {
     positions.reserve(static_cast<size_t>(commands.length) * 6);
     surfaces.reserve(static_cast<size_t>(commands.length) * 6);
 
-    auto EmitQuad = [&](float x0, float y0, float x1, float y1, const JPH::Vec4& color) -> void {
-        const PackedRGBA8 c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    auto EmitQuad = [&](float x0, float y0, float x1, float y1, const FVec4& color) -> void {
+        const PackedRGBA8 c = Math::PackColor(color.x, color.y, color.z, color.w);
 
         positions.push_back({{x0, y0, 0.0f}});
         positions.push_back({{x0, y1, 0.0f}});
@@ -529,7 +527,7 @@ auto Frame::End() && noexcept -> UIDrawData {
         switch (cmd->commandType) {
             case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
                 const auto      c = cmd->renderData.rectangle.backgroundColor;
-                const JPH::Vec4 color(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f);
+                const FVec4 color{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
 
                 const auto startIdx = static_cast<uint32_t>(positions.size());
                 EmitQuad(bb.x, bb.y, bb.x + bb.width, bb.y + bb.height, color);
@@ -546,7 +544,7 @@ auto Frame::End() && noexcept -> UIDrawData {
             }
             case CLAY_RENDER_COMMAND_TYPE_TEXT: {
                 const auto      tc = cmd->renderData.text.textColor;
-                const JPH::Vec4 color(tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f);
+                const FVec4 color{tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f};
                 const float     scale = font.ScaleFor(static_cast<float>(cmd->renderData.text.fontSize));
 
                 const std::string_view text(cmd->renderData.text.stringContents.chars, static_cast<size_t>(cmd->renderData.text.stringContents.length));
@@ -738,7 +736,7 @@ void Frame::EndScrollArea() noexcept {
             }
             const float drawY = std::clamp(-*scrollY / overflow, 0.0f, 1.0f) * travel;
 
-            const auto EmitBar = [&](float y, float h, const JPH::Vec4& color) -> void {
+            const auto EmitBar = [&](float y, float h, const FVec4& color) -> void {
                 Clay_ElementDeclaration decl = {
                     .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(bar.width), .height = CLAY_SIZING_FIXED(h)}},
                     .backgroundColor = ToClayColor(color),
@@ -780,14 +778,14 @@ void Frame::EndColumn() noexcept {
     EndBox();
 }
 
-void Frame::Text(std::string_view text, float fontSize, ZHLN::Float4 color) noexcept {
+void Frame::Text(std::string_view text, float fontSize, ZHLN::FVec4 color) noexcept {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_TextElementConfig config = {.textColor = ToClayColor(color), .fontSize = static_cast<uint16_t>(fontSize)};
     Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
-auto Frame::Button(std::string_view label, ZHLN::Float4 color, const Sizing& width, std::string_view id) noexcept -> bool {
+auto Frame::Button(std::string_view label, ZHLN::FVec4 color, const Sizing& width, std::string_view id) noexcept -> bool {
     assert(_impl != nullptr && _impl->inLayout);
     Clay_SetCurrentContext(_impl->clayContext);
     bool                   clicked = false;
@@ -1065,7 +1063,7 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
                 }
                 continue;
             }
-            const auto result = TextEdit::HandleKey(buf, state.caret, static_cast<KeyCode>(ev.key), mods, _impl->activeClipboard);
+            const auto result = TextEdit::HandleKey(buf, state.caret, ev.key, mods, _impl->activeClipboard);
             if (result == TextEdit::KeyResult::Edited) {
                 changed = true;
             }
@@ -1103,8 +1101,8 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
     const size_t selEnd   = hasSel ? state.caret.SelectionEnd(all.size()) : all.size();
     const size_t caretIdx = std::min<size_t>(state.caret.cursorIndex, all.size());
 
-    const JPH::Vec4 plainColor {0.9f, 0.9f, 0.9f, 1.0f};
-    const JPH::Vec4 selectedColor {1.0f, 1.0f, 1.0f, 1.0f};
+    const FVec4 plainColor {0.9f, 0.9f, 0.9f, 1.0f};
+    const FVec4 selectedColor {1.0f, 1.0f, 1.0f, 1.0f};
 
     size_t emitted    = 0;
     bool   caretDrawn = false;
@@ -1123,7 +1121,7 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
         Clay__CloseElement();
     };
 
-    auto emitRun = [&](size_t from, size_t to, const JPH::Vec4& color) -> void {
+    auto emitRun = [&](size_t from, size_t to, const FVec4& color) -> void {
         if (from >= to) {
             return;
         }
@@ -1260,7 +1258,7 @@ auto Frame::Dropdown(std::string_view label, std::span<const std::string_view> o
             if (ev.isChar || ev.consumed) {
                 continue;
             }
-            switch (static_cast<KeyCode>(ev.key)) {
+            switch (ev.key) {
                 case KeyCode::Up:
                     state.highlightIndex = (state.highlightIndex + optionCount - 1) % optionCount;
                     ev.consumed          = true;
@@ -1342,7 +1340,8 @@ auto Frame::Dropdown(std::string_view label, std::span<const std::string_view> o
                 .backgroundColor = hot ? Clay_Color {70, 100, 140, 255} : Clay_Color {0, 0, 0, 0}
             };
             Clay__ConfigureOpenElement(rowDecl);
-            Text(options[static_cast<size_t>(i)], 14.0f, (i == selected) ? JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} : JPH::Float4 {0.8f, 0.8f, 0.8f, 1.0f});
+            const auto shade = (i == selected) ? 1.0f : 0.8f;
+            Text(options[static_cast<size_t>(i)], 14.0f, {shade, shade, shade, 1.0f});
             Clay__CloseElement();
         }
 

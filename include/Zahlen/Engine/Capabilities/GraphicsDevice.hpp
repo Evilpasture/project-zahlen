@@ -12,6 +12,7 @@
 // setters on a borrowed object.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
@@ -25,6 +26,8 @@
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -33,15 +36,18 @@
 #include <string_view>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 
+class AssetLibrary;
 class RenderContext;
 struct EnvironmentRadianceDesc;
-class Mat44;
 
 class ZHLN_API GraphicsDevice {
   public:
+    [[nodiscard]] auto operator==(const GraphicsDevice&) const noexcept -> bool = default;
+
     // --- Device state ---------------------------------------------------------
     void SetResolution(Extent2D resolution);
     void SetViewport(const ViewportRect& rect) noexcept;
@@ -56,6 +62,17 @@ class ZHLN_API GraphicsDevice {
 
     void               ApplySettings(const GraphicsSettings& settings) noexcept;
     [[nodiscard]] auto Settings() const noexcept -> const GraphicsSettings&;
+
+    // Read-modify-write for callers that want to change a field or two. The
+    // device stays the owner: `fn` edits a copy, and the result goes back
+    // through ApplySettings, so delta detection still sees one transition.
+    template <typename Fn>
+        requires std::is_invocable_v<Fn, GraphicsSettings&>
+    void PatchSettings(Fn&& fn) noexcept(std::is_nothrow_invocable_v<Fn, GraphicsSettings&>) {
+        GraphicsSettings edited = Settings();
+        std::forward<Fn>(fn)(edited);
+        ApplySettings(edited);
+    }
     void               SetAntiAliasing(AAState state);
     void               ClearCaches() noexcept;
     [[nodiscard]] auto SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode>;
@@ -77,9 +94,24 @@ class ZHLN_API GraphicsDevice {
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode>;
     [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true,
                                      bool generateMips = true) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto CreateTextureHDR(std::string_view name, std::span<const std::byte> rgba16f, Extent2D extent,
+                                        bool generateMips = false) -> std::expected<TextureID, ErrorCode>;
+    [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
+        -> std::expected<TextureID, ErrorCode>;
     [[nodiscard]] auto CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true,
                                                bool generateMips = true) -> TextureID;
+    template <typename Func>
+        requires std::invocable<Func&, std::span<uint32_t>>
+    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureID, ErrorCode> {
+        std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
+        std::forward<Func>(callback)(std::span<uint32_t> {pixels});
+        return CreateTexture(std::span<const uint32_t> {pixels}, extent, isSRGB);
+    }
     void UnloadTexture(TextureID handle);
+
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureID, ErrorCode>;
+    void               DestroyRenderTexture(TextureID handle) noexcept;
 
     [[nodiscard]] auto Mesh(AssetID id) const noexcept -> std::optional<ZHLN::Mesh>;
     [[nodiscard]] auto Material(MaterialID id) const noexcept -> std::optional<ZHLN::Material>;
@@ -90,7 +122,7 @@ class ZHLN_API GraphicsDevice {
     void               DestroyMesh(const ZHLN::Mesh& mesh) noexcept;
     [[nodiscard]] auto BuildMeshBLAS(ZHLN::Mesh& mesh) noexcept -> RenderResult;
 
-    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices);
+    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices);
     [[nodiscard]] auto AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t;
 
     // --- Frame submission -----------------------------------------------------
@@ -108,18 +140,18 @@ class ZHLN_API GraphicsDevice {
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto UpdateBuffer(BufferID handle, std::span<T, SpanExtent> elements) noexcept -> std::expected<void, ErrorCode> {
-        return UpdateBuffer(handle, std::as_bytes(elements));
+        return UpdateBuffer(handle, std::span<const std::byte>{std::as_bytes(elements)});
     }
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureID, ErrorCode> {
-        return CreateTexture(std::as_bytes(pixels), extent, isSRGB);
+        return CreateTexture(std::span<const std::byte>{std::as_bytes(pixels)}, extent, isSRGB);
     }
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
     [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
         -> std::expected<TextureID, ErrorCode> {
-        return CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+        return CreateTexture(name, std::span<const std::byte>{std::as_bytes(pixels)}, extent, isSRGB);
     }
 
     [[nodiscard]] auto BeginFrame() noexcept -> FrameOutcome<FrameScope>;
@@ -129,6 +161,7 @@ class ZHLN_API GraphicsDevice {
 
   private:
     friend class Engine;
+    friend class AssetLibrary;
     explicit GraphicsDevice(RenderContext& ctx) noexcept: _ctx(&ctx) {
     }
     RenderContext* _ctx;

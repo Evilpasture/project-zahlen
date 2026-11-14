@@ -605,9 +605,9 @@ class Reader {
 
 // Specialize for types that need hand-written encoding (e.g. Jolt math):
 //
-//   template <> struct ZHLN::Wire::Codec<JPH::Vec3> {
-//       static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
-//       static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
+//   template <> struct ZHLN::Wire::Codec<FVec3> {
+//       static auto Encode(const FVec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
+//       static auto Decode(FVec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
 //   };
 template <typename T>
 struct Codec;

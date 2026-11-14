@@ -6,6 +6,7 @@
 // engine keeps the context.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <string_view>
 
@@ -14,7 +15,6 @@ namespace ZHLN {
 class AudioContext;
 struct AudioEvent;
 struct VoiceDesc;
-class Float3;
 
 class ZHLN_API AudioEngine {
   public:
@@ -27,7 +27,7 @@ class ZHLN_API AudioEngine {
     [[nodiscard]] auto IsVoiceValid(VoiceID handle) const noexcept -> bool;
     void               SetVoiceVolume(VoiceID handle, float volume);
     void               SetVoiceLooping(VoiceID handle, bool looping);
-    void               SetVoicePosition(VoiceID handle, const Float3& position);
+    void               SetVoicePosition(VoiceID handle, const FVec3& position);
 
 
   private:

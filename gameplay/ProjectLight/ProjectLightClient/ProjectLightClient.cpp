@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
 
@@ -13,12 +15,13 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 
@@ -31,6 +34,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <string>
 #include <string_view>
@@ -665,8 +669,8 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.hasPhysicsSample = false;
             object.transformDirty = true;
         } else if (property == "Rotation") {
-            object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
-            object.rotationQuat     = Math::EulerDegreesToQuat(object.rotationEulerDeg).Normalized();
+            object.rotationEulerDeg.value = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg.value);
+            object.rotationQuat     = Quat::FromEulerDegrees(object.rotationEulerDeg).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
             object.transformDirty = true;
@@ -823,13 +827,13 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
 
         const auto& data = value.arrayVal;
         auto scaled = [](const MsgPackValue& component) { return component.AsFloat() / VEC3_SCALE; };
-        const JPH::Vec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
-        const JPH::Quat rotation = JPH::Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
+        const FVec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
+        const Quat rotation = Quat{scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])}.Normalized();
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
-        object->linearVelocity   = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
+        object->rotationEulerDeg = object->rotationQuat.EulerAnglesDegrees();
+        object->linearVelocity = {scaled(data[7]), scaled(data[8]), scaled(data[9])};
         object->hasPhysicsSample = true;
         object->transformDirty = true;
     }
@@ -843,10 +847,8 @@ void ClientSession::ApplyControllerState(const MsgPackValue& packet) {
 
     NetworkTransformHistory& history = m_playerControllerStates[userId];
     history.Push(NetworkTransformSample {
-        .position = JPH::Vec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
-        .rotation = JPH::Quat(
-            state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()
-        ).Normalized(),
+        .position = FVec3{state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()},
+        .rotation = Quat{state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()}.Normalized(),
         .receivedAt = std::chrono::steady_clock::now()
     });
 }
@@ -1246,20 +1248,18 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 
 void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    auto input = registry.GetSingleton<Components::InputStateComponent>();
-    m_lastControls = {};
+    auto        entities = engine.Entities();
+    const auto  input    = std::as_const(engine).Input();
+    m_lastControls       = {};
     // No main camera entity means no view to report; the zeroed controls above stand.
-    if (const auto cameraComp = registry.GetSingleton<Components::CameraComponent>()) {
-        m_lastControls.yaw = cameraComp->camera.yaw;
+    if (const auto cameraComp = entities.GetSingleton<Components::CameraComponent>()) {
+        m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
-    if (input) {
-        m_lastControls.forward  = input->IsKeyDown(static_cast<uint8_t>(KeyCode::W));
-        m_lastControls.backward = input->IsKeyDown(static_cast<uint8_t>(KeyCode::S));
-        m_lastControls.left     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::A));
-        m_lastControls.right    = input->IsKeyDown(static_cast<uint8_t>(KeyCode::D));
-        m_lastControls.jump     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
-    }
+    m_lastControls.forward  = input.KeyDown(KeyCode::W);
+    m_lastControls.backward = input.KeyDown(KeyCode::S);
+    m_lastControls.left     = input.KeyDown(KeyCode::A);
+    m_lastControls.right    = input.KeyDown(KeyCode::D);
+    m_lastControls.jump     = input.KeyDown(KeyCode::Space);
 
     MsgPackValue inputs = MsgPackValue::Map();
     inputs.Set("forward", MsgPackValue::Bool(m_lastControls.forward));
@@ -1271,17 +1271,17 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
+    auto physics = engine.Physics();
     if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyID::Null()) {
-        auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-        const auto movement = registry.Get<Character::MovementComponent>(m_localController);
+        const auto movement = entities.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
             const auto& state = *bodyState;
-            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : static_cast<JPH::Quat>(state.currentRotation).Normalized();
-            const JPH::Vec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
+            const Quat rotation = (movement ? movement->orientation : Quat{state.currentRotation}).Normalized();
+            const auto velocity = physics.CharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
-                rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW(),
-                velocity.GetX(), velocity.GetY(), velocity.GetZ()
+                rotation.x, rotation.y, rotation.z, rotation.w,
+                velocity.x, velocity.y, velocity.z
             }));
             HumanoidState humanoidState = HumanoidState::Idle;
             if (movement) {
@@ -1292,7 +1292,6 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         }
     }
 
-    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     for (auto& [uid, object]: m_objects) {
         if (m_localPlayerUid == 0 || object.removalPending || !IsPartClass(object.className)
             || object.networkOwnerUid != m_localPlayerUid) continue;
@@ -1300,15 +1299,14 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         bool haveState = false;
         if (IsLocalCharacterPart(uid)) {
             haveState = true;
-        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && registry.IsAlive(entity)) {
-            const auto body = registry.Get<Components::PhysicsComponent>(entity);
+        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && entities.IsAlive(entity)) {
+            const auto body = entities.Get<Components::PhysicsComponent>(entity);
             if (body) {
                 if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
                     const auto& snapshot = *bodyState;
                     transform.position = snapshot.currentPosition;
-                    transform.rotation = snapshot.currentRotation;
-                    const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
-                    if (!bodyID.IsInvalid()) transform.linearVelocity = physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID);
+                    transform.rotation = Quat{snapshot.currentRotation};
+                    if (const auto vel = physics.BodyLinearVelocity(body->physicsID)) transform.linearVelocity = *vel;
                     haveState = true;
                 }
             }
@@ -1320,7 +1318,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
+        object.rotationEulerDeg = object.rotationQuat.EulerAnglesDegrees();
         object.linearVelocity   = transform.linearVelocity;
         object.renderPosition   = object.position;
         object.renderRotation   = object.rotationQuat;
@@ -1329,9 +1327,9 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
         MsgPackValue key = MsgPackValue::UInt(uid);
         MsgPackValue value = FloatArray({
-            transform.position.GetX(), transform.position.GetY(), transform.position.GetZ(),
-            transform.rotation.GetX(), transform.rotation.GetY(), transform.rotation.GetZ(), transform.rotation.GetW(),
-            transform.linearVelocity.GetX(), transform.linearVelocity.GetY(), transform.linearVelocity.GetZ()
+            transform.position.x, transform.position.y, transform.position.z,
+            transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w,
+            transform.linearVelocity.x, transform.linearVelocity.y, transform.linearVelocity.z
         });
         ownedTransforms.mapVal.emplace_back(std::move(key), std::move(value));
     }
@@ -1364,7 +1362,7 @@ void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
         // definition; the mirror keeps its records and re-spawns from them.
         object.materialId = InvalidMaterialID;
         object.hasPhysicsBody = false;
-        object.spawnedSize = JPH::Vec3::sZero();
+        object.spawnedSize = FVec3::Zero();
         object.visualDirty = true;
         object.transformDirty = true;
     }

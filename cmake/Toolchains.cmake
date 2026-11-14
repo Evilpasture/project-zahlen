@@ -191,11 +191,18 @@ function(zhln_toolchain_package name)
 endfunction()
 
 # Public installed names, including helper libraries needed by static consumers.
+#
+# Every target named in a zhln_toolchain_package(...) call below must appear
+# here, or its exported name falls back to the internal one and the package
+# advertises a target nobody documented. Fonts was the missing entry: the
+# package's manifest listed Zahlen::zahlen_fonts while every other package
+# advertised the short name.
 foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
-        "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam")
+        "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
+        "fonts;Fonts")
     list(GET pair 0 internal)
     list(GET pair 1 public)
     if(TARGET zahlen_${internal})
@@ -208,7 +215,18 @@ if(USE_SANITIZERS)
     target_link_options(zahlen_engine INTERFACE -fsanitize=address,undefined -fno-sanitize=vptr)
     target_compile_definitions(zahlen_engine INTERFACE __ASAN_ENABLED__ ZHLN_SANITIZER_BUILD=1)
 endif()
-if(ZHLN_DEV_MODE)
+#
+# ZHLN_DEV_MODE defaults ON (CMakeLists.txt) because it is what makes an
+# in-tree build read loose assets off the checkout. It is *not* a property of a
+# released toolchain, and forwarding it unconditionally baked "load loose files
+# and remember ${PROJECT_SOURCE_DIR}" into every installed package -- so a
+# consumer's runtime behaviour depended on a developer default in the tree that
+# produced the package. The packaging lane says so explicitly instead.
+# The root CMakeLists refuses the ambiguous combination (dev mode compiled into
+# the payload, packaging requested, no explicit opt-in), so by the time this runs
+# there are exactly two consistent states: dev mode off everywhere, or dev mode
+# on and deliberately shipped. This only has to state the second one.
+if(ZHLN_DEV_MODE AND ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_DEV_MODE)
 endif()
 if(ZHLN_NO_ANNOTATION_EXTRACT)
@@ -233,6 +251,10 @@ zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extension
 zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)
 zhln_toolchain_package(HostRunner TARGETS zahlen_host_runner DEPENDS Engine CommandLine Signal)
 zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine CommandLine HostRunner)
+# Consumer-side header only: install independently of the in-tree Application
+# package so COM clients need not link its static libraries.
+install(FILES app/include/Zahlen/COM/App.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen/COM COMPONENT ZahlenCOMApp)
 install(FILES app/include/Zahlen/HostRunner.hpp app/include/Zahlen/KernelApp.hpp
     app/include/Zahlen/AppOutcome.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
     COMPONENT ZahlenHostRunner)
@@ -261,9 +283,16 @@ zhln_toolchain_package(Fonts TARGETS zahlen_fonts DEPENDS Engine Serialization H
 # owns the fontbm .fnt + atlas path, and these 50 KB are what it feeds. The
 # vendored faces are licence-clean and already in the tree, so they travel with
 # the code that parses them.
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/fonts/JetBrainsMonoNerdFontRegular
-    COMPONENT ZahlenFonts)
+#
+# Only when the package it belongs to was actually configured: ZHLN_BUILD_EXTRAS
+# is what creates zahlen_fonts, and installing the data of a package that does
+# not exist makes `--component ZahlenFonts` succeed with a payload and no
+# library, which is worse than failing.
+if(TARGET zahlen_fonts)
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/fonts/JetBrainsMonoNerdFontRegular
+        COMPONENT ZahlenFonts)
+endif()
 
 # --- Tools, not content ----------------------------------------------------
 # There is deliberately no Data package. What used to be one was the sandbox's

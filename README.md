@@ -20,7 +20,7 @@ This project's renderer proudly has zero:
 Besides that, it's kinda like Bevy but C++26 and Vulkan.
 
 ## Build Requirements
-* **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later). At this point, if you have a modern compiler I assume you know what you're doing.
+* **C++26 Compiler with -freflection**: Supporting C++26 standard features. The build does not ask your compiler its version; it hands it `cmake/probes/pr125280-static-member.cpp` and keeps going if that compiles. GCC 16.2 passes. A `releases/gcc-16` build from before 2026-05-13 does not, and reports the same version as one that does. At this point, if you have a modern compiler I assume you know what you're doing.
 
 ## Build Instructions
 
@@ -213,7 +213,7 @@ Should work on macOS too if you manage to compile it, but you need a CPU rasteri
 ## System & Platform Dependencies
 
 The project is primarily developed on Linux and macOS and Windows.
-You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
+You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC yourself -- new enough to carry the fix for GCC PR c++/125280, which the configure step checks by compiling it rather than by trusting a version number.
 
 The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
 However, precompiled headers are buggy due to unknown internal compiler errors. scripts/build.sh --p2996 should handle some of the work as long as you have your build ready.

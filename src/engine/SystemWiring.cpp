@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -23,7 +24,6 @@
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Core/Profiler.hpp>
@@ -37,19 +37,16 @@
 namespace ZHLN {
 namespace { namespace Steps {
 
+// The host's UI callback. What runs immediately after it in the same phase --
+// releasing a capture the host did not ask for, then re-evaluating the action
+// maps -- reaches the engine-private input router, which this translation unit
+// cannot see. That half is `uiInputStep`, defined in Engine.cpp and placed here
+// by pointer, exactly like presentStep: a FrameStepFn carries no userdata, so a
+// step that needs engine-private state has to be written where that state is
+// visible.
 void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
-        if (engine.GetPendingUIData().Empty()) {
-            if (auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
-                st->wantCaptureKeyboard = false;
-                st->wantCaptureMouse    = false;
-            }
-        }
-    }
-    if (const auto st = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::InputStateComponent>()) {
-        engine.GetInput().SyncCaptureFlags(st->wantCaptureKeyboard, st->wantCaptureMouse);
-        engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
     }
 }
 
@@ -57,8 +54,21 @@ void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float, FrameContext& ctx) {
-    PhysicsSystem::Update(engine, ctx.fixedSteps);
+void Physics(Engine& engine, float dt, FrameContext& ctx) {
+    const auto& character = engine.GetPhysicsSubstepHooks();
+    ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
+    for (uint32_t step = 0; step < ctx.fixedSteps; ++step) {
+        if (character.preStep != nullptr) {
+            character.preStep(engine, kFixedStepDt);
+        }
+        // A private buffer is played here, not at simulation-graph or main
+        // buffer playback: hooks in the next substep must see consumed commands.
+        engine.GetUpdateGraph().InvokeSequentialAndPlayback<&PhysicsSystem::CommitImpulses>(engine.MakeFrame(dt, ctx.alpha));
+        engine.Physics().Step(kFixedStepDt);
+        if (character.postStep != nullptr) {
+            character.postStep(engine);
+        }
+    }
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext& ctx) {
@@ -80,7 +90,7 @@ void CleanupScene(Engine& engine, float, FrameContext&) {
 void Camera(Engine& engine, float dt, FrameContext& ctx) {
     // No instance and no function-local static: the pass is stateless, and the
     // camera it projects is component data.
-    CameraSystem::Update(engine, dt, ctx.alpha);
+    engine.GetRenderGraph().InvokeSequential<&CameraSystem::Update>(engine.MakeFrame(dt, ctx.alpha));
 }
 
 void LOD(Engine&, float, FrameContext&) {
@@ -96,24 +106,9 @@ void RenderGraph(Engine& engine, float dt, FrameContext& ctx) {
     engine.GetRenderGraph().Execute(frame);
 }
 
-void Present(Engine& engine, float dt, FrameContext& ctx) {
-    auto render_res = RenderSystem::Update(engine, dt);
-    if (!render_res) {
-        if (render_res.error().Is(FrameResult::DeviceLost)) {
-            if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
-                // Carry the recovery failure out of the frame: the caller
-                // gets the real ErrorCode instead of a C-style -1.
-                ctx.error = lost_res.error();
-                engine.GetPlatformHost().Close();
-            }
-        }
-    }
-}
-
-void TransformHistory(Engine& engine, float, FrameContext&) {
+void TransformHistory(Engine& engine, float dt, FrameContext& ctx) {
     ZHLN::ScopedTimer profTimer("ECS System: Update Transform History");
-    TransformSystem::UpdateTransformHistory(ZHLN::EngineAccess::RegistryOf(engine));
+    engine.GetUpdateGraph().InvokeSequential<&TransformSystem::UpdateTransformHistory>(engine.MakeFrame(dt, ctx.alpha));
 }
 
 }} // namespace ::Steps
@@ -127,7 +122,7 @@ void TransformHistory(Engine& engine, float, FrameContext&) {
 // relative to one of these is depending on this function, so a rename here is a
 // breaking change to every module that anchored to it, reported as
 // FramePlanError::AnchorMissing rather than absorbed.
-void BuildCoreFramePlan(FramePlan& plan) {
+void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep, FrameStepFn uiInputStep) {
     using Phase = FramePhase;
 
     // A core step that cannot be placed is a programming error in this function,
@@ -139,7 +134,12 @@ void BuildCoreFramePlan(FramePlan& plan) {
         }
     };
 
+    // HostUICallback is the step's name and stays the UI callback, because
+    // modules anchor to it. The input half of the same phase runs beside it as
+    // its own step, so the name keeps meaning what it always did and the input
+    // evaluation has a name a module can anchor to as well.
     require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
+    require(plan.Append(Phase::UI, "EvaluateInput", uiInputStep));
     require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
     require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));
@@ -148,7 +148,7 @@ void BuildCoreFramePlan(FramePlan& plan) {
     require(plan.Append(Phase::Camera, "CameraSystems", Steps::Camera));
     require(plan.Append(Phase::Camera, "LODSystem", Steps::LOD));
     require(plan.Append(Phase::Visibility, "RenderGraph", Steps::RenderGraph));
-    require(plan.Append(Phase::Present, "RenderSystem", Steps::Present));
+    require(plan.Append(Phase::Present, "RenderSystem", presentStep));
     require(plan.Append(Phase::History, "TransformHistory", Steps::TransformHistory));
 }
 
@@ -188,30 +188,10 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.Compile();
 }
 
-auto InitializeDefaultScene(Engine& engine) -> bool {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-    reg.RegisterAllComponentsIn<ZHLN::Components>();
-
-    reg.GetOrEmplaceSingleton<Components::InputStateComponent>();
-
-    reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {});
-
-    // A scene reset clears the registry, so the engine-level singletons World::Create()
-    // seeds are re-seeded here alongside the rest of the scene's settings.
-    reg.Create(
-        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
-        Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}
-    );
-
-    engine.EnsureFontAtlas();
-
-    // The graphs are rebuilt per scene; the frame plan is not. A scene reset
-    // clears the registry and rebuilds the graphs, and both are scene state --
-    // the timeline is composition state, installed once by the application, and
-    // rebuilding it per scene was how a replayed module step could land twice.
-    BuildSystemGraphs(engine);
-    return true;
+void SeedBaselineScene(ECS::Registry& reg) {
+    if (reg.SingletonEntity<Components::MainCameraTagComponent>() == Entity::Null()) {
+        reg.Create(Components::MainCameraTagComponent {}, Components::CameraComponent {});
+    }
 }
 
 } // namespace ZHLN

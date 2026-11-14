@@ -21,15 +21,6 @@
 
 namespace ZHLN::Physics {
 
-enum class SlotState : uint8_t {
-    Empty              = 0,
-    PendingCreateRigid = 1,
-    PendingCreateChar  = 2,
-    Alive              = 3,
-    Character          = 4,
-    PendingDestroy     = 5,
-};
-
 struct SlotPredicate {
     bool isActive;
     bool isDestructible;
@@ -60,13 +51,13 @@ struct alignas(64) BodyTable {
     ZHLN::Atomic<size_t> freeCount {0};
     size_t               slotCapacity = 0;
 
-    JPH::Array<ZHLN::Atomic<uint32_t>> generations;
-    JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
-    JPH::Array<ZHLN::Atomic<uint8_t>>  slotMotionTypes;
-    JPH::Array<ZHLN::Atomic<uint32_t>> slotBodyIDs;
-    JPH::Array<ZHLN::Atomic<uint32_t>> slotMaterialIDs;
-    JPH::Array<ZHLN::Atomic<uint64_t>> joltIndexToBodyID;
-    JPH::Array<const void*>            joltBodyPtrs;
+    JPH::Array<ZHLN::Atomic<uint32_t>>         generations;
+    JPH::Array<ZHLN::Atomic<SlotState>>        slotStates;
+    JPH::Array<ZHLN::Atomic<JPH::EMotionType>> slotMotionTypes;
+    JPH::Array<ZHLN::Atomic<uint32_t>>         slotBodyIDs;
+    JPH::Array<ZHLN::Atomic<uint32_t>>         slotMaterialIDs;
+    JPH::Array<ZHLN::Atomic<uint64_t>>         joltIndexToBodyID;
+    JPH::Array<const void*>                    joltBodyPtrs;
 
     JPH::Array<uint32_t>    slotToDense;
     JPH::Array<uint32_t>    denseToSlot;
@@ -83,11 +74,11 @@ struct alignas(64) BodyTable {
     void Shutdown() noexcept;
 
     [[nodiscard]] auto LoadSlotState(uint32_t slot) const noexcept -> SlotState {
-        return static_cast<SlotState>(slotStates[slot].load(std::memory_order::acquire));
+        return slotStates[slot].load(std::memory_order::acquire);
     }
 
     void StoreSlotState(uint32_t slot, SlotState state) noexcept {
-        slotStates[slot].store(static_cast<uint8_t>(state), std::memory_order::release);
+        slotStates[slot].store(state, std::memory_order::release);
     }
 
     [[nodiscard]] auto ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyID;

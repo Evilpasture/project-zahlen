@@ -150,8 +150,11 @@ image's own tooling is the login profile snippet, which just exports
 
 **Compiler.** The compiler is exactly `gcc`/`g++` from `dnf` — no pinned
 prebuilt, no downgrade. Installed package configs gate on compiler family and
-`GNU >= 16.1.1` (`ZHLN_GCC_MIN`), not an exact patch version, so Fedora's 16.2.1
-satisfies them. The real runtime requirement is the `GLIBCXX_x.y.z` symbol
+on compiling `cmake/probes/pr125280-static-member.cpp`, not on a version
+number, so Fedora's 16.2.1 satisfies them by demonstration rather than by
+arithmetic. (A version floor could not have done this job anyway: the GCC PR
+c++/125280 fix was cherry-picked onto a branch that reports 16.1.1 both before
+and after it.) The real runtime requirement is the `GLIBCXX_x.y.z` symbol
 versions the engine `.so` asks for, which the linker/loader reports precisely if
 a distro is too old. **Caveat:** the published `v0.1.0` archives were packaged
 before that fix and still carry the old exact `16.2.0` check, so re-publish a

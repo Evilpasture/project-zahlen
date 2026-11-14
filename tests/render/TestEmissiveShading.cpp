@@ -15,7 +15,9 @@
 // ambient turned all the way down. Whatever the emissive box shows in that
 // frame can only have come from the emissive term.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -83,18 +85,16 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // 3.0 has always been at this exposure: 13/255, a dim lamp. Expressing the
 // emitter the way the importer does keeps the test measuring a neon material
 // rather than the accounting error that used to inflate one.
-// Not constexpr: Jolt's Float4 constructor is not constexpr, so a lane
-// constant is `const` at namespace scope. It is still one object, not a
-// spelling that has to be converted at the crossing.
-const JPH::Float4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+// Native color vectors can be passed directly to the material APIs.
+const ZHLN::FVec4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 // Hue is asserted here, not at import scale: 6x is sibling-proven chromatic
 // (the multi-emissive direct boxes read their hues at 6x under worse wash),
 // while 100x through the default Khronos Neutral tonemap desaturates to
 // near-white BY DESIGN -- asserting hue there pins the test to the
 // tonemapper's highlight shoulder rather than to the emission path.
-const JPH::Float4 kHueGreen {0.0f, 6.0f, 0.0f, 1.0f};
-const JPH::Float4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
-const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
+const ZHLN::FVec4 kHueGreen {0.0f, 6.0f, 0.0f, 1.0f};
+const ZHLN::FVec4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
+const ZHLN::FVec4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
 // The ordinary glTF neon case, in the units the importer produces: a
 // spec-clamped emissiveFactor of 0.8 with no KHR_materials_emissive_strength,
@@ -106,7 +106,7 @@ const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // thing casting it. That dimness was the actual regression behind "the neon
 // look is gone"; the fix is the unit conversion at import, and this constant
 // tracks it so the test measures what an imported asset really does.
-const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const ZHLN::FVec4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 // The halo frames run the bloom composite here, not at the engine default
 // 0.0 (which multiplies the whole Kawase chain by zero at composite --
 // blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
@@ -129,30 +129,27 @@ constexpr float kHaloBloomStrength = 0.003f;
 // Returns false when material creation fails, which is a setup failure rather
 // than a rendering result.
 [[nodiscard]] bool BuildUnlitBoxScene(
-    ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
+    ZHLN::Engine& engine, const ZHLN::FVec4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
     auto renderCtx = engine.Graphics();
 
-    for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity, bloomStrength](auto& pp) {
-            if (glowIntensity.has_value()) {
-                pp.glowIntensity = *glowIntensity;
-            }
-            if (bloomStrength.has_value()) {
-                pp.bloomStrength = *bloomStrength;
-            }
-            pp.fullBright      = 0;
-            pp.ambientExposure = 0.0f;
-            pp.giMode          = 0;
-            pp.giIntensity     = 0.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 0;
-            pp.skyZenith       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyHorizon      = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyGround       = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        });
-    }
+    engine.Graphics().PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
+        if (glowIntensity.has_value()) {
+            gfx.post.glowIntensity = *glowIntensity;
+        }
+        if (bloomStrength.has_value()) {
+            gfx.post.bloomStrength = *bloomStrength;
+        }
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 0.0f;
+        gfx.post.mode          = 0;
+        gfx.post.giIntensity     = 0.0f;
+        gfx.post.enableSSR       = 0;
+        gfx.rayTracing.enableReflections       = false;
+        gfx.environment.skyZenith = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyGround = {0.0f, 0.0f, 0.0f, 1.0f};
+    });
 
     const auto material =
         renderCtx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = kBoxBaseColor, .emissive = emissiveFactor});
@@ -164,15 +161,16 @@ constexpr float kHaloBloomStrength = 0.003f;
         engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}
     );
 
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& camera = c.camera;
+        camera.position = {0.0f, 0.0f, 6.0f};
+        camera.yaw      = ZHLN::DegF{-90.0f};
+        camera.pitch    = ZHLN::DegF{0.0f};
+        camera.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return false;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = JPH::Vec3(0.0f, 0.0f, 6.0f);
-    camera.yaw      = -90.0f;
-    camera.pitch    = 0.0f;
-    camera.fov      = 60.0f;
     return true;
 }
 
@@ -189,7 +187,7 @@ struct UnlitMeasurement {
 
 // Renders the unlit scene once and measures it.
 [[nodiscard]] auto MeasureUnlitBox(
-    const JPH::Float4& emissiveFactor, std::string_view ppmPath, std::optional<float> glowIntensity = std::nullopt,
+    const ZHLN::FVec4& emissiveFactor, std::string_view ppmPath, std::optional<float> glowIntensity = std::nullopt,
     std::optional<float> bloomStrength = std::nullopt
 )
     -> UnlitMeasurement {

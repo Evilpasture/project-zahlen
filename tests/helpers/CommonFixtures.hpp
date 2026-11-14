@@ -129,7 +129,6 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) WorldFixture {
     auto               operator*() const noexcept -> ZHLN::World& { return *_world; }
     explicit           operator bool() const noexcept { return _world != nullptr; }
 
-    auto Registry() -> ZHLN::ECS::Registry& { return _world->GetRegistry(); }
     auto Physics() -> ZHLN::PhysicsContext& { return _world->GetPhysics(); }
 
   private:

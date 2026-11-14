@@ -5,8 +5,8 @@
 // presence live in this diagnostic host, not in the ordinary game binary.
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "SceneDocument.hpp"
-#include "engine/system/GraphicsSettingsSync.hpp"
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/QualityPresets.hpp>
 #include <FallbackScene/FallbackScene.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
@@ -67,7 +67,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::pa
         return callRes;
     };
 
-    const ZHLN::GraphicsSettings base    = ZHLN::CollectGraphicsSettings(engine);
+    const ZHLN::GraphicsSettings base    = engine.Graphics().Settings();
     ZHLN::GraphicsSettings       staging = base;
     if (auto res = applyOverlay(staging); !res) {
         ZHLN::LogWarning("[Graphics] '{}' rejected ({}); keeping live settings.", path.string(), res.error());
@@ -76,13 +76,13 @@ void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::pa
 
     if (staging.qualityPreset != ZHLN::QualityLevel::Custom && staging.qualityPreset != base.qualityPreset) {
         ZHLN::GraphicsSettings presetLayered = base;
-        presetLayered.ApplyPreset(staging.qualityPreset);
+        ZHLN::ApplyPreset(presetLayered, staging.qualityPreset);
         if (applyOverlay(presetLayered)) {
             staging = presetLayered;
         }
     }
 
-    ZHLN::ApplyGraphicsSettings(engine, staging);
+    engine.Graphics().ApplySettings(staging);
     ZHLN::Log("[Graphics] applied declarative profile '{}' (preset={}).", path.string(), staging.qualityPreset);
 }
 #endif
@@ -122,9 +122,6 @@ void BootHostStateStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /
             // A partially instantiated document must not survive as the next
             // frame's scene; restore the engine's empty default scene.
             engine.ClearScene();
-            if (!engine.InitializeDefaultScene()) {
-                ZHLN::LogError("[Scene] could not restore the default scene");
-            }
             ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", s_HostLaunchConfig.scenePath.string());
         }
     }

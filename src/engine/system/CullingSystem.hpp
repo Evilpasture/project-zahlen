@@ -3,9 +3,8 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
@@ -16,8 +15,8 @@
 #include <array>
 
 namespace ZHLN {
-class Engine;
 class RenderContext;
+class DebugDraw;
 
 // The culling pass's working set: the planes it derived this frame, the
 // freeze-frame corners, and whether the last frame was frozen. This is the
@@ -26,12 +25,12 @@ class RenderContext;
 // (ECS::Local<CullingScratch>) rather than to the world.
 //
 // The counters the pass publishes are a different thing: they are read by the
-// overlay, the crash dump and the render tests, so they live in
-// Components::CullingStatsComponent where world data belongs.
+// overlay, the crash dump and the render tests, so they live on World and enter
+// the render graph through RenderServices (ECS::ResMut<CullingStats>).
 struct CullingScratch {
     Frustum                  mainFrustum {};
     Frustum                  shadowFrustum {};
-    std::array<JPH::Vec3, 8> frustumCorners {};
+    std::array<FVec3, 8> frustumCorners {};
     bool                     wasFrozen = false;
 };
 
@@ -39,21 +38,20 @@ class ZHLN_API CullingSystem {
   public:
     using CullingQuery = ECS::Query<
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
-        const Components::GlobalSettingsTagComponent, const Components::PostProcessSettingsComponent,
-        const Components::ShadowSettingsComponent, const Components::LightComponent, const Components::SunTagComponent,
-        const Components::EnvironmentSunTagComponent, const Components::TransformComponent, Components::CullingStatsComponent&>;
+        const Components::LightComponent, const Components::SunTagComponent,
+        const Components::EnvironmentSunTagComponent, const Components::TransformComponent>;
 
     // Reflected graph entry point. The pass owns its scratch (ECS::Local), reads
     // the camera entity's pose from the registry, and writes the counters it
-    // publishes into the stats singleton. There is no culler *object* left to
-    // hand it: the class is a namespace for the pass.
-    static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, VisibleEntities visible, VisibleShadowEntities shadow,
-                            ECS::Local<CullingScratch> scratch);
+    // publishes into the world's CullingStats service.
+    static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
+                            VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch);
 
     // The freeze-frame debug view. The corners are the pass's own state now, so
     // this derives them from the same view-projection the pass froze instead of
     // reaching into another node's storage.
-    static void DrawDebugFrustum(Engine& engine);
+    using DebugFrustumQuery = ECS::Query<const Components::CameraComponent>;
+    static void DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene);
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
@@ -63,6 +61,6 @@ class ZHLN_API CullingSystem {
 // The eight world-space corners of a view-projection, in the order the debug
 // edges expect. Shared by the freeze path (which stores them) and the debug draw
 // (which draws them).
-[[nodiscard]] ZHLN_API std::array<JPH::Vec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept;
+[[nodiscard]] ZHLN_API std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept;
 
 } // namespace ZHLN

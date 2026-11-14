@@ -45,7 +45,7 @@ struct ScriptECSBridgeTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> ecs_bridge_property_access_and_drilling() {
             ZHLN::ECS::Registry   reg;
-            ZHLN::ScriptECSBridge bridge(reg);
+            ZHLN::ScriptECSBridge bridge(ZHLN::ECS::Inspection {reg});
 
             // Register Manifest with both ECS and ScriptBinder
             bridge.RegisterComponentManifest<BridgeManifest>();
@@ -94,6 +94,20 @@ struct ScriptECSBridgeTestSuite {
             auto setElemRes = bridge.SetPropertyElementAt(e, "PlayerDataComponent", "inventory", 1, ZHLN::ToScriptVal(999));
             ZHLN::Test::ExpectTrue(setElemRes.has_value());
             ZHLN::Test::ExpectEq(comp->inventory[1], 999);
+
+            // A boxed component member must be re-resolved after a sparse-set
+            // swap removal, and must stop resolving when its owner is removed.
+            const auto other = reg.Create(PlayerDataComponent {.coords = {.x = 37.0f}});
+            auto movedBox = bridge.GetProperty(other, "PlayerDataComponent", "coords");
+            ZHLN::Test::ExpectTrue(movedBox.has_value());
+            reg.Remove<PlayerDataComponent>(e);
+            auto movedX = bridge.GetPropertyOf(*movedBox, "x");
+            ZHLN::Test::ExpectTrue(movedX.has_value());
+            if (movedX) ZHLN::Test::ExpectEq(*ZHLN::FromScriptVal<float>(*movedX), 37.0f);
+            reg.Remove<PlayerDataComponent>(other);
+            ZHLN::Test::ExpectTrue(!bridge.GetPropertyOf(*movedBox, "x"));
+            reg.Destroy(other);
+            ZHLN::Test::ExpectTrue(!bridge.GetPropertyOf(*movedBox, "x"));
 
             return {};
         }

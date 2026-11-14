@@ -16,10 +16,10 @@
 #include "StudioModelImporter.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -58,7 +58,15 @@ inline constexpr float kMissingTextureDim          = 0.25f;
 // exposure and contributes to bloom instead of stopping at the bloom threshold.
 inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
+auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.GetCachedPrefab(hash);
+}
+auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
+    return assets.CachedPrefab(hash);
+}
+
+template <typename Gfx>
+auto LoadTextureFromBytes(Gfx& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
     // 1. Try VTF first
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
@@ -225,7 +233,8 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
     return std::ranges::any_of(names, [shader](std::string_view name) { return ShaderNameEquals(shader, name); });
 }
 
-auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
+template <typename Gfx>
+auto ResolveMaterialDesc(Gfx& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
@@ -240,7 +249,7 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     }
 
     const VMTMaterial& material = *vmt;
-    desc.baseColor              = material.baseColor;
+    desc.baseColor              = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w};
     // $nocull from the VMT, or the importer's single-sheet wall audit marking
     // this part: Source draws undercovered faces from their back side (the
     // vbsp leaffaces of the room include them), so honours match by rendering
@@ -382,7 +391,8 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> sur
 // Uploads each packed VRAD page exactly once for this imported prefab. The
 // pages remain linear RGBA16F: Source's RGBExp luxels are already linear
 // radiance and must not take the sRGB texture path or the old VPL gain.
-auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureID> {
+template <typename Gfx>
+auto UploadVradLightmaps(Gfx& ctx, const VradLightmapAtlas& atlas, std::string_view prefabPath) -> std::vector<TextureID> {
     std::vector<TextureID> handles(atlas.pages.size(), TextureID::Invalid);
     for (size_t pageIndex = 0; pageIndex < atlas.pages.size(); ++pageIndex) {
         const VradLightmapPage& page = atlas.pages[pageIndex];
@@ -401,8 +411,9 @@ auto UploadVradLightmaps(RenderContext& ctx, const VradLightmapAtlas& atlas, std
 }
 
 // Shared by the world prefab and the interactive submodel prefabs.
+template <typename Gfx>
 void AssemblePrefabParts(
-    RenderContext&         ctx,
+    Gfx&                   ctx,
     const SourceVFS&       vfs,
     const ImportedMapData& data,
     std::string_view       prefabPath,
@@ -420,10 +431,10 @@ void AssemblePrefabParts(
             continue;
         }
 
-        const BufferID   posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
-        const BufferID   frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
-        const BufferID   surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
-        const BufferID   ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {part.indices});
+        const BufferID   posVbo     = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
+        const BufferID   frameVbo   = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.tangentFrames});
+        const BufferID   surfaceVbo = ctx.template CreateBuffer<BufferUsage::Vertex>(std::span {part.surfaces});
+        const BufferID   ibo        = ctx.template CreateBuffer<BufferUsage::Index>(std::span {part.indices});
         const MeshletStreams ml         = ctx.UploadMeshlets(BuildMeshlets(std::span {part.indices}, std::span {part.positions}));
 
         Mesh subMesh = {
@@ -469,9 +480,9 @@ void AssemblePrefabParts(
         modelPart.mesh            = subMesh;
         modelPart.defaultMaterial = subMaterial;
         modelPart.nodeIndex       = 0;
-        modelPart.localTransform  = JPH::Mat44::sIdentity();
-        modelPart.localMin        = part.boundsMin;
-        modelPart.localMax        = part.boundsMax;
+        modelPart.localTransform  = Mat4x4::Identity();
+        modelPart.localMin        = {part.boundsMin.x, part.boundsMin.y, part.boundsMin.z};
+        modelPart.localMax        = {part.boundsMax.x, part.boundsMax.y, part.boundsMax.z};
 
         const std::string assetKey = std::string(prefabPath) + "#part_" + std::to_string(prefab.parts.size());
         modelPart.meshAsset        = HashAssetID(assetKey);
@@ -491,19 +502,18 @@ void AssemblePrefabParts(
         }
 
         if (options.buildColliders && !part.skyboxLayer) {
-            modelPart.meshCollider = Physics::CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
+            modelPart.meshCollider = MakePrefabMeshCollider(part.positions, part.indices);
 
-            const JPH::Vec3 localCenter(
+            const FVec3 localCenter{
                 (part.boundsMin.x + part.boundsMax.x) * 0.5f, (part.boundsMin.y + part.boundsMax.y) * 0.5f, (part.boundsMin.z + part.boundsMax.z) * 0.5f
-            );
-            const JPH::Vec3 halfExtents(
+            };
+            const FVec3 halfExtents{
                 std::max((part.boundsMax.x - part.boundsMin.x) * 0.5f, 0.01f), std::max((part.boundsMax.y - part.boundsMin.y) * 0.5f, 0.01f),
                 std::max((part.boundsMax.z - part.boundsMin.z) * 0.5f, 0.01f)
-            );
-            const JPH::ShapeRefC baseBox = new JPH::BoxShape(halfExtents);
-            modelPart.boxCollider        = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
+            };
+            modelPart.boxCollider = MakePrefabBoxCollider(halfExtents, localCenter);
 
-            if (modelPart.meshCollider == nullptr) {
+            if (!modelPart.meshCollider) {
                 modelPart.meshCollider = modelPart.boxCollider;
             }
         }
@@ -518,30 +528,20 @@ void AssemblePrefabParts(
     // compound of {part mesh, collision-only mesh} keeps both hulls intact
     // for mesh queries and CharacterVirtual alike.
     if (options.buildColliders && data.collisionOnly.IndexCount() > 0) {
-        if (JPH::ShapeRefC collisionShape = Physics::CreateMeshShape(
-                data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(), data.collisionOnly.IndexCount()
-            )) {
+        if (auto collisionShape = MakePrefabMeshCollider(data.collisionOnly.positions, data.collisionOnly.indices)) {
             bool folded = false;
             for (ModelPart& part: prefab.parts) {
-                if (part.meshCollider == nullptr) {
-                    continue;
-                }
-                JPH::StaticCompoundShapeSettings compoundSettings;
-                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), part.meshCollider);
-                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), collisionShape);
-                const auto compound = compoundSettings.Create();
-                if (!compound.IsValid()) {
-                    continue;
-                }
-                part.meshCollider = compound.Get();
-                folded            = true;
+                if (!part.meshCollider) continue;
+                Physics::Shape<Physics::Compound> compound;
+                AppendPrefabCollider(compound, *part.meshCollider);
+                AppendPrefabCollider(compound, *collisionShape);
+                part.meshCollider = Physics::AnyShape(std::move(compound));
+                folded = true;
                 break;
             }
             if (!folded) {
-                LogWarning(
-                    "BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
-                    data.collisionOnly.indices.size() / 3
-                );
+                LogWarning("BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
+                           data.collisionOnly.indices.size() / 3);
             }
         }
     }
@@ -550,33 +550,34 @@ void AssemblePrefabParts(
 // Translates every stream (render parts and the collision-only fold) by
 // offset. Used to re-base rotating doors on their hinge pivot so the entity
 // transform -- placed at the pivot -- rotates the geometry about it.
-void ShiftImportedGeometry(ImportedMapData& data, JPH::Vec3Arg offset) {
+void ShiftImportedGeometry(ImportedMapData& data, FVec3 offset) {
     const auto shiftStreams = [offset](MaterialStreams& streams) {
         for (VertexPosition& vertex: streams.positions) {
-            vertex.position[0] += offset.GetX();
-            vertex.position[1] += offset.GetY();
-            vertex.position[2] += offset.GetZ();
+            vertex.position[0] += offset.x;
+            vertex.position[1] += offset.y;
+            vertex.position[2] += offset.z;
         }
-        streams.boundsMin.x += offset.GetX();
-        streams.boundsMin.y += offset.GetY();
-        streams.boundsMin.z += offset.GetZ();
-        streams.boundsMax.x += offset.GetX();
-        streams.boundsMax.y += offset.GetY();
-        streams.boundsMax.z += offset.GetZ();
+        streams.boundsMin.x += offset.x;
+        streams.boundsMin.y += offset.y;
+        streams.boundsMin.z += offset.z;
+        streams.boundsMax.x += offset.x;
+        streams.boundsMax.y += offset.y;
+        streams.boundsMax.z += offset.z;
     };
     for (MaterialStreams& part: data.parts) {
         shiftStreams(part);
     }
     shiftStreams(data.collisionOnly);
-    data.boundsMin.x += offset.GetX();
-    data.boundsMin.y += offset.GetY();
-    data.boundsMin.z += offset.GetZ();
-    data.boundsMax.x += offset.GetX();
-    data.boundsMax.y += offset.GetY();
-    data.boundsMax.z += offset.GetZ();
+    data.boundsMin.x += offset.x;
+    data.boundsMin.y += offset.y;
+    data.boundsMin.z += offset.z;
+    data.boundsMax.x += offset.x;
+    data.boundsMax.y += offset.y;
+    data.boundsMax.z += offset.z;
 }
 
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
+template <typename Gfx, typename Assets>
+auto BuildModelPrefab(Gfx& ctx, Assets& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
     -> ZHLN::Optional<ModelPrefab&> {
     // Interactive brush submodels (doors, buttons) get their own prefabs
     // below; excluding them here keeps their faces out of the static world
@@ -669,14 +670,14 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         "{} fixtures damped{}",
         virtualPath, lighting.entityLightsEmitted, lighting.entityLightsOffered, lighting.droppedBeamCone, lighting.droppedDisabled,
         lighting.ambientAuthored ? "authored" : "default",
-        (imported.ambient.color.GetX() + imported.ambient.color.GetY() + imported.ambient.color.GetZ() > 0.0f) ? "" : " (zero)", lighting.emissiveFaces,
+        (imported.ambient.color.x + imported.ambient.color.y + imported.ambient.color.z > 0.0f) ? "" : " (zero)", lighting.emissiveFaces,
         lighting.emissiveSurfaces, lighting.emissiveAreaSquareMetres, emissiveProbeDropped, lighting.emissiveDroppedCap, lighting.emissiveFixtureDamped,
         lighting.floorEnforced ? " [floor enforced]" : "");
 
     // One identity root; parts hang off it directly (part.localTransform does
     // the placement), lights get their own translated nodes because ModelLight
     // resolves position through its node chain.
-    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
+    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false});
 
     AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, *prefab);
 
@@ -684,7 +685,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         ModelNode node;
         node.name           = String64(light.name.c_str());
         node.parentIndex    = 0;
-        node.localTransform = JPH::Mat44::sTranslation(light.position);
+        node.localTransform = CreateTranslation(FVec3 {light.position.x, light.position.y, light.position.z});
         node.hasMesh        = false;
         prefab->nodes.push_back(node);
 
@@ -744,12 +745,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         // leave them in world space. Re-base only the latter: unconditionally
         // subtracting the entity pivot sends already-local render geometry back
         // to the map origin, while the fallback collider remains at the door.
-        const JPH::Vec3 geometryCenter(
+        const FVec3 geometryCenter{
             (subImported.boundsMin.x + subImported.boundsMax.x) * 0.5f,
             (subImported.boundsMin.y + subImported.boundsMax.y) * 0.5f,
             (subImported.boundsMin.z + subImported.boundsMax.z) * 0.5f
-        );
-        if ((geometryCenter - sub.pivot).LengthSq() < geometryCenter.LengthSq()) {
+        };
+        if ((geometryCenter - sub.pivot).LengthSquared() < geometryCenter.LengthSquared()) {
             ShiftImportedGeometry(subImported, -sub.pivot);
         }
 
@@ -758,14 +759,14 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         subPrefab->virtualPath         = String256(subPath);
         subPrefab->emissiveFactorScale = 1.0f;
         subPrefab->nodes.push_back(
-            ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false}
+            ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = Mat4x4::Identity(), .hasMesh = false}
         );
         AssemblePrefabParts(ctx, vfs, subImported, subPath, options, *subPrefab);
         assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));
         Log("BSP Importer: {} -> interactive submodel prefab ({}, {} parts)", subPath, sub.rotating ? "rotating" : "sliding", subImported.parts.size());
     }
 
-    return assetMgr.GetCachedPrefab(HashAssetPath(virtualPath));
+    return LookupPrefab(assetMgr, HashAssetPath(virtualPath));
 }
 
 } // namespace
@@ -823,9 +824,9 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
 
     // Keep the term at the material's own chromaticity and let its luminance
     // set the magnitude: a red neon sign emits red, not a grey scaled by red.
-    emission.tint = JPH::Vec3(vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z);
+    emission.tint = {vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z};
     if (Rec709Luma(emission.tint) < 1e-4f) {
-        emission.tint = JPH::Vec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
+        emission.tint = {1.0f, 1.0f, 1.0f}; // a black albedo is "no tint", not "black light"
     }
     return emission;
 }
@@ -891,7 +892,7 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // a lamp reads the same whichever shader class the mapper reached for.
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
     const float scale = emission.strength * kSourceEmissionHdrScale / luma;
-    desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
+    desc.emissive     = {emission.tint.x * scale, emission.tint.y * scale, emission.tint.z * scale, 1.0f};
 
     // The additive term carries the surface's own art whenever the material
     // builder did not already say so: a screen glows with its picture, not
@@ -906,11 +907,11 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     // already dimmed to the missing-texture grey, and that is all it should
     // read as.
     if (unlitByConstruction && !vmt.baseTexture.empty() && !vfs.ResolveTexture(vmt.baseTexture).has_value()) {
-        desc.emissive = JPH::Float4(0.0f, 0.0f, 0.0f, 1.0f);
+        desc.emissive = {0.0f, 0.0f, 0.0f, 1.0f};
     }
 }
 
-auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
+auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash   = HashAssetPath(path);
     const auto     cached = assetMgr.GetCachedPrefab(hash);
     if (cached) {
@@ -922,12 +923,29 @@ auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view 
         LogWarning("BSP Importer: failed to read {}", path);
         return std::nullopt;
     }
-    return LoadBSPPrefabFromMemory(ctx, assetMgr, *bytes, path, options);
+    return LoadBSPPrefabFromMemory(ctx, assetMgr, physics, *bytes, path, options);
+}
+
+auto LoadBSPPrefab(Engine& engine, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash   = HashAssetPath(path);
+    auto           assets = engine.Assets();
+    const auto     cached = assets.CachedPrefab(hash);
+    if (cached) {
+        return cached;
+    }
+
+    const auto bytes = ReadWholeFile(path);
+    if (!bytes) {
+        LogWarning("BSP Importer: failed to read {}", path);
+        return std::nullopt;
+    }
+    return LoadBSPPrefabFromMemory(engine, *bytes, path, options);
 }
 
 auto LoadBSPPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            /*physics*/,
     std::span<const std::byte> bytes,
     std::string_view           virtualPath,
     const ImportOptions&       options
@@ -946,7 +964,29 @@ auto LoadBSPPrefabFromMemory(
     return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
 }
 
-auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, const ImportOptions& options) -> size_t {
+auto LoadBSPPrefabFromMemory(
+    Engine&                    engine,
+    std::span<const std::byte> bytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options
+) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash   = HashAssetPath(virtualPath);
+    auto           assets = engine.Assets();
+    const auto     cached = assets.CachedPrefab(hash);
+    if (cached) {
+        return cached;
+    }
+
+    const auto parsed = ParseBsp(bytes);
+    if (!parsed) {
+        LogWarning("BSP Importer: {}: {}", virtualPath, parsed.error());
+        return std::nullopt;
+    }
+    auto gfx = engine.Graphics();
+    return BuildModelPrefab(gfx, assets, *parsed, virtualPath, options);
+}
+
+auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, const ImportOptions& options) -> size_t {
     SourceVFS vfs;
     if (!options.assetRoot.empty()) {
         vfs.AddSearchPath(options.assetRoot);
@@ -955,7 +995,7 @@ auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap
     size_t loaded = 0;
     for (const auto& sp: map.staticProps) {
         if (!sp.modelName.empty()) {
-            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options); model.has_value()) {
+            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, sp.modelName, options); model.has_value()) {
                 ++loaded;
             }
         }
@@ -964,7 +1004,34 @@ auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap
     for (const auto& ent: map.entities) {
         const std::string_view model = ent.Find("model");
         if (model.ends_with(".mdl")) {
-            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, options); m.has_value()) {
+            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, model, options); m.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+
+    return loaded;
+}
+
+auto PreloadStaticProps(Engine& engine, const BSPMap& map, const ImportOptions& options) -> size_t {
+    SourceVFS vfs;
+    if (!options.assetRoot.empty()) {
+        vfs.AddSearchPath(options.assetRoot);
+    }
+
+    size_t loaded = 0;
+    for (const auto& sp: map.staticProps) {
+        if (!sp.modelName.empty()) {
+            if (const auto model = LoadStudioModelPrefab(engine, vfs, sp.modelName, options); model.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+
+    for (const auto& ent: map.entities) {
+        const std::string_view model = ent.Find("model");
+        if (model.ends_with(".mdl")) {
+            if (const auto m = LoadStudioModelPrefab(engine, vfs, model, options); m.has_value()) {
                 ++loaded;
             }
         }

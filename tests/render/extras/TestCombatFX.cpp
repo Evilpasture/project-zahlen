@@ -1,10 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -49,7 +50,6 @@ struct CombatFXTestSuite {
             .fullscreen     = false,
             .validationMode = ZHLN::ValidationMode::On,
             .headless       = true,
-            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);
@@ -58,7 +58,6 @@ struct CombatFXTestSuite {
         }
 
         auto engine = std::move(engineRes.value());
-        engine->InitializeDefaultScene();
         return engine;
     }
 
@@ -68,11 +67,11 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> surface_presets_and_decal_instantiation() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             ZHLN::CombatFX::System combatFX;
             combatFX.Init(*engine);
@@ -91,24 +90,27 @@ struct CombatFXTestSuite {
             );
 
             // 1. Spawn Impact on Preset 0 (Concrete / Solid -> spawns Decal)
-            const JPH::Vec3 hitPos1(5.0f, 1.5f, 0.0f);
-            const JPH::Vec3 hitNorm1(0.0f, 1.0f, 0.0f);
+            const ZHLN::FVec3 hitPos1{5.0f, 1.5f, 0.0f};
+            const ZHLN::FVec3 hitNorm1{0.0f, 1.0f, 0.0f};
             combatFX.SpawnImpact(*engine, hitPos1, hitNorm1, 0);
 
             // 2. Spawn Impact on Preset 1 (Flesh / Organic -> spawnDecal is false)
-            const JPH::Vec3 hitPos2(10.0f, 1.5f, 0.0f);
-            const JPH::Vec3 hitNorm2(0.0f, 0.0f, 1.0f);
+            const ZHLN::FVec3 hitPos2{10.0f, 1.5f, 0.0f};
+            const ZHLN::FVec3 hitNorm2{0.0f, 0.0f, 1.0f};
             combatFX.SpawnImpact(*engine, hitPos2, hitNorm2, 1);
 
             // 3. Spawn Impact on Custom Preset 4 (Glass -> spawnDecal is false)
-            const JPH::Vec3 hitPos3(15.0f, 1.5f, 0.0f);
-            const JPH::Vec3 hitNorm3(-1.0f, 0.0f, 0.0f);
+            const ZHLN::FVec3 hitPos3{15.0f, 1.5f, 0.0f};
+            const ZHLN::FVec3 hitNorm3{-1.0f, 0.0f, 0.0f};
             combatFX.SpawnImpact(*engine, hitPos3, hitNorm3, 4);
 
-            // Playback ECB to instantiate queued decal entities
+            // The bare entity exists immediately, but decal components remain
+            // invisible until the caller-owned main buffer is played back.
+            ZHLN::Test::ExpectTrue(reg.EntitiesWith<ZHLN::Components::DecalComponent>().empty());
+            ZHLN::Test::ExpectTrue(!engine->Commands().Empty());
             engine->Commands().Playback();
 
-            const auto decalEntities = reg.GetEntitiesWith<ZHLN::Components::DecalComponent>();
+            const auto decalEntities = reg.EntitiesWith<ZHLN::Components::DecalComponent>();
 
             // Invariant: Exactly 1 decal entity spawned (from Preset 0)
             ZHLN::Test::ExpectEq(decalEntities.size(), 1u);
@@ -122,9 +124,9 @@ struct CombatFXTestSuite {
                 }
 
                 // Verify decal was placed at hit position
-                ZHLN::Test::ExpectEq(transComp->position.x, hitPos1.GetX());
-                ZHLN::Test::ExpectEq(transComp->position.y, hitPos1.GetY());
-                ZHLN::Test::ExpectEq(transComp->position.z, hitPos1.GetZ());
+                ZHLN::Test::ExpectEq(transComp->position.x, hitPos1.x);
+                ZHLN::Test::ExpectEq(transComp->position.y, hitPos1.y);
+                ZHLN::Test::ExpectEq(transComp->position.z, hitPos1.z);
                 ZHLN::Test::ExpectTrue(decalComp->albedoMap != ZHLN::TextureID::Invalid);
             }
 
@@ -136,7 +138,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> ballistic_tracer_progression_and_termination() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
@@ -144,8 +146,8 @@ struct CombatFXTestSuite {
             combatFX.Init(*engine);
 
             // Spawn a 100m tracer traveling at 200 m/s (travel time: exactly 0.5s)
-            const JPH::Vec3 from(0.0f, 2.0f, 0.0f);
-            const JPH::Vec3 to(0.0f, 2.0f, 100.0f);
+            const ZHLN::FVec3 from{0.0f, 2.0f, 0.0f};
+            const ZHLN::FVec3 to{0.0f, 2.0f, 100.0f};
             combatFX.SpawnTracer(from, to, 200.0f, 2.5f);
 
             constexpr float dt = 1.0f / 60.0f;
@@ -176,7 +178,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> shockwave_rings_and_particle_physics() {
             auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
             }
 
@@ -184,12 +186,12 @@ struct CombatFXTestSuite {
             combatFX.Init(*engine);
 
             // 1. Spawn Expanding Kinetic Shockwave Ring (duration: 0.25s)
-            const JPH::Vec3 ringOrigin(0.0f, 0.5f, 0.0f);
-            const JPH::Vec3 ringNormal(0.0f, 1.0f, 0.0f);
+            const ZHLN::FVec3 ringOrigin{0.0f, 0.5f, 0.0f};
+            const ZHLN::FVec3 ringNormal{0.0f, 1.0f, 0.0f};
             combatFX.SpawnShockwaveRing(ringOrigin, ringNormal, 3.0f, 0.25f);
 
             // 2. Spawn Surface Impact Sparks (Metal preset 2: 16 sparks, gravity: -14.0, maxLife: ~0.35s)
-            combatFX.SpawnImpact(*engine, JPH::Vec3(0.0f, 1.0f, 0.0f), JPH::Vec3(0.0f, 1.0f, 0.0f), 2);
+            combatFX.SpawnImpact(*engine, ZHLN::FVec3{0.0f, 1.0f, 0.0f}, ZHLN::FVec3{0.0f, 1.0f, 0.0f}, 2);
 
             constexpr float dt = 1.0f / 60.0f;
 

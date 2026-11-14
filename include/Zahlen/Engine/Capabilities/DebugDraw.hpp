@@ -6,14 +6,15 @@
 // caller describes what to draw, it does not borrow a mutable scene container.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <span>
 
 namespace ZHLN {
 
-class Float3;
-class Float4;
 struct SceneData;
+struct LineSegment;
 struct BillboardQuad;
 struct ParticleEmitterSubmission;
 struct MeshParticleEmitterSubmission;
@@ -22,8 +23,9 @@ struct VertexSurface;
 
 class ZHLN_API DebugDraw {
   public:
-    void AddLine(const Float3& start, const Float3& end, const Float4& color);
-    void AddLine(const Float3& start, const Float3& end, const Float4& colorStart, const Float4& colorEnd);
+    void AddLine(const FVec3& start, const FVec3& end, const FVec4& color);
+    void AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd);
+    [[nodiscard]] auto Lines() const noexcept -> std::span<const LineSegment>;
     void AddBillboards(TextureID texture, std::span<const BillboardQuad> quads, bool additive);
     void AddDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces);
     void Clear() noexcept;

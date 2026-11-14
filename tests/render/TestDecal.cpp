@@ -1,7 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -84,7 +87,7 @@ struct DecalTestSuite {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             // 1. Create a 64x64 bright yellow procedural decal texture
@@ -97,13 +100,13 @@ struct DecalTestSuite {
             }
 
             // 2. Spawn Decal Entity with DecalComponent
-            const JPH::Vec3  decalPos(0.0f, 1.5f, 0.0f);
-            const JPH::Quat  decalRot = JPH::Quat::sIdentity();
-            const JPH::Vec3  decalScale(1.5f, 1.5f, 2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, decalRot, decalScale);
+            const ZHLN::FVec3  decalPos{0.0f, 1.5f, 0.0f};
+            const auto decalRot = ZHLN::Quat::Identity();
+            const ZHLN::FVec3  decalScale{1.5f, 1.5f, 2.0f};
+            const auto worldMat = ZHLN::ComposeTransform(decalPos, decalRot, decalScale);
 
-            const ZHLN::Entity decalEnt = reg.Create();
-            reg.Add(
+            const ZHLN::Entity decalEnt = reg.Spawn();
+            reg.Attach(
                 decalEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("TestDecalEntity")},
                 ZHLN::Components::TransformComponent {.position = decalPos, .rotation = decalRot, .scale = decalScale},
                 ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
@@ -138,32 +141,30 @@ struct DecalTestSuite {
             // step runs every tick.
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 1.5f, 2.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f}; // Look directly along -Z
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
-            cam.yaw      = -90.0f; // Look directly along -Z
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
 
             // The extras rig must not fight the test's explicit camera
             // framing: author the rig state directly (the frame step only
             // re-seeds defaults when the component is missing).
-            auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            auto camEnts = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!camEnts.empty()) {
-                reg.Add(
+                reg.Attach(
                     camEnts[0],
                     ZHLN::CameraRig::TargetCameraComponent {
                         .target  = ZHLN::Entity::Null(),
@@ -188,13 +189,13 @@ struct DecalTestSuite {
             ZHLN::TextureID redDecalTex = rc.CreateProceduralTexture("vfx_test_decal_red", {64, 64}, redPixels, true);
 
             // 4. Spawn Decal centered on the wall (at Z = -2.0m, Scale 2.5m x 2.5m x 2.0m depth)
-            const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
-            const JPH::Quat  decalRot = JPH::Quat::sIdentity();
-            const JPH::Vec3  decalScale(2.5f, 2.5f, 2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, decalRot, decalScale);
+            const ZHLN::FVec3  decalPos{0.0f, 1.5f, -2.0f};
+            const auto decalRot = ZHLN::Quat::Identity();
+            const ZHLN::FVec3  decalScale{2.5f, 2.5f, 2.0f};
+            const auto worldMat = ZHLN::ComposeTransform(decalPos, decalRot, decalScale);
 
-            const ZHLN::Entity decalEnt = reg.Create();
-            reg.Add(
+            const ZHLN::Entity decalEnt = reg.Spawn();
+            reg.Attach(
                 decalEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("ProjectedRedDecal")},
                 ZHLN::Components::TransformComponent {.position = decalPos, .rotation = decalRot, .scale = decalScale},
                 ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
@@ -258,18 +259,19 @@ struct DecalTestSuite {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
             auto rc = engine->Graphics();
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 1.5f, 2.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
 
             // 1. Front Wall at Z = -2.0m (Inside decal projection volume)
             ZHLN::PrefabFactory::CreateBox(
@@ -287,12 +289,12 @@ struct DecalTestSuite {
             auto                bluePixels   = GenerateCircularDecalTexture(64, 0, 120, 255);
             ZHLN::TextureID blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", {64, 64}, bluePixels, true);
 
-            const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
-            const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, {0.0f, 0.0f, 0.0f, 1.0f}, {1.5f, 1.5f, 1.0f});
+            const ZHLN::FVec3  decalPos{0.0f, 1.5f, -2.0f};
+            const auto worldMat = ZHLN::ComposeTransform(decalPos, ZHLN::Quat::Identity(), {1.5f, 1.5f, 1.0f});
 
-            const ZHLN::Entity decalEnt = reg.Create();
-            reg.Add(
-                decalEnt, ZHLN::Components::TransformComponent {.position = decalPos, .scale = JPH::Vec3(1.5f, 1.5f, 1.0f)},
+            const ZHLN::Entity decalEnt = reg.Spawn();
+            reg.Attach(
+                decalEnt, ZHLN::Components::TransformComponent {.position = decalPos, .scale = ZHLN::FVec3{1.5f, 1.5f, 1.0f}},
                 ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
                 ZHLN::Components::DecalComponent {.albedoMap = blueDecalTex}
             );

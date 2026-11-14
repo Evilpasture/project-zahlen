@@ -4,15 +4,11 @@
 module;
 
 // --- Global Module Fragment: Preprocessor Directives Only ---
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 
@@ -41,8 +37,8 @@ export struct LightningComponent {
     float currentKA      = 0.0f;
     float flashLuminance = 0.0f;
 
-    JPH::Vec3 cloudOrigin  = JPH::Vec3::sZero();
-    JPH::Vec3 groundTarget = JPH::Vec3::sZero();
+    FVec3 cloudOrigin  = FVec3::Zero();
+    FVec3 groundTarget = FVec3::Zero();
 
     BufferID vboPos          = BufferID::Invalid;
     BufferID vboFrame        = BufferID::Invalid;
@@ -60,9 +56,11 @@ export struct LightningComponent {
 
 namespace Lightning {
 
-export auto Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg = {}) -> Entity;
+export auto Spawn(Engine& engine, ZHLN::DVec3 cloudPos, ZHLN::DVec3 groundPos, const LightningConfig& cfg = {}) -> Entity;
 
-export auto Update(Engine& engine, float dt) -> void;
+// Rendering support shared with the resolved update implementation.
+// The update itself is declared in <VFX/LightningUpdate.hpp>.
+export void RebuildBuffers(LightningComponent& bolt, GraphicsDevice graphics, FVec3 cameraPosition);
 
 // Explicit replacement/removal of a resource-owning LightningComponent.
 export void Attach(Engine& engine, Entity entity, LightningComponent component);

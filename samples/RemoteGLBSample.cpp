@@ -85,11 +85,17 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/QualityPresets.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -101,8 +107,8 @@
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -129,10 +135,6 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -149,6 +151,9 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 // ============================================================================
 // WHAT TO FETCH
@@ -198,14 +203,14 @@ inline constexpr float kAmbientExposure = 4.00f; // scales the baked SH fill *an
 // reads the lit buffer, and the gradient below is what fills it (and what a
 // ray-traced reflection paints where its ray leaves the scene). This is the lever
 // that makes brushed metal read as metal.
-inline const JPH::Vec4 kSkyZenith {0.35f, 0.42f, 0.55f, 1.0f};
-inline const JPH::Vec4 kSkyHorizon {0.90f, 0.92f, 0.96f, 1.0f};
-inline const JPH::Vec4 kSkyGround {0.06f, 0.06f, 0.07f, 1.0f};
+inline const FVec4 kSkyZenith {0.35f, 0.42f, 0.55f, 1.0f};
+inline const FVec4 kSkyHorizon {0.90f, 0.92f, 0.96f, 1.0f};
+inline const FVec4 kSkyGround {0.06f, 0.06f, 0.07f, 1.0f};
 
 // Key light. Directional, so it needs no distance compensation.
 inline constexpr float kSunIntensity = 60.0f;
-inline const JPH::Vec3 kSunColor {1.00f, 0.97f, 0.92f};
-inline const JPH::Vec3 kSunDirection {0.45f, 1.00f, 0.30f};
+inline const FVec3 kSunColor {1.00f, 0.97f, 0.92f};
+inline const FVec3 kSunDirection {0.45f, 1.00f, 0.30f};
 
 // Two point/spot fills, quoted per square metre of subject: a point light falls off
 // as 1/(d^2 + 1) and the rig sits at a distance proportional to the subject's
@@ -213,8 +218,8 @@ inline const JPH::Vec3 kSunDirection {0.45f, 1.00f, 0.30f};
 // car. At the helmet's ~0.5 m that is 25 and 40 — was 70/110 which blew the floor.
 inline constexpr float kFillIntensityPerM2 = 100.0f;
 inline constexpr float kRimIntensityPerM2  = 160.0f;
-inline const JPH::Vec3 kFillColor {0.55f, 0.72f, 1.00f}; // cool, from the front-left
-inline const JPH::Vec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-right
+inline const FVec3 kFillColor {0.55f, 0.72f, 1.00f}; // cool, from the front-left
+inline const FVec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-right
 
 // Floor: dark and glossy enough to show SSR/RTR reflections without blowing out
 // point-light specular. 0.22 was too sharp (blown highlights on RTX 3050),
@@ -222,7 +227,7 @@ inline const JPH::Vec3 kRimColor {1.00f, 0.72f, 0.45f};  // warm, from behind-ri
 // (alpha=0.078) with 1 SPP sparkle like sparkling water. 0.03 is mirror tier
 // (<0.04): warp-coherent full-res ray, no VNDF jitter, no half-res upsample,
 // clean reflection. Keep dark color so mirror is not blown.
-inline const JPH::Vec4 kFloorColor {0.08f, 0.09f, 0.11f, 1.0f};
+inline const FVec4 kFloorColor {0.08f, 0.09f, 0.11f, 1.0f};
 inline constexpr float kFloorRoughness = 0.03f;
 inline constexpr float kFloorExtent    = 5.0f; // wider to catch reflections at oblique angles
 
@@ -443,9 +448,9 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
 struct Subject {
     ZHLN::ModelPrefab*        prefab    = nullptr;
     std::vector<ZHLN::Entity> instances {};
-    JPH::Vec3                 center    = JPH::Vec3::sZero();
-    JPH::Vec3                 boundsMin = JPH::Vec3::sZero();
-    JPH::Vec3                 boundsMax = JPH::Vec3::sZero();
+    FVec3                 center    = FVec3::Zero();
+    FVec3                 boundsMin = FVec3::Zero();
+    FVec3                 boundsMax = FVec3::Zero();
     float                     radius    = 1.0f;
     uint32_t                  triangles = 0;
     uint32_t                  textures  = 0;
@@ -455,11 +460,11 @@ struct Subject {
 // A part's node transform, accumulated up the hierarchy -- the same product
 // PrefabFactory::InstantiatePrefab places the part with, and the same walk
 // ProceduralAnimationSample uses to estimate a character's bounds.
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
+[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
         transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
@@ -474,35 +479,35 @@ struct Subject {
 // and a union of untransformed boxes would be a different box. The world AABB of
 // an oriented box is its centre plus the absolute contributions of its three
 // transformed half axes, which is exact for a rotation and a uniform scale.
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3& outMax) {
-    outMin = JPH::Vec3(1e9f, 1e9f, 1e9f);
-    outMax = JPH::Vec3(-1e9f, -1e9f, -1e9f);
+void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax) {
+    outMin = FVec3(1e9f, 1e9f, 1e9f);
+    outMax = FVec3(-1e9f, -1e9f, -1e9f);
 
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
+        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const FVec3  localCenter = (localMin + localMax) * 0.5f;
+        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
 
-        const JPH::Vec3 center = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const JPH::Vec3 extent = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
-                                 (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
+        const FVec3 center = ZHLN::TransformPoint(model, localCenter);
+        const FVec3 extent = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                 (model.Column(2).XYZ() * halfExtent.z).Abs();
 
-        outMin = JPH::Vec3::sMin(outMin, center - extent);
-        outMax = JPH::Vec3::sMax(outMax, center + extent);
+        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
+        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
     }
 
     if (prefab.parts.empty()) {
-        outMin = JPH::Vec3(-1.0f, -1.0f, -1.0f);
-        outMax = JPH::Vec3(1.0f, 1.0f, 1.0f);
+        outMin = FVec3(-1.0f, -1.0f, -1.0f);
+        outMax = FVec3(1.0f, 1.0f, 1.0f);
     }
 }
 
 void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
-        if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
+        if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -520,7 +525,7 @@ void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
 // Draco-compressed asset this importer cannot decode, a binary it cannot parse --
 // leaves the previous subject on screen instead of an empty turntable.
 auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath);
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine, bytes, virtualPath);
     if (!prefab) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
@@ -570,8 +575,8 @@ auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8
     subject.loaded = true;
     ZHLN::Log(
         "[RemoteGLB] Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
-        virtualPath, prefab->parts.size(), prefab->nodes.size(), subject.triangles, subject.textures, subject.center.GetX(), subject.center.GetY(),
-        subject.center.GetZ(), subject.radius, written
+        virtualPath, prefab->parts.size(), prefab->nodes.size(), subject.triangles, subject.textures, subject.center.x, subject.center.y,
+        subject.center.z, subject.radius, written
     );
     return true;
 }
@@ -594,27 +599,26 @@ struct Studio {
     ZHLN::Engine&    engine,
     std::string_view name,
     ZHLN::LightType  type,
-    JPH::Vec3Arg     position,
-    JPH::Vec3Arg     color,
+    FVec3     position,
+    FVec3     color,
     float            intensity,
     float            radius,
     float            range,
-    JPH::Vec3Arg     direction
+    FVec3     direction
 ) -> ZHLN::Entity {
-    auto&            reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    const JPH::Mat44 world = ZHLN::Math::CreateTransform(position, {0.0f, 0.0f, 0.0f, 1.0f});
-    return reg.Create(
+    const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), FVec3::One());
+    return engine.Entities().Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
-        ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
         ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
         ZHLN::Components::LightComponent {.type = type, .color = color, .intensity = intensity, .radius = radius, .direction = direction, .range = range}
     );
 }
 
 void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: {studio.sun, studio.fill, studio.rim, studio.floor}) {
-        if (entity != ZHLN::Entity::Null() && reg.IsAlive(entity)) {
+        if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
@@ -625,7 +629,7 @@ void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
 }
 
 void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
-    ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
+    engine.Entities().Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
         if (studio.floorOn) {
             mesh.flags &= ~ZHLN::DrawFlags::Hidden;
         } else {
@@ -638,8 +642,9 @@ void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
 // The floor-shimmer diagnostic: if the flicker follows the subject into
 // invisibility, it is the subject's shadow or reflection, not the floor.
 void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studio& studio) {
+    auto entities = engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
-        ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
+        entities.Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
             if (studio.subjectOn) {
                 mesh.flags &= ~ZHLN::DrawFlags::Hidden;
             } else {
@@ -654,21 +659,21 @@ void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studi
 // function is what lets a device-lost recovery rebuild it in one call.
 void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     ClearStudio(engine, studio);
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
     const float     radius = subject.radius;
-    const JPH::Vec3 center = subject.center;
+    const FVec3 center = subject.center;
 
-    studio.sun = MakeLight(engine, "StudioSun", ZHLN::LightType::Sun, center + JPH::Vec3(radius * 10.0f, radius * 20.0f, radius * 10.0f), kSunColor,
+    studio.sun = MakeLight(engine, "StudioSun", ZHLN::LightType::Sun, center + FVec3(radius * 10.0f, radius * 20.0f, radius * 10.0f), kSunColor,
                            kSunIntensity, 0.0f, 0.0f, kSunDirection.Normalized());
 
     // Cool fill from the front-left, warm rim from behind-right: the two specular
     // highlights that separate a metal surface from a silhouette. Neither asks to
     // cast, so the shadow atlas hands them no tile.
-    studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + JPH::Vec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
-                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, JPH::Vec3::sZero());
-    studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + JPH::Vec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
-                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, JPH::Vec3::sZero());
+    studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + FVec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
+                            kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::Zero());
+    studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + FVec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
+                            kRimIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, FVec3::Zero());
 
     // The floor sits on the subject's lowest point, and is wide enough to catch a
     // reflection at any orbit angle without reaching the camera's far plane. Two
@@ -683,18 +688,18 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     ZHLN::MaterialDesc floorDesc;
     floorDesc.metallic  = 0.0f;
     floorDesc.roughness = kFloorRoughness;
-    floorDesc.baseColor = {kFloorColor.GetX(), kFloorColor.GetY(), kFloorColor.GetZ(), kFloorColor.GetW()};
+    floorDesc.baseColor = {kFloorColor.x, kFloorColor.y, kFloorColor.z, kFloorColor.w};
     const ZHLN::Material floorMaterial = engine.Graphics().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
 
     studio.floor = ZHLN::PrefabFactory::CreatePlane(
         engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
-            .position         = {center.GetX(), subject.boundsMin.GetY(), center.GetZ()},
+            .position         = {center.x, subject.boundsMin.y, center.z},
             .createPhysics    = false,
             .materialOverride = floorMaterial,
         }
     );
-    reg.Assign<ZHLN::Components::NameComponent>(studio.floor, "StudioFloor");
+    entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
     SetFloorVisible(engine, studio);
 }
 
@@ -718,7 +723,7 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // one left running.
 [[nodiscard]] auto MakeStudioSettings(float subjectRadius, bool rayTraced) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
-    gfx.ApplyPreset(ZHLN::QualityLevel::Ultra);
+    ZHLN::ApplyPreset(gfx, ZHLN::QualityLevel::Ultra);
 
     // --- sharpness vs noise tradeoff:
     // Ultra defaults (16 GI samples + 3 atrous passes) smear albedo like an oil
@@ -740,7 +745,6 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // by default to keep the cascade PCSS penumbra (analytic, not noisy).
     // ZHLN_REMOTE_GLB_RTR=1 enables full RT (shadows + reflections) via env.
     gfx.post.enableSSR               = 1;
-    gfx.post.enableRTR               = 1;
     gfx.rayTracing.enableReflections = true;
     gfx.rayTracing.enableShadows     = rayTraced;
 
@@ -776,9 +780,9 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // the scene, and the backdrop behind the subject. ambientExposure scales both
     // it and the baked SH fill.
     gfx.environment.ambientExposure = kAmbientExposure;
-    gfx.environment.skyZenith       = {kSkyZenith.GetX(), kSkyZenith.GetY(), kSkyZenith.GetZ(), kSkyZenith.GetW()};
-    gfx.environment.skyHorizon      = {kSkyHorizon.GetX(), kSkyHorizon.GetY(), kSkyHorizon.GetZ(), kSkyHorizon.GetW()};
-    gfx.environment.skyGround       = {kSkyGround.GetX(), kSkyGround.GetY(), kSkyGround.GetZ(), kSkyGround.GetW()};
+    gfx.environment.skyZenith       = {kSkyZenith.x, kSkyZenith.y, kSkyZenith.z, kSkyZenith.w};
+    gfx.environment.skyHorizon      = {kSkyHorizon.x, kSkyHorizon.y, kSkyHorizon.z, kSkyHorizon.w};
+    gfx.environment.skyGround       = {kSkyGround.x, kSkyGround.y, kSkyGround.z, kSkyGround.w};
     gfx.environment.useLocalProbe   = 0;
     gfx.environment.fullBright      = 0;
 
@@ -800,91 +804,13 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     return gfx;
 }
 
-// Writes a GraphicsSettings back into the ECS editing surface the renderer
-// collects from every frame: post/GI/environment on the global-settings entity,
-// shadows and ray tracing beside it, AA on the main camera. Core's
-// ApplyQualityPreset performs the same write-back but lives in src/engine/system,
-// so the sample writes the components itself -- which is also the honest way to
-// show what a preset is.
-//
-// Registry::Add replaces an existing instance, so the settings components are
-// built whole from the model. AA is the exception: the main camera owns that
-// component, so a tier change patches its knobs in place instead of replacing
-// the component.
+// Hands a GraphicsSettings to the device that owns them. The whole value goes
+// across in one call, so the renderer sees one transition rather than a field
+// at a time -- which is also the honest way to show what a preset is.
 void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (settings == ZHLN::Entity::Null()) {
-        ZHLN::Log("[RemoteGLB] No global-settings entity; the render settings have nowhere to go.");
-        return;
-    }
-
-    reg.Add(
-        settings,
-        ZHLN::Components::PostProcessSettingsComponent {
-            .giMode            = gfx.post.mode,
-            .aoRadius          = gfx.post.aoRadius,
-            .aoBias            = gfx.post.aoBias,
-            .aoPower           = gfx.post.aoPower,
-            .giIntensity       = gfx.post.giIntensity,
-            .giSamples         = gfx.post.giSamples,
-            .useLocalProbe     = gfx.environment.useLocalProbe,
-            .vignetteIntensity = gfx.post.vignetteIntensity,
-            .vignettePower     = gfx.post.vignettePower,
-            .glowIntensity     = gfx.post.glowIntensity,
-            .enableSSR         = gfx.post.enableSSR,
-            .enableRTR         = gfx.post.enableRTR,
-            .fullBright        = gfx.environment.fullBright,
-            .exposure          = gfx.post.exposure,
-            .bloomStrength     = gfx.post.bloomStrength,
-            .contrast          = gfx.post.contrast,
-            .saturation        = gfx.post.saturation,
-            .tonemapper        = gfx.post.tonemapper,
-            .colorFilter       = gfx.post.colorFilter,
-            .ambientExposure   = gfx.environment.ambientExposure,
-            .probeMin          = gfx.environment.probeMin,
-            .probeMax          = gfx.environment.probeMax,
-            .probePos          = gfx.environment.probePos,
-            .skyZenith         = gfx.environment.skyZenith,
-            .skyHorizon        = gfx.environment.skyHorizon,
-            .skyGround         = gfx.environment.skyGround,
-        }
-    );
-    reg.Add(
-        settings,
-        ZHLN::Components::ShadowSettingsComponent {
-            .shadowWidth      = gfx.shadows.width,
-            .shadowResolution = static_cast<int>(gfx.shadows.resolution),
-            .sunSize          = gfx.shadows.sunSize,
-        }
-    );
-    reg.Add(settings, ZHLN::Components::RayTracingSettingsComponent {.config = gfx.rayTracing});
-
-    // AA lives on the main camera in the default scene, which is where the
-    // collector looks for it first.
-    const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-    if (camera == ZHLN::Entity::Null()) {
-        return;
-    }
-    if (!reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
-            aa.state.mode                  = gfx.antiAliasing.mode;
-            aa.state.fxaaSubpix            = gfx.antiAliasing.fxaaSubpix;
-            aa.state.fxaaEdgeThreshold     = gfx.antiAliasing.fxaaEdgeThreshold;
-            aa.state.fxaaEdgeThresholdMin  = gfx.antiAliasing.fxaaEdgeThresholdMin;
-        })) {
-        reg.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
-    }
+    engine.Graphics().ApplySettings(gfx);
 }
 
-// The stage (floor, framing, zoom range) scales with the subject's radius, but
-// these two frustum-level quantities used to be clamped to flat metre-scale
-// ceilings. A subject over ~2.7 m in radius outran them: the far plane stopped
-// 2000 m out while the zoom range (60 r) and the 5 r floor ran past it, so the
-// floor's far edge -- and eventually the subject itself -- clipped at far zoom
-// (this is what Fox hit: it is authored in centimetres, so its 87.775 m "radius"
-// is really 0.88 m of geometry). The ceilings are now each formula's own value
-// at the far end of the zoom range, which is exactly 2000/400 for every model
-// the old caps were enough for.
 [[nodiscard]] constexpr auto FrameFarPlane(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
     const float ceiling = std::max(2000.0f, (maxDistance * 12.0f) + (subjectRadius * 24.0f));
     return std::clamp((orbitDistance * 12.0f) + (subjectRadius * 24.0f), 20.0f, ceiling);
@@ -897,21 +823,18 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 
 // The caster-culling ortho box is centred on the camera, so it has to grow with
 // the orbit or the subject leaves it and stops casting. Written only when it moves
-// by more than 2%: the collector reads the component every frame anyway, and a
-// value that changed with every pixel of wheel travel would be noise.
+// by more than 2%: a value that changed with every pixel of wheel travel would
+// be noise.
 void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
-    const float        wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
-    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [wanted](auto& shadow) -> auto {
-        if (std::abs(shadow.shadowWidth - wanted) > (wanted * 0.02f)) {
-            shadow.shadowWidth = wanted;
+    const float wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
+    engine.Graphics().PatchSettings([wanted](auto& gfx) {
+        if (std::abs(gfx.shadows.width - wanted) > (wanted * 0.02f)) {
+            gfx.shadows.width = wanted;
         }
     });
 }
 
-// QualityLevel and AAMode log as integers -- GraphicsSettingsSync names the tiers
-// by hand for the same reason -- so the HUD spells them out.
+// QualityLevel and AAMode log as integers, so the HUD spells them out.
 [[nodiscard]] constexpr auto QualityName(ZHLN::QualityLevel level) noexcept -> std::string_view {
     switch (level) {
         case ZHLN::QualityLevel::Low: return "Low";
@@ -937,8 +860,8 @@ void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbi
 // ============================================================================
 
 struct OrbitCamera {
-    JPH::Vec3 target         = JPH::Vec3::sZero();
-    JPH::Vec3 wantedTarget   = JPH::Vec3::sZero();
+    FVec3 target         = FVec3::Zero();
+    FVec3 wantedTarget   = FVec3::Zero();
     float     distance       = 3.0f;
     float     wantedDistance = 3.0f;
     float     yaw            = -90.0f;
@@ -950,16 +873,16 @@ struct OrbitCamera {
 
 // The camera's own convention (Camera::GetViewMatrix): yaw and pitch build the
 // view direction, and the eye sits that far back along it from the target.
-[[nodiscard]] auto OrbitDirection(float yawDegrees, float pitchDegrees) noexcept -> JPH::Vec3 {
-    const float yaw   = JPH::DegreesToRadians(yawDegrees);
-    const float pitch = JPH::DegreesToRadians(pitchDegrees);
-    return JPH::Vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
+[[nodiscard]] auto OrbitDirection(float yawDegrees, float pitchDegrees) noexcept -> FVec3 {
+    const float yaw   = ZHLN::DegF {yawDegrees}.ToRadians().value;
+    const float pitch = ZHLN::DegF {pitchDegrees}.ToRadians().value;
+    return FVec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
 }
 
 // Puts the subject in frame: the bounding sphere at the vertical half-angle, with
 // the zoom clamps derived from the same radius.
 void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
-    const float distance = (subject.radius / std::tan(JPH::DegreesToRadians(orbit.fov) * 0.5f)) * kFrameMargin;
+    const float distance = (subject.radius / std::tan(ZHLN::DegF {orbit.fov}.ToRadians().value * 0.5f)) * kFrameMargin;
     orbit.target         = subject.center;
     orbit.wantedTarget   = subject.center;
     orbit.distance       = distance;
@@ -968,10 +891,10 @@ void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
     orbit.maxDistance    = std::max(subject.radius * 60.0f, 100.0f);
 }
 
-void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent& input, float dt) {
-    const bool  lmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool  rmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    const bool  mmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
+void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
+    const bool  lmb = input.IsMouseButtonDown(ZHLN::MouseButton::Left);
+    const bool  rmb = input.IsMouseButtonDown(ZHLN::MouseButton::Right);
+    const bool  mmb = input.IsMouseButtonDown(ZHLN::MouseButton::Middle);
     const float dx  = input.mouseDeltaX;
     const float dy  = input.mouseDeltaY;
 
@@ -982,12 +905,12 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
         // Pan in the view plane, grab-the-world way round: the subject follows the
         // cursor instead of running away from it. Right and up come from the view
         // direction the way extensions/Camera's target rig derives them.
-        const JPH::Vec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
-        JPH::Vec3       right   = forward.Cross(JPH::Vec3::sAxisY());
-        if (right.LengthSq() > 1e-6f) {
+        const FVec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
+        FVec3       right   = ZHLN::Cross(forward, FVec3::UnitY());
+        if (right.LengthSquared() > 1e-6f) {
             right = right.Normalized();
         }
-        const JPH::Vec3 up    = right.Cross(forward).Normalized();
+        const FVec3 up    = Cross(right, forward).Normalized();
         const float     scale = orbit.distance * kPanSpeed;
         orbit.wantedTarget += ((right * -dx) + (up * dy)) * scale;
     }
@@ -1008,23 +931,21 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
 }
 
 void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& subject) {
-    auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
-        return;
-    }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
-    camera.yaw           = orbit.yaw;
-    camera.pitch         = orbit.pitch;
-    camera.fov           = orbit.fov;
+    engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+        ZHLN::Camera& camera = cameraComp.camera;
+        camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
+        camera.yaw           = ZHLN::DegF{orbit.yaw};
+        camera.pitch         = ZHLN::DegF{orbit.pitch};
+        camera.fov           = ZHLN::DegF{orbit.fov};
 
-    // The cascade splits are fractions of [near, far], so a far plane that reaches
-    // the horizon puts the subject in a cascade fitted to kilometres. Keeping it
-    // just past the floor is what buys the shadow its texel density, and a near
-    // plane scaled to the orbit keeps the depth range narrow enough to resolve a
-    // millimetre of it.
-    camera.nearZ = std::clamp(orbit.distance * kNearPlaneScale, 0.01f, 0.5f);
-    camera.farZ  = FrameFarPlane(orbit.distance, orbit.maxDistance, subject.radius);
+        // The cascade splits are fractions of [near, far], so a far plane that reaches
+        // the horizon puts the subject in a cascade fitted to kilometres. Keeping it
+        // just past the floor is what buys the shadow its texel density, and a near
+        // plane scaled to the orbit keeps the depth range narrow enough to resolve a
+        // millimetre of it.
+        camera.nearZ = std::clamp(orbit.distance * kNearPlaneScale, 0.01f, 0.5f);
+        camera.farZ  = FrameFarPlane(orbit.distance, orbit.maxDistance, subject.radius);
+    });
 }
 
 // ============================================================================
@@ -1170,11 +1091,11 @@ void SelectModel(SampleState& state, int index) {
 
 // Edge detection for the handful of keys the sample owns: the level is in the
 // input singleton, the previous frame's level is here.
-[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::Components::InputStateComponent& input, ZHLN::KeyCode key) -> bool {
-    const uint8_t code = static_cast<uint8_t>(key);
-    const bool    down = input.IsKeyDownRaw(code);
-    const bool    was  = state.keyWasDown[code];
-    state.keyWasDown[code] = down;
+[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::InputState& input, ZHLN::KeyCode key) -> bool {
+    const size_t idx  = ZHLN::EnumIndex(key);
+    const bool   down = input.IsKeyDown(key);
+    const bool   was  = state.keyWasDown[idx];
+    state.keyWasDown[idx] = down;
     return down && !was;
 }
 
@@ -1239,20 +1160,11 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void HandleInput(ZHLN::Engine& engine, SampleState& state) {
-    auto&              reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto         entities = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
-    if (entities.empty()) {
-        return;
-    }
-    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(entities[0]);
-    if (!input) {
-        return;
-    }
-
-    if (input->needsResize) {
-        engine.Graphics().SetResolution(input->newSize);
-        reg.Patch<ZHLN::Components::InputStateComponent>(entities[0], [](auto& st) -> auto { st.needsResize = false; });
-    }
+    // One value snapshot for the helpers below, which are pure functions over
+    // InputState. Snapshot() hands out a copy, so nothing here aliases the
+    // engine's router.
+    const ZHLN::InputState  inputState = std::as_const(engine).Input().Snapshot();
+    const ZHLN::InputState* input      = &inputState;
 
     // The panel owns input inside its strip, the way the inspector's explorer
     // does: a drag that starts on the HUD is not a drag around the subject.
@@ -1263,8 +1175,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 
     if (KeyPressed(state, *input, ZHLN::KeyCode::F) && state.subject.loaded) {
         FrameSubject(state.orbit, state.subject);
-        ZHLN::Log("[RemoteGLB] Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.GetX(),
-                  state.subject.center.GetY(), state.subject.center.GetZ());
+        ZHLN::Log("[RemoteGLB] Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x,
+                  state.subject.center.y, state.subject.center.z);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::G) && state.studio.floor != ZHLN::Entity::Null()) {
         state.studio.floorOn = !state.studio.floorOn;
@@ -1276,10 +1188,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     // that says whether the shimmer is the reflection or the sun shadow.
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
-        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& p) -> auto { p.enableSSR = state.studio.ssrOn ? 1 : 0; });
-        }
+        engine.Graphics().PatchSettings([&](auto& gfx) { gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; });
         ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
@@ -1325,7 +1234,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         }
         ZHLN::GraphicsSettings gfx = MakeStudioSettings(state.subject.radius, state.rayTraced);
         if (tier.level != ZHLN::QualityLevel::Custom) {
-            gfx.ApplyPreset(tier.level);
+            ZHLN::ApplyPreset(gfx, tier.level);
             // Preset overwrote the sharpness tweaks — re-apply them. Ultra's
             // 3 atrous passes smear albedo, so cap the denoiser at 1 pass and
             // keep SMAA for Custom/Medium+, FXAA for Low.
@@ -1338,11 +1247,9 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
             // Medium+ get RT reflections for the floor, but RT shadows only
             // when ZHLN_REMOTE_GLB_RTR=1 to keep PCSS.
             if (tier.level == ZHLN::QualityLevel::Low) {
-                gfx.post.enableRTR               = 0;
                 gfx.rayTracing.enableReflections = false;
                 gfx.rayTracing.enableShadows     = false;
             } else {
-                gfx.post.enableRTR               = 1;
                 gfx.rayTracing.enableReflections = true;
                 gfx.rayTracing.enableShadows     = state.rayTraced;
             }
@@ -1359,8 +1266,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
-        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(gfx.DetectPreset()), gfx.shadows.resolution,
-                  gfx.post.giSamples, gfx.post.enableSSR, gfx.post.enableRTR, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
+        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution,
+                  gfx.post.giSamples, gfx.post.enableSSR, gfx.rayTracing.enableReflections, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
     }
 }
 
@@ -1429,7 +1336,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
             }
             ui.Text(
                 std::format("{}  |  {}  |  quality {}  |  {}  |  AO mode {}  |  {:.0f} fps", info.gpuName, info.rayTracingSupported ? "RT capable" : "no RT",
-                            QualityName(state.settings.DetectPreset()), AAName(state.settings.antiAliasing.mode), state.settings.post.mode, state.fps),
+                            QualityName(ZHLN::DetectPreset(state.settings)), AAName(state.settings.antiAliasing.mode), state.settings.post.mode, state.fps),
                 11.0f, {0.50f, 0.57f, 0.67f, 1.0f}
             );
             ui.Text("LMB orbit   RMB pan   wheel zoom", 12.0f, {0.72f, 0.78f, 0.86f, 1.0f});
@@ -1454,7 +1361,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
         .appName = "Zahlen :: Remote glTF",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
@@ -1501,8 +1407,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
     ZHLN::Animation::Install(*engine);
 
-    engine->InitializeDefaultScene();
-
     SampleState state;
     state.rayTraced   = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");
     state.frameBudget = EnvironmentU32("ZHLN_REMOTE_GLB_FRAMES", 0);
@@ -1519,8 +1423,7 @@ auto main(int argc, char* argv[]) -> int {
     // The turntable owns the camera, so core's WASD free-cam has to come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              reg    = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = engine->Entities().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
         }
     }

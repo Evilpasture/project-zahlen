@@ -674,9 +674,9 @@ struct BSPMaterialsTestSuite {
                 }
                 const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
                 if (!ZHLN::Test::ExpectInRange(emission.strength, 0.549f, 0.551f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetX(), 0.999f, 1.001f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetY(), 0.999f, 1.001f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetZ(), 0.999f, 1.001f)) {
+                    !ZHLN::Test::ExpectInRange(emission.tint.x, 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.y, 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.z, 0.999f, 1.001f)) {
                     return Fail();
                 }
 

@@ -4,6 +4,7 @@
 #include "PhysicsWorld.hpp"
 #include "Zahlen/Log.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
+#include <algorithm>
 #include <cstring>
 #include <new>
 #include <utility>
@@ -36,7 +37,7 @@ void AllocateTransformFrame(TransformFrame& frame, size_t cap) {
     frame.slotToDense       = AllocateAligned<uint32_t>(cap, CACHE_LINE);
     frame.denseToSlot       = AllocateAligned<uint32_t>(cap, CACHE_LINE);
     frame.slotGenerations   = AllocateAligned<uint32_t>(cap, CACHE_LINE);
-    frame.slotStates        = AllocateAligned<uint8_t>(cap, CACHE_LINE);
+    frame.slotStates        = AllocateAligned<SlotState>(cap, CACHE_LINE);
 
     std::memset(frame.positions, 0, cap * 4 * sizeof(JPH::Real));
     std::memset(frame.prevPositions, 0, cap * 4 * sizeof(JPH::Real));
@@ -48,7 +49,7 @@ void AllocateTransformFrame(TransformFrame& frame, size_t cap) {
     std::memset(frame.slotToDense, 0, cap * sizeof(uint32_t));
     std::memset(frame.denseToSlot, 0, cap * sizeof(uint32_t));
     std::memset(frame.slotGenerations, 0, cap * sizeof(uint32_t));
-    std::memset(frame.slotStates, 0, cap * sizeof(uint8_t));
+    std::fill_n(frame.slotStates, cap, SlotState::Empty);
 }
 
 void DeallocateTransformFrame(TransformFrame& frame) noexcept {
@@ -251,7 +252,7 @@ void BodyTable::Init(uint32_t maxBodies) {
     for (uint32_t i = 0; i < maxBodies; ++i) {
         generations[i].store(1u, std::memory_order::relaxed);
         StoreSlotState(i, SlotState::Empty);
-        slotMotionTypes[i].store(static_cast<uint8_t>(JPH::EMotionType::Static), std::memory_order::relaxed);
+        slotMotionTypes[i].store(JPH::EMotionType::Static, std::memory_order::relaxed);
         slotBodyIDs[i].store(JPH::BodyID::cInvalidBodyID, std::memory_order::relaxed);
         slotMaterialIDs[i].store(0u, std::memory_order::relaxed);
         freeSlots[i] = (maxBodies - 1u) - i;
@@ -297,7 +298,7 @@ auto BodyTable::ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH
     const uint32_t gen  = generations[slot].load(std::memory_order::acquire);
     spawnPositions[slot] = spawnPos;
     spawnRotations[slot] = spawnRot;
-    slotMotionTypes[slot].store(static_cast<uint8_t>(motion), std::memory_order::relaxed);
+    slotMotionTypes[slot].store(motion, std::memory_order::relaxed);
     slotBodyIDs[slot].store(JPH::BodyID::cInvalidBodyID, std::memory_order::relaxed);
     slotMaterialIDs[slot].store(0u, std::memory_order::relaxed);
     StoreSlotState(slot, pendingState);
@@ -311,11 +312,11 @@ auto BodyTable::TryMarkPendingDestroy(BodyID handle) noexcept -> bool {
         return false;
     }
 
-    uint8_t expected = slotStates[slot].load(std::memory_order::acquire);
-    while (GetSlotPredicate(static_cast<SlotState>(expected)).isDestructible) {
+    SlotState expected = slotStates[slot].load(std::memory_order::acquire);
+    while (GetSlotPredicate(expected).isDestructible) {
         if (slotStates[slot].compare_exchange_weak(
                 expected,
-                static_cast<uint8_t>(SlotState::PendingDestroy),
+                SlotState::PendingDestroy,
                 std::memory_order::acq_rel,
                 std::memory_order::acquire
             )) {
@@ -510,7 +511,7 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
         ptr += (slotCap * sizeof(uint32_t));
         std::memcpy(ptr, snap.denseToSlot, slotCap * sizeof(uint32_t));
         ptr += (slotCap * sizeof(uint32_t));
-        std::memcpy(ptr, snap.slotStates, slotCap * sizeof(uint8_t));
+        std::memcpy(ptr, snap.slotStates, slotCap * sizeof(SlotState));
     }
 
     return buffer;
@@ -573,13 +574,14 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
     ptr += (slotCap * sizeof(uint32_t));
 
     for (size_t i = 0; i < slotCap; ++i) {
-        bodyTable.slotStates[i].store(*ptr, std::memory_order::relaxed);
+        const SlotState restored = (*ptr <= std::to_underlying(SlotState::PendingDestroy)) ? static_cast<SlotState>(*ptr) : SlotState::Empty;
+        bodyTable.slotStates[i].store(restored, std::memory_order::relaxed);
         ptr += 1;
     }
 
     size_t newFreeCount = 0;
     for (uint32_t i = 0; i < slotCap; ++i) {
-        if (bodyTable.slotStates[i].load(std::memory_order::relaxed) == static_cast<uint8_t>(SlotState::Empty)) {
+        if (bodyTable.slotStates[i].load(std::memory_order::relaxed) == SlotState::Empty) {
             bodyTable.freeSlots[newFreeCount++] = i;
         }
     }

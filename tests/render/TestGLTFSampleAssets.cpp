@@ -15,7 +15,8 @@
 // (an A/B capture against the empty scene differs). No pixel goldens, no
 // absolute counts: a fidelity improvement must not fail this suite.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -53,6 +54,7 @@ enum class SampleAssetsError : uint8_t {
 };
 
 namespace {
+using ZHLN::FVec3;
 
 // Candidates in preference order, relative to the sample-assets root. The
 // first file that exists and parses as a GLB wins; when none does the test
@@ -100,7 +102,8 @@ constexpr std::array kModelCandidates {
 void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, float fovDegrees) {
     double radius = 0.0;
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        const float offset = part.localTransform.GetTranslation().Length();
+        const auto& m = part.localTransform;
+        const float offset = ZHLN::FVec3 {m[0, 3], m[1, 3], m[2, 3]}.Length();
         radius             = std::max(radius, static_cast<double>(offset + part.boundingRadius));
     }
     if (!(radius > 0.5)) {
@@ -109,10 +112,10 @@ void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, fl
     const double halfFov  = std::max(0.1, static_cast<double>(JPH::DegreesToRadians(fovDegrees)) * 0.5);
     double       distance = radius / std::tan(halfFov) * 1.25;
     distance              = std::clamp(distance, radius * 1.2 + 1.0, 80.0);
-    camera.position       = JPH::Vec3(0.0f, static_cast<float>(radius * 0.35), static_cast<float>(distance));
-    camera.yaw            = -90.0f;
-    camera.pitch          = static_cast<float>(-JPH::RadiansToDegrees(std::atan(radius * 0.35 / distance)));
-    camera.fov            = fovDegrees;
+    camera.position = {0.0f, static_cast<float>(radius * 0.35), static_cast<float>(distance)};
+    camera.yaw            = ZHLN::DegF{-90.0f};
+    camera.pitch          = ZHLN::DegF{static_cast<float>(-JPH::RadiansToDegrees(std::atan(radius * 0.35 / distance)))};
+    camera.fov            = ZHLN::DegF{fovDegrees};
     camera.nearZ          = 0.05f;
     camera.farZ           = std::max(100.0f, static_cast<float>(distance * 4.0));
 }
@@ -151,7 +154,7 @@ struct GLTFSampleAssetsTestSuite {
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.
             constexpr ZHLN::GLTF::ImportOptions fidelity {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, modelPath, modelPath, fidelity);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, modelPath, modelPath, fidelity);
             if (!prefab || !ZHLN::Test::ExpectGt(prefab->parts.size(), size_t {0})) {
                 return std::unexpected(SampleAssetsError::ImportFailed);
             }
@@ -164,11 +167,10 @@ struct GLTFSampleAssetsTestSuite {
                 return std::unexpected(SampleAssetsError::RenderDegenerate);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>(
+                    [&](auto& c) { FitCameraToPrefab(c.camera, *prefab, 50.0f); }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            FitCameraToPrefab(camComp->camera, *prefab, 50.0f);
 
             std::vector<ZHLN::Entity> instances(1u + prefab->parts.size());
             const uint32_t            spawned = ZHLN::PrefabFactory::InstantiatePrefab(

@@ -55,9 +55,13 @@ namespace GUI {
 struct UIInput;
 }
 
+namespace COM {
+class EngineCOM;
+}
+
 class ArticulationSystem;
 class Engine;
-struct EngineAccess;
+struct EngineCore;
 class GraphicsDevice;
 class Simulation;
 class DebugDraw;
@@ -65,6 +69,9 @@ class AssetLibrary;
 class AudioEngine;
 class EngineState;
 class Entities;
+class InputReader;
+class InputHaptics;
+class InputActions;
 
 class ZHLN_API Engine {
   public:
@@ -128,11 +135,24 @@ class ZHLN_API Engine {
     [[nodiscard]] auto Assets() noexcept -> AssetLibrary;
     [[nodiscard]] auto Audio() noexcept -> AudioEngine;
     [[nodiscard]] auto State() noexcept -> ZHLN::EngineState;
+    [[nodiscard]] auto State() const noexcept -> ZHLN::EngineState;
     // Entity lifecycle and typed component access, with resource-owning
     // components released through SceneResources. Not a Registry pass-through.
     [[nodiscard]] auto Entities() noexcept -> ZHLN::Entities;
 
     [[nodiscard]] auto Entities() const noexcept -> ZHLN::Entities;
+
+    // Input, split by what a caller is allowed to do with it.
+    //
+    // Input() on a mutable Engine is the authoring surface (maps, bindings,
+    // seats, deadzones, capture, persistence); on a const Engine it is the
+    // read-only one. Haptics() is rumble and nothing else. A system in the
+    // simulation graph gets the read-only pair only (see SimServices), so
+    // rebinding a key from inside the simulation is a compile error rather
+    // than a convention.
+    [[nodiscard]] auto Input() noexcept -> InputActions;
+    [[nodiscard]] auto Input() const noexcept -> InputReader;
+    [[nodiscard]] auto Haptics() noexcept -> InputHaptics;
     // In-frame mutations are recorded here, played back at MainECBPlayback and
     // cleaned up by SceneCleanup. Systems declare EntityCommandBuffer& instead.
     [[nodiscard]] auto Commands() noexcept -> ECS::EntityCommandBuffer&;
@@ -147,8 +167,6 @@ class ZHLN_API Engine {
     // handed stops being valid here.
     void ResetWorkerScratch() noexcept;
 
-    auto               GetInput() noexcept -> InputContext&;
-    [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
 
     auto               GetUpdateGraph() -> SimGraph&;
@@ -160,8 +178,8 @@ class ZHLN_API Engine {
     // Release every scene-owned resource before clearing the registry/ECB.
     void ClearScene();
     // Register an extra bulk cleanup system once per Engine, not per entity.
-    [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
-    void               RunSceneCleanupPasses(bool all);
+    auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
+    void RunSceneCleanupPasses(bool all);
 
     [[nodiscard]] auto GetVisibleEntities() const noexcept -> std::span<const Entity>;
     [[nodiscard]] auto GetVisibleShadowEntities() const noexcept -> std::span<const Entity>;
@@ -186,6 +204,22 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
 
     [[nodiscard]] auto ConsumeUIInput(float dt) noexcept -> GUI::UIInput;
+
+    // Hand a frame's UI input in from outside the device path.
+    //
+    // The GUI is fed through ConsumeUIInput, which reads the router. That is
+    // right for a running game and wrong for a host that owns the pointer
+    // itself -- a virtual-reality compositor, a remote-desktop host, an
+    // input-recording harness -- because those already have the frame's pointer
+    // vector and must not have to fabricate device events to deliver it.
+    //
+    // This is the *UI* seam and nothing else: it replaces what the next
+    // ConsumeUIInput returns for one frame. It cannot set a key the action maps
+    // evaluate, so it is not a way to synthesise gameplay input, and it is not
+    // reachable from a simulation system (SimServices carries the read and
+    // haptic capabilities only).
+    void SubmitUIInput(GUI::UIInput uiInput) noexcept;
+
     void               SubmitUI(UIDrawData uiData) noexcept;
 
     void AddDeviceLostCallback(DeviceLostCallback callback);
@@ -243,15 +277,20 @@ class ZHLN_API Engine {
     void AddTeardownHook(TeardownHook hook);
 
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
+    [[nodiscard]] auto DeviceGeneration() const noexcept -> uint64_t;
     [[nodiscard]] auto GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&>;
 
     void ProvokeDeviceLost();
 
-    auto InitializeDefaultScene() -> bool;
-
     [[nodiscard]] auto Tick(float dt) -> std::expected<void, ErrorCode>;
 
-    [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
+    // The frame cap lives with the pacing that reads it every frame, not in
+    // a creation struct: it is a runtime value, and Run() re-evaluates it on
+    // each iteration. 0 disables the cap.
+    // The frame cap lives in EngineImpl, seeded from EngineConfig at
+    // creation and re-read by the loop every frame. 0 disables it.
+    void               SetMaxFramesPerSecond(uint32_t fps) noexcept;
+    [[nodiscard]] auto MaxFramesPerSecond() const noexcept -> uint32_t;
 
     void EnsureFontAtlas();
 
@@ -272,9 +311,13 @@ class ZHLN_API Engine {
             -> std::expected<void, ErrorCode>;
 
   private:
-    friend struct ZHLN::EngineAccess;
+    friend struct EngineCore;
+    friend class Entities;
+    friend class EngineState;
+    friend class COM::EngineCOM;
+    friend void DespawnEntity(Engine& engine, Entity entity);
 
-    // Cold-start / build-tree-only path to the concrete registry. SDK consumers
+    // Cold-start / build-tree-only path to the concrete registry. API consumers
     // get Entities() and Commands() instead.
     auto               GetInternalRegistry() noexcept -> ECS::Registry&;
     [[nodiscard]] auto GetInternalRegistry() const noexcept -> const ECS::Registry&;
@@ -283,8 +326,11 @@ class ZHLN_API Engine {
     // application and bespoke hosts never need to inspect ECS resize flags.
     void SynchronizeResize();
 
-    // Build the service bundles and the two typed graphs on first use.
+    // Build the service bundles and the two typed graphs on first use, and
+    // recompile them when installed modules have marked them dirty.
     void EnsureSystemGraphs();
+
+    void ReleaseSceneContents();
 
     // Core's own frame steps, placed once. Not a scene-reset concern: the plan a
     // module composed into has to survive a scene rebuild, and rebuilding it per

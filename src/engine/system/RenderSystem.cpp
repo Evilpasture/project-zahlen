@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
@@ -9,7 +11,6 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RenderSystem.hpp"
 #include "CullingSystem.hpp"
-#include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -18,6 +19,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -26,6 +28,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -45,7 +48,7 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
+[[nodiscard]] auto EnsureSkinnedScratch(GraphicsDevice rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
     if (skeleton.skinnedScratch != BufferID::Invalid && skeleton.scratchVertexCount != vertexCount) {
         rc.DestroyBuffer(skeleton.skinnedScratch);
         skeleton.skinnedScratch     = BufferID::Invalid;
@@ -60,27 +63,25 @@ namespace {
     return skeleton.skinnedScratch;
 }
 
-[[nodiscard]] auto HasSceneSun(const ECS::Registry& reg) noexcept -> bool {
-    for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-        if (const auto light = reg.Get<Components::LightComponent>(e); light && light->type == LightType::Sun) {
+using SceneSunQuery = ECS::Query<const Components::LightComponent, const Components::SunTagComponent>;
+
+[[nodiscard]] auto HasSceneSun(SceneSunQuery query) noexcept -> bool {
+    for (const Entity e: query.Entities<Components::LightComponent>()) {
+        if (const auto light = query.Get<Components::LightComponent>(e); light && light->type == LightType::Sun) {
             return true;
         }
     }
-    return !reg.GetEntitiesWith<Components::SunTagComponent>().empty();
+    return !query.Entities<Components::SunTagComponent>().empty();
 }
 
-[[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
-    const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
-    if (ent == Entity::Null()) {
-        return rc.SetEnvironmentRadiance({});
-    }
-    const auto env = reg.Get<Components::EnvironmentMapComponent>(ent);
+using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
+
+[[nodiscard]] auto SyncEnvironmentMap(EnvironmentQuery query, GraphicsDevice rc, AssetLibrary assets) -> std::expected<void, ErrorCode> {
+    const auto env = query.GetSingleton<Components::EnvironmentMapComponent>();
     if (!env || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
-    const auto pixels = engine.Assets().FindEnvironmentImage(std::string_view(env->source));
+    const auto pixels = assets.FindEnvironmentImage(std::string_view(env->source));
     if (!pixels) {
         Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
@@ -104,20 +105,20 @@ constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
 // The simulation description stays in ECS; only a stable emitter identity crosses
 // the API. Persistent particle buffers are private to the RenderContext.
-void SubmitParticleEmitters(Engine& engine) {
-    auto scene = engine.Debug();
-    auto& reg   = ZHLN::EngineAccess::RegistryOf(engine);
+using ParticleSubmitQuery = ECS::Query<const Components::CameraComponent, const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
+
+void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
     // render path reports NoMainCamera on its own.
-    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return;
     }
     const auto& cam = camera->camera;
 
-    for (const Entity entity: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {
-        auto emitter = reg.Get<Components::ParticleEmitterComponent>(entity);
+    for (const Entity entity: query.Entities<Components::ParticleEmitterComponent>()) {
+        auto emitter = query.Get<Components::ParticleEmitterComponent>(entity);
         if (!emitter || !emitter->active) {
             continue;
         }
@@ -132,8 +133,8 @@ void SubmitParticleEmitters(Engine& engine) {
         );
     }
 
-    for (const Entity entity: reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>()) {
-        auto emitter = reg.Get<Components::MeshParticleEmitterComponent>(entity);
+    for (const Entity entity: query.Entities<Components::MeshParticleEmitterComponent>()) {
+        auto emitter = query.Get<Components::MeshParticleEmitterComponent>(entity);
         if (!emitter || !emitter->active) {
             continue;
         }
@@ -148,18 +149,20 @@ void SubmitParticleEmitters(Engine& engine) {
 }
 
 // The palettes the simulation pushed this frame, applied in order.
-void UploadPosePalettes(Engine& engine) {
-    auto rc = engine.Graphics();
-    ZHLN::EngineAccess::PoseUploadsOf(engine).Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
+void UploadPosePalettes(GraphicsDevice rc, PoseUploadQueue& poseUploads) {
+    poseUploads.Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
-void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
-    auto rc = engine.Graphics();
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+using MeshSubmitQuery = ECS::Query<
+    const Components::MeshComponent, const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&,
+    const Components::MorphTargetComponent, const Components::WorldTransformComponent, const Components::PBRComponent,
+    const Components::CSGComponent, const Components::AmbientCubeComponent>;
+
+void SubmitVisibleMeshes(MeshSubmitQuery query, GraphicsDevice rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
 
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
-    for (Entity e: reg.GetEntitiesWith<Components::MeshComponent>()) {
+    for (Entity e: query.Entities<Components::MeshComponent>()) {
         bool inMain   = IsInList(mainVisible, e);
         bool inShadow = IsInList(shadowVisible, e);
 
@@ -167,7 +170,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             continue;
         }
 
-        auto meshComp = reg.Get<Components::MeshComponent>(e);
+        auto meshComp = query.Get<Components::MeshComponent>(e);
         if (!meshComp) {
             continue;
         }
@@ -176,7 +179,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         if (!gpuMeshOpt.has_value()) {
             // Explicit cache clears discard lookups, not scene-owned buffers.
             // Rebind the owner's view instead of allocating another mesh.
-            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
+            if (const auto owned = query.Get<Components::OwnedMeshComponent>(e);
                 owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferID::Invalid) {
                 rc.RegisterMesh(meshComp->meshAsset, owned->mesh);
                 gpuMeshOpt = owned->mesh;
@@ -190,12 +193,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         Mesh     gpuMesh = *gpuMeshOpt;
         Material gpuMat  = *gpuMatOpt;
 
-        auto skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
-        auto morphComp  = reg.Get<Components::MorphTargetComponent>(e);
-        auto worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        auto skelMesh   = query.Get<Components::SkeletalMeshComponent>(e);
+        auto morphComp  = query.Get<Components::MorphTargetComponent>(e);
+        auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
 
-        JPH::Mat44 worldMat = JPH::Mat44::sIdentity();
-        JPH::Mat44 prevMat  = JPH::Mat44::sIdentity();
+        auto worldMat = Mat4x4::Identity();
+        auto prevMat  = Mat4x4::Identity();
         if (worldTrans) {
             worldMat = worldTrans->world;
             prevMat  = worldTrans->previous;
@@ -206,11 +209,14 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        const ZHLN::Float4         morphWeights     = morphComp ? morphComp->weights : ZHLN::Float4 {};
+        auto morphWeights = Components::MorphTargetComponent {}.weights;
+        if (morphComp) {
+            morphWeights = morphComp->weights;
+        }
 
         BufferID scratchVbo = BufferID::Invalid;
         if (isSkinned) {
-            scratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *skelMesh, gpuMesh.vertexCount);
+            scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
         }
 
         // The 3D skybox is ordinary geometry now: it is placed where the
@@ -230,12 +236,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
         float roughness = -1.0f;
         float metallic  = -1.0f;
-        if (auto pbr = reg.Get<Components::PBRComponent>(e)) {
+        if (auto pbr = query.Get<Components::PBRComponent>(e)) {
             roughness = pbr->roughness;
             metallic  = pbr->metallic;
         }
 
-        if (auto csg = reg.Get<Components::CSGComponent>(e)) {
+        if (auto csg = query.Get<Components::CSGComponent>(e)) {
             CSGDrawParams csgParams;
             csgParams.eyeParams = {
                 .transform           = worldMat,
@@ -253,15 +259,15 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             };
 
             for (const auto& mod: csg->modifiers) {
-                if (reg.IsAlive(mod.operandEntity)) {
-                    if (auto cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                if (query.IsAlive(mod.operandEntity)) {
+                    if (auto cutMesh = query.Get<Components::MeshComponent>(mod.operandEntity)) {
                         auto cutGpuMeshOpt = rc.Mesh(cutMesh->meshAsset);
                         auto cutGpuMatOpt  = rc.Material(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
-                            auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                            auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
-                            JPH::Mat44 cutWorldMat   = JPH::Mat44::sIdentity();
-                            JPH::Mat44 cutPrevMat    = JPH::Mat44::sIdentity();
+                            auto       cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                            auto       cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            auto cutWorldMat   = Mat4x4::Identity();
+                            auto cutPrevMat    = Mat4x4::Identity();
                             if (cutWorldTrans) {
                                 cutWorldMat = cutWorldTrans->world;
                                 cutPrevMat  = cutWorldTrans->previous;
@@ -269,7 +275,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
 
                             BufferID cutScratchVbo = BufferID::Invalid;
                             if (cutSkelMesh) {
-                                cutScratchVbo = EnsureSkinnedScratch(ZHLN::EngineAccess::RenderOf(engine), *cutSkelMesh, cutGpuMeshOpt->vertexCount);
+                                cutScratchVbo = EnsureSkinnedScratch(rc, *cutSkelMesh, cutGpuMeshOpt->vertexCount);
                             }
 
                             csgParams.cutters.push_back(
@@ -308,7 +314,7 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
             .roughness           = roughness,
             .metallic            = metallic
         };
-        if (auto ambient = reg.Get<Components::AmbientCubeComponent>(e)) {
+        if (auto ambient = query.Get<Components::AmbientCubeComponent>(e)) {
             drawParams.hasAmbientCube = true;
             drawParams.ambientCube    = ambient->cube;
         }
@@ -316,28 +322,29 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     }
 }
 
-[[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> std::optional<Camera> {
+using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Components::WorldTransformComponent>;
+
+[[nodiscard]] auto MakeViewportCamera(ViewCameraQuery query, Entity cameraEnt) -> std::optional<Camera> {
     // A viewport camera is built from the main camera's optics: a world without a
     // main camera has no optics to build from, and says so by returning nothing.
-    const auto main = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
+    const auto main = query.GetSingleton<Components::CameraComponent>();
     if (!main) {
         return std::nullopt;
     }
     Camera extra = main->camera;
-    auto&  reg   = ZHLN::EngineAccess::RegistryOf(engine);
-    if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
+    if (cameraEnt == Entity::Null() || !query.IsAlive(cameraEnt)) {
         return extra;
     }
-    if (auto world = reg.Get<Components::WorldTransformComponent>(cameraEnt)) {
-        const JPH::Mat44 worldMat = world->world;
-        extra.position            = worldMat.GetTranslation();
+    if (auto world = query.Get<Components::WorldTransformComponent>(cameraEnt)) {
+        const Mat4x4& worldMat = world->world;
+        extra.position = {worldMat[0, 3], worldMat[1, 3], worldMat[2, 3]};
     }
     return extra;
 }
 
-[[nodiscard]] auto MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
+[[nodiscard]] auto MakeViewFor(ViewCameraQuery query, GraphicsDevice rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
     -> std::optional<SceneView> {
-    auto cComp = ZHLN::EngineAccess::RegistryOf(engine).Get<Components::CameraComponent>(cameraEnt);
+    auto cComp = query.Get<Components::CameraComponent>(cameraEnt);
 
     // The view's camera is the entity's own component when it has one; a bare
     // transform entity gets a viewport camera built from the main camera's optics
@@ -346,15 +353,15 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
     Camera     cam {};
     if (cComp) {
         cam = cComp->camera;
-    } else if (auto fallback = MakeViewportCamera(engine, cameraEnt)) {
+    } else if (auto fallback = MakeViewportCamera(query, cameraEnt)) {
         cam = *fallback;
     } else {
         return std::nullopt;
     }
-    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.Graphics().ViewportAspect();
-    const JPH::Mat44 view   = cam.GetViewMatrix();
-    const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
-    JPH::Mat44       viewProj = proj * view;
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.ViewportAspect();
+    const auto view = cam.GetViewMatrix();
+    const auto proj = cam.GetProjectionMatrix(aspect);
+    auto viewProj = proj * view;
     if (cComp) {
         viewProj = cComp->viewProj;
     }
@@ -368,24 +375,25 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         .viewMatrix        = view,
         .projMatrix        = proj,
         .viewProjMatrix    = viewProj,
-        .invViewProjMatrix = viewProj.Inversed(),
+        .invViewProjMatrix = Inverse(viewProj),
         .worldPosition     = cam.position,
         .viewport          = viewport,
         .target            = target,
         .frustum           = frustum,
         .visibilityMask    = ~0ULL,
-        .frameIndex        = static_cast<uint32_t>(engine.GetCurrentFrame()),
-        .time              = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep,
+        .frameIndex        = static_cast<uint32_t>(frameIndex),
+        .time              = static_cast<float>(frameIndex & kFrameClockMask) * kFrameTimeStep,
     };
 }
 
 }
 
-std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
-    int        physicsDrawMode = 0;
-    JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
+std::expected<void, ErrorCode> RenderSystem::Update(
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
+) {
+    auto shadowProjView = Mat4x4::Identity();
 
-    auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
+    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, cullingStats, shadowProjView, dt);
     if (!mainResult) {
         return std::unexpected(mainResult.error());
     }
@@ -396,13 +404,16 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     return {};
 }
 
-FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
+    Mat4x4& outShadowProjView, float dt
+) {
     auto rc = engine.Graphics();
-    auto&       reg             = ZHLN::EngineAccess::RegistryOf(engine);
+    const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
     // anything is recorded rather than after a dereference.
-    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
@@ -412,27 +423,22 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     const Camera cam            = camera->camera;
     const auto& visibleEntities = engine.GetVisibleEntities();
 
-    JPH::Mat44 vp {};
-    JPH::Mat44 unjitteredVp {};
-    JPH::Mat44 prevUnjitteredVp {};
+    Mat4x4 vp {};
+    Mat4x4 unjitteredVp {};
+    Mat4x4 prevUnjitteredVp {};
 
     // The getter above already proved a main camera entity exists; this is the
     // entity itself, for the viewport views built below.
-    auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
+    auto cameraEntities = query.Entities<Components::MainCameraTagComponent>();
 
-    const GraphicsSettings gfx = SyncGraphicsSettings(engine);
-
-    outPhysicsDrawMode = 0;
-    if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
-        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
-            outPhysicsDrawMode = dbg->physicsDrawMode;
-        }
-    }
+    // The graphics owner is authoritative; nothing scrapes the registry for it.
+    const GraphicsSettings gfx             = engine.Graphics().Settings();
+    const int              physicsDrawMode = engine.State().PhysicsDrawMode();
 
     auto scene = engine.Debug();
     scene.SetFrameDelta(dt);
-    SubmitParticleEmitters(engine);
-    RenderDebug(engine, outPhysicsDrawMode);
+    SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), scene);
+    RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), physicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
@@ -442,12 +448,12 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return FrameSkipped {};
     }
     FrameScope gpuFrame = std::move(**begin_res);
-    if (auto env = SyncEnvironmentMap(engine); !env) {
+    if (auto env = SyncEnvironmentMap(query.As<EnvironmentQuery>(), rc, engine.Assets()); !env) {
         return std::unexpected(env.error());
     }
     Entity cameraEntity = cameraEntities[0];
 
-    if (auto cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
+    if (auto cComp = query.Get<Components::CameraComponent>(cameraEntity)) {
         vp               = cComp->viewProj;
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
@@ -455,34 +461,34 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    auto sun = LightingSystem::GetSun(LightingSystem::SunQuery {reg});
-    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasSceneSun(reg)) {
-        if (const auto env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env && !env->source.empty()) {
+    auto sun = LightingSystem::GetSun(query.As<LightingSystem::SunQuery>());
+    if (const auto env = query.GetSingleton<Components::EnvironmentMapComponent>(); env && !HasSceneSun(query.As<SceneSunQuery>())) {
+        if (!env->source.empty()) {
             sun.intensity = 0.0f;
         }
     }
-    const JPH::Vec3 sunDirection = sun.direction;
+    const FVec3 sunDirection = sun.direction;
     // The extracted emitter used to live in EvaluateSH and inherited the
     // environment exposure. Convert its irradiance/pi to directional radiance
     // (pi * irradiance), then apply that same exposure only to cooked suns.
     const float sunIntensity = sun.intensity * (sun.fromEnvironment ? gfx.environment.ambientExposure : 1.0f);
-    const JPH::Vec3 sunRadiance = sun.color * sunIntensity;
+    const FVec3 sunRadiance = sun.color * sunIntensity;
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
 
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
-    JPH::Vec3 shadowCenter = cam.position;
-    shadowCenter.SetX(std::round(shadowCenter.GetX() / textelSize) * textelSize);
-    shadowCenter.SetY(std::round(shadowCenter.GetY() / textelSize) * textelSize);
-    shadowCenter.SetZ(std::round(shadowCenter.GetZ() / textelSize) * textelSize);
+    FVec3 shadowCenter = cam.position;
+    shadowCenter.x = std::round(shadowCenter.x / textelSize) * textelSize;
+    shadowCenter.y = std::round(shadowCenter.y / textelSize) * textelSize;
+    shadowCenter.z = std::round(shadowCenter.z / textelSize) * textelSize;
 
-    JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-    JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
+    FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
+    const auto lightView = CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
     float      halfWidth = shadowWidth * 0.5f;
-    JPH::Mat44 lightProj = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
+    const auto lightProj = CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
     outShadowProjView    = lightProj * lightView;
 
     // The shadow planes are the culler's own: CullingSystem derives them from
@@ -498,7 +504,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.viewProj               = vp;
     frame.unjitteredViewProj     = unjitteredVp;
     frame.prevUnjitteredViewProj = prevUnjitteredVp;
-    frame.invViewProj            = unjitteredVp.Inversed();
+    frame.invViewProj            = Inverse(unjitteredVp);
     frame.camPosition            = cam.position;
     frame.frameClock             = frameClock;
     frame.sunDirection           = sunDirection;
@@ -508,7 +514,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.probeMax               = gfx.environment.probeMax;
     frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
-    frame.enableRTR              = gfx.post.enableRTR;
+    frame.enableRTR              = gfx.rayTracing.enableReflections ? 1 : 0;
     frame.fullBright             = gfx.environment.fullBright;
     frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());
     frame.shadowWidth            = gfx.shadows.width;
@@ -521,13 +527,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     scene.SetFrameDelta(dt);
 
-    UploadPosePalettes(engine);
+    UploadPosePalettes(rc, poseUploads);
 
-    if (outPhysicsDrawMode == 0) {
-        SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+    if (physicsDrawMode == 0) {
+        SubmitVisibleMeshes(query.As<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
-    if (auto sim_res = gpuFrame.DispatchSimulations(ZHLN::EngineAccess::SceneOf(engine), dt); !sim_res) {
+    if (auto sim_res = gpuFrame.DispatchSimulations(sceneData, dt); !sim_res) {
         return std::unexpected(sim_res.error());
     }
 
@@ -540,7 +546,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return {};
     }
     const FrameTarget attachment = **target;
-    const auto       sceneView   = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    const auto       sceneView   = MakeViewFor(query.As<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
     if (!sceneView) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
@@ -548,7 +554,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
             SceneRenderPass {
                 .view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx
             },
-            ZHLN::EngineAccess::SceneOf(engine)
+            sceneData
         );
         !scene_res) {
         return std::unexpected(scene_res.error());
@@ -570,10 +576,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
-        const auto     input    = reg.GetSingleton<Components::InputStateComponent>();
-        const Extent2D hostSize = host.GetSize();
-        const float    rawX     = input ? input->mouseX : static_cast<float>(hostSize.width) * 0.5f;
-        const float    rawY     = input ? input->mouseY : static_cast<float>(hostSize.height) * 0.5f;
+        // The cursor follows the device, not gameplay's view of it, so this
+        // asks the read capability by value rather than gating on UiCapture.
+        const auto     input    = std::as_const(engine).Input();
+        const Axis2DValue where  = input.MousePosition();
+        const Extent2D hostSize  = host.GetSize();
+        const float    rawX      = where.x;
+        const float    rawY      = where.y;
         const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
         const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
 
@@ -595,17 +604,16 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(end_res.error());
     }
 
-    auto& cstats = ZHLN::EngineAccess::WorldOf(engine).GetCullingStats();
-    cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
-    cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
+    cullingStats.TotalObjects  = query.Entities<Components::MeshComponent>().size();
+    cullingStats.CulledObjects = cullingStats.TotalObjects - visibleEntities.size();
 
     return {};
 }
 
-void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
+void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats, RenderDebugQuery query, int physicsDrawMode) {
     auto scene = engine.Debug();
 
-    CullingSystem::DrawDebugFrustum(engine);
+    CullingSystem::DrawDebugFrustum(cullingStats, query, scene);
 
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
@@ -619,7 +627,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
                 float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
                 float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
-                return JPH::Vec4(r, g, b, a);
+                return FVec4{r, g, b, a};
             };
 
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {

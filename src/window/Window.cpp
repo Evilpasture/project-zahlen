@@ -501,15 +501,18 @@ void Window::ProcessEvents() {
         return;
     }
 
-    for (uint8_t slot = 0; slot < kMaxGamepads; ++slot) {
-        const int  jid     = GLFW_JOYSTICK_1 + static_cast<int>(slot);
-        const bool present = glfwJoystickPresent(jid) == GLFW_TRUE && glfwJoystickIsGamepad(jid) == GLFW_TRUE;
+    for (size_t slotIdx = 0; slotIdx < kMaxGamepads; ++slotIdx) {
+        const GamepadSlot slot {static_cast<uint8_t>(slotIdx)};
+        const int         jid     = GLFW_JOYSTICK_1 + static_cast<int>(slotIdx);
+        const bool        present = glfwJoystickPresent(jid) == GLFW_TRUE && glfwJoystickIsGamepad(jid) == GLFW_TRUE;
 
-        if (present != _impl->gamepadConnected[slot]) {
-            _impl->gamepadConnected[slot] = present;
+        if (present != _impl->gamepadConnected[slotIdx]) {
+            _impl->gamepadConnected[slotIdx] = present;
             if (rx.onGamepadConnection != nullptr) {
-                const char* rawName = present ? glfwGetGamepadName(jid) : nullptr;
-                rx.onGamepadConnection(rx.userdata, slot, present, rawName != nullptr ? std::string_view(rawName) : std::string_view {});
+                const char* hardwareName = present ? glfwGetGamepadName(jid) : nullptr;
+                rx.onGamepadConnection(
+                    rx.userdata, slot, present, hardwareName != nullptr ? std::string_view(hardwareName) : std::string_view {}
+                );
             }
         }
 
@@ -522,29 +525,29 @@ void Window::ProcessEvents() {
             continue;
         }
 
-        GamepadRawSample sample {};
-        sample.buttons[static_cast<size_t>(GamepadButton::South)]       = gp.buttons[GLFW_GAMEPAD_BUTTON_A] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::East)]        = gp.buttons[GLFW_GAMEPAD_BUTTON_B] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::West)]        = gp.buttons[GLFW_GAMEPAD_BUTTON_X] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::North)]       = gp.buttons[GLFW_GAMEPAD_BUTTON_Y] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::LeftBumper)]  = gp.buttons[GLFW_GAMEPAD_BUTTON_LEFT_BUMPER] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::RightBumper)] = gp.buttons[GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::Back)]        = gp.buttons[GLFW_GAMEPAD_BUTTON_BACK] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::Start)]       = gp.buttons[GLFW_GAMEPAD_BUTTON_START] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::Guide)]       = gp.buttons[GLFW_GAMEPAD_BUTTON_GUIDE] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::LeftThumb)]   = gp.buttons[GLFW_GAMEPAD_BUTTON_LEFT_THUMB] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::RightThumb)]  = gp.buttons[GLFW_GAMEPAD_BUTTON_RIGHT_THUMB] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::DPadUp)]      = gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_UP] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::DPadRight)]   = gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_RIGHT] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::DPadDown)]    = gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_DOWN] == GLFW_PRESS;
-        sample.buttons[static_cast<size_t>(GamepadButton::DPadLeft)]    = gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_LEFT] == GLFW_PRESS;
+        GamepadHardwareSample sample {};
+        sample.SetButton(GamepadButton::South, gp.buttons[GLFW_GAMEPAD_BUTTON_A] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::East, gp.buttons[GLFW_GAMEPAD_BUTTON_B] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::West, gp.buttons[GLFW_GAMEPAD_BUTTON_X] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::North, gp.buttons[GLFW_GAMEPAD_BUTTON_Y] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::LeftBumper, gp.buttons[GLFW_GAMEPAD_BUTTON_LEFT_BUMPER] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::RightBumper, gp.buttons[GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::Back, gp.buttons[GLFW_GAMEPAD_BUTTON_BACK] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::Start, gp.buttons[GLFW_GAMEPAD_BUTTON_START] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::Guide, gp.buttons[GLFW_GAMEPAD_BUTTON_GUIDE] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::LeftThumb, gp.buttons[GLFW_GAMEPAD_BUTTON_LEFT_THUMB] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::RightThumb, gp.buttons[GLFW_GAMEPAD_BUTTON_RIGHT_THUMB] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::DPadUp, gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_UP] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::DPadRight, gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_RIGHT] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::DPadDown, gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_DOWN] == GLFW_PRESS);
+        sample.SetButton(GamepadButton::DPadLeft, gp.buttons[GLFW_GAMEPAD_BUTTON_DPAD_LEFT] == GLFW_PRESS);
 
-        sample.axes[static_cast<size_t>(GamepadAxis::LeftX)]        = gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X];
-        sample.axes[static_cast<size_t>(GamepadAxis::LeftY)]        = -gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
-        sample.axes[static_cast<size_t>(GamepadAxis::RightX)]       = gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_X];
-        sample.axes[static_cast<size_t>(GamepadAxis::RightY)]       = -gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y];
-        sample.axes[static_cast<size_t>(GamepadAxis::LeftTrigger)]  = (gp.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] + 1.0f) * 0.5f;
-        sample.axes[static_cast<size_t>(GamepadAxis::RightTrigger)] = (gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] + 1.0f) * 0.5f;
+        sample.SetAxis(GamepadAxis::LeftX, gp.axes[GLFW_GAMEPAD_AXIS_LEFT_X]);
+        sample.SetAxis(GamepadAxis::LeftY, -gp.axes[GLFW_GAMEPAD_AXIS_LEFT_Y]);
+        sample.SetAxis(GamepadAxis::RightX, gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_X]);
+        sample.SetAxis(GamepadAxis::RightY, -gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y]);
+        sample.SetAxis(GamepadAxis::LeftTrigger, (gp.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] + 1.0f) * 0.5f);
+        sample.SetAxis(GamepadAxis::RightTrigger, (gp.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] + 1.0f) * 0.5f);
 
         rx.onGamepadState(rx.userdata, slot, sample);
     }

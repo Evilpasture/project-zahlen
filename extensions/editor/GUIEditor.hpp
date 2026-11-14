@@ -11,15 +11,15 @@
 // Design notes:
 //
 //   * The editor draws into the same GUI::Context as the scene it edits.
-//     The registry is passed separately: the new Clay-based GUI::Context is
-//     pure layout and does not own or expose ECS state.
+//     The entity capability is passed separately: GUI::Context is pure layout
+//     and does not own or expose ECS state.
 //
 //   * The inspector is generic. Component fields are enumerated through
 //     ZHLN::Reflect::ForEachFieldWithName, so a new component (or a new field
 //     on an existing one) shows up in the inspector without touching this
 //     file. Field dispatch: float -> Slider, bool -> Checkbox, int -> Slider
 //     with step 1, enum -> Dropdown (via ZHLN::Reflect::EnumNames), String64/
-//     String256 -> TextInput stub, JPH::Vec4 -> four sliders. Handles,
+//     String256 -> TextInput stub, FVec4 -> four sliders. Handles,
 //     textures and padding fields (leading '_') get no row in this version.
 //
 //   * The reflection iteration lives in extensions/editor/GUIEditor.cpp, not here.
@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags, for the editor's own input flag set
 #include <Zahlen/ECS/Entity.hpp>
@@ -36,19 +37,29 @@
 #include <span>
 #include <string_view>
 
-namespace ZHLN::ECS {
-class Registry;
-}
 namespace ZHLN {
 class Engine;
+class Entities;
 struct Camera;
+struct InputState;
 }
 
 namespace ZHLN::GUI {
 class Context;
+class Frame;
 }
 
 namespace ZHLN::Editor {
+
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
 
 // Raw input levels the modal transform mode watches, sampled once per frame.
 // Presses are the edge between two samples (`level & ~previous`), which is why
@@ -97,15 +108,15 @@ struct EditorState {
     ZHLN::Entity transformEntity = ZHLN::Entity::Null();
 
     // Captures taken at mode entry; cancel writes them back.
-    JPH::Vec3 transformStartPosition = JPH::Vec3::sZero();
+    FVec3 transformStartPosition = FVec3::Zero();
     JPH::Quat transformStartRotation = JPH::Quat::sIdentity();
-    JPH::Vec3 transformStartScale    = JPH::Vec3::sReplicate(1.0f);
+    FVec3 transformStartScale    = FVec3::Splat(1.0f);
 
     // Anchors for the running mode: Move intersects the mouse ray with a plane
     // through the start position (normal = camera forward at entry); Rotate and
     // Scale measure screen-space angle / distance around the projected object.
-    JPH::Vec3 transformPlaneNormal = JPH::Vec3::sAxisY();
-    JPH::Vec3 transformAnchor      = JPH::Vec3::sZero();
+    FVec3 transformPlaneNormal = FVec3::UnitY();
+    FVec3 transformAnchor      = FVec3::Zero();
     float     transformStartAngle  = 0.0f;
     float     transformStartDist   = 1.0f;
 
@@ -126,7 +137,7 @@ struct EditorState {
 //
 // These are separate from the panel functions on purpose. A panel needs a
 // GUI::Context, a viewport and a frame to do anything; these need only a
-// registry, so "create an entity", "destroy the selection" and "add/remove a
+// entity capability, so "create an entity", "destroy the selection" and "add/remove a
 // component" are callable from a script, a test or a key binding without
 // building a single widget -- and testable on a machine with no GPU.
 
@@ -140,7 +151,7 @@ struct EditorState {
 // something the editor cannot conjure -- a GPU mesh and material, a body in
 // the physics world -- so "new entity" cannot mean "new box" from in here.
 // Spawning geometry is PrefabFactory's job and needs an Engine.
-ZHLN_STATIC_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {}) -> ZHLN::Entity;
+ZHLN_STATIC_API auto CreateEntity(ZHLN::Entities& reg, std::string_view name = {}) -> ZHLN::Entity;
 
 // Destroys `state.selectedEntity` and clears the selection.
 //
@@ -155,9 +166,9 @@ ZHLN_STATIC_API void DestroySelected(ZHLN::Engine& engine, EditorState& state) n
 // constant and a caller needs no allocation to walk it.
 struct ComponentKind {
     std::string_view name;
-    bool (*has)(const ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
-    void (*add)(ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
-    void (*remove)(ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
+    bool (*has)(const ZHLN::Entities& reg, ZHLN::Entity entity);
+    void (*add)(ZHLN::Entities& reg, ZHLN::Entity entity);
+    void (*remove)(ZHLN::Entities& reg, ZHLN::Entity entity);
 };
 
 // The components the editor can add, in the order the inspector lists them.
@@ -184,9 +195,9 @@ struct ComponentKind {
 // Runs the Blender-style modal transform for this frame: enters a mode on
 // G/R/S press edges (plain S only -- a Ctrl+S save chord never starts Scale),
 // manipulates the captured entity from the mouse ray, and confirms or cancels
-// it. Reads raw input levels from the registry's InputStateComponent
-// singleton and writes the entity's TransformComponent live, so the world
-// preview follows the pointer before confirmation.
+// it. Reads raw input levels from `input` and writes the entity's
+// TransformComponent live, so the world preview follows the pointer before
+// confirmation.
 //
 // Call once per frame BEFORE camera control and viewport picking: cancel and
 // confirm then win over the global Escape / click-to-select bindings on the
@@ -207,11 +218,12 @@ struct SceneViewport {
 };
 
 ZHLN_STATIC_API void UpdateTransformMode(
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    const Camera&        camera,
-    const SceneViewport& viewport,
-    bool                 uiOwnsInput
+    ZHLN::Entities&          reg,
+    const ZHLN::InputState&  input,
+    EditorState&             state,
+    const Camera&            camera,
+    const SceneViewport&     viewport,
+    bool                     uiOwnsInput
 ) noexcept;
 
 // Draws the scene hierarchy: one selectable row per named entity that is not
@@ -242,7 +254,7 @@ ZHLN_STATIC_API void DrawHierarchyPanel(
 // NOTE: `reg` is separate from `gui` for the same reason as above.
 ZHLN_STATIC_API void DrawInspectorPanel(
     ZHLN::GUI::Frame&    gui,
-    ZHLN::ECS::Registry& reg,
+    ZHLN::Entities& reg,
     EditorState&         state,
     std::string_view     id = "Inspector"
 );

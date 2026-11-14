@@ -5,6 +5,7 @@
 #include "CookedRadianceFormat.hpp"
 #include "EnvironmentPreparation.hpp"
 #include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <stb_image.h>
 
@@ -466,15 +467,7 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     return map;
 }
 
-auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
-    const size_t vfsSize = vfs.ReadFile(path, nullptr, 0);
-    if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
-        std::vector<std::byte> bytes(vfsSize);
-        if (vfs.ReadFile(path, bytes.data(), bytes.size()) == vfsSize) {
-            return bytes;
-        }
-    }
-
+auto ReadUnpackedBytes(std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
     std::ifstream in {std::string(path), std::ios::binary | std::ios::ate};
     if (!in) {
         return std::unexpected(RadianceAssetError::NotFound);
@@ -494,6 +487,17 @@ auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> 
         return std::unexpected(RadianceAssetError::Truncated);
     }
     return bytes;
+}
+
+auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
+    const size_t vfsSize = vfs.ReadFile(path, nullptr, 0);
+    if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
+        std::vector<std::byte> bytes(vfsSize);
+        if (vfs.ReadFile(path, bytes.data(), bytes.size()) == vfsSize) {
+            return bytes;
+        }
+    }
+    return ReadUnpackedBytes(path);
 }
 
 }
@@ -532,6 +536,10 @@ auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view pat
         return std::unexpected(bytes.error());
     }
     return DecodeRadiance(*bytes);
+}
+
+auto ReadEnvironmentImage(AssetLibrary assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
+    return ReadEnvironmentImage(assets.VFS(), path);
 }
 
 } // namespace ZHLN::AssetCooking

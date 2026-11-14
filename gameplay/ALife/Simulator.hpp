@@ -3,17 +3,13 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "Factions.hpp"
 #include "Graph.hpp"
 #include "SpatialGrid.hpp"
 #include "Types.hpp"
 #include <Zahlen/Common.h>
 #include <functional>
-
-// Forward-declare Engine to break the circular dependency loop
-namespace ZHLN {
-class Engine;
-}
 
 namespace ZHLN::ALife {
 
@@ -38,12 +34,15 @@ class ZHLN_STATIC_API Simulator {
   public:
     explicit Simulator(const SimConfig& config = SimConfig {});
 
-    // Subsystem update hook
-    void Update(ZHLN::Engine& engine, float dt, JPH::RVec3Arg observer_pos);
+    // The caller owns isolation across all three phases and their callbacks.
+    // Movement and interaction callbacks may run concurrently. They must not
+    // structurally mutate the queried storage, and shared callback state and
+    // cross-entity writes require their own synchronization.
+    void Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos);
 
     void SetRelation(uint32_t a, uint32_t b, float value);
     void BroadcastEvent(const Event& event);
-    void ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2);
+    void ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2);
 
     auto Save(const char* filename) const -> bool;
     auto Load(ECS::Registry& reg, const char* filename) -> bool;

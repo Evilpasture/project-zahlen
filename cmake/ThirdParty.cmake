@@ -8,6 +8,19 @@
 # includes this once, before the core subsystems, so the vendor cache variables
 # below are settled before any vendor CMakeLists runs.
 
+# --- Homebrew prefix (Apple) ------------------------------------------------
+#
+# First statement in the file, because it has to be: everything below searches
+# for a package, a header or a library, and a prefix path appended after those
+# searches only helps the *next* configure. Apple Silicon installs under
+# /opt/homebrew and Intel under /usr/local; /opt/homebrew/lib is also put on the
+# linker path here rather than at the bottom of the file, where
+# link_directories() would arrive after the targets that needed it were created.
+if(APPLE)
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+    link_directories(/opt/homebrew/lib)
+endif()
+
 # --- Vulkan-Headers ---
 # Vulkan-Headers is header-only; the renderer needs no Vulkan SDK or loader.
 # Prefer a compatible system copy on Unix, but the renderer's Vulkan 1.4 and
@@ -842,11 +855,12 @@ if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
 endif()
 
-if(APPLE)
-    # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-    link_directories(/opt/homebrew/lib)
-endif()
+# Homebrew's prefix is appended to the search path at the TOP of this file, not
+# here. It used to be at the bottom, after every find_package/find_path/
+# find_library in the file had already run -- so on Apple nothing Homebrew
+# installs under /opt/homebrew (or /usr/local on Intel) was found by the
+# un-HINTed searches above it, and link_directories() there could not reach a
+# target created before this point either. See "Homebrew prefix" at the top.
 
 # libseat and libevdev are loaded at runtime by src/engine/tty (SharedLibrary).
 # They are not link-time or configure-time dependencies: a machine without the

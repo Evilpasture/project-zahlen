@@ -245,6 +245,9 @@ class RasterPassContextBase {
 
         vkCmdSetViewport(m_cmd, 0, 1, &viewport);
         vkCmdSetScissor(m_cmd, 0, 1, &scissor);
+        if (m_inheritance) {
+            m_inheritance->SetViewport(viewport);
+        }
     }
 
   protected:

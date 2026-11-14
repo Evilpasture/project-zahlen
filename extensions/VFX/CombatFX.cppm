@@ -2,19 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 
 // Public Engine & Jolt Headers
 // clang-format off
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
@@ -22,7 +16,10 @@ module;
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -57,7 +54,7 @@ struct SurfaceResponse {
     float         decalRoughness = 0.90f;
     bool          spawnDecal     = true;
 
-    ZHLN::Float4 sparkColor    = {1.0f, 0.82f, 0.55f, 1.0f};
+    ZHLN::FVec4 sparkColor    = {1.0f, 0.82f, 0.55f, 1.0f};
     uint32_t     sparkCount    = 8;
     float        sparkSpeed    = 4.5f;
     float        sparkLifetime = 0.35f;
@@ -76,30 +73,30 @@ struct SurfaceResponse {
 // ============================================================================
 
 struct BulletTracer {
-    ZHLN::Float3 start         = {};
-    ZHLN::Float3 direction     = {0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 start         = {};
+    ZHLN::FVec3 direction     = {0.0f, 0.0f, 1.0f};
     float        speed         = 350.0f;
     float        length        = 2.5f;
     float        totalDistance = 0.0f;
     float        traveled      = 0.0f;
-    ZHLN::Float4 colorStart    = {1.0f, 0.92f, 0.65f, 1.0f};
-    ZHLN::Float4 colorEnd      = {1.0f, 0.45f, 0.10f, 0.0f};
+    ZHLN::FVec4 colorStart    = {1.0f, 0.92f, 0.65f, 1.0f};
+    ZHLN::FVec4 colorEnd      = {1.0f, 0.45f, 0.10f, 0.0f};
 };
 
 struct EnergyRing {
-    ZHLN::Float3 position  = {};
-    ZHLN::Float3 normal    = {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 position  = {};
+    ZHLN::FVec3 normal    = {0.0f, 1.0f, 0.0f};
     float        radius    = 0.0f;
     float        maxRadius = 2.5f;
     float        age       = 0.0f;
     float        duration  = 0.25f;
-    ZHLN::Float4 color     = {0.65f, 0.90f, 1.00f, 0.8f};
+    ZHLN::FVec4 color     = {0.65f, 0.90f, 1.00f, 0.8f};
 };
 
 struct ImpactParticle {
-    ZHLN::Float3 position = {};
-    ZHLN::Float3 velocity = {};
-    ZHLN::Float4 color    = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec3 position = {};
+    ZHLN::FVec3 velocity = {};
+    ZHLN::FVec4 color    = {1.0f, 1.0f, 1.0f, 1.0f};
     float        size     = 0.04f;
     float        age      = 0.0f;
     float        maxLife  = 0.35f;
@@ -190,84 +187,20 @@ class System {
     /**
      * @brief Spawns visual and acoustic impact effects given a hit position and normal.
      */
-    void SpawnImpact(Engine& engine, const JPH::Vec3& point, const JPH::Vec3& normal, uint32_t surfaceId = 0) {
-        auto                   it  = m_surfaces.find(surfaceId);
-        const SurfaceResponse& cfg = (it != m_surfaces.end()) ? it->second : m_surfaces[0];
-
-        std::mt19937                          gen(m_randomDevice());
-        std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
-
-        // 1. Spawn Decal via ECS DecalComponent (Heightmap & Geometry Agnostic)
-        if (cfg.spawnDecal && cfg.decalTexture != TextureID::Invalid) {
-            auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-            auto& ecb = engine.Commands();
-
-            JPH::Vec3 zAxis = -normal.Normalized();
-            JPH::Vec3 up    = (std::abs(zAxis.GetY()) > 0.95f) ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
-            JPH::Vec3 xAxis = up.Cross(zAxis).Normalized();
-            JPH::Vec3 yAxis = zAxis.Cross(xAxis).Normalized();
-
-            JPH::Mat44 rotMat(JPH::Vec4(xAxis, 0.0f), JPH::Vec4(yAxis, 0.0f), JPH::Vec4(zAxis, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f));
-            JPH::Quat  decalRot = rotMat.GetQuaternion().Normalized();
-
-            JPH::Vec3  decalScale(cfg.decalSize, cfg.decalSize, 0.40f);
-            JPH::Mat44 worldMat = Math::CreateTransform(point, decalRot, decalScale);
-
-            Entity decalEnt = reg.Create();
-            ecb.AddComponent(
-                decalEnt, Components::NameComponent {.name = String64("ImpactDecal")},
-                Components::TransformComponent {.position = point, .rotation = decalRot, .scale = decalScale},
-                Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
-                Components::DecalComponent {.albedoMap = cfg.decalTexture, .normalMap = cfg.normalTexture, .roughness = cfg.decalRoughness, .metallic = 0.0f}
-            );
-        }
-
-        // 2. Spawn Particle Spray
-        for (uint32_t i = 0; i < cfg.sparkCount; ++i) {
-            JPH::Vec3 randSpread(dis(gen), (dis(gen) + 1.0f) * 0.5f, dis(gen));
-            JPH::Vec3 vel = (normal * (cfg.sparkSpeed * 0.6f)) + (randSpread.Normalized() * (cfg.sparkSpeed * 0.8f));
-
-            m_particles.push_back(
-                ImpactParticle {
-                    .position = point,
-                    .velocity = vel,
-                    .color    = cfg.sparkColor,
-                    .size     = cfg.sparkSize * (0.8f + (dis(gen) + 1.0f) * 0.3f),
-                    .age      = 0.0f,
-                    .maxLife  = cfg.sparkLifetime * (0.7f + (dis(gen) + 1.0f) * 0.4f),
-                    .drag     = cfg.sparkDrag,
-                    .gravity  = cfg.sparkGravity
-                }
-            );
-        }
-
-        // 3. Acoustic Audio Feedback via Unified Fire-and-Forget Event Queue
-        if (cfg.hasAudio) {
-            engine.Audio().PostEvent(
-                {.type       = AudioEventType::NoiseBurst3D,
-                 .position   = point,
-                 .volume     = 0.65f,
-                 .param1     = cfg.soundFreq,
-                 .param2     = 2.5f,
-                 .duration   = cfg.soundDuration,
-                 .filterType = AudioFilterType::BandPass,
-                 .noiseType  = AudioNoiseType::Pink}
-            );
-        }
-    }
+    void SpawnImpact(Engine& engine, const FVec3& point, const FVec3& normal, uint32_t surfaceId = 0);
 
     /**
      * @brief Spawns a high-speed ballistic tracer beam.
      */
     void SpawnTracer(
-        const JPH::Vec3& from,
-        const JPH::Vec3& to,
+        const FVec3& from,
+        const FVec3& to,
         float            speed      = 320.0f,
         float            length     = 2.2f,
-        const JPH::Vec4& colorStart = {1.0f, 0.95f, 0.65f, 1.0f},
-        const JPH::Vec4& colorEnd   = {1.0f, 0.45f, 0.10f, 0.0f}
+        const FVec4& colorStart = {1.0f, 0.95f, 0.65f, 1.0f},
+        const FVec4& colorEnd   = {1.0f, 0.45f, 0.10f, 0.0f}
     ) {
-        JPH::Vec3 diff = to - from;
+        FVec3 diff = to - from;
         float     dist = diff.Length();
         if (dist <= 0.01f) {
             return;
@@ -291,11 +224,11 @@ class System {
      * @brief Spawns an expanding energy/kinetic shockwave ring.
      */
     void SpawnShockwaveRing(
-        const JPH::Vec3& position,
-        const JPH::Vec3& normal,
+        const FVec3& position,
+        const FVec3& normal,
         float            maxRadius = 2.5f,
         float            duration  = 0.25f,
-        const JPH::Vec4& color     = {0.65f, 0.90f, 1.00f, 0.8f}
+        const FVec4& color     = {0.65f, 0.90f, 1.00f, 0.8f}
     ) {
         m_rings.push_back(
             EnergyRing {
@@ -317,11 +250,11 @@ class System {
             float tail = std::max(0.0f, tracer.traveled - tracer.length);
 
             if (head > tail) {
-                // Storage fields, Jolt algebra: load once, use twice.
-                const JPH::Vec3 tracerStart = tracer.start;
-                const JPH::Vec3 tracerDir   = tracer.direction;
-                JPH::Vec3       pTail       = tracerStart + (tracerDir * tail);
-                JPH::Vec3       pHead       = tracerStart + (tracerDir * head);
+                // Load once, use twice.
+                const FVec3 tracerStart = tracer.start;
+                const FVec3 tracerDir   = tracer.direction;
+                FVec3       pTail       = tracerStart + (tracerDir * tail);
+                FVec3       pHead       = tracerStart + (tracerDir * head);
 
                 // Draws line segment with HDR emissive boost into line queue
                 scene.AddLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
@@ -337,20 +270,20 @@ class System {
 
             // Approximate ring with 16-segment line loop
             constexpr int   kSegments  = 16;
-            const JPH::Vec3 ringNormal = ring.normal;
-            const JPH::Vec4 ringColor  = ring.color;
-            const JPH::Vec3 ringOrigin = ring.position;
-            JPH::Vec3       u          = (std::abs(ringNormal.GetY()) > 0.95f) ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
-            JPH::Vec3       v          = ringNormal.Cross(u).Normalized();
-            u                          = v.Cross(ringNormal).Normalized();
+            const FVec3 ringNormal = ring.normal;
+            const FVec4 ringColor  = ring.color;
+            const FVec3 ringOrigin = ring.position;
+            FVec3       u          = (std::abs(ringNormal.y) > 0.95f) ? FVec3::UnitX() : FVec3::UnitY();
+            FVec3       v          = Cross(ringNormal, u).Normalized();
+            u                          = Cross(v, ringNormal).Normalized();
 
-            float     alpha = (1.0f - t) * ringColor.GetW();
-            JPH::Vec4 col(ringColor.GetX(), ringColor.GetY(), ringColor.GetZ(), alpha);
+            float     alpha = (1.0f - t) * ringColor.w;
+            FVec4 col(ringColor.x, ringColor.y, ringColor.z, alpha);
 
-            JPH::Vec3 prevP = ringOrigin + u * currentRadius;
+            FVec3 prevP = ringOrigin + u * currentRadius;
             for (int i = 1; i <= kSegments; ++i) {
                 float     theta = (static_cast<float>(i) / kSegments) * 2.0f * std::numbers::pi_v<float>;
-                JPH::Vec3 p     = ringOrigin + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
+                FVec3 p     = ringOrigin + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
                 scene.AddLine(prevP, p, col, col);
                 prevP = p;
             }
@@ -360,11 +293,10 @@ class System {
         // 3. Advance Impact Particles (Generalized drag + gravity without planar floor assumption)
         for (auto& p: m_particles) {
             p.age += dt;
-            // Integration is written on Jolt locals and stored back: the fields
-            // are storage, and a member converts on assignment, not on SetY or *=.
-            JPH::Vec3 velocity = p.velocity;
-            JPH::Vec3 position = p.position;
-            velocity.SetY(velocity.GetY() + (p.gravity * dt));
+            // Integrate in native vector space and write the updated state back.
+            FVec3 velocity = p.velocity;
+            FVec3 position = p.position;
+            velocity.y += p.gravity * dt;
             velocity *= std::exp(-p.drag * dt);
             position += velocity * dt;
             p.velocity = velocity;
@@ -373,9 +305,9 @@ class System {
             // Render spark as short directional streak along velocity vector
             float speed = velocity.Length();
             if (speed > 0.05f) {
-                JPH::Vec3 streakTail = position - (velocity / speed) * (p.size * 1.5f);
+                FVec3 streakTail = position - (velocity / speed) * (p.size * 1.5f);
                 float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.w;
-                JPH::Vec4 col(p.color.x, p.color.y, p.color.z, alpha);
+                FVec4 col(p.color.x, p.color.y, p.color.z, alpha);
 
                 scene.AddLine(streakTail, position, col, col);
             }

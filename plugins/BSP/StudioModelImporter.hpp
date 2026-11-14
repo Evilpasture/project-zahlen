@@ -13,8 +13,10 @@
 #include <string_view>
 
 namespace ZHLN {
+class Engine;
 class RenderContext;
 class AssetManager;
+class PhysicsContext;
 } // namespace ZHLN
 
 namespace ZHLN::BSP {
@@ -24,6 +26,13 @@ namespace ZHLN::BSP {
 [[nodiscard]] auto LoadStudioModelPrefab(
     RenderContext&       ctx,
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
+    const SourceVFS&     vfs,
+    std::string_view     path,
+    const ImportOptions& options = {}
+) -> ZHLN::Optional<ModelPrefab&>;
+[[nodiscard]] auto LoadStudioModelPrefab(
+    Engine&              engine,
     const SourceVFS&     vfs,
     std::string_view     path,
     const ImportOptions& options = {}
@@ -33,6 +42,17 @@ namespace ZHLN::BSP {
 [[nodiscard]] auto LoadStudioModelPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
+    const SourceVFS&           vfs,
+    std::span<const std::byte> mdlBytes,
+    std::span<const std::byte> vvdBytes,
+    std::span<const std::byte> vtxBytes,
+    std::span<const std::byte> phyBytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options = {}
+) -> ZHLN::Optional<ModelPrefab&>;
+[[nodiscard]] auto LoadStudioModelPrefabFromMemory(
+    Engine&                    engine,
     const SourceVFS&           vfs,
     std::span<const std::byte> mdlBytes,
     std::span<const std::byte> vvdBytes,

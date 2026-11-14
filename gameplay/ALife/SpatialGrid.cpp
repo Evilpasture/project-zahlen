@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SpatialGrid.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "ALifeComponents.hpp"
 #include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace ZHLN::ALife {
 
@@ -17,14 +19,14 @@ void SpatialGrid::Clear() noexcept {
     std::ranges::fill(_cellHeads, Entity::Null());
 }
 
-auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
-    if (pos.GetX() < 0.0 || pos.GetZ() < 0.0) {
+auto SpatialGrid::GetCellIndex(DVec3 pos) const noexcept -> int32_t {
+    if (pos.x < 0.0 || pos.z < 0.0) {
         return -1;
     }
 
     const auto cell_size = static_cast<double>(_cellSize);
-    auto       gx        = static_cast<int32_t>(pos.GetX() / cell_size);
-    auto       gz        = static_cast<int32_t>(pos.GetZ() / cell_size);
+    auto       gx        = static_cast<int32_t>(pos.x / cell_size);
+    auto       gz        = static_cast<int32_t>(pos.z / cell_size);
 
     if (gx >= static_cast<int32_t>(_width) || gz >= static_cast<int32_t>(_height)) {
         return -1;
@@ -32,8 +34,9 @@ auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
     return (gz * static_cast<int32_t>(_width)) + gx;
 }
 
-void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos) {
-    auto comp = reg.Get<ALifeComponent>(handle);
+template <typename View>
+void SpatialGrid::UpdateEntityImpl(View& view, Entity handle, DVec3 old_pos) {
+    auto comp = view.template Get<ALifeComponent>(handle);
     if (!comp) {
         return;
     }
@@ -59,7 +62,7 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
                 *curr = comp->next_in_grid;
                 break;
             }
-            auto curr_comp = reg.Get<ALifeComponent>(*curr);
+            auto curr_comp = view.template Get<ALifeComponent>(*curr);
             if (!curr_comp) {
                 break;
             }
@@ -74,8 +77,9 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
     }
 }
 
-void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
-    auto comp = reg.Get<ALifeComponent>(handle);
+template <typename View>
+void SpatialGrid::RemoveEntityImpl(View& view, Entity handle) {
+    auto comp = view.template Get<ALifeComponent>(handle);
     if (!comp) {
         return;
     }
@@ -89,7 +93,7 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
                 comp->next_in_grid = Entity::Null();
                 break;
             }
-            auto curr_comp = reg.Get<ALifeComponent>(*curr);
+            auto curr_comp = view.template Get<ALifeComponent>(*curr);
             if (!curr_comp) {
                 break;
             }
@@ -98,16 +102,17 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
     }
 }
 
-auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
+template <typename View>
+auto SpatialGrid::QueryImpl(const View& view, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
     reusable.clear();
 
     const auto cell_size = static_cast<double>(_cellSize);
     const auto rad       = static_cast<double>(radius);
 
-    auto min_x = static_cast<int32_t>(std::floor((pos.GetX() - rad) / cell_size));
-    auto max_x = static_cast<int32_t>(std::floor((pos.GetX() + rad) / cell_size));
-    auto min_z = static_cast<int32_t>(std::floor((pos.GetZ() - rad) / cell_size));
-    auto max_z = static_cast<int32_t>(std::floor((pos.GetZ() + rad) / cell_size));
+    auto min_x = static_cast<int32_t>(std::floor((pos.x - rad) / cell_size));
+    auto max_x = static_cast<int32_t>(std::floor((pos.x + rad) / cell_size));
+    auto min_z = static_cast<int32_t>(std::floor((pos.z - rad) / cell_size));
+    auto max_z = static_cast<int32_t>(std::floor((pos.z + rad) / cell_size));
 
     const float radius_sq = radius * radius;
 
@@ -120,12 +125,12 @@ auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radiu
 
             Entity current = _cellHeads[(z * static_cast<int32_t>(_width)) + x];
             while (current != Entity::Null()) {
-                const auto comp = reg.Get<ALifeComponent>(current);
+                const auto comp = view.template Get<ALifeComponent>(current);
                 if (!comp) {
                     break; // A destroyed component cannot supply the next link.
                 }
 
-                const float dist_sq = (comp->position - pos).LengthSq();
+                const float dist_sq = (comp->position - pos).LengthSquared();
                 if (dist_sq <= radius_sq) {
                     reusable.push_back(current);
                 }
@@ -135,6 +140,16 @@ auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radiu
         }
     }
     return reusable;
+}
+
+void SpatialGrid::UpdateEntity(WriteQuery query, Entity handle, DVec3 old_pos) {
+    UpdateEntityImpl(query, handle, old_pos);
+}
+void SpatialGrid::RemoveEntity(WriteQuery query, Entity handle) {
+    RemoveEntityImpl(query, handle);
+}
+auto SpatialGrid::Query(ReadQuery query, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
+    return QueryImpl(query, pos, radius, std::move(reusable));
 }
 
 } // namespace ZHLN::ALife

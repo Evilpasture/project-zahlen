@@ -15,7 +15,9 @@
 // does for alphaMode 2, so the glass mesh is patched after spawn. AA is off
 // so a static scene stays static. Mesh shading is left alone (Hybrid).
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -61,40 +63,38 @@ using ZHLN::Test::Image::SubRegionStats;
 constexpr NormalizedRect kThroughPane {.x0 = 0.42, .y0 = 0.42, .x1 = 0.58, .y1 = 0.58};
 constexpr NormalizedRect kWallOnly {.x0 = 0.12, .y0 = 0.42, .x1 = 0.24, .y1 = 0.58};
 
-const JPH::Float4 kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
-const JPH::Float4 kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
-const JPH::Float4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
+const ZHLN::FVec4 kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
+const ZHLN::FVec4 kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
+const ZHLN::FVec4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
 
 enum class PaneKind : uint8_t { None, Glass, Opaque };
 
 enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
 [[nodiscard]] auto SpawnWallAndPane(ZHLN::Engine& engine, PaneKind pane) -> SceneBuild {
-    auto& registry  = ZHLN::EngineAccess::RegistryOf(engine);
+    auto registry = engine.Entities();
     auto renderCtx = engine.Graphics();
 
-    for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.glowIntensity     = 0.0f;
-            pp.bloomStrength     = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-            pp.giMode            = 0;
-            pp.skyZenith         = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.glowIntensity           = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+        gfx.post.mode                    = 0;
+        gfx.environment.skyZenith = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
+        gfx.environment.skyGround = {0.0f, 0.0f, 0.0f, 1.0f};
+    });
 
     // ForwardPass still shades; a sun on the camera-facing +Z faces keeps the
     // glass from compositing as an unlit black film on top of the wall albedo.
-    const ZHLN::Entity sun = registry.Create();
-    registry.Add(
-        sun, ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 8.0f)},
+    const ZHLN::Entity sun = registry.Spawn();
+    registry.Attach(
+        sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = JPH::Vec3(0.0f, 0.0f, 1.0f)
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 1.0f, 1.0f}, .intensity = 220.0f, .direction = ZHLN::FVec3{0.0f, 0.0f, 1.0f}
         }
     );
 
@@ -134,15 +134,16 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         }
     }
 
-    const auto cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& camera = c.camera;
+        camera.position = {0.0f, 0.0f, 5.0f};
+        camera.yaw      = ZHLN::DegF{-90.0f};
+        camera.pitch    = ZHLN::DegF{0.0f};
+        camera.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return SceneBuild::Camera;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
-    camera.yaw      = -90.0f;
-    camera.pitch    = 0.0f;
-    camera.fov      = 60.0f;
     return SceneBuild::Ok;
 }
 
@@ -273,30 +274,29 @@ struct TransparentMaterialsTestSuite {
             if (!engine.Valid()) return std::unexpected(TransparentMaterialError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
             auto rc = engine->Graphics();
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
-            for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
-                    pp.fullBright = 0;
-                    pp.ambientExposure = 1.0f;
-                    pp.giMode = 0;
-                    pp.enableSSR = 0;
-                    pp.enableRTR = 0;
-                    pp.vignetteIntensity = 0.0f;
-                    pp.glowIntensity = 0.0f;
-                    pp.bloomStrength = 0.0f;
-                    pp.tonemapper = 3;
-                });
-            }
-            const auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+            engine->Graphics().PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright       = 0;
+                gfx.environment.ambientExposure  = 1.0f;
+                gfx.post.mode                    = 0;
+                gfx.post.enableSSR               = 0;
+                gfx.rayTracing.enableReflections = false;
+                gfx.post.vignetteIntensity       = 0.0f;
+                gfx.post.glowIntensity           = 0.0f;
+                gfx.post.bloomStrength           = 0.0f;
+                gfx.post.tonemapper              = 3;
+            });
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& camera = c.camera;
+                camera.position = {0.0f, 0.0f, 5.0f};
+                camera.yaw = ZHLN::DegF{-90.0f};
+                camera.pitch = ZHLN::DegF{0.0f};
+                camera.fov = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& camera = cameraComp->camera;
-            camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
-            camera.yaw = -90.0f;
-            camera.pitch = 0.0f;
-            camera.fov = 60.0f;
 
             constexpr uint32_t side = 64;
             std::vector<uint8_t> maskPixels(side * side * 4u, 255u);

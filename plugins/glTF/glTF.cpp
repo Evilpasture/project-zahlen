@@ -13,8 +13,11 @@
 
 module;
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Quat.h>
@@ -23,8 +26,10 @@ module;
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
@@ -52,6 +57,9 @@ module ZHLN.glTF;
 
 namespace {
 
+using ZHLN::FVec3;
+using ZHLN::FVec4;
+
 // ============================================================================
 // STATE & THEME
 // ============================================================================
@@ -67,7 +75,7 @@ struct InspectorState {
     std::vector<ZHLN::Entity>     instances {};
     std::optional<ZHLN::FileDrop> pendingDrop {};
 
-    JPH::Vec3 target   = JPH::Vec3(0.0f, 0.0f, 0.0f);
+    FVec3 target   = {0.0f, 0.0f, 0.0f};
     float     distance = 5.0f;
     float     yaw      = -90.0f;
     float     pitch    = -15.0f;
@@ -83,77 +91,77 @@ struct InspectorState {
     ZHLN::GUI::Context              gui {};
 };
 
-[[nodiscard]] JPH::Vec4 ThemeText() noexcept {
-    return JPH::Vec4(0.86f, 0.90f, 0.96f, 1.0f);
+[[nodiscard]] FVec4 ThemeText() noexcept {
+    return FVec4{0.86f, 0.90f, 0.96f, 1.0f};
 }
-[[nodiscard]] JPH::Vec4 ThemeTextDim() noexcept {
-    return JPH::Vec4(0.55f, 0.62f, 0.72f, 1.0f);
+[[nodiscard]] FVec4 ThemeTextDim() noexcept {
+    return FVec4{0.55f, 0.62f, 0.72f, 1.0f};
 }
-[[nodiscard]] JPH::Vec4 ThemeAccent() noexcept {
-    return JPH::Vec4(0.30f, 0.85f, 1.0f, 1.0f);
+[[nodiscard]] FVec4 ThemeAccent() noexcept {
+    return FVec4{0.30f, 0.85f, 1.0f, 1.0f};
 }
-[[nodiscard]] JPH::Vec4 ThemePlaying() noexcept {
-    return JPH::Vec4(0.45f, 0.95f, 0.55f, 1.0f);
+[[nodiscard]] FVec4 ThemePlaying() noexcept {
+    return FVec4{0.45f, 0.95f, 0.55f, 1.0f};
 }
 
 // ============================================================================
 // CAMERA / SCENE HELPERS
 // ============================================================================
 
-[[nodiscard]] JPH::Vec3 OrbitDirection(float yawDeg, float pitchDeg) noexcept {
+[[nodiscard]] FVec3 OrbitDirection(float yawDeg, float pitchDeg) noexcept {
     const float yaw   = JPH::DegreesToRadians(yawDeg);
     const float pitch = JPH::DegreesToRadians(pitchDeg);
-    return JPH::Vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch));
+    return FVec3{std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)};
 }
 
-[[nodiscard]] JPH::Vec3 Cross(JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept {
-    return JPH::Vec3(a.GetY() * b.GetZ() - a.GetZ() * b.GetY(), a.GetZ() * b.GetX() - a.GetX() * b.GetZ(), a.GetX() * b.GetY() - a.GetY() * b.GetX());
+[[nodiscard]] FVec3 Cross(FVec3 a, FVec3 b) noexcept {
+    return FVec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 void AddInspectorLighting(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
-    const JPH::Vec3  sunPos   = JPH::Vec3(15.0f, 30.0f, 15.0f);
-    const JPH::Quat  sunRot   = ZHLN::Math::EulerDegreesToQuat({50.0f, -35.0f, 0.0f});
-    const JPH::Mat44 sunWorld = ZHLN::Math::CreateTransform(sunPos, sunRot);
-    reg.Create(
+    const FVec3  sunPos   = {15.0f, 30.0f, 15.0f};
+    const auto sunRot = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}});
+    const auto sunWorld = ZHLN::ComposeTransform(sunPos, sunRot, FVec3::One());
+    entities.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorSun")},
-        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = JPH::Vec3::sReplicate(1.0f)},
+        ZHLN::Components::TransformComponent {.position = sunPos, .rotation = sunRot, .scale = FVec3::Splat(1.0f)},
         ZHLN::Components::WorldTransformComponent {.world = sunWorld, .previous = sunWorld},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.97f, 0.91f), .intensity = 120.0f, .direction = JPH::Vec3(0.4f, 1.0f, 0.3f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = FVec3{1.0f, 0.97f, 0.91f}, .intensity = 120.0f, .direction = FVec3{0.4f, 1.0f, 0.3f}.Normalized()
         }
     );
 
     const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
         engine, 40.0f, {0.12f, 0.14f, 0.18f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .roughness = 0.9f, .metallic = 0.0f}
     );
-    reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
+    entities.Attach(ground, ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorGround")});
 
     engine.EnsureFontAtlas();
 }
 
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outCenter, float& outDistance) {
-    JPH::Vec3 min(1e9f, 1e9f, 1e9f);
-    JPH::Vec3 max(-1e9f, -1e9f, -1e9f);
+void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outCenter, float& outDistance) {
+    FVec3 min{1e9f, 1e9f, 1e9f};
+    FVec3 max{-1e9f, -1e9f, -1e9f};
     bool      any = false;
     for (const ZHLN::ModelPart& part: prefab.parts) {
-        min.SetX(std::min(min.GetX(), part.localMin[0]));
-        min.SetY(std::min(min.GetY(), part.localMin[1]));
-        min.SetZ(std::min(min.GetZ(), part.localMin[2]));
-        max.SetX(std::max(max.GetX(), part.localMax[0]));
-        max.SetY(std::max(max.GetY(), part.localMax[1]));
-        max.SetZ(std::max(max.GetZ(), part.localMax[2]));
+        min.x = std::min(min.x, part.localMin[0]);
+        min.y = std::min(min.y, part.localMin[1]);
+        min.z = std::min(min.z, part.localMin[2]);
+        max.x = std::max(max.x, part.localMax[0]);
+        max.y = std::max(max.y, part.localMax[1]);
+        max.z = std::max(max.z, part.localMax[2]);
         any = true;
     }
     if (!any) {
-        outCenter   = JPH::Vec3::sZero();
+        outCenter   = FVec3::Zero();
         outDistance = 5.0f;
         return;
     }
 
-    const JPH::Vec3 center = (min + max) * 0.5f;
-    const JPH::Vec3 ext    = (max - min) * 0.5f;
+    const FVec3 center = (min + max) * 0.5f;
+    const FVec3 ext    = (max - min) * 0.5f;
     const float     radius = ext.Length();
     const float     fov    = 45.0f;
     outCenter              = center;
@@ -164,9 +172,9 @@ void ClearInstances(InspectorState& state) {
     if (state.engine == nullptr) {
         return;
     }
-    auto& reg = ZHLN::EngineAccess::RegistryOf(*state.engine);
+    auto entities = state.engine->Entities();
     for (ZHLN::Entity e: state.instances) {
-        if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
+        if (e != ZHLN::Entity::Null() && entities.IsAlive(e)) {
             DespawnEntity(*state.engine, e);
         }
     }
@@ -190,17 +198,17 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if ((state.engine == nullptr) || state.instances.empty()) {
         return;
     }
-    auto&              reg  = ZHLN::EngineAccess::RegistryOf(*state.engine);
-    const ZHLN::Entity root = state.instances[0];
-    if (root == ZHLN::Entity::Null() || !reg.IsAlive(root)) {
+    auto               entities = state.engine->Entities();
+    const ZHLN::Entity root     = state.instances[0];
+    if (root == ZHLN::Entity::Null() || !entities.IsAlive(root)) {
         return;
     }
-    if (!reg.Get<ZHLN::Components::AnimatorComponent>(root)) {
+    if (!entities.Get<ZHLN::Components::AnimatorComponent>(root)) {
         return;
     }
 
     const bool stopping = (state.playingClip == clipIndex);
-    reg.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
+    entities.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
         anim.currentTrackIdx      = stopping ? -1 : clipIndex;
         anim.currentTrackTime     = 0.0f;
         anim.currentPlaybackSpeed = 1.0f;
@@ -221,7 +229,7 @@ void TreeRow(
     bool                expandable,
     std::string_view    selectTitle,
     std::string_view    selectDetails,
-    const JPH::Vec4& /*textColor*/,
+    const FVec4& /*textColor*/,
     int32_t clipIndex = -1
 ) {
     const std::string pathStr(path);
@@ -233,8 +241,8 @@ void TreeRow(
     text += expandable ? (expanded ? "v " : "> ") : "  ";
     text += label;
 
-    JPH::Vec4 btnColor = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) :
-                                    (playing ? JPH::Vec4(0.15f, 0.30f, 0.20f, 0.85f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.60f));
+    FVec4 btnColor = selected ? FVec4{0.18f, 0.36f, 0.56f, 0.98f} :
+                                    (playing ? FVec4{0.15f, 0.30f, 0.20f, 0.85f} : FVec4{0.10f, 0.12f, 0.16f, 0.60f});
 
     if (ui.Button(text, btnColor)) {
         if (expandable) {
@@ -277,13 +285,14 @@ void DrawModelNodeRows(
         label += "  [mesh]";
     }
 
-    const JPH::Vec3 pos      = node.localTransform.GetTranslation();
+    const auto& m = node.localTransform;
+    const FVec3 pos {m[0, 3], m[1, 3], m[2, 3]};
     const bool      expanded = state.expanded.contains(path);
     TreeRow(
         ui, state, path, depth, label, hasChildren, std::format("Node: {}", label),
         std::format(
-            "Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex, node.hasMesh ? "yes" : "no", pos.GetX(),
-            pos.GetY(), pos.GetZ()
+            "Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex, node.hasMesh ? "yes" : "no", pos.x,
+            pos.y, pos.z
         ),
         ThemeText()
     );
@@ -625,7 +634,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     ClearInstances(state);
 
     auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+        engine, std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
     if (!prefab) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
@@ -683,27 +692,21 @@ void OnFileDropped(void* userdata, const ZHLN::FileDrop* files, uint32_t count) 
 }
 
 void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
-    auto& reg  = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  ents = reg.GetEntitiesWith<ZHLN::Components::InputStateComponent>();
-    if (ents.empty()) {
-        return;
-    }
-    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
-    if (!input) {
-        return;
-    }
+    const auto input = std::as_const(engine).Input();
 
     // The scene explorer panel owns input inside its screen region (once shown).
-    const bool overExplorer = state.loaded && (input->mouseX >= 0.0f) && (input->mouseX <= kExplorerWidth);
+    const ZHLN::Axis2DValue where  = input.MousePosition();
+    const bool        overExplorer = state.loaded && (where.x >= 0.0f) && (where.x <= kExplorerWidth);
     if (overExplorer) {
         return;
     }
 
-    const float dx  = input->mouseDeltaX;
-    const float dy  = input->mouseDeltaY;
-    const bool  lmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool  rmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    const bool  mmb = input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
+    const ZHLN::Axis2DValue delta = input.MouseDelta();
+    const float            dx    = delta.x;
+    const float            dy    = delta.y;
+    const bool             lmb   = input.MouseButtonDown(ZHLN::MouseButton::Left);
+    const bool             rmb   = input.MouseButtonDown(ZHLN::MouseButton::Right);
+    const bool             mmb   = input.MouseButtonDown(ZHLN::MouseButton::Middle);
 
     constexpr float kOrbitSpeed = 0.30f;
     constexpr float kPanSpeed   = 0.0015f;
@@ -714,31 +717,30 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.pitch -= dy * kOrbitSpeed;
         state.pitch = std::clamp(state.pitch, -89.0f, 89.0f);
     } else if (rmb) {
-        const JPH::Vec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
-        JPH::Vec3       camRight = Cross(forward, JPH::Vec3::sAxisY());
-        if (camRight.LengthSq() > 1e-6f) {
+        const FVec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
+        FVec3       camRight = Cross(forward, FVec3::UnitY());
+        if (camRight.LengthSquared() > 1e-6f) {
             camRight = camRight.Normalized();
         }
-        const JPH::Vec3 camUp = Cross(camRight, forward).Normalized();
+        const FVec3 camUp = Cross(camRight, forward).Normalized();
         const float     scale = state.distance * kPanSpeed;
 
         state.target += (-camRight * dx + camUp * dy) * scale;
     }
 
-    if (input->mouseWheel != 0.0f) {
-        state.distance *= std::exp(-input->mouseWheel * kZoomSpeed);
+    const float wheel = input.MouseWheel();
+    if (wheel != 0.0f) {
+        state.distance *= std::exp(-wheel * kZoomSpeed);
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 
-    const JPH::Vec3 dir        = OrbitDirection(state.yaw, state.pitch);
-    auto            cameraComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
-        return;
-    }
-    ZHLN::Camera& cam = cameraComp->camera;
-    cam.position      = state.target - dir * state.distance;
-    cam.yaw           = state.yaw;
-    cam.pitch         = state.pitch;
+    const FVec3 dir = OrbitDirection(state.yaw, state.pitch);
+    engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](ZHLN::Components::CameraComponent& cameraComp) {
+        ZHLN::Camera& cam = cameraComp.camera;
+        cam.position      = state.target - dir * state.distance;
+        cam.yaw           = ZHLN::DegF{state.yaw};
+        cam.pitch         = ZHLN::DegF{state.pitch};
+    });
 }
 
 void DrawDropPrompt(ZHLN::GUI::Frame& ui) {
@@ -793,8 +795,6 @@ namespace ZHLN::glTF {
 
 void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
-
-    engine.InitializeDefaultScene();
 
     auto* state   = new InspectorState();
     state->engine = &engine;

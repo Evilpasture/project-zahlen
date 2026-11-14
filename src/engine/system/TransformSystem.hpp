@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <array>
@@ -48,7 +49,7 @@ class ZHLN_API TransformSystem {
         };
 
         struct Node {
-            JPH::Mat44 resolvedWorld    = JPH::Mat44::sIdentity();
+            Mat4x4 resolvedWorld    = Mat4x4::Identity();
             Entity     entity           = Entity::Null();
             Entity     parent           = Entity::Null();
             uint32_t   parentIndex      = NoNode;
@@ -83,11 +84,11 @@ class ZHLN_API TransformSystem {
 
     // Called after Present. Copy only matrices whose world value differs from
     // previous, so direct world-matrix writers need no transient dirty flag.
-    static void UpdateTransformHistory(ECS::Registry& registry) noexcept;
+    static void UpdateTransformHistory(ECS::Query<Components::WorldTransformComponent&> query) noexcept;
 
   private:
     [[nodiscard]] static auto LocalTransformBits(const Components::TransformComponent& transform) noexcept -> std::array<uint32_t, 10>;
-    [[nodiscard]] static auto WorldMatrixBits(const JPH::Mat44& matrix) noexcept -> std::array<uint32_t, 16>;
+    [[nodiscard]] static auto WorldMatrixBits(const Mat4x4& matrix) noexcept -> std::array<uint32_t, 16>;
     static void               BreakTransformCycles(ScratchStorage& scratch);
     static void               BuildChildren(ScratchStorage& scratch);
 };

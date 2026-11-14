@@ -10,13 +10,13 @@
 namespace ZHLN {
 class Engine;
 namespace ECS {
-class Registry;
+class Inspection;
 }
 
 class ZHLN_STATIC_API ConsoleDebugger {
   public:
     static void Execute(Engine& engine, GameConsole& console, std::string_view commandLine);
-    static void Execute(ECS::Registry& registry, GameConsole& console, std::string_view commandLine);
+    static void Execute(ECS::Inspection inspection, GameConsole& console, std::string_view commandLine);
 };
 
 } // namespace ZHLN

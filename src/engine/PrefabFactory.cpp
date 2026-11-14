@@ -1,34 +1,33 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <optional>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
+#include <optional>
+// TODO(Evilpasture): REMOVE SYSTEM LEAK
 #include "ArticulationSystem.hpp"
-#include "LightingSystem.hpp"
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <algorithm>
 #include <cstddef>
 #include <span>
@@ -67,23 +66,6 @@ auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::Ba
 }
 
 } // namespace
-
-void DetachOwnedMesh(GraphicsDevice gfx, ECS::Registry& reg, Entity entity) {
-    SceneResources::Detach<Components::OwnedMeshComponent>(gfx, reg, entity);
-}
-
-void AttachOwnedMesh(GraphicsDevice gfx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component) {
-    SceneResources::Attach(gfx, reg, entity, std::move(component));
-}
-
-void ReleaseOwnedMeshes(GraphicsDevice gfx, ECS::Registry& reg) {
-    if (reg.GetEntitiesWith<Components::OwnedMeshComponent>().empty()) {
-        return;
-    }
-    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
-        SceneResources::Release(gfx, owned);
-    }
-}
 
 auto CreateFontAtlas(RenderContext& render) -> FontAtlas {
     return CreateFontAtlas(render, std::nullopt, GUI::kDefaultFontAssetID);
@@ -209,40 +191,50 @@ auto LoadModelPrefab(GraphicsDevice, AssetManager& assetMgr, std::string_view pa
 
 namespace {
 
+[[nodiscard]] auto NativeModelMatrix(const Mat4x4& source) -> Mat4x4 { return source; }
+
+[[nodiscard]] auto SpawnLocalTransform(const SpawnParams& params) -> Components::TransformComponent {
+    return {
+        .position = {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)},
+        .rotation = params.rotation,
+        .scale = params.scale
+    };
+}
+
+[[nodiscard]] auto SpawnMatrix(const SpawnParams& params) -> Mat4x4 {
+    const auto transform = SpawnLocalTransform(params);
+    return ComposeTransform(transform.position, transform.rotation, transform.scale);
+}
+
 auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) -> Entity {
-    Entity     root     = reg.Create();
-    JPH::Mat44 localMat = Math::CreateTransform(p.position, p.rotation, p.scale);
-    reg.Add(root, Components::TransformComponent {.position = ZHLN::Float3(p.position), .rotation = p.rotation, .scale = p.scale});
+    const auto root = reg.Create();
+    const auto localMat = SpawnMatrix(p);
+    reg.Add(root, SpawnLocalTransform(p));
     reg.Add(root, Components::WorldTransformComponent {.world = localMat, .previous = localMat});
     reg.Add(root, Components::NameComponent {.name = String64("Root_" + std::string(vPath))});
     return root;
 }
 
-auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
-    JPH::Mat44 matrix    = prefab.nodes[nodeIndex].localTransform;
+auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> Mat4x4 {
+    auto matrix = NativeModelMatrix(prefab.nodes[nodeIndex].localTransform);
     int32_t    parentIdx = prefab.nodes[nodeIndex].parentIndex;
 
     while (parentIdx >= 0) {
-        matrix    = prefab.nodes[parentIdx].localTransform * matrix;
+        matrix    = NativeModelMatrix(prefab.nodes[parentIdx].localTransform) * matrix;
         parentIdx = prefab.nodes[parentIdx].parentIndex;
     }
     return matrix;
 }
 
 struct PreparedPart {
-    JPH::Vec3      translation {};
-    JPH::Quat      rotation {};
-    JPH::Vec3      scale {};
+    FVec3      translation {};
+    Quat           rotation = Quat::Identity();
+    FVec3      scale {};
     float          maxScale = 1.0f;
-    JPH::ShapeRefC shape    = nullptr;
+    const Physics::AnyShape* shape = nullptr;
 };
 
-auto PreparePrefabPhysics(
-    const ModelPrefab& prefab,
-    const JPH::Mat44&  baseTransform,
-    bool               createPhysics,
-    bool               useBoxColliders
-) -> std::vector<PreparedPart> {
+auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform, bool createPhysics, bool useBoxColliders) -> std::vector<PreparedPart> {
     std::vector<PreparedPart> outPrepared(prefab.parts.size());
 
     TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) -> void {
@@ -250,21 +242,18 @@ auto PreparePrefabPhysics(
             const auto& part = prefab.parts[i];
             auto&       prep = outPrepared[i];
 
-            JPH::Mat44 nodeWorld  = GetNodeLogicalTransform(prefab, part.nodeIndex);
-            JPH::Mat44 finalLocal = baseTransform * nodeWorld * part.localTransform;
-
-            const Math::TransformTRS trs = Math::Decompose(finalLocal);
+            const auto nodeWorld = GetNodeLogicalTransform(prefab, part.nodeIndex);
+            const auto finalLocal = baseTransform * nodeWorld * NativeModelMatrix(part.localTransform);
+            const auto trs = DecomposeTransform(finalLocal);
 
             prep.scale       = trs.scale;
             prep.rotation    = trs.rotation;
             prep.translation = trs.translation;
-            prep.maxScale    = std::max({std::abs(trs.scale.GetX()), std::abs(trs.scale.GetY()), std::abs(trs.scale.GetZ())});
+            prep.maxScale    = std::max({std::abs(trs.scale.x), std::abs(trs.scale.y), std::abs(trs.scale.z)});
 
             if (createPhysics) {
-                JPH::ShapeRefC rawShape = useBoxColliders ? part.boxCollider : part.meshCollider;
-                if (rawShape != nullptr) {
-                    prep.shape = !prep.scale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f) ? new JPH::ScaledShape(rawShape, prep.scale) : rawShape;
-                }
+                const auto& shape = useBoxColliders ? part.boxCollider : part.meshCollider;
+                if (shape) prep.shape = &*shape;
             }
         }
     });
@@ -272,7 +261,7 @@ auto PreparePrefabPhysics(
 }
 
 auto InstantiateMeshPart(
-    GraphicsDevice                        gfx,
+    GraphicsDevice                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
     ArticulationSystem&                    art,
@@ -283,11 +272,11 @@ auto InstantiateMeshPart(
     Entity                                 rootEntity,
     std::unordered_map<int32_t, uint32_t>& allocatedSkeletons
 ) -> Entity {
-    const JPH::Mat44 baseTransform = Math::CreateTransform(params.position, params.rotation, params.scale);
+    const auto baseTransform = SpawnMatrix(params);
 
     AssetID    meshAsset = part.meshAsset;
     MaterialID matAsset  = params.materialOverride.pipeline != PipelineID::Invalid ? static_cast<uint64_t>(params.materialOverride.pipeline) :
-                                                                                         part.materialAsset;
+                                                                                     part.materialAsset;
 
     Material activeMat = params.materialOverride.pipeline != PipelineID::Invalid ? params.materialOverride : part.defaultMaterial;
 
@@ -322,36 +311,30 @@ auto InstantiateMeshPart(
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
-    JPH::Mat44 worldMat = Math::CreateTransform(prep.translation, prep.rotation, prep.scale);
+    const auto worldMat = ComposeTransform(prep.translation, prep.rotation, prep.scale);
 
+    auto body = Physics::BodyID::Null();
     if (params.createPhysics && prep.shape != nullptr) {
+        body = pc.CreateRigidBody(
+            *prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
+            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate,
+            prep.scale
+        );
+    }
+    if (body != Physics::BodyID::Null()) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-
-        reg.Add(
-            e,
-            Components::PhysicsComponent {
-                .physicsID = pc.CreateRigidBody(
-                    prep.shape, prep.translation, prep.rotation,
-                    params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-                    (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory,
-                    params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
-                ),
-                .isStatic = params.isStaticPhysics
-            }
-        );
+        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     } else if (part.isSkinned && params.isAnimated) {
-        reg.Add(e, Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+        reg.Add(e, Components::TransformComponent {});
         reg.Add(e, Components::WorldTransformComponent {.world = baseTransform, .previous = baseTransform});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     } else {
-        const JPH::Mat44         nodeLocal  = GetNodeLogicalTransform(prefab, part.nodeIndex) * part.localTransform;
-        const Math::TransformTRS localTRS   = Math::Decompose(nodeLocal);
-        const JPH::Vec3&         localPos   = localTRS.translation;
-        const JPH::Quat&         localRot   = localTRS.rotation;
-        const JPH::Vec3&         localScale = localTRS.scale;
-
-        reg.Add(e, Components::TransformComponent {.position = localPos, .rotation = localRot, .scale = localScale});
+        const auto nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * NativeModelMatrix(part.localTransform);
+        const auto localTRS = DecomposeTransform(nodeLocal);
+        reg.Add(e, Components::TransformComponent {.position = localTRS.translation, .rotation = localTRS.rotation, .scale = localTRS.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     }
@@ -363,9 +346,9 @@ auto InstantiateMeshPart(
                .meshAsset     = meshAsset,
                .materialAsset = matAsset,
                .cullRadius    = part.boundingRadius,
-               .localCenter   = JPH::Vec3(
+               .localCenter   = {
                    (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
-               ),
+               },
                .flags     = flags,
                .nodeIndex = part.nodeIndex
            }
@@ -395,35 +378,33 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
         return std::nullopt; // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
-    const float        invImportScale = 1.0f / emissiveFactorScale;
-    const JPH::Float4& raw            = part.defaultMaterial.emissiveFactor;
-    const float        ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
+    const float         invImportScale = 1.0f / emissiveFactorScale;
+    const auto& raw = part.defaultMaterial.emissiveFactor;
+    const float         ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
         return std::nullopt;
     }
 
-    JPH::Vec3 localCenter(
-        (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
-    );
+    const auto localCenter = (part.localMax + part.localMin) * 0.5f;
     float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
 
     Entity glowEnt = reg.Create();
-    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+    reg.Add(glowEnt, Components::TransformComponent {.position = localCenter});
     reg.Add(glowEnt, Components::HierarchyComponent {.parent = parentEntity});
     reg.Add(glowEnt, Components::NameComponent {.name = String64("Glow_" + std::string(part.name.c_str()))});
 
     reg.Add(
         glowEnt, Components::LightComponent {
-                     .type        = LightType::Point,
-                     .color       = JPH::Vec3(ef[0], ef[1], ef[2]),
-                     .intensity   = lum * 35.0f,
-                     .radius      = std::max(partExtent * scaleMult * 0.15f, 0.05f),
-                     .direction   = JPH::Vec3(0, -1, 0),
-                     .range       = std::max(partExtent * scaleMult * 2.5f, 3.0f),
-                     .points      = {},
-                     .twoSided    = 0
+                     .type      = LightType::Point,
+                     .color     = {ef[0], ef[1], ef[2]},
+                     .intensity = lum * 35.0f,
+                     .radius    = std::max(partExtent * scaleMult * 0.15f, 0.05f),
+                     .direction = {0.0f, -1.0f, 0.0f},
+                     .range     = std::max(partExtent * scaleMult * 2.5f, 3.0f),
+                     .points    = {},
+                     .twoSided  = 0
                  }
     );
     return glowEnt;
@@ -431,13 +412,11 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
-    JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
-                             JPH::Vec4(
-                                 params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
-                                 params.materialOverride.baseColorFactor[2], params.materialOverride.baseColorFactor[3]
-                             ) :
-                             JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+auto CreateBoxInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+    auto boxColor = params.materialOverride.baseColorFactor;
+    if (!(boxColor.w >= 0.0f)) {
+        boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
+    }
 
     Mesh mesh = CreateBoxMesh(gfx, halfExtents, boxColor);
 
@@ -447,7 +426,7 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = JPH::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
+        mat.baseColorFactor = {boxColor.x, boxColor.y, boxColor.z, boxColor.w};
         mat.roughnessFactor = 0.3f;
         mat.metallicFactor  = 0.1f;
     }
@@ -459,10 +438,10 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     gfx.RegisterMesh(meshAsset, mesh);
     gfx.RegisterMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    const auto worldMat = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64("Box_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     float maxExtent = std::max({halfExtents.x, halfExtents.y, halfExtents.z});
@@ -472,20 +451,21 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
                .meshAsset  = meshAsset,
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Box,
-               .dimensions = static_cast<JPH::Vec3>(halfExtents),
+               .dimensions = halfExtents,
                .color      = boxColor
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto shape =
-            pc->GetOrCreateShape(Physics::ShapeType::Box, halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z);
+        Physics::AnyShape shape = Physics::Shape<Physics::Box> {
+            halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z
+        };
         auto body = pc->CreateRigidBody(
-            shape, params.position, params.rotation,
-            params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
+            shape, params.position, params.rotation.AsVec4(),
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -493,27 +473,26 @@ auto CreateBox(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     return e;
 }
 
-auto CreateBox(Engine& engine, ZHLN::Float3 halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBox(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), halfExtents, params);
-}
-
 namespace {
 
 auto SpawnPrimitive(
-    GraphicsDevice                       gfx,
+    GraphicsDevice                        gfx,
     ECS::Registry&                        reg,
     ZHLN::Optional<PhysicsContext&>       pc,
     std::string_view                      shapeName,
     Mesh                                  mesh,
     Components::OwnedMeshComponent::Shape shape,
-    JPH::Vec3                             dimensions,
+    FVec3                             dimensions,
     float                                 cullRadius,
     Physics::ShapeType                    physicsShape,
     float                                 physP1,
     float                                 physP2,
     const SpawnParams&                    params
 ) -> Entity {
-    const JPH::Vec4 shapeColor = (params.color.w >= 0.0f) ? JPH::Vec4(params.color) : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    auto shapeColor = params.color;
+    if (!(shapeColor.w >= 0.0f)) {
+        shapeColor = {0.8f, 0.4f, 0.2f, 1.0f};
+    }
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -521,7 +500,7 @@ auto SpawnPrimitive(
     } else {
         auto mat_res        = gfx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
-        mat.baseColorFactor = JPH::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
+        mat.baseColorFactor = {shapeColor.x, shapeColor.y, shapeColor.z, shapeColor.w};
         mat.roughnessFactor = params.roughness;
         mat.metallicFactor  = params.metallic;
     }
@@ -533,22 +512,24 @@ auto SpawnPrimitive(
     gfx.RegisterMesh(meshAsset, mesh);
     gfx.RegisterMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    const auto worldMat = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
     reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        Physics::AnyShape bodyShape = physicsShape == Physics::ShapeType::Sphere ?
+            Physics::AnyShape(Physics::Shape<Physics::Sphere> {physP1}) :
+            Physics::AnyShape(Physics::Shape<Physics::Cylinder> {physP1, physP2});
         auto body      = pc->CreateRigidBody(
-            bodyShape, params.position, params.rotation,
-            params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
+            bodyShape, params.position, params.rotation.AsVec4(),
+            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -557,23 +538,19 @@ auto SpawnPrimitive(
 
 } // namespace
 
-auto CreateSphere(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
+auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, JPH::Vec3(radius, 0.0f, 0.0f),
+        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, FVec3{radius, 0.0f, 0.0f},
         radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
     );
 }
 
-auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphere(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, params);
-}
-
-auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
+auto CreateCylinderInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
     -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
@@ -582,32 +559,24 @@ auto CreateCylinder(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Physi
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
         gfx, reg, pc, "Cylinder", CreateCylinderMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
-        JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
+        FVec3{radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
         height * 0.5f * maxScale, resolved
     );
 }
 
-auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinder(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
-}
-
-auto CreateCone(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateConeInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, JPH::Vec3(radius, height, 0.0f),
+        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, FVec3{radius, height, 0.0f},
         std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
     );
 }
 
-auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCone(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), radius, height, params);
-}
-
-auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::Float4 color, const SpawnParams& params)
+auto CreatePlaneInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
     -> Entity {
     Mesh mesh = CreatePlaneMesh(gfx, extent, color);
 
@@ -629,10 +598,10 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     gfx.RegisterMesh(meshAsset, mesh);
     gfx.RegisterMaterial(matAsset, mat);
 
-    JPH::Mat44 worldMat = Math::CreateTransform(params.position, params.rotation, params.scale);
+    const auto worldMat = SpawnMatrix(params);
 
     reg.Add(e, Components::NameComponent {.name = String64("Plane_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = ZHLN::Float3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
@@ -641,16 +610,16 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
                .meshAsset  = meshAsset,
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Plane,
-               .dimensions = JPH::Vec3(extent, 0.0f, 0.0f),
-               .color      = static_cast<JPH::Vec4>(color)
+               .dimensions = {extent, 0.0f, 0.0f},
+               .color      = color
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
+        Physics::AnyShape shape = Physics::Shape<Physics::Plane> {};
         auto body  = pc->CreateRigidBody(
-            shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask
+            shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }
@@ -658,11 +627,7 @@ auto CreatePlane(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     return e;
 }
 
-auto CreatePlane(Engine& engine, float extent, ZHLN::Float4 color, const SpawnParams& params) -> Entity {
-    return CreatePlane(engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), extent, color, params);
-}
-
-auto InstantiatePrefab(
+auto InstantiatePrefabInternal(
     GraphicsDevice      gfx,
     ECS::Registry&      reg,
     PhysicsContext&     pc,
@@ -697,8 +662,8 @@ auto InstantiatePrefab(
         }
     }
 
-    JPH::Mat44                baseTransform = Math::CreateTransform(params.position, params.rotation, params.scale);
-    std::vector<PreparedPart> preparedParts = PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders);
+    const auto baseTransform = SpawnMatrix(params);
+    const auto preparedParts = PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders);
 
     float                                 scaleMult = std::max({params.scale.x, params.scale.y, params.scale.z});
     std::unordered_map<int32_t, uint32_t> allocatedSkeletons;
@@ -715,9 +680,8 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        const auto glowEnt = params.emissiveVirtualLights ?
-                                 SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
-                                 std::optional<Entity> {};
+        const auto glowEnt = params.emissiveVirtualLights ? SpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) :
+                                                            std::optional<Entity> {};
         if (glowEnt) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = *glowEnt;
@@ -756,22 +720,22 @@ auto InstantiatePrefab(
     if (!prefab.lights.empty()) {
         for (const auto& light: prefab.lights) {
             // Walk up the parent hierarchy to compute the model-space transform
-            JPH::Mat44 nodeModelMat = JPH::Mat44::sIdentity();
+            auto nodeModelMat = Mat4x4::Identity();
             int32_t    curr         = light.nodeIndex;
             int        guard        = 0; // Prevent infinite loops on malformed DAGs
 
             while (curr >= 0 && curr < static_cast<int32_t>(prefab.nodes.size()) && guard++ < 256) {
-                nodeModelMat = prefab.nodes[curr].localTransform * nodeModelMat;
+                nodeModelMat = NativeModelMatrix(prefab.nodes[curr].localTransform) * nodeModelMat;
                 curr         = prefab.nodes[curr].parentIndex;
             }
 
-            JPH::Mat44 worldMat = baseTransform * nodeModelMat;
+            const auto worldMat = baseTransform * nodeModelMat;
+            const auto worldTRS = DecomposeTransform(worldMat);
+            const auto localTRS = DecomposeTransform(nodeModelMat);
 
-            Math::TransformTRS worldTRS = Math::Decompose(worldMat);
-            Math::TransformTRS localTRS = Math::Decompose(nodeModelMat);
-
-            // Per glTF spec, directional and spot lights point along local -Z
-            JPH::Vec3 worldDir = (worldTRS.rotation * JPH::Vec3(0.0f, 0.0f, -1.0f)).Normalized();
+            // Per glTF spec, directional and spot lights point along local -Z.
+            const auto rotation = ComposeTransform({}, worldTRS.rotation, {1.0f, 1.0f, 1.0f});
+            const auto worldDir = TransformVector(rotation, {0.0f, 0.0f, -1.0f}).Normalized();
 
             Entity lightEnt = reg.Create();
             reg.Add(lightEnt, Components::NameComponent {.name = light.name});
@@ -787,12 +751,12 @@ auto InstantiatePrefab(
 
             reg.Add(
                 lightEnt, Components::LightComponent {
-                              .type        = light.type,
-                              .color       = light.color,
-                              .intensity   = light.intensity,
-                              .radius      = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
-                              .direction   = worldDir,
-                              .range       = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
+                              .type             = light.type,
+                              .color            = light.color,
+                              .intensity        = light.intensity,
+                              .radius           = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
+                              .direction        = worldDir,
+                              .range            = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
                               .innerConeRadians = light.innerConeAngle,
                               .outerConeRadians = light.outerConeAngle
                           }
@@ -828,16 +792,16 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
                 owned.mesh = CreateBoxMesh(gfx, owned.dimensions, owned.color);
                 break;
             case Shape::Plane:
-                owned.mesh = CreatePlaneMesh(gfx, owned.dimensions.GetX(), owned.color);
+                owned.mesh = CreatePlaneMesh(gfx, owned.dimensions.x, owned.color);
                 break;
             case Shape::Sphere:
-                owned.mesh = CreateSphereMesh(gfx, owned.dimensions.GetX(), owned.color);
+                owned.mesh = CreateSphereMesh(gfx, owned.dimensions.x, owned.color);
                 break;
             case Shape::Cylinder:
-                owned.mesh = CreateCylinderMesh(gfx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
+                owned.mesh = CreateCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
                 break;
             case Shape::Cone:
-                owned.mesh = CreateConeMesh(gfx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color);
+                owned.mesh = CreateConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
                 break;
             case Shape::None:
                 continue;
@@ -865,16 +829,6 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
             }
         }
     }
-}
-
-auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadModelPrefab(engine.Graphics(), ZHLN::EngineAccess::AssetsOf(engine), path);
-}
-
-auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
-    return InstantiatePrefab(
-        engine.Graphics(), ZHLN::EngineAccess::RegistryOf(engine), ZHLN::EngineAccess::PhysicsOf(engine), ZHLN::EngineAccess::ArticulationOf(engine), prefab, params, outBuffer, maxCount
-    );
 }
 
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {

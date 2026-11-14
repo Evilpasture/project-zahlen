@@ -3,6 +3,19 @@
 
 include_guard(GLOBAL)
 
+# cmake/ECSCompiler.cmake
+#
+# The .ecs -> C++ module compiler. `zahlen_compile_ecs_modules(<target>)` is the
+# whole public surface, and at the time of writing NO target calls it: there is
+# no .ecs source anywhere in the tree, and no CMakeLists names the function. The
+# root includes this file inside the asset-pipeline block, which is why a
+# `cargo build` of utils/ecsc does not happen on a configure that never asks for
+# it -- `_zhln_ensure_ecsc_binary` is lazy, and nothing triggers it.
+#
+# Kept rather than deleted because the tool and the generator are real, working
+# code that a gameplay module can opt into with one call. If that call is never
+# made, this file resolves to two unused function definitions.
+
 # --- INTERNAL LAZY HELPER: DISCOVER OR BUILD ECSC ONLY ON-DEMAND ---
 function(_zhln_ensure_ecsc_binary OUT_VAR)
     if(ECSC_BIN_CACHED AND EXISTS "${ECSC_BIN_CACHED}")

@@ -5,19 +5,19 @@
 
 #include <Scripting/ScriptBinder.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/Inspection.hpp>
 
 namespace ZHLN {
 
 class ZHLN_STATIC_API ScriptECSBridge {
   public:
-    explicit ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {
+    explicit ScriptECSBridge(ECS::Inspection inspection): m_inspection(inspection) {
     }
 
     template <typename Manifest>
     void RegisterComponentManifest() {
         ZHLN::RegisterManifest<Manifest>();
-        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto { m_registry.RegisterComponent<Comp>(ZHLN::Reflect::TypeName<Comp>()); });
+        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto { m_inspection.Register<Comp>(ZHLN::Reflect::TypeName<Comp>()); });
     }
 
     // --- Entity Component Roots ---
@@ -40,7 +40,7 @@ class ZHLN_STATIC_API ScriptECSBridge {
     [[nodiscard]] auto ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode>;
 
   private:
-    ECS::Registry& m_registry;
+    ECS::Inspection m_inspection;
 };
 
 } // namespace ZHLN

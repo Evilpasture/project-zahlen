@@ -4,8 +4,12 @@
 #pragma once
 
 #include "vulkan/VulkanHeader.hpp"
+#include <array>
 #include <expected>
+#include <string_view>
+#include <vector>
 
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Error.hpp>
 #include "vulkan/core/FrameConfig.hpp"
@@ -85,16 +89,32 @@ class GpuProfiler {
     void RetrievePipelineStats(uint32_t frameIndex, Func&& callback) noexcept;
 
   private:
+    [[nodiscard]] static constexpr auto ValidStage(EnumT stage) noexcept -> bool {
+        return EnumIndex(stage) < kStageCount;
+    }
+
+    [[nodiscard]] static constexpr auto StatsQuery(EnumT stage) noexcept -> uint32_t {
+        return static_cast<uint32_t>(EnumIndex(stage));
+    }
+
+    [[nodiscard]] static constexpr auto TimestampStartQuery(EnumT stage) noexcept -> uint32_t {
+        return StatsQuery(stage) * 2U;
+    }
+
+    [[nodiscard]] static constexpr auto TimestampEndQuery(EnumT stage) noexcept -> uint32_t {
+        return TimestampStartQuery(stage) + 1U;
+    }
+
     void Teardown() noexcept;
 
     VkDevice _device = VK_NULL_HANDLE;
     std::array<VkQueryPool, Vk::kFramesInFlight> _pools {};
-    mutable std::array<uint64_t, Vk::kFramesInFlight> _recordedMasks {};
+    mutable std::array<EnumBitMask<EnumT>, Vk::kFramesInFlight> _recordedMasks {};
     bool _enabled = false;
 
     std::array<VkQueryPool, Vk::kFramesInFlight> _statsPools {};
-    mutable std::array<uint64_t, Vk::kFramesInFlight> _statsBeginMasks {};
-    mutable std::array<uint64_t, Vk::kFramesInFlight> _statsEndMasks {};
+    mutable std::array<EnumBitMask<EnumT>, Vk::kFramesInFlight> _statsBeginMasks {};
+    mutable std::array<EnumBitMask<EnumT>, Vk::kFramesInFlight> _statsEndMasks {};
     VkQueryPipelineStatisticFlags _statsBits = 0;
     bool _statsSupported = false;
     bool _statsEnabled = false;

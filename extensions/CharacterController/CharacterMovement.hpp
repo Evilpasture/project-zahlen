@@ -4,42 +4,27 @@
 // extensions/CharacterController/CharacterMovement.hpp
 #pragma once
 
+#include "CharacterComponents.hpp"
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Engine/Frame.hpp>
+
 namespace ZHLN {
-
-class Engine;
 class PhysicsContext;
-class Simulation;
-
-namespace ECS {
-class Registry;
-} // namespace ECS
 
 namespace Character {
 
-// One fixed physics substep of character locomotion: gravity/jump
-// integration, velocity steering toward the input direction, and yaw
-// slewing toward travel direction. Moved out of core together with
-// MovementComponent -- it IS the overgrowth-style controller.
-void MovementSystem(Engine& engine, float dt);
+using MovementQuery = ECS::Query<MovementComponent&, const Components::PhysicsComponent, const Components::RagdollComponent>;
+using CharacterReadQuery = ECS::Query<const MovementComponent, const Components::PhysicsComponent>;
+using CharacterGroundedQuery = ECS::Query<MovementComponent&, const Components::PhysicsComponent>;
 
-// Pushes MovementComponent velocities into their CharacterVirtual bodies.
-// Runs before PhysicsContext::Step inside the substep loop.
-void CommitCharacterSteering(Engine& engine);
-
-// Character-on-prop interaction policy: every fixed step, a character that
-// is moving through dynamic rigid bodies applies an impulse along its travel
-// direction, so walking into a box pushes it. This used to be a hardcoded
-// impulse formula in the low-level character contact listener; the engine
-// core exerts no forces on bodies from character contacts any more, and the
-// policy lives in the controller that owns the character. The engine substep
-// passes the Simulation capability; the raw-context overload remains for
-// standalone (engine-free) physics fixtures that own a PhysicsContext.
-void PushProps(Simulation physics, ECS::Registry& reg);
-void PushProps(PhysicsContext& pc, ECS::Registry& reg);
-
-// Reads the CharacterVirtual grounded flags back into MovementComponent
-// after PhysicsContext::Step.
-void WriteCharacterGrounded(Engine& engine);
+// Fixed-substep passes. The frame owner invokes them sequentially around the
+// physics step, so character steering and prop impulses are available before
+// stepping and grounded state is written immediately afterward.
+void MovementSystem(MovementQuery query, FrameDt dt);
+void CommitCharacterSteering(CharacterReadQuery query, ECS::ResMut<PhysicsContext> physics);
+void PushProps(CharacterReadQuery query, ECS::ResMut<PhysicsContext> physics);
+void WriteCharacterGrounded(CharacterGroundedQuery query, ECS::Res<PhysicsContext> physics);
 
 } // namespace Character
 } // namespace ZHLN

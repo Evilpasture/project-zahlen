@@ -3,25 +3,25 @@
 
 #pragma once
 
-#include "vulkan/VulkanHeader.hpp"
-
 #include "render/DrawQueueManager.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include "render/FrameDestinations.hpp"
 #include "render/FrameResources.hpp"
 #include "render/GeometryManager.hpp"
 #include "render/GpuAbi.hpp"
 #include "render/GpuLayout.hpp"
 #include "render/RenderFrame.hpp"
-#include "vulkan/Rendering.hpp"
 #include "render/TargetManager.hpp"
 #include "render/TextureManager.hpp"
-#include "vulkan/core/FrameStorage.hpp"
 #include "render/features/ShadowAtlas.hpp"
 #include "render/features/ShadowRenderer.hpp"
 #include "render/features/VolumetricFogSystem.hpp"
 #include "render/passes/lighting/LightingResources.hpp"
 #include "render/passes/postprocess/PostProcessResources.hpp"
 #include "render/pipelines/ReflectionPipeline.hpp"
+#include "vulkan/Rendering.hpp"
+#include "vulkan/core/FrameStorage.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
@@ -38,13 +38,13 @@ struct IBLPayload {
     Vk::ImageView brdfLutView;
     Vk::Image     prefilteredImage;
     Vk::ImageView prefilteredView;
+    Vk::Image     visualSkyImage;
+    Vk::ImageView visualSkyView;
 
-    Vk::Image                visualSkyImage;
-    Vk::ImageView            visualSkyView;
-    std::array<JPH::Vec4, 9> shCoeffs {};
-    VkFormat                 prefilteredFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    uint64_t                 contentHash       = 0;
-    int                      environmentMode   = 0;
+    std::array<ZHLN::FVec4, 9> shCoeffs {};
+    VkFormat                    prefilteredFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    uint64_t                    contentHash       = 0;
+    int                         environmentMode   = 0;
 
     void Destroy(Vk::Allocator& allocator) noexcept {
         brdfLutView     = {};
@@ -91,7 +91,7 @@ struct Renderer {
     Vk::SwapchainPresenter presenter;
     // Primary scene depth is a renderer resource, not part of presentation state.
     Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt> primaryDepthTarget;
-    FrameDestinations                                    destinations;
+    FrameDestinations                                destinations;
 
     DrawQueueManager queues;
     GraphicsSettings settings {};
@@ -115,11 +115,11 @@ struct Renderer {
     uint32_t viewportW = 0;
     uint32_t viewportH = 0;
 
-    JPH::Mat44 current_view_proj    = JPH::Mat44::sIdentity();
-    JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
+    Mat4x4 current_view_proj    = Mat4x4::Identity();
+    Mat4x4 unjittered_view_proj = Mat4x4::Identity();
 
-    JPH::Mat44    view_matrix    = JPH::Mat44::sIdentity();
-    JPH::Mat44    shadowProjView = JPH::Mat44::sIdentity();
+    Mat4x4    view_matrix    = Mat4x4::Identity();
+    Mat4x4    shadowProjView = Mat4x4::Identity();
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
@@ -197,34 +197,6 @@ struct Renderer {
         };
     }
 
-    // Begins a frame command stream, with its heap state established before the
-    // first command is recorded into it. The stream comes back as a
-    // Vk::StreamCommandRecorder, a type that cannot be obtained any other way and
-    // that is the only thing here which can bind the heaps -- so "the stream
-    // began without its heap state" is not a state the code can be in.
-    //
-    // What it establishes: both heap segments bound, and the per-frame
-    // device-address block pushed. The shaders' `ParameterBlock<GlobalSceneRegistry>
-    // scene` reads `scene.frame`, `scene.lights`, `scene.g_instances` and
-    // `scene.g_joints` as raw 64-bit addresses out of the push range, with no
-    // descriptor table behind them, so a stream that begins without the block
-    // does not misrender: it faults at address zero or reads the buffer the
-    // previous recording left behind.
-    //
-    // Two streams begin per frame, and both begin here:
-    //
-    //   * a window's graphics stream -- RenderContext::Impl::AcquireTarget, the
-    //     one the scene graph, the Blit pass and the UI pass all record into;
-    //   * the async-compute stream   -- Pipelines::ComputeSimPipeline::Submit.
-    //
-    // Passes cannot reach it, and no longer need to: a pass is handed its frame
-    // and a Vk::CommandEncoder, and neither begins a stream.
-    //
-    // Secondary command buffers inherit neither the bindings nor the push range
-    // from the primary they are executed in, so they are not begun this way: the
-    // parallel recorders take a Vk::SecondaryPassContext and let it re-establish
-    // that state in every slot they begin (see CreateSecondaryContext, and
-    // RenderContext::Impl::ForkReplayer::ExecuteFork).
     [[nodiscard]] auto BeginStream(VkCommandBuffer cmd) const noexcept -> std::expected<Vk::StreamCommandRecorder, ErrorCode>;
 
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
@@ -242,12 +214,6 @@ struct Renderer {
     }
 
   private:
-    // The heap bindings and the push-address block, on the command buffer, once.
-    // Private because there is exactly one moment where this is the right thing
-    // to do -- the moment a stream begins -- and BeginStream is that moment. Any
-    // other caller would be establishing state that only stays correct because
-    // of what happens to be recorded before or after it on the same buffer,
-    // which is the coupling this type exists to remove.
     void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 };
 

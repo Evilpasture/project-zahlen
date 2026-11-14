@@ -7,8 +7,9 @@
 // Moved out of core: the scene content (emblem, ground, orbit light), the popup
 // are application policy, not engine substrate. Core keeps the pieces
 // this composes -- the Scene::Instantiate path, the frame/graph extension
-// seams, the enableFallbackScene config flag and the teardown-hook list --
-// and a host that wants none of it simply never calls Install.
+// seams and the teardown-hook list -- and a host that wants none of it simply
+// never calls Install. The engine holds no flag for this: whether a fallback
+// scene exists is the host's decision, expressed by making the call.
 #pragma once
 
 #include <Zahlen/ECS/Entity.hpp>

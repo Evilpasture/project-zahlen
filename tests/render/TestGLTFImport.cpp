@@ -16,7 +16,11 @@
 // This suite lives in a GPU group because BuildModelPrefab uploads textures
 // and geometry through RenderContext, so it needs a real (headless) device.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -69,6 +73,8 @@ enum class GLTFImportError : uint8_t {
 };
 
 namespace {
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 // A material map that resolved to a real upload. Anything else -- invalid
 // or one of the built-in fallback textures -- means the import fell back
@@ -100,6 +106,13 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
         JPH::Vec4(values[8], values[9], values[10], values[11]), JPH::Vec4(values[12], values[13], values[14], values[15])
     );
 }
+
+[[nodiscard]] JPH::Mat44 ToJolt(const ZHLN::Mat4x4& m) noexcept {
+    return JPH::Mat44(JPH::Vec4(m[0,0], m[1,0], m[2,0], m[3,0]), JPH::Vec4(m[0,1], m[1,1], m[2,1], m[3,1]),
+                      JPH::Vec4(m[0,2], m[1,2], m[2,2], m[3,2]), JPH::Vec4(m[0,3], m[1,3], m[2,3], m[3,3]));
+}
+[[nodiscard]] FVec3 Translation(const ZHLN::Mat4x4& m) noexcept { return {m[0,3], m[1,3], m[2,3]}; }
+[[nodiscard]] bool Close(FVec3 a, FVec3 b, float tolerance) noexcept { return (a - b).LengthSquared() <= tolerance; }
 
 [[nodiscard]] JPH::Mat44 SourceLocal(const cgltf_node& node) noexcept {
     float matrix[16] {};
@@ -999,7 +1012,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, kVirtualPath);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, kVirtualPath);
             if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1048,7 +1061,7 @@ struct GLTFImportTestSuite {
                     return std::unexpected(GLTFImportError::NodeGraphMismatch);
                 }
 
-                if (!imported.localTransform.IsClose(SourceLocal(sourceNode), 0.0001f)) {
+                if (!ZHLN::Physics::ToJoltMatrix(imported.localTransform).IsClose(SourceLocal(sourceNode), 0.0001f)) {
                     return std::unexpected(GLTFImportError::NodeGraphMismatch);
                 }
             }
@@ -1060,10 +1073,10 @@ struct GLTFImportTestSuite {
             // transforms. This is what catches a transposed matrix load or a
             // reversed parent/child multiply that per-node comparisons miss.
             for (size_t index = 0; index < prefab->nodes.size(); ++index) {
-                JPH::Mat44 world  = prefab->nodes[index].localTransform;
+                JPH::Mat44 world  = ZHLN::Physics::ToJoltMatrix(prefab->nodes[index].localTransform);
                 int32_t    cursor = prefab->nodes[index].parentIndex;
                 for (size_t depth = 0; cursor >= 0 && depth < prefab->nodes.size(); ++depth) {
-                    world  = prefab->nodes[static_cast<size_t>(cursor)].localTransform * world;
+                    world  = ZHLN::Physics::ToJoltMatrix(prefab->nodes[static_cast<size_t>(cursor)].localTransform) * world;
                     cursor = prefab->nodes[static_cast<size_t>(cursor)].parentIndex;
                 }
                 if (!world.IsClose(SourceWorld(document.nodes[index]), 0.0001f)) {
@@ -1111,7 +1124,7 @@ struct GLTFImportTestSuite {
             }
 
             // The loader is cache-backed: the same virtual path must not import twice.
-            const auto cachedPrefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, kVirtualPath);
+            const auto cachedPrefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, kVirtualPath);
             if (!cachedPrefab || &*cachedPrefab != &*prefab) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
@@ -1148,7 +1161,7 @@ struct GLTFImportTestSuite {
             // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ProceduralAnimationBaseRig_Skins.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "ProceduralAnimationBaseRig_Skins.glb");
             if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1191,7 +1204,7 @@ struct GLTFImportTestSuite {
 
                     // The inverse bind matrix must undo the bind-pose world transform.
                     if (skin.inverse_bind_matrices != nullptr &&
-                        !(SourceWorld(*sourceNode) * joint.inverseBindMatrix).IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
+                        !(SourceWorld(*sourceNode) * ToJolt(joint.inverseBindMatrix)).IsClose(JPH::Mat44::sIdentity(), 0.0001f)) {
                         return std::unexpected(GLTFImportError::SkeletonMismatch);
                     }
                 }
@@ -1288,7 +1301,7 @@ struct GLTFImportTestSuite {
             //    factor, on top of the import-time unit conversion.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
             const auto                 withStrength =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), strengthBytes, "ext_emissive_strength.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, strengthBytes, "ext_emissive_strength.glb");
             if (!withStrength || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1305,7 +1318,7 @@ struct GLTFImportTestSuite {
             //    emissiveStrength = 1 must import identically to one that omits
             //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
-            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), plainBytes, "ext_emissive_plain.glb");
+            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, plainBytes, "ext_emissive_plain.glb");
             if (!plain || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1323,7 +1336,7 @@ struct GLTFImportTestSuite {
 
             // 3. Lit mesh fixture: now imports both the emissive material AND the light
             const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
-            const auto litMesh = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), litBytes, "ext_lit_mesh.glb");
+            const auto litMesh = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, litBytes, "ext_lit_mesh.glb");
             if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1335,13 +1348,13 @@ struct GLTFImportTestSuite {
             // 4. Geometry-free light document: imports the transform node AND the light
             const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
             const auto                 lightOnly =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), lightOnlyBytes, "ext_light_only.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, lightOnlyBytes, "ext_light_only.glb");
             if (!lightOnly || lightOnly->nodes.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const ZHLN::ModelNode& lightNode = lightOnly->nodes[0];
             if (std::string_view(lightNode.name) != "PunctualLight" || lightNode.hasMesh || lightNode.parentIndex != -1 ||
-                !lightNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
+                !ZHLN::Physics::ToJoltMatrix(lightNode.localTransform).GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // Formerly checked that lights were dropped; now verify the light is present:
@@ -1365,14 +1378,12 @@ struct GLTFImportTestSuite {
             if (!engine.Valid()) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
-            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
-            auto& assets = ZHLN::EngineAccess::AssetsOf(*engine);
             constexpr ZHLN::GLTF::ImportOptions conformant {.emissiveFactorScale = 1.0f};
 
             const auto plainBytes    = MakePlainEmissiveFixture();
-            const auto plain         = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            const auto plain         = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
             const auto strengthBytes = MakeEmissiveStrengthFixture();
-            const auto strong        = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
+            const auto strong        = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
             if (!plain || !strong || plain->parts.size() != 1 || strong->parts.size() != 1 || plain->emissiveFactorScale != 1.0f ||
                 strong->emissiveFactorScale != 1.0f || plain->maxTextureDimension != ZHLN::kGLTFDefaultMaxTextureDimension) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
@@ -1387,12 +1398,14 @@ struct GLTFImportTestSuite {
             // An emissive image and albedo share a source image. Both must
             // sample sRGB; a PBR data reference to the same image must not.
             const auto texturedBytes = MakeAnisotropyFixture();
-            const auto textured      = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
+            const auto textured      = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
             if (!textured || textured->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
-            if (material.emissiveFactor != ZHLN::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureID::Invalid ||
+            auto expectedEmissive = material.emissiveFactor;
+            expectedEmissive = {0.0f, 1.0f, 0.0f, 1.0f};
+            if (material.emissiveFactor != expectedEmissive || material.emissiveMap == ZHLN::TextureID::Invalid ||
                 material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || IsFallbackTexture(material.emissiveMap)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1401,18 +1414,18 @@ struct GLTFImportTestSuite {
             // prefab cache identity. Fidelity can retain 2048px images while
             // other import clients continue using the default 1024px cap.
             constexpr ZHLN::GLTF::ImportOptions detailed {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto highRes       = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
-            const auto cachedHighRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
-            const auto cachedPlain   = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            const auto highRes       = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            const auto cachedHighRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            const auto cachedPlain   = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
             if (!highRes || highRes->maxTextureDimension != 2048 || !cachedHighRes || &*cachedHighRes != &*highRes ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant).has_value() ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant).has_value() ||
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                    rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {},
+                    *engine, texturedBytes, "fidelity_emissive_highres.glb", {},
                     ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}
                 )
                     .has_value() ||
                 !cachedPlain || &*cachedPlain != &*plain ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb").has_value()) {
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, plainBytes, "fidelity_emissive_plain.glb").has_value()) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
             return {};
@@ -1438,8 +1451,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ext_anisotropy.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "ext_anisotropy.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1528,11 +1540,29 @@ struct GLTFImportTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Unlit");
             if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "KHR_materials_unlit.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "KHR_materials_unlit.glb");
             if (!prefab || prefab->parts.size() != 2) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
+            // Static triangle primitives receive both collider forms. A cached
+            // reload must retain the same shapes rather than recreating them.
+            const auto cached = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                *engine, bytes, "KHR_materials_unlit.glb");
+            if (!cached || &*cached != &*prefab) return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             for (size_t i = 0; i < 2; ++i) {
+                if (!prefab->parts[i].boxCollider || !prefab->parts[i].meshCollider) {
+                    return std::unexpected(GLTFImportError::PrefabCacheMismatch);
+                }
+                const auto* compound = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Compound>>(&*prefab->parts[i].boxCollider);
+                if (!compound || compound->children.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+                const auto* box = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Box>>(&compound->children[0].shape);
+                const auto center = compound->children[0].position;
+                if (!box || std::abs(center.x - 0.5f) > 1e-4f || std::abs(center.y - 0.5f) > 1e-4f ||
+                    std::abs(box->halfExtents.x - 0.5f) > 1e-4f || std::abs(box->halfExtents.y - 0.5f) > 1e-4f) {
+                    return std::unexpected(GLTFImportError::PrefabLoadFailed);
+                }
+                const auto* mesh = std::get_if<ZHLN::Physics::Shape<ZHLN::Physics::Mesh>>(&*prefab->parts[i].meshCollider);
+                if (!mesh || !mesh->storage || mesh->vertices.empty() || mesh->indices.empty()) return std::unexpected(GLTFImportError::PrefabLoadFailed);
                 const auto& expected = source.data->materials[i];
                 const auto& material = prefab->parts[i].defaultMaterial;
                 if (!material.unlit || material.alphaMode != 0u || material.albedoMap != ZHLN::TextureID::Invalid ||
@@ -1545,6 +1575,28 @@ struct GLTFImportTestSuite {
                         return std::unexpected(GLTFImportError::ExtensionMismatch);
                     }
                 }
+            }
+            // Exercise both prefab collider forms after importer scratch buffers
+            // have been destroyed. Non-unit scale must reach the physics layer.
+            auto registry = engine->Entities();
+            for (bool useBox: {true, false}) {
+                std::array<ZHLN::Entity, 8> entities {};
+                const double baseX = useBox ? 10.0 : 20.0;
+                ZHLN::PrefabFactory::SpawnParams params {};
+                params.position = {baseX, 0, 0};
+                params.scale = {2, 2, 2};
+                params.createPhysics = true;
+                params.useBoxColliders = useBox;
+                const auto count = ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), entities.size());
+                if (count != 2) { ZHLN::Log("prefab collider: count={} box={}", count, useBox); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
+                const auto firstBody = registry.Get<ZHLN::Components::PhysicsComponent>(entities[0]);
+                if (!firstBody || firstBody->physicsID == ZHLN::Physics::BodyID::Null()) { ZHLN::Log("prefab collider: missing body box={}", useBox); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
+                auto physics = engine->Physics();
+                physics.Step(1.0f / 60.0f);
+                const double localX = useBox ? 1.5 : 0.25;
+                const double localY = useBox ? 1.5 : 0.25;
+                const auto hit = physics.Raycast({baseX - 2.4 + localX, localY, 5.0}, {0, 0, -1}, 10.0f);
+                if (!hit.hasHit || hit.bodyID != firstBody->physicsID) { ZHLN::Log("prefab collider: ray miss box={} hit={} got={} expected={}", useBox, hit.hasHit, hit.bodyID.Pack(), firstBody->physicsID.Pack()); return std::unexpected(GLTFImportError::PrefabLoadFailed); }
             }
             const ZHLN::Material defaults {};
             if (defaults.unlit)
@@ -1568,12 +1620,14 @@ struct GLTFImportTestSuite {
             if (!engine.Valid())
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "required_specular_glossiness.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "required_specular_glossiness.glb");
             if (!prefab || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
-            if (material.baseColorFactor != ZHLN::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
+            auto expectedBaseColor = material.baseColorFactor;
+            expectedBaseColor = {1.0f, 1.0f, 1.0f, 1.0f};
+            if (material.baseColorFactor != expectedBaseColor || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
                 material.albedoMap != ZHLN::TextureID::Invalid || material.pipeline == ZHLN::PipelineID::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1598,7 +1652,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
 
             const auto prefab =
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "negative_scale_sidedness.glb");
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "negative_scale_sidedness.glb");
             if (!prefab || prefab->parts.size() != 5)
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
@@ -1657,7 +1711,7 @@ struct GLTFImportTestSuite {
             // The renderer derives the raster-winding flag from the *actual*
             // draw world matrix. Check the spawned hierarchy as well as cgltf's
             // source hierarchy, especially the negatively scaled sphere parents.
-            auto&  registry = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto  registry = engine->Entities();
             size_t matched  = 0;
             for (uint32_t i = 1; i < count; ++i) { // outBuffer[0] is the prefab root, not a mesh part.
                 const auto name  = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
@@ -1668,7 +1722,7 @@ struct GLTFImportTestSuite {
                 if (part == nullptr)
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const bool sourceMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(part->nodeIndex)]).GetDeterminant3x3() < 0.0f;
-                if ((JPH::Mat44(world->world).GetDeterminant3x3() < 0.0f) != sourceMirrored) {
+                if ((ToJolt(world->world).GetDeterminant3x3() < 0.0f) != sourceMirrored) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 }
                 ++matched;
@@ -1696,10 +1750,9 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
-            auto& assets = ZHLN::EngineAccess::AssetsOf(*engine);
-            const auto masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
-            const auto opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
+
+            const auto masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, maskedBytes, "masked_transmission.glb");
+            const auto opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, opaqueBytes, "opaque_transmission.glb");
             if (!masked || !opaque || masked->parts.size() != 1 || opaque->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1722,7 +1775,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto& transform = mat.textureTransforms[transSlot];
-            if (transform.texCoord != 1u || transform.offset != ZHLN::Float2 {0.25f, -0.25f} || transform.scale != ZHLN::Float2 {2.0f, 0.5f} ||
+            if (transform.texCoord != 1u || transform.offset != ZHLN::FVec2 {0.25f, -0.25f} || transform.scale != ZHLN::FVec2 {2.0f, 0.5f} ||
                 std::abs(transform.rotation - 1.5707963f) > 1e-5f || mat.textureTransforms[albedoSlot].texCoord != 0u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1740,7 +1793,7 @@ struct GLTFImportTestSuite {
                 source.data->meshes[0].primitives[0].attributes_count != 3) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "ext_sheen_transform.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "ext_sheen_transform.glb");
             if (!prefab || prefab->parts.size() != 1)
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
@@ -1752,10 +1805,10 @@ struct GLTFImportTestSuite {
             const auto& sheenColor     = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
             const auto& sheenRoughness = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenRoughness)];
             const auto& occlusion      = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
-            if (albedo.texCoord != 1u || albedo.offset != ZHLN::Float2 {0.2f, 0.4f} || albedo.scale != ZHLN::Float2 {2.0f, -3.0f} ||
-                std::abs(albedo.rotation - 1.5707963f) > 1e-5f || pbr.texCoord != 0u || pbr.scale != ZHLN::Float2 {30.0f, -30.0f} || normal != pbr ||
-                sheenColor.texCoord != 0u || sheenColor.scale != ZHLN::Float2 {4.0f, -5.0f} || sheenRoughness.texCoord != 1u ||
-                sheenRoughness.scale != ZHLN::Float2 {1.0f, 1.0f} || occlusion.scale != ZHLN::Float2 {1.0f, 1.0f}) {
+            if (albedo.texCoord != 1u || albedo.offset != ZHLN::FVec2 {0.2f, 0.4f} || albedo.scale != ZHLN::FVec2 {2.0f, -3.0f} ||
+                std::abs(albedo.rotation - 1.5707963f) > 1e-5f || pbr.texCoord != 0u || pbr.scale != ZHLN::FVec2 {30.0f, -30.0f} || normal != pbr ||
+                sheenColor.texCoord != 0u || sheenColor.scale != ZHLN::FVec2 {4.0f, -5.0f} || sheenRoughness.texCoord != 1u ||
+                sheenRoughness.scale != ZHLN::FVec2 {1.0f, 1.0f} || occlusion.scale != ZHLN::FVec2 {1.0f, 1.0f}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // A positive rotation in top-left-origin UV space moves +U toward
@@ -1773,8 +1826,7 @@ struct GLTFImportTestSuite {
                 std::abs(tiled[1] + 15.0f) > 1e-4f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
-            auto& rc = ZHLN::EngineAccess::RenderOf(*engine);
-            if (material.sheenColorFactor != ZHLN::Float3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
+            if (material.sheenColorFactor != ZHLN::FVec3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
                 material.sheenColorMap == ZHLN::TextureID::Invalid || material.sheenRoughnessMap == ZHLN::TextureID::Invalid ||
                 material.occlusionMap == ZHLN::TextureID::Invalid || material.albedoMap != material.sheenColorMap ||
                 material.pbrMap != material.sheenRoughnessMap || material.sheenRoughnessMap != material.occlusionMap ||
@@ -1784,7 +1836,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.sheenColorFactor != ZHLN::Float3 {0.0f, 0.0f, 0.0f} || defaults.sheenRoughnessFactor != 0.0f ||
+            if (defaults.sheenColorFactor != ZHLN::FVec3 {0.0f, 0.0f, 0.0f} || defaults.sheenRoughnessFactor != 0.0f ||
                 defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1816,14 +1868,14 @@ struct GLTFImportTestSuite {
             }
 
             const std::vector<uint8_t> bytes = MakeEmissiveStrengthFixture();
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bytes, "emissive_spawn.glb");
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, "emissive_spawn.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
-            auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto registry = engine->Entities();
 
-            const auto lightCount = [&registry] { return registry.GetEntitiesWith<ZHLN::Components::LightComponent>().size(); };
+            const auto lightCount = [&registry] { return registry.EntitiesWith<ZHLN::Components::LightComponent>().size(); };
 
             const size_t lightsBefore = lightCount();
 
@@ -1839,8 +1891,8 @@ struct GLTFImportTestSuite {
 
             // 2. Opting in adds exactly one light for the one emissive part.
             std::array<ZHLN::Entity, 8>            entities {};
-            const JPH::Vec3                        spawnPosition(4.0f, 1.0f, -2.0f);
-            const ZHLN::PrefabFactory::SpawnParams params {.position = spawnPosition, .emissiveVirtualLights = true};
+            const FVec3                        spawnPosition{4.0f, 1.0f, -2.0f};
+            const ZHLN::PrefabFactory::SpawnParams params {.position = {spawnPosition.x, spawnPosition.y, spawnPosition.z}, .emissiveVirtualLights = true};
             const uint32_t spawned = ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
             if (spawned < 3 || lightCount() != lightsBefore + 1) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
@@ -1861,12 +1913,10 @@ struct GLTFImportTestSuite {
 
             // Insert a transformless parent between the prefab root and its
             // part. It should contribute identity while preserving ancestry.
-            const ZHLN::Entity bridgeEntity  = registry.Create(ZHLN::Components::HierarchyComponent {.parent = rootEntity});
-            auto               partHierarchy = registry.Get<ZHLN::Components::HierarchyComponent>(partEntity);
-            if (!partHierarchy) {
+            const ZHLN::Entity bridgeEntity = registry.Spawn(ZHLN::Components::HierarchyComponent {.parent = rootEntity});
+            if (!registry.Patch<ZHLN::Components::HierarchyComponent>(partEntity, [bridgeEntity](auto& h) { h.parent = bridgeEntity; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            partHierarchy->parent = bridgeEntity;
 
             // The stored transform is a local offset. The triangle's bounds sit
             // within a unit box at the origin, so a spawn four metres away must
@@ -1875,7 +1925,7 @@ struct GLTFImportTestSuite {
             if (!glowLocal) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 localOffset = glowLocal->position;
+            const FVec3 localOffset = glowLocal->position;
             if (localOffset.Length() > 2.0f) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
@@ -1886,21 +1936,19 @@ struct GLTFImportTestSuite {
             if (!glowWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 restingPosition = JPH::Mat44(glowWorld->world).GetTranslation();
-            if (!restingPosition.IsClose(spawnPosition + localOffset, 0.001f)) {
+            const FVec3 restingPosition = Translation(glowWorld->world);
+            if (!Close(restingPosition, spawnPosition + localOffset, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // 3. Move the prefab root; the light has to move with it by the same
             //    delta rather than staying behind at the spawn point.
-            const JPH::Vec3 delta(10.0f, 0.0f, 7.0f);
-            auto            rootTransform = registry.Get<ZHLN::Components::TransformComponent>(rootEntity);
-            if (!rootTransform) {
+            const FVec3 delta{10.0f, 0.0f, 7.0f};
+            // Write the public field directly: transform propagation must not
+            // depend on a setter or caller-maintained dirty bit.
+            if (!registry.Patch<ZHLN::Components::TransformComponent>(rootEntity, [delta](auto& t) { t.position = FVec3{t.position} + delta; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            // Write the public field directly: transform propagation must not
-            // depend on a setter, Patch hook, or caller-maintained dirty bit.
-            rootTransform->position = JPH::Vec3(rootTransform->position) + delta;
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1908,22 +1956,24 @@ struct GLTFImportTestSuite {
             if (!movedWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 movedGlowPos = JPH::Mat44(movedWorld->world).GetTranslation();
-            const JPH::Vec3 movedGlowPrev = JPH::Mat44(movedWorld->previous).GetTranslation();
-            if (!movedGlowPos.IsClose(restingPosition + delta, 0.001f) || !movedGlowPrev.IsClose(movedGlowPos, 0.001f)) {
+            const FVec3 movedGlowPos = Translation(movedWorld->world);
+            const FVec3 movedGlowPrev = Translation(movedWorld->previous);
+            if (!Close(movedGlowPos, restingPosition + delta, 0.001f) || !Close(movedGlowPrev, movedGlowPos, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // A direct world-matrix write on a transformed parent must preserve
             // that parent output and dirty its descendants, even though local TRS
             // is unchanged. This exercises root -> transformless bridge -> part -> light.
-            const JPH::Vec3 parentWorldDelta(0.5f, 0.0f, 0.0f);
-            auto            rootWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(rootEntity);
+            const FVec3 parentWorldDelta{0.5f, 0.0f, 0.0f};
+            const auto  rootWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(rootEntity);
             if (!rootWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Mat44 externallyMovedParent = JPH::Mat44::sTranslation(parentWorldDelta) * rootWorld->world;
-            rootWorld->world                       = externallyMovedParent;
+            const auto externallyMovedParent = ZHLN::CreateTranslation(parentWorldDelta) * rootWorld->world;
+            if (!registry.Patch<ZHLN::Components::WorldTransformComponent>(rootEntity, [&](auto& w) { w.world = externallyMovedParent; })) {
+                return std::unexpected(GLTFImportError::EmissiveLightMismatch);
+            }
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1931,26 +1981,24 @@ struct GLTFImportTestSuite {
             if (!parentMovedGlow) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 parentMovedPos  = JPH::Mat44(parentMovedGlow->world).GetTranslation();
-            const JPH::Vec3 parentMovedPrev = JPH::Mat44(parentMovedGlow->previous).GetTranslation();
-            if (!parentMovedPos.IsClose(movedGlowPos + parentWorldDelta, 0.001f) || !parentMovedPrev.IsClose(parentMovedPos, 0.001f)) {
+            const FVec3 parentMovedPos  = Translation(parentMovedGlow->world);
+            const FVec3 parentMovedPrev = Translation(parentMovedGlow->previous);
+            if (!Close(parentMovedPos, movedGlowPos + parentWorldDelta, 0.001f) || !Close(parentMovedPrev, parentMovedPos, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // A leaf's direct world write and a world-transform-only entity have
             // no TransformSystem writer to notify the history pass.
-            const JPH::Vec3  leafWorldDelta(-0.25f, 0.0f, 0.0f);
-            const JPH::Mat44 externallyMovedGlow = JPH::Mat44::sTranslation(leafWorldDelta) * parentMovedGlow->world;
-            auto             mutableGlowWorld    = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (!mutableGlowWorld) {
+            const FVec3 leafWorldDelta{-0.25f, 0.0f, 0.0f};
+            const auto  externallyMovedGlow = ZHLN::CreateTranslation(leafWorldDelta) * parentMovedGlow->world;
+            if (!registry.Patch<ZHLN::Components::WorldTransformComponent>(glowEntity, [&](auto& w) { w.world = externallyMovedGlow; })) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            mutableGlowWorld->world = externallyMovedGlow;
 
-            const JPH::Mat44   previousWorldOnly = JPH::Mat44::sTranslation(JPH::Vec3(-1.0f, 0.0f, 0.0f));
-            const JPH::Mat44   currentWorldOnly  = JPH::Mat44::sTranslation(JPH::Vec3(3.0f, 0.0f, 0.0f));
+            const auto previousWorldOnly = ZHLN::CreateTranslation(FVec3{-1.0f, 0.0f, 0.0f});
+            const auto currentWorldOnly = ZHLN::CreateTranslation(FVec3{3.0f, 0.0f, 0.0f});
             const ZHLN::Entity worldOnlyEntity =
-                registry.Create(ZHLN::Components::WorldTransformComponent {.world = currentWorldOnly, .previous = previousWorldOnly});
+                registry.Spawn(ZHLN::Components::WorldTransformComponent {.world = currentWorldOnly, .previous = previousWorldOnly});
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
@@ -1959,12 +2007,12 @@ struct GLTFImportTestSuite {
             if (!syncedGlowWorld || !syncedWorldOnly) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            const JPH::Vec3 externallyMovedGlowPos = externallyMovedGlow.GetTranslation();
-            const JPH::Vec3 syncedGlowPos          = JPH::Mat44(syncedGlowWorld->world).GetTranslation();
-            const JPH::Vec3 syncedGlowPrev         = JPH::Mat44(syncedGlowWorld->previous).GetTranslation();
-            const JPH::Vec3 syncedOnlyPrev         = JPH::Mat44(syncedWorldOnly->previous).GetTranslation();
-            if (!syncedGlowPos.IsClose(externallyMovedGlowPos, 0.001f) || !syncedGlowPrev.IsClose(externallyMovedGlowPos, 0.001f) ||
-                !syncedOnlyPrev.IsClose(currentWorldOnly.GetTranslation(), 0.001f)) {
+            const FVec3 externallyMovedGlowPos = Translation(externallyMovedGlow);
+            const FVec3 syncedGlowPos          = Translation(syncedGlowWorld->world);
+            const FVec3 syncedGlowPrev         = Translation(syncedGlowWorld->previous);
+            const FVec3 syncedOnlyPrev         = Translation(syncedWorldOnly->previous);
+            if (!Close(syncedGlowPos, externallyMovedGlowPos, 0.001f) || !Close(syncedGlowPrev, externallyMovedGlowPos, 0.001f) ||
+                !Close(syncedOnlyPrev, Translation(currentWorldOnly), 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 

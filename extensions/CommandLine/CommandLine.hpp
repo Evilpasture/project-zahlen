@@ -10,6 +10,7 @@
 // allowing CLI tools (`ztest`, test workers, offline utilities) to expose only
 // their own flags while host layers bind their own configuration through reflection.
 
+#include <Zahlen/Core/Description.hpp>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -20,10 +21,10 @@
 namespace ZHLN {
 
 enum class CommandLineError : uint8_t {
-    InvalidValue = 1,
-    MissingValue,
-    UnknownArgument,
-    DuplicateFlag,
+    InvalidValue    ZHLN_ANNOTATION(ZHLN::Description<"Invalid value"> {}) = 1,
+    MissingValue    ZHLN_ANNOTATION(ZHLN::Description<"Missing value"> {}),
+    UnknownArgument ZHLN_ANNOTATION(ZHLN::Description<"Unknown argument"> {}),
+    DuplicateFlag   ZHLN_ANNOTATION(ZHLN::Description<"Duplicated flag"> {}),
 };
 
 struct CliToken {
@@ -39,16 +40,16 @@ struct CliEnvDoc {
 
 struct CliFlagDesc {
     std::string_view key;
-    std::string_view shortKey    = "";
-    std::string_view placeholder = "";
-    std::string_view description = "";
+    std::string_view shortKey;
+    std::string_view placeholder;
+    std::string_view description;
 };
 
 struct CliFlag {
     std::string_view                                                       key;
-    std::string_view                                                       shortKey    = "";
-    std::string_view                                                       placeholder = "";
-    std::string_view                                                       description = "";
+    std::string_view                                                       shortKey;
+    std::string_view                                                       placeholder;
+    std::string_view                                                       description;
     std::function<std::expected<void, CommandLineError>(std::string_view)> action;
 };
 
@@ -57,7 +58,7 @@ struct CliParseConfig {
     std::string_view           usageSuffix      = "[options]";
     std::string_view           primaryHeading   = "Options";
     std::string_view           secondaryHeading = "Application Options";
-    std::span<const CliEnvDoc> environmentDocs  = {};
+    std::span<const CliEnvDoc> environmentDocs;
     bool                       addHelpFlag      = true;
     bool                       addVersionFlag   = true;
     bool                       printHelpOnError = true;
@@ -75,17 +76,9 @@ struct CliParseResult {
 
 void PrintBuildVersion(std::string_view programTitle = "Zahlen Engine");
 
-void PrintCliHelp(
-    std::string_view            exeName,
-    std::span<const CliFlagDesc> primaryFlags,
-    std::span<const CliFlagDesc> secondaryFlags = {},
-    const CliParseConfig&       config         = {}
-);
+void PrintCliHelp(std::string_view exeName, std::span<const CliFlagDesc> primaryFlags, std::span<const CliFlagDesc> secondaryFlags, CliParseConfig config);
 
-[[nodiscard]] auto ParseCli(
-    std::span<char* const>   args,
-    std::span<const CliFlag> flags,
-    const CliParseConfig&    config = {}
-) -> std::expected<CliParseResult, CommandLineError>;
+[[nodiscard]] auto
+    ParseCli(std::span<char* const> args, std::span<const CliFlag> flags, const CliParseConfig& config = {}) -> std::expected<CliParseResult, CommandLineError>;
 
 } // namespace ZHLN

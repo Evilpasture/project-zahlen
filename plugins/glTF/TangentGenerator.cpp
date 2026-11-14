@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TangentGenerator.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Vec3.h>
 #include <algorithm>
@@ -11,14 +12,14 @@ namespace ZHLN::GLTF {
 
 namespace {
 
-[[nodiscard]] auto NormalizeOr(JPH::Vec3Arg v, JPH::Vec3Arg fallback) noexcept -> JPH::Vec3 {
-    const float len2 = v.LengthSq();
+[[nodiscard]] auto NormalizeOr(FVec3 v, FVec3 fallback) noexcept -> FVec3 {
+    const float len2 = v.LengthSquared();
     return std::isfinite(len2) && len2 > 1e-20f ? v / std::sqrt(len2) : fallback;
 }
 
-[[nodiscard]] auto CornerAngle(JPH::Vec3Arg a, JPH::Vec3Arg b) noexcept -> float {
-    const float lengths = std::sqrt(a.LengthSq() * b.LengthSq());
-    return lengths > 1e-20f ? std::acos(std::clamp(a.Dot(b) / lengths, -1.0f, 1.0f)) : 0.0f;
+[[nodiscard]] auto CornerAngle(FVec3 a, FVec3 b) noexcept -> float {
+    const float lengths = std::sqrt(a.LengthSquared() * b.LengthSquared());
+    return lengths > 1e-20f ? std::acos(std::clamp(Dot(a, b) / lengths, -1.0f, 1.0f)) : 0.0f;
 }
 
 } // namespace
@@ -35,9 +36,9 @@ auto GenerateTangents(
     const size_t count = positions.size();
     if (normals.size() != count || texcoords.size() != count) return {};
 
-    std::vector<JPH::Vec3> tangents(count, JPH::Vec3::sZero());
-    std::vector<JPH::Vec3> bitangents(count, JPH::Vec3::sZero());
-    const auto position = [&](uint32_t index) -> JPH::Vec3 {
+    std::vector<FVec3> tangents(count, FVec3::Zero());
+    std::vector<FVec3> bitangents(count, FVec3::Zero());
+    const auto position = [&](uint32_t index) -> FVec3 {
         const auto& p = positions[index].position;
         return {p[0], p[1], p[2]};
     };
@@ -46,26 +47,26 @@ auto GenerateTangents(
         const uint32_t i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
         if (i0 >= count || i1 >= count || i2 >= count) continue;
 
-        const JPH::Vec3 p0 = position(i0), p1 = position(i1), p2 = position(i2);
-        const JPH::Vec3 e1 = p1 - p0, e2 = p2 - p0;
+        const FVec3 p0 = position(i0), p1 = position(i1), p2 = position(i2);
+        const FVec3 e1 = p1 - p0, e2 = p2 - p0;
         const auto& uv0 = texcoords[i0];
         const auto& uv1 = texcoords[i1];
         const auto& uv2 = texcoords[i2];
         const float du1 = uv1[0] - uv0[0], dv1 = uv1[1] - uv0[1];
         const float du2 = uv2[0] - uv0[0], dv2 = uv2[1] - uv0[1];
         const float det = du1 * dv2 - dv1 * du2;
-        if (std::abs(det) <= 1e-12f || e1.Cross(e2).LengthSq() <= 1e-20f) continue;
+        if (std::abs(det) <= 1e-12f || Cross(e1, e2).LengthSquared() <= 1e-20f) continue;
 
         // Normalize before weighting: a UV island's texel density must not
         // outweigh its neighbours just because its UV gradient is small.
-        const JPH::Vec3 t = NormalizeOr((e1 * dv2 - e2 * dv1) / det, JPH::Vec3::sZero());
+        const FVec3 t = NormalizeOr((e1 * dv2 - e2 * dv1) / det, FVec3::Zero());
         // glTF images have top-left UV origin (V grows down), but their normal
         // maps use OpenGL's +Y-up convention. The shading bitangent is thus
         // -dP/dV. Using +dP/dV makes NormalTangentTest's mapped spheres look
         // concave or rotated; the authored tangents in NormalTangentMirrorTest
         // confirm the opposite handedness for the same UV orientation.
-        const JPH::Vec3 b = NormalizeOr((e1 * du2 - e2 * du1) / det, JPH::Vec3::sZero());
-        if (t.LengthSq() < 0.5f || b.LengthSq() < 0.5f) continue;
+        const FVec3 b = NormalizeOr((e1 * du2 - e2 * du1) / det, FVec3::Zero());
+        if (t.LengthSquared() < 0.5f || b.LengthSquared() < 0.5f) continue;
 
         const float w0 = CornerAngle(e1, e2);
         const float w1 = CornerAngle(p2 - p1, p0 - p1);
@@ -81,13 +82,13 @@ auto GenerateTangents(
     std::vector<std::array<float, 4>> result(count);
     for (size_t i = 0; i < count; ++i) {
         const auto& raw = normals[i];
-        const JPH::Vec3 n = NormalizeOr({raw[0], raw[1], raw[2]}, JPH::Vec3::sAxisY());
-        const JPH::Vec3 projected = tangents[i] - n * n.Dot(tangents[i]);
-        const JPH::Vec3 axis = std::abs(n.GetX()) < 0.95f ? JPH::Vec3::sAxisX() : JPH::Vec3::sAxisY();
-        const JPH::Vec3 fallback = NormalizeOr(axis - n * n.Dot(axis), JPH::Vec3::sAxisZ());
-        const JPH::Vec3 t = NormalizeOr(projected, fallback);
-        const float sign = n.Cross(t).Dot(bitangents[i]) < 0.0f ? -1.0f : 1.0f;
-        result[i] = {t.GetX(), t.GetY(), t.GetZ(), sign};
+        const FVec3 n = NormalizeOr({raw[0], raw[1], raw[2]}, FVec3::UnitY());
+        const FVec3 projected = tangents[i] - n * Dot(n, tangents[i]);
+        const FVec3 axis = std::abs(n.x) < 0.95f ? FVec3::UnitX() : FVec3::UnitY();
+        const FVec3 fallback = NormalizeOr(axis - n * Dot(n, axis), FVec3::UnitZ());
+        const FVec3 t = NormalizeOr(projected, fallback);
+        const float sign = Dot(Cross(n, t), bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+        result[i] = {t.x, t.y, t.z, sign};
     }
     return result;
 }

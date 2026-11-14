@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
@@ -206,7 +207,7 @@ class ZHLN_API RenderContext {
         return CreateTexture(std::span {pixels}, extent, isSRGB);
     }
 
-    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices);
+    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices);
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
@@ -250,7 +251,7 @@ class ZHLN_API RenderContext {
     void               SubmitMeshParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat);
     void               DrawBillboards(TextureID texture, std::span<const BillboardQuad> billboards, bool additive);
     [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
-    void SetFrameData(const Camera& cam, const FrameData& frame, const ZHLN::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt) noexcept;
+    void SetFrameData(const Camera& cam, const FrameData& frame, const ZHLN::Mat4x4& shadowProjView, std::span<const LightDesc> lights, float dt) noexcept;
     void ApplySimulationData(const SceneData& scene) noexcept;
     void ApplyDrawData(const SceneData& scene) noexcept;
     [[nodiscard]] auto                            RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;

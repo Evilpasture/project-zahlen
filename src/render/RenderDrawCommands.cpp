@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/RenderInternal.hpp"
-#include "Zahlen/Math/Math3D.hpp"
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <array>
@@ -96,18 +98,18 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
-    JPH::Mat44 world     = JPH::Mat44::sIdentity();
-    JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
+    Mat4x4 world     = Mat4x4::Identity();
+    Mat4x4 prevWorld = Mat4x4::Identity();
 
     uint64_t posAddress          = 0;
     uint64_t tangentFrameAddress = 0;
     uint64_t surfaceAddress      = 0;
 
-    BindlessIndices indices {};
-    uint32_t bakedIrradianceTex = kNoFilmTexture;
-    float    bakedIrradianceScale = 1.0f;
-    bool                       hasAmbientCube = false;
-    std::array<ZHLN::Float4, 6> ambientCube {};
+    BindlessIndices             indices {};
+    uint32_t                    bakedIrradianceTex   = kNoFilmTexture;
+    float                       bakedIrradianceScale = 1.0f;
+    bool                        hasAmbientCube       = false;
+    std::array<ZHLN::FVec4, 6> ambientCube {};
 
     uint32_t alphaMode    = 0;
     bool     isViewmodel  = false;
@@ -128,10 +130,10 @@ struct InstanceDataDesc {
     float roughnessFactor = 1.0f;
     float alphaCutoff     = 0.0f;
 
-    JPH::Float3 localCenter {0.0f, 0.0f, 0.0f};
-    JPH::Float4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
-    JPH::Float4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 localCenter {0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
 
     float                     transmissionFactor       = 0.0f;
     float                     iridescenceFactor        = 0.0f;
@@ -153,18 +155,18 @@ struct InstanceDataDesc {
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f;
     uint32_t                  anisotropyTex            = kNoFilmTexture;
-    JPH::Float3               sheenColorFactor {};
-    float                     sheenRoughnessFactor = 0.0f;
-    uint32_t                  sheenColorTex        = kNoFilmTexture;
-    uint32_t                  sheenRoughnessTex    = kNoFilmTexture;
-    uint32_t                  occlusionTex         = kNoFilmTexture;
-    float                     occlusionStrength    = 1.0f;
-    bool                      specularEnabled      = false;
-    bool                      environmentReflectionEnabled  = false;
+    ZHLN::FVec3              sheenColorFactor {};
+    float                     sheenRoughnessFactor           = 0.0f;
+    uint32_t                  sheenColorTex                  = kNoFilmTexture;
+    uint32_t                  sheenRoughnessTex              = kNoFilmTexture;
+    uint32_t                  occlusionTex                   = kNoFilmTexture;
+    float                     occlusionStrength              = 1.0f;
+    bool                      specularEnabled                = false;
+    bool                      environmentReflectionEnabled   = false;
     bool                      environmentReflectionAlphaMask = false;
-    float                     environmentReflectionFactor = 1.0f;
-    float                     specularFactor       = 1.0f;
-    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    float                     environmentReflectionFactor    = 1.0f;
+    float                     specularFactor                 = 1.0f;
+    ZHLN::FVec3              specularColorFactor {1.0f, 1.0f, 1.0f};
     uint32_t                  specularTex     = kNoFilmTexture;
     uint32_t                  specularTexMode = 0;
     MaterialSamplerAddresses  textureSamplers {};
@@ -183,29 +185,29 @@ struct InstanceDataDesc {
     // Bits 14..18 are deliberately material-presence flags, rather than a
     // sampled result: a texture can make the extension non-zero per pixel.
     constexpr float kExtensionEpsilon = 1.0f / 255.0f;
-    const uint32_t hasClearcoat =
-        (!desc.unlit &&
-         (desc.clearcoatFactor > kExtensionEpsilon || desc.clearcoatTex != kNoFilmTexture || desc.clearcoatRoughnessTex != kNoFilmTexture ||
-          desc.clearcoatNormalTex != kNoFilmTexture)) ?
-            1u :
-            0u;
-    const uint32_t hasAnisotropy = (!desc.unlit && (desc.anisotropyStrength > kExtensionEpsilon || desc.anisotropyTex != kNoFilmTexture)) ? 1u : 0u;
-    const uint32_t hasSheen =
-        (!desc.unlit &&
-         (desc.sheenColorFactor.x > kExtensionEpsilon || desc.sheenColorFactor.y > kExtensionEpsilon || desc.sheenColorFactor.z > kExtensionEpsilon ||
-          desc.sheenColorTex != kNoFilmTexture || desc.sheenRoughnessTex != kNoFilmTexture)) ?
+    const uint32_t  hasClearcoat      = (!desc.unlit && (desc.clearcoatFactor > kExtensionEpsilon || desc.clearcoatTex != kNoFilmTexture ||
+                                                         desc.clearcoatRoughnessTex != kNoFilmTexture || desc.clearcoatNormalTex != kNoFilmTexture)) ?
+                                            1u :
+                                            0u;
+    const uint32_t  hasAnisotropy     = (!desc.unlit && (desc.anisotropyStrength > kExtensionEpsilon || desc.anisotropyTex != kNoFilmTexture)) ? 1u : 0u;
+    const uint32_t  hasSheen =
+        (!desc.unlit && (desc.sheenColorFactor.x > kExtensionEpsilon || desc.sheenColorFactor.y > kExtensionEpsilon ||
+                         desc.sheenColorFactor.z > kExtensionEpsilon || desc.sheenColorTex != kNoFilmTexture || desc.sheenRoughnessTex != kNoFilmTexture)) ?
             1u :
             0u;
     const uint32_t hasEmissive = desc.hasEmissive ? 1u : 0u;
     // Bit 20: per-instance Source ambient cube present (InstanceData::ambientCube).
     const uint32_t hasAmbientCube = desc.hasAmbientCube ? 1u : 0u;
-    const uint32_t hasSpecular = !desc.unlit && desc.specularEnabled ? 1u : 0u;
+    const uint32_t hasSpecular    = !desc.unlit && desc.specularEnabled ? 1u : 0u;
 
-    const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
+    const FVec3 basisX {desc.world[0, 0], desc.world[1, 0], desc.world[2, 0]};
+    const FVec3 basisY {desc.world[0, 1], desc.world[1, 1], desc.world[2, 1]};
+    const FVec3 basisZ {desc.world[0, 2], desc.world[1, 2], desc.world[2, 2]};
+    const uint32_t isMirrored = Dot(basisX, Cross(basisY, basisZ)) < 0.0f ? 1u : 0u;
 
-    JPH::Float4 emissive       = desc.emissiveFactor;
-    uint32_t    paddingCenter  = 0;
-    uint32_t    paddingMeshlet = 0;
+    ZHLN::FVec4 emissive       = desc.emissiveFactor;
+    uint32_t     paddingCenter  = 0;
+    uint32_t     paddingMeshlet = 0;
     if (hasTransmission != 0) {
         paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
         paddingMeshlet = desc.iridescenceTex & kNoFilmTexture;
@@ -219,14 +221,14 @@ struct InstanceDataDesc {
         }
     }
 
-    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow0;
-    std::array<ZHLN::Float4, kMaterialTextureSlotCount> uvRow1;
+    std::array<ZHLN::FVec4, kMaterialTextureSlotCount> uvRow0;
+    std::array<ZHLN::FVec4, kMaterialTextureSlotCount> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s         = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot]          = JPH::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
-        uvRow1[slot]          = JPH::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
+        uvRow0[slot]          = {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot]          = {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {
@@ -246,18 +248,18 @@ struct InstanceDataDesc {
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
 
-        .flags            = (hasAmbientCube << 20) | (isViewmodel << 19) | (hasSpecular << 18) | (hasEmissive << 17) | (hasSheen << 16) | (hasAnisotropy << 15) |
-                            (hasClearcoat << 14) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) |
-                            (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
-        .jointOffset      = desc.jointOffset,
-        .morphOffset      = desc.morphOffset,
-        .activeMorphCount = desc.activeMorphCount,
-        .localCenter      = desc.localCenter,
-        ._paddingCenter   = paddingCenter,
-        .morphWeights     = desc.morphWeights,
-        .baseColorFactor  = desc.baseColorFactor,
-        .emissiveFactor   = emissive,
-        .meshletAddress   = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
+        .flags       = (hasAmbientCube << 20) | (isViewmodel << 19) | (hasSpecular << 18) | (hasEmissive << 17) | (hasSheen << 16) | (hasAnisotropy << 15) |
+                       (hasClearcoat << 14) | (isBackground << 13) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) |
+                       (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .jointOffset = desc.jointOffset,
+        .morphOffset = desc.morphOffset,
+        .activeMorphCount     = desc.activeMorphCount,
+        .localCenter          = desc.localCenter,
+        ._paddingCenter       = paddingCenter,
+        .morphWeights         = desc.morphWeights,
+        .baseColorFactor      = desc.baseColorFactor,
+        .emissiveFactor       = emissive,
+        .meshletAddress       = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr.Get() : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr.Get() : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
@@ -284,11 +286,11 @@ struct InstanceDataDesc {
         .uvRow1                  = uvRow1,
         .specularParams          = {desc.specularColorFactor.x, desc.specularColorFactor.y, desc.specularColorFactor.z, std::max(desc.specularFactor, 0.0f)},
         .specularTexIndex        = desc.specularTex,
-        .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u) |
-                                  (desc.environmentReflectionEnabled ? 1u << 3u : 0u) | (desc.environmentReflectionAlphaMask ? 1u << 4u : 0u),
-        .bakedIrradianceTexIndex = desc.bakedIrradianceTex,
-        .bakedIrradianceScale    = std::max(desc.bakedIrradianceScale, 0.0f),
-        .ambientCube             = desc.ambientCube,
+        .specularFlags = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u) | (desc.environmentReflectionEnabled ? 1u << 3u : 0u) |
+                         (desc.environmentReflectionAlphaMask ? 1u << 4u : 0u),
+        .bakedIrradianceTexIndex     = desc.bakedIrradianceTex,
+        .bakedIrradianceScale        = std::max(desc.bakedIrradianceScale, 0.0f),
+        .ambientCube                 = desc.ambientCube,
         .environmentReflectionFactor = desc.environmentReflectionFactor,
     };
 }
@@ -408,75 +410,75 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
-                 .resolved                 = &*resolved,
-                 .world                    = params.transform,
-                 .prevWorld                = params.prevTransform,
-                 .posAddress               = resolved->posAddr.Get(),
-                 .tangentFrameAddress      = resolved->frameAddr.Get(),
-                 .surfaceAddress           = resolved->surfaceAddr.Get(),
-                 .indices                  = tex,
-                 .bakedIrradianceTex     = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
-                 .bakedIrradianceScale   = material.bakedIrradianceScale,
-                 .hasAmbientCube         = params.hasAmbientCube,
-                 .ambientCube            = params.ambientCube,
-                 .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
-                 .isViewmodel              = isViewmodel != 0u,
-                 .isBackground             = (params.flags & DrawFlags::Background) != DrawFlags::None,
-                 .isSkinned                = isSkinned != 0u,
-                 .doubleSided              = material.doubleSided,
-                 .unlit                    = material.unlit,
-                 .hasEmissive              = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
-                                             material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f ||
-                                             params.hasAmbientCube,
-                 .vertexCount              = resolved->posMesh->vertexCount,
-                 .indexCount               = mesh.indexCount,
-                 .jointOffset              = params.jointOffset,
-                 .morphOffset              = params.morphOffset,
-                 .activeMorphCount         = activeMorphCount,
-                 .cullRadius               = params.cullRadius,
-                 .metallicFactor           = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
-                 .roughnessFactor          = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
-                 .alphaCutoff              = material.alphaCutoff,
-                 .localCenter              = params.localCenter,
-                 .morphWeights             = params.morphWeights,
-                 .baseColorFactor          = (params.colorOverride.w >= 0.0f) ? params.colorOverride : material.baseColorFactor,
-                 .emissiveFactor           = (params.emissiveOverride.w >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
-                 .transmissionFactor       = material.transmissionFactor,
-                 .iridescenceFactor        = material.iridescenceFactor,
-                 .filmThicknessNm          = material.filmThicknessNm,
-                 .filmThicknessMinNm       = material.filmThicknessMinNm,
-                 .volumeThicknessM         = material.volumeThicknessM,
-                 .ior                      = material.ior,
-                 .normalScale              = material.normalScale,
-                 .transmissionTex          = OptionalTextureIndex(_impl.get(), material.transmissionMap),
-                 .filmThicknessTex         = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
-                 .iridescenceTex           = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
-                 .volumeThicknessTex       = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
-                 .clearcoatFactor          = material.clearcoatFactor,
-                 .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
-                 .clearcoatNormalScale     = material.clearcoatNormalScale,
-                 .clearcoatTex             = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
-                 .clearcoatRoughnessTex    = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
-                 .clearcoatNormalTex       = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
-                 .anisotropyStrength       = material.anisotropyStrength,
-                 .anisotropyRotation       = material.anisotropyRotation,
-                 .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
-                 .sheenColorFactor         = material.sheenColorFactor,
-                 .sheenRoughnessFactor     = material.sheenRoughnessFactor,
-                 .sheenColorTex            = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
-                 .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
-                 .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
-                 .occlusionStrength        = material.occlusionStrength,
-                 .specularEnabled          = material.specularEnabled,
-                 .environmentReflectionEnabled  = material.environmentReflectionEnabled,
+                 .resolved                       = &*resolved,
+                 .world                          = params.transform,
+                 .prevWorld                      = params.prevTransform,
+                 .posAddress                     = resolved->posAddr.Get(),
+                 .tangentFrameAddress            = resolved->frameAddr.Get(),
+                 .surfaceAddress                 = resolved->surfaceAddr.Get(),
+                 .indices                        = tex,
+                 .bakedIrradianceTex             = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
+                 .bakedIrradianceScale           = material.bakedIrradianceScale,
+                 .hasAmbientCube                 = params.hasAmbientCube,
+                 .ambientCube                    = params.ambientCube,
+                 .alphaMode                      = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                 .isViewmodel                    = isViewmodel != 0u,
+                 .isBackground                   = (params.flags & DrawFlags::Background) != DrawFlags::None,
+                 .isSkinned                      = isSkinned != 0u,
+                 .doubleSided                    = material.doubleSided,
+                 .unlit                          = material.unlit,
+                 .hasEmissive                    = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
+                                                   material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f ||
+                                                   params.hasAmbientCube,
+                 .vertexCount                    = resolved->posMesh->vertexCount,
+                 .indexCount                     = mesh.indexCount,
+                 .jointOffset                    = params.jointOffset,
+                 .morphOffset                    = params.morphOffset,
+                 .activeMorphCount               = activeMorphCount,
+                 .cullRadius                     = params.cullRadius,
+                 .metallicFactor                 = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+                 .roughnessFactor                = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
+                 .alphaCutoff                    = material.alphaCutoff,
+                 .localCenter                    = params.localCenter,
+                 .morphWeights                   = params.morphWeights,
+                 .baseColorFactor                = (params.colorOverride.w >= 0.0f) ? params.colorOverride : material.baseColorFactor,
+                 .emissiveFactor                 = (params.emissiveOverride.w >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
+                 .transmissionFactor             = material.transmissionFactor,
+                 .iridescenceFactor              = material.iridescenceFactor,
+                 .filmThicknessNm                = material.filmThicknessNm,
+                 .filmThicknessMinNm             = material.filmThicknessMinNm,
+                 .volumeThicknessM               = material.volumeThicknessM,
+                 .ior                            = material.ior,
+                 .normalScale                    = material.normalScale,
+                 .transmissionTex                = OptionalTextureIndex(_impl.get(), material.transmissionMap),
+                 .filmThicknessTex               = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
+                 .iridescenceTex                 = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
+                 .volumeThicknessTex             = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
+                 .clearcoatFactor                = material.clearcoatFactor,
+                 .clearcoatRoughnessFactor       = material.clearcoatRoughnessFactor,
+                 .clearcoatNormalScale           = material.clearcoatNormalScale,
+                 .clearcoatTex                   = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
+                 .clearcoatRoughnessTex          = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                 .clearcoatNormalTex             = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                 .anisotropyStrength             = material.anisotropyStrength,
+                 .anisotropyRotation             = material.anisotropyRotation,
+                 .anisotropyTex                  = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
+                 .sheenColorFactor               = material.sheenColorFactor,
+                 .sheenRoughnessFactor           = material.sheenRoughnessFactor,
+                 .sheenColorTex                  = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
+                 .sheenRoughnessTex              = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                 .occlusionTex                   = OptionalTextureIndex(_impl.get(), material.occlusionMap),
+                 .occlusionStrength              = material.occlusionStrength,
+                 .specularEnabled                = material.specularEnabled,
+                 .environmentReflectionEnabled   = material.environmentReflectionEnabled,
                  .environmentReflectionAlphaMask = material.environmentReflectionAlphaMask,
-                 .environmentReflectionFactor = material.environmentReflectionFactor,
-                 .specularFactor           = material.specularFactor,
-                 .specularColorFactor      = material.specularColorFactor,
-                 .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
-                 .specularTexMode          = material.specularTexMode,
-                 .textureSamplers          = material.textureSamplers,
-                 .textureTransforms        = material.textureTransforms,
+                 .environmentReflectionFactor    = material.environmentReflectionFactor,
+                 .specularFactor                 = material.specularFactor,
+                 .specularColorFactor            = material.specularColorFactor,
+                 .specularTex                    = OptionalTextureIndex(_impl.get(), material.specularMap),
+                 .specularTexMode                = material.specularTexMode,
+                 .textureSamplers                = material.textureSamplers,
+                 .textureTransforms              = material.textureTransforms,
              }
          ),
          .material            = resolved->material,
@@ -495,7 +497,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 }
 
 void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
-    auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
+    auto MakeCommand = [&](const Material& material, const Mesh& mesh, const Mat4x4& transform, const Mat4x4& prevTransform, float cullRadius,
                            uint32_t jointOffset, BufferID skinnedVertexBuffer, DrawFlags flags) -> std::optional<DrawCommand> {
         auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, skinnedVertexBuffer);
         if (!resolved) {
@@ -510,67 +512,67 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         return DrawCommand {
             .instanceData = BuildGPUInstanceData(
                 InstanceDataDesc {
-                    .resolved                 = &*resolved,
-                    .world                    = transform,
-                    .prevWorld                = prevTransform,
-                    .posAddress               = resolved->posAddr.Get(),
-                    .tangentFrameAddress      = resolved->frameAddr.Get(),
-                    .surfaceAddress           = resolved->surfaceAddr.Get(),
-                    .indices                  = tex,
-                    .bakedIrradianceTex     = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
-                    .bakedIrradianceScale   = material.bakedIrradianceScale,
-                    .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
-                    .isBackground             = (flags & DrawFlags::Background) != DrawFlags::None,
-                    .isSkinned                = isSkinned != 0u,
-                    .doubleSided              = material.doubleSided,
-                    .unlit                    = material.unlit,
-                    .hasEmissive              = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
-                                                material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
-                    .vertexCount              = resolved->posMesh->vertexCount,
-                    .indexCount               = mesh.indexCount,
-                    .jointOffset              = jointOffset,
-                    .cullRadius               = cullRadius,
-                    .metallicFactor           = material.metallicFactor,
-                    .roughnessFactor          = material.roughnessFactor,
-                    .alphaCutoff              = material.alphaCutoff,
-                    .baseColorFactor          = material.baseColorFactor,
-                    .emissiveFactor           = material.emissiveFactor,
-                    .transmissionFactor       = material.transmissionFactor,
-                    .iridescenceFactor        = material.iridescenceFactor,
-                    .filmThicknessNm          = material.filmThicknessNm,
-                    .filmThicknessMinNm       = material.filmThicknessMinNm,
-                    .volumeThicknessM         = material.volumeThicknessM,
-                    .ior                      = material.ior,
-                    .normalScale              = material.normalScale,
-                    .transmissionTex          = OptionalTextureIndex(_impl.get(), material.transmissionMap),
-                    .filmThicknessTex         = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
-                    .iridescenceTex           = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
-                    .volumeThicknessTex       = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
-                    .clearcoatFactor          = material.clearcoatFactor,
-                    .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
-                    .clearcoatNormalScale     = material.clearcoatNormalScale,
-                    .clearcoatTex             = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
-                    .clearcoatRoughnessTex    = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
-                    .clearcoatNormalTex       = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
-                    .anisotropyStrength       = material.anisotropyStrength,
-                    .anisotropyRotation       = material.anisotropyRotation,
-                    .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
-                    .sheenColorFactor         = material.sheenColorFactor,
-                    .sheenRoughnessFactor     = material.sheenRoughnessFactor,
-                    .sheenColorTex            = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
-                    .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
-                    .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
-                    .occlusionStrength        = material.occlusionStrength,
-                    .specularEnabled          = material.specularEnabled,
-                    .environmentReflectionEnabled  = material.environmentReflectionEnabled,
+                    .resolved                       = &*resolved,
+                    .world                          = transform,
+                    .prevWorld                      = prevTransform,
+                    .posAddress                     = resolved->posAddr.Get(),
+                    .tangentFrameAddress            = resolved->frameAddr.Get(),
+                    .surfaceAddress                 = resolved->surfaceAddr.Get(),
+                    .indices                        = tex,
+                    .bakedIrradianceTex             = OptionalTextureIndex(_impl.get(), material.bakedIrradianceMap),
+                    .bakedIrradianceScale           = material.bakedIrradianceScale,
+                    .alphaMode                      = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                    .isBackground                   = (flags & DrawFlags::Background) != DrawFlags::None,
+                    .isSkinned                      = isSkinned != 0u,
+                    .doubleSided                    = material.doubleSided,
+                    .unlit                          = material.unlit,
+                    .hasEmissive                    = material.bakedIrradianceMap != TextureID::Invalid || material.emissiveMap != TextureID::Invalid ||
+                                                      material.emissiveFactor.x > 0.0f || material.emissiveFactor.y > 0.0f || material.emissiveFactor.z > 0.0f,
+                    .vertexCount                    = resolved->posMesh->vertexCount,
+                    .indexCount                     = mesh.indexCount,
+                    .jointOffset                    = jointOffset,
+                    .cullRadius                     = cullRadius,
+                    .metallicFactor                 = material.metallicFactor,
+                    .roughnessFactor                = material.roughnessFactor,
+                    .alphaCutoff                    = material.alphaCutoff,
+                    .baseColorFactor                = material.baseColorFactor,
+                    .emissiveFactor                 = material.emissiveFactor,
+                    .transmissionFactor             = material.transmissionFactor,
+                    .iridescenceFactor              = material.iridescenceFactor,
+                    .filmThicknessNm                = material.filmThicknessNm,
+                    .filmThicknessMinNm             = material.filmThicknessMinNm,
+                    .volumeThicknessM               = material.volumeThicknessM,
+                    .ior                            = material.ior,
+                    .normalScale                    = material.normalScale,
+                    .transmissionTex                = OptionalTextureIndex(_impl.get(), material.transmissionMap),
+                    .filmThicknessTex               = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
+                    .iridescenceTex                 = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
+                    .volumeThicknessTex             = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
+                    .clearcoatFactor                = material.clearcoatFactor,
+                    .clearcoatRoughnessFactor       = material.clearcoatRoughnessFactor,
+                    .clearcoatNormalScale           = material.clearcoatNormalScale,
+                    .clearcoatTex                   = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
+                    .clearcoatRoughnessTex          = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                    .clearcoatNormalTex             = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                    .anisotropyStrength             = material.anisotropyStrength,
+                    .anisotropyRotation             = material.anisotropyRotation,
+                    .anisotropyTex                  = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
+                    .sheenColorFactor               = material.sheenColorFactor,
+                    .sheenRoughnessFactor           = material.sheenRoughnessFactor,
+                    .sheenColorTex                  = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
+                    .sheenRoughnessTex              = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                    .occlusionTex                   = OptionalTextureIndex(_impl.get(), material.occlusionMap),
+                    .occlusionStrength              = material.occlusionStrength,
+                    .specularEnabled                = material.specularEnabled,
+                    .environmentReflectionEnabled   = material.environmentReflectionEnabled,
                     .environmentReflectionAlphaMask = material.environmentReflectionAlphaMask,
-                    .environmentReflectionFactor = material.environmentReflectionFactor,
-                    .specularFactor           = material.specularFactor,
-                    .specularColorFactor      = material.specularColorFactor,
-                    .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
-                    .specularTexMode          = material.specularTexMode,
-                    .textureSamplers          = material.textureSamplers,
-                    .textureTransforms        = material.textureTransforms,
+                    .environmentReflectionFactor    = material.environmentReflectionFactor,
+                    .specularFactor                 = material.specularFactor,
+                    .specularColorFactor            = material.specularColorFactor,
+                    .specularTex                    = OptionalTextureIndex(_impl.get(), material.specularMap),
+                    .specularTexMode                = material.specularTexMode,
+                    .textureSamplers                = material.textureSamplers,
+                    .textureTransforms              = material.textureTransforms,
                 }
             ),
             .material            = resolved->material,

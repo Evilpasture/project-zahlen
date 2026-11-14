@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Graph.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "ALife/Types.hpp"
 #include <algorithm>
 #include <limits>
@@ -77,13 +78,13 @@ void LevelGraph::Connect(uint32_t a, uint32_t b) {
     }
 }
 
-auto LevelGraph::FindClosest(JPH::RVec3Arg pos) const -> uint32_t {
+auto LevelGraph::FindClosest(DVec3 pos) const -> uint32_t {
     uint32_t best_idx    = INVALID_GRAPH_NODE;
     float    min_dist_sq = std::numeric_limits<float>::max();
 
     for (uint32_t i = 0; i < _nodes.size(); ++i) {
         // High-performance SIMD subtraction and squared length check from Jolt
-        float d2 = (_nodes[i].position - pos).LengthSq();
+        float d2 = (_nodes[i].position - pos).LengthSquared();
 
         if (d2 < min_dist_sq) {
             min_dist_sq = d2;

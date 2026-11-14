@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPImporter.hpp
 //
 // The Source engine BSP reader, in the same shape as <glTF/GLTFImporter.hpp>:
@@ -30,8 +31,10 @@
 #include <string_view>
 
 namespace ZHLN {
+class Engine;
 class RenderContext;
 class AssetManager;
+class PhysicsContext;
 } // namespace ZHLN
 
 namespace ZHLN::BSP {
@@ -39,13 +42,22 @@ namespace ZHLN::BSP {
 // Reads path from disk and imports it. A cached prefab from an earlier call is
 // returned as-is (the cache key is the virtual path, like the glTF importer).
 [[nodiscard]] auto
-    LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, const ImportOptions& options = {}) -> ZHLN::Optional<ModelPrefab&>;
+    LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, std::string_view path, const ImportOptions& options = {}) -> ZHLN::Optional<ModelPrefab&>;
+[[nodiscard]] auto
+    LoadBSPPrefab(Engine& engine, std::string_view path, const ImportOptions& options = {}) -> ZHLN::Optional<ModelPrefab&>;
 
 // Like LoadBSPPrefab, but consumes bytes already read by the caller. The
 // virtual path names the cache entry; geometry converts per options.
 [[nodiscard]] auto LoadBSPPrefabFromMemory(
     RenderContext&             ctx,
     AssetManager&              assetMgr,
+    PhysicsContext&            physics,
+    std::span<const std::byte> bytes,
+    std::string_view           virtualPath,
+    const ImportOptions&       options = {}
+) -> ZHLN::Optional<ModelPrefab&>;
+[[nodiscard]] auto LoadBSPPrefabFromMemory(
+    Engine&                    engine,
     std::span<const std::byte> bytes,
     std::string_view           virtualPath,
     const ImportOptions&       options = {}
@@ -56,6 +68,12 @@ namespace ZHLN::BSP {
 auto PreloadStaticProps(
     RenderContext&       ctx,
     AssetManager&        assetMgr,
+    PhysicsContext&      physics,
+    const BSPMap&        map,
+    const ImportOptions& options = {}
+) -> size_t;
+auto PreloadStaticProps(
+    Engine&              engine,
     const BSPMap&        map,
     const ImportOptions& options = {}
 ) -> size_t;
@@ -82,7 +100,7 @@ auto PreloadStaticProps(
 // not a grey scaled by red.
 struct VmtEmission {
     float     strength = 0.0f;
-    JPH::Vec3 tint {1.0f, 1.0f, 1.0f};
+    FVec3 tint {1.0f, 1.0f, 1.0f};
 };
 
 // Reads the rules above out of one parsed material. The base texture luminance

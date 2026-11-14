@@ -34,5 +34,3 @@
 #else
 #define ZHLN_STATIC_API [[gnu::visibility("default")]]
 #endif
-
-struct ZHLN_Engine;

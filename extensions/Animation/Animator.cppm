@@ -4,9 +4,8 @@
 module;
 
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Animation/IK.hpp>
 #include <algorithm>
 #include <cmath>
@@ -31,20 +30,20 @@ struct ParametricCurve {
     }
 };
 
-JPH::Quat AimBone(JPH::Vec3Arg bindDirection, JPH::QuatArg parentWorldQuat, JPH::Vec3Arg targetWorldDir) noexcept {
-    JPH::Vec3 localDir = parentWorldQuat.Inversed() * targetWorldDir.Normalized();
-    return JPH::Quat::sFromTo(bindDirection, localDir);
+auto AimBone(FVec3 bindDirection, Quat parentWorldQuat, FVec3 targetWorldDir) noexcept -> Quat {
+    const auto localDir = Rotate(parentWorldQuat.Inversed(), targetWorldDir.Normalized());
+    return FromTo(bindDirection, localDir);
 }
 
 void SolveTwoBoneIK(
-    JPH::Vec3Arg jointWorldPos,
-    JPH::Vec3Arg parentBindPos,
-    JPH::Vec3Arg childBindPos,
-    JPH::QuatArg grandparentWorldQuat,
-    JPH::Vec3Arg targetWorld,
-    JPH::Vec3Arg poleWorld,
-    JPH::Quat&   outParentQuat,
-    JPH::Quat&   outChildQuat
+    FVec3 jointWorldPos,
+    FVec3 parentBindPos,
+    FVec3 childBindPos,
+    Quat grandparentWorldQuat,
+    FVec3 targetWorld,
+    FVec3 poleWorld,
+    Quat&   outParentQuat,
+    Quat&   outChildQuat
 ) noexcept {
     auto ikOutput = ZHLN::IK::SolveTwoBoneIK(
         {.upperPosition  = jointWorldPos,
@@ -58,7 +57,7 @@ void SolveTwoBoneIK(
         return;
 
     outParentQuat             = AimBone(parentBindPos, grandparentWorldQuat, ikOutput.upperDirection);
-    JPH::Quat parentWorldQuat = grandparentWorldQuat * outParentQuat;
+    const auto parentWorldQuat = grandparentWorldQuat * outParentQuat;
     outChildQuat              = AimBone(childBindPos, parentWorldQuat, ikOutput.lowerDirection);
 }
 

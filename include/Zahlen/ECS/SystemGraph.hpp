@@ -32,6 +32,13 @@
 
 namespace ZHLN::ECS {
 
+class Inspection;
+
+template <typename T>
+inline constexpr bool IsUnscheduledWorldAccess =
+    std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>, Registry> ||
+    std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>, Inspection>;
+
 // What the core hands a node's function: the carrier the graph was executed with,
 // and the storage this node owns. One of these is built per invocation on the
 // invoking thread's stack -- the carrier itself is shared by every node, so
@@ -77,21 +84,18 @@ struct ParameterResolver<Query<Comps...>> {
     }
 };
 
-template <>
-struct ParameterResolver<Registry&> {
+template <typename... Comps>
+struct ParameterResolver<ExclusiveQuery<Comps...>> {
     template <typename CarrierType>
-    static auto Resolve(CarrierType& carrier) noexcept -> Registry& {
-        return carrier.registry;
+    static auto Resolve(CarrierType& carrier) noexcept -> ExclusiveQuery<Comps...> {
+        return ExclusiveQuery<Comps...>(carrier.registry);
     }
 };
 
-template <>
-struct ParameterResolver<const Registry&> {
-    template <typename CarrierType>
-    static auto Resolve(CarrierType& carrier) noexcept -> const Registry& {
-        return carrier.registry;
-    }
-};
+// A graph never hands systems the raw registry, even if a service bundle
+// happens to contain one. Structural work uses an exclusive query or ECB.
+template <> struct ParameterResolver<Registry&> {};
+template <> struct ParameterResolver<const Registry&> {};
 
 template <>
 struct ParameterResolver<EntityCommandBuffer&> {
@@ -129,8 +133,9 @@ struct ParameterResolver<FrameIndex> {
 template <typename T>
 struct ParameterResolver<Res<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+        requires(!IsUnscheduledWorldAccess<T> &&
+                 (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
     static auto Resolve(CarrierType& carrier) noexcept -> Res<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -147,8 +152,9 @@ struct ParameterResolver<Res<T>> {
 template <typename T>
 struct ParameterResolver<ResMut<T>> {
     template <typename CarrierType>
-        requires(Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                 Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())
+        requires(!IsUnscheduledWorldAccess<T> &&
+                 (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
+                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
     static auto Resolve(CarrierType& carrier) noexcept -> ResMut<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -235,6 +241,7 @@ struct ParameterResolver<Param> {
     using Clean = std::remove_const_t<Value>;
 
     template <typename CarrierType>
+        requires (!IsUnscheduledWorldAccess<Clean>)
     static auto Resolve(CarrierType& carrier) noexcept -> Param {
         if constexpr (Reflect::BundleProvides<Clean, typename CarrierType::Services>()) {
             return *Reflect::FindService<Clean>(carrier.services);
@@ -500,6 +507,25 @@ consteval auto SignatureUsesCommandBuffer() -> bool {
     return uses;
 }
 
+// Direct phase calls do not have a graph node, so they cannot resolve node
+// state or a raw registry. They may use queries, ordinary service views,
+// frame values and, for the playback form only, a private command buffer;
+// the phase owner provides isolation.
+template <typename Param>
+inline constexpr bool SequentialParameter =
+    std::is_same_v<Param, EntityCommandBuffer&> ||
+    (std::is_same_v<Param, std::remove_cvref_t<Param>> &&
+     (IsQuery<Param> || IsExclusiveQuery<Param> || ResourceView<Param>::value || OptionalResourceParam<Param> ||
+      std::is_same_v<Param, FrameDt> || std::is_same_v<Param, FrameAlpha> || std::is_same_v<Param, FrameIndex>));
+
+template <auto SystemFn>
+consteval auto SequentialParameters() -> bool {
+    using Inspector = Reflect::CallableInspector<SystemFn>;
+    return []<std::size_t... Is>(std::index_sequence<Is...>) {
+        return (SequentialParameter<typename Inspector::template ParameterType<Is>> && ...);
+    }(std::make_index_sequence<Inspector::ParameterCount()> {});
+}
+
 } // namespace TemplatedDetail
 
 // A system parameter is admissible when the graph's carrier can resolve it. The
@@ -507,9 +533,10 @@ consteval auto SignatureUsesCommandBuffer() -> bool {
 // this graph provide" has exactly one answer, in the resolver table rather than
 // in a hand-maintained list beside it.
 template <typename CarrierT, typename Param>
-concept ResolvableFrom = requires(CarrierT& carrier) {
+concept ResolvableFrom = !IsUnscheduledWorldAccess<Param> &&
+    requires(CarrierT& carrier) {
     // The parameter is resolved as written. A reference parameter is part of the
-    // signature's meaning (Registry& is the world; Res<T> is the indirection),
+    // signature's meaning (Res<T> is the indirection),
     // so stripping the reference here would silently change what a system asked
     // for -- and would miss the specialization that answers it.
     ParameterResolver<Param>::Resolve(carrier);
@@ -549,7 +576,7 @@ consteval void AdmitParameters() {
     static_assert(
         EveryParameterResolvable<CarrierT, SystemFn>(std::make_index_sequence<Reflect::CallableInspector<SystemFn>::ParameterCount()> {}),
         "A system parameter cannot be resolved by this graph. Either add the service it asks for to the graph's service bundle, "
-        "or ask for something every graph resolves: Query<...>, EntityCommandBuffer&, Registry&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
+        "or ask for something every graph resolves: Query<...>, ExclusiveQuery<...>, EntityCommandBuffer&, FrameDt/FrameAlpha/FrameIndex, Local<T> "
         "for the node's own state, EventReader<T>/EventWriter<T> (with EventBus in services), Res<T>/ResMut<T>/Optional<T&> for a service "
         "the bundle provides, SoAScratch<T, N> or LinearArena&."
     );
@@ -606,6 +633,20 @@ class LocalBlock {
             return;
         }
         _block = ::operator new(_layout.size, std::align_val_t(_layout.align));
+        for (const TemplatedDetail::LocalSlotDesc& slot: _layout.slots) {
+            slot.construct(static_cast<std::byte*>(_block) + slot.offset);
+        }
+    }
+
+    // Destroy and default-reconstruct every slot in place, keeping the block
+    // and layout intact across a scene reset without rebuilding the graph.
+    void Reinitialize() {
+        if (_block == nullptr) {
+            return;
+        }
+        for (auto& slot: std::ranges::reverse_view(_layout.slots)) {
+            slot.destroy(static_cast<std::byte*>(_block) + slot.offset);
+        }
         for (const TemplatedDetail::LocalSlotDesc& slot: _layout.slots) {
             slot.construct(static_cast<std::byte*>(_block) + slot.offset);
         }
@@ -687,12 +728,14 @@ class ZHLN_API SystemGraphCore {
     [[nodiscard]] auto IsSystemEnabled(std::string_view name) const noexcept -> bool;
     [[nodiscard]] auto GetSystemCount() const noexcept -> size_t;
     [[nodiscard]] auto IsEmpty() const noexcept -> bool;
+    void               ResetLocals();
     void               Clear() noexcept;
 
     [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;
 
   protected:
     void BindCommandRegistry(Registry& registry, EntityCommandBuffer::DestroyFn destroy = nullptr) noexcept;
+    [[nodiscard]] auto CommandDestroy() const noexcept -> EntityCommandBuffer::DestroyFn { return _commandDestroy; }
 
   private:
     // An aggregate on purpose: every construction site spells out the fields it
@@ -785,8 +828,43 @@ class SystemGraph: public SystemGraphCore {
         SystemGraphCore::Execute(&carrier);
     }
 
-    [[nodiscard]] auto GetRegistry() noexcept -> ECS::Registry& {
-        return _registry;
+    // Invoke a stateless system at an externally ordered phase boundary, not
+    // as a graph node. The caller must ensure no graph or other world work is
+    // running concurrently: this call does not participate in hazard ordering.
+    // It resolves against the graph's already-bound world and services without
+    // giving the system a Registry&. Node-local state and ECBs are deliberately
+    // unavailable here; such work belongs in a graph or an explicit barrier.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && !TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequential(const ZHLN::Frame& frame) {
+        AdmitParameters<SystemFn, CarrierType>();
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+    }
+
+    // Invoke at an externally ordered barrier, recording into the caller's
+    // existing buffer without playing it back. The buffer must target this
+    // graph's world; the phase owner owns isolation, ordering, and playback.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequentialWithCommands(const ZHLN::Frame& frame, EntityCommandBuffer& commands) {
+        AdmitParameters<SystemFn, CarrierType>();
+        ZHLN::PanicIf(!commands.Targets(_registry), "A sequential phase command buffer must target the graph's registry");
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame, .ecb = &commands};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+    }
+
+    // As above, but structural commands use a private buffer and are played
+    // back before returning. In particular this never flushes the engine's main
+    // buffer. The caller still owns the phase's concurrency and ordering.
+    template <auto SystemFn>
+        requires (TemplatedDetail::SequentialParameters<SystemFn>() && TemplatedDetail::SignatureUsesCommandBuffer<SystemFn>())
+    void InvokeSequentialAndPlayback(const ZHLN::Frame& frame) {
+        AdmitParameters<SystemFn, CarrierType>();
+        EntityCommandBuffer commands {_registry, CommandDestroy()};
+        CarrierType carrier {.registry = _registry, .services = _services, .frame = frame, .ecb = &commands};
+        SystemSignature<SystemFn>::template Invoke<ParameterResolver, CarrierType>(carrier);
+        commands.Playback();
     }
 
   private:

@@ -8,16 +8,12 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 # A package is not a compiler distribution. GCC point releases keep the
 # libstdc++ ABI, so demanding the exact patch version that happened to build a
-# release was arbitrary. The real gates are the compiler family, the tree's
-# minimum, the CPU, the dual-ABI/debug switches below, and the ELF symbol
+# release was arbitrary. The real gates are the compiler family, the CPU, the
+# behavioural probe below, the dual-ABI/debug switches, and the ELF symbol
 # versions the linker and loader enforce.
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@" OR
    NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "@CMAKE_SYSTEM_PROCESSOR@")
     message(FATAL_ERROR "Zahlen toolchain requires @CMAKE_CXX_COMPILER_ID@ on @CMAKE_SYSTEM_PROCESSOR@")
-endif()
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-   CMAKE_CXX_COMPILER_VERSION VERSION_LESS "@ZHLN_GCC_MIN@")
-    message(FATAL_ERROR "Zahlen toolchain requires GNU >= @ZHLN_GCC_MIN@ (built with @CMAKE_CXX_COMPILER_VERSION@)")
 endif()
 set(Zahlen_SANITIZER_PROFILE "release" CACHE STRING "Zahlen toolchain profile: release or asan-ubsan")
 if(NOT Zahlen_SANITIZER_PROFILE STREQUAL "@ZHLN_TOOLCHAIN_PROFILE@")
@@ -42,6 +38,34 @@ if(NOT _zahlen_abi)
 int main() { return 0; }" _zahlen_stl_ok)
     if(NOT _zahlen_stl_ok)
         message(FATAL_ERROR "Zahlen toolchain requires libstdc++ with _GLIBCXX_USE_CXX11_ABI=@ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ and no debug containers")
+    endif()
+    # The headers in this package are compiled with -freflection in the
+    # *consumer's* toolchain, so the consumer's compiler has to survive GCC PR
+    # c++/125280 just as the one that built the package did. This used to be a
+    # `VERSION_LESS` against a minimum GCC, which cannot work: the fix was
+    # cherry-picked onto releases/gcc-16, which reports 16.1.1 on both sides of
+    # it. Compiling the construct is the only question that distinguishes them,
+    # and it costs one try_compile per consumer configure, in the same block as
+    # the libstdc++ check so neither runs per find_dependency().
+    if(NOT "@ZHLN_TOOLCHAIN_REFLECTION_FLAGS@" STREQUAL "")
+        unset(_zahlen_pr125280_ok CACHE)
+        set(_zahlen_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+        set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} @ZHLN_TOOLCHAIN_REFLECTION_FLAGS@")
+        # The source is substituted into this file at package-generation time.
+        # Bracket arguments keep its quotes, backslashes and semicolons literal;
+        # a quoted argument would be broken by quotes in the C++ source/comments.
+        check_cxx_source_compiles([==[@ZHLN_PR125280_PROBE_SOURCE@]==] _zahlen_pr125280_ok)
+        set(CMAKE_REQUIRED_FLAGS "${_zahlen_saved_required_flags}")
+        unset(_zahlen_saved_required_flags)
+        if(NOT _zahlen_pr125280_ok)
+            message(FATAL_ERROR
+                "This compiler (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}) hits GCC PR c++/125280: "
+                "it rejects a static data member whose type is a class template instantiated while the owning "
+                "class is still incomplete, which Zahlen's headers and JoltPhysics both rely on under "
+                "@ZHLN_TOOLCHAIN_REFLECTION_FLAGS@. Fixed in r17-498 and cherry-picked to releases/gcc-16 as "
+                "r16-8903 on 2026-05-13; the branch reports the same version on both sides of that commit, so "
+                "use a build from after it rather than looking for a higher version number.")
+        endif()
     endif()
 endif()
 @ZHLN_TOOLCHAIN_DEPENDENCIES@

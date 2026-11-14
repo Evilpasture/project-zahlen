@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include "CullingSystem.hpp"
 #include <Zahlen/Engine/VisibilityList.hpp>
@@ -9,9 +11,7 @@
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
@@ -33,13 +33,13 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
         }
 
         const auto worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
-        JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+        auto worldMat = Mat4x4::Identity();
         if (worldTrans) {
             worldMat = worldTrans->world;
         }
-        JPH::Vec3  pos        = worldMat * meshes[i].localCenter;
+        FVec3  pos        = TransformPoint(worldMat, meshes[i].localCenter);
 
-        float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+        float currentMaxScale = std::max({worldMat.Column(0).XYZ().Length(), worldMat.Column(1).XYZ().Length(), worldMat.Column(2).XYZ().Length()});
 
         if (frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
@@ -66,12 +66,12 @@ namespace ZHLN {
 
 namespace {
 
-[[nodiscard]] inline float GetLane(const JPH::Vec4& v, uint32_t lane) noexcept {
+[[nodiscard]] inline float GetLane(const FVec4& v, uint32_t lane) noexcept {
     switch (lane) {
-        case 0:  return v.GetX();
-        case 1:  return v.GetY();
-        case 2:  return v.GetZ();
-        default: return v.GetW();
+        case 0:  return v.x;
+        case 1:  return v.y;
+        case 2:  return v.z;
+        default: return v.w;
     }
 }
 
@@ -96,13 +96,15 @@ struct BatchedFrustum {
         return out;
     }
 
-    void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
-        JPH::Vec4 worstViolation = JPH::Vec4::sReplicate(-1.0f);
+    void Test4(const FVec4& centersX, const FVec4& centersY, const FVec4& centersZ, const FVec4& negInflatedRadii, bool* outVisible) const noexcept {
+        FVec4 worstViolation = FVec4::Splat(-1.0f);
 
         for (uint32_t p = 0; p < kPlaneCount; ++p) {
-            JPH::Vec4 dist = JPH::Vec4::sReplicate(nx[p]) * centersX + JPH::Vec4::sReplicate(ny[p]) * centersY + JPH::Vec4::sReplicate(nz[p]) * centersZ +
-                             JPH::Vec4::sReplicate(pw[p]);
-            worstViolation = JPH::Vec4::sMax(worstViolation, negInflatedRadii - dist);
+            FVec4 dist = FVec4::Splat(nx[p]) * centersX + FVec4::Splat(ny[p]) * centersY + FVec4::Splat(nz[p]) * centersZ +
+                             FVec4::Splat(pw[p]);
+            const FVec4 violation = negInflatedRadii - dist;
+            worstViolation = {std::max(worstViolation.x, violation.x), std::max(worstViolation.y, violation.y),
+                              std::max(worstViolation.z, violation.z), std::max(worstViolation.w, violation.w)};
         }
 
         for (uint32_t j = 0; j < 4; ++j) {
@@ -114,8 +116,8 @@ struct BatchedFrustum {
 }
 
 
-void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, VisibleEntities visible, VisibleShadowEntities shadow,
-                                ECS::Local<CullingScratch> scratch) {
+void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
+                                VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch) {
     // The pose the culler tests against is the main camera entity's: it is world
     // data, not a service. No camera entity means this frame has no view to cull
     // for -- RenderSystem reports NoMainCamera for it.
@@ -124,16 +126,7 @@ void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> rend
         return;
     }
 
-    // The counters are world data, so they live in the registry rather than on
-    // the pass. World::Create() creates the singleton and a scene reset re-seeds it
-    // in InitializeDefaultScene, so this is unreachable on those paths -- it marks the
-    // one that is left: a graph run against a registry that was cleared and never
-    // re-seeded. (World::GetCullingStats() would create it, but the culler reaches the
-    // component through its declared query, which by design cannot emplace.)
-    auto stats = query.GetSingleton<Components::CullingStatsComponent>();
-    ZHLN::Assert(stats.has_value(), "CullingStatsComponent singleton is missing: World::Create() creates it and InitializeDefaultScene re-seeds it after a scene clear");
-
-    UpdateCore(query, *render, camComp->camera, true, *scratch, stats->stats, visible.values, shadow.values);
+    UpdateCore(query, *render, camComp->camera, true, *scratch, *stats, visible.values, shadow.values);
 }
 
 void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
@@ -148,24 +141,12 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         cComp = query.Get<Components::CameraComponent>(cameraEntities[0]);
     }
 
-    bool     isFullBright     = false;
-    float    shadowWidth      = 80.0f;
-    uint32_t shadowResolution = 2048;
-
-    auto settingsEntities = query.Entities<Components::GlobalSettingsTagComponent>();
-    if (!settingsEntities.empty()) {
-        if (auto pp = query.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
-            isFullBright = (pp->fullBright != 0);
-        }
-    }
-
-    auto shadowEntities = query.Entities<Components::ShadowSettingsComponent>();
-    if (!shadowEntities.empty()) {
-        if (auto shadowSettings = query.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
-            shadowWidth      = shadowSettings->shadowWidth;
-            shadowResolution = shadowSettings->shadowResolution;
-        }
-    }
+    // Pipeline settings come from the context that owns them, not from a
+    // registry entity the pass has to go hunting for.
+    const GraphicsSettings& gfx              = rc.GetSettings();
+    const bool              isFullBright     = (gfx.environment.fullBright != 0);
+    const float             shadowWidth      = gfx.shadows.width;
+    const uint32_t          shadowResolution = gfx.shadows.resolution;
 
     if (stats.FreezeFrustum && engineCam) {
         if (!scratch.wasFrozen) {
@@ -193,18 +174,18 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
                          const Components::TransformComponent, const Components::SunTagComponent,
                          const Components::EnvironmentSunTagComponent>());
 
-        JPH::Vec3 shadowCenter = cam.position;
+        FVec3 shadowCenter = cam.position;
         float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
-        shadowCenter.SetX(std::round(shadowCenter.GetX() / texelSize) * texelSize);
-        shadowCenter.SetY(std::round(shadowCenter.GetY() / texelSize) * texelSize);
-        shadowCenter.SetZ(std::round(shadowCenter.GetZ() / texelSize) * texelSize);
+        shadowCenter.x = std::round(shadowCenter.x / texelSize) * texelSize;
+        shadowCenter.y = std::round(shadowCenter.y / texelSize) * texelSize;
+        shadowCenter.z = std::round(shadowCenter.z / texelSize) * texelSize;
 
-        JPH::Vec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
-        JPH::Mat44 lightView = Math::CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
+        FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
+        const auto lightView = CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
         float      halfWidth      = shadowWidth * 0.5f;
-        JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
-        JPH::Mat44 shadowProjView = lightProj * lightView;
+        const auto lightProj = CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
+        const auto shadowProjView = lightProj * lightView;
 
         scratch.shadowFrustum.Update(shadowProjView);
     }
@@ -240,7 +221,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(scratch.shadowFrustum);
 
     std::array<Entity, kBatch>  batchEntities {};
-    std::array<JPH::Vec3, kBatch> batchCenters {};
+    std::array<FVec3, kBatch> batchCenters {};
     std::array<float, kBatch>   batchRadii {};
     std::array<float, kBatch>   batchScaledRadii {};
     std::array<uint32_t, kBatch> batchTris {};
@@ -263,16 +244,16 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             }
 
             const auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
-            JPH::Mat44 worldMat   = JPH::Mat44::sIdentity();
+            auto worldMat = Mat4x4::Identity();
             if (worldTrans) {
                 worldMat = worldTrans->world;
             }
 
             batchEntities[n] = e;
-            batchCenters[n]  = worldMat * meshComp.localCenter;
+            batchCenters[n]  = TransformPoint(worldMat, meshComp.localCenter);
             batchRadii[n]    = meshComp.cullRadius;
             batchScaledRadii[n] =
-                meshComp.cullRadius * std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
+                meshComp.cullRadius * std::max({worldMat.Column(0).XYZ().Length(), worldMat.Column(1).XYZ().Length(), worldMat.Column(2).XYZ().Length()});
             batchTris[n]   = meshTris;
             batchHidden[n] = hidden;
             // Background scenery is culled like everything else now (it lives
@@ -288,17 +269,15 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             ++n;
         }
 
-        const JPH::Vec4 centersX(batchCenters[0].GetX(), batchCenters[1].GetX(), batchCenters[2].GetX(), batchCenters[3].GetX());
-        const JPH::Vec4 centersY(batchCenters[0].GetY(), batchCenters[1].GetY(), batchCenters[2].GetY(), batchCenters[3].GetY());
-        const JPH::Vec4 centersZ(batchCenters[0].GetZ(), batchCenters[1].GetZ(), batchCenters[2].GetZ(), batchCenters[3].GetZ());
-        const JPH::Vec4 negScaled = JPH::Vec4(
-            -(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)
-        );
+        const FVec4 centersX{batchCenters[0].x, batchCenters[1].x, batchCenters[2].x, batchCenters[3].x};
+        const FVec4 centersY{batchCenters[0].y, batchCenters[1].y, batchCenters[2].y, batchCenters[3].y};
+        const FVec4 centersZ{batchCenters[0].z, batchCenters[1].z, batchCenters[2].z, batchCenters[3].z};
+        const FVec4 negScaled = {-(batchScaledRadii[0] + 0.5f), -(batchScaledRadii[1] + 0.5f), -(batchScaledRadii[2] + 0.5f), -(batchScaledRadii[3] + 0.5f)};
 
         mainPlanes.Test4(centersX, centersY, centersZ, negScaled, mainVisible.data());
 
         if (!isFullBright) {
-            const JPH::Vec4 negPlain = JPH::Vec4(-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f));
+            const FVec4 negPlain = {-(batchRadii[0] + 0.5f), -(batchRadii[1] + 0.5f), -(batchRadii[2] + 0.5f), -(batchRadii[3] + 0.5f)};
             shadowPlanes.Test4(centersX, centersY, centersZ, negPlain, shadowVisible.data());
         }
 
@@ -324,22 +303,18 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     }
 }
 
-void CullingSystem::DrawDebugFrustum(Engine& engine) {
-    auto& reg    = ZHLN::EngineAccess::RegistryOf(engine);
-    auto  stats  = reg.GetSingleton<Components::CullingStatsComponent>();
-    if (!stats || !stats->stats.FreezeFrustum) {
+void CullingSystem::DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene) {
+    if (!stats.FreezeFrustum) {
         return;
     }
 
     // The pass's corners are its own state, so this draws the same frustum from
     // the same source: the view-projection the pass froze.
-    const auto camComp = reg.GetSingleton<Components::CameraComponent>();
+    const auto camComp = query.GetSingleton<Components::CameraComponent>();
     if (!camComp) {
         return;
     }
-    const std::array<JPH::Vec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
-
-    auto scene = engine.Debug();
+    const std::array<FVec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
 
     struct FrustumEdge {
         int start;
@@ -360,35 +335,35 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
          {.start = 3, .end = 7}}
     };
 
-    JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
+    FVec4 cyanColor{0.0f, 1.0f, 1.0f, 1.0f};
     for (auto edge: frustumEdges) {
         scene.AddLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
     }
 }
 
-std::array<JPH::Vec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept {
-    // JPH::Vec4's constructor is not constexpr, so this is a constant of the pass
+std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept {
+    // FVec4's constructor is not constexpr, so this is a constant of the pass
     // rather than a compile-time one.
-    const std::array<JPH::Vec4, 8> kClipCorners = {
-        JPH::Vec4 {-1.0f, -1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {1.0f, -1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {1.0f, 1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {-1.0f, 1.0f, 0.0f, 1.0f},
-        JPH::Vec4 {-1.0f, -1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {1.0f, -1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {1.0f, 1.0f, 1.0f, 1.0f},
-        JPH::Vec4 {-1.0f, 1.0f, 1.0f, 1.0f},
+    const std::array<FVec4, 8> kClipCorners = {
+        FVec4 {-1.0f, -1.0f, 0.0f, 1.0f},
+        FVec4 {1.0f, -1.0f, 0.0f, 1.0f},
+        FVec4 {1.0f, 1.0f, 0.0f, 1.0f},
+        FVec4 {-1.0f, 1.0f, 0.0f, 1.0f},
+        FVec4 {-1.0f, -1.0f, 1.0f, 1.0f},
+        FVec4 {1.0f, -1.0f, 1.0f, 1.0f},
+        FVec4 {1.0f, 1.0f, 1.0f, 1.0f},
+        FVec4 {-1.0f, 1.0f, 1.0f, 1.0f},
     };
 
-    std::array<JPH::Vec3, 8> corners {};
-    corners.fill(JPH::Vec3::sZero());
+    std::array<FVec3, 8> corners {};
+    corners.fill(FVec3::Zero());
 
-    const JPH::Mat44 invViewProj = viewProj.Inversed();
+    const auto invViewProj = Inverse(viewProj);
     for (size_t i = 0; i < kClipCorners.size(); ++i) {
-        const JPH::Vec4 worldPos = invViewProj * kClipCorners[i];
-        const float     w        = worldPos.GetW();
+        const FVec4 worldPos = invViewProj * kClipCorners[i];
+        const float     w        = worldPos.w;
         if (std::abs(w) > 1e-6f) {
-            corners[i] = JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w);
+            corners[i] = {worldPos.x / w, worldPos.y / w, worldPos.z / w};
         }
     }
     return corners;

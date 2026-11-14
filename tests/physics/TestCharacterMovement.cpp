@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "helpers/CommonFixtures.hpp"
 
 // clang-format off
@@ -14,7 +16,11 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterMovement.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <CharacterController/PlayerInput.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -48,7 +54,7 @@ enum class CharacterTestError : uint8_t {
 
 namespace {
 
-inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex) noexcept -> JPH::Vec3 {
+inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex) noexcept -> ZHLN::FVec3 {
     auto        posView = pc.GetPositionBuffer();
     const auto* posData = static_cast<const JPH::Real*>(posView.buf);
     return {static_cast<float>(posData[denseIndex * 4 + 0]), static_cast<float>(posData[denseIndex * 4 + 1]), static_cast<float>(posData[denseIndex * 4 + 2])};
@@ -66,15 +72,15 @@ struct CPUPipelineHarness {
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
     ZHLN::Physics::BodyID charPhys {};
-    JPH::Vec3            prevPos = JPH::Vec3::sZero();
-    JPH::Vec3            currPos = JPH::Vec3::sZero();
+    ZHLN::FVec3          prevPos = ZHLN::FVec3::Zero();
+    ZHLN::FVec3          currPos = ZHLN::FVec3::Zero();
 
     float accumulator  = 0.0f;
     float currentAlpha = 0.0f;
 
     static constexpr float kTargetDt = 1.0f / 60.0f;
 
-    explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, JPH::RVec3Arg spawnPos = JPH::RVec3(0, 0, 0), const ZHLN::Physics::DualShapeConfig& hull = {}):
+    explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, ZHLN::DVec3 spawnPos = ZHLN::DVec3::Zero(), const ZHLN::Physics::DualShapeConfig& hull = {}):
         pc(cfg) {
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
@@ -89,17 +95,17 @@ struct CPUPipelineHarness {
                       }
         );
         player   = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
+            ZHLN::Components::TransformComponent {.position = spawnPos.Cast<float>()}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
         );
-        prevPos = JPH::Vec3(spawnPos);
-        currPos = JPH::Vec3(spawnPos);
+        prevPos = spawnPos.Cast<float>();
+        currPos = spawnPos.Cast<float>();
 
         pc.OptimizeBroadphase();
 
-        cam.position = JPH::Vec3(spawnPos) + JPH::Vec3(0.0f, 1.5f, -5.0f);
-        cam.yaw      = -90.0f;
-        cam.pitch    = 0.0f;
+        cam.position = spawnPos.Cast<float>() + ZHLN::FVec3(0.0f, 1.5f, -5.0f);
+        cam.yaw      = ZHLN::DegF{-90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
     }
 
     ~CPUPipelineHarness() {
@@ -126,13 +132,13 @@ struct CPUPipelineHarness {
 
         accumulator += std::min(renderDt, 0.1f);
         while (accumulator >= kTargetDt) {
-            JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
+            const ZHLN::FVec3 vel {move->inputX * move->speed, verticalVel, move->inputZ * move->speed};
             pc.SetCharacterVelocity(charPhys, vel);
 
             // Prop interaction is controller policy, not a contact-callback
             // policy: the fixed step pushes the props the character moves
             // through, the same way the engine's CharacterPreStep hook does.
-            ZHLN::Character::PushProps(pc, reg);
+            ZHLN::Character::PushProps(ZHLN::Character::CharacterReadQuery {reg}, ZHLN::ECS::ResMut<ZHLN::PhysicsContext> {&pc});
             pc.Step(kTargetDt);
 
             prevPos = currPos;
@@ -146,8 +152,8 @@ struct CPUPipelineHarness {
 
         trans->position = prevPos + alpha * (currPos - prevPos);
 
-        JPH::Vec3 targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
-        cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
+        const ZHLN::FVec3 targetCenter = trans->position + ZHLN::FVec3(0.0f, 1.5f, 0.0f);
+        cam.position           = targetCenter + ZHLN::FVec3(0.0f, 0.0f, -5.0f);
     }
 };
 
@@ -166,6 +172,119 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::Test::ExpectTrue(JPH::Factory::sInstance != nullptr);
         }
 
+        void test_typed_player_input_and_intent_seat_and_freecam(Fixture::TaskSystemAndJoltScope&) {
+            // The seat translation is a pure function over a seat's physical
+            // state, so it is tested as one: no router, no engine, no window and
+            // no synthetic device events. What used to be a constructed router
+            // plus InjectKey(W, true) is now two locals.
+            ECS::Registry reg;
+
+            InputState primaryKbm {};
+            primaryKbm.SetKey(KeyCode::W, true);
+            primaryKbm.SetKey(KeyCode::Space, true);
+            primaryKbm.SetKey(KeyCode::LShift, true);
+
+            InputState secondaryKbm {};
+            secondaryKbm.SetKey(KeyCode::D, true);
+
+            const auto primary   = reg.Create(Character::InputComponent {}, Character::MovementComponent {});
+            const auto secondary = reg.Create(Character::InputComponent {}, Character::MovementComponent {}, Components::PlayerSeatComponent {.seat = PlayerSeat {1}});
+            ExpectTrue(reg.Get<Components::PlayerSeatComponent>(secondary)->seat == PlayerSeat {1});
+
+            // Both seats get the keyboard, and neither has a pad: this is the
+            // shape TranslateSeatIntent takes, not a router configured to fake it.
+            ExpectTrue(primaryKbm.IsKeyDown(KeyCode::W));
+            ExpectTrue(secondaryKbm.IsKeyDown(KeyCode::D));
+
+            // A router that provides no pads and no actions. The function needs
+            // one only to answer gamepad queries, which return idle values for a
+            // bundle with no device attached -- so it takes an InputReader from a
+            // real Engine rather than a fabricated one. Author the nothing it
+            // needs and read back.
+            auto engineCreated = Engine::Create(EngineConfig {.appName = "CharacterInputTest", .validationMode = ValidationMode::Off, .headless = true});
+            ExpectTrue(engineCreated.has_value());
+            if (!engineCreated) {
+                return;
+            }
+            auto engine       = std::move(*engineCreated);
+            const auto reader = std::as_const(*engine).Input();
+
+            const Character::SeatIntent primaryIntent =
+                Character::TranslateSeatIntent(primaryKbm, /*seatHasKeyboardMouse=*/true, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+            const Character::SeatIntent secondaryIntent =
+                Character::TranslateSeatIntent(secondaryKbm, /*seatHasKeyboardMouse=*/true, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+
+            ExpectEq(primaryIntent.moveZ, 1.0f);
+            ExpectEq(primaryIntent.moveX, 0.0f);
+            ExpectTrue(primaryIntent.jump && primaryIntent.sprint);
+            ExpectEq(secondaryIntent.moveX, 1.0f);
+            ExpectEq(secondaryIntent.moveZ, 0.0f);
+            ExpectTrue(!secondaryIntent.jump && !secondaryIntent.sprint);
+
+            // A seat the routing does not give the keyboard reports no keyboard
+            // intent at all -- the same rule the system applies per seat.
+            const Character::SeatIntent unseatedIntent =
+                Character::TranslateSeatIntent(primaryKbm, /*seatHasKeyboardMouse=*/false, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+            ExpectEq(unseatedIntent.moveZ, 0.0f);
+            ExpectEq(unseatedIntent.moveX, 0.0f);
+            ExpectTrue(!unseatedIntent.jump && !unseatedIntent.sprint);
+
+            // Latch the intent into the components the next stage consumes.
+            const auto latch = [&](Entity entity, const Character::SeatIntent& intent) {
+                reg.Patch<Character::InputComponent>(entity, [&](Character::InputComponent& ic) {
+                    ic.localMoveX     = intent.moveX;
+                    ic.localMoveZ     = intent.moveZ;
+                    ic.lookYawDelta   = intent.lookYaw;
+                    ic.lookPitchDelta = intent.lookPitch;
+                    ic.zoomDelta      = intent.zoom;
+                    ic.wantsToJump    = intent.jump;
+                    ic.wantsToSprint  = intent.sprint;
+                });
+            };
+            latch(primary, primaryIntent);
+            latch(secondary, secondaryIntent);
+            ExpectTrue(reg.Get<Character::InputComponent>(primary)->localMoveZ == 1.0f);
+            ExpectTrue(reg.Get<Character::InputComponent>(primary)->wantsToJump && reg.Get<Character::InputComponent>(primary)->wantsToSprint);
+            ExpectEq(reg.Get<Character::InputComponent>(secondary)->localMoveX, 1.0f);
+
+            // No camera means intent remains latched, not partially changed.
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            ExpectTrue(reg.Get<Character::MovementComponent>(primary)->inputX == 0.0f);
+            Components::CameraComponent camera {};
+            camera.camera.yaw = DegF {0.0f};
+            const auto cameraEntity = reg.Create(camera, Components::MainCameraTagComponent {});
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            const auto p = reg.Get<Character::MovementComponent>(primary);
+            const auto s = reg.Get<Character::MovementComponent>(secondary);
+            ExpectTrue(std::abs(p->inputX - 1.0f) < 1e-5f && std::abs(p->inputZ) < 1e-5f);
+            ExpectTrue(p->jumpRequested && p->isSprinting && std::abs(s->inputZ - 1.0f) < 1e-5f);
+            reg.Add(cameraEntity, FreeCam::FreeCamTagComponent {});
+            Character::PlayerInputSystem::PlayerInputTranslate(Character::PlayerInputSystem::IntentQuery {reg});
+            ExpectTrue(p->inputX == 0.0f && p->inputZ == 0.0f && !p->jumpRequested);
+            ExpectTrue(s->inputX == 0.0f && s->inputZ == 0.0f && !s->jumpRequested);
+        }
+
+        void test_typed_fixed_step_movement_and_grounded_state(Fixture::TaskSystemAndJoltScope&) {
+            PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
+            CPUPipelineHarness harness(cfg);
+            harness.Settle(10);
+            auto move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            move->inputX = 1.0f;
+            move->jumpRequested = true;
+            move->isGrounded = true;
+            const auto withoutPhysics = harness.reg.Create(Character::MovementComponent {.currentYVel = 7.0f});
+            Character::MovementSystem(Character::MovementQuery {harness.reg}, FrameDt {1.0f / 60.0f});
+            move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            ExpectTrue(!move->jumpRequested && move->currentYVel == move->jumpForce && move->currentVelX > 0.0f);
+            ExpectTrue(harness.reg.Get<Character::MovementComponent>(withoutPhysics)->currentYVel == 7.0f);
+            Character::CommitCharacterSteering(Character::CharacterReadQuery {harness.reg}, ECS::ResMut<PhysicsContext> {&harness.pc});
+            ExpectTrue(harness.pc.GetCharacterVelocity(harness.charPhys).GetX() > 0.0f);
+            harness.pc.Step(1.0f / 60.0f);
+            Character::WriteCharacterGrounded(Character::CharacterGroundedQuery {harness.reg}, ECS::Res<PhysicsContext> {&harness.pc});
+            move = harness.reg.Get<Character::MovementComponent>(harness.player);
+            ExpectTrue(move->wasGrounded && move->isGrounded == harness.pc.IsCharacterOnGround(harness.charPhys));
+        }
+
         // 1. Settle & Resting Stability
         auto test_01_flat_ground_settling_and_stability(Fixture::TaskSystemAndJoltScope&) -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
@@ -175,10 +294,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectLt(std::abs(pos.GetY()), 0.005f);
+            const auto pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectLt(std::abs(pos.y), 0.005f);
 
-            if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.GetY()) >= 0.005f) {
+            if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.y) >= 0.005f) {
                 return std::unexpected(CharacterTestError::GroundedStateFailed);
             }
             return {};
@@ -194,10 +313,10 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectGe(pos.GetZ(), 5.85f) && ZHLN::Test::ExpectLe(pos.GetZ(), 6.15f);
+            const auto pos = GetBodyPosition(harness.pc, 1);
+            ZHLN::Test::ExpectGe(pos.z, 5.85f) && ZHLN::Test::ExpectLe(pos.z, 6.15f);
 
-            if (pos.GetZ() < 5.85f || pos.GetZ() > 6.15f) {
+            if (pos.z < 5.85f || pos.z > 6.15f) {
                 return std::unexpected(CharacterTestError::DisplacementMismatch);
             }
             return {};
@@ -243,7 +362,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
                 const auto trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-                JPH::Vec3  targetCenter = JPH::Vec3(trans->position) + JPH::Vec3(0.0f, 1.5f, 0.0f);
+                const ZHLN::FVec3 targetCenter = trans->position + ZHLN::FVec3(0.0f, 1.5f, 0.0f);
 
                 float dist = (harness.cam.position - targetCenter).Length();
                 distances.push_back(dist);
@@ -306,12 +425,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.66f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectLe(pos.GetZ(), 3.15f);
-            ZHLN::Test::ExpectGe(pos.GetZ(), 2.85f);
+            ZHLN::Test::ExpectLe(pos.z, 3.15f);
+            ZHLN::Test::ExpectGe(pos.z, 2.85f);
 
-            if (pos.GetZ() > 3.15f) {
+            if (pos.z > 3.15f) {
                 return std::unexpected(CharacterTestError::WallBreachDetected);
             }
             return {};
@@ -332,12 +451,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 1.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectLe(pos.GetZ(), 2.20f);
-            ZHLN::Test::ExpectGe(pos.GetX(), 4.0f);
+            ZHLN::Test::ExpectLe(pos.z, 2.20f);
+            ZHLN::Test::ExpectGe(pos.x, 4.0f);
 
-            if (pos.GetZ() > 2.20f || pos.GetX() < 4.0f) {
+            if (pos.z > 2.20f || pos.x < 4.0f) {
                 return std::unexpected(CharacterTestError::WallSlideFailed);
             }
             return {};
@@ -362,7 +481,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 if (!onGround) {
                     wasInAir = true;
                     vertVel -= 32.0f * dt;
-                    peakY = std::max(peakY, GetBodyPosition(harness.pc, 1).GetY());
+                    peakY = std::max(peakY, GetBodyPosition(harness.pc, 1).y);
                 } else if (wasInAir) {
                     landed  = true;
                     vertVel = 0.0f;
@@ -398,12 +517,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 0.66f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
+            ZHLN::Test::ExpectGt(pos.z, 3.0f);
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
-            if (pos.GetZ() <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
+            if (pos.z <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
                 return std::unexpected(CharacterTestError::StepClimbFailed);
             }
             return {};
@@ -414,9 +533,9 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
-            JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
+            const auto rampRot = ZHLN::Quat::FromEulerDegrees({{-25.0f, 0.0f, 0.0f}});
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, {0, 1.0, 4.0}, rampRot.AsVec4(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -425,12 +544,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
                 harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
             }
 
-            JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
+            const auto pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectGt(pos.GetY(), 0.8f);
-            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
+            ZHLN::Test::ExpectGt(pos.y, 0.8f);
+            ZHLN::Test::ExpectGt(pos.z, 3.0f);
 
-            if (pos.GetY() <= 0.8f) {
+            if (pos.y <= 0.8f) {
                 return std::unexpected(CharacterTestError::SlopeClimbFailed);
             }
             return {};

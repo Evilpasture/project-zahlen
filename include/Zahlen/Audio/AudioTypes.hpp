@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 
@@ -25,15 +26,16 @@ inline constexpr size_t kAudioBusCount  = 6;
 inline constexpr size_t kMaxAudioBuses  = 16;
 
 struct AudioBusID {
-    uint8_t index = static_cast<uint8_t>(AudioBus::SFX);
+    uint8_t index = std::to_underlying(AudioBus::SFX);
 
     constexpr AudioBusID() noexcept = default;
     // Implicit from built-in AudioBus so callers can pass AudioBus::Music / AudioBus::SFX directly.
-    constexpr AudioBusID(AudioBus builtin) noexcept : index(static_cast<uint8_t>(builtin)) {}
+    constexpr AudioBusID(AudioBus builtin) noexcept : index(std::to_underlying(builtin)) {}
     explicit constexpr AudioBusID(uint8_t rawIndex) noexcept : index(rawIndex) {}
 
     [[nodiscard]] static constexpr auto Invalid() noexcept -> AudioBusID { return AudioBusID(0xFFu); }
     [[nodiscard]] constexpr auto        IsValid() const noexcept -> bool { return index < kMaxAudioBuses; }
+    [[nodiscard]] constexpr auto        SlotIndex() const noexcept -> size_t { return static_cast<size_t>(index); }
     constexpr auto                      operator==(const AudioBusID&) const noexcept -> bool = default;
 };
 static_assert(std::is_trivially_copyable_v<AudioBusID>);

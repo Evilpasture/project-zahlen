@@ -14,7 +14,7 @@
 // COM::Reflect.hpp audits that contract at compile time.
 
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Core/Reflection/Core.hpp>
+#include <Zahlen/Core/Reflection/CanonicalName.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -31,12 +31,12 @@ struct InterfaceID {
 
 static_assert(std::is_standard_layout_v<InterfaceID> && std::is_trivially_copyable_v<InterfaceID>);
 
-// Compile-time 128-bit hash of the qualified interface name. The name is
+// Compile-time 128-bit hash of the canonical interface name. The name is
 // reflected, so there is no GUID registry and no IDL to keep in sync; the
-// values are immutable for a given spelling of the type.
+// values follow the documented canonical grammar, not compiler display text.
 template <typename Interface>
 [[nodiscard]] consteval InterfaceID InterfaceIdOf() noexcept {
-    constexpr std::string_view name = Reflect::QualifiedTypeName<Interface>();
+    constexpr std::string_view name = Reflect::CanonicalTypeName<Interface>();
     return InterfaceID {
         .high = Hash64(name),
         .low  = Hash64(name.substr(0, name.size() / 2)),

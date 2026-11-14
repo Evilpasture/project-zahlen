@@ -30,7 +30,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 # Core is a public dependency: the preset instantiates through Scene, drives
-# the immediate-mode GUI, reads InputStateComponent and subscribes engine
+# the immediate-mode GUI, reads InputContext and subscribes engine
 # teardown.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
@@ -43,10 +43,8 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
     ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
 )
 
-# FallbackScene.cpp reaches Components.hpp, whose key bitset is sized by
-# Reflect::EnumCount<KeyCode>(). Reflection is not a per-target feature --
-# without the flags that count is 0 instead of 72 and any component after it
-# moves, a silent wrong-offset read.
+# Reflection is a whole-program ABI contract across targets that share ECS
+# component registration and reflected type names with zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

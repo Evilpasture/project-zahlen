@@ -34,9 +34,11 @@
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Float2.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Vec4.h>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <toml/TOML.hpp>
 #include <type_traits>
 
@@ -58,12 +60,12 @@ struct TOMLVector<JPH::Float4> : std::true_type {};
 // quietly change shape -- `color = [r, g, b, a]` becoming a table of x/y/z/w --
 // as soon as a field was spelled in a value type instead of a Jolt one.
 template <>
-struct TOMLVector<ZHLN::Float2>: std::true_type {};
+struct TOMLVector<ZHLN::FVec2>: std::true_type {};
 template <>
-struct TOMLVector<ZHLN::Float3>: std::true_type {};
+struct TOMLVector<ZHLN::FVec3>: std::true_type {};
 template <>
-struct TOMLVector<ZHLN::Float4> : std::true_type {};
+struct TOMLVector<ZHLN::FVec4> : std::true_type {};
 template <>
-struct TOMLVector<ZHLN::Double3> : std::true_type {};
+struct TOMLVector<ZHLN::DVec3> : std::true_type {};
 
 } // namespace ZHLN::ReflectTOML

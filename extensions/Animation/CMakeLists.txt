@@ -57,6 +57,7 @@ set(ZHLN_ANIMATION_MODULES
 )
 
 set(ZHLN_ANIMATION_SOURCES
+    LocomotionLifecycle.cpp
     ProceduralAnimation.cpp
     ProceduralGait.cpp
     ProceduralItemHandling.cpp

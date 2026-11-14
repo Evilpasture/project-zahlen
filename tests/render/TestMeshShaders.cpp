@@ -14,7 +14,10 @@
 // Every GPU test degrades to a skip (not a failure) when the device does not
 // expose mesh shading, so this binary stays green on lavapipe/older hardware.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -352,9 +355,9 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f})},
-                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(engine.Graphics(), 4.0f)},
-                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(engine.Graphics())},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(engine->Graphics(), {0.5f, 0.5f, 0.5f})},
+                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(engine->Graphics(), 4.0f)},
+                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(engine->Graphics())},
             };
 
             bool allOk = true;
@@ -396,7 +399,7 @@ struct MeshShaderTestSuite {
                 .height            = 240,
                 .enableMeshShading = true,
             });
-            if (!ZHLN::Test::ExpectTrue(enabledEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(enabledEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -419,7 +422,7 @@ struct MeshShaderTestSuite {
                 .height            = 240,
                 .enableMeshShading = false,
             });
-            if (!ZHLN::Test::ExpectTrue(disabledEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(disabledEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -445,7 +448,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -457,15 +460,11 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupScene = [](ZHLN::Engine& engine) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
                 auto rc = engine.Graphics();
 
                 // --- Determinism ---------------------------------------------
                 // fullBright bypasses lighting/shadow variance...
-                auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
                 // ...and AA has to be switched off AT ITS SOURCE. The camera's
                 // AASettingsComponent is authoritative: RenderSystem re-pushes it
@@ -474,26 +473,23 @@ struct MeshShaderTestSuite {
                 // spatial edge filters, so leaving one on changes the pixels at
                 // every high-contrast edge, which has nothing to do with the
                 // geometry pipeline.
-                for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-                    reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                        aa.state.mode        = ZHLN::AAMode::None;
-                    });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
                 rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 1.0f, 4.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{0.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
-                cam.yaw      = -90.0f;
-                cam.pitch    = 0.0f;
-                cam.fov      = 60.0f;
 
                 // Boxes at different depths and offsets: covers front faces, faces
                 // rejected by the task shader's normal cone, and partial overlap.
-                const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
+                const std::array<ZHLN::DVec3, 3> spawnPoints = {ZHLN::DVec3{-1.3, 1.0, 0.0}, ZHLN::DVec3{0.0, 1.0, -1.0}, ZHLN::DVec3{1.3, 1.2, 0.4}};
                 for (const auto& p: spawnPoints) {
                     ZHLN::PrefabFactory::CreateBox(engine, {0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false});
                 }
@@ -528,7 +524,7 @@ struct MeshShaderTestSuite {
             const Image vertexB = capture(*vertexEngine, "headless_meshshader_vertex_b.ppm");
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (auto setupResult = setupScene(*meshEngine); !setupResult) {
@@ -664,7 +660,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!vertexEngine->Graphics().Info().meshShadingSupported) {
@@ -675,44 +671,38 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) -> std::expected<void, ZHLN::ErrorCode> {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-                auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright = 1;
-                        pp.enableSSR = 0;
-                        pp.enableRTR = 0;
-                    });
-                }
-                for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-                    reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                        aa.state.mode = ZHLN::AAMode::None;
-                    });
-                }
+                engine.Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 1;
+                    gfx.post.enableSSR               = 0;
+                    gfx.rayTracing.enableReflections = false;
+                });
+                engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
                 engine.Graphics().SetAntiAliasing(ZHLN::AAState{.mode = ZHLN::AAMode::None});
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
-                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
-                }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.yaw = -90.0f;
-                cam.pitch = 0.0f;
-                cam.fov = 30.0f;
-                cam.nearZ = 0.01f;
-                cam.farZ = 10.0f;
-
                 const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = {0, 0, 0}, .createPhysics = false};
+                ZHLN::FVec3 closeupPos {};
                 if (subject.sphere) {
                     // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
-                    cam.position = JPH::Vec3(0.0f, 0.0f, 0.70f);
+                    closeupPos = {0.0f, 0.0f, 0.70f};
                     ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, atOrigin);
                 } else {
                     // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
-                    cam.position = JPH::Vec3(0.0f, 0.0f, 0.60f);
+                    closeupPos = {0.0f, 0.0f, 0.60f};
                     ZHLN::PrefabFactory::CreateBox(engine, {0.5f, 0.5f, 0.5f}, atOrigin);
+                }
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([closeupPos](auto& c) {
+                    auto& cam = c.camera;
+                    cam.yaw = ZHLN::DegF{-90.0f};
+                    cam.pitch = ZHLN::DegF{0.0f};
+                    cam.fov = ZHLN::DegF{30.0f};
+                    cam.nearZ = 0.01f;
+                    cam.farZ = 10.0f;
+                    cam.position = closeupPos;
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
                 // The closeup pose is chosen by the branch above: the write-back belongs
                 // after it, or the engine renders the pre-branch framing.
@@ -750,7 +740,7 @@ struct MeshShaderTestSuite {
             }
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
@@ -837,7 +827,7 @@ struct MeshShaderTestSuite {
             };
 
             auto vertexEngine = acquire(false);
-            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(vertexEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!vertexEngine->Graphics().Info().meshShadingSupported) {
@@ -847,19 +837,17 @@ struct MeshShaderTestSuite {
 
             auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
                 ZHLN::Test::Headless::DisableAA(engine);
-                auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-                for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
-                        pp.fullBright = 1;
-                        pp.vignetteIntensity = 0.0f;
-                        pp.enableSSR = 0;
-                        pp.enableRTR = 0;
-                        pp.giMode = 0;
-                        pp.skyZenith = JPH::Vec4(0, 0, 0, 1);
-                        pp.skyHorizon = JPH::Vec4(0, 0, 0, 1);
-                        pp.skyGround = JPH::Vec4(0, 0, 0, 1);
-                    });
-                }
+                auto reg = engine.Entities();
+                engine.Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 1;
+                    gfx.post.vignetteIntensity       = 0.0f;
+                    gfx.post.enableSSR               = 0;
+                    gfx.rayTracing.enableReflections = false;
+                    gfx.post.mode                    = 0;
+                    gfx.environment.skyZenith = {0, 0, 0, 1};
+                    gfx.environment.skyHorizon = {0, 0, 0, 1};
+                    gfx.environment.skyGround = {0, 0, 0, 1};
+                });
 
                 auto rc = engine.Graphics();
                 auto material = rc.CreateMaterial(ZHLN::MaterialDesc {
@@ -869,15 +857,16 @@ struct MeshShaderTestSuite {
                     return false;
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 0.0f, 4.0f};
+                    cam.yaw = ZHLN::DegF{-90.0f};
+                    cam.pitch = ZHLN::DegF{0.0f};
+                    cam.fov = ZHLN::DegF{45.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return false;
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(0.0f, 0.0f, 4.0f);
-                cam.yaw = -90.0f;
-                cam.pitch = 0.0f;
-                cam.fov = 45.0f;
 
                 // CreatePlaneMesh winds toward +Y. Rotate -90 degrees about X
                 // to make it face -Z, away from the camera; leave room for the
@@ -885,7 +874,7 @@ struct MeshShaderTestSuite {
                 const ZHLN::Entity plane = ZHLN::PrefabFactory::CreatePlane(
                     engine, 1.0f, {1, 1, 1, 1},
                     ZHLN::PrefabFactory::SpawnParams {
-                        .rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -std::numbers::pi_v<float> * 0.5f), .materialOverride = *material
+                        .rotation = ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitX(), ZHLN::RadF{-std::numbers::pi_v<float> * 0.5f}), .materialOverride = *material
                     }
                 );
                 const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);
@@ -902,7 +891,7 @@ struct MeshShaderTestSuite {
             const Image vertexImg = capture(*vertexEngine, "headless_double_sided_vertex.ppm");
 
             auto meshEngine = acquire(true);
-            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(meshEngine.Valid())) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
             if (!ZHLN::Test::ExpectTrue(meshEngine->Graphics().Info().meshShadingActive)) {

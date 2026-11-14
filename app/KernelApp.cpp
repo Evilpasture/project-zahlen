@@ -3,12 +3,12 @@
 
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <cstddef>
 #include <expected>
 #include <optional>
@@ -30,14 +30,20 @@ auto KernelApp::Run(int argc, char* argv[]) const -> AppRunResult {
 
 auto KernelApp::Run(std::span<char* const> args) const -> AppRunResult {
     EngineConfig config = _config;
-    auto parsed = ParseEngineConfig(args, config);
+    auto         parsed = ParseEngineConfig(args, config);
     if (!parsed) {
         LogError("[KernelApp] command line: {}", parsed.error());
         return std::unexpected(parsed.error());
     }
-    if (parsed->helpRequested) return AppExitReason::CliHelpRequested;
-    if (parsed->versionRequested) return AppExitReason::CliVersionRequested;
-    if (parsed->graphRequested) return AppExitReason::CliGraphRequested;
+    if (parsed->helpRequested) {
+        return AppExitReason::CliHelpRequested;
+    }
+    if (parsed->versionRequested) {
+        return AppExitReason::CliVersionRequested;
+    }
+    if (parsed->graphRequested) {
+        return AppExitReason::CliGraphRequested;
+    }
     return RunConfigured(std::move(config));
 }
 
@@ -45,7 +51,7 @@ auto KernelApp::RunConfigured(EngineConfig config) const -> AppRunResult {
     SetLogLevel(config.logLevel);
     // Both the renderer and all application-owned GPU state die before workers.
     ProcessScope process;
-    auto created = Kernel::Create(config, _receiver);
+    auto         created = Kernel::Create(config, _receiver);
     if (!created) {
         LogError("[KernelApp] kernel creation failed: {}", created.error());
         return std::unexpected(created.error()); // retain the actual Kernel/renderer error
@@ -68,23 +74,23 @@ auto KernelApp::RunConfigured(EngineConfig config) const -> AppRunResult {
         return {};
     };
 
-    FramePacer pacer(config.fpsLimit);
-    Clock      clock({.maxDeltaTime = 0.1f});
+    FramePacer               pacer(config.fpsLimit);
+    Clock                    clock({.maxDeltaTime = 0.1f});
     std::optional<ErrorCode> failure;
     while (kernel->IsRunning()) {
-        const auto frameStart = FramePacer::BeginFrame();
-        const float rawDt     = clock.Tick();
+        const auto  frameStart = FramePacer::BeginFrame();
+        const float rawDt      = clock.Tick();
         if (_onInputFrame) {
             _onInputFrame(*kernel, rawDt);
         }
-        process.PollCrashes();
+        ProcessScope::PollCrashes();
         kernel->ProcessEvents();
         if (!kernel->IsRunning()) {
             break;
         }
-        auto& rc = kernel->GetRenderContext();
+        auto&                      rc      = kernel->GetRenderContext();
         const std::optional<float> pacedDt = rc.GetPacedDeltaTime();
-        const float dt = pacer.SelectDelta(rawDt, pacedDt);
+        const float                dt      = pacer.SelectDelta(rawDt, pacedDt);
         if (_onUpdate) {
             _onUpdate(*kernel, dt);
             if (!kernel->IsRunning()) {
@@ -102,7 +108,9 @@ auto KernelApp::RunConfigured(EngineConfig config) const -> AppRunResult {
                 }
             } else {
                 LogError("[KernelApp] BeginFrame failed: {}", began.error());
-                if (!failure) failure = began.error(); // the tool may keep running
+                if (!failure) {
+                    failure = began.error(); // the tool may keep running
+                }
             }
             pacer.EndFrame(frameStart, pacedDt);
             continue;
@@ -126,7 +134,9 @@ auto KernelApp::RunConfigured(EngineConfig config) const -> AppRunResult {
                 }
             } else {
                 LogError("[KernelApp] EndFrame failed: {}", ended.error());
-                if (!failure) failure = ended.error();
+                if (!failure) {
+                    failure = ended.error();
+                }
             }
         }
         // PresentSuboptimal is already handled by the renderer's target rebuild.

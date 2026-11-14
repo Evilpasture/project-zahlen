@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPInteraction.hpp
 //
 // What the map says about its interactive entities, decoded.
@@ -35,9 +36,8 @@
 #include "BSPRead.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -73,7 +73,7 @@ struct EntityOutput {
 // The entity's "movedir" as an engine-space direction. Source spells it as
 // pitch/yaw degrees and overloads the first component with two sentinels
 // instead of an angle: -1 is up, -2 is down. An absent key is +X forward.
-[[nodiscard]] auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> JPH::Vec3;
+[[nodiscard]] auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3;
 
 // The numeric reading of a keyvalue or of an output's parameter field.
 // Absent or unparseable yields @p fallback, the field's own default: reading a
@@ -148,13 +148,13 @@ struct EntityRecord {
     // Engine space, sentinels resolved, and +X forward when the lump has no
     // movedir key -- the absent case is a format default, so it is decided here
     // rather than by every consumer.
-    JPH::Vec3 moveDirection = JPH::Vec3::sAxisX();
+    FVec3 moveDirection = FVec3::UnitX();
 
     // Only for TeleportDestination, and already in engine space: the landing
     // point and the facing. The degree convention and the axis remap are the
     // asset's, so they are resolved before the record exists.
-    std::optional<JPH::Vec3> origin;
-    JPH::Quat               orientation = JPH::Quat::sIdentity();
+    std::optional<FVec3> origin;
+    Quat               orientation = Quat::Identity();
 
     std::optional<DoorFlags>   door;
     std::optional<ButtonFlags> button;
@@ -167,10 +167,12 @@ struct EntityRecord {
     std::string matchName;
 };
 
+using ResolutionQuery = ECS::Query<const Components::SceneSourceComponent, const Components::NameComponent>;
+
 // Every interactive entity in @p map, decoded, with `entity` resolved against
-// the entities already in @p registry. The registry is read, never written:
+// the entities already in @p query. The registry is read, never written:
 // this describes what should happen, and the caller does it.
-[[nodiscard]] auto DescribeInteractiveEntities(ECS::Registry& registry, const BSPMap& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
+[[nodiscard]] auto DescribeInteractiveEntities(ResolutionQuery query, const BSPMap& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
 
 // The entity the lump entry @p matchName / @p modelSource refers to, or
 // Entity::Null(). A model source ("*12") is matched against the scene's brush
@@ -178,6 +180,6 @@ struct EntityRecord {
 // lets many brush entities share one so an input can address the whole group,
 // and matching by name alone attaches every member of a named door bank to the
 // first entity that answers.
-[[nodiscard]] auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity;
+[[nodiscard]] auto FindMatchingEntity(ResolutionQuery query, std::string_view matchName, std::string_view modelSource) -> Entity;
 
 } // namespace ZHLN::BSP

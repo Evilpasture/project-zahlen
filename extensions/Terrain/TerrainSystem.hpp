@@ -20,6 +20,15 @@ class EntityCommandBuffer;
 
 namespace Terrain {
 
+// Explicit views for sampling and lifecycle passes. Terrain slot storage is
+// shared outside the registry, so callers of the typed entry points must also
+// isolate sampling from slot retirement/reclamation and cleanup from other
+// accesses to the affected components. The Engine adapters run at their
+// existing externally ordered phases.
+using TerrainHeightQuery = ECS::Query<const TerrainComponent, const Components::TransformComponent>;
+using TerrainReleaseQuery = ECS::Query<TerrainComponent&>;
+using TerrainCleanupQuery = ECS::Query<TerrainComponent&, const Components::PendingDestroy>;
+
 // Owns the terrain slot table and lazy-bakes GPU meshes/materials for
 // TerrainComponent entities. Moved out of core: it is the bookkeeping half
 // of the procedural terrain feature, not engine substrate.
@@ -46,11 +55,12 @@ class TerrainSystem {
     // Explicit ownership operations for TerrainComponent's heightmap slot.
     static void Attach(Engine& engine, Entity entity, TerrainComponent component);
     static void Detach(Engine& engine, Entity entity);
-    static void ReleaseTerrainData(ECS::Registry& registry); // standalone registry before Clear
+    static void ReleaseTerrainDataWithQuery(TerrainReleaseQuery query);
     static void RegisterCleanup(Engine& engine);
+    static void CleanupWithQuery(TerrainCleanupQuery query, bool all);
     static void Cleanup(Engine& engine, bool all);
 
-    static float SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept;
+    static float SampleHeightAtWithQuery(TerrainHeightQuery query, float worldX, float worldZ) noexcept;
 };
 
 // Composition-root entry point: registers TerrainComponent and contributes

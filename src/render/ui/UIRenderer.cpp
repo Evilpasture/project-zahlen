@@ -10,7 +10,7 @@
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <algorithm>
@@ -284,7 +284,14 @@ void UIRenderer::RecordBatches(
     impl.arenaOffset[slot] = vertexOffset + safeCount;
 
     UIObjectConstants uipc {};
-    uipc.orthoMatrix = Math::CreateOrthoMatrix(static_cast<float>(width), static_cast<float>(height));
+    // Preserve the UI's top-left-origin projection (unlike the 3D ortho
+    // helper, this has a positive Y scale).
+    const float uiWidth = static_cast<float>(width);
+    const float uiHeight = static_cast<float>(height);
+    uipc.orthoMatrix = Mat4x4::FromCols(
+        {2.0f / uiWidth, 0.0f, 0.0f, 0.0f}, {0.0f, 2.0f / uiHeight, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f}, {-1.0f, -1.0f, 0.0f, 1.0f}
+    );
 
     const VkRect2D defaultScissor = {
         .offset = {.x = 0, .y = 0},

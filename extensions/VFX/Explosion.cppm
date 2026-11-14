@@ -5,29 +5,29 @@ module;
 
 // Public Engine & Jolt Headers
 // clang-format off
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 
 // Standard Library Headers
@@ -47,7 +47,7 @@ namespace ZHLN {
 // Ordnance Types
 // ============================================================================
 
-export enum class OrdnanceType: uint8_t {
+export enum class OrdnanceType : uint8_t {
     StandardFireball, // Standard omnidirectional fireball
     ArtilleryMortar   // Anisotropic cone, shockwave rings, heavy soil ejecta, crater decal & blast impulse
 };
@@ -56,253 +56,43 @@ export enum class OrdnanceType: uint8_t {
 // Modernized Fast SIMD & Noise Utilities
 // ============================================================================
 
-[[nodiscard]] static constexpr float Hash2D(float x, float y) noexcept {
-    float v = std::sin(x * 127.1f + y * 311.7f + 13.37f) * 43758.5453f;
-    return v - std::floor(v);
-}
-
-[[nodiscard]] static constexpr float ValueNoise2D(float x, float y) noexcept {
-    float ix = std::floor(x);
-    float iy = std::floor(y);
-    float fx = x - ix;
-    float fy = y - iy;
-
-    float a = Hash2D(ix, iy);
-    float b = Hash2D(ix + 1.0f, iy);
-    float c = Hash2D(ix, iy + 1.0f);
-    float d = Hash2D(ix + 1.0f, iy + 1.0f);
-
-    float u = fx * fx * (3.0f - 2.0f * fx);
-    float v = fy * fy * (3.0f - 2.0f * fy);
-
-    return std::lerp(std::lerp(a, b, u), std::lerp(c, d, u), v);
-}
-
-[[nodiscard]] static float FBM2D(float x, float y, int octaves = 4) noexcept {
-    float v    = 0.0f;
-    float amp  = 0.5f;
-    float freq = 1.0f;
-    float norm = 0.0f;
-
-    for (int i = 0; i < octaves; ++i) {
-        v += ValueNoise2D(x * freq, y * freq) * amp;
-        norm += amp;
-        amp *= 0.5f;
-        freq *= 2.1f;
-    }
-    return v / norm;
-}
-
-[[nodiscard]] static float Hash31(JPH::Vec3Arg p) noexcept {
-    float px = std::fmod(p.GetX() * 0.1031f, 1.0f);
-    float py = std::fmod(p.GetY() * 0.1031f, 1.0f);
-    float pz = std::fmod(p.GetZ() * 0.1031f, 1.0f);
+[[nodiscard]] static float Hash31(FVec3 p) noexcept {
+    float px = std::fmod(p.x * 0.1031f, 1.0f);
+    float py = std::fmod(p.y * 0.1031f, 1.0f);
+    float pz = std::fmod(p.z * 0.1031f, 1.0f);
 
     float dotVal = px * (pz + 31.32f) + py * (py + 31.32f) + pz * (px + 31.32f);
     return std::fmod((px + dotVal) * (py + dotVal) * (pz + dotVal), 1.0f);
 }
 
-[[nodiscard]] static JPH::Vec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
+[[nodiscard]] static FVec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 u     = dis(gen);
     float                                 v     = dis(gen);
-    float                                 theta = 2.0f * std::numbers::pi_v<float> * u;
+    const auto theta = RadF{2.0f * std::numbers::pi_v<float> * u};
     float                                 phi   = std::acos(2.0f * v - 1.0f);
     float                                 r     = std::cbrt(dis(gen));
-    return {r * std::sin(phi) * std::cos(theta), r * std::sin(phi) * std::sin(theta), r * std::cos(phi)};
+    return {r * std::sin(phi) * Cos(theta), r * std::sin(phi) * Sin(theta), r * std::cos(phi)};
 }
 
-[[nodiscard]] static JPH::Vec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
+[[nodiscard]] static FVec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = JPH::DegreesToRadians(dis(gen) * maxAngleDeg);
+    const auto theta = DegF{dis(gen) * maxAngleDeg}.ToRadians();
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
-    float                                 sinT  = std::sin(theta);
-    float                                 cosT  = std::cos(theta);
+    float                                 sinT  = Sin(theta);
+    float                                 cosT  = Cos(theta);
 
-    return JPH::Vec3(sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)).Normalized();
+    return FVec3{sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)}.Normalized();
 }
 
-[[nodiscard]] static JPH::Vec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
+[[nodiscard]] static FVec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    float                                 theta = JPH::DegreesToRadians(minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg));
+    const auto theta = DegF{minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg)}.ToRadians();
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
-    float                                 sinT  = std::sin(theta);
-    float                                 cosT  = std::cos(theta);
+    float                                 sinT  = Sin(theta);
+    float                                 cosT  = Cos(theta);
 
-    return JPH::Vec3(sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)).Normalized();
-}
-
-// ============================================================================
-// Procedural Texture Generators
-// ============================================================================
-
-static std::vector<uint32_t> GenerateFireTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx   = (static_cast<float>(x) - center) / center;
-            float dy   = (static_cast<float>(y) - center) / center;
-            float d    = std::sqrt(dx * dx + dy * dy);
-            float ang  = std::atan2(dy, dx);
-            float turb = FBM2D(x * 0.028f, y * 0.028f, 3) * 0.45f + FBM2D(x * 0.11f, y * 0.11f, 2) * 0.18f;
-
-            float r = std::clamp(1.0f - d * 1.15f + turb * 0.9f + std::sin(ang * 6.0f + d * 8.0f) * 0.07f, 0.0f, 1.0f);
-
-            float R = 0.0f, G = 0.0f, B = 0.0f, A = 0.0f;
-            if (r > 0.01f) {
-                A = std::pow(r, 0.9f);
-                if (r < 0.25f) {
-                    float t = r / 0.25f;
-                    R       = 120.0f + t * 80.0f;
-                    G       = 10.0f + t * 15.0f;
-                } else if (r < 0.48f) {
-                    float t = (r - 0.25f) / 0.23f;
-                    R       = 200.0f + t * 45.0f;
-                    G       = 25.0f + t * 80.0f;
-                } else if (r < 0.72f) {
-                    float t = (r - 0.48f) / 0.24f;
-                    R       = 245.0f + t * 10.0f;
-                    G       = 105.0f + t * 95.0f;
-                    B       = t * 15.0f;
-                } else {
-                    float t = (r - 0.72f) / 0.28f;
-                    R       = 255.0f;
-                    G       = 200.0f + t * 55.0f;
-                    B       = 120.0f + t * 135.0f;
-                }
-                float speck = Hash2D(x * 1.7f, y * 1.7f) * 0.08f;
-                R           = std::min(255.0f, R + speck * 255.0f);
-                G           = std::min(255.0f, G + speck * 120.0f);
-            }
-
-            pixels[y * size + x] = Math::PackColor(R / 255.0f, G / 255.0f, B / 255.0f, A).data;
-        }
-    }
-    return pixels;
-}
-
-static std::vector<uint32_t> GenerateSoilTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx    = (static_cast<float>(x) - center) / center;
-            float dy    = (static_cast<float>(y) - center) / center;
-            float d     = std::sqrt(dx * dx + dy * dy);
-            float n     = FBM2D(x * 0.025f, y * 0.025f, 3);
-            float n2    = FBM2D(x * 0.06f + 10.0f, y * 0.06f, 2);
-            float ang   = std::atan2(dy, dx);
-            float alpha = std::clamp(
-                std::pow(std::max(0.0f, 1.0f - d * 1.08f), 0.9f) * (0.65f + n * 0.55f) * (0.85f + n2 * 0.3f) * (1.0f + std::sin(ang * 3.0f + n * 6.0f) * 0.08f),
-                0.0f, 1.0f
-            );
-
-            pixels[y * size + x] = Math::PackColor(138.0f / 255.0f, 122.0f / 255.0f, 98.0f / 255.0f, alpha).data;
-        }
-    }
-    return pixels;
-}
-
-static std::vector<uint32_t> GenerateShockwaveRingTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx    = (static_cast<float>(x) - center) / center;
-            float dy    = (static_cast<float>(y) - center) / center;
-            float d     = std::sqrt(dx * dx + dy * dy);
-            float ring  = std::pow(std::max(0.0f, 1.0f - std::abs(d - 0.82f) / 0.08f), 2.5f);
-            float angle = std::atan2(dy, dx);
-            float n     = FBM2D(dx * 4.0f, dy * 4.0f, 2);
-            float strk  = std::pow(std::sin(angle * 12.0f + n * 3.0f) * 0.5f + 0.5f, 4.0f) * 0.35f;
-            float alpha = (d > 1.0f) ? 0.0f : std::clamp((ring * 0.85f) + (ring * strk), 0.0f, 1.0f);
-
-            pixels[y * size + x] = Math::PackColor(255.0f / 255.0f, 240.0f / 255.0f, 210.0f / 255.0f, alpha).data;
-        }
-    }
-    return pixels;
-}
-
-static std::vector<uint32_t> GenerateGroundRingTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx        = (static_cast<float>(x) - center) / center;
-            float dy        = (static_cast<float>(y) - center) / center;
-            float d         = std::sqrt(dx * dx + dy * dy);
-            float ring      = std::pow(std::max(0.0f, 1.0f - std::abs(d - 0.85f) / 0.10f), 2.0f) * (0.75f + FBM2D(x * 0.05f, y * 0.05f, 2) * 0.35f);
-            float innerFill = std::max(0.0f, 1.0f - d / 0.85f) * 0.06f;
-            float alpha     = (d > 1.0f) ? 0.0f : std::clamp((ring * 0.28f) + innerFill, 0.0f, 0.35f);
-
-            pixels[y * size + x] = Math::PackColor(210.0f / 255.0f, 180.0f / 255.0f, 130.0f / 255.0f, alpha).data;
-        }
-    }
-    return pixels;
-}
-
-static std::vector<uint32_t> GenerateCraterTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx    = (static_cast<float>(x) - center) / center;
-            float dy    = (static_cast<float>(y) - center) / center;
-            float d     = std::sqrt(dx * dx + dy * dy);
-            float n     = FBM2D(x * 0.04f, y * 0.04f, 3);
-            float alpha = (d <= 0.40f) ? 0.95f : ((d <= 0.85f) ? (0.95f * (1.0f - std::pow((d - 0.40f) / 0.45f, 2.0f)) * (0.8f + n * 0.4f)) : 0.0f);
-
-            pixels[y * size + x] = Math::PackColor(28.0f / 255.0f, 22.0f / 255.0f, 18.0f / 255.0f, std::clamp(alpha, 0.0f, 1.0f)).data;
-        }
-    }
-    return pixels;
-}
-
-static std::vector<uint32_t> GenerateCraterNormalTexture(uint32_t size) {
-    std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
-    const float           center = size * 0.5f;
-
-    for (uint32_t y = 0; y < size; ++y) {
-        for (uint32_t x = 0; x < size; ++x) {
-            float dx = (static_cast<float>(x) - center) / center;
-            float dy = (static_cast<float>(y) - center) / center;
-            float d  = std::sqrt(dx * dx + dy * dy);
-
-            float nx = 0.0f;
-            float ny = 0.0f;
-            float nz = 1.0f;
-
-            if (d > 0.001f && d < 0.95f) {
-                float dirX = dx / d;
-                float dirY = dy / d;
-
-                float slope = 0.0f;
-                if (d < 0.45f) {
-                    slope = -std::sin(d / 0.45f * std::numbers::pi_v<float>) * 0.45f;
-                } else if (d < 0.85f) {
-                    float t = (d - 0.45f) / 0.40f;
-                    slope   = std::sin(t * std::numbers::pi_v<float>) * 0.35f;
-                }
-
-                nx = dirX * slope;
-                ny = dirY * slope;
-                nz = std::sqrt(std::max(0.0f, 1.0f - (nx * nx + ny * ny)));
-            }
-
-            uint8_t r = static_cast<uint8_t>((nx * 0.5f + 0.5f) * 255.0f);
-            uint8_t g = static_cast<uint8_t>((ny * 0.5f + 0.5f) * 255.0f);
-            uint8_t b = static_cast<uint8_t>((nz * 0.5f + 0.5f) * 255.0f);
-
-            pixels[y * size + x] = 0xFF000000u | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) | r;
-        }
-    }
-    return pixels;
+    return FVec3{sinT * std::cos(phi), std::abs(cosT) * 0.2f + 0.02f, sinT * std::sin(phi)}.Normalized();
 }
 
 // ============================================================================
@@ -314,27 +104,27 @@ struct ShockwaveParticle {
     float     maxLife   = 0.5f;
     float     maxRadius = 18.0f;
     float     speed     = 1.0f;
-    JPH::Vec3 colorStart {};
-    JPH::Vec3 colorEnd {};
+    FVec3 colorStart {};
+    FVec3 colorEnd {};
     bool      isGround = false;
 };
 
 struct ExplosionParticle {
-    JPH::Vec3 position {};
-    JPH::Vec3 velocity {};
+    FVec3 position {};
+    FVec3 velocity {};
     float     life      = 0.0f;
     float     maxLife   = 1.0f;
     float     startSize = 1.0f;
     float     drag      = 1.0f;
     float     gravity   = 0.0f;
-    JPH::Vec3 colorStart {};
-    JPH::Vec3 colorMid {};
-    JPH::Vec3 colorEnd {};
+    FVec3 colorStart {};
+    FVec3 colorMid {};
+    FVec3 colorEnd {};
 };
 
 export struct ExplosionComponent {
     OrdnanceType type     = OrdnanceType::ArtilleryMortar;
-    JPH::Vec3    origin   = JPH::Vec3::sZero();
+    FVec3    origin   = FVec3::Zero();
     float        scale    = 1.0f;
     float        age      = 0.0f;
     float        duration = 3.5f;
@@ -357,8 +147,8 @@ export struct CraterDecalComponent {
     float     fadeDuration = 6.0f;  // Dissolves smoothly over the final 6 seconds
     float     baseRadius   = 3.4f;
     float     baseDepth    = 5.0f;
-    JPH::Vec3 origin       = JPH::Vec3::sZero();
-    JPH::Quat rotation     = JPH::Quat::sIdentity();
+    FVec3 origin       = FVec3::Zero();
+    Quat rotation = Quat::Identity();
 };
 
 // ============================================================================
@@ -370,316 +160,30 @@ export class ExplosionSystem {
     // No Release and no cleanup pass: the component holds nothing on the GPU, and
     // the renderer releases what it allocated for described quads on its own
     // schedule. Detaching is an ECS mutation and nothing else.
-    static void Detach(Engine& engine, Entity entity) {
-        ZHLN::EngineAccess::RegistryOf(engine).Remove<ExplosionComponent>(entity);
+    static void Detach(Engine& engine, Entity entity);
+
+    static void Init(Engine& engine);
+
+    static void Attach(Engine& engine, Entity entity, ExplosionComponent component);
+
+    static Entity Spawn(Engine& engine, ZHLN::FVec3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar);
+
+    // The typed ECS update lives outside this module interface so its query
+    // definitions do not enter the module's global fragment.
+    static void AdvanceAndRender(ExplosionComponent& exp, SceneData& scene, float dt) {
+        UpdateGroup(exp.fireball, dt, false);
+        UpdateGroup(exp.soilSmoke, dt, true);
+        RenderBatchGPU(scene, exp);
     }
-
-    static void Init(Engine& engine) {
-        auto rc = engine.Graphics();
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-
-        // Register ECS components for the current registry instance
-        reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
-        reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
-
-        // No scene-cleanup pass: there is no GPU state of this system's to release.
-        // The one thing that must not survive a device loss is the cached context
-        // pointer, and the renderer is the one that lost the device.
-        engine.AddDeviceLostCallback([](Engine& owner) { s_LastRenderContext = nullptr; });
-
-        s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
-        s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
-
-        // Debris is shared by every explosion in this scene, not owned by any
-        // one emitter. Keep its buffers on a dedicated ECS resource entity.
-        Entity resourceEntity = Entity::Null();
-        for (const Entity e: reg.GetEntitiesWith<Components::OwnedMeshComponent>()) {
-            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
-                owned && owned->meshAsset == s_DebrisMeshAsset) {
-                resourceEntity = e;
-                break;
-            }
-        }
-        if (s_LastRenderContext == &ZHLN::EngineAccess::RenderOf(engine) && resourceEntity != Entity::Null() &&
-            rc.Mesh(s_DebrisMeshAsset).has_value() && rc.Material(s_DebrisMatAsset).has_value()) {
-            return;
-        }
-        s_LastRenderContext = &ZHLN::EngineAccess::RenderOf(engine);
-
-        // Register procedural textures into TextureManager
-        s_FireTexID         = rc.CreateProceduralTexture("vfx_artillery_fire", {256, 256}, GenerateFireTexture(256), true);
-        s_SoilTexID         = rc.CreateProceduralTexture("vfx_artillery_soil", {256, 256}, GenerateSoilTexture(256), true);
-        s_ShockwaveTexID    = rc.CreateProceduralTexture("vfx_artillery_shockwave", {512, 512}, GenerateShockwaveRingTexture(512), true);
-        s_GroundRingID      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", {512, 512}, GenerateGroundRingTexture(512), true);
-        s_CraterTexID       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
-        s_CraterNormalTexID = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
-
-        Mesh boxMesh;
-        // Registry::Get answers nullopt when the entity has no such component, and
-        // this used to be dereferenced on the strength of the entity merely being
-        // non-null -- which is the null dereference GCC reports. A missing
-        // component now takes the same path as a missing entity: the debris mesh
-        // the asset is registered from gets created either way.
-        auto owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : ZHLN::Optional<Components::OwnedMeshComponent&> {};
-        if (owned) {
-            boxMesh = owned->mesh;
-            if (boxMesh.posBuffer == BufferID::Invalid) {
-                boxMesh = PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
-                rc.DestroyMesh(std::exchange(owned->mesh, boxMesh));
-            }
-        } else {
-            boxMesh = PrefabFactory::CreateBoxMesh(engine.Graphics(), {0.5f, 0.5f, 0.5f}, {0.28f, 0.22f, 0.16f, 1.0f});
-            reg.Create(Components::OwnedMeshComponent {.meshAsset = s_DebrisMeshAsset, .mesh = boxMesh});
-        }
-        rc.RegisterMesh(s_DebrisMeshAsset, boxMesh);
-
-        if (!rc.Material(s_DebrisMatAsset).has_value()) {
-            Material debrisMat = rc.CreateMaterial({
-                                     .roughness = 0.94f,
-                                     .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
-                                 })
-                                     .value_or(Material {});
-            rc.RegisterMaterial(s_DebrisMatAsset, debrisMat);
-        }
-    }
-
-    static void Attach(Engine& engine, Entity entity, ExplosionComponent component) {
-        Init(engine);
-        Detach(engine, entity);
-        ZHLN::EngineAccess::RegistryOf(engine).Add(entity, std::move(component));
-    }
-
-    static Entity Spawn(Engine& engine, ZHLN::Float3 origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        Init(engine);
-
-        ExplosionComponent initialExp {
-            .type = type, .origin = static_cast<JPH::Vec3>(origin), .scale = scale, .duration = (type == OrdnanceType::ArtilleryMortar) ? 3.5f : 2.5f
-        };
-
-        std::mt19937 gen(std::random_device {}());
-        if (type == OrdnanceType::ArtilleryMortar) {
-            InitArtilleryParticles(initialExp, gen);
-        } else {
-            InitStandardFireballParticles(initialExp, gen);
-        }
-
-        Entity root         = reg.Create();
-        Entity debrisEntity = (type == OrdnanceType::ArtilleryMortar) ? reg.Create() : Entity::Null();
-
-        initialExp.debrisEntity = debrisEntity;
-
-        // Position light directly at origin with slight vertical offset
-        JPH::Vec3  lightWorldPos = static_cast<JPH::Vec3>(origin) + JPH::Vec3(0.0f, 1.8f * scale, 0.0f);
-        JPH::Mat44 rootTransform = Math::CreateTransform(lightWorldPos, {0.0f, 0.0f, 0.0f, 1.0f});
-
-        // Attach synchronously to root entity
-        reg.Add(
-            root, Components::NameComponent {.name = String64("ArtilleryExplosionRoot")}, Components::TransformComponent {.position = lightWorldPos},
-            Components::WorldTransformComponent {.world = rootTransform, .previous = rootTransform},
-            Components::LightComponent {
-                .type        = LightType::Point,
-                .color       = JPH::Vec3(1.0f, 0.48f, 0.09f),
-                .intensity   = 2800.0f * scale * scale,
-                .radius      = 1.5f,
-                .range       = 60.0f * scale
-            },
-            std::move(initialExp)
-        );
-
-        if (debrisEntity != Entity::Null()) {
-            reg.Add(
-                debrisEntity, Components::NameComponent {.name = String64("Artillery3DDebris")},
-                Components::TransformComponent {.position = static_cast<JPH::Vec3>(origin)},
-                Components::MeshParticleEmitterComponent {
-                    .meshAsset     = s_DebrisMeshAsset,
-                    .materialAsset = s_DebrisMatAsset,
-                    .maxParticles  = 48,
-                    .active        = true,
-                    .params =
-                        {.gravity     = {0.0f, -18.0f * scale, 0.0f},
-                         .drag        = 0.32f,
-                         .spawnOrigin = static_cast<JPH::Vec3>(origin),
-                         .initVelMin  = {-12.0f * scale, 6.0f * scale, -12.0f * scale},
-                         .lifetimeMin = 2.0f,
-                         .initVelMax  = {12.0f * scale, 20.0f * scale, 12.0f * scale},
-                         .lifetimeMax = 3.0f,
-                         .rotVelMin   = {-8.0f, -8.0f, -8.0f},
-                         .scaleMin    = 0.09f * scale,
-                         .rotVelMax   = {8.0f, 8.0f, 8.0f},
-                         .scaleMax    = 0.27f * scale,
-                         .startColor  = {0.28f, 0.22f, 0.16f, 1.0f},
-                         .endColor    = {0.28f, 0.22f, 0.16f, 1.0f}}
-                },
-                Components::HierarchyComponent {.parent = root}
-            );
-        }
-
-        // Procedural Audio DSP
-        auto audio = engine.Audio();
-        audio.PostEvent(
-            {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<JPH::Vec3>(origin),
-             .volume     = 1.0f,
-             .param1     = 60.0f, // Low pass cutoff frequency
-             .param2     = 3.5f,  // Q factor
-             .duration   = 0.85f,
-             .filterType = AudioFilterType::LowPass,
-             .noiseType  = AudioNoiseType::Brownian}
-        );
-
-        audio.PostEvent(
-            {.type     = AudioEventType::ToneSweep3D,
-             .position = static_cast<JPH::Vec3>(origin),
-             .volume   = 0.85f,
-             .param1   = 150.0f, // Start frequency
-             .param2   = 30.0f,  // End frequency
-             .duration = 0.45f,
-             .waveType = AudioWaveformType::Sawtooth}
-        );
-
-        audio.PostEvent(
-            {.type       = AudioEventType::NoiseBurst3D,
-             .position   = static_cast<JPH::Vec3>(origin),
-             .volume     = 0.65f,
-             .param1     = 320.0f, // Band pass center frequency
-             .param2     = 1.4f,   // Q factor
-             .duration   = 0.30f,
-             .filterType = AudioFilterType::BandPass,
-             .noiseType  = AudioNoiseType::Pink}
-        );
-
-        return root;
-    }
-
-    static void Update(Engine& engine, float dt) {
-        Init(engine);
-
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        auto& ecb = engine.Commands();
-        auto scene = engine.Debug();
-
-        // --------------------------------------------------------------------
-        // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)
-        // --------------------------------------------------------------------
-        auto expEntities = reg.GetEntitiesWith<ExplosionComponent>();
-        if (!expEntities.empty()) {
-            auto explosions = reg.GetRawArray<ExplosionComponent>();
-
-            for (size_t i = 0; i < expEntities.size(); ++i) {
-                Entity              e   = expEntities[i];
-                ExplosionComponent& exp = explosions[i];
-                if (reg.Get<Components::PendingDestroy>(e)) {
-                    continue;
-                }
-                exp.age += dt;
-
-                // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
-                reg.Patch<Components::LightComponent>(e, [&](auto& light) {
-                    float flashT = std::exp(-exp.age * 5.5f);
-                    if (flashT < 0.002f) {
-                        light.intensity = 0.0f; // Drop to pitch black so zero light lingers in fog
-                    } else {
-                        float flicker   = (0.92f + Hash31(exp.origin * exp.age) * 0.16f);
-                        light.intensity = flashT * flicker * 2800.0f * exp.scale * exp.scale;
-                        light.color     = JPH::Vec3(1.0f, 0.48f * flashT + 0.1f, 0.09f * flashT);
-                    }
-                });
-
-                // Spawn autonomous crater decal
-                if (!exp.craterSpawned && exp.age >= 0.20f && exp.type == OrdnanceType::ArtilleryMortar) {
-                    exp.craterSpawned = true;
-                    Entity crater     = reg.Create();
-
-                    float     randomYaw = Hash31(exp.origin) * 6.2831853f;
-                    JPH::Quat yawRot    = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), randomYaw);
-                    JPH::Quat baseRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-90.0f));
-                    JPH::Quat decalRot  = (yawRot * baseRot).Normalized();
-
-                    float     radius    = 3.4f * exp.scale;
-                    float     projDepth = 5.0f * exp.scale;
-                    JPH::Vec3 decalScale(radius * 2.0f, radius * 2.0f, projDepth);
-
-                    JPH::Mat44 localMat = Math::CreateTransform(exp.origin, decalRot, decalScale);
-
-                    // Autonomous entity with CraterDecalComponent
-                    ecb.AddComponent(
-                        crater, Components::NameComponent {.name = String64("ArtilleryCraterDecal")},
-                        Components::TransformComponent {.position = exp.origin, .rotation = decalRot, .scale = decalScale},
-                        Components::WorldTransformComponent {.world = localMat, .previous = localMat},
-                        Components::DecalComponent {.albedoMap = s_CraterTexID, .normalMap = s_CraterNormalTexID, .roughness = 0.96f, .metallic = 0.0f},
-                        CraterDecalComponent {
-                            .age          = 0.0f,
-                            .lifetime     = 28.0f,
-                            .fadeDuration = 6.0f,
-                            .baseRadius   = radius,
-                            .baseDepth    = projDepth,
-                            .origin       = exp.origin,
-                            .rotation     = decalRot
-                        }
-                    );
-                }
-
-                // Update Particle Emitters
-                UpdateGroup(exp.fireball, dt, false);
-                UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(ZHLN::EngineAccess::SceneOf(engine), exp);
-
-                // Clean up explosion particle root and children when particles finish
-                if (exp.age > exp.duration) {
-                    if (exp.debrisEntity != Entity::Null()) {
-                        ecb.DestroyEntity(exp.debrisEntity);
-                    }
-                    ecb.DestroyEntity(e); // Atomically destroys root and its LightComponent
-                }
-            }
-        }
-
-        // --------------------------------------------------------------------
-        // 2. UPDATE PERSISTENT CRATER DECALS (Long-lived & Smooth Fade)
-        // --------------------------------------------------------------------
-        auto craterEntities = reg.GetEntitiesWith<CraterDecalComponent>();
-        if (!craterEntities.empty()) {
-            auto craters = reg.GetRawArray<CraterDecalComponent>();
-
-            for (size_t i = 0; i < craterEntities.size(); ++i) {
-                Entity                craterEnt = craterEntities[i];
-                CraterDecalComponent& crater    = craters[i];
-                if (reg.Get<Components::PendingDestroy>(craterEnt)) {
-                    continue;
-                }
-                crater.age += dt;
-
-                // Handle smooth dissolution over the final fadeDuration seconds
-                if (crater.age >= (crater.lifetime - crater.fadeDuration)) {
-                    float remaining = std::max(0.0f, crater.lifetime - crater.age);
-                    float fadeRatio = remaining / crater.fadeDuration; // 1.0 -> 0.0
-
-                    float ease          = std::pow(fadeRatio, 0.75f);
-                    float currentRadius = crater.baseRadius * ease;
-                    float currentDepth  = crater.baseDepth * ease;
-
-                    JPH::Vec3 newScale(currentRadius * 2.0f, currentRadius * 2.0f, currentDepth);
-
-                    reg.Patch<Components::TransformComponent>(craterEnt, [&](auto& trans) { trans.scale = newScale; });
-                    reg.Patch<Components::WorldTransformComponent>(craterEnt, [&](auto& wt) {
-                        wt.world = Math::CreateTransform(crater.origin, crater.rotation, newScale);
-                    });
-                }
-
-                if (crater.age >= crater.lifetime) {
-                    ecb.DestroyEntity(craterEnt);
-                }
-            }
-        }
-    }
+    static float EffectHash(FVec3 position) noexcept { return Hash31(position); }
+    static auto CraterTextures() noexcept -> std::pair<TextureID, TextureID> { return {s_CraterTexID, s_CraterNormalTexID}; }
 
   private:
     static void InitArtilleryParticles(ExplosionComponent& exp, std::mt19937& gen) {
         exp.fireball.resize(78);
         for (size_t i = 0; i < exp.fireball.size(); ++i) {
             bool      isRing = (i > 52);
-            JPH::Vec3 dir    = isRing ? SampleRingDirection(gen, 82.0f, 94.0f) : SampleConeDirection(gen, 34.0f);
+            FVec3 dir    = isRing ? SampleRingDirection(gen, 82.0f, 94.0f) : SampleConeDirection(gen, 34.0f);
             float     speed  = (isRing ? (10.0f + Hash31(dir * 1.5f) * 6.0f) : (16.0f + Hash31(dir * 1.5f) * 11.0f)) * exp.scale;
 
             exp.fireball[i] = {
@@ -690,18 +194,18 @@ export class ExplosionSystem {
                 .startSize  = (0.85f + Hash31(dir * 3.5f) * 0.95f) * exp.scale,
                 .drag       = 3.0f,
                 .gravity    = -4.2f,
-                .colorStart = JPH::Vec3(4.0f, 2.8f, 1.2f),
-                .colorMid   = JPH::Vec3(2.5f, 1.0f, 0.2f),
-                .colorEnd   = JPH::Vec3(0.23f, 0.10f, 0.04f)
+                .colorStart = FVec3{4.0f, 2.8f, 1.2f},
+                .colorMid   = FVec3{2.5f, 1.0f, 0.2f},
+                .colorEnd   = FVec3{0.23f, 0.10f, 0.04f}
             };
         }
 
         exp.soilSmoke.resize(84);
         for (size_t i = 0; i < exp.soilSmoke.size(); ++i) {
             bool      isRing = (i < 24);
-            JPH::Vec3 dir    = isRing ? SampleRingDirection(gen, 84.0f, 92.0f) : SampleConeDirection(gen, 40.0f);
+            FVec3 dir    = isRing ? SampleRingDirection(gen, 84.0f, 92.0f) : SampleConeDirection(gen, 40.0f);
             float     speed  = (isRing ? (7.0f + Hash31(dir * 1.5f) * 4.0f) : (8.0f + Hash31(dir * 1.5f) * 6.0f)) * exp.scale;
-            JPH::Vec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? JPH::Vec3(0.42f, 0.35f, 0.26f) : JPH::Vec3(0.54f, 0.48f, 0.38f);
+            FVec3 sc     = (Hash31(dir * 6.5f) < 0.3f) ? FVec3{0.42f, 0.35f, 0.26f} : FVec3{0.54f, 0.48f, 0.38f};
 
             exp.soilSmoke[i] = {
                 .position   = dir * (0.2f * exp.scale),
@@ -711,7 +215,7 @@ export class ExplosionSystem {
                 .startSize  = (1.55f + Hash31(dir * 3.5f) * 1.35f) * exp.scale,
                 .drag       = 1.8f,
                 .gravity    = -1.1f,
-                .colorStart = JPH::Vec3(1.2f, 0.7f, 0.25f),
+                .colorStart = FVec3{1.2f, 0.7f, 0.25f},
                 .colorMid   = sc * 1.2f,
                 .colorEnd   = sc * 0.7f
             };
@@ -759,8 +263,8 @@ export class ExplosionSystem {
     static void InitStandardFireballParticles(ExplosionComponent& exp, std::mt19937& gen) {
         exp.fireball.resize(120);
         for (auto& p: exp.fireball) {
-            JPH::Vec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.GetY()) * 0.6f + dir.GetY() * 0.4f);
+            FVec3 dir = RandomInUnitSphere(gen);
+            dir.y = std::abs(dir.y) * 0.6f + dir.y * 0.4f;
 
             p = {
                 .position   = dir * (0.15f * exp.scale),
@@ -770,29 +274,29 @@ export class ExplosionSystem {
                 .startSize  = (0.5f + Hash31(dir * 3.5f) * 0.8f) * exp.scale,
                 .drag       = 2.5f,
                 .gravity    = -1.0f,
-                .colorStart = JPH::Vec3(4.0f, 3.0f, 1.4f),
-                .colorMid   = JPH::Vec3(2.2f, 0.9f, 0.25f),
-                .colorEnd   = JPH::Vec3(0.4f, 0.06f, 0.02f)
+                .colorStart = FVec3{4.0f, 3.0f, 1.4f},
+                .colorMid   = FVec3{2.2f, 0.9f, 0.25f},
+                .colorEnd   = FVec3{0.4f, 0.06f, 0.02f}
             };
         }
 
         exp.soilSmoke.resize(80);
         for (auto& p: exp.soilSmoke) {
-            JPH::Vec3 dir = RandomInUnitSphere(gen);
-            dir.SetY(std::abs(dir.GetY()) * 0.8f + dir.GetY() * 0.2f);
+            FVec3 dir = RandomInUnitSphere(gen);
+            dir.y = std::abs(dir.y) * 0.8f + dir.y * 0.2f;
             float gray = 0.05f + Hash31(dir * 6.5f) * 0.15f;
 
             p = {
                 .position   = dir * (0.3f * exp.scale),
-                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + JPH::Vec3(0.0f, 0.8f * exp.scale, 0.0f),
+                .velocity   = dir * ((1.5f + Hash31(dir * 1.5f) * 3.5f) * exp.scale) + FVec3{0.0f, 0.8f * exp.scale, 0.0f},
                 .life       = 0.0f,
                 .maxLife    = 2.5f + Hash31(dir * 2.5f) * 2.0f,
                 .startSize  = (1.0f + Hash31(dir * 4.5f) * 1.0f) * exp.scale,
                 .drag       = 1.2f,
                 .gravity    = 0.6f,
-                .colorStart = JPH::Vec3(1.4f, 0.6f, 0.15f),
-                .colorMid   = JPH::Vec3(0.35f, 0.25f, 0.2f),
-                .colorEnd   = JPH::Vec3(gray, gray, gray * 0.95f)
+                .colorStart = FVec3{1.4f, 0.6f, 0.15f},
+                .colorMid   = FVec3{0.35f, 0.25f, 0.2f},
+                .colorEnd   = FVec3{gray, gray, gray * 0.95f}
             };
         }
     }
@@ -805,11 +309,11 @@ export class ExplosionSystem {
             }
 
             if (isSmoke) {
-                p.velocity.SetY(p.velocity.GetY() + 0.58f * dt);
+                p.velocity.y = p.velocity.y + 0.58f * dt;
             }
 
             p.velocity *= std::exp(-p.drag * dt);
-            p.velocity.SetY(p.velocity.GetY() + p.gravity * dt);
+            p.velocity.y = p.velocity.y + p.gravity * dt;
             p.position += p.velocity * dt;
         }
     }
@@ -827,7 +331,7 @@ export class ExplosionSystem {
             for (const auto& p: exp.fireball) {
                 const float t = std::min(1.0f, p.life / p.maxLife);
 
-                const JPH::Vec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
+                const FVec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
                                                       p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.52f) / 0.48f);
 
                 const float opacity = (1.0f - t) * 0.98f;
@@ -837,7 +341,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                     .color    = FVec4{color * (opacity * 3.5f), opacity},
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -852,7 +356,7 @@ export class ExplosionSystem {
             for (const auto& p: exp.soilSmoke) {
                 float     opacity = 0.0f;
                 float     size    = p.startSize;
-                JPH::Vec3 color   = p.colorEnd;
+                FVec3 color   = p.colorEnd;
 
                 if (p.life < p.maxLife) {
                     float t = p.life / p.maxLife;
@@ -865,7 +369,7 @@ export class ExplosionSystem {
                     {.position = exp.origin + p.position,
                      .size     = size,
                      .rotation = 0.0f,
-                     .color    = JPH::Vec4(color, opacity),
+                     .color    = FVec4{color, opacity},
                      .facing   = ParticleAlignment::CameraBillboard}
                 );
             }
@@ -883,7 +387,7 @@ export class ExplosionSystem {
                     float       localTime = exp.age - sw.delay;
                     float       opacity   = 0.0f;
                     float       radius    = 0.1f;
-                    JPH::Vec3   color     = sw.colorStart;
+                    FVec3   color     = sw.colorStart;
 
                     if (localTime > 0.0f && localTime < sw.maxLife) {
                         float t = localTime / sw.maxLife;
@@ -896,7 +400,7 @@ export class ExplosionSystem {
                         {.position = exp.origin,
                          .size     = radius * 2.0f,
                          .rotation = 0.0f,
-                         .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                         .color    = FVec4{color * (opacity * 3.5f), opacity},
                          .facing   = ParticleAlignment::CameraBillboard}
                     );
                 }
@@ -910,7 +414,7 @@ export class ExplosionSystem {
                 float       localTime = exp.age - sw.delay;
                 float       opacity   = 0.0f;
                 float       radius    = 0.1f;
-                JPH::Vec3   color     = sw.colorStart;
+                FVec3   color     = sw.colorStart;
 
                 if (localTime > 0.0f && localTime < sw.maxLife) {
                     float t = localTime / sw.maxLife;
@@ -920,10 +424,10 @@ export class ExplosionSystem {
                 }
 
                 const BillboardQuad quad {
-                    .position = exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f),
+                    .position = exp.origin + FVec3{0.0f, 0.05f, 0.0f},
                     .size     = radius * 2.0f,
                     .rotation = 0.0f,
-                    .color    = JPH::Vec4(color, opacity),
+                    .color    = FVec4{color, opacity},
                     .facing   = ParticleAlignment::GroundFlat,
                 };
                 scene.AddBillboards(s_GroundRingID, std::span {&quad, 1}, true);
@@ -937,7 +441,7 @@ export class ExplosionSystem {
     // emitted for the definition, so an importer that inlines one of the member
     // bodies above is left holding an undefined reference. A single definition
     // in the module's translation unit needs no help from `inline`.
-    static RenderContext* s_LastRenderContext;
+    static Engine* s_LastEngine;
 
     // Type-safe registered Texture Handles
     static TextureID s_FireTexID;
@@ -951,7 +455,7 @@ export class ExplosionSystem {
     static MaterialID s_DebrisMatAsset;
 };
 
-RenderContext* ExplosionSystem::s_LastRenderContext = nullptr;
+Engine* ExplosionSystem::s_LastEngine = nullptr;
 
 TextureID ExplosionSystem::s_FireTexID         = TextureID::Invalid;
 TextureID ExplosionSystem::s_SoilTexID         = TextureID::Invalid;

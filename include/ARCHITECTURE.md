@@ -13,22 +13,16 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ---
 
-## 1.1 Strict ECS Mandate & Architectural Constraints
+## 1.1 State Ownership & Architectural Constraints
 
-To preserve the engine's data-oriented design (DOD), cache locality, zero-allocation memory guarantees, and C++26 reflection-based tooling, **ALL state in Zahlen MUST reside in ECS Components, and ALL logic MUST reside in ECS Systems.**
-
-### The Core Law
-> **There are no "Manager" or "Simulation" classes for gameplay or visual effects in Zahlen.**
-> Every entity, bolt, particle, projectile, sound, and light source is represented as a plain-data `struct` inside the `ZHLN::Components` namespace.
-
----
+Zahlen is data-oriented, which is a statement about how data is laid out and accessed -- not a rule that every value must be an ECS component. **ECS owns scene state: things there are many of, keyed by entity.** **Subsystems own their own state: things there is exactly one of.** `RenderContext` owns pipeline configuration, `InputContext` owns input, `AudioContext` owns audio. A singleton component is a global variable with extra indirection, and it pushes configuration through the registry for no benefit.
 
 ### Strict Development Rules
 
-#### 1. Zero Class-Based State
-* **NO `class` instances may hold simulation, timing, or visual state.**
-* Features MUST NOT wrap state inside private member variables (`m_phase`, `m_time`, `m_luminance`).
-* All state MUST be stored in `ZHLN::Components` as POD (Plain Old Data) structs and accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`.
+#### 1. State Lives With Its Owner
+* **Per-entity state belongs in `ZHLN::Components`** as POD structs, accessed via `reg.Get<Component>()` or `reg.GetRawArray<Component>()`. That is what the registry is for and where it pays off.
+* **Single-instance state belongs to the subsystem that owns it**, as ordinary members of a stateful class. Pipeline configuration lives on `RenderContext`, input on `InputContext`, audio on `AudioContext`.
+* The test is simply *how many of these are there?* If the answer is one, a component is the wrong container: it costs a lookup, invites a second copy, and makes external hosts mutate the registry to change a setting.
 
 #### 2. The $N$-Concurrent Rule
 * **Every feature MUST support $N$ simultaneous instances out of the box.**
@@ -36,7 +30,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 
 #### 3. Pure System Functions
 * Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
-* Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
+* Systems MUST NOT store internal state across frames in function-local statics. Per-entity memory belongs in a Component; single-instance memory belongs to the owning subsystem, which is a real object with a lifetime, not a hidden static.
 
 #### 4. External Resource Lifecycle
 * Components store plain generational IDs. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
@@ -46,69 +40,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
-* Global state changes MUST be applied as non-destructive deltas or read from an un-flashed baseline cached on the Global Settings entity.
-
----
-
-### Anti-Pattern Reference Guide
-
-#### ❌ FORBIDDEN: Classic OOP Class Bypass
-```cpp
-// BAD: Stateful class holding simulation variables, non-DOD memory, single-instance lock
-class LightningSimulation {
-  private:
-    float  m_phaseTime    = 0.0f;
-    float  m_baseExposure = 4.5f; // Clobbers global exposure!
-    Entity m_flashLight;
-
-  public:
-    void TriggerStrike(Engine& engine, ...);
-    void Update(Engine& engine, float dt);
-};
-```
-
-#### ✅ MANDATED: Idiomatic Data-Oriented ECS
-```cpp
-// GOOD: Pure POD Component
-struct LightningComponent {
-    LightningConfig config {};
-    LightningPhase  phase               = LightningPhase::Idle;
-    float           phaseTime           = 0.0f;
-    float           baseAmbientExposure = 4.5f;
-
-    BufferID vboPos     = BufferID::Invalid;
-    BufferID vboFrame   = BufferID::Invalid;
-    BufferID vboSurface = BufferID::Invalid;
-
-    // Component state only. The renderer sees non-owning mesh registrations;
-    // Engine scene cleanup frees these buffers before destroying the component.
-    // Direct replacement/removal must release them explicitly first.
-};
-
-// GOOD: Stateless System Function
-// Parameters that cross a subsystem boundary are the engine's own value types --
-// ZHLN::Float3, ZHLN::Float4, ZHLN::Double3 -- never Vec3Arg/QuatArg/RVec3Arg,
-// never `const JPH::Vec3&`, and never a conversion helper at the call site. A
-// caller writes `{1.0f, 2.0f, 3.0f}`, or passes the Vec3 it was already holding;
-// the crossing is a conversion owned by the type (Math/ValueTypes.hpp), so Jolt's
-// SIMD classes appear only where the maths happens. Quat has no value type yet
-// and stays JPH::Quat.
-namespace ZHLN::Lightning {
-Entity Spawn(Engine& engine, ZHLN::Double3 cloudPos, ZHLN::Double3 groundPos, const LightningConfig& cfg);
-void   Update(Engine& engine, float dt);
-} // namespace ZHLN::Lightning
-```
-
----
-
-### Architectural Rationale
-
-| Requirement | Why OOP Fails | Why ECS Succeeds |
-| :--- | :--- | :--- |
-| **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
-| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` derives component Read/Write hazards from each system's `Query<const T, U&>` signature (or explicit `Registry&` for structural writers) and orders fiber tasks accordingly. |
-| **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
-
+* Read the current value from the owning subsystem, apply a non-destructive delta, and write it back through that subsystem's API -- `Graphics().Settings()` then `Graphics().ApplySettings()`. There is no global settings entity.
 
 ---
 
@@ -480,10 +412,10 @@ Two consequences are worth stating, because they are what the design buys:
 * **The plan is composable, and its vocabulary is public.** Anchor names are the
   contract between a module and core. A rename in `BuildCoreFramePlan` is a
   breaking change, and it is reported rather than absorbed.
-* **The plan is not rebuilt with the scene.** `InitializeDefaultScene` rebuilds
-  the graphs because they are scene state; the timeline is composition state and
-  is built once. Rebuilding it per scene was how a replayed module step could
-  accumulate a second copy.
+* **Neither the plan nor the compiled system graphs are rebuilt with the scene.**
+  `Engine::Create` compiles core's system graphs (and marks them dirty when a
+  module installs graph systems); `ClearScene` keeps both the frame plan and the
+  compiled system graphs intact and resets each node's `Local<T>` state in place.
 
 An ordinary game's C++ source is compiled into its executable. `Application`
 runs its callback **before** the engine's frame plan. System-driven games may
@@ -496,12 +428,12 @@ Tick: UI (layers.UI) / state-file watches → PlayerIntent → Physics
 Exit: layers.Stop (reverse registration order) → Engine destroyed
 ```
 
-1. **Input & OS Events**: `Application` calls `Engine::ProcessEvents` before layers/gameplay. `Kernel::ProcessEvents` detects a changed primary framebuffer extent and notifies the renderer; Engine consumes the WindowInputReceiver's `InputStateComponent::needsResize` notification during the same pump (including headless/TTY synthetic sizes) and clears it. Neither `Application::RunConfigured` nor the low-level `Engine::Run` reads the singleton or skips a gameplay frame for resize.
+1. **Input & OS Events**: `Application` calls `Engine::ProcessEvents` before layers/gameplay. `Kernel::ProcessEvents` detects a changed primary framebuffer extent and notifies the renderer; Engine consumes the WindowInputReceiver's `InputContext::ConsumePendingResize` notification during the same pump (including headless/TTY synthetic sizes). Neither `Application::RunConfigured` nor the low-level `Engine::Run` skips a gameplay frame for resize.
 2. **Compiled gameplay**: `App().Run(callback)` owns the per-frame game update; `App().Install(...)` composes systems and frame steps before the first scene. `App().AddLayer(...)` owns heterogeneously typed Start/Tick/UI/Stop layers (including UI-only, Stop-only and move-only ones) using a one-time state allocation and four plain function pointers, no virtual call per frame. Start runs after the scene, Tick runs before the optional `Run(callback)`, and UI runs inside Core's HostUICallback step during `Engine::Tick`; these phases follow registration order. Stop runs once in reverse registration order while Engine resources still exist, whether the loop closes normally or a frame fails; CLI early exits and failed initialization do not start/stop layers. `Engine::Run` remains a low-level Core entry for bespoke hosts with their own composition and event poller.
    `Application::Run(std::span<char* const> args, callback)` reflects its `EngineConfig` and combines it with optional `.WithConfig(gameLaunch)`, `.AddCliOption(...)` and `.WithCliOptions(...)` bindings; the `Run(argc, argv, callback)` adapter checks C arguments first. `ConfigCli` owns generated flag keys, aliases and enum choices across copies, while config targets and custom handler captures are borrowed through the synchronous parse. It walks nested aggregates with prefixed keys (e.g. `physics.maxBodies` -> `--physics-max-bodies`); the non-owning pipeline binary span is intentionally C++-only. Duplicate engine/game/custom keys are rejected, never shadowed or mirrored. The independent `zahlen_command_line` library only tokenizes, dispatches, and handles help/version. Host-owned `ParseEngineConfig` handles graph/debugger commands and environmental defaults without adding process state to EngineConfig.
    Before module installers, `OnStart` and graph construction, Application publishes a **copy of the actual `EngineConfig`** in `Engine::Services()`. Systems may resolve `ECS::Res<EngineConfig>` from `ExtensionServices`. This service exists on CLI and no-CLI runs; neither argv nor CLI handlers enter Engine services. `KernelApp` binds the same canonical value and returns the same typed early-exit reasons.
    `Application::Run` and `KernelApp::Run` return `AppRunResult = std::expected<AppExitReason, ErrorCode>` rather than an OS exit integer. CLI help/version/graph requests and normal host closure are distinct `AppExitReason` values; the parser's `CommandLineError` and the underlying Engine/Kernel/render/recovery errors are propagated unchanged. `AppError` represents invalid C argument vectors or scene/tick failures without a lower-layer error code. `app/main.cpp` and `app/UIEditor.cpp` map success/failure to process status **only inside main**; tests inspect typed outcomes. This does not make process-wide `ProcessScope` state safe for uncoordinated concurrent runners.
-3. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
+3. **Physics Simulation Step**: The frame-plan physics step runs fixed 60 Hz (`1/60s`) substeps. Each substep invokes the character pre-hook, runs typed `PhysicsSystem::CommitImpulses` and plays its private command buffer, steps Jolt, then invokes the character post-hook. Impulse removals are visible to the next substep without flushing the main frame command buffer. Character grounded flags are written back onto `MovementComponent` after the step.
 4. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems). `VisualInterpolationSystem` reads PhysicsWorld pose history and writes interpolated transforms; static bodies are skipped.
 5. **Render Graph Execution**: `CullingSystem` performs frustum culling, `LightingSystem` gathers lights, and `RenderSystem` records Vulkan commands and presents. `Engine::Tick` returns a `std::expected<void, ErrorCode>` carrying the real device-lost recovery failure; `FramePlan::Execute` stops at the first step that sets `FrameContext::error`.
 
@@ -547,12 +479,8 @@ Graphics configuration flows in **one direction** through a single canonical mod
 (`include/Zahlen/Render/GraphicsSettings.hpp`):
 
 ```
-UI (ImGui) / Lua scripts / quality presets
-        │ write
-        ▼
-ECS settings components (the editing surface)
-  PostProcessSettingsComponent · ShadowSettingsComponent · AASettingsComponent
-        │ CollectGraphicsSettings() — once per frame, start of RenderSystem::RenderMain
+UI (ImGui) / Lua scripts / quality presets / the settings menu
+        │ GraphicsDevice::ApplySettings() / PatchSettings()
         ▼
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
@@ -562,17 +490,18 @@ RenderContext state (SetFrameData packs the engine's FrameData into the shader's
   GPU target resizes)
 ```
 
-* **Single collector**: `system/GraphicsSettingsSync.cpp` folds the ECS
-  components into `GraphicsSettings` and applies it once per frame. The
-  renderer never queries the components directly, and the former
-  `PostProcessSystem` ECS→`SetGISettings` bridge is gone.
+* **One owner**: the graphics device holds the settings. There is no ECS
+  editing surface and no per-frame collector: a caller reads the value it owns,
+  edits it, and hands it back. The renderer is a pure sink — it stores what it
+  is given and never asks where the numbers came from.
 * **Reactive deltas**: `ApplySettings` compares against the current state and
   reacts — e.g. a `shadowResolution` change (from ImGui, a script or a preset)
   resizes the cascade targets automatically. `SetGISettings` / `SetAAState` /
   `SetShadowResolution` remain only as legacy bridges for tools/tests.
 * **Quality tiers**: `Low / Medium / High / Ultra / Custom` presets pin a
-  signature of quality-relevant fields (`GraphicsSettings::ApplyPreset`);
-  `DetectPreset()` reports the effective tier (Custom after manual tweaks).
+  signature of quality-relevant fields. They are application policy, not engine
+  behaviour, so they live in `app/include/Zahlen/QualityPresets.hpp` as free
+  functions (`ApplyPreset`, `DetectPreset`) over the dumb settings struct.
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
@@ -640,23 +569,15 @@ replacement is chosen by semantics rather than by a blanket naming rule.
 | frame schedule | `Steps() const noexcept -> std::span<const FrameStep>` | diagnostics and profilers can read the composed order, but only `InstallModule(const Module&)` mutates it, all-or-nothing against core's anchor names. `Clear()` / `Append()` on a public `FramePlan&` silently bypassed anchor validation. |
 | entity lifecycle | `Entities() -> Entities` (`Zahlen/Engine/Capabilities/Entities.hpp`) | not a `Registry` pass-through. `Despawn` marks `PendingDestroy` so `SceneCleanup` releases Jolt bodies, miniaudio voices and GPU buffers; `Attach` / `Detach` route replacements through `SceneResources::Release`. `Get` / `GetSingleton` are read-only `Optional<const T&>`. |
 | in-frame mutations | `Commands() -> ECS::EntityCommandBuffer&` | systems declare `ECS::EntityCommandBuffer&` in their signature and `SystemGraph` resolves it from `carrier.ecb`; external frame steps record into the same ECB. Playback is `MainECBPlayback`, immediately followed by `SceneCleanup`. Synchronous creation/destruction inside `Tick` is prohibited. |
-| skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal; their two consumers reach them through `EngineAccess`. |
+| skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal. |
 
 `Engine.hpp` forward-declares `ECS::Registry` and `ECS::EntityCommandBuffer` and
 does not include `<Zahlen/ECS/ECS.hpp>` or `<Zahlen/Engine/PoseUploads.hpp>`.
-The raw registry is reachable only through the build-tree-only
-`Zahlen/Engine/Internal/EngineAccess.hpp` seam (`RegistryOf`, `PoseUploadsOf`,
-`ArticulationOf`, `FramePlanOf`), which is **not installed**. That seam is for
-engine implementation units, `SystemGraph` compilation,
-`GameModule::ComponentRegistrar`, cold-boot scene deserializers and in-tree
-failure-injection tests. In-repo systems, extensions, samples and tests that
-still need arbitrary registry operations use `RegistryOf`; SDK consumers get
-`Entities()` and `Commands()` instead.
-
-The remaining work -- rewriting every in-tree system to `Query<...>` /
-`EntityCommandBuffer&` signatures so `RegistryOf` survives only in the three
-cold-start seams -- is tracked in `todo/ecs_capability_boundary.md`. It is a
-multi-patch change and is deliberately not folded into this one.
+Engine implementation headers live under `src/engine` and are included locally;
+no engine-internal directory is exposed to build-tree or installed consumers.
+External code must use the public capabilities, `InstallModule`, or typed
+queries instead of including engine implementation headers; no `EngineAccess`
+backdoor or raw-registry accessor is exposed on `Engine`.
 
 ### 3.5 Frame outcome
 
@@ -674,14 +595,15 @@ ignores the outcome spells it `(void)engine.Tick(dt);`.
 ### 3.6 COM ABI surface
 
 `Zahlen/Core/COM/` is the vocabulary and protocol for objects that live in one
-shared library and are consumed from another. It exists so an SDK consumer does
+shared library and are consumed from another. It exists so an API consumer does
 not have to agree with the engine about a standard-library layout: no STL
 container object, allocator or exception crosses the boundary.
 
 | header | contents |
 | :--- | :--- |
-| `Types.hpp` | `StringView`, `Span<T>`, `Result<T>` / `Result<void>` -- fixed-layout scalars that convert to and from `std::string_view`, `std::span` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
-| `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the *qualified* type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
+| `Types.hpp` | `ComError`, `StringView`, `Span<T>`, `Option<T>`, `Result<T>` / `Result<void>` -- fixed-layout values that convert to and from `std::string_view`, `std::span`, `std::optional` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
+| `Chain.hpp` | `ChainInNode` / `ChainOutNode`, `ChainTypeID<T>()`, caller-side `COM::InChain(...)` / `COM::OutChain(...)`, and callee-side `COM::DispatchInChain` / `COM::DispatchOutChain`. Non-intrusive `sType`/`layoutHash`/`size`/`pNext` linked lists keep plain value structs standard-layout while allowing configuration and resource descriptors to evolve without shifting vtable slots or reading past caller-owned structs. |
+| `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the canonical type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
 | `Reflect.hpp` | `Implements<Derived, Interfaces...>` and `AuditInterfaceABI<I>()`. Reflection walks the whole base graph to build `QueryRaw`'s dispatch; there is no interface map, no switch and no macro. |
 | `Ref.hpp` | `Ref<T>`, an owning reference. `Adopt` takes a reference `QueryRaw` already added; the explicit constructor adds one. Assignment acquires before it releases. |
 
@@ -707,16 +629,25 @@ three virtuals is then the final overrider for every branch. Interfaces are
 listed once, as template arguments, and the reflected dispatch covers interfaces
 reached through interface inheritance as well as the direct ones.
 
-`InterfaceIdOf<T>()` hashes `display_string_of(^^T)`, which on this toolchain
-answers `ZHLN::COM::IGraphicsDevice` rather than the unqualified `identifier_of`.
-The ID is therefore stable for a given toolchain and spelling, but it is not yet
-a portable wire constant: a deployment that mixes compiler vendors should pin
-IDs with an explicit override before relying on them across binaries. The
-layout of `StringView`, `Span<T>` and `Result<T>` is pinned by static asserts in
-`tests/core/TestCOM.cpp` instead.
+`InterfaceIdOf<T>()` hashes the canonical AST name from `identifier_of` and
+its declaring scopes, never compiler display text. `IEntities` uses the same
+name for consumer components and engine component lookup; the ECS dynamic
+path hashes the exact name supplied over the boundary. Specializations encode
+the template and tagged arguments, including integral/enum values, qualifiers,
+pointers and arrays. Anonymous or local scopes, unsupported type forms (such as function types) and unsupported template
+arguments (such as pointer and structural-object values), fail at compile time
+rather than being given an ambiguous identity. Such types must be moved to a
+named namespace or use the explicit raw API with a caller-chosen name.
+
+This changes interface IDs wherever the old display spelling differs, and
+changes template component names; rebuild the engine and all consumers together
+and migrate any persisted IDs/names. Neither the 128-bit interface hash nor the
+32-bit ECS hash is collision-proof. Different compiler ABIs, standard library
+inline namespaces and platform-dependent type aliases can still differ; the
+canonical grammar is not an ABI compatibility guarantee.
 
 The reflection library has **no domain**: it gained only generic primitives --
-`QualifiedTypeName<T>()` in `Core.hpp`, and
+`CanonicalTypeName<T>()` in `CanonicalName.hpp`, and
 `MethodSignature<Return, Noexcept, Parameters...>` plus
 `ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
 `ForEachBase`. `MethodSignature` reports a return type, a `noexcept` bit and
@@ -733,6 +664,158 @@ fallback and no second code path.
 Wiring an engine-owned object to this root (and exposing it across
 `libzahlen_engine.so`) is a separate increment; this section defines the
 boundary, not the first tenant.
+
+### 3.7 The COM boundary
+
+`Zahlen/COM/` is the engine as a consumer outside `libzahlen_engine.so` sees
+it. `Core/COM/` is the mechanism; this is the surface built on it.
+
+| header | contents |
+| :--- | :--- |
+| `COMTypes.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
+| `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`) and borrowed accessors for the seven capability interfaces |
+| `IGraphicsDevice.hpp` | resolution, viewport, chained `ApplySettings` / `GetSettings` (full `GraphicsSettings` or sub-slices), buffers, textures, PBR materials, procedural & stream meshes, mesh registries and BLAS builds |
+| `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 34 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
+| `ISimulation.hpp` | chained rigid-body (`BoxShapeDesc`, `SphereShapeDesc`, `CapsuleShapeDesc`, `CylinderShapeDesc`, `PlaneShapeDesc`, `MeshShapeDesc`, `HeightFieldShapeDesc`, `CompoundShapeDesc` + pose/surface/filter) and character creation, raycasts, sphere queries, velocities, kinematic poses, collision filters and debug geometry |
+| `IAudioDevice.hpp` | chained `PostEvent` (`AudioEvent`) and `CreateVoice` (`VoiceDesc`) plus voice playback, volume, looping and spatial position controls |
+| `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
+| `IActionContext.hpp` | raw device injection, chained action-map / action / binding / rebind / multi-seat routing configuration, default-binding snapshots/resets, virtual actions and physical state |
+| `IState.hpp` | engine-level `CullingStats` readback, reset, and `SetCullingEnabled` / `SetFreezeFrustum` toggles |
+| `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`EngineAppConfig`, `EngineWindowConfig`, `EngineRenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
+
+One `EngineCOM` implements all eight interfaces, so `engine->Graphics()` and
+`engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
+accessors are **borrows** and must not be released; `Query` / `As` take a
+reference the way COM expects.
+
+**Extensible descriptors via non-intrusive reflected chains.** Raw aggregate
+descriptors passed directly in vtable slots freeze forever or break binary
+callers when fields are appended, while append-only builder vtables accumulate
+combinatorial setter debt. Instead, configuration and descriptor-taking vtable
+slots accept `const ChainInNode*` / `ChainOutNode*`. Callers pass plain
+standard-layout structs (`COM::InChain(appCfg, winCfg, renderCfg)` or
+`COM::OutChain(aaOut, shadowOut)`), and the engine validates each node's
+`sType` (`CanonicalTypeName<T>()`), `size`, and leaf-recursive
+`Reflect::LayoutHash<T>()` before reading or writing it. Shipped node structs
+remain frozen -- new fields ship in new extension structs chained via `pNext` --
+while `LayoutHash<T>()` catches accidental inner-struct drift with
+`ComError::LayoutMismatch` and unknown extensions with
+`ComError::UnsupportedExtension`. Single-struct ergonomics remain inline
+methods compiled in the consumer's own TU.
+
+There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
+implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
+calling convention already agree:
+`CreateEngine(const ChainInNode*)` is defined in the shared
+library and undefined in every consumer. What the boundary refuses to carry is
+the *standard library*, not C++ itself.
+
+`CreateEngine` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
+`Result<T>` carries `T` by value and therefore requires a trivially copyable
+`T`, which a reference-counting handle is not. `CreateEngineRef` is inline, so
+it runs in the consumer's translation unit and may use `std::expected<Ref<IEngine>,
+ErrorCode>` freely -- that type is built and consumed on one side and never
+crosses.
+
+Every method is `noexcept`, which costs nothing to honour: Zahlen compiles with
+`-fno-exceptions -fno-rtti`. The same flags are why `QueryRaw` is a reflected
+`static_cast` chain rather than `dynamic_cast`.
+
+**The ECS seam.** A virtual function cannot be a template, so the vtable
+carries `AttachRaw` / `GetRaw` / `DetachRaw` plus `AttachEngineRaw` /
+`GetEngineRaw` / `DetachEngineRaw` / `EntitiesWithRaw` keyed on a component's
+canonical type name and recursive leaf `LayoutHash<T>()`, and `IEntities`
+rebuilds the typed API (`Attach<T>`, `Get<T>`, `Detach<T>`, `EntitiesWith<T>`,
+`SingletonEntity<T>`) from inline templates that compile in the consumer's own
+TU. Thirty-five fixed-layout `ZHLN::Components` are published directly to their
+typed ECS families (releasing owned Jolt/audio/GPU handles via `SceneResources`
+on overwrite or detach); consumer-defined components fall through to the
+registry's dynamic-component path, which holds raw bytes and runs no destructor
+-- hence the `ComComponent` constraint.
+
+Interface IDs are a hash of the qualified type name, so adding a capability
+interface needs no GUID and no registry.
+
+**Two tiers: the wire and the header.** An interface here has a virtual tier
+and a non-virtual tier, and they answer to different masters. The virtuals are
+the wire protocol: vtable slots that two separately compiled binaries must
+agree on byte for byte, restricted to pointers and fixed-layout values. The
+non-virtual members above them are ordinary inline code that the *consumer*
+compiles from this header into its own TU. They may allocate, they may name
+`std::optional`, `std::vector` and `std::string`, and none of it reaches the
+library -- the vector is born in the caller's TU, the library is handed a bare
+`BodyID*` and a count, and the caller's allocator frees it.
+
+So the restatement that the ABI forces is a wire detail, not the API. A
+`std::vector` return becomes a caller-owned buffer plus a count on the wire,
+and comes back as a `std::vector` in the header (`BodiesInSphere`,
+`PrefabVirtualPath`, `Instantiate`). Both spellings stay public there: the
+buffer form is for a caller who already owns storage or refuses to allocate,
+the inline form is for everyone else. `GamepadState` is the one thing that
+genuinely does not cross, because `std::bitset` is built out of a base class
+in libstdc++ and is therefore not standard layout -- the scalar queries answer
+the same questions.
+
+**Optionality is a value, not a protocol.** `COM::Option<T>` is `T` plus a
+flag with a fixed layout, so a query that may find nothing simply returns one
+(`BodyPosition`, `BodyState`, `DescribePrefab`, `FindEnvironmentImage`). The
+older shape -- `bool` return plus a `T*` out-parameter -- is a C habit that
+survives into C++ only because the ABI forbids `std::optional`, and it is
+worse in three ways that have nothing to do with taste: the caller must
+declare storage before knowing whether anything will go in it, the result
+cannot be returned or chained, and the state of `*out` on a miss becomes prose
+in a comment instead of something the type enforces. `Option` costs the same
+bytes and none of that. It converts implicitly to `std::optional<T>` exactly
+as `COM::Result<T>` converts to `std::expected<T, ErrorCode>`: the wire type
+is what the vtable traffics in, the standard type is one conversion away in
+the caller's own TU.
+
+That is also why the ergonomic tier is thinner than it first looks. There is
+no inline `std::optional` overload beside these four, because an overload
+differing only in return type is ill-formed -- the conversion on `Option`
+itself does the job, and one spelling is better than two.
+
+`AuditInterfaceABI` therefore inspects the virtual members only. That is not a
+loosening: a non-virtual inline member occupies no vtable slot, emits no
+cross-library symbol, and is as invisible to the ABI as the member templates
+the audit already skipped. The rule the audit now trusts rather than checks is
+that a non-virtual member declared in an interface must be *defined* in that
+header; one defined inside the library would be a cross-boundary symbol that
+no longer passes under the audit's eye. Enumerating virtuals is a language
+property, so `ForEachVirtualMethodSignature` lives in Reflection next to
+`ForEachMethodSignature`, and the policy built on it stays in `Core/COM/`.
+
+No virtual at this boundary takes a default argument: a default is baked into
+the caller's TU, so changing one would silently change already-compiled
+consumer code while the vtable stayed valid. Where a default is worth having,
+the inline tier supplies it and recompiles with the caller. `IActionContext`'s
+`ActionDown` / `Pressed` / `Held` / `Released` / `Axis1D` / `Axis2D` are the
+same idea: six derived reads over one `Action()` dispatch.
+
+**`Instantiate` is the exception to count-then-fill.** The engine's
+`InstantiatePrefab` treats its out-buffer as a *recording* device, not a dry
+run: passing it a null buffer still spawns the whole prefab and merely discards
+the ids. Asking it for a count and then asking again for the entities would
+spawn twice. The inline overload instead sizes its vector from `PrefabInfo`
+-- root, one entity per part, one more per part when the spawn asks for
+emissive virtual lights, one per punctual light -- calls the wire method once,
+and shrinks to what came back. The virtual's comment says so in as many words,
+because the shape invites the wrong habit.
+
+**Importing is not here.** `IAssetLibrary` resolves, describes and instantiates
+cached prefabs, but cannot load one. Every importer (glTF, BSP, StudioModel)
+lives in `plugins/`, a layer *above* `libzahlen_engine.so`, and the engine's own
+`LoadModelPrefab` is a cache lookup. Giving the boundary a real load would mean
+inverting that dependency or adding an importer-registration seam; neither is
+in this increment, and a `LoadPrefab` that silently resolved from cache would
+have been a lie in the header.
+
+Three value headers were split out so a consumer of this boundary does not
+compile the subsystem behind it, the way `PhysicsValues.hpp` was split out of
+`Physics.hpp`: `Audio/AudioValues.hpp` (`AudioEvent`, `VoiceDesc`),
+`Input/ActionValues.hpp` (`ActionID`, `ActionState`, `InputBinding`) and
+`Engine/SpawnParams.hpp`. Each original header includes its new one, so no
+existing spelling moved.
 
 ## 4. Deferred Render Graph Topology
 

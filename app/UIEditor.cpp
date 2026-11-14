@@ -26,13 +26,14 @@
 // string that FindNodeById / InsertChild / RemoveNodeById already speak.
 
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Engine/Kernel.hpp>
 #include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
@@ -62,6 +63,8 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec4;
 
 namespace GUI = ZHLN::GUI;
 
@@ -163,7 +166,9 @@ enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 struct WindowUIInputCollector {
     static constexpr size_t kQueueCap = 64;
 
-    ZHLN::Components::InputStateComponent state {};
+    ZHLN::InputState                      state {};
+    bool                                  wantCaptureKeyboard = false;
+    bool                                  wantCaptureMouse    = false;
     std::array<ZHLN::KeyCode, kQueueCap>  pressedKeys {};
     std::array<uint32_t, kQueueCap>       charStream {};
     std::array<ZHLN::KeyCode, kQueueCap>  latchedKeys {};
@@ -178,7 +183,7 @@ struct WindowUIInputCollector {
             .onKey =
                 [](void* ud, ZHLN::KeyCode key, bool pressed) -> void {
                     auto* self = static_cast<WindowUIInputCollector*>(ud);
-                    self->state.SetKey(static_cast<uint8_t>(key), pressed);
+                    self->state.SetKey(key, pressed);
                     if (pressed && self->pressedCount < kQueueCap) {
                         self->pressedKeys[self->pressedCount++] = key;
                     }
@@ -214,16 +219,13 @@ struct WindowUIInputCollector {
         charCount    = 0;
 
         ZHLN::KeyModifiers mods = ZHLN::KeyModifiers::None;
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl))) {
+        if (state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl)) {
             mods = mods | ZHLN::KeyModifiers::Ctrl;
         }
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RShift))) {
+        if (state.IsKeyDown(ZHLN::KeyCode::LShift) || state.IsKeyDown(ZHLN::KeyCode::RShift)) {
             mods = mods | ZHLN::KeyModifiers::Shift;
         }
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LAlt)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RAlt))) {
+        if (state.IsKeyDown(ZHLN::KeyCode::LAlt) || state.IsKeyDown(ZHLN::KeyCode::RAlt)) {
             mods = mods | ZHLN::KeyModifiers::Alt;
         }
 
@@ -237,9 +239,9 @@ struct WindowUIInputCollector {
             .mouseY      = state.mouseY,
             .mouseScroll = scroll,
             .mouseDown   = {
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)),
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)),
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton)),
+                state.IsMouseButtonDown(ZHLN::MouseButton::Left),
+                state.IsMouseButtonDown(ZHLN::MouseButton::Right),
+                state.IsMouseButtonDown(ZHLN::MouseButton::Middle),
             },
             .modifiers       = mods,
             .pressedKeys     = std::span<const ZHLN::KeyCode>(latchedKeys.data(), nKeys),
@@ -338,7 +340,7 @@ void DrawHierarchyRow(GUI::Frame& gui, Session& session, const GUI::UINode& node
         hierId,
         GUI::BoxConfig {
             .width   = {.grow = 1.0f},
-            .color   = selected ? JPH::Vec4 {0.20f, 0.35f, 0.55f, 0.95f} : JPH::Vec4 {0.10f, 0.12f, 0.16f, 0.80f},
+            .color   = selected ? FVec4 {0.20f, 0.35f, 0.55f, 0.95f} : FVec4 {0.10f, 0.12f, 0.16f, 0.80f},
             .padding = 4.0f,
         },
         [&]() {
@@ -415,7 +417,7 @@ void DrawHierarchy(GUI::Frame& gui, Session& session) {
     return {};
 }
 
-void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::Float4& value, float minVal, float maxVal, float step) {
+void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::FVec4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);
@@ -605,19 +607,15 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent& state, bool uiOwnsKeyboard) {
-    const float mx = state.mouseX;
-    const float my = state.mouseY;
-    const bool controlDown =
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
-    const bool gDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::G));
-    const bool sDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
-    const bool rDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::R));
-    const bool confirmDown =
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Enter)) ||
-        state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool cancelDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::InputState& state, bool uiOwnsKeyboard) {
+    const float mx          = state.mouseX;
+    const float my          = state.mouseY;
+    const bool  controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
+    const bool  gDown       = state.IsKeyDown(ZHLN::KeyCode::G);
+    const bool  sDown       = state.IsKeyDown(ZHLN::KeyCode::S);
+    const bool  rDown       = state.IsKeyDown(ZHLN::KeyCode::R);
+    const bool  confirmDown = state.IsKeyDown(ZHLN::KeyCode::Enter) || state.IsMouseButtonDown(ZHLN::MouseButton::Left);
+    const bool  cancelDown  = state.IsKeyDown(ZHLN::KeyCode::Escape);
 
     if (session.xform != XformMode::None) {
         ApplyXform(session, mx, my);
@@ -805,21 +803,20 @@ void LoadTree(Session& session, std::string_view path) {
 
 void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
     auto&      state          = session.editorInput.state;
-    const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || state.wantCaptureKeyboard;
+    const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || session.editorInput.wantCaptureKeyboard;
 
     const bool xformWasActive = session.xform != XformMode::None;
     UpdateCanvasXform(session.editorGui, session, state, uiOwnsKeyboard);
 
-    const bool escDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+    const bool escDown = state.IsKeyDown(ZHLN::KeyCode::Escape);
     if (escDown && !session.escWasDown && !uiOwnsKeyboard && !xformWasActive) {
         session.selectedId.clear();
     }
     session.escWasDown = escDown;
 
 #if defined(ZHLN_HAS_UI_TOML)
-    const bool controlDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-                             state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
-    const bool saveDown = controlDown && state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
+    const bool saveDown    = controlDown && state.IsKeyDown(ZHLN::KeyCode::S);
     if (saveDown && !session.saveWasDown && !uiOwnsKeyboard) {
         SaveTree(session.tree, kDocumentPath);
     }
@@ -940,8 +937,8 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
     );
     auto&                  rc     = kernel.GetRenderContext();
     const ZHLN::UIDrawData uiData = std::move(gui).End();
-    session.editorInput.state.wantCaptureMouse    = uiData.wantsCaptureMouse;
-    session.editorInput.state.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
+    session.editorInput.wantCaptureMouse    = uiData.wantsCaptureMouse;
+    session.editorInput.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
     const bool drawCustomCursor                   = kernel.GetPlatformHost().UsesCustomCursor();
     if (uiData.Empty() && !drawCustomCursor) {
         return;

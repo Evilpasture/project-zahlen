@@ -213,12 +213,17 @@ cameras, animation or authoring tools must explicitly install those systems.
 
 ## ABI and profiles
 
-Each config checks the compiler family, the tree's minimum GCC (`ZHLN_GCC_MIN`,
-16.1.1), architecture, dual ABI, debug-container mode, Release configuration and
-an explicit sanitizer profile. It does **not** pin a compiler patch version or a
-`__GLIBCXX__` header date: GCC point releases keep the libstdc++ ABI, and an
-older runtime is rejected by the linker/loader with the precise missing
-`GLIBCXX_x.y.z` symbol. A shared fingerprint includes the engine revision,
+Each config checks the compiler family, architecture, dual ABI,
+debug-container mode, Release configuration and an explicit sanitizer profile,
+and compiles `cmake/probes/pr125280-static-member.cpp` in the consumer's own
+toolchain. It does **not** pin a compiler version, a patch release or a
+`__GLIBCXX__` header date. A version floor was tried and removed: GCC PR
+c++/125280 rejects the static-member construct Jolt and these headers rely on,
+and its fix was cherry-picked onto `releases/gcc-16`, which reports 16.1.1 on
+both sides of the commit — so `VERSION_LESS 16.1.1` admits the broken compiler
+and tells the user nothing. Compiling the construct separates them; GCC point
+releases otherwise keep the libstdc++ ABI, and an older runtime is rejected by
+the linker/loader with the precise missing `GLIBCXX_x.y.z` symbol. A shared fingerprint includes the engine revision,
 compiler flags, Jolt public ABI definitions/options and the annotation setting;
 mixing fingerprints is rejected even when package versions match, and so is
 mixing packages from two toolchain ids.

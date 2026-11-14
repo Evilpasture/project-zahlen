@@ -29,6 +29,7 @@ namespace ZHLN {
 class Engine;
 class RenderContext;
 class AssetManager;
+class PhysicsContext;
 
 namespace GLTF {
 
@@ -106,8 +107,11 @@ struct ImportOptions {
     uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 };
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& physics, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
+auto LoadGLBPrefab(Engine& engine, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
 
+// Both loaders create colliders through physics, associated with the same
+// engine as the renderer and asset cache. GPU-only rebuilds retain them.
 // Like LoadGLBPrefab, but consumes bytes already read by the caller. Split
 // .gltf assets store geometry and textures in external .bin/image files whose
 // URIs only resolve relative to the .gltf's own location; `bytesPath` is that
@@ -117,12 +121,21 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
 auto LoadGLBPrefabFromMemory(
     RenderContext&           ctx,
     AssetManager&            cwMgr,
+    PhysicsContext&          physics,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    std::string_view         bytesPath = {},
+    ImportOptions            options   = {}
+) -> ZHLN::Optional<ModelPrefab&>;
+auto LoadGLBPrefabFromMemory(
+    Engine&                  engine,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
     std::string_view         bytesPath = {},
     ImportOptions            options   = {}
 ) -> ZHLN::Optional<ModelPrefab&>;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
+void RebuildPrefabGPUResources(GraphicsDevice ctx, ModelPrefab* prefab);
 
 // Import straight from a byte buffer and spawn it in one call. Core has no
 // equivalent because reading bytes is the importer's job.
@@ -140,6 +153,7 @@ auto InstantiatePrefabFromMemory(
 // device-lost half of importing: after a VkDevice is recreated the GPU handles
 // in a ModelPrefab are dead, and recovering them means reading the .glb again.
 void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr);
+void RebuildCachedPrefabs(Engine& engine);
 
 // Subscribes RebuildCachedPrefabs to the engine's device-lost notification.
 //

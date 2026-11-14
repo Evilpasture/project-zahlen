@@ -2,7 +2,7 @@
 
 ## Design Constraints & Goals
 - **Strictly zero runtime cost when rendering is active (`ZHLN_BUILD_RENDER=ON`, default):**
-  - Keep `ZHLN::RenderContext` non-virtual (`std::unique_ptr<Impl> _impl` PIMPL), statically linked into `zahlen_engine` with `cmake/zahlen_engine.map` internal binding — **0 virtual dispatches, 0 function-pointer indirections, 0 extra allocations, 0 hot-path branches, identical machine code**.
+  - Keep `ZHLN::RenderContext` non-virtual (`std::unique_ptr<Impl> _impl` PIMPL), statically linked into `zahlen_engine` with hidden-visibility internal binding — **0 virtual dispatches, 0 function-pointer indirections, 0 extra allocations, 0 hot-path branches, identical machine code**.
 - **Complete render/Vulkan/Slang avoidance when the world simulation is enough (`-DZHLN_BUILD_RENDER=OFF`):**
   - Skip `Vulkan-Headers`, `VulkanMemoryAllocator`, `SPIRV-Reflect`, `src/vulkan` (`zahlen_vulkan` + `volk`), `cmake/ShaderCompilation.cmake` (`zshader`, `Slang`, `zahlen_shader_catalog`, `zahlen_gpu_types`, `.spv` cooking), `zahlen_shader_bytecode`, `HostBlitSwapchain`, and all 56 Vulkan renderer TUs in `src/render/`.
   - Satisfy the 4 `src/render`-defined public symbols (`ZHLN::RenderContext`, `ZHLN::FrameScope`, `ZHLN::PipelineStatsCapture`, `ZHLN::GetRenderGraphDump`) via a single-TU world-only null implementation (`src/render/null/RenderContextNull.cpp`) with zero `#ifdef` clutter in engine, plugin, extension, or gameplay layers.

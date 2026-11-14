@@ -3,6 +3,7 @@
 
 // gameplay/Interaction/InteractionSystem.cpp
 #include "InteractionSystem.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPInteraction.hpp"
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
@@ -12,9 +13,11 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <cmath>
 #include <string>
@@ -25,7 +28,7 @@ namespace {
 // Debug aid: a readable label for whatever entity "E" is being aimed at.
 // Prefers the Source targetname the interaction code dispatches on, then the
 // ECS name, then the raw entity id so an unnamed entity is still traceable.
-std::string DebugLabel(const ECS::Registry& registry, Entity e) {
+std::string DebugLabel(InteractionQuery registry, Entity e) {
     if (const auto meta = registry.Get<BSPEntityMetadataComponent>(e)) {
         if (!meta->className.empty()) {
             return std::string(meta->className.c_str()) +
@@ -45,7 +48,7 @@ std::string DebugLabel(const ECS::Registry& registry, Entity e) {
 // the view does not lag the physics body, and snaps the camera to the
 // destination's facing the way Source does.
 void TeleportPlayer(
-    ECS::Registry&                  registry,
+    InteractionQuery                registry,
     ZHLN::Optional<PhysicsContext&> physics,
     Entity                          playerEnt,
     std::string_view                destination,
@@ -78,9 +81,9 @@ void TeleportPlayer(
 
     // The destination origin is at floor level while the character body origin
     // sits at the capsule centre, so lift by the shape's own ground offset.
-    const JPH::Vec3 destPos = destTrans->position;
-    const JPH::Vec3 center  = destPos + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f);
-    physics->SetCharacterPosition(playerPhys->physicsID, center);
+    const FVec3 destPos = destTrans->position;
+    const FVec3 center  = destPos + FVec3{0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsID) + 0.05f, 0.0f};
+    physics->SetCharacterPosition(playerPhys->physicsID, center.Cast<double>());
     physics->SetCharacterVelocity(playerPhys->physicsID, {0.0f, 0.0f, 0.0f});
 
     if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
@@ -90,12 +93,13 @@ void TeleportPlayer(
     // View snap: the destination's Euler triplet rotates +X to
     // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
     // formula -- so the camera's yaw/pitch invert straight out of it.
-    const JPH::Quat destRot = destTrans->rotation;
-    const JPH::Vec3 forward = destRot.RotateAxisX();
-    if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
-        registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
-            cc.camera.yaw   = std::atan2(forward.GetZ(), forward.GetX()) * 57.29577951308232f;
-            cc.camera.pitch = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * 57.29577951308232f;
+    const auto destRot = destTrans->rotation;
+    const FVec3 forward = destRot * FVec3::UnitX();
+    const auto cameras = registry.Entities<Components::MainCameraTagComponent>();
+    if (!cameras.empty()) {
+        registry.Patch<Components::CameraComponent>(cameras.front(), [&](Components::CameraComponent& cc) {
+            cc.camera.yaw   = Atan2(forward.z, forward.x).ToDegrees();
+            cc.camera.pitch = Asin(std::clamp(forward.y, -1.0f, 1.0f)).ToDegrees();
         });
     }
 
@@ -108,23 +112,14 @@ void TeleportPlayer(
 } // namespace
 
 void InteractionSystem::Update(
-    ECS::Query<
-        const Character::MovementComponent,
-        const Components::TransformComponent,
-        TriggerComponent&,
-        const Components::InputStateComponent,
-        PickupComponent&,
-        const ItemBaseComponent,
-        ContainerComponent&,
-        const Components::PhysicsComponent,
-        const Components::MeshComponent,
-        const UsableComponent,
-        DoorComponent&,
-        ButtonComponent&>           query,
-    ECS::Registry&                  registry,
+    InteractionQuery query,
+    ECS::EntityCommandBuffer& commands,
     ZHLN::Optional<PhysicsContext&> physics,
-    ZHLN::Optional<AudioContext&>   audio
+    ZHLN::Optional<AudioContext&> audio,
+    UseIntent useIntent
 ) {
+    const auto dispatch = query.As<DispatchQuery>();
+
     // The player is whoever carries a MovementComponent.
     Entity playerEnt = Entity::Null();
     for (Entity e: query.Entities<Character::MovementComponent>()) {
@@ -141,13 +136,19 @@ void InteractionSystem::Update(
         return;
     }
 
-    const JPH::Vec3 playerPos = playerTrans->position;
+    const FVec3 playerPos = playerTrans->position;
 
-    auto        inputState          = query.GetSingleton<Components::InputStateComponent>();
-    const bool  interactPressed     = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
-    static bool wasInteractPressed  = false;
-    const bool  interactJustPressed = interactPressed && !wasInteractPressed;
-    wasInteractPressed              = interactPressed;
+    // The edge comes from the pair the caller handed in. No function-local
+    // static: that latch used to be shared by every caller and every test, so one
+    // call's press leaked into the next and the system's result depended on how
+    // many times it had been called rather than on the world.
+    const bool interactJustPressed = useIntent.JustPressed();
+
+    // A newly created inventory is not visible through Query until playback.
+    // Keep one pending value so several pickups in this invocation accumulate
+    // into the same container, then enqueue it once.
+    ContainerComponent pendingContainer {};
+    bool addPendingContainer = false;
 
     // 1. Trigger volumes (AABB or sphere)
     auto triggerEntities = query.Entities<TriggerComponent>();
@@ -167,11 +168,11 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 triggerPosition = trans->position;
+        const FVec3 triggerPosition = trans->position;
         bool            inside          = false;
-        if (trigger.halfExtents.LengthSq() > 1e-4f) {
-            const JPH::Vec3 delta = (playerPos - triggerPosition).Abs();
-            inside = delta.GetX() <= trigger.halfExtents.GetX() && delta.GetY() <= trigger.halfExtents.GetY() && delta.GetZ() <= trigger.halfExtents.GetZ();
+        if (trigger.halfExtents.LengthSquared() > 1e-4f) {
+            const auto delta = (playerPos - triggerPosition).Abs();
+            inside = delta.x <= trigger.halfExtents.x && delta.y <= trigger.halfExtents.y && delta.z <= trigger.halfExtents.z;
         } else {
             const float dist = (triggerPosition - playerPos).Length();
             inside           = dist <= trigger.radius;
@@ -182,7 +183,7 @@ void InteractionSystem::Update(
             trigger.flags |= TriggerFlags::PlayerInside;
 
             if (interactJustPressed) {
-                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}", DebugLabel(registry, triggerEnt),
+                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}", DebugLabel(query, triggerEnt),
                     static_cast<uint32_t>(trigger.flags), std::string_view(trigger.target),
                     (trigger.flags & TriggerFlags::TouchOpens) != TriggerFlags::None,
                     (trigger.flags & TriggerFlags::UseOpens) != TriggerFlags::None,
@@ -190,12 +191,12 @@ void InteractionSystem::Update(
             }
 
             if (newlyEntered) {
-                const uint32_t firedTrigger    = FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
-                const uint32_t firedStartTouch = FireEntityOutputs(registry, triggerEnt, "OnStartTouch", audio);
+                const uint32_t firedTrigger    = FireEntityOutputs(dispatch, triggerEnt, "OnTrigger", audio);
+                const uint32_t firedStartTouch = FireEntityOutputs(dispatch, triggerEnt, "OnStartTouch", audio);
                 if ((trigger.flags & TriggerFlags::Teleports) != TriggerFlags::None) {
-                    TeleportPlayer(registry, physics, playerEnt, std::string_view(trigger.target), audio);
+                    TeleportPlayer(query, physics, playerEnt, std::string_view(trigger.target), audio);
                 } else if (firedTrigger == 0 && firedStartTouch == 0 && !trigger.target.empty()) {
-                    FireEntityInput(registry, std::string_view(trigger.target), "Toggle", "", audio);
+                    FireEntityInput(dispatch, std::string_view(trigger.target), "Toggle", "", audio);
                 }
                 if ((trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None) {
                     trigger.flags &= ~TriggerFlags::Active;
@@ -210,20 +211,22 @@ void InteractionSystem::Update(
                 if (auto pickup = query.Get<PickupComponent>(triggerEnt)) {
                     auto itemBase = query.Get<ItemBaseComponent>(triggerEnt);
                     if (itemBase) {
-                        auto container = query.Get<ContainerComponent>(playerEnt);
-                        if (!container) {
-                            container = registry.Add(playerEnt, ContainerComponent {});
-                        }
+                        auto existingContainer = query.Get<ContainerComponent>(playerEnt);
+                        ContainerComponent* container = existingContainer ? &*existingContainer : &pendingContainer;
+                        if (!existingContainer) addPendingContainer = true;
 
                         if (container->count < ContainerComponent::MAX_SLOTS) {
                             container->slots[container->count++] = triggerEnt;
                             pickup->isPickedUp                   = 1;
 
                             if (physics) {
-                                SceneResources::Detach<Components::PhysicsComponent>(*physics, registry, triggerEnt);
+                                if (auto component = query.Get<Components::PhysicsComponent>(triggerEnt)) {
+                                    SceneResources::Release(*physics, *component);
+                                    commands.RemoveComponent<Components::PhysicsComponent>(triggerEnt);
+                                }
                             }
                             if (query.Get<Components::MeshComponent>(triggerEnt)) {
-                                registry.Remove<Components::MeshComponent>(triggerEnt);
+                                commands.RemoveComponent<Components::MeshComponent>(triggerEnt);
                             }
 
                             trigger.flags &= ~TriggerFlags::Active;
@@ -256,7 +259,7 @@ void InteractionSystem::Update(
             }
         } else {
             if ((trigger.flags & TriggerFlags::PlayerInside) != TriggerFlags::None) {
-                FireEntityOutputs(registry, triggerEnt, "OnEndTouch", audio);
+                FireEntityOutputs(dispatch, triggerEnt, "OnEndTouch", audio);
                 trigger.flags &= ~TriggerFlags::PlayerInside;
             }
         }
@@ -275,11 +278,11 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 doorPosition = trans->position;
+        const FVec3 doorPosition = trans->position;
         const float     dist         = (doorPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
-                FireEntityInput(registry, doorEnt, "Open", "", audio);
+                FireEntityInput(dispatch, doorEnt, "Open", "", audio);
             }
 
             if (interactJustPressed && (door.flags & DoorFlags::UseOpens) != DoorFlags::None) {
@@ -293,7 +296,7 @@ void InteractionSystem::Update(
                     }
                 } else {
                     const std::string_view action = ((door.flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
-                    FireEntityInput(registry, doorEnt, action, "", audio);
+                    FireEntityInput(dispatch, doorEnt, action, "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 600.0f, .duration = 0.08f});
                     }
@@ -315,11 +318,11 @@ void InteractionSystem::Update(
             continue;
         }
 
-        const JPH::Vec3 buttonPosition = trans->position;
+        const FVec3 buttonPosition = trans->position;
         const float     dist           = (buttonPosition - playerPos).Length();
         if (dist <= 2.5f) {
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
-                FireEntityInput(registry, buttonEnt, "Press", "", audio);
+                FireEntityInput(dispatch, buttonEnt, "Press", "", audio);
             }
 
             if (interactJustPressed && (button.flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
@@ -329,7 +332,7 @@ void InteractionSystem::Update(
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 250.0f, .duration = 0.10f});
                     }
                 } else {
-                    FireEntityInput(registry, buttonEnt, "Press", "", audio);
+                    FireEntityInput(dispatch, buttonEnt, "Press", "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 700.0f, .duration = 0.08f});
                     }
@@ -337,11 +340,13 @@ void InteractionSystem::Update(
             }
         }
     }
+    if (addPendingContainer) commands.AddComponent(playerEnt, std::move(pendingContainer));
+
 }
 
 void DoorMovementSystem::Update(
     ECS::Query<DoorComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-    ECS::Registry&                                                                                                                   registry,
+    DispatchQuery                                                                                                                    dispatch,
     FrameDt                                                                                                                          dt,
     ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
     ZHLN::Optional<AudioContext&>                                                                                                    audio
@@ -361,10 +366,10 @@ void DoorMovementSystem::Update(
                     door->progress  = 1.0f;
                     door->state     = DoorState::Open;
                     door->waitTimer = door->wait;
-                    FireEntityOutputs(registry, e, "OnOpen", audio);
-                    FireEntityOutputs(registry, e, "OnFullyOpen", audio);
+                    FireEntityOutputs(dispatch, e, "OnOpen", audio);
+                    FireEntityOutputs(dispatch, e, "OnFullyOpen", audio);
                     if (!door->target.empty()) {
-                        FireEntityInput(registry, std::string_view(door->target), "Open", "", audio);
+                        FireEntityInput(dispatch, std::string_view(door->target), "Open", "", audio);
                     }
                 }
                 break;
@@ -374,7 +379,7 @@ void DoorMovementSystem::Update(
                     door->waitTimer -= deltaTime;
                     if (door->waitTimer <= 0.0f) {
                         door->state = DoorState::Closing;
-                        FireEntityOutputs(registry, e, "OnClose", audio);
+                        FireEntityOutputs(dispatch, e, "OnClose", audio);
                     }
                 }
                 break;
@@ -384,7 +389,7 @@ void DoorMovementSystem::Update(
                 if (door->progress <= 0.0f) {
                     door->progress = 0.0f;
                     door->state    = DoorState::Closed;
-                    FireEntityOutputs(registry, e, "OnFullyClosed", audio);
+                    FireEntityOutputs(dispatch, e, "OnFullyClosed", audio);
                 }
                 break;
             }
@@ -394,7 +399,7 @@ void DoorMovementSystem::Update(
 
         // Interpolate visual transform
         if ((door->flags & DoorFlags::Rotating) != DoorFlags::None) {
-            trans->rotation = door->closedRotation.SLERP(door->openRotation, door->progress);
+            trans->rotation = Slerp(door->closedRotation, door->openRotation, door->progress);
         } else {
             trans->position = door->closedPosition + (door->openPosition - door->closedPosition) * door->progress;
         }
@@ -407,7 +412,7 @@ void DoorMovementSystem::Update(
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                 if (phys->physicsID.Pack() != 0) {
-                    physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
+                    physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation.AsVec4());
                 }
             }
         }
@@ -416,7 +421,7 @@ void DoorMovementSystem::Update(
 
 void ButtonMovementSystem::Update(
     ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-    ECS::Registry&                                                                                                                   registry,
+    DispatchQuery                                                                                                                    dispatch,
     FrameDt                                                                                                                          dt,
     ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
     ZHLN::Optional<AudioContext&>                                                                                                    audio
@@ -436,10 +441,10 @@ void ButtonMovementSystem::Update(
                     button->progress          = 1.0f;
                     button->state             = ButtonState::Pressed;
                     button->waitTimer         = button->wait;
-                    const uint32_t firedPress = FireEntityOutputs(registry, e, "OnPressed", audio);
-                    const uint32_t firedIn    = FireEntityOutputs(registry, e, "OnIn", audio);
+                    const uint32_t firedPress = FireEntityOutputs(dispatch, e, "OnPressed", audio);
+                    const uint32_t firedIn    = FireEntityOutputs(dispatch, e, "OnIn", audio);
                     if (firedPress == 0 && firedIn == 0 && !button->target.empty()) {
-                        FireEntityInput(registry, std::string_view(button->target), "Toggle", "", audio);
+                        FireEntityInput(dispatch, std::string_view(button->target), "Toggle", "", audio);
                     }
                 }
                 break;
@@ -451,7 +456,7 @@ void ButtonMovementSystem::Update(
                         button->state = ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None) ? ButtonState::Off : ButtonState::MovingOut;
                         if (button->state == ButtonState::Off) {
                             button->progress = 0.0f;
-                            FireEntityOutputs(registry, e, "OnOut", audio);
+                            FireEntityOutputs(dispatch, e, "OnOut", audio);
                         }
                     }
                 }
@@ -462,7 +467,7 @@ void ButtonMovementSystem::Update(
                 if (button->progress <= 0.0f) {
                     button->progress = 0.0f;
                     button->state    = ButtonState::Off;
-                    FireEntityOutputs(registry, e, "OnOut", audio);
+                    FireEntityOutputs(dispatch, e, "OnOut", audio);
                 }
                 break;
             }
@@ -476,7 +481,7 @@ void ButtonMovementSystem::Update(
             if (physics) {
                 if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                     if (phys->physicsID.Pack() != 0) {
-                        physics->SetKinematicPose(phys->physicsID, trans->position, trans->rotation);
+                        physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation.AsVec4());
                     }
                 }
             }
@@ -484,10 +489,31 @@ void ButtonMovementSystem::Update(
     }
 }
 
+void InteractionSystem::Update(
+    InteractionQuery query,
+    ECS::EntityCommandBuffer& commands,
+    ZHLN::Optional<PhysicsContext&> physics,
+    ZHLN::Optional<AudioContext&> audio,
+    ECS::Res<InputReader> input,
+    ECS::Local<UseLatch> latch
+) {
+    // Device form: ask the capability for the level, keep the previous one in this
+    // node's own state, and hand the resulting intent to the same body a script
+    // or a test drives directly.
+    const bool use = input->KeyDown(KeyCode::E);
+    Update(query, commands, physics, audio, UseIntent {.use = use, .wasUseDown = latch->wasDown});
+    latch->wasDown = use;
+}
+
 namespace {
 
 void AddSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
-    updateGraph.AddSystem<&InteractionSystem::Update>();
+    // The name is overloaded (the intent form and the device form), so the cast
+    // picks the node signature explicitly: same-name overloads are how one
+    // system offers both a body and a phase entry point.
+    updateGraph.AddSystem<static_cast<void (*)(InteractionQuery, ECS::EntityCommandBuffer&, ZHLN::Optional<PhysicsContext&>,
+                                               ZHLN::Optional<AudioContext&>, ECS::Res<InputReader>, ECS::Local<InteractionSystem::UseLatch>)>(
+        &InteractionSystem::Update)>();
     updateGraph.AddSystem<&DoorMovementSystem::Update>();
     updateGraph.AddSystem<&ButtonMovementSystem::Update>();
 }

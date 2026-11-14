@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec4.hpp>
 // ===========================================================================
 // A span of samples drawn as a strip of bars.
 //
@@ -32,7 +33,7 @@
 // ===========================================================================
 
 #include <Zahlen/GUI/GUI.hpp> // the context, its boxes, and the layout a strip is
-#include <Jolt/Math/Vec4.h>    // drawn in; Jolt.h comes with it, which Vec4.h needs
+#include <Zahlen/Math/Vec4.hpp> // the native colour value
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -57,7 +58,7 @@ enum class BarScale : uint8_t {
 // before the series started, which are handed here too so a caller can draw them
 // its own way. Returning a zero-alpha colour draws no bar; the strip applies no
 // alpha of its own.
-using BarInkFn = JPH::Vec4 (*)(void* user, size_t bar, float value, bool absent);
+using BarInkFn = FVec4 (*)(void* user, size_t bar, float value, bool absent);
 
 struct BarStripStyle {
     // The strip's box, in pixels. Bars are laid out across `width` and stand up
@@ -88,9 +89,9 @@ struct BarStripStyle {
     // in `ink` unless a policy says otherwise.
     float threshold = 0.0f;
 
-    JPH::Vec4 ink       = {0.60f, 0.70f, 0.85f, 1.00f};
-    JPH::Vec4 hotInk    = {1.00f, 0.55f, 0.30f, 1.00f};
-    JPH::Vec4 absentInk = {0.02f, 0.03f, 0.05f, 0.85f};
+    FVec4 ink       = {0.60f, 0.70f, 0.85f, 1.00f};
+    FVec4 hotInk    = {1.00f, 0.55f, 0.30f, 1.00f};
+    FVec4 absentInk = {0.02f, 0.03f, 0.05f, 0.85f};
 
     // Wins over `ink`, `hotInk` and `threshold` when set: `inkUser` is whatever
     // the caller needs to reach its ramp or its palette (a core's load colour,

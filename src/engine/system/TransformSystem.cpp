@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TransformSystem.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -53,15 +54,15 @@ auto TransformSystem::LocalTransformBits(const Components::TransformComponent& t
     };
 }
 
-auto TransformSystem::WorldMatrixBits(const JPH::Mat44& matrix) noexcept -> std::array<uint32_t, 16> {
+auto TransformSystem::WorldMatrixBits(const Mat4x4& matrix) noexcept -> std::array<uint32_t, 16> {
     std::array<uint32_t, 16> bits {};
     for (uint32_t column = 0; column < 4; ++column) {
-        const JPH::Vec4 value = matrix.GetColumn4(column);
+        const auto value = matrix.Column(column);
         const size_t    base  = static_cast<size_t>(column) * 4;
-        bits[base + 0]        = std::bit_cast<uint32_t>(value.GetX());
-        bits[base + 1]        = std::bit_cast<uint32_t>(value.GetY());
-        bits[base + 2]        = std::bit_cast<uint32_t>(value.GetZ());
-        bits[base + 3]        = std::bit_cast<uint32_t>(value.GetW());
+        bits[base + 0]        = std::bit_cast<uint32_t>(value.x);
+        bits[base + 1]        = std::bit_cast<uint32_t>(value.y);
+        bits[base + 2]        = std::bit_cast<uint32_t>(value.z);
+        bits[base + 3]        = std::bit_cast<uint32_t>(value.w);
     }
     return bits;
 }
@@ -261,7 +262,7 @@ void TransformSystem::Update(TransformQuery query, ECS::EntityCommandBuffer& ecb
                 continue;
             }
 
-            JPH::Mat44 parentWorld = JPH::Mat44::sIdentity();
+            auto parentWorld = Mat4x4::Identity();
             if (node.parentIndex != ScratchStorage::NoNode) {
                 const auto& parentNode = state.nodes[node.parentIndex];
                 if (parentNode.hasResolvedWorld) {
@@ -271,10 +272,10 @@ void TransformSystem::Update(TransformQuery query, ECS::EntityCommandBuffer& ecb
                 }
             }
 
-            const JPH::Mat44 computedWorld = parentWorld * transform->GetLocalMatrix();
+            const auto computedWorld = parentWorld * ComposeTransform(transform->position, transform->rotation, transform->scale);
             auto&            snapshot      = state.snapshots[node.entity.index];
             if (auto worldTransform = query.Get<Components::WorldTransformComponent>(node.entity)) {
-                if (!node.preserveWorld && !Math::SameMatrix(worldTransform->world, computedWorld)) {
+                if (!node.preserveWorld && worldTransform->world != computedWorld) {
                     worldTransform->world = computedWorld;
                 }
                 node.resolvedWorld    = worldTransform->world;
@@ -300,9 +301,9 @@ void TransformSystem::Update(TransformQuery query, ECS::EntityCommandBuffer& ecb
     }
 }
 
-void TransformSystem::UpdateTransformHistory(ECS::Registry& registry) noexcept {
-    const auto entities        = registry.GetEntitiesWith<Components::WorldTransformComponent>();
-    auto       worldTransforms = registry.GetRawArray<Components::WorldTransformComponent>();
+void TransformSystem::UpdateTransformHistory(ECS::Query<Components::WorldTransformComponent&> query) noexcept {
+    const auto entities        = query.Entities<Components::WorldTransformComponent>();
+    auto       worldTransforms = query.Raw<Components::WorldTransformComponent>();
 
     // WorldTransformComponent is public output data, and existing systems may
     // write `world` directly (including on entities without TransformComponent).
@@ -312,7 +313,7 @@ void TransformSystem::UpdateTransformHistory(ECS::Registry& registry) noexcept {
     constexpr uint32_t kHistoryChunkSize = 512;
     TaskSystem::ParallelFor(static_cast<uint32_t>(entities.size()), kHistoryChunkSize, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
-            if (!Math::SameMatrix(worldTransforms[i].world, worldTransforms[i].previous)) {
+            if (worldTransforms[i].world != worldTransforms[i].previous) {
                 worldTransforms[i].previous = worldTransforms[i].world;
             }
         }

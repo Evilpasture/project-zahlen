@@ -10,7 +10,9 @@
 // re-push the per-frame device-address block via vkCmdPushDataEXT, and draw
 // with heap pipelines. 400 cubes in 4 shared materials verify the pipeline.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -88,27 +90,24 @@ struct DescriptorHeapsParallelSuite {
                 return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
             auto rc = engine->Graphics();
 
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 6.0f, 13.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 6.0f, 13.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
 
             // 4 strongly separated material colors.
             struct TestMaterial {
-                JPH::Float4            baseColor {};
+                ZHLN::FVec4            baseColor {};
                 std::array<uint8_t, 3> rgb {};
             };
             const std::array<TestMaterial, 4> materials {{
@@ -138,11 +137,11 @@ struct DescriptorHeapsParallelSuite {
             for (uint32_t row = 0; row < kGridRows; ++row) {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
-                    const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
+                    const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f};
                     ZHLN::PrefabFactory::CreateBox(
                         *engine, {halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {
-                            .position = {pos.GetX(), pos.GetY(), pos.GetZ()}, .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
+                            .position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
                         }
                     );
                 }

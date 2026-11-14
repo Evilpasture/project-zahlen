@@ -19,8 +19,11 @@
 
 #pragma once
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -88,7 +91,6 @@ struct EngineOptions {
         .validationMode = ZHLN::ValidationMode::On,
         .headless       = true,
         .enableMeshShading = opts.enableMeshShading,
-        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);
@@ -97,7 +99,6 @@ struct EngineOptions {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->InitializeDefaultScene();
     return engine;
 }
 
@@ -170,21 +171,17 @@ static_assert(std::is_trivially_copyable_v<EngineView> && std::is_trivially_dest
 // the default scene seeded again.
 //
 // Registry::Clear bumps every generation, so entity IDs a previous test
-// held are dead rather than dangling. InitializeDefaultScene re-registers the
-// component families (idempotent), recreates the camera and settings
-// singletons, and rebuilds the system graphs and frame scheduler.
-//
-// "Rebuilds" is load-bearing, and is what
-// scene_reset_rebuilds_engine_state_instead_of_accumulating_it pins:
-// BuildSystemGraphs clears both graphs first, because appending instead left
-// one duplicate of every system per reset -- and duplicates of a system that
-// declares no conflicting access (CullingSystem, DecalSystem) get scheduled
-// concurrently with each other. Device-level state built by
-// InitializeDefaultScene, the font atlas so far, is built once by the engine
-// and copied into the new scene rather than remade here.
+// held are dead rather than dangling. ClearScene re-seeds the baseline camera,
+// input and debug entities, resets World culling counters, and reinitializes
+// each graph node's Local<T> block in place without rebuilding the compiled
+// system graphs or recreating device-level state such as the font atlas.
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.ClearScene();
-    engine.InitializeDefaultScene();
+
+    // Graphics settings belong to the renderer, not the cleared ECS scene.
+    // A pooled acquisition must not inherit the previous test's grading,
+    // lighting, AA, or other renderer configuration.
+    engine.Graphics().ApplySettings(ZHLN::GraphicsSettings {});
 
     // The camera lives in an entity, so the reset has to follow the rebuild above:
     // before it there is no camera entity to write, and Patch reports that rather
@@ -192,7 +189,7 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // (position and yaw but not fov, say), and inheriting the previous test's
     // framing is exactly the kind of order-dependent difference a pooled engine
     // must not introduce.
-    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
+    auto       camReg    = engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 
@@ -399,12 +396,7 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
 // are spatial edge filters that perturb high-contrast pixels. Every scene that
 // asserts on stability or on exact pixel values disables AA first.
 inline void DisableAA(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::None;
-        });
-    }
+    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
     engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
@@ -515,21 +507,21 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
 
         const uint32_t validationBefore = ZHLN::Test::ValidationErrorCount();
 
-        ZHLN::RenderContext* const preWarmup = &ZHLN::EngineAccess::RenderOf(engine);
+        const uint64_t preWarmup = engine.DeviceGeneration();
         TickFrames(engine, warmupFrames);
-        if (&ZHLN::EngineAccess::RenderOf(engine) != preWarmup) {
+        if (engine.DeviceGeneration() != preWarmup) {
             continue;
         }
 
-        ZHLN::RenderContext* const preWork = &ZHLN::EngineAccess::RenderOf(engine);
-        const bool                 ok      = sceneFn(engine);
-        if (ok && &ZHLN::EngineAccess::RenderOf(engine) == preWork) {
+        const uint64_t preWork = engine.DeviceGeneration();
+        const bool     ok      = sceneFn(engine);
+        if (ok && engine.DeviceGeneration() == preWork) {
             if (outValidationDelta != nullptr) {
                 *outValidationDelta = ZHLN::Test::ValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }
-        if (&ZHLN::EngineAccess::RenderOf(engine) == preWork) {
+        if (engine.DeviceGeneration() == preWork) {
             return StableRunResult::AssertionsFailed;
         }
     }

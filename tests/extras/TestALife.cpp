@@ -2,14 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include <ALife/ALifeComponents.hpp>
 #include <ALife/Factions.hpp>
 #include <ALife/GOAP.hpp>
 #include <ALife/Graph.hpp>
 #include <ALife/SpatialGrid.hpp>
+#include <ALife/Simulator.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <atomic>
 #include <algorithm>
 #include <expected>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <memory_resource>
 #include <utility>
 
@@ -20,6 +28,8 @@ enum class ALifeTestError : uint8_t {
 };
 
 namespace {
+
+using ZHLN::DVec3;
 
 struct ALifeTestSuite {
     struct Tests {
@@ -70,10 +80,10 @@ struct ALifeTestSuite {
         std::expected<void, ZHLN::ErrorCode> graph_astar_pathfinding() {
             // Create a 4-node linear graph: 0 -- 1 -- 2 -- 3
             ZHLN::ALife::LevelGraph graph(4);
-            graph.GetNode(0).position = JPH::RVec3(0, 0, 0);
-            graph.GetNode(1).position = JPH::RVec3(10, 0, 0);
-            graph.GetNode(2).position = JPH::RVec3(20, 0, 0);
-            graph.GetNode(3).position = JPH::RVec3(30, 0, 0);
+            graph.GetNode(0).position = {0, 0, 0};
+            graph.GetNode(1).position = {10, 0, 0};
+            graph.GetNode(2).position = {20, 0, 0};
+            graph.GetNode(3).position = {30, 0, 0};
 
             graph.Connect(0, 1);
             graph.Connect(1, 2);
@@ -121,6 +131,127 @@ struct ALifeTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> typed_simulator_preserves_phase_order_and_grid_membership() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            sim.GetTuning().switch_distance = 1.0f;
+            const Entity first = reg.Create(ALifeComponent {.position = {100, 0, 100}, .state = State::Offline});
+            const Entity second = reg.Create(ALifeComponent {.position = {110, 0, 100}, .state = State::Online});
+            const Entity waiting = reg.Create(ALifeComponent {.position = {300, 0, 300}, .state = State::Online, .wait_time = 10});
+            const Entity dead = reg.Create(ALifeComponent {.position = {800, 0, 800}, .state = State::Dead});
+            SpatialGrid::WriteQuery query {reg};
+            int thinkCount = 0, eventCount = 0, interactionCount = 0;
+            bool phaseOrder = true;
+            sim.on_think = [&](Simulator&, Entity e) {
+                phaseOrder = phaseOrder && (e == first || e == second);
+                ++thinkCount;
+            };
+            sim.on_event = [&](Simulator&, const Event&) { ++eventCount; };
+            sim.on_interaction = [&](Simulator& current, Entity e, Entity neighbor) {
+                const auto matches = current.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+                phaseOrder = phaseOrder && thinkCount == 2 && eventCount == 1 && matches.size() == 2 &&
+                    ((e == first && neighbor == second) || (e == second && neighbor == first));
+                ++interactionCount;
+            };
+            sim.Update(query, 0.5f, {0, 0, 0});
+            ZHLN::Test::ExpectTrue(phaseOrder && thinkCount == 2 && eventCount == 1 && interactionCount == 2);
+            ZHLN::Test::ExpectEq(sim.GetGameTimeMS(), uint64_t {5000});
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(second)->state == State::Offline);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(waiting)->state == State::Online);
+            ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(waiting)->wait_time, 5);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(dead)->state == State::Dead);
+            for (const Entity entity: {first, second, waiting, dead}) {
+                ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(entity)->self_entity, entity);
+            }
+            // A writable query projects the read-only view for lookup.
+            sim.GetGrid().RemoveEntity(query, first);
+            const auto remaining = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(remaining.size() == 1 && remaining[0] == second);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> typed_interaction_unlinks_looted_entities() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            const Entity living = reg.Create(ALifeComponent {.position = {100, 0, 100}, .state = State::Offline, .power = 10});
+            const Entity corpse1 = reg.Create(ALifeComponent {.position = {101, 0, 100}, .state = State::Dead, .loot_value = 30});
+            const Entity corpse2 = reg.Create(ALifeComponent {.position = {102, 0, 100}, .state = State::Dead, .loot_value = 40});
+            SpatialGrid::WriteQuery query {reg};
+            for (Entity e: {living, corpse1, corpse2}) sim.GetGrid().UpdateEntity(query, e, {-1, -1, -1});
+            sim.ResolveOfflineInteraction(query, living, corpse1);
+            sim.ResolveOfflineInteraction(query, corpse2, living);
+            ZHLN::Test::ExpectEq(query.Get<ALifeComponent>(living)->power, 17);
+            ZHLN::Test::ExpectTrue(query.Get<ALifeComponent>(corpse1)->is_looted && query.Get<ALifeComponent>(corpse2)->is_looted);
+            const auto remaining = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(remaining.size() == 1 && remaining[0] == living);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> typed_simulator_parallel_chunks_join_before_grid_and_interactions() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            TaskSystem::Scope tasks {2, 64, kMinimumFiberStackSize};
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            Simulator sim;
+            sim.GetTuning().switch_distance = 1.0f;
+            constexpr uint32_t count = 300; // more than the 256-item chunk
+            for (uint32_t i = 0; i < count; ++i) {
+                reg.Create(ALifeComponent {.position = {100.0 + static_cast<double>(i) * 0.01, 0, 100}, .state = State::Offline});
+            }
+            std::atomic<uint32_t> thinkCount {0}, interactionCount {0};
+            std::atomic<bool> phaseOrder {true};
+            sim.on_think = [&](Simulator&, Entity) { thinkCount.fetch_add(1, std::memory_order_relaxed); };
+            sim.on_interaction = [&](Simulator&, Entity, Entity) {
+                if (thinkCount.load(std::memory_order_relaxed) != count) phaseOrder.store(false, std::memory_order_relaxed);
+                interactionCount.fetch_add(1, std::memory_order_relaxed);
+            };
+            SpatialGrid::WriteQuery query {reg};
+            sim.Update(query, 0.1f, {0, 0, 0});
+            const auto nearby = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            ZHLN::Test::ExpectTrue(phaseOrder.load() && thinkCount.load() == count && interactionCount.load() == count);
+            ZHLN::Test::ExpectEq(nearby.size(), static_cast<size_t>(count));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> load_rebuilds_typed_grid_after_restoring_components() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            struct Header { uint32_t magic = 0x414C4946; uint32_t version = 1; uint32_t count = 2; };
+            struct Record { Entity entity; ALifeComponent component; };
+            ECS::Registry reg;
+            reg.RegisterComponent<ALifeComponent>("ALifeComponent");
+            const auto existing = reg.Create(ALifeComponent {.position = {500, 0, 500}});
+            const auto added = reg.Create();
+            const Record records[] = {{existing, ALifeComponent {.position = {100, 0, 100}}},
+                                      {added, ALifeComponent {.position = {105, 0, 100}}}};
+            const auto path = std::filesystem::temp_directory_path() /
+                ("zahlen-alife-load-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin");
+            {
+                std::ofstream file(path, std::ios::binary);
+                const Header header;
+                file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+                file.write(reinterpret_cast<const char*>(records), sizeof(records));
+                if (!file) return std::unexpected(ALifeTestError::SpatialGridQueryFailed);
+            }
+            Simulator sim;
+            const bool loaded = sim.Load(reg, path.string().c_str());
+            std::filesystem::remove(path);
+            if (!loaded) return std::unexpected(ALifeTestError::SpatialGridQueryFailed);
+            SpatialGrid::WriteQuery query {reg};
+            const auto nearby = sim.GetGrid().Query(query.As<SpatialGrid::ReadQuery>(), {100, 0, 100}, 20.0f);
+            if (nearby.size() != 2 || !query.Get<ALifeComponent>(existing) || !query.Get<ALifeComponent>(added) ||
+                query.Get<ALifeComponent>(existing)->self_entity != existing || query.Get<ALifeComponent>(added)->self_entity != added)
+                return std::unexpected(ALifeTestError::SpatialGridQueryFailed);
+            return {};
+        }
+
         // --- 4. Spatial Grid Partitioning & Radial Query ---
         std::expected<void, ZHLN::ErrorCode> spatial_grid_queries() {
             ZHLN::ECS::Registry reg;
@@ -128,40 +259,42 @@ struct ALifeTestSuite {
 
             // 100x100 grid with 50.0m cells
             ZHLN::ALife::SpatialGrid grid(100, 100, 50.0f);
+            ZHLN::ALife::SpatialGrid::WriteQuery query {reg};
+            const auto read = query.As<ZHLN::ALife::SpatialGrid::ReadQuery>();
 
             // Entity 1 at (100, 0, 100) -> Cell (2, 2)
             ZHLN::Entity e1 = reg.Create();
             auto&        c1 = reg.Add<ZHLN::ALife::ALifeComponent>(e1);
-            c1.position     = JPH::RVec3(100.0, 0.0, 100.0);
+            c1.position = {100.0, 0.0, 100.0};
             c1.self_entity  = e1;
-            grid.UpdateEntity(reg, e1, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(query, e1, DVec3{-1, -1, -1});
 
             // Entity 2 at (110, 0, 100) (Distance 10m from e1)
             ZHLN::Entity e2 = reg.Create();
             auto&        c2 = reg.Add<ZHLN::ALife::ALifeComponent>(e2);
-            c2.position     = JPH::RVec3(110.0, 0.0, 100.0);
+            c2.position = {110.0, 0.0, 100.0};
             c2.self_entity  = e2;
-            grid.UpdateEntity(reg, e2, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(query, e2, DVec3{-1, -1, -1});
 
             // Entity 3 at (800, 0, 800) (Far away)
             ZHLN::Entity e3 = reg.Create();
             auto&        c3 = reg.Add<ZHLN::ALife::ALifeComponent>(e3);
-            c3.position     = JPH::RVec3(800.0, 0.0, 800.0);
+            c3.position = {800.0, 0.0, 800.0};
             c3.self_entity  = e3;
-            grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));
+            grid.UpdateEntity(query, e3, DVec3{-1, -1, -1});
 
             // Query within 20m of (100, 0, 100)
-            std::vector<ZHLN::Entity> results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f);
+            std::vector<ZHLN::Entity> results = grid.Query(read, DVec3{100.0, 0.0, 100.0}, 20.0f);
 
             // Should find e1 and e2, but NOT e3
             ZHLN::Test::ExpectEq(results.size(), size_t {2});
 
             // Move e2 outside the radius
-            JPH::RVec3 oldPos = c2.position;
-            c2.position       = JPH::RVec3(300.0, 0.0, 300.0);
-            grid.UpdateEntity(reg, e2, oldPos);
+            DVec3 oldPos = c2.position;
+            c2.position = {300.0, 0.0, 300.0};
+            grid.UpdateEntity(query, e2, oldPos);
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
+            results = grid.Query(read, DVec3{100.0, 0.0, 100.0}, 20.0f, std::move(results));
             ZHLN::Test::ExpectEq(results.size(), size_t {1});
             if (results.size() == 1) {
                 ZHLN::Test::ExpectEq(results[0], e1);
@@ -170,17 +303,17 @@ struct ALifeTestSuite {
             // Unlink a non-head entry, then reuse its ECS slot. A grid link
             // must carry the generation, not accidentally find the old entity
             // through a fabricated generation-0 handle.
-            const JPH::RVec3 movedFrom = c2.position;
-            c2.position = JPH::RVec3(103.0, 0.0, 100.0);
-            grid.UpdateEntity(reg, e2, movedFrom);
-            grid.RemoveEntity(reg, e1);
+            const DVec3 movedFrom = c2.position;
+            c2.position = {103.0, 0.0, 100.0};
+            grid.UpdateEntity(query, e2, movedFrom);
+            grid.RemoveEntity(query, e1);
             reg.Destroy(e1);
             const ZHLN::Entity replacement = reg.Create();
             auto& replacementComp = reg.Add<ZHLN::ALife::ALifeComponent>(replacement);
-            replacementComp.position = JPH::RVec3(105.0, 0.0, 100.0);
-            grid.UpdateEntity(reg, replacement, JPH::RVec3(-1, -1, -1));
+            replacementComp.position = {105.0, 0.0, 100.0};
+            grid.UpdateEntity(query, replacement, DVec3{-1, -1, -1});
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
+            results = grid.Query(read, DVec3{100.0, 0.0, 100.0}, 20.0f, std::move(results));
             ZHLN::Test::ExpectEq(replacement.index, e1.index);
             ZHLN::Test::ExpectNe(replacement.generation, e1.generation);
             ZHLN::Test::ExpectEq(results.size(), size_t {2});

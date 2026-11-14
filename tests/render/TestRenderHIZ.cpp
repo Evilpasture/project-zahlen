@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
@@ -105,7 +106,7 @@ struct HiZTestSuite {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // Spawn ground plane and multiple scatter cubes
             const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
@@ -128,15 +129,16 @@ struct HiZTestSuite {
                 }
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 4.0f, -10.0f};
+                cam.yaw      = ZHLN::DegF{90.0f}; // Look forward along +Z
+                cam.pitch    = ZHLN::DegF{-10.0f};
+                cam.fov      = ZHLN::DegF{60.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 4.0f, -10.0f);
-            cam.yaw      = 90.0f; // Look forward along +Z
-            cam.pitch    = -10.0f;
-            cam.fov      = 60.0f;
 
             constexpr float dt = 1.0f / 60.0f;
 
@@ -163,7 +165,7 @@ struct HiZTestSuite {
                 return std::unexpected(HiZTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto reg = engine->Entities();
 
             // 1. Large Opaque Occluder Wall right in front of camera (Z = 5m, 12m wide, 8m tall)
             const ZHLN::Entity occluderWall = ZHLN::PrefabFactory::CreateBox(
@@ -189,15 +191,16 @@ struct HiZTestSuite {
                 }
             );
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 4.0f, -5.0f};
+                cam.yaw      = ZHLN::DegF{90.0f}; // Point directly along +Z
+                cam.pitch    = ZHLN::DegF{0.0f};
+                cam.fov      = ZHLN::DegF{75.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 4.0f, -5.0f);
-            cam.yaw      = 90.0f; // Point directly along +Z
-            cam.pitch    = 0.0f;
-            cam.fov      = 75.0f;
 
             constexpr float dt = 1.0f / 60.0f;
 

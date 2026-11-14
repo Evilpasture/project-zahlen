@@ -10,7 +10,9 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
@@ -44,18 +46,15 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                });
 
                 auto mirrorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(mirrorMatRes.has_value())) {
@@ -77,29 +76,30 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}
                 );
 
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})
+                        .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                         .intensity = 140.0f,
-                        .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                        .direction = ZHLN::FVec3{0.0f, 0.75f, 0.66f}.Normalized()
                     }
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 5.0f, 14.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
-                cam.yaw      = -90.0f;
-                cam.pitch    = -22.0f;
-                cam.fov      = 60.0f;
             }
 
             uint32_t validationRaised = 0;
@@ -141,16 +141,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
-                    const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_rtr_off.ppm");
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -214,32 +208,29 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                    gfx.post.mode                    = 0;
+                });
 
                 // Sun illumination to support scene depth and HDR tone mapping
-                const ZHLN::Entity sunEnt = reg.Create();
-                reg.Add(
+                const ZHLN::Entity sunEnt = reg.Spawn();
+                reg.Attach(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
-                        .position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})
+                        .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
                     },
                     ZHLN::Components::LightComponent {
                         .type      = ZHLN::LightType::Sun,
-                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                         .intensity = 100.0f,
-                        .direction = JPH::Vec3(0.0f, 0.75f, 0.66f).Normalized()
+                        .direction = ZHLN::FVec3{0.0f, 0.75f, 0.66f}.Normalized()
                     }
                 );
 
@@ -289,15 +280,16 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}
                 );
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 5.0f, 14.0f};
+                    cam.yaw      = ZHLN::DegF{-90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
-                cam.yaw      = -90.0f;
-                cam.pitch    = -22.0f;
-                cam.fov      = 60.0f;
             }
 
             uint32_t validationRaised = 0;
@@ -323,16 +315,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    auto&      reg      = ZHLN::EngineAccess::RegistryOf(eng);
-                    const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 0; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_rtr_off.ppm");
-                    if (!settings.empty()) {
-                        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.enableRTR = 1; });
-                    }
+                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -508,20 +494,17 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+                auto reg = engine->Entities();
                 auto rc = engine->Graphics();
 
-                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-                if (!settingsEnts.empty()) {
-                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
-                        pp.fullBright      = 0;
-                        pp.exposure        = 0.015f;
-                        pp.ambientExposure = 6.0f;
-                        pp.enableSSR       = 1;
-                        pp.enableRTR       = 1;   // BVH ray gate: reflection.slang only traces when wantRTR
-                        pp.giMode          = 0;
-                    });
-                }
+                engine->Graphics().PatchSettings([](auto& gfx) {
+                    gfx.environment.fullBright       = 0;
+                    gfx.post.exposure                = 0.015f;
+                    gfx.environment.ambientExposure  = 6.0f;
+                    gfx.post.enableSSR               = 1;
+                    gfx.rayTracing.enableReflections = true;   // BVH ray gate: reflection.slang only traces when wantRTR
+                    gfx.post.mode                    = 0;
+                });
 
                 auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
                 ZHLN::PrefabFactory::CreatePlane(
@@ -563,11 +546,11 @@ struct ReflectionsTestSuite {
                     float lz     = std::cos(angle) * radius;
                     float ly     = 1.0f + static_cast<float>(i % 4) * 0.8f;
 
-                    JPH::Vec3 lightCol(std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f);
+                    ZHLN::FVec3 lightCol{std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f};
 
-                    const ZHLN::Entity lt = reg.Create();
-                    reg.Add(
-                        lt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(lx, ly, lz)},
+                    const ZHLN::Entity lt = reg.Spawn();
+                    reg.Attach(
+                        lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{lx, ly, lz}},
                         ZHLN::Components::LightComponent {
                             .type      = ZHLN::LightType::Point,
                             .color     = lightCol,
@@ -577,15 +560,16 @@ struct ReflectionsTestSuite {
                     );
                 }
 
-                const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                    auto& cam = c.camera;
+                    cam.position = {0.0f, 8.0f, -18.0f};
+                    cam.yaw      = ZHLN::DegF{90.0f};
+                    cam.pitch    = ZHLN::DegF{-22.0f};
+                    cam.fov      = ZHLN::DegF{60.0f};
+                });
+                if (!ZHLN::Test::ExpectTrue(camOk)) {
                     return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
                 }
-                ZHLN::Camera& cam = camComp->camera;
-                cam.position = JPH::Vec3(0.0f, 8.0f, -18.0f);
-                cam.yaw      = 90.0f;
-                cam.pitch    = -22.0f;
-                cam.fov      = 60.0f;
             }
 
             uint32_t validationRaised = 0;

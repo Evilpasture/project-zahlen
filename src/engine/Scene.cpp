@@ -1,7 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -11,7 +15,7 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -20,6 +24,7 @@
 #include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -44,10 +49,10 @@ void AssignConverted(Dst& dst, const Src& src) {
     // sky: the component carries a fourth lane, the description does not. Sky
     // alpha is not part of the description and is restored as one when a scene
     // is instantiated.
-    } else if constexpr (std::is_same_v<D, ZHLN::Float3> && std::is_same_v<S, ZHLN::Float4>) {
-        dst = ZHLN::Float3 {src.x, src.y, src.z};
-    } else if constexpr (std::is_same_v<D, ZHLN::Float4> && std::is_same_v<S, ZHLN::Float3>) {
-        dst = ZHLN::Float4 {src.x, src.y, src.z, 1.0f};
+    } else if constexpr (std::is_same_v<D, ZHLN::FVec3> && std::is_same_v<S, ZHLN::FVec4>) {
+        dst = {src.x, src.y, src.z};
+    } else if constexpr (std::is_same_v<D, ZHLN::FVec4> && std::is_same_v<S, ZHLN::FVec3>) {
+        dst = {src.x, src.y, src.z, 1.0f};
     } else if constexpr (std::is_arithmetic_v<D> && std::is_arithmetic_v<S>) {
         dst = static_cast<D>(src);
     }
@@ -61,7 +66,7 @@ void AssignConverted(Dst& dst, const Src& src) {
     //
     // What guards the rules instead: SharesEveryField below pins the name set, and
     // the pairs that do match are same-type except the sky, which the two
-    // Float3/Float4 rules above cover in both directions.
+    // FVec3/FVec4 rules above cover in both directions.
 }
 
 template <typename Dst, typename Src>
@@ -81,16 +86,11 @@ consteval auto SharesEveryField() -> bool {
     return true;
 }
 
-static_assert(
-    SharesEveryField<SceneEnvironment, Components::PostProcessSettingsComponent>(),
-    "SceneEnvironment declares a field PostProcessSettingsComponent does not have. Add it to the component (with the same "
-    "default) or drop it from the description -- the two are copied by field name, in both directions."
-);
-
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
-        .position           = entity.transform.position,
-        .rotation           = Math::EulerDegreesToQuat(entity.transform.rotation),
+        .position           = {static_cast<double>(entity.transform.position.x), static_cast<double>(entity.transform.position.y),
+                               static_cast<double>(entity.transform.position.z)},
+        .rotation           = Quat::FromEulerDegrees({entity.transform.rotation}),
         .scale              = entity.transform.scale,
         .createPhysics      = entity.body != BodyKind::None,
         .isStaticPhysics    = entity.body != BodyKind::Dynamic,
@@ -111,8 +111,8 @@ static_assert(
     return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
 
-[[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
-    return ctx.CreateMaterial(
+[[nodiscard]] auto BuildMaterial(GraphicsDevice gfx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
+    return gfx.CreateMaterial(
         MaterialDesc {
             .metallic  = material.metallic,
             .roughness = material.roughness,
@@ -122,18 +122,18 @@ static_assert(
     );
 }
 
-void NameEntity(ECS::Registry& registry, Entity entity, std::string_view name) {
+void NameEntity(Entities entities, Entity entity, std::string_view name) {
     if (name.empty() || entity == Entity::Null()) {
         return;
     }
-    registry.Assign<Components::NameComponent>(entity, String64(name));
+    entities.Attach(entity, Components::NameComponent {.name = String64(name)});
 }
 
-void StampSource(ECS::Registry& registry, Entity entity, const SceneEntity& description) {
+void StampSource(Entities entities, Entity entity, const SceneEntity& description) {
     if (entity == Entity::Null()) {
         return;
     }
-    registry.Add(
+    entities.Attach(
         entity, Components::SceneSourceComponent {
                     .shape                 = description.shape,
                     .source                = ZHLN::String256 {description.source},
@@ -151,31 +151,37 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     instance.entities.reserve(description.entities.size());
     instance.lights.reserve(description.lights.size());
 
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto entities = engine.Entities();
 
-    // The description's camera applies when the world has a main camera entity to
-    // keep it. A world without one still instantiates its entities, lights and
-    // environment: the camera block is one field of the description, not the scene,
-    // and a caller that wants it applied builds the scene first.
-    auto&      sceneReg     = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
-    sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
-        c.camera.position = JPH::Vec3 {description.camera.position};
-        c.camera.yaw      = description.camera.yaw;
-        c.camera.pitch    = description.camera.pitch;
-        c.camera.fov      = description.camera.fov;
+    // Ensure a main camera entity exists in the world, creating one when a
+    // caller despawned it before instantiating this description.
+    Entity cameraEntity = entities.SingletonEntity<Components::MainCameraTagComponent>();
+    if (cameraEntity == Entity::Null()) {
+        cameraEntity = entities.Spawn(Components::MainCameraTagComponent {}, Components::CameraComponent {});
+    }
+    entities.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
+        c.camera.position = FVec3 {description.camera.position};
+        c.camera.yaw      = DegF{description.camera.yaw};
+        c.camera.pitch    = DegF{description.camera.pitch};
+        c.camera.fov      = DegF{description.camera.fov};
     });
 
+    // The scene description is a source of settings, not their owner: it hands
+    // them to the graphics device and keeps no copy.
     const SceneEnvironment& environment = description.environment;
-    for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { CopySharedFields(pp, environment); });
+    {
+        GraphicsSettings gfx = engine.Graphics().Settings();
+        CopySharedFields(gfx.post, environment);
+        CopySharedFields(gfx.environment, environment);
+        gfx.rayTracing.enableReflections = environment.enableRTR;
+        engine.Graphics().ApplySettings(gfx);
     }
 
     for (const SceneEntity& entity: description.entities) {
         PrefabFactory::SpawnParams params = MakeSpawnParams(entity);
 
         if (NeedsMaterial(entity.material)) {
-            auto material = BuildMaterial(ZHLN::EngineAccess::RenderOf(engine), entity.material);
+            auto material = BuildMaterial(engine.Graphics(), entity.material);
             if (!material) {
                 ZHLN::Log("[Scene] entity '{}': material creation failed", entity.name);
                 return std::unexpected(SceneError::MaterialCreationFailed);
@@ -186,15 +192,15 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         switch (entity.shape) {
             case ShapeKind::Box: {
                 const Entity created = PrefabFactory::CreateBox(engine, entity.halfExtents, params);
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
             case ShapeKind::Plane: {
                 const Entity created = PrefabFactory::CreatePlane(engine, entity.extent, entity.material.baseColor, params);
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
@@ -231,16 +237,13 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 }
 
                 const uint32_t recorded = std::min(count, static_cast<uint32_t>(parts.size()));
-                NameEntity(registry, parts[0], entity.name);
-                StampSource(registry, parts[0], entity);
+                NameEntity(entities, parts[0], entity.name);
+                StampSource(entities, parts[0], entity);
 
                 // Every mesh part of a prop carries the same leaf ambient cube.
                 if (entity.hasAmbientCube) {
                     for (uint32_t i = 0; i < recorded; ++i) {
-                        registry.Add<Components::AmbientCubeComponent>(parts[i]);
-                        registry.Patch<Components::AmbientCubeComponent>(parts[i], [&](auto& c) {
-                            c.cube = entity.ambientCube;
-                        });
+                        entities.Attach(parts[i], Components::AmbientCubeComponent {.cube = entity.ambientCube});
                     }
                 }
 
@@ -248,30 +251,25 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                     // Collider extent: union of the prefab's part bounds when
                     // available (correct for BSP submodel prefabs and .mdl
                     // props alike), otherwise the description's halfExtents.
-                    JPH::Vec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
+                    FVec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
                     if (loadedPrefab && !loadedPrefab->parts.empty()) {
-                        JPH::Vec3 lo = JPH::Vec3::sReplicate(1e30f);
-                        JPH::Vec3 hi = JPH::Vec3::sReplicate(-1e30f);
+                        FVec3 lo = FVec3::Splat(1e30f);
+                        FVec3 hi = FVec3::Splat(-1e30f);
                         for (const ModelPart& part: loadedPrefab->parts) {
-                            lo = JPH::Vec3::sMin(lo, JPH::Vec3(part.localMin.x, part.localMin.y, part.localMin.z));
-                            hi = JPH::Vec3::sMax(hi, JPH::Vec3(part.localMax.x, part.localMax.y, part.localMax.z));
+                            lo = {std::min(lo.x, part.localMin.x), std::min(lo.y, part.localMin.y), std::min(lo.z, part.localMin.z)};
+                            hi = {std::max(hi.x, part.localMax.x), std::max(hi.y, part.localMax.y), std::max(hi.z, part.localMax.z)};
                         }
                         half = (hi - lo) * 0.5f * std::max({params.scale.x, params.scale.y, params.scale.z});
                     }
-                    half = JPH::Vec3::sMax(half, JPH::Vec3::sReplicate(0.05f));
+                    half = {std::max(half.x, 0.05f), std::max(half.y, 0.05f), std::max(half.z, 0.05f)};
 
-                    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-                    const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.GetX(), half.GetY(), half.GetZ());
-                    if (shape != nullptr) {
-                        registry.Add(
-                            parts[0], Components::PhysicsComponent {
-                                          .physicsID = physics.CreateRigidBody(
-                                              shape, params.position, params.rotation, JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
-                                              params.physicsCategory, params.physicsMask
-                                          ),
-                                          .isStatic = true
-                                      }
-                        );
+                    auto physics = engine.Physics();
+                    const auto body = physics.CreateRigidBody(
+                        Physics::Shape<Physics::Box> {half}, params.position, params.rotation.AsVec4(),
+                        Physics::MotionType::Kinematic, Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask
+                    );
+                    if (body != Physics::BodyID::Null()) {
+                        entities.Attach(parts[0], Components::PhysicsComponent {.physicsID = body, .isStatic = true});
                     }
                 }
 
@@ -283,17 +281,17 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             case ShapeKind::Empty: {
                 // Logic-only entity (trigger volumes): transform + source stamp,
                 // no rendered geometry and no physics.
-                const JPH::Vec3  position = JPH::Vec3 {entity.transform.position};
-                const JPH::Quat  rotation = Math::EulerDegreesToQuat(entity.transform.rotation);
-                const JPH::Vec3  scale    = JPH::Vec3 {entity.transform.scale};
-                const JPH::Mat44 world    = Math::CreateTransform(position, rotation, scale);
+                const auto position = entity.transform.position;
+                const auto rotation = Quat::FromEulerDegrees({entity.transform.rotation});
+                const auto scale = entity.transform.scale;
+                const auto world = ComposeTransform(position, rotation, scale);
 
-                const Entity created = registry.Create(
+                const Entity created = entities.Spawn(
                     Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
                     Components::WorldTransformComponent {.world = world, .previous = world}
                 );
-                NameEntity(registry, created, entity.name);
-                StampSource(registry, created, entity);
+                NameEntity(entities, created, entity.name);
+                StampSource(entities, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
@@ -307,20 +305,20 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             return std::unexpected(SceneError::UnknownLightType);
         }
 
-        const JPH::Vec3  position = JPH::Vec3 {light.position};
-        const JPH::Quat  rotation = Math::EulerDegreesToQuat(light.rotation);
-        const JPH::Mat44 world    = Math::CreateTransform(position, rotation, {1.0f, 1.0f, 1.0f});
+        const auto position = light.position;
+        const auto rotation = Quat::FromEulerDegrees({light.rotation});
+        const auto world = ComposeTransform(position, rotation, {1.0f, 1.0f, 1.0f});
 
-        const JPH::Vec3 rawDirection = JPH::Vec3 {light.direction};
-        const JPH::Vec3 direction    = rawDirection.LengthSq() > 1e-8f ? rawDirection.Normalized() : rawDirection;
+        const auto rawDirection = light.direction;
+        const auto direction = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
-        const Entity created = registry.Create(
+        const Entity created = entities.Spawn(
             Components::NameComponent {.name = String64(light.name)},
-            Components::TransformComponent {.position = position, .rotation = rotation, .scale = JPH::Vec3::sReplicate(1.0f)},
+            Components::TransformComponent {.position = position, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}},
             Components::WorldTransformComponent {.world = world, .previous = world},
             Components::LightComponent {
                 .type        = *type,
-                .color       = JPH::Vec3 {light.color},
+                .color       = light.color,
                 .intensity   = light.intensity,
                 .radius      = light.radius,
                 .direction   = direction,
@@ -351,30 +349,27 @@ namespace {
 // in (a container, or a Jolt vector out of the maths library). Kept as a function
 // so the description's spelling stays decided in one place rather than at eight
 // call sites.
-[[nodiscard]] auto ToDescriptionFloat3(ZHLN::Float3 v) noexcept -> ZHLN::Float3 {
+[[nodiscard]] auto ToDescriptionFloat3(ZHLN::FVec3 v) noexcept -> ZHLN::FVec3 {
     return v;
 }
 
 [[nodiscard]] auto ToDescriptionTransform(const Components::TransformComponent& transform) noexcept -> Transform {
     return Transform {
         .position = ToDescriptionFloat3(transform.position),
-        .rotation = ToDescriptionFloat3(Math::QuatToEulerDegrees(transform.rotation)),
+        .rotation = ToDescriptionFloat3(transform.rotation.EulerAnglesDegrees().value),
         .scale    = ToDescriptionFloat3(transform.scale)
     };
 }
 
 [[nodiscard]] auto ToDescriptionCamera(const Camera& camera) noexcept -> SceneCamera {
-    return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw, .pitch = camera.pitch, .fov = camera.fov};
+    return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw.value, .pitch = camera.pitch.value, .fov = camera.fov.value};
 }
 
-[[nodiscard]] auto ExtractEnvironment(const ECS::Registry& registry) -> SceneEnvironment {
+[[nodiscard]] auto ExtractEnvironment(const GraphicsSettings& gfx) -> SceneEnvironment {
     SceneEnvironment environment;
-    for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        if (const auto pp = registry.Get<Components::PostProcessSettingsComponent>(settings)) {
-            CopySharedFields(environment, *pp);
-            break;
-        }
-    }
+    CopySharedFields(environment, gfx.post);
+    CopySharedFields(environment, gfx.environment);
+    environment.enableRTR = gfx.rayTracing.enableReflections;
     return environment;
 }
 
@@ -396,7 +391,7 @@ namespace {
         .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
-        .emissive              = gpu.has_value() ? ZHLN::Float3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
+        .emissive              = gpu.has_value() ? gpu->emissiveFactor.XYZ() : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }
@@ -467,7 +462,7 @@ namespace {
                 .name        = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-                .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+                .rotation    = transform ? ToDescriptionFloat3(transform->rotation.EulerAnglesDegrees().value) : defaults.rotation,
                 .direction   = ToDescriptionFloat3(light.direction),
                 .color       = ToDescriptionFloat3(light.color),
                 .intensity   = light.intensity,
@@ -490,27 +485,13 @@ namespace {
 
 } // namespace
 
-auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
+auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
     return Scene {
         .camera      = ToDescriptionCamera(camera),
-        .environment = ExtractEnvironment(registry),
+        .environment = ExtractEnvironment(gfx),
         .entities    = ExtractEntities(registry, materials),
         .lights      = ExtractLights(registry),
     };
-}
-
-auto Extract(Engine& engine) -> Scene {
-    // The description's camera block is the world's main camera when there is one;
-    // a world without one describes the engine's default framing, since there is
-    // nothing else to write into that field.
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<Components::CameraComponent>();
-    const auto camera  = camComp ? camComp->camera : Camera {};
-    return Extract(
-        camera, ZHLN::EngineAccess::RegistryOf(engine),
-        MaterialLookup {.userdata = &ZHLN::EngineAccess::RenderOf(engine), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
-                            return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
-                        }}
-    );
 }
 
 } // namespace ZHLN::Scene

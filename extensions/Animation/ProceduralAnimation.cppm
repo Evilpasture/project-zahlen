@@ -4,16 +4,17 @@
 module;
 
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Animation/ProceduralMath.hpp>
+#include <Zahlen/Math/Angles.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -99,8 +100,8 @@ struct RigChildOfConstraint {
     RigNodeIndex   parent         = InvalidRigNode;
     RigNodeIndex   child          = InvalidRigNode;
     RigChildOfKind kind           = RigChildOfKind::Hand;
-    ZHLN::Mat44    bindRelative   = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44    localPoseDelta = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4    bindRelative   = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4    localPoseDelta = ZHLN::Mat4x4::Identity();
 };
 
 enum class FingerDigit : uint8_t {
@@ -120,8 +121,8 @@ struct RigFingerJointConstraint {
     uint8_t      segment        = 0;
     bool         repairRelation = false;
     float        hingeFlexSign  = -1.0f;
-    ZHLN::Mat44  bindRelative   = ZHLN::Mat44::sIdentity();
-    ZHLN::Mat44  localPoseDelta = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4  bindRelative   = ZHLN::Mat4x4::Identity();
+    ZHLN::Mat4x4  localPoseDelta = ZHLN::Mat4x4::Identity();
 };
 
 /**
@@ -137,9 +138,9 @@ struct alignas(64) RigBoneMap {
         values.fill(InvalidRigNode);
         return values;
     }();
-    std::array<JPH::Mat44, kBoneCount> inverseBindMatrices = [] {
-        std::array<JPH::Mat44, kBoneCount> values;
-        values.fill(JPH::Mat44::sIdentity());
+    std::array<Mat4x4, kBoneCount> inverseBindMatrices = [] {
+        std::array<Mat4x4, kBoneCount> values;
+        values.fill(Mat4x4::Identity());
         return values;
     }();
 
@@ -148,15 +149,15 @@ struct alignas(64) RigBoneMap {
         values.fill(InvalidRigNode);
         return values;
     }();
-    std::array<JPH::Mat44, kMaxRigNodes> bindLocalTransforms = [] {
-        std::array<JPH::Mat44, kMaxRigNodes> values;
-        values.fill(JPH::Mat44::sIdentity());
+    std::array<Mat4x4, kMaxRigNodes> bindLocalTransforms = [] {
+        std::array<Mat4x4, kMaxRigNodes> values;
+        values.fill(Mat4x4::Identity());
         return values;
     }();
-    std::array<JPH::Mat44, kMaxRigNodes> localTransforms = bindLocalTransforms;
-    std::array<JPH::Mat44, kMaxRigNodes> modelTransforms = bindLocalTransforms;
+    std::array<Mat4x4, kMaxRigNodes> localTransforms = bindLocalTransforms;
+    std::array<Mat4x4, kMaxRigNodes> modelTransforms = bindLocalTransforms;
 
-    std::array<JPH::Quat, 2>                               handBoneToPalmRotations {JPH::Quat::sIdentity(), JPH::Quat::sIdentity()};
+    std::array<Quat, 2>                               handBoneToPalmRotations {Quat::Identity(), Quat::Identity()};
     std::array<bool, 2>                                    handPalmFramesValid {false, false};
     std::array<RigFingerJointConstraint, kMaxFingerJoints> fingerJointConstraints {};
     size_t                                                 fingerJointConstraintCount = 0;
@@ -166,20 +167,20 @@ struct alignas(64) RigBoneMap {
 
     // Spring-damper keyframe state for the 21 semantic controls. Authored clip
     // samples become physical targets; procedural passes then layer on top.
-    std::array<JPH::Vec3, kCoreBoneCount> poseTranslations {};
-    std::array<JPH::Vec3, kCoreBoneCount> poseTranslationVelocities {};
-    std::array<JPH::Quat, kCoreBoneCount> poseRotations = [] {
-        std::array<JPH::Quat, kCoreBoneCount> values;
-        values.fill(JPH::Quat::sIdentity());
+    std::array<FVec3, kCoreBoneCount> poseTranslations {};
+    std::array<FVec3, kCoreBoneCount> poseTranslationVelocities {};
+    std::array<Quat, kCoreBoneCount> poseRotations = [] {
+        std::array<Quat, kCoreBoneCount> values;
+        values.fill(Quat::Identity());
         return values;
     }();
-    std::array<JPH::Vec3, kCoreBoneCount> poseAngularVelocities {};
-    std::array<JPH::Vec3, kCoreBoneCount> poseScales = [] {
-        std::array<JPH::Vec3, kCoreBoneCount> values;
-        values.fill(JPH::Vec3::sReplicate(1.0f));
+    std::array<FVec3, kCoreBoneCount> poseAngularVelocities {};
+    std::array<FVec3, kCoreBoneCount> poseScales = [] {
+        std::array<FVec3, kCoreBoneCount> values;
+        values.fill(FVec3::Splat(1.0f));
         return values;
     }();
-    std::array<JPH::Vec3, kCoreBoneCount> poseScaleVelocities {};
+    std::array<FVec3, kCoreBoneCount> poseScaleVelocities {};
     float                                 poseSpringStiffness     = 2500.0f;
     float                                 poseSpringDampingFactor = 0.90f;
     int32_t                               springPoseTrack         = -1;
@@ -246,10 +247,10 @@ struct ProceduralLocomotionComponent {
     float      forwardLeanScale = 1.0f;
     float      lateralBankScale = 1.0f;
 
-    ZHLN::Float3 localFootTargetL = {};
-    ZHLN::Float3 localFootTargetR = {};
-    ZHLN::Float3 footNormalL      = {0.0f, 1.0f, 0.0f};
-    ZHLN::Float3 footNormalR      = {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 localFootTargetL = {};
+    ZHLN::FVec3 localFootTargetR = {};
+    ZHLN::FVec3 footNormalL      = {0.0f, 1.0f, 0.0f};
+    ZHLN::FVec3 footNormalR      = {0.0f, 1.0f, 0.0f};
     float        plantWeightL     = 1.0f;
     float        plantWeightR     = 1.0f;
     bool         ikReachClampedL  = false;
@@ -280,15 +281,15 @@ struct ProceduralLocomotionComponent {
     float        passWeightR       = 0.0f;
     float        reachWeightL      = 0.0f;
     float        reachWeightR      = 0.0f;
-    ZHLN::Float3 centerOfMassModel = {0.0f, 1.12f, 0.0f};
+    ZHLN::FVec3 centerOfMassModel = {0.0f, 1.12f, 0.0f};
 
-    ZHLN::Float3 previousVelocity        = {};
-    ZHLN::Float3 directionalAcceleration = {};
-    ZHLN::Float4 previousRootRotation    = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 previousVelocity        = {};
+    ZHLN::FVec3 directionalAcceleration = {};
+    ZHLN::Quat previousRootRotation = ZHLN::Quat::Identity();
     bool         orientationInitialized  = false;
 
-    ZHLN::Float3 plantedFootWorldL = {};
-    ZHLN::Float3 plantedFootWorldR = {};
+    ZHLN::FVec3 plantedFootWorldL = {};
+    ZHLN::FVec3 plantedFootWorldR = {};
     bool         footLockValidL    = false;
     bool         footLockValidR    = false;
     bool         wasPlantedL       = true;
@@ -302,18 +303,18 @@ struct alignas(64) HairStrandsComponent {
     static constexpr size_t kLinksPerStrand     = 6;
     static constexpr size_t kTotalParticles     = kStrandCount * kLinksPerStrand;
 
-    std::array<JPH::Vec3, kTotalParticles> positions {};
-    std::array<JPH::Vec3, kTotalParticles> prevPositions {};
+    std::array<FVec3, kTotalParticles> positions {};
+    std::array<FVec3, kTotalParticles> prevPositions {};
 
     // Rest state is stored in head-local space and populated directly from the
     // imported GLB bind pose. This lets every mapped bone return to its authored
     // silhouette instead of treating all strands as gravity-only ropes.
-    std::array<JPH::Vec3, kTotalParticles> restLocalPositions {};
-    std::array<JPH::Quat, kTotalParticles> restLocalRotations {};
-    std::array<JPH::Vec3, kTotalParticles> restLocalDirections {};
+    std::array<FVec3, kTotalParticles> restLocalPositions {};
+    std::array<Quat, kTotalParticles> restLocalRotations {};
+    std::array<FVec3, kTotalParticles> restLocalDirections {};
     std::array<float, kTotalParticles>     segmentLengths {};
     std::array<float, kTotalParticles>     bendLengths {};
-    std::array<JPH::Vec3, kStrandCount>    rootBindOffsets {};
+    std::array<FVec3, kStrandCount>    rootBindOffsets {};
 
     float damping                = 0.94f;
     float gravity                = -9.81f;
@@ -329,17 +330,17 @@ struct alignas(64) HairStrandsComponent {
 };
 
 struct ProceduralLookAtComponent {
-    ZHLN::Float3 targetWorldPos = {};
+    ZHLN::FVec3 targetWorldPos = {};
     float        weight         = 1.0f;
     float        maxAngleDeg    = 75.0f;
 };
 
 struct FirstPersonVisibilityComponent {
-    ZHLN::Float3 eyeOffsetModel      = {0.0f, 0.07f, 0.08f};
-    ZHLN::Float3 smoothedEyeModel    = {};
-    ZHLN::Float3 eyeVelocity         = {};
-    ZHLN::Float4 smoothedViewModel   = {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3 viewAngularVelocity = {};
+    ZHLN::FVec3 eyeOffsetModel      = {0.0f, 0.07f, 0.08f};
+    ZHLN::FVec3 smoothedEyeModel    = {};
+    ZHLN::FVec3 eyeVelocity         = {};
+    ZHLN::Quat smoothedViewModel = ZHLN::Quat::Identity();
+    ZHLN::FVec3 viewAngularVelocity = {};
     float        lookYawDegrees      = 0.0f;
     float        lookPitchDegrees    = 0.0f;
     float        positionStiffness   = 120.0f;
@@ -392,8 +393,8 @@ struct GraspDesc {
 struct GripPoint {
     CharacterBone       assignedLimb       = CharacterBone::HandR;
     GripOrientationMode orientationMode    = GripOrientationMode::AutomaticHanded;
-    ZHLN::Mat44         localTransform     = ZHLN::Mat44::sIdentity();
-    ZHLN::Float3        poleHintOffset     = {0.0f, -1.0f, -0.5f};
+    ZHLN::Mat4x4         localTransform     = ZHLN::Mat4x4::Identity();
+    ZHLN::FVec3        poleHintOffset     = {0.0f, -1.0f, -0.5f};
     float               ikWeight           = 1.0f;
     float               ikWeightVelocity   = 0.0f;
     float               evaluatedIKWeight  = 1.0f;
@@ -414,12 +415,12 @@ struct ItemObstacleAvoidance {
 };
 
 struct ItemSwayState {
-    ZHLN::Float3 positionOffset         = {};
-    ZHLN::Float3 positionVelocity       = {};
-    ZHLN::Float4 rotationOffset         = {0.0f, 0.0f, 0.0f, 1.0f};
-    ZHLN::Float3 angularVelocity        = {};
-    ZHLN::Float3 previousDriverPosition = {};
-    ZHLN::Float4 previousDriverRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    ZHLN::FVec3 positionOffset         = {};
+    ZHLN::FVec3 positionVelocity       = {};
+    ZHLN::Quat rotationOffset = ZHLN::Quat::Identity();
+    ZHLN::FVec3 angularVelocity        = {};
+    ZHLN::FVec3 previousDriverPosition = {};
+    ZHLN::Quat previousDriverRotation = ZHLN::Quat::Identity();
     float        massKg                 = 2.5f;
     float        stiffness              = 130.0f;
     float        damping                = 0.84f;
@@ -431,9 +432,9 @@ struct ItemHandlingComponent {
     ItemDriverMode driverMode = ItemDriverMode::HandAnchored;
     Entity         itemEntity {};
 
-    ZHLN::Mat44 hipLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.20f, -0.16f, 0.40f));
-    ZHLN::Mat44 aimLocalOffset = JPH::Mat44::sTranslation(JPH::Vec3(0.00f, -0.05f, 0.22f));
-    ZHLN::Mat44 worldAnchor    = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4 hipLocalOffset = ZHLN::CreateTranslation(FVec3{0.20f, -0.16f, 0.40f});
+    ZHLN::Mat4x4 aimLocalOffset = ZHLN::CreateTranslation(FVec3{0.00f, -0.05f, 0.22f});
+    ZHLN::Mat4x4 worldAnchor    = ZHLN::Mat4x4::Identity();
     float       aimProgress    = 0.0f;
     float       aimVelocity    = 0.0f;
 
@@ -441,7 +442,7 @@ struct ItemHandlingComponent {
     size_t                   gripCount = 0;
     ItemObstacleAvoidance    avoidance {};
     ItemSwayState            sway {};
-    ZHLN::Mat44              itemModelTransform = ZHLN::Mat44::sIdentity();
+    ZHLN::Mat4x4              itemModelTransform = ZHLN::Mat4x4::Identity();
     float                    shoulderLeadWeight = 0.20f;
     float                    torsoReachWeight   = 0.25f;
 };
@@ -527,43 +528,43 @@ namespace Animation {
 float      EvaluateGravityBounce(const ProceduralLocomotionComponent& gait, float speed) noexcept;
 float      EvaluateTwoKeyPosePhase(float stridePhase) noexcept;
 void       BlendGaitParameters(ProceduralLocomotionComponent& gait, float dt) noexcept;
-void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float angularVelocity, float dt) noexcept;
-void       EvaluateGait(ProceduralLocomotionComponent& gait, JPH::Vec3Arg velocity, float dt) noexcept;
-void       ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-JPH::Mat44 CorrectBoneDirection(
-    const JPH::Mat44& authoredTransform,
-    JPH::Vec3Arg      currentDirection,
-    JPH::Vec3Arg      solvedDirection,
-    JPH::Vec3Arg      solvedPosition
+void       EvaluateGait(ProceduralLocomotionComponent& gait, FVec3 velocity, float angularVelocity, float dt) noexcept;
+void       EvaluateGait(ProceduralLocomotionComponent& gait, FVec3 velocity, float dt) noexcept;
+void       ApplyAccelerationTilt(ProceduralLocomotionComponent& gait, Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept;
+Mat4x4 CorrectBoneDirection(
+    const Mat4x4& authoredTransform,
+    FVec3      currentDirection,
+    FVec3      solvedDirection,
+    FVec3      solvedPosition
 ) noexcept;
-JPH::Vec3  LimitGroundNormal(JPH::Vec3Arg modelNormal, float maxSidewaysRadians, float maxForwardRadians) noexcept;
-JPH::Mat44 AlignFootToGround(
-    const JPH::Mat44& authoredFoot,
-    JPH::Vec3Arg      target,
-    JPH::Vec3Arg      modelNormal,
-    float             maxSidewaysRadians = JPH::DegreesToRadians(15.0f),
-    float             maxForwardRadians  = JPH::DegreesToRadians(35.0f)
+FVec3  LimitGroundNormal(FVec3 modelNormal, RadF maxSidewaysRadians, RadF maxForwardRadians) noexcept;
+Mat4x4 AlignFootToGround(
+    const Mat4x4& authoredFoot,
+    FVec3      target,
+    FVec3      modelNormal,
+    RadF             maxSidewaysRadians = ZHLN::DegF{15.0f}.ToRadians(),
+    RadF             maxForwardRadians  = ZHLN::DegF{35.0f}.ToRadians()
 ) noexcept;
-size_t SetModelTransformAndCarrySubtree(JPH::Mat44* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const JPH::Mat44& target) noexcept;
+size_t SetModelTransformAndCarrySubtree(Mat4x4* nodeTransforms, const RigBoneMap& map, RigNodeIndex rootNode, const Mat4x4& target) noexcept;
 void   ApplyIKReachTilt(
     ProceduralLocomotionComponent& gait,
-    JPH::Mat44*                    nodeTransforms,
+    Mat4x4*                    nodeTransforms,
     const RigBoneMap&              map,
-    JPH::Vec3Arg                   targetL,
-    JPH::Vec3Arg                   targetR,
+    FVec3                   targetL,
+    FVec3                   targetR,
     float                          weightL,
     float                          weightR,
     float                          maxLegExtension,
-    float                          maxBodyTiltRadians,
+    RadF                          maxBodyTiltRadians,
     float                          dt
 ) noexcept;
-void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
+void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, Mat4x4* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
     const PhysicsContext&          physics,
-    JPH::Vec3Arg                   rootPosition,
-    JPH::QuatArg                   rootRotation,
+    FVec3                   rootPosition,
+    Quat                   rootRotation,
     ProceduralLocomotionComponent& gait,
-    JPH::Mat44*                    nodeTransforms,
+    Mat4x4*                    nodeTransforms,
     const RigBoneMap&              map,
     Physics::BodyID            ignoredPhysicsID    = {},
     float                          ikWeight                = 1.0f,
@@ -573,16 +574,16 @@ void SolveLegGrounding(
     float                          dt                      = 1.0f / 60.0f,
     float                          pelvisDropWeight        = 1.0f,
     float                          maxLegExtension         = 0.98f,
-    float                          maxBodyTiltRadians      = JPH::DegreesToRadians(10.0f),
-    float                          maxAnkleSidewaysRadians = JPH::DegreesToRadians(15.0f),
-    float                          maxAnkleForwardRadians  = JPH::DegreesToRadians(35.0f)
+    RadF                          maxBodyTiltRadians      = ZHLN::DegF{10.0f}.ToRadians(),
+    RadF                          maxAnkleSidewaysRadians = ZHLN::DegF{15.0f}.ToRadians(),
+    RadF                          maxAnkleForwardRadians  = ZHLN::DegF{35.0f}.ToRadians()
 ) noexcept;
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
-    JPH::Vec3Arg                         rootPosition,
-    JPH::QuatArg                         rootRotation,
-    JPH::Mat44*                          nodeTransforms,
+    FVec3                         rootPosition,
+    Quat                         rootRotation,
+    Mat4x4*                          nodeTransforms,
     const RigBoneMap&                    map,
     bool                                 applyArmSwing = true,
     bool                                 applyLookAt   = true
@@ -590,67 +591,58 @@ void SolveUpperBody(
 void SolveUpperBody(
     const ProceduralLocomotionComponent& gait,
     const ProceduralLookAtComponent*     lookAt,
-    JPH::Mat44*                          nodeTransforms,
+    Mat4x4*                          nodeTransforms,
     const RigBoneMap&                    map
 ) noexcept;
 
-[[nodiscard]] JPH::Mat44 SolveItemBasePose(
+[[nodiscard]] Mat4x4 SolveItemBasePose(
     const ItemHandlingComponent& handling,
-    const JPH::Mat44&            primaryHandModel,
-    const JPH::Mat44&            chestModel,
-    const JPH::Mat44&            worldToModel,
-    JPH::Vec3Arg                 headPosModel,
-    JPH::Vec3Arg                 aimDirModel,
-    const JPH::Mat44&            worldAnchor
+    const Mat4x4&            primaryHandModel,
+    const Mat4x4&            chestModel,
+    const Mat4x4&            worldToModel,
+    FVec3                 headPosModel,
+    FVec3                 aimDirModel,
+    const Mat4x4&            worldAnchor
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
-void  UpdateItemDynamics(
-    const ECS::Registry&   registry,
-    const PhysicsContext&  physics,
-    Entity                 characterEntity,
-    ItemHandlingComponent& handling,
-    JPH::Vec3Arg           rootPosition,
-    JPH::QuatArg           rootRotation,
-    float                  dt
-) noexcept;
-void ConstrainItemToGripReach(ItemHandlingComponent& handling, const JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, JPH::Vec3Arg targetGripPos, float weight) noexcept;
+void ConstrainItemToGripReach(ItemHandlingComponent& handling, const Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept;
+void ApplyClavicleLead(Mat4x4* nodeTransforms, const RigBoneMap& map, CharacterBone upperArmBone, FVec3 targetGripPos, float weight) noexcept;
 void ApplyTorsoReachCompensation(
-    JPH::Mat44*       nodeTransforms,
+    Mat4x4*       nodeTransforms,
     const RigBoneMap& map,
     CharacterBone     upperArmBone,
     CharacterBone     forearmBone,
     CharacterBone     handBone,
-    JPH::Vec3Arg      targetGripPos,
+    FVec3      targetGripPos,
     float             weight
 ) noexcept;
-[[nodiscard]] JPH::Quat ConstrainWristRotation(
-    JPH::QuatArg targetRotation,
-    JPH::QuatArg authoredRotation,
-    JPH::Vec3Arg twistAxis,
-    float        maxTwistRadians,
-    float        maxSwingRadians
+[[nodiscard]] Quat ConstrainWristRotation(
+    Quat targetRotation,
+    Quat authoredRotation,
+    FVec3 twistAxis,
+    RadF        maxTwistRadians,
+    RadF        maxSwingRadians
 ) noexcept;
 void SolveLimbIK(
-    JPH::Mat44*       nodeTransforms,
+    Mat4x4*       nodeTransforms,
     const RigBoneMap& map,
     CharacterBone     upperBone,
     CharacterBone     foreBone,
     CharacterBone     handBone,
-    const JPH::Mat44& targetGripTransform,
+    const Mat4x4& targetGripTransform,
     const GripPoint&  grip
 ) noexcept;
 [[nodiscard]] FingerCurlDesc EvaluateFingerCurl(const GraspDesc& grasp) noexcept;
-[[nodiscard]] JPH::Quat      ConstrainFingerHingeRotation(
-    JPH::QuatArg authoredRotation,
-    JPH::QuatArg desiredRotation,
-    JPH::Vec3Arg hingeAxis,
+[[nodiscard]] Quat      ConstrainFingerHingeRotation(
+    Quat authoredRotation,
+    Quat desiredRotation,
+    FVec3 hingeAxis,
     float        flexSign,
-    float        maxFlexRadians,
-    float        maxExtensionRadians
+    RadF        maxFlexRadians,
+    RadF        maxExtensionRadians
 ) noexcept;
 void ApplyKinematicFingers(
-    JPH::Mat44*           nodeTransforms,
+    Mat4x4*           nodeTransforms,
     const RigBoneMap&     map,
     CharacterBone         handBone,
     const FingerCurlDesc& curl,
@@ -658,16 +650,16 @@ void ApplyKinematicFingers(
     FingerCurlAxisMode    axisMode = FingerCurlAxisMode::AutomaticPalm
 ) noexcept;
 
-void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept;
+void ConfigureHairBindPose(HairStrandsComponent& hair, const Mat4x4* bindModelTransforms, const RigBoneMap& map) noexcept;
 void StepHairSimulation(
     HairStrandsComponent& hair,
-    JPH::Vec3Arg          headWorldPosition,
-    JPH::QuatArg          headWorldRotation,
-    JPH::Vec3Arg          characterVelocity,
+    FVec3          headWorldPosition,
+    Quat          headWorldRotation,
+    FVec3          characterVelocity,
     float                 dt
 ) noexcept;
-void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
-void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept;
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Quat headWorldRotation, Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept;
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept;
 
 } // namespace Animation
 
@@ -686,8 +678,8 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept;
 /** Draws the most recently evaluated pose, including contact normals and hair. */
 void DrawProceduralDebugRig(
     RenderContext&                       renderContext,
-    JPH::Vec3Arg                         rootPosition,
-    JPH::QuatArg                         rootRotation,
+    FVec3                         rootPosition,
+    Quat                         rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr
 ) noexcept;
@@ -696,8 +688,9 @@ namespace ProceduralAnimation {
 
 /** Registers ECS types and inserts the optional evaluator before articulation. */
 void Register(Engine& engine);
-/** Direct evaluation entry point for custom schedules. */
-void   Update(SystemContext& ctx, float dt) noexcept;
+/** Add the typed evaluator to a custom simulation graph. The caller owns
+ * scheduling and must Compile the graph before execution. */
+void AddEvaluator(ECS::SimGraph& graph);
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;
@@ -711,19 +704,25 @@ size_t ApplyChildOfConstraints(
     bool        applyHead            = true,
     bool        applyFootAttachments = true
 ) noexcept;
-size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<JPH::Mat44> output) noexcept;
+size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<Mat4x4> output) noexcept;
 size_t MaskFirstPersonPalette(
     const Skeleton&       skeleton,
     const RigBoneMap&     boneMap,
-    std::span<JPH::Mat44> palette,
+    std::span<Mat4x4> palette,
     bool                  hideHead = true,
     bool                  hideHair = true
 ) noexcept;
-size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
     SceneData&                           scene,
-    JPH::Vec3Arg                         rootPosition,
-    JPH::QuatArg                         rootRotation,
+    FVec3                         rootPosition,
+    Quat                         rootRotation,
+    const RigBoneMap&                    boneMap,
+    const ProceduralLocomotionComponent* gait = nullptr
+) noexcept;
+void   DrawDebugRig(
+    DebugDraw                            debug,
+    FVec3                                rootPosition,
+    Quat                                 rootRotation,
     const RigBoneMap&                    boneMap,
     const ProceduralLocomotionComponent* gait = nullptr
 ) noexcept;

@@ -180,6 +180,11 @@ concept OptionalResourceParam = requires { typename Param::value_type; } && std:
 template <typename T>
 using RawComponent = std::remove_cvref_t<T>;
 
+// Specialised for Query below; used by Query::As to reuse Select's
+// component and access checks without exposing the underlying Registry.
+template <typename Target>
+struct QueryProjection;
+
 template <typename... Ts>
 struct UniqueComponents: std::true_type {};
 
@@ -225,8 +230,9 @@ struct LocalLayout {
 // const T&) is read-only; T (or T&) is writable. Get/Raw/Entities only accept
 // families in this list. ForEach requires all listed families to be present,
 // while Get/Entities allow optional cross-entity lookups and separate passes.
-// Structural changes must use an explicit Registry& system parameter, which
-// the graph conservatively serialises against all other component accesses.
+// Structural changes should use EntityCommandBuffer& and become visible at
+// graph playback. Explicit Registry& remains available for exclusive access;
+// the graph conservatively serialises it against other component accesses.
 template <typename... Comps>
 class Query {
     static_assert(sizeof...(Comps) > 0, "Query needs at least one component");
@@ -299,6 +305,14 @@ class Query {
         return Query<Subset...>(*_registry);
     }
 
+    // Named equivalent of Select<...>. A target can only drop access or
+    // families: it cannot add a family or upgrade a read to a write.
+    template <typename TargetQuery>
+        requires requires(const Query& source) { TemplatedDetail::QueryProjection<TargetQuery>::Project(source); }
+    [[nodiscard]] auto As() const noexcept -> TargetQuery {
+        return TemplatedDetail::QueryProjection<TargetQuery>::Project(*this);
+    }
+
     template <typename T>
         requires Declared<T>
     [[nodiscard]] auto Raw() const noexcept -> ZHLN::RestrictSpan<Element<T>> {
@@ -331,6 +345,48 @@ class Query {
   private:
     Registry* _registry;
 };
+
+// Transitional view for systems that must make an immediate structural add
+// or create a bare entity immediately.
+// A graph schedules it with the same AllComponents write hazard as Registry&;
+// it is NOT a way to make structural mutations safe in a parallel query. Only
+// declared writable families can be added, and existing components are never
+// replaced (resource-owning replacements need their explicit owner APIs).
+// An insertion can invalidate component views just like Registry::Add.
+template <typename... Comps>
+class ExclusiveQuery : public Query<Comps...> {
+    template <typename T>
+    static constexpr bool Writable = ((std::is_same_v<T, TemplatedDetail::RawComponent<Comps>> &&
+                                       !std::is_const_v<std::remove_reference_t<Comps>>) || ...);
+
+  public:
+    explicit ExclusiveQuery(Registry& registry) noexcept: Query<Comps...>(registry), _registry(&registry) {}
+
+    // Creates a live, component-free entity immediately; component attachment
+    // remains either AddIfMissing or explicitly deferred through an ECB.
+    [[nodiscard]] auto CreateEntity() const -> Entity { return _registry->Create(); }
+
+    template <typename T>
+        requires (Writable<T> && std::is_same_v<T, std::remove_cvref_t<T>>)
+    auto AddIfMissing(Entity entity, T value) const -> T& {
+        if (auto existing = this->template Get<T>(entity)) return *existing;
+        return _registry->Add(entity, std::move(value));
+    }
+
+  private:
+    Registry* _registry;
+};
+
+namespace TemplatedDetail {
+template <typename... Components>
+struct QueryProjection<Query<Components...>> {
+    template <typename Source>
+        requires requires(const Source& source) { source.template Select<Components...>(); }
+    [[nodiscard]] static auto Project(const Source& source) noexcept -> Query<Components...> {
+        return source.template Select<Components...>();
+    }
+};
+} // namespace TemplatedDetail
 
 } // namespace ECS
 } // namespace ZHLN

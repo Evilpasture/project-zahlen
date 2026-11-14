@@ -4,12 +4,12 @@
 module;
 
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
+#include <Animation/ProceduralMath.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 // clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -28,24 +28,24 @@ namespace ZHLN::Animation {
 // only an unnamed namespace keeps three definitions of one name from colliding.
 namespace {
 
-[[nodiscard]] JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
-    return value.LengthSq() > 1.0e-10f ? value.Normalized() : JPH::Vec3(fallback);
+[[nodiscard]] FVec3 SafeNormalized(FVec3 value, FVec3 fallback) noexcept {
+    return value.LengthSquared() > 1.0e-10f ? value.Normalized() : fallback;
 }
 
-[[nodiscard]] JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
-    const float     xScale = matrix.GetColumn3(0).Length();
-    const float     yScale = matrix.GetColumn3(1).Length();
-    const float     zScale = matrix.GetColumn3(2).Length();
-    const JPH::Vec3 x      = xScale > 1.0e-6f ? matrix.GetColumn3(0) / xScale : JPH::Vec3::sAxisX();
-    const JPH::Vec3 y      = yScale > 1.0e-6f ? matrix.GetColumn3(1) / yScale : JPH::Vec3::sAxisY();
-    const JPH::Vec3 z      = zScale > 1.0e-6f ? matrix.GetColumn3(2) / zScale : JPH::Vec3::sAxisZ();
-    return JPH::Mat44(JPH::Vec4(x, 0.0f), JPH::Vec4(y, 0.0f), JPH::Vec4(z, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
+[[nodiscard]] Quat ExtractRotation(const Mat4x4& matrix) noexcept {
+    const float     xScale = ProceduralMath::Column3(matrix, 0).Length();
+    const float     yScale = ProceduralMath::Column3(matrix, 1).Length();
+    const float     zScale = ProceduralMath::Column3(matrix, 2).Length();
+    const FVec3 x      = xScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 0) / xScale : FVec3::UnitX();
+    const FVec3 y      = yScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 1) / yScale : FVec3::UnitY();
+    const FVec3 z      = zScale > 1.0e-6f ? ProceduralMath::Column3(matrix, 2) / zScale : FVec3::UnitZ();
+    return ProceduralMath::Rotation(Mat4x4::FromCols(FVec4{x, 0.0f}, FVec4{y, 0.0f}, FVec4{z, 0.0f}, FVec4{0.0f, 0.0f, 0.0f, 1.0f}));
 }
 
-void ProjectSphere(JPH::Vec3& point, JPH::Vec3Arg center, float radius, JPH::Vec3Arg restPoint) noexcept {
+void ProjectSphere(FVec3& point, FVec3 center, float radius, FVec3 restPoint) noexcept {
     const float allowedBindRadius = (restPoint - center).Length();
     const float effectiveRadius   = std::min(radius, allowedBindRadius);
-    JPH::Vec3   delta             = point - center;
+    FVec3   delta             = point - center;
     float       length            = delta.Length();
     if (length >= effectiveRadius || effectiveRadius <= 1.0e-6f) {
         return;
@@ -53,30 +53,30 @@ void ProjectSphere(JPH::Vec3& point, JPH::Vec3Arg center, float radius, JPH::Vec
     point = center + SafeNormalized(delta, restPoint - center) * effectiveRadius;
 }
 
-void ProjectEllipsoid(JPH::Vec3& point, JPH::Vec3Arg center, JPH::QuatArg rotation, JPH::Vec3Arg radii, JPH::Vec3Arg restPoint) noexcept {
-    const JPH::Quat invRotation = rotation.Inversed();
-    const JPH::Vec3 local       = invRotation * (point - center);
-    JPH::Vec3       scaled(
-        local.GetX() / std::max(radii.GetX(), 1.0e-4f), local.GetY() / std::max(radii.GetY(), 1.0e-4f), local.GetZ() / std::max(radii.GetZ(), 1.0e-4f)
-    );
-    const JPH::Vec3 restLocal = invRotation * (restPoint - center);
-    const JPH::Vec3 restScaled(
-        restLocal.GetX() / std::max(radii.GetX(), 1.0e-4f), restLocal.GetY() / std::max(radii.GetY(), 1.0e-4f),
-        restLocal.GetZ() / std::max(radii.GetZ(), 1.0e-4f)
-    );
+void ProjectEllipsoid(FVec3& point, FVec3 center, Quat rotation, FVec3 radii, FVec3 restPoint) noexcept {
+    const Quat invRotation = rotation.Inversed();
+    const FVec3 local       = invRotation * (point - center);
+    FVec3       scaled{
+        local.x / std::max(radii.x, 1.0e-4f), local.y / std::max(radii.y, 1.0e-4f), local.z / std::max(radii.z, 1.0e-4f)
+    };
+    const FVec3 restLocal = invRotation * (restPoint - center);
+    const FVec3 restScaled{
+        restLocal.x / std::max(radii.x, 1.0e-4f), restLocal.y / std::max(radii.y, 1.0e-4f),
+        restLocal.z / std::max(radii.z, 1.0e-4f)
+    };
     const float effectiveBoundary = std::min(1.0f, restScaled.Length());
     if (scaled.Length() >= effectiveBoundary || effectiveBoundary <= 1.0e-6f) {
         return;
     }
 
     scaled = SafeNormalized(scaled, restScaled) * effectiveBoundary;
-    const JPH::Vec3 projected(scaled.GetX() * radii.GetX(), scaled.GetY() * radii.GetY(), scaled.GetZ() * radii.GetZ());
+    const FVec3 projected{scaled.x * radii.x, scaled.y * radii.y, scaled.z * radii.z};
     point = center + rotation * projected;
 }
 
 void SolveDistanceConstraint(
-    JPH::Vec3& positionA,
-    JPH::Vec3& positionB,
+    FVec3& positionA,
+    FVec3& positionB,
     float      inverseMassA,
     float      inverseMassB,
     float      restLength,
@@ -84,7 +84,7 @@ void SolveDistanceConstraint(
     float      dtSquared,
     float&     lambda
 ) noexcept {
-    JPH::Vec3 delta       = positionB - positionA;
+    FVec3 delta       = positionB - positionA;
     float     length      = std::max(delta.Length(), 1.0e-6f);
     float     alpha       = std::max(compliance, 0.0f) / dtSquared;
     float     denominator = inverseMassA + inverseMassB + alpha;
@@ -94,13 +94,13 @@ void SolveDistanceConstraint(
 
     const float deltaLambda = (-(length - restLength) - alpha * lambda) / denominator;
     lambda += deltaLambda;
-    const JPH::Vec3 correction = delta / length * deltaLambda;
+    const FVec3 correction = delta / length * deltaLambda;
     positionA -= correction * inverseMassA;
     positionB += correction * inverseMassB;
 }
 
-void SolveShapeConstraint(JPH::Vec3& position, JPH::Vec3Arg target, float compliance, float dtSquared, float& lambda) noexcept {
-    JPH::Vec3 delta  = position - target;
+void SolveShapeConstraint(FVec3& position, FVec3 target, float compliance, float dtSquared, float& lambda) noexcept {
+    FVec3 delta  = position - target;
     float     length = delta.Length();
     if (length <= 1.0e-7f) {
         return;
@@ -128,13 +128,13 @@ void FinalizeRestConstraints(HairStrandsComponent& hair) noexcept {
 
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
             const size_t index = base + link;
-            JPH::Vec3    direction;
+            FVec3    direction;
             if (link + 1 < HairStrandsComponent::kLinksPerStrand) {
                 direction = hair.restLocalPositions[index + 1] - hair.restLocalPositions[index];
             } else {
                 direction = hair.restLocalPositions[index] - hair.restLocalPositions[index - 1];
             }
-            hair.restLocalDirections[index] = SafeNormalized(direction, JPH::Vec3(0.0f, -1.0f, 0.0f));
+            hair.restLocalDirections[index] = SafeNormalized(direction, FVec3{0.0f, -1.0f, 0.0f});
         }
     }
     hair.bindPoseInitialized = true;
@@ -147,14 +147,14 @@ void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const float     angle = kTwoPi * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
-        const JPH::Vec3 rootOffset(std::cos(angle) * 0.105f, 0.17f + 0.010f * std::sin(angle * 2.0f), std::sin(angle) * 0.105f);
-        const JPH::Vec3 outward(std::cos(angle), 0.0f, std::sin(angle));
+        const FVec3 rootOffset{std::cos(angle) * 0.105f, 0.17f + 0.010f * std::sin(angle * 2.0f), std::sin(angle) * 0.105f};
+        const FVec3 outward{std::cos(angle), 0.0f, std::sin(angle)};
         const size_t    base = strand * HairStrandsComponent::kLinksPerStrand;
         for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
             const size_t index             = base + link;
-            hair.restLocalPositions[index] = rootOffset + JPH::Vec3(0.0f, -kDefaultLength * static_cast<float>(link), 0.0f) +
+            hair.restLocalPositions[index] = rootOffset + FVec3{0.0f, -kDefaultLength * static_cast<float>(link), 0.0f} +
                                              outward * (0.012f * static_cast<float>(link));
-            hair.restLocalRotations[index] = JPH::Quat::sIdentity();
+            hair.restLocalRotations[index] = Quat::Identity();
         }
     }
     FinalizeRestConstraints(hair);
@@ -162,17 +162,17 @@ void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
     // Align fallback rotations to the generated strand directions. Imported
     // GLBs retain their authored bind rotations instead.
     for (size_t index = 0; index < HairStrandsComponent::kTotalParticles; ++index) {
-        hair.restLocalRotations[index] = JPH::Quat::sFromTo(JPH::Vec3(0.0f, -1.0f, 0.0f), hair.restLocalDirections[index]);
+        hair.restLocalRotations[index] = FromTo(FVec3{0.0f, -1.0f, 0.0f}, hair.restLocalDirections[index]);
     }
 }
 
-void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPosition, JPH::QuatArg headRotation) noexcept {
+void InitializeParticles(HairStrandsComponent& hair, FVec3 headPosition, Quat headRotation) noexcept {
     if (!hair.bindPoseInitialized) {
         GenerateFallbackRestPose(hair);
     }
 
     for (size_t index = 0; index < HairStrandsComponent::kTotalParticles; ++index) {
-        const JPH::Vec3 position  = JPH::Vec3(headPosition) + headRotation * hair.restLocalPositions[index];
+        const FVec3 position  = headPosition + headRotation * hair.restLocalPositions[index];
         hair.positions[index]     = position;
         hair.prevPositions[index] = position;
     }
@@ -186,7 +186,7 @@ void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPosition, 
  * links are extrapolated only for the internal solver and are never uploaded to
  * unmapped bones.
  */
-void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindModelTransforms, const RigBoneMap& map) noexcept {
+void ConfigureHairBindPose(HairStrandsComponent& hair, const Mat4x4* bindModelTransforms, const RigBoneMap& map) noexcept {
     if (bindModelTransforms == nullptr || map.nodeCount == 0) {
         return;
     }
@@ -198,9 +198,9 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
     }
 
     constexpr float kDefaultLength      = 0.105f;
-    const JPH::Vec3 headPosition        = bindModelTransforms[headNode].GetTranslation();
-    const JPH::Quat headRotation        = ExtractRotation(bindModelTransforms[headNode]);
-    const JPH::Quat inverseHeadRotation = headRotation.Inversed();
+    const FVec3 headPosition        = ProceduralMath::Translation(bindModelTransforms[headNode]);
+    const Quat headRotation        = ExtractRotation(bindModelTransforms[headNode]);
+    const Quat inverseHeadRotation = headRotation.Inversed();
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const float  angle = 2.0f * std::numbers::pi_v<float> * static_cast<float>(strand) / static_cast<float>(HairStrandsComponent::kStrandCount);
@@ -210,18 +210,18 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
             const size_t       semantic = BoneSlot(CharacterBone::HairStart) + particle;
             const RigNodeIndex node     = map.nodeIndices[semantic];
             if (IsValidRigNode(node, map.nodeCount)) {
-                hair.restLocalPositions[particle] = inverseHeadRotation * (bindModelTransforms[node].GetTranslation() - headPosition);
+                hair.restLocalPositions[particle] = inverseHeadRotation * (ProceduralMath::Translation(bindModelTransforms[node]) - headPosition);
                 hair.restLocalRotations[particle] = (inverseHeadRotation * ExtractRotation(bindModelTransforms[node])).Normalized();
                 continue;
             }
 
             if (link == 0) {
-                hair.restLocalPositions[particle] = JPH::Vec3(std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f);
-                hair.restLocalRotations[particle] = JPH::Quat::sIdentity();
+                hair.restLocalPositions[particle] = {std::cos(angle) * 0.105f, 0.17f, std::sin(angle) * 0.105f};
+                hair.restLocalRotations[particle] = Quat::Identity();
                 continue;
             }
 
-            JPH::Vec3 direction(0.0f, -1.0f, 0.0f);
+            FVec3 direction{0.0f, -1.0f, 0.0f};
             if (link >= 2) {
                 direction = SafeNormalized(hair.restLocalPositions[particle - 1] - hair.restLocalPositions[particle - 2], direction);
             }
@@ -240,9 +240,9 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
  */
 void StepHairSimulation(
     HairStrandsComponent& hair,
-    JPH::Vec3Arg          headWorldPosition,
-    JPH::QuatArg          headWorldRotation,
-    JPH::Vec3Arg          characterVelocity,
+    FVec3          headWorldPosition,
+    Quat          headWorldRotation,
+    FVec3          characterVelocity,
     float                 dt
 ) noexcept {
     if (!hair.initialized) {
@@ -251,25 +251,25 @@ void StepHairSimulation(
 
     const float     safeDt       = std::clamp(dt, 0.0001f, 1.0f / 30.0f);
     const float     dtSq         = safeDt * safeDt;
-    const JPH::Vec3 inertialWind = characterVelocity * -0.035f;
-    const JPH::Vec3 acceleration = inertialWind + JPH::Vec3(0.0f, hair.gravity, 0.0f);
+    const FVec3 inertialWind = characterVelocity * -0.035f;
+    const FVec3 acceleration = inertialWind + FVec3{0.0f, hair.gravity, 0.0f};
 
-    const JPH::Vec3 torsoCenter = JPH::Vec3(headWorldPosition) + headWorldRotation * JPH::Vec3(0.0f, -0.48f, -0.015f);
-    const JPH::Vec3 shoulderL   = JPH::Vec3(headWorldPosition) + headWorldRotation * JPH::Vec3(0.24f, -0.31f, 0.0f);
-    const JPH::Vec3 shoulderR   = JPH::Vec3(headWorldPosition) + headWorldRotation * JPH::Vec3(-0.24f, -0.31f, 0.0f);
-    const JPH::Vec3 torsoRadii(hair.torsoColliderRadiusXZ, hair.torsoColliderRadiusY, hair.torsoColliderRadiusXZ * 0.75f);
-    const JPH::Vec3 shoulderRadii(hair.shoulderColliderRadius, hair.shoulderColliderRadius * 0.62f, hair.shoulderColliderRadius * 0.78f);
+    const FVec3 torsoCenter = headWorldPosition + headWorldRotation * FVec3{0.0f, -0.48f, -0.015f};
+    const FVec3 shoulderL   = headWorldPosition + headWorldRotation * FVec3{0.24f, -0.31f, 0.0f};
+    const FVec3 shoulderR   = headWorldPosition + headWorldRotation * FVec3{-0.24f, -0.31f, 0.0f};
+    const FVec3 torsoRadii{hair.torsoColliderRadiusXZ, hair.torsoColliderRadiusY, hair.torsoColliderRadiusXZ * 0.75f};
+    const FVec3 shoulderRadii{hair.shoulderColliderRadius, hair.shoulderColliderRadius * 0.62f, hair.shoulderColliderRadius * 0.78f};
 
     TaskSystem::ParallelFor(static_cast<uint32_t>(HairStrandsComponent::kStrandCount), 1, [&](uint32_t first, uint32_t last, uint32_t) {
         for (uint32_t strand = first; strand < last; ++strand) {
             const size_t    base = static_cast<size_t>(strand) * HairStrandsComponent::kLinksPerStrand;
-            const JPH::Vec3 root = JPH::Vec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[base];
+            const FVec3 root = headWorldPosition + headWorldRotation * hair.restLocalPositions[base];
 
             hair.positions[base]     = root;
             hair.prevPositions[base] = root;
             for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                 const size_t    index     = base + link;
-                const JPH::Vec3 velocity  = (hair.positions[index] - hair.prevPositions[index]) * std::clamp(hair.damping, 0.0f, 1.0f);
+                const FVec3 velocity  = (hair.positions[index] - hair.prevPositions[index]) * std::clamp(hair.damping, 0.0f, 1.0f);
                 hair.prevPositions[index] = hair.positions[index];
                 hair.positions[index] += velocity + acceleration * dtSq;
             }
@@ -300,13 +300,13 @@ void StepHairSimulation(
 
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
-                    const JPH::Vec3 restTarget = JPH::Vec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
+                    const FVec3 restTarget = headWorldPosition + headWorldRotation * hair.restLocalPositions[current];
                     SolveShapeConstraint(hair.positions[current], restTarget, hair.shapeCompliance, dtSq, shapeLambdas[link]);
                 }
 
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
-                    const JPH::Vec3 restTarget = JPH::Vec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
+                    const FVec3 restTarget = headWorldPosition + headWorldRotation * hair.restLocalPositions[current];
                     ProjectSphere(hair.positions[current], headWorldPosition, hair.headColliderRadius, restTarget);
                     ProjectEllipsoid(hair.positions[current], torsoCenter, headWorldRotation, torsoRadii, restTarget);
                     ProjectEllipsoid(hair.positions[current], shoulderL, headWorldRotation, shoulderRadii, restTarget);
@@ -318,7 +318,7 @@ void StepHairSimulation(
 }
 
 /** Generates one world transform for every mapped secondary bone. */
-void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg headWorldRotation, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Quat headWorldRotation, Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept {
     if (nodeTransforms == nullptr || !hair.initialized) {
         return;
     }
@@ -333,7 +333,7 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg he
                 continue;
             }
 
-            JPH::Vec3 direction;
+            FVec3 direction;
             if (link + 1 < HairStrandsComponent::kLinksPerStrand) {
                 direction = hair.positions[particleIndex + 1] - hair.positions[particleIndex];
             } else {
@@ -341,21 +341,21 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg he
             }
             direction = SafeNormalized(direction, headWorldRotation * hair.restLocalDirections[particleIndex]);
 
-            const JPH::Vec3 restDirectionWorld = headWorldRotation * hair.restLocalDirections[particleIndex];
-            const JPH::Quat deformation        = JPH::Quat::sFromTo(restDirectionWorld, direction);
-            const JPH::Quat bindWorldRotation  = (headWorldRotation * hair.restLocalRotations[particleIndex]).Normalized();
-            const JPH::Quat rotation           = (deformation * bindWorldRotation).Normalized();
-            const JPH::Vec3 scale(
-                nodeTransforms[nodeIndex].GetColumn3(0).Length(), nodeTransforms[nodeIndex].GetColumn3(1).Length(),
-                nodeTransforms[nodeIndex].GetColumn3(2).Length()
-            );
-            nodeTransforms[nodeIndex] = JPH::Mat44::sRotationTranslation(rotation, hair.positions[particleIndex]).PreScaled(scale);
+            const FVec3 restDirectionWorld = headWorldRotation * hair.restLocalDirections[particleIndex];
+            const Quat deformation        = FromTo(restDirectionWorld, direction);
+            const Quat bindWorldRotation  = (headWorldRotation * hair.restLocalRotations[particleIndex]).Normalized();
+            const Quat rotation           = (deformation * bindWorldRotation).Normalized();
+            const FVec3 scale{
+                ProceduralMath::Column3(nodeTransforms[nodeIndex], 0).Length(), ProceduralMath::Column3(nodeTransforms[nodeIndex], 1).Length(),
+                ProceduralMath::Column3(nodeTransforms[nodeIndex], 2).Length()
+            };
+            nodeTransforms[nodeIndex] = ProceduralMath::Transform(rotation, hair.positions[particleIndex], scale);
         }
     }
 }
 
-void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::Mat44* nodeTransforms, const RigBoneMap& map) noexcept {
-    ExtractHairBoneTransforms(hair, JPH::Quat::sIdentity(), nodeTransforms, map);
+void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Mat4x4* nodeTransforms, const RigBoneMap& map) noexcept {
+    ExtractHairBoneTransforms(hair, Quat::Identity(), nodeTransforms, map);
 }
 
 } // namespace ZHLN::Animation

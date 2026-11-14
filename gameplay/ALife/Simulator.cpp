@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -17,9 +16,9 @@
 namespace ZHLN::ALife {
 
 // --- Package-Safe Math Helper ---
-static auto MoveTowards(JPH::RVec3Arg current, JPH::RVec3Arg target, float max_dist) -> JPH::RVec3 {
-    JPH::RVec3 diff = target - current; // Keep as RVec3 to handle single/double precision correctly
-    double     d2   = diff.LengthSq();
+static auto MoveTowards(DVec3 current, DVec3 target, float max_dist) -> DVec3 {
+    DVec3 diff = target - current; // Keep as DVec3 to handle single/double precision correctly
+    double     d2   = diff.LengthSquared();
 
     if (d2 < static_cast<double>(max_dist * max_dist) || d2 < 0.0001) {
         return target;
@@ -48,7 +47,7 @@ void Simulator::BroadcastEvent(const Event& event) {
 
 // --- Main Simulation Loop ---
 
-void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
+void Simulator::Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos) {
     ZHLN::ScopedTimer profTimer("ALife Simulator Update");
 
     // 1. Advance Game Time
@@ -57,9 +56,8 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     const float game_dt           = dt * _tuning.time_factor;
     const float dist_sq_threshold = _tuning.switch_distance * _tuning.switch_distance;
 
-    ECS::Registry&               reg      = ZHLN::EngineAccess::RegistryOf(engine);
-    std::span<const Entity>      entities = reg.GetEntitiesWith<ALifeComponent>();
-    RestrictSpan<ALifeComponent> comps    = reg.GetRawArray<ALifeComponent>();
+    std::span<const Entity>      entities = query.Entities<ALifeComponent>();
+    RestrictSpan<ALifeComponent> comps    = query.Raw<ALifeComponent>();
 
     if (entities.empty()) {
         return;
@@ -89,7 +87,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             // Movement along path (A*)
             if (comp.path_index < comp.path_count && _levelGraph.GetNodeCount() > 0) {
                 uint32_t   target_node = comp.path[comp.path_index];
-                JPH::RVec3 target_pos  = _levelGraph.GetNode(target_node).position;
+                DVec3 target_pos  = _levelGraph.GetNode(target_node).position;
 
                 float speed = comp.travel_speed;
                 if (comp.is_fleeing) {
@@ -112,7 +110,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             }
             // Fallback: Direct Node Movement
             else if (comp.target_node != INVALID_GRAPH_NODE && _levelGraph.GetNodeCount() > 0) {
-                JPH::RVec3 target_pos = _levelGraph.GetNode(comp.target_node).position;
+                DVec3 target_pos = _levelGraph.GetNode(comp.target_node).position;
 
                 float speed = comp.travel_speed;
                 if (comp.is_fleeing) {
@@ -131,7 +129,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
             }
 
             // Distance-based Online/Offline State Switching
-            float d2        = (comp.position - observer_pos).LengthSq();
+            float d2        = (comp.position - observer_pos).LengthSquared();
             State old_state = comp.state;
 
             if (comp.state == State::Offline && d2 < dist_sq_threshold) {
@@ -151,7 +149,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
     // Fast O(N) re-indexing of all entities into the spatial grid
     _grid.Clear();
     for (auto entitie: entities) {
-        _grid.UpdateEntity(reg, entitie, JPH::RVec3(-1, -1, -1)); // -1 forces fresh insertion
+        _grid.UpdateEntity(query, entitie, DVec3{-1, -1, -1}); // -1 forces fresh insertion
     }
 
     // --- PHASE 3: OFFLINE INTERACTIONS (Parallel) ---
@@ -168,7 +166,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
                     continue;
                 }
 
-                neighbors = _grid.Query(reg, comp.position, 50.0f, std::move(neighbors));
+                neighbors = _grid.Query(query.As<SpatialGrid::ReadQuery>(), comp.position, 50.0f, std::move(neighbors));
 
                 for (Entity neighbor: neighbors) {
                     if (neighbor != e) {
@@ -185,9 +183,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 
 // --- Interaction Math ---
 
-void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    auto c1 = reg.Get<ALifeComponent>(e1);
-    auto c2 = reg.Get<ALifeComponent>(e2);
+void Simulator::ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2) {
+    auto c1 = query.Get<ALifeComponent>(e1);
+    auto c2 = query.Get<ALifeComponent>(e2);
     if (!c1 || !c2) {
         return;
     }
@@ -236,13 +234,13 @@ void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity 
     else if (c1->state != State::Dead && c2->state == State::Dead && !c2->is_looted) {
         c1->power += (c2->loot_value / 10);
         c2->is_looted = true;
-        _grid.RemoveEntity(reg, e2);
+        _grid.RemoveEntity(query, e2);
     }
     // Scavenging: E2 loots E1
     else if (c2->state != State::Dead && c1->state == State::Dead && !c1->is_looted) {
         c2->power += (c1->loot_value / 10);
         c1->is_looted = true;
-        _grid.RemoveEntity(reg, e1);
+        _grid.RemoveEntity(query, e1);
     }
 }
 
@@ -304,9 +302,10 @@ auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
     }
 
     _grid.Clear();
-    auto entities = reg.GetEntitiesWith<ALifeComponent>();
+    const SpatialGrid::WriteQuery query {reg};
+    const auto entities = query.Entities<ALifeComponent>();
     for (Entity e: entities) {
-        _grid.UpdateEntity(reg, e, JPH::RVec3(-1, -1, -1));
+        _grid.UpdateEntity(query, e, DVec3{-1, -1, -1});
     }
 
     return true;

@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "AudioSystem.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Math.h>
 #include <vector>
 
 namespace ZHLN {
@@ -35,20 +34,20 @@ ZHLN_API void AudioSystem(
     for (Entity e: query.Entities<Components::AudioListenerComponent>()) {
         auto listener = query.Get<Components::AudioListenerComponent>(e);
         if (listener && listener->isPrimary) {
-            JPH::Vec3 pos = JPH::Vec3::sZero();
-            JPH::Vec3 dir = JPH::Vec3::sAxisZ();
-            JPH::Vec3 up  = JPH::Vec3::sAxisY();
+            auto pos = FVec3::Zero();
+            auto dir = FVec3::UnitZ();
+            auto up = FVec3::UnitY();
 
             if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
-                const JPH::Mat44 world = wt->world;
-                pos                    = world.GetTranslation();
-                dir                    = -world.GetColumn3(2).Normalized();
-                up                     = world.GetColumn3(1).Normalized();
+                const auto& world = wt->world;
+                pos = world.Column(3).XYZ();
+                dir = -world.Column(2).XYZ().Normalized();
+                up = world.Column(1).XYZ().Normalized();
             } else if (auto t = query.Get<Components::TransformComponent>(e)) {
-                const JPH::Quat rotation = t->rotation;
-                pos                      = t->position;
-                dir                      = rotation * JPH::Vec3::sAxisZ();
-                up                       = rotation * JPH::Vec3::sAxisY();
+                const auto rotation = ComposeTransform({}, t->rotation, {1.0f, 1.0f, 1.0f});
+                pos = t->position;
+                dir = rotation.Column(2).XYZ();
+                up = rotation.Column(1).XYZ();
             }
 
             device.UpdateListener(pos, dir, up, listener->velocity);
@@ -62,9 +61,9 @@ ZHLN_API void AudioSystem(
     if (!listenerFound) {
         if (const auto camComp = cameraQuery.GetSingleton<Components::CameraComponent>(); camComp) {
             const auto& cam      = camComp->camera;
-            const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-            const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-            const JPH::Vec3 dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+            const auto yaw = cam.yaw.ToRadians();
+            const auto pitch = cam.pitch.ToRadians();
+            const FVec3 dir {Cos(yaw) * Cos(pitch), Sin(pitch), Sin(yaw) * Cos(pitch)};
             device.UpdateListener(cam.position, dir.Normalized(), {0.0f, 1.0f, 0.0f});
         }
     }
@@ -76,16 +75,16 @@ ZHLN_API void AudioSystem(
         const Entity                      e   = srcEntities[i];
         Components::AudioSourceComponent& src = sources[i];
 
-        JPH::Vec3 pos = JPH::Vec3::sZero();
-        JPH::Vec3 dir = JPH::Vec3(0.0f, 0.0f, -1.0f);
+        auto pos = FVec3::Zero();
+        auto dir = FVec3::Forward();
         if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
-            const JPH::Mat44 world = wt->world;
-            pos                    = world.GetTranslation();
-            dir                    = -world.GetColumn3(2).Normalized();
+            const auto& world = wt->world;
+            pos = world.Column(3).XYZ();
+            dir = -world.Column(2).XYZ().Normalized();
         } else if (auto t = query.Get<Components::TransformComponent>(e)) {
-            const JPH::Quat rotation = t->rotation;
-            pos                      = t->position;
-            dir                      = rotation * JPH::Vec3(0.0f, 0.0f, -1.0f);
+            const auto rotation = ComposeTransform({}, t->rotation, {1.0f, 1.0f, 1.0f});
+            pos = t->position;
+            dir = -rotation.Column(2).XYZ();
         }
 
         if (src.voiceID != VoiceID::Invalid && !device.IsVoiceValid(src.voiceID)) {

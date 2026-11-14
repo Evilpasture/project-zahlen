@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/RenderGraphBuild.hpp"
-#include "Zahlen/Math/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Render/RenderGraphDump.hpp>
