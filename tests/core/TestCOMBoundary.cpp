@@ -441,19 +441,19 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
     ZHLN::Test::ExpectEq(actions.MouseWheel(ZHLN::kPrimarySeat), 2.0F);
 
     ZHLN::Test::ExpectEq(actions.ConnectedGamepadCount(), uint32_t {0});
-    actions.InjectGamepadConnection(0, true, "Boundary Test Pad");
-    ZHLN::Test::ExpectTrue(actions.GamepadConnected(0));
+    actions.InjectGamepadConnection(ZHLN::GamepadSlot {0}, true, "Boundary Test Pad");
+    ZHLN::Test::ExpectTrue(actions.GamepadConnected(ZHLN::GamepadSlot {0}));
     ZHLN::Test::ExpectEq(actions.ConnectedGamepadCount(), uint32_t {1});
 
-    actions.InjectGamepadButton(0, ZHLN::GamepadButton::South, true);
-    ZHLN::Test::ExpectTrue(actions.GamepadButtonDown(0, ZHLN::GamepadButton::South));
-    ZHLN::Test::ExpectTrue(!actions.GamepadButtonDown(0, ZHLN::GamepadButton::North));
+    actions.InjectGamepadButton(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::South, true);
+    ZHLN::Test::ExpectTrue(actions.GamepadButtonDown(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::South));
+    ZHLN::Test::ExpectTrue(!actions.GamepadButtonDown(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::North));
 
-    actions.InjectGamepadAxis(0, ZHLN::GamepadAxis::LeftTrigger, 1.0F);
-    ZHLN::Test::ExpectTrue(actions.GamepadAxisValue(0, ZHLN::GamepadAxis::LeftTrigger) > 0.5F);
+    actions.InjectGamepadAxis(ZHLN::GamepadSlot {0}, ZHLN::GamepadAxis::LeftTrigger, 1.0F);
+    ZHLN::Test::ExpectTrue(actions.GamepadAxisValue(ZHLN::GamepadSlot {0}, ZHLN::GamepadAxis::LeftTrigger) > 0.5F);
 
-    ZHLN::Test::ExpectTrue(!actions.GamepadConnected(3));
-    ZHLN::Test::ExpectEq(actions.GamepadAxisValue(3, ZHLN::GamepadAxis::LeftTrigger), 0.0F);
+    ZHLN::Test::ExpectTrue(!actions.GamepadConnected(ZHLN::GamepadSlot {3}));
+    ZHLN::Test::ExpectEq(actions.GamepadAxisValue(ZHLN::GamepadSlot {3}, ZHLN::GamepadAxis::LeftTrigger), 0.0F);
 
     actions.RefreshActions();
     const ZHLN::ActionState unbound = actions.Action(ZHLN::ActionID {"NothingBindsThis"}, ZHLN::kPrimarySeat);

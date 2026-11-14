@@ -209,7 +209,7 @@ void test_gamepad_deadzone_curves_and_trigger_edges() {
 }
 
 struct RumbleRecord {
-    uint8_t       slot = 0;
+    GamepadSlot   slot = GamepadSlot {0};
     GamepadRumble rumble {};
 };
 
@@ -219,7 +219,7 @@ void test_multiseat_routing_hotplug_events_and_haptics() {
 
     std::vector<RumbleRecord> rumbleLog;
     input.SetRumbleSink(
-        [](void* ud, uint8_t slot, const GamepadRumble& r) noexcept {
+        [](void* ud, GamepadSlot slot, const GamepadRumble& r) noexcept {
             static_cast<std::vector<RumbleRecord>*>(ud)->push_back(RumbleRecord {.slot = slot, .rumble = r});
         },
         &rumbleLog
@@ -238,17 +238,17 @@ void test_multiseat_routing_hotplug_events_and_haptics() {
     ExpectEq(bus.Reader<GamepadConnectionEvent>().Size(), size_t {2});
 
     // Rumble Seat 1 for 0.20s, step 0.10s (still active), step another 0.15s (auto-expires & sends zero stop).
-    const uint32_t rumbledCount = input.RumbleSeat(1, GamepadRumble {.lowFrequency = 0.8f, .highFrequency = 0.4f, .durationSeconds = 0.20f});
+    const uint32_t rumbledCount = input.RumbleSeat(PlayerSeat {1}, GamepadRumble {.lowFrequency = 0.8f, .highFrequency = 0.4f, .durationSeconds = 0.20f});
     ExpectEq(rumbledCount, 1u);
     ExpectEq(rumbleLog.size(), size_t {1});
-    Expect(Near(input.ActiveRumble(0).lowFrequency, 0.8f));
+    Expect(Near(input.ActiveRumble(GamepadSlot {0}).lowFrequency, 0.8f));
 
     input.StepHaptics(0.10f);
-    Expect(Near(input.ActiveRumble(0).lowFrequency, 0.8f));
+    Expect(Near(input.ActiveRumble(GamepadSlot {0}).lowFrequency, 0.8f));
     ExpectEq(rumbleLog.size(), size_t {1});
 
     input.StepHaptics(0.15f);
-    Expect(input.ActiveRumble(0).IsZero());
+    Expect(input.ActiveRumble(GamepadSlot {0}).IsZero());
     ExpectEq(rumbleLog.size(), size_t {2});
     Expect(rumbleLog.back().rumble.IsZero());
 

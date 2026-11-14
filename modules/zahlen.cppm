@@ -552,7 +552,7 @@ using ZHLN::FixedStepBatch;
 using ZHLN::GamepadAxis;
 using ZHLN::GamepadButton;
 using ZHLN::GamepadConnectionEvent;
-using ZHLN::GamepadRawSample;
+using ZHLN::GamepadHardwareSample;
 using ZHLN::GamepadRumble;
 using ZHLN::GamepadState;
 using ZHLN::InputAction;
