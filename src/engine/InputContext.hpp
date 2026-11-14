@@ -1,6 +1,25 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// src/engine/InputContext.hpp
+//
+// The input router's storage. Engine-private on purpose: this header used to be
+// include/Zahlen/Input/InputContext.hpp, which made InputActionMap&,
+// InputAction&, InputState& and every Inject* entry point part of the engine's
+// public API. Anything a caller actually needs is a value, and values live in
+// <Zahlen/Input/Input.hpp> and <Zahlen/Input/ActionValues.hpp>.
+//
+// Exactly two translation units include this file:
+//
+//   * Engine.cpp      -- lifecycle and OS wiring: the WindowInputReceiver
+//                        callbacks, the rumble sink, the frame boundary.
+//   * Capabilities.cpp -- the bodies of InputReader / InputHaptics /
+//                        InputActions, which are the only shapes the router is
+//                        ever seen in from outside.
+//
+// No ZHLN_API appears anywhere below. Nothing here is exported, so nothing here
+// can be named by a consumer that links libzahlen_engine.
+
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -30,7 +49,7 @@ class EventBus;
 
 namespace ZHLN {
 
-class ZHLN_API InputAction {
+class InputAction {
   public:
     InputAction(std::string_view name, ActionKind kind) noexcept;
 
@@ -78,7 +97,7 @@ class ZHLN_API InputAction {
     std::vector<InputBinding> _defaultBindings;
 };
 
-class ZHLN_API InputActionMap {
+class InputActionMap {
   public:
     static constexpr SeatMask kAllSeatsMask = SeatMask::All();
 
@@ -163,25 +182,10 @@ class ZHLN_API InputActionMap {
     std::vector<InputAction> _actions;
 };
 
-enum class BindingCaptureStatus : uint8_t {
-    Idle = 0,
-    Waiting,
-    Captured,
-    Cancelled,
-};
-
-enum class InputBindingParseError : uint8_t {
-    InvalidHeader       ZHLN_ANNOTATION(ZHLN::Description<"Input bindings text header is missing or unsupported"> {})       = 1,
-    MalformedLine       ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line is malformed"> {}),
-    UnknownBindingKind  ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line names an unknown binding kind"> {}),
-    UnknownEnumerator   ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line names an unknown key, button, or axis"> {}),
-    InvalidNumericValue ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line contains an invalid numeric parameter"> {}),
-};
-
 using GamepadRumbleSinkFn = void (*)(void* userdata, GamepadSlot gamepadSlot, const GamepadRumble& rumble) noexcept;
 
 // Core multi-seat input router, gamepad manager, haptics controller, and virtual action stack.
-class ZHLN_API InputContext {
+class InputContext {
   public:
     InputContext();
     ~InputContext() = default;

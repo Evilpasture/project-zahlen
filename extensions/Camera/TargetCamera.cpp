@@ -13,7 +13,7 @@
 #include "Zahlen/Engine/FramePlan.hpp"
 #include "Zahlen/Engine/GameModule.hpp"
 #include "Zahlen/Input/Input.hpp"
-#include "Zahlen/Input/InputContext.hpp"
+#include "Zahlen/Engine/Capabilities/InputReader.hpp"
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -52,7 +52,7 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 
 namespace ZHLN::CameraRig {
 
-void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputContext> input, FrameDt frameDt, FrameAlpha frameAlpha) noexcept {
+void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputReader> input, FrameDt frameDt, FrameAlpha frameAlpha) noexcept {
     const auto camera = query.GetSingleton<Components::CameraComponent>();
     if (!camera) {
         return;
@@ -91,8 +91,7 @@ void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputContext> input, Fr
         }
 
         // 3. ZOOM & FOV SMOOTHING
-        const InputState& inputState = input->SeatKeyboardMouse();
-        float             wheelDelta = inputState.GetMouseWheel();
+        float wheelDelta = input->MouseWheel();
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = std::clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
@@ -108,9 +107,10 @@ void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputContext> input, Fr
 
         // 4. MOUSE LOOK ORBITING
         const float sensitivity = 0.15f;
-        if (inputState.IsMouseButtonDown(MouseButton::Right)) {
-            camComp.yaw += inputState.GetMouseDeltaX() * sensitivity;
-            camComp.pitch = std::clamp(camComp.pitch - (inputState.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
+        if (input->MouseButtonDown(MouseButton::Right)) {
+            const Axis2DValue look = input->MouseDelta();
+            camComp.yaw += look.x * sensitivity;
+            camComp.pitch = std::clamp(camComp.pitch - (look.y * sensitivity), -89.0f, 89.0f);
         }
 
         cam.yaw   = DegF{camComp.yaw};

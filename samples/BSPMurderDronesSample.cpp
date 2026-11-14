@@ -60,7 +60,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -1206,10 +1206,11 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [&](auto& cc) -> auto {
         // Captured mouse: look every frame, no button. Uncaptured: keep the
         // RMB drag so a host that never captures still works exactly as before.
-        const auto& input = engine.GetInput().SeatKeyboardMouse();
-        if (g_mouseCaptured || input.IsMouseButtonDown(ZHLN::MouseButton::Right)) {
-            g_view.yaw += input.GetMouseDeltaX() * kLookSensitivity;
-            g_view.pitch = std::clamp(g_view.pitch - (input.GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
+        const auto input = std::as_const(engine).Input();
+        if (g_mouseCaptured || input.MouseButtonDown(ZHLN::MouseButton::Right)) {
+            const ZHLN::Axis2DValue look = input.MouseDelta();
+            g_view.yaw += look.x * kLookSensitivity;
+            g_view.pitch = std::clamp(g_view.pitch - (look.y * kLookSensitivity), -89.0f, 89.0f);
         }
         cc.camera.yaw      = ZHLN::DegF{g_view.yaw};
         cc.camera.pitch    = ZHLN::DegF{g_view.pitch};
@@ -1893,7 +1894,11 @@ auto main(int argc, char* argv[]) -> int {
         // capture and crosshair-pick toggles all read the same seat state, and
         // they are three separate blocks now.
         auto       reg   = engine->Entities();
-        const auto* input = &engine->GetInput().SeatKeyboardMouse();
+        // A value snapshot: this block and the ones below it read the seat's keys
+        // repeatedly, and a copy is cheaper to reason about than three live
+        // references into the router.
+        const ZHLN::InputState  seatState = std::as_const(*engine).Input().Snapshot();
+        const ZHLN::InputState* input     = &seatState;
 
         {
             // Raw, like the other samples' edge detection: no console or text

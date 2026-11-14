@@ -17,7 +17,6 @@ namespace ZHLN {
 
 class VisibilityList;
 class PhysicsContext;
-class InputContext;
 class ArticulationSystem;
 struct CullingStats;
 struct DebugSettings;
@@ -48,8 +47,10 @@ class ZHLN_API World {
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
     auto GetEventBus() noexcept -> ECS::EventBus&;
     [[nodiscard]] auto GetEventBus() const noexcept -> const ECS::EventBus&;
-    auto GetInput() noexcept -> InputContext&;
-    [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
+    // No GetInput() here. The World does not own or use input -- it only ever
+    // held the router so callers could reach it through the World, which is the
+    // backdoor this header used to be. The router lives in EngineImpl and is
+    // reached only as InputReader/InputHaptics/InputActions.
 
     auto GetArticulationSystem() -> ArticulationSystem&;
     auto GetCullingStats() noexcept -> CullingStats&;

@@ -24,7 +24,6 @@
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Core/Profiler.hpp>
@@ -38,14 +37,17 @@
 namespace ZHLN {
 namespace { namespace Steps {
 
+// The host's UI callback. What runs immediately after it in the same phase --
+// releasing a capture the host did not ask for, then re-evaluating the action
+// maps -- reaches the engine-private input router, which this translation unit
+// cannot see. That half is `uiInputStep`, defined in Engine.cpp and placed here
+// by pointer, exactly like presentStep: a FrameStepFn carries no userdata, so a
+// step that needs engine-private state has to be written where that state is
+// visible.
 void HostUICallback(Engine& engine, float, FrameContext&) {
     if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
-        if (engine.GetPendingUIData().Empty()) {
-            engine.GetInput().SyncCaptureFlags(false, false);
-        }
     }
-    engine.GetInput().RefreshActionsForCurrentFrame(&engine.GetEventBus());
 }
 
 void HotReload(Engine& engine, float, FrameContext&) {
@@ -120,7 +122,7 @@ void TransformHistory(Engine& engine, float dt, FrameContext& ctx) {
 // relative to one of these is depending on this function, so a rename here is a
 // breaking change to every module that anchored to it, reported as
 // FramePlanError::AnchorMissing rather than absorbed.
-void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep) {
+void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep, FrameStepFn uiInputStep) {
     using Phase = FramePhase;
 
     // A core step that cannot be placed is a programming error in this function,
@@ -132,7 +134,12 @@ void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep) {
         }
     };
 
+    // HostUICallback is the step's name and stays the UI callback, because
+    // modules anchor to it. The input half of the same phase runs beside it as
+    // its own step, so the name keeps meaning what it always did and the input
+    // evaluation has a name a module can anchor to as well.
     require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
+    require(plan.Append(Phase::UI, "EvaluateInput", uiInputStep));
     require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
     require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));

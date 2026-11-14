@@ -13,7 +13,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -28,16 +28,17 @@ namespace {
 
 struct FreeCamOptOutComponent {};
 
-void Drive(Components::CameraComponent& cc, const InputState& input, const FreeCamComponent& knobs, float dt) {
+void Drive(Components::CameraComponent& cc, const InputReader& input, const FreeCamComponent& knobs, float dt) {
     if (!knobs.enabled) {
         return;
     }
     Camera&     cam        = cc.camera;
     const float look       = knobs.lookSensitivity;
-    const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(MouseButton::Right) : true;
+    const bool  lookButton = knobs.lookRequiresButton ? input.MouseButtonDown(MouseButton::Right) : true;
     if (lookButton) {
-        cam.yaw += DegF{input.GetMouseDeltaX() * look};
-        cam.pitch = std::clamp(cam.pitch - DegF{input.GetMouseDeltaY() * look}, DegF{-89.0f}, DegF{89.0f});
+        const Axis2DValue delta = input.MouseDelta();
+        cam.yaw += DegF{delta.x * look};
+        cam.pitch = std::clamp(cam.pitch - DegF{delta.y * look}, DegF{-89.0f}, DegF{89.0f});
     }
 
     const float yawRad   = cam.yaw.ToRadians().value;
@@ -49,25 +50,25 @@ void Drive(Components::CameraComponent& cc, const InputState& input, const FreeC
         right = right.Normalized();
     }
     const FVec3 up    = FVec3::UnitY();
-    const float speed = input.IsKeyDown(KeyCode::LShift) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
+    const float speed = input.KeyDown(KeyCode::LShift) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
 
     FVec3 move = FVec3::Zero();
-    if (input.IsKeyDown(KeyCode::W)) {
+    if (input.KeyDown(KeyCode::W)) {
         move += forward;
     }
-    if (input.IsKeyDown(KeyCode::S)) {
+    if (input.KeyDown(KeyCode::S)) {
         move -= forward;
     }
-    if (input.IsKeyDown(KeyCode::A)) {
+    if (input.KeyDown(KeyCode::A)) {
         move -= right;
     }
-    if (input.IsKeyDown(KeyCode::D)) {
+    if (input.KeyDown(KeyCode::D)) {
         move += right;
     }
-    if (input.IsKeyDown(KeyCode::E) || input.IsKeyDown(KeyCode::Space)) {
+    if (input.KeyDown(KeyCode::E) || input.KeyDown(KeyCode::Space)) {
         move += up;
     }
-    if (input.IsKeyDown(KeyCode::Q)) {
+    if (input.KeyDown(KeyCode::Q)) {
         move -= up;
     }
     if (move.LengthSquared() > 0.0f && dt > 0.0f) {
@@ -100,8 +101,8 @@ void SeedBootCamera(SeedQuery query, ECS::EntityCommandBuffer& commands) {
 }
 
 using FreeCamQuery = ECS::Query<const FreeCamTagComponent, const FreeCamComponent, Components::CameraComponent&>;
-void ApplyTyped(FreeCamQuery query, ECS::Res<InputContext> input, FrameDt frameDt) {
-    const InputState& kbm = input->SeatKeyboardMouse();
+void ApplyTyped(FreeCamQuery query, ECS::Res<InputReader> input, FrameDt frameDt) {
+    const InputReader& kbm = *input;
     for (Entity e: query.Entities<FreeCamTagComponent>()) {
         const auto knobs = query.Get<FreeCamComponent>(e);
         const FreeCamComponent defaults {};

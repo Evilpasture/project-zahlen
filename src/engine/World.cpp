@@ -7,7 +7,6 @@
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/EngineServices.hpp>
-#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Engine/VisibilityList.hpp>
@@ -32,7 +31,6 @@ struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
     ECS::EventBus                   eventBus;
-    InputContext                    inputContext;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
@@ -118,12 +116,6 @@ auto World::GetEventBus() noexcept -> ECS::EventBus& {
 }
 auto World::GetEventBus() const noexcept -> const ECS::EventBus& {
     return _impl->eventBus;
-}
-auto World::GetInput() noexcept -> InputContext& {
-    return _impl->inputContext;
-}
-auto World::GetInput() const noexcept -> const InputContext& {
-    return _impl->inputContext;
 }
 
 auto World::GetArticulationSystem() -> ArticulationSystem& {

@@ -17,7 +17,9 @@
 #include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterMovement.hpp>
 #include <CharacterController/PlayerInput.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -171,21 +173,76 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
         }
 
         void test_typed_player_input_and_intent_seat_and_freecam(Fixture::TaskSystemAndJoltScope&) {
+            // The seat translation is a pure function over a seat's physical
+            // state, so it is tested as one: no router, no engine, no window and
+            // no synthetic device events. What used to be a constructed router
+            // plus InjectKey(W, true) is now two locals.
             ECS::Registry reg;
-            InputContext input;
-            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::W, true);
-            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::Space, true);
-            input.MutableSeatKeyboardMouse(kPrimarySeat).SetKey(KeyCode::LShift, true);
-            input.SetKeyboardMouseSeat(PlayerSeat {1}, true);
-            input.MutableSeatKeyboardMouse(PlayerSeat {1}).SetKey(KeyCode::D, true);
-            const auto primary = reg.Create(Character::InputComponent {}, Character::MovementComponent {});
+
+            InputState primaryKbm {};
+            primaryKbm.SetKey(KeyCode::W, true);
+            primaryKbm.SetKey(KeyCode::Space, true);
+            primaryKbm.SetKey(KeyCode::LShift, true);
+
+            InputState secondaryKbm {};
+            secondaryKbm.SetKey(KeyCode::D, true);
+
+            const auto primary   = reg.Create(Character::InputComponent {}, Character::MovementComponent {});
             const auto secondary = reg.Create(Character::InputComponent {}, Character::MovementComponent {}, Components::PlayerSeatComponent {.seat = PlayerSeat {1}});
-            ExpectTrue(input.SeatReceivesKeyboardMouse(PlayerSeat {1}));
-            ExpectTrue(input.SeatKeyboardMouse(PlayerSeat {1}).IsKeyDown(KeyCode::D));
             ExpectTrue(reg.Get<Components::PlayerSeatComponent>(secondary)->seat == PlayerSeat {1});
-            Character::PlayerInputSystem::InputQuery q {reg};
-            ExpectTrue(q.Get<Components::PlayerSeatComponent>(secondary).transform([](const Components::PlayerSeatComponent& seat) { return seat.seat; }).value_or(kPrimarySeat) == PlayerSeat {1});
-            Character::PlayerInputSystem::Update(Character::PlayerInputSystem::InputQuery {reg}, ECS::Res<InputContext> {&input});
+
+            // Both seats get the keyboard, and neither has a pad: this is the
+            // shape TranslateSeatIntent takes, not a router configured to fake it.
+            ExpectTrue(primaryKbm.IsKeyDown(KeyCode::W));
+            ExpectTrue(secondaryKbm.IsKeyDown(KeyCode::D));
+
+            // A router that provides no pads and no actions. The function needs
+            // one only to answer gamepad queries, which return idle values for a
+            // bundle with no device attached -- so it takes an InputReader from a
+            // real Engine rather than a fabricated one. Author the nothing it
+            // needs and read back.
+            auto engineCreated = Engine::Create(EngineConfig {.appName = "CharacterInputTest", .validationMode = ValidationMode::Off, .headless = true});
+            ExpectTrue(engineCreated.has_value());
+            if (!engineCreated) {
+                return;
+            }
+            auto engine       = std::move(*engineCreated);
+            const auto reader = std::as_const(*engine).Input();
+
+            const Character::SeatIntent primaryIntent =
+                Character::TranslateSeatIntent(primaryKbm, /*seatHasKeyboardMouse=*/true, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+            const Character::SeatIntent secondaryIntent =
+                Character::TranslateSeatIntent(secondaryKbm, /*seatHasKeyboardMouse=*/true, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+
+            ExpectEq(primaryIntent.moveZ, 1.0f);
+            ExpectEq(primaryIntent.moveX, 0.0f);
+            ExpectTrue(primaryIntent.jump && primaryIntent.sprint);
+            ExpectEq(secondaryIntent.moveX, 1.0f);
+            ExpectEq(secondaryIntent.moveZ, 0.0f);
+            ExpectTrue(!secondaryIntent.jump && !secondaryIntent.sprint);
+
+            // A seat the routing does not give the keyboard reports no keyboard
+            // intent at all -- the same rule the system applies per seat.
+            const Character::SeatIntent unseatedIntent =
+                Character::TranslateSeatIntent(primaryKbm, /*seatHasKeyboardMouse=*/false, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+            ExpectEq(unseatedIntent.moveZ, 0.0f);
+            ExpectEq(unseatedIntent.moveX, 0.0f);
+            ExpectTrue(!unseatedIntent.jump && !unseatedIntent.sprint);
+
+            // Latch the intent into the components the next stage consumes.
+            const auto latch = [&](Entity entity, const Character::SeatIntent& intent) {
+                reg.Patch<Character::InputComponent>(entity, [&](Character::InputComponent& ic) {
+                    ic.localMoveX     = intent.moveX;
+                    ic.localMoveZ     = intent.moveZ;
+                    ic.lookYawDelta   = intent.lookYaw;
+                    ic.lookPitchDelta = intent.lookPitch;
+                    ic.zoomDelta      = intent.zoom;
+                    ic.wantsToJump    = intent.jump;
+                    ic.wantsToSprint  = intent.sprint;
+                });
+            };
+            latch(primary, primaryIntent);
+            latch(secondary, secondaryIntent);
             ExpectTrue(reg.Get<Character::InputComponent>(primary)->localMoveZ == 1.0f);
             ExpectTrue(reg.Get<Character::InputComponent>(primary)->wantsToJump && reg.Get<Character::InputComponent>(primary)->wantsToSprint);
             ExpectEq(reg.Get<Character::InputComponent>(secondary)->localMoveX, 1.0f);

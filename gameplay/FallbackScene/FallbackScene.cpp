@@ -13,7 +13,7 @@
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -198,8 +198,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    const auto& inputState = engine.GetInput().SeatKeyboardMouse();
-    bool        escDown    = inputState.IsKeyDown(KeyCode::Escape);
+    const auto input       = std::as_const(engine).Input();
+    bool       escDown     = input.KeyDown(KeyCode::Escape);
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {

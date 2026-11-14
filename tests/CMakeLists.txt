@@ -45,6 +45,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestGUIContext.cpp
     core/TestGraphicsSettings.cpp
     core/TestInput.cpp
+    core/TestInputLive.cpp
     core/TestMath.cpp
     core/TestNamespaceFixture.cpp
     core/TestOptional.cpp

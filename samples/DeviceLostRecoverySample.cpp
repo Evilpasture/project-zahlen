@@ -39,7 +39,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -245,7 +245,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        const bool f9Down = engine->GetInput().SeatKeyboardMouse().IsKeyDown(ZHLN::KeyCode::F9);
+        const bool f9Down = std::as_const(*engine).Input().KeyDown(ZHLN::KeyCode::F9);
 
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;

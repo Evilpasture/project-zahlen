@@ -23,7 +23,7 @@
 namespace ZHLN {
 
 class Engine;
-class InputContext;
+class InputReader;
 
 namespace ECS {
 class Registry;
@@ -64,7 +64,7 @@ class TargetCameraSystem {
   public:
     using RigQuery = ECS::Query<TargetCameraComponent&, Components::CameraComponent&, const Components::WorldTransformComponent,
                                 const Components::TransformComponent, const FreeCam::FreeCamTagComponent>;
-    static void Update(RigQuery query, ECS::Res<InputContext> input, FrameDt dt, FrameAlpha alpha) noexcept;
+    static void Update(RigQuery query, ECS::Res<InputReader> input, FrameDt dt, FrameAlpha alpha) noexcept;
 };
 
 // Composition-root entry point: registers TargetCameraComponent and installs

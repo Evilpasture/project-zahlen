@@ -69,6 +69,9 @@ class AssetLibrary;
 class AudioEngine;
 class EngineState;
 class Entities;
+class InputReader;
+class InputHaptics;
+class InputActions;
 
 class ZHLN_API Engine {
   public:
@@ -138,6 +141,18 @@ class ZHLN_API Engine {
     [[nodiscard]] auto Entities() noexcept -> ZHLN::Entities;
 
     [[nodiscard]] auto Entities() const noexcept -> ZHLN::Entities;
+
+    // Input, split by what a caller is allowed to do with it.
+    //
+    // Input() on a mutable Engine is the authoring surface (maps, bindings,
+    // seats, deadzones, capture, persistence); on a const Engine it is the
+    // read-only one. Haptics() is rumble and nothing else. A system in the
+    // simulation graph gets the read-only pair only (see SimServices), so
+    // rebinding a key from inside the simulation is a compile error rather
+    // than a convention.
+    [[nodiscard]] auto Input() noexcept -> InputActions;
+    [[nodiscard]] auto Input() const noexcept -> InputReader;
+    [[nodiscard]] auto Haptics() noexcept -> InputHaptics;
     // In-frame mutations are recorded here, played back at MainECBPlayback and
     // cleaned up by SceneCleanup. Systems declare EntityCommandBuffer& instead.
     [[nodiscard]] auto Commands() noexcept -> ECS::EntityCommandBuffer&;
@@ -152,8 +167,6 @@ class ZHLN_API Engine {
     // handed stops being valid here.
     void ResetWorkerScratch() noexcept;
 
-    auto               GetInput() noexcept -> InputContext&;
-    [[nodiscard]] auto GetInput() const noexcept -> const InputContext&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
 
     auto               GetUpdateGraph() -> SimGraph&;
@@ -191,6 +204,22 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
 
     [[nodiscard]] auto ConsumeUIInput(float dt) noexcept -> GUI::UIInput;
+
+    // Hand a frame's UI input in from outside the device path.
+    //
+    // The GUI is fed through ConsumeUIInput, which reads the router. That is
+    // right for a running game and wrong for a host that owns the pointer
+    // itself -- a virtual-reality compositor, a remote-desktop host, an
+    // input-recording harness -- because those already have the frame's pointer
+    // vector and must not have to fabricate device events to deliver it.
+    //
+    // This is the *UI* seam and nothing else: it replaces what the next
+    // ConsumeUIInput returns for one frame. It cannot set a key the action maps
+    // evaluate, so it is not a way to synthesise gameplay input, and it is not
+    // reachable from a simulation system (SimServices carries the read and
+    // haptic capabilities only).
+    void SubmitUIInput(GUI::UIInput uiInput) noexcept;
+
     void               SubmitUI(UIDrawData uiData) noexcept;
 
     void AddDeviceLostCallback(DeviceLostCallback callback);

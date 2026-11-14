@@ -22,7 +22,7 @@
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -110,9 +110,9 @@ constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
-    const auto& st     = engine.GetInput().SeatKeyboardMouse();
-    const float mouseX = st.mouseX;
-    const float mouseY = st.mouseY;
+    const ZHLN::Axis2DValue where  = std::as_const(engine).Input().MousePosition();
+    const float       mouseX = where.x;
+    const float       mouseY = where.y;
 
     if (vp.width == 0 || vp.height == 0) {
         return {};
@@ -256,7 +256,11 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         if (!engine.IsRunning())
             break;
 
-        const auto* state      = &engine.GetInput().SeatKeyboardMouse();
+        // A tool's picking/drag helpers take a plain InputState, so the editor
+        // takes a value snapshot once per frame and hands that around. It is a
+        // copy: nothing here aliases the router.
+        const ZHLN::InputState inputState = std::as_const(engine).Input().Snapshot();
+        const auto*      state      = &inputState;
         const auto  cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
         if (!cameraComp)
             return std::unexpected(ZHLN::AppError::SceneInitFailed);
@@ -310,7 +314,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // Viewport bounds: center area between the left hierarchy and right inspector
         const bool pointerInViewport = state && state->mouseX >= vpX0 && state->mouseX <= vpX1;
 
-        const auto& capture         = engine.GetInput().UiCapture(ZHLN::kPrimarySeat);
+        const auto  capture         = std::as_const(engine).Input().UiCapture(ZHLN::kPrimarySeat);
         const bool  uiCapturesMouse = state && (!pointerInViewport || capture.mouse);
         // A focused text field owns the keyboard without setting a capture flag
         // of its own, so it has to be asked directly -- otherwise typing "wasd"

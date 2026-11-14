@@ -7,7 +7,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/GUI/GUI.hpp>
@@ -174,11 +174,18 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
+            // Drive the GUI the way a host that owns its pointer does: hand the
+            // frame's UI input in, then run the frame. This is the real seam
+            // (Engine::SubmitUIInput), not a fabricated one: ConsumeUIInput
+            // returns exactly this vector for the frame it was submitted for, and
+            // the device path is not touched. A host with a compositor or a
+            // remote pointer uses the same call.
             auto setInput = [&](float mx, float my, bool lbutton) {
-                auto& in  = engine->GetInput().MutableSeatKeyboardMouse();
-                in.mouseX = mx;
-                in.mouseY = my;
-                in.SetMouseButton(ZHLN::MouseButton::Left, lbutton);
+                ZHLN::GUI::UIInput ui {};
+                ui.mouseX       = mx;
+                ui.mouseY       = my;
+                ui.mouseDown[0] = lbutton;
+                engine->SubmitUIInput(ui);
             };
 
             uint32_t clickCountA = 0;
@@ -584,7 +591,14 @@ struct UITestSuite {
             }
 
             auto& host = engine->GetPlatformHost();
-            engine->GetInput().MutableSeatKeyboardMouse().ApplyLocalMotion(320.0f, 240.0f);
+            // The custom-cursor draw reads the seat's mouse position through the
+            // read capability, so this asserts the value path rather than
+            // writing to it: a headless host has no pointer, hence no position,
+            // and the cursor is drawn at the origin. What the test checks below
+            // is the cursor *mode* transition, which is PlatformHost state.
+            const auto cursorInput = std::as_const(*engine).Input();
+            ZHLN::Test::ExpectEq(cursorInput.MousePosition().x, 0.0f);
+            ZHLN::Test::ExpectEq(cursorInput.MousePosition().y, 0.0f);
 
             if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
                 !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||

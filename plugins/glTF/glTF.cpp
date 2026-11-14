@@ -26,7 +26,7 @@ module;
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -692,19 +692,21 @@ void OnFileDropped(void* userdata, const ZHLN::FileDrop* files, uint32_t count) 
 }
 
 void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
-    const auto& input = engine.GetInput().SeatKeyboardMouse();
+    const auto input = std::as_const(engine).Input();
 
     // The scene explorer panel owns input inside its screen region (once shown).
-    const bool overExplorer = state.loaded && (input.mouseX >= 0.0f) && (input.mouseX <= kExplorerWidth);
+    const ZHLN::Axis2DValue where  = input.MousePosition();
+    const bool        overExplorer = state.loaded && (where.x >= 0.0f) && (where.x <= kExplorerWidth);
     if (overExplorer) {
         return;
     }
 
-    const float dx  = input.mouseDeltaX;
-    const float dy  = input.mouseDeltaY;
-    const bool  lmb = input.IsMouseButtonDown(ZHLN::MouseButton::Left);
-    const bool  rmb = input.IsMouseButtonDown(ZHLN::MouseButton::Right);
-    const bool  mmb = input.IsMouseButtonDown(ZHLN::MouseButton::Middle);
+    const ZHLN::Axis2DValue delta = input.MouseDelta();
+    const float            dx    = delta.x;
+    const float            dy    = delta.y;
+    const bool             lmb   = input.MouseButtonDown(ZHLN::MouseButton::Left);
+    const bool             rmb   = input.MouseButtonDown(ZHLN::MouseButton::Right);
+    const bool             mmb   = input.MouseButtonDown(ZHLN::MouseButton::Middle);
 
     constexpr float kOrbitSpeed = 0.30f;
     constexpr float kPanSpeed   = 0.0015f;
@@ -726,8 +728,9 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.target += (-camRight * dx + camUp * dy) * scale;
     }
 
-    if (input.mouseWheel != 0.0f) {
-        state.distance *= std::exp(-input.mouseWheel * kZoomSpeed);
+    const float wheel = input.MouseWheel();
+    if (wheel != 0.0f) {
+        state.distance *= std::exp(-wheel * kZoomSpeed);
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 

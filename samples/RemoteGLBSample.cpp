@@ -107,7 +107,7 @@
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -1160,7 +1160,11 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void HandleInput(ZHLN::Engine& engine, SampleState& state) {
-    const ZHLN::InputState* input = &engine.GetInput().SeatKeyboardMouse();
+    // One value snapshot for the helpers below, which are pure functions over
+    // InputState. Snapshot() hands out a copy, so nothing here aliases the
+    // engine's router.
+    const ZHLN::InputState  inputState = std::as_const(engine).Input().Snapshot();
+    const ZHLN::InputState* input      = &inputState;
 
     // The panel owns input inside its strip, the way the inspector's explorer
     // does: a drag that starts on the HUD is not a drag around the subject.

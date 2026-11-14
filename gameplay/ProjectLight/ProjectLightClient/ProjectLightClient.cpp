@@ -15,7 +15,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -1249,17 +1249,17 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
     auto        entities = engine.Entities();
-    const auto& input    = engine.GetInput().SeatKeyboardMouse();
+    const auto  input    = std::as_const(engine).Input();
     m_lastControls       = {};
     // No main camera entity means no view to report; the zeroed controls above stand.
     if (const auto cameraComp = entities.GetSingleton<Components::CameraComponent>()) {
         m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
-    m_lastControls.forward  = input.IsKeyDown(KeyCode::W);
-    m_lastControls.backward = input.IsKeyDown(KeyCode::S);
-    m_lastControls.left     = input.IsKeyDown(KeyCode::A);
-    m_lastControls.right    = input.IsKeyDown(KeyCode::D);
-    m_lastControls.jump     = input.IsKeyDown(KeyCode::Space);
+    m_lastControls.forward  = input.KeyDown(KeyCode::W);
+    m_lastControls.backward = input.KeyDown(KeyCode::S);
+    m_lastControls.left     = input.KeyDown(KeyCode::A);
+    m_lastControls.right    = input.KeyDown(KeyCode::D);
+    m_lastControls.jump     = input.KeyDown(KeyCode::Space);
 
     MsgPackValue inputs = MsgPackValue::Map();
     inputs.Set("forward", MsgPackValue::Bool(m_lastControls.forward));

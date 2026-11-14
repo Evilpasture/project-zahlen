@@ -19,7 +19,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -576,10 +576,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
-        const auto&    input    = engine.GetInput().SeatKeyboardMouse();
-        const Extent2D hostSize = host.GetSize();
-        const float    rawX     = input.mouseX;
-        const float    rawY     = input.mouseY;
+        // The cursor follows the device, not gameplay's view of it, so this
+        // asks the read capability by value rather than gating on UiCapture.
+        const auto     input    = std::as_const(engine).Input();
+        const Axis2DValue where  = input.MousePosition();
+        const Extent2D hostSize  = host.GetSize();
+        const float    rawX      = where.x;
+        const float    rawY      = where.y;
         const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
         const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
 

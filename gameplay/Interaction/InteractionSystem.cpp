@@ -13,7 +13,7 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -116,7 +116,7 @@ void InteractionSystem::Update(
     ECS::EntityCommandBuffer& commands,
     ZHLN::Optional<PhysicsContext&> physics,
     ZHLN::Optional<AudioContext&> audio,
-    ZHLN::Optional<const InputContext&> input
+    UseIntent useIntent
 ) {
     const auto dispatch = query.As<DispatchQuery>();
 
@@ -138,10 +138,11 @@ void InteractionSystem::Update(
 
     const FVec3 playerPos = playerTrans->position;
 
-    const bool  interactPressed     = input && input->SeatKeyboardMouse().IsKeyDown(KeyCode::E);
-    static bool wasInteractPressed  = false;
-    const bool  interactJustPressed = interactPressed && !wasInteractPressed;
-    wasInteractPressed              = interactPressed;
+    // The edge comes from the pair the caller handed in. No function-local
+    // static: that latch used to be shared by every caller and every test, so one
+    // call's press leaked into the next and the system's result depended on how
+    // many times it had been called rather than on the world.
+    const bool interactJustPressed = useIntent.JustPressed();
 
     // A newly created inventory is not visible through Query until playback.
     // Keep one pending value so several pickups in this invocation accumulate
@@ -488,10 +489,31 @@ void ButtonMovementSystem::Update(
     }
 }
 
+void InteractionSystem::Update(
+    InteractionQuery query,
+    ECS::EntityCommandBuffer& commands,
+    ZHLN::Optional<PhysicsContext&> physics,
+    ZHLN::Optional<AudioContext&> audio,
+    ECS::Res<InputReader> input,
+    ECS::Local<UseLatch> latch
+) {
+    // Device form: ask the capability for the level, keep the previous one in this
+    // node's own state, and hand the resulting intent to the same body a script
+    // or a test drives directly.
+    const bool use = input->KeyDown(KeyCode::E);
+    Update(query, commands, physics, audio, UseIntent {.use = use, .wasUseDown = latch->wasDown});
+    latch->wasDown = use;
+}
+
 namespace {
 
 void AddSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
-    updateGraph.AddSystem<&InteractionSystem::Update>();
+    // The name is overloaded (the intent form and the device form), so the cast
+    // picks the node signature explicitly: same-name overloads are how one
+    // system offers both a body and a phase entry point.
+    updateGraph.AddSystem<static_cast<void (*)(InteractionQuery, ECS::EntityCommandBuffer&, ZHLN::Optional<PhysicsContext&>,
+                                               ZHLN::Optional<AudioContext&>, ECS::Res<InputReader>, ECS::Local<InteractionSystem::UseLatch>)>(
+        &InteractionSystem::Update)>();
     updateGraph.AddSystem<&DoorMovementSystem::Update>();
     updateGraph.AddSystem<&ButtonMovementSystem::Update>();
 }

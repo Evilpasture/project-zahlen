@@ -21,7 +21,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Scene.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -787,7 +787,15 @@ struct BSPInteractionTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> interaction_graph_declares_dispatch_hazards() {
             using namespace ZHLN::ECS;
-            const SystemInfo interaction {.access_pattern = SystemSignature<&ZHLN::Interaction::InteractionSystem::Update>::PopulateAccessPattern()};
+            // The name is overloaded (intent form and device form), so the
+            // signature names the node overload explicitly -- the same cast
+            // InteractionSystem's own AddSystems makes.
+            constexpr auto kInteractionNode =
+                static_cast<void (*)(ZHLN::Interaction::InteractionQuery, EntityCommandBuffer&, ZHLN::Optional<ZHLN::PhysicsContext&>,
+                                     ZHLN::Optional<ZHLN::AudioContext&>, Res<ZHLN::InputReader>,
+                                     Local<ZHLN::Interaction::InteractionSystem::UseLatch>)>(
+                    &ZHLN::Interaction::InteractionSystem::Update);
+            const SystemInfo interaction {.access_pattern = SystemSignature<kInteractionNode>::PopulateAccessPattern()};
             const SystemInfo door {.access_pattern = SystemSignature<&ZHLN::Interaction::DoorMovementSystem::Update>::PopulateAccessPattern()};
             const SystemInfo button {.access_pattern = SystemSignature<&ZHLN::Interaction::ButtonMovementSystem::Update>::PopulateAccessPattern()};
             for (const auto* info : {&interaction, &door, &button}) {
@@ -802,18 +810,18 @@ struct BSPInteractionTestSuite {
             using namespace ZHLN;
             using namespace ZHLN::Interaction;
             ECS::Registry reg;
-            InputContext  input;
             const Entity player = reg.Create(Character::MovementComponent {}, Components::TransformComponent {});
             const Entity first = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
             const Entity second = reg.Create(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
             InteractionQuery query {reg};
             ECS::EntityCommandBuffer commands {reg};
 
-            // Establish an unpressed prior frame, independent of earlier tests.
-            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
+            // Establish an unpressed prior frame, then the rising edge. The intent
+            // is a value -- no router, no injected keystroke, and (unlike the old
+            // function-local latch) no state shared with any other test.
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = false, .wasUseDown = false});
             commands.Playback();
-            input.InjectKey(KeyCode::E, true);
-            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = true, .wasUseDown = false});
             ZHLN::Test::ExpectFalse(reg.Get<ContainerComponent>(player).has_value());
             ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(first).has_value());
             ZHLN::Test::ExpectTrue(reg.Get<Components::MeshComponent>(second).has_value());
@@ -826,10 +834,8 @@ struct BSPInteractionTestSuite {
             }
             ZHLN::Test::ExpectFalse(reg.Get<Components::MeshComponent>(first).has_value());
             ZHLN::Test::ExpectFalse(reg.Get<Components::MeshComponent>(second).has_value());
-            // The legacy input edge state is shared by invocations; release it
-            // before the next direct-call test.
-            input.InjectKey(KeyCode::E, false);
-            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
+            // Release the edge; held-but-not-newly-pressed must not fire twice.
+            InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, InteractionSystem::UseIntent {.use = true, .wasUseDown = true});
             commands.Playback();
             return {};
         }
@@ -849,10 +855,6 @@ struct BSPInteractionTestSuite {
             reg.RegisterComponent<ZHLN::Interaction::DoorComponent>();
             reg.RegisterComponent<ZHLN::Interaction::ButtonComponent>();
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
-
-            // Create input context with E key down
-            ZHLN::InputContext input;
-            input.InjectKey(ZHLN::KeyCode::E, true);
 
             // Create player at (0, 0, 0)
             const auto playerEnt = reg.Create();
@@ -876,7 +878,9 @@ struct BSPInteractionTestSuite {
 
             ZHLN::Interaction::InteractionQuery query(reg);
             ZHLN::ECS::EntityCommandBuffer commands(reg);
-            ZHLN::Interaction::InteractionSystem::Update(query, commands, std::nullopt, std::nullopt, input);
+            ZHLN::Interaction::InteractionSystem::Update(
+                query, commands, std::nullopt, std::nullopt, ZHLN::Interaction::InteractionSystem::UseIntent {.use = true, .wasUseDown = false}
+            );
             commands.Playback();
 
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);

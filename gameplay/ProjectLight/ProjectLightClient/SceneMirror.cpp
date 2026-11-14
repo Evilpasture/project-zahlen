@@ -26,7 +26,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -701,8 +701,8 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     const auto velocity = physics.CharacterVelocity(state.localControllerBody);
     (void)dt;
 
-    const auto& input    = engine.GetInput().SeatKeyboardMouse();
-    const bool  jumpDown = input.IsKeyDown(KeyCode::Space);
+    const auto input    = std::as_const(engine).Input();
+    const bool jumpDown = input.KeyDown(KeyCode::Space);
     if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
     state.wasJumpDown = jumpDown;
     state.jumpRemaining = std::max(0.0f, state.jumpRemaining - std::max(0.0f, dt));

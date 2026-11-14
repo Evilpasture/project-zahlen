@@ -34,13 +34,14 @@
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/InputActions.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
-#include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsShapes.hpp>
@@ -1242,45 +1243,15 @@ public:
     }
 
     // --------------------------------------------------------- IActionContext
-    void BeginFrame() noexcept override {
-        Router().BeginFrame();
-    }
-
-    void RefreshActions() noexcept override {
-        Router().RefreshActionsForCurrentFrame(&m_engine->GetEventBus());
-    }
-
-    void EvaluateFrame(float deltaSeconds) noexcept override {
-        Router().EvaluateFrame(deltaSeconds, &m_engine->GetEventBus());
-    }
-
-    void InjectKey(KeyCode key, bool down, PlayerSeat seat) noexcept override {
-        Router().InjectKey(key, down, seat);
-    }
-
-    void InjectMouseMove(float x, float y, PlayerSeat seat) noexcept override {
-        Router().InjectMouseMove(x, y, seat);
-    }
-
-    void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat seat) noexcept override {
-        Router().InjectMouseRelative(x, y, dx, dy, seat);
-    }
-
-    void InjectMouseScroll(float delta, PlayerSeat seat) noexcept override {
-        Router().InjectMouseScroll(delta, seat);
-    }
-
-    void InjectGamepadConnection(GamepadSlot slot, bool connected, StringView name) noexcept override {
-        Router().InjectGamepadConnection(slot, connected, std::string_view(name));
-    }
-
-    void InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept override {
-        Router().InjectGamepadButton(slot, button, down);
-    }
-
-    void InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept override {
-        Router().InjectGamepadAxis(slot, axis, value);
-    }
+    //
+    // Every override below is written against the same three capability values
+    // an application gets from Engine::Input()/Haptics(). There is no router
+    // accessor here and no InputContext include: the COM boundary has exactly
+    // the surface a host is allowed to use, which is the point of the split.
+    //
+    // The router is reached through a mutable Engine because the capabilities
+    // are constructed by it; the calls themselves are the same value operations
+    // a caller makes.
 
     [[nodiscard]] Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept override {
         if (mapChain == nullptr) return ComError::NullArgument;
@@ -1297,33 +1268,33 @@ public:
         const std::string_view mapName(cfg->name);
         if (mapName.empty()) return ComError::InvalidArgument;
 
-        InputActionMap& map = Router().CreateActionMap(mapName, cfg->priority);
-        map.SetEnabled(cfg->enabled);
-        map.SetSeatMask(cfg->seatMask);
-        map.SetBlocksLowerPriority(cfg->blocksLowerPriority);
-        map.SetConsumePhysicalInputs(cfg->consumePhysicalInputs);
+        // One call: the capability owns the map, the COM override does not.
+        Inputs().ConfigureActionMap(*cfg);
         return {};
     }
 
     bool RemoveActionMap(StringView mapName) noexcept override {
-        return Router().RemoveActionMap(std::string_view(mapName));
+        return Inputs().RemoveActionMap(std::string_view(mapName));
     }
 
+    // HasActionMap / IsActionMapEnabled / GetRouting below are const and answer
+    // from reads alone, so they take the reader capability instead of asking a
+    // non-const InputActions for the same answer -- no const_cast, and the
+    // method says by its callee that it mutates nothing.
     [[nodiscard]] bool HasActionMap(StringView mapName) const noexcept override {
-        return static_cast<bool>(Router().FindActionMap(std::string_view(mapName)));
+        return Reader().HasActionMap(std::string_view(mapName));
     }
 
     [[nodiscard]] bool IsActionMapEnabled(StringView mapName) const noexcept override {
-        const auto found = Router().FindActionMap(std::string_view(mapName));
-        return static_cast<bool>(found) && found->Enabled();
+        return Reader().IsActionMapEnabled(std::string_view(mapName));
     }
 
     bool SetActionMapEnabled(StringView mapName, bool enabled) noexcept override {
-        return Router().SetActionMapEnabled(std::string_view(mapName), enabled);
+        return Inputs().SetActionMapEnabled(std::string_view(mapName), enabled);
     }
 
     bool SetActionMapEnabledForSeat(StringView mapName, PlayerSeat seat, bool enabled) noexcept override {
-        return Router().SetActionMapEnabledForSeat(std::string_view(mapName), seat, enabled);
+        return Inputs().SetActionMapEnabledForSeat(std::string_view(mapName), seat, enabled);
     }
 
     [[nodiscard]] Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept override {
@@ -1343,32 +1314,17 @@ public:
         if (mapName.empty() || actionName.empty()) return ComError::InvalidArgument;
         if (cfg->bindingCount > 0U && cfg->bindings == nullptr) return ComError::InvalidArgument;
 
-        auto mapOpt = Router().FindActionMap(mapName);
-        if (!mapOpt) return ComError::InvalidArgument;
-
-        InputAction& action = mapOpt->AddAction(actionName, cfg->kind);
-        action.SetClampUnitCircle(cfg->clampUnitCircle);
-        action.SetActuationThreshold(cfg->actuationThreshold);
-
-        if (cfg->replaceBindings) {
-            const std::span<const InputBinding> spanBindings {cfg->bindings, cfg->bindingCount};
-            action.ReplaceBindings(spanBindings);
-        } else {
-            for (uint32_t i = 0; i < cfg->bindingCount; ++i) {
-                action.AppendBinding(cfg->bindings[i]);
-            }
-        }
-        return action.Id();
+        // No HasActionMap pre-check: ConfigureAction already resolves the map and
+        // returns a null ActionID when it does not exist, so this is one lookup
+        // instead of two and cannot disagree with itself.
+        const ActionID action = Inputs().ConfigureAction(*cfg);
+        if (!action.Valid()) return ComError::InvalidArgument;
+        return action;
     }
 
     [[nodiscard]] Result<void> BindAction(StringView mapName, ActionID action,
                                           const ChainInNode* bindingChain) noexcept override {
         if (bindingChain == nullptr) return ComError::NullArgument;
-
-        auto mapOpt = Router().FindActionMap(std::string_view(mapName));
-        if (!mapOpt) return ComError::InvalidArgument;
-        auto actOpt = mapOpt->FindAction(action);
-        if (!actOpt) return ComError::InvalidArgument;
 
         std::optional<InputBinding>       appendBinding;
         std::optional<ActionRebindConfig> rebindCfg;
@@ -1388,35 +1344,30 @@ public:
         if (opCount != 1U) return ComError::InvalidArgument;
 
         if (appendBinding.has_value()) {
-            actOpt->AppendBinding(*appendBinding);
+            if (!Inputs().BindAction(mapName, action, *appendBinding)) return ComError::InvalidArgument;
             return {};
         }
         if (rebindCfg.has_value()) {
-            if (!actOpt->Rebind(rebindCfg->slotIndex, rebindCfg->binding)) return ComError::InvalidArgument;
+            if (!Inputs().RebindAction(mapName, action, rebindCfg->slotIndex, rebindCfg->binding)) return ComError::InvalidArgument;
             return {};
         }
         return ComError::InvalidArgument;
     }
 
     bool ClearBindings(StringView mapName, ActionID action) noexcept override {
-        auto mapOpt = Router().FindActionMap(std::string_view(mapName));
-        if (!mapOpt) return false;
-        auto actOpt = mapOpt->FindAction(action);
-        if (!actOpt) return false;
-        actOpt->ClearBindings();
-        return true;
+        return Inputs().ClearActionBindings(std::string_view(mapName), action);
     }
 
     void SnapshotDefaults() noexcept override {
-        Router().SnapshotAllDefaults();
+        Inputs().SnapshotAllDefaults();
     }
 
     bool ResetActionMapToDefaults(StringView mapName) noexcept override {
-        return Router().ResetActionMapToDefaults(std::string_view(mapName));
+        return Inputs().ResetActionMapToDefaults(std::string_view(mapName));
     }
 
     void ResetAllToDefaults() noexcept override {
-        Router().ResetAllToDefaults();
+        Inputs().ResetAllToDefaults();
     }
 
     [[nodiscard]] Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept override {
@@ -1431,21 +1382,21 @@ public:
         if (!chainRes.HasValue()) return chainRes;
         if (!cfg.has_value()) return ComError::InvalidArgument;
 
-        Router().SetRoutingPolicy(cfg->policy);
+        Inputs().SetRoutingPolicy(cfg->policy);
         for (size_t seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
             const PlayerSeat seat {static_cast<uint8_t>(seatIdx)};
-            Router().SetKeyboardMouseSeat(seat, cfg->keyboardMouseSeatMask.Contains(seat));
+            Inputs().SetKeyboardMouseSeat(seat, cfg->keyboardMouseSeatMask.Contains(seat));
         }
         return {};
     }
 
     [[nodiscard]] Result<void> GetRouting(ChainOutNode* routingChain) const noexcept override {
         return DispatchOutChain<InputRoutingConfig>(routingChain, [&](InputRoutingConfig& outCfg) -> Result<void> {
-            outCfg.policy = Router().RoutingPolicy();
+            outCfg.policy = Reader().RoutingPolicy();
             SeatMask mask = SeatMask::None();
             for (size_t seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
                 const PlayerSeat seat {static_cast<uint8_t>(seatIdx)};
-                if (Router().SeatReceivesKeyboardMouse(seat)) {
+                if (Reader().SeatReceivesKeyboardMouse(seat)) {
                     mask.Set(seat);
                 }
             }
@@ -1455,65 +1406,62 @@ public:
     }
 
     [[nodiscard]] ActionState Action(ActionID id, PlayerSeat seat) const noexcept override {
-        return Router().Action(id, seat);
+        return Reader().Action(id, seat);
     }
 
+    // The COM contract is deliberately *physical*: a host asking whether a key is
+    // down is asking about the device, not about who currently owns the keyboard.
+    // InputReader answers exactly that way, so the two surfaces agree.
     [[nodiscard]] bool KeyDown(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Router().SeatKeyboardMouse(seat).IsKeyDown(key);
+        return Reader().KeyDown(key, seat);
     }
 
     [[nodiscard]] bool KeyPressed(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Router().SeatKeyboardMouse(seat).IsKeyPressed(key);
+        return Reader().KeyPressed(key, seat);
     }
 
     [[nodiscard]] bool KeyReleased(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Router().SeatKeyboardMouse(seat).IsKeyReleased(key);
+        return Reader().KeyReleased(key, seat);
     }
 
     [[nodiscard]] Axis2DValue MousePosition(PlayerSeat seat) const noexcept override {
-        const auto& kbm = Router().SeatKeyboardMouse(seat);
-        return Axis2DValue {.x = kbm.mouseX, .y = kbm.mouseY};
+        return Reader().MousePosition(seat);
     }
 
     [[nodiscard]] Axis2DValue MouseDelta(PlayerSeat seat) const noexcept override {
-        const auto& kbm = Router().SeatKeyboardMouse(seat);
-        return Axis2DValue {.x = kbm.mouseDeltaX, .y = kbm.mouseDeltaY};
+        return Reader().MouseDelta(seat);
     }
 
     [[nodiscard]] float MouseWheel(PlayerSeat seat) const noexcept override {
-        return Router().SeatKeyboardMouse(seat).mouseWheel;
+        return Reader().MouseWheel(seat);
     }
 
     [[nodiscard]] InputDeviceKind LastActiveDevice(PlayerSeat seat) const noexcept override {
-        return Router().LastActiveDevice(seat);
+        return Reader().LastActiveDevice(seat);
     }
 
     [[nodiscard]] uint32_t ConnectedGamepadCount() const noexcept override {
-        return static_cast<uint32_t>(Router().ConnectedGamepadCount());
+        return static_cast<uint32_t>(Reader().ConnectedGamepadCount());
     }
 
     [[nodiscard]] bool GamepadConnected(GamepadSlot slot) const noexcept override {
-        const auto pad = Router().Gamepad(slot);
-        return static_cast<bool>(pad) && pad->connected;
+        return Reader().GamepadConnected(slot);
     }
 
     [[nodiscard]] bool GamepadButtonDown(GamepadSlot slot, GamepadButton button) const noexcept override {
-        const auto pad = Router().Gamepad(slot);
-        return static_cast<bool>(pad) && pad->IsButtonDown(button);
+        return Reader().GamepadButtonDown(slot, button);
     }
 
     [[nodiscard]] float GamepadAxisValue(GamepadSlot slot, GamepadAxis axis) const noexcept override {
-        const auto pad = Router().Gamepad(slot);
-        if (!pad) return 0.0F;
-        return pad->Axis(axis);
+        return Reader().GamepadAxisValue(slot, axis);
     }
 
     [[nodiscard]] PlayerSeat GamepadSeat(GamepadSlot slot) const noexcept override {
-        return Router().GamepadSeat(slot);
+        return Reader().GamepadSeat(slot);
     }
 
     bool AssignGamepadToSeat(GamepadSlot slot, PlayerSeat seat) noexcept override {
-        return Router().AssignGamepadToSeat(slot, seat);
+        return Inputs().AssignGamepadToSeat(slot, seat);
     }
 
 private:
@@ -1545,8 +1493,16 @@ private:
         return const_cast<Engine&>(*m_engine).Assets();
     }
 
-    [[nodiscard]] auto Router() const noexcept -> ZHLN::InputContext& {
-        return const_cast<Engine&>(*m_engine).GetInput();
+    // The two input capabilities, reached the way an application reaches them.
+    // The facades are two pointers wide; this is a load, not an allocation.
+    [[nodiscard]] auto Reader() const noexcept -> ZHLN::InputReader {
+        return std::as_const(*m_engine).Input();
+    }
+
+    // Named Inputs() rather than Actions(): IEngine::Actions() is the COM
+    // accessor, and a member of the same name would hide it inside this class.
+    [[nodiscard]] auto Inputs() const noexcept -> ZHLN::InputActions {
+        return const_cast<Engine&>(*m_engine).Input();
     }
 
     std::unique_ptr<Engine> m_engine;

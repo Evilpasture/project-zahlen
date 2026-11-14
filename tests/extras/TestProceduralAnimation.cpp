@@ -21,6 +21,9 @@
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/Capabilities/InputActions.hpp>
+#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <algorithm>
 #include <atomic>
@@ -181,7 +184,22 @@ struct ProceduralAnimationTestSuite {
             AssetManager assets;
             ECS::ExtensionServices extensions;
             PoseUploadQueue uploads;
-            SimServices services {.physics = world->GetPhysics(), .audio = audio, .assets = assets, .input = world->GetInput(),
+            // The simulation bundle carries the two input capabilities, and this
+            // graph does not read input at all. They are filled from the engine
+            // the suite already owns rather than from a router the test builds:
+            // an InputContext is not constructible outside src/engine (that is
+            // work item 1), and synthesizing one to satisfy a bundle field would
+            // be the injection seam this refactor exists to close. The engine is
+            // never ticked here, so both views are simply idle.
+            auto engine = Engine::Create(EngineConfig {.appName = "ProceduralAnimationInputServices",
+                                                       .validationMode = ValidationMode::Off,
+                                                       .headless = true});
+            if (!engine) return std::unexpected(engine.error());
+            // The reader comes from the const accessor and the haptics from the
+            // mutable one, which is exactly the split the bundle mirrors.
+            const Engine& constEngine = **engine;
+            SimServices   services {.physics = world->GetPhysics(), .audio = audio, .assets = assets,
+                                    .input = constEngine.Input(), .haptics = (*engine)->Haptics(),
                                   .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
                                   .extensions = extensions, .poseUploads = uploads};
             const Frame frame {.dt = {1.0f / 60.0f}};

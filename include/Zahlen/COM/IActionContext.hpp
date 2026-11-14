@@ -5,11 +5,18 @@
 
 // Zahlen/COM/IActionContext.hpp
 //
-// Input as the public API sees it: action-map setup, raw device events in,
-// virtual actions and physical state out. Configuration descriptors
-// (ActionMapConfig, ActionConfig, InputBinding, ActionRebindConfig,
-// InputRoutingConfig) travel via reflected ChainInNode / ChainOutNode lists so
-// future input options extend by chaining rather than changing vtable slots.
+// Input as the COM API sees it: action-map setup, virtual actions and physical
+// state out. Configuration descriptors (ActionMapConfig, ActionConfig,
+// InputBinding, ActionRebindConfig, InputRoutingConfig) travel via reflected
+// ChainInNode / ChainOutNode lists so future input options extend by chaining
+// rather than changing vtable slots.
+//
+// What is NOT here, and will not be: BeginFrame / RefreshActions /
+// EvaluateFrame, and every Inject*. Device events arrive from the PlatformHost
+// during IEngine::ProcessEvents(), and evaluation happens inside IEngine::Tick().
+// A host that wants input to happen must run the frame, not poke the router --
+// otherwise the two entry points race and the order of a frame is a property of
+// the host instead of the engine.
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -27,32 +34,6 @@ static_assert(std::is_standard_layout_v<ActionState> && std::is_trivially_copyab
 static_assert(std::is_standard_layout_v<Axis2DValue> && std::is_trivially_copyable_v<Axis2DValue>);
 
 struct IActionContext : IObject {
-    // --- Frame lifecycle ----------------------------------------------------
-
-    // Snapshots the previous physical and virtual state. Everything injected
-    // after this call belongs to the new frame.
-    virtual void BeginFrame() noexcept = 0;
-
-    // Re-evaluates every enabled action map against what has been injected so
-    // far and flushes queued gamepad hotplug events to the engine's event bus.
-    // Safe to call more than once in a frame.
-    virtual void RefreshActions() noexcept = 0;
-
-    // RefreshActions plus haptics stepping, which is what a frame normally
-    // wants.
-    virtual void EvaluateFrame(float deltaSeconds) noexcept = 0;
-
-    // --- Raw device ingestion -----------------------------------------------
-
-    virtual void InjectKey(KeyCode key, bool down, PlayerSeat seat) noexcept = 0;
-    virtual void InjectMouseMove(float x, float y, PlayerSeat seat) noexcept = 0;
-    virtual void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat seat) noexcept = 0;
-    virtual void InjectMouseScroll(float delta, PlayerSeat seat) noexcept = 0;
-
-    virtual void InjectGamepadConnection(GamepadSlot slot, bool connected, StringView name) noexcept = 0;
-    virtual void InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept = 0;
-    virtual void InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept = 0;
-
     // --- Action-map & binding setup -----------------------------------------
 
     // Creates or updates an action map. Supported node: ActionMapConfig.

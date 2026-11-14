@@ -23,7 +23,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -791,21 +791,25 @@ auto main(int argc, char* argv[]) -> int {
         auto entities = engine->Entities();
 
         // 1. Mouse Look and edge-triggered handgun equip input.
-        auto& st           = engine->GetInput().MutableSeatKeyboardMouse();
-        bool  equipKeyDown = st.IsKeyDown(ZHLN::KeyCode::E);
-        bool  viewKeyDown  = st.IsKeyDown(ZHLN::KeyCode::V);
-        bool  tabKeyDown   = st.IsKeyDown(ZHLN::KeyCode::Tab);
-        if (viewState.enabled) {
-            st.mouseWheel = 0.0f;
-        }
-        if (st.IsMouseButtonDown(ZHLN::MouseButton::Right)) {
+        //
+        // Read by value, per query. The sample used to hold the router's mutable
+        // seat state so it could zero the wheel while the first-person view was
+        // on; that write is gone with the mutable accessor, and it was dead
+        // weight -- this sample is the only reader of the wheel, so there was
+        // nothing left for the zeroing to protect.
+        const auto input        = std::as_const(*engine).Input();
+        const bool equipKeyDown = input.KeyDown(ZHLN::KeyCode::E);
+        const bool viewKeyDown  = input.KeyDown(ZHLN::KeyCode::V);
+        const bool tabKeyDown   = input.KeyDown(ZHLN::KeyCode::Tab);
+        if (input.MouseButtonDown(ZHLN::MouseButton::Right)) {
+            const ZHLN::Axis2DValue look = input.MouseDelta();
             if (viewState.enabled) {
-                viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
-                viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);
+                viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + look.x * 0.15f, -80.0f, 80.0f);
+                viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - look.y * 0.15f, -70.0f, 70.0f);
             } else {
                 entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
-                    cameraComp.camera.yaw += ZHLN::DegF{st.GetMouseDeltaX() * 0.15f};
-                    cameraComp.camera.pitch = std::clamp(cameraComp.camera.pitch - ZHLN::DegF{st.GetMouseDeltaY() * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
+                    cameraComp.camera.yaw += ZHLN::DegF{look.x * 0.15f};
+                    cameraComp.camera.pitch = std::clamp(cameraComp.camera.pitch - ZHLN::DegF{look.y * 0.15f}, ZHLN::DegF{-85.0f}, ZHLN::DegF{85.0f});
                 });
             }
         }

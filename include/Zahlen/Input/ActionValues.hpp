@@ -7,15 +7,17 @@
 //
 // The virtual-input vocabulary: what an action is called, what state it is in,
 // which physical input produces it, and the fixed-layout configuration nodes
-// that set up action maps across the COM boundary. Split out of
-// InputContext.hpp the way PhysicsValues.hpp was split out of Physics.hpp --
+// that set up action maps across the COM boundary. Split out of the router --
 // naming an action or describing a binding should not require the router, its
-// action-map storage or <vector> and <string>. InputContext.hpp includes this
-// file, so every existing spelling still resolves.
+// action-map storage or <vector> and <string>. The router's own header lives
+// inside the engine (src/engine/InputContext.hpp) and includes this file.
 //
 // Every type here is a fixed layout of scalars, which is what lets them cross
-// the COM boundary.
+// the COM boundary. That is also why the capture/parse status enums below live
+// here rather than next to the router: a caller reads them by value from
+// Engine::Input(), and reading a status must not name the engine's storage.
 
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -322,6 +324,26 @@ struct ActionConfig {
     bool                replaceBindings    = true;
     const InputBinding* bindings           = nullptr;
     uint32_t            bindingCount       = 0;
+};
+
+// Where a BeginBindingCapture() request is: still waiting for a device edge, it
+// got one, or it was cancelled by its cancel key. Read through
+// InputReader::CaptureStatus / InputActions::CaptureStatus.
+enum class BindingCaptureStatus : uint8_t {
+    Idle = 0,
+    Waiting,
+    Captured,
+    Cancelled,
+};
+
+// Why DeserializeBindings() rejected the text it was handed. One enumerator per
+// thing a hand-edited or stale bindings file can get wrong.
+enum class InputBindingParseError : uint8_t {
+    InvalidHeader ZHLN_ANNOTATION(ZHLN::Description<"Input bindings text header is missing or unsupported"> {}) = 1,
+    MalformedLine ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line is malformed"> {}),
+    UnknownBindingKind ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line names an unknown binding kind"> {}),
+    UnknownEnumerator ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line names an unknown key, button, or axis"> {}),
+    InvalidNumericValue ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line contains an invalid numeric parameter"> {}),
 };
 
 struct ActionRebindConfig {

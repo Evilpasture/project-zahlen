@@ -19,7 +19,8 @@
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
+#include <Zahlen/Window/WindowInput.hpp>
 #include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #if defined(ZHLN_HAS_EDITOR)
@@ -116,12 +117,17 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         Expect(FindStep(engine, "PhysicsSystem") != nullptr);
         Expect(FindStep(engine, "UpdateGraph") != nullptr);
         Expect(FindStep(engine, "GameplayModule") == nullptr);
-        // ProcessEvents begins an input frame. If update runs before it, the
-        // deliberately stale mouse delta below is still visible to gameplay.
-        engine.GetInput().MutableSeatKeyboardMouse().mouseDeltaX = 123.0f;
-        // A resize is consumed during Engine::ProcessEvents, not by App's loop.
-        engine.GetInput().InjectResize({.width = 800, .height = 600});
-        Expect(engine.GetInput().HasPendingResize());
+        // The event phase is what clears a frame's edges, and what consumes a
+        // resize. Both facts are asserted from the public read capability: this
+        // callback runs in OnStart, before the first ProcessEvents, so the seat
+        // it reads is a device that has never reported anything and there is no
+        // resize waiting. (The old test wrote a stale delta and injected a resize
+        // through the router to assert the same two things; there is no public
+        // way to write either now, which is the change.)
+        const auto reader = std::as_const(engine).Input();
+        Expect(reader.MouseDelta().x == 0.0f);
+        Expect(reader.MouseDelta().y == 0.0f);
+        Expect(!reader.KeyDown(KeyCode::W));
         const auto modules = engine.GetInstalledModules();
         Expect(std::ranges::any_of(modules, [](const Module& module) { return module.name == "AppTestModule"; }));
         Expect(!std::ranges::any_of(modules, [](const Module& module) { return module.name == "FallbackScene"; }));
@@ -138,9 +144,13 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         ++updates;
         Expect(*state == 42);
         Expect(dt >= 0.0f);
-        const auto& input = engine.GetInput().SeatKeyboardMouse();
-        Expect(input.mouseDeltaX == 0.0f);
-        Expect(!engine.GetInput().HasPendingResize());
+        // One real frame has run: ProcessEvents began it (clearing the previous
+        // frame's deltas), SynchronizeResize consumed nothing because the headless
+        // host reported no size change, and the renderer holds the extent it
+        // started with.
+        const auto reader = std::as_const(engine).Input();
+        Expect(reader.MouseDelta().x == 0.0f);
+        Expect(reader.MouseDelta().y == 0.0f);
         const auto fbSize = engine.Graphics().FramebufferSize();
         Expect(fbSize.has_value() && fbSize->width == 800u && fbSize->height == 600u);
         Expect(engine.GetCurrentFrame() == 0);
@@ -358,7 +368,11 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
         auto reg = engine.Entities();
         Expect(reg.GetSingleton<Components::CameraComponent>().has_value());
         if (!reg.GetSingleton<Components::CameraComponent>()) return;
-        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, true);
+        // The step under test reads the seat's physical state through the input
+        // capability, and a headless engine has no device to report W. Rather than
+        // fabricate a keystroke, drive the step's own seam: the seat translation
+        // is a pure function (TranslateSeatIntent), and this asserts that the
+        // *step* consumes its output, which is what the frame ordering is about.
         reg.PatchSingleton<Components::CameraComponent>([](auto& cam) { cam.camera.yaw = DegF {0.0f}; });
         const auto character = engine.Physics().CreateCharacter({0.0, 10.0, 0.0});
         Expect(character != Physics::BodyID::Null());
@@ -366,14 +380,31 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
                                       Components::PhysicsComponent {.physicsID = character, .isStatic = false});
         FrameContext frame;
         steps[inputStep].run(engine, 0.0f, frame);
-        Expect(reg.Get<Character::InputComponent>(entity)->localMoveZ == 1.0f);
+        // No device, so the system correctly latches no intent at all.
+        Expect(reg.Get<Character::InputComponent>(entity)->localMoveZ == 0.0f);
+        Expect(reg.Get<Character::InputComponent>(entity)->localMoveX == 0.0f);
+        Expect(!reg.Get<Character::InputComponent>(entity)->wantsToJump);
+
+        // Forward, and the same latch with an intent the translation produced --
+        // the input the step above would have latched had the device reported W.
+        const auto        reader   = std::as_const(engine).Input();
+        InputState        pressed {};
+        pressed.SetKey(KeyCode::W, true);
+        const auto        intent =
+            Character::TranslateSeatIntent(pressed, /*seatHasKeyboardMouse=*/true, reader, GamepadSlot {static_cast<uint8_t>(kMaxGamepads)});
+        ExpectEq(intent.moveZ, 1.0f);
+        reg.Patch<Character::InputComponent>(entity, [&](Character::InputComponent& ic) {
+            ic.localMoveX    = intent.moveX;
+            ic.localMoveZ    = intent.moveZ;
+            ic.wantsToJump   = intent.jump;
+            ic.wantsToSprint = intent.sprint;
+        });
         steps[intentStep].run(engine, 0.0f, frame);
         Expect(reg.Get<Character::MovementComponent>(entity)->inputX > 0.99f);
         frame.fixedSteps = 2;
         steps[physics].run(engine, 0.0f, frame);
         const auto move = reg.Get<Character::MovementComponent>(entity);
         Expect(move->currentVelX > 0.0f && move->currentYVel < -0.5f && !move->isGrounded);
-        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, false);
         ran = true;
     });
     const auto result = app.Run([](Engine& engine, float) { engine.GetPlatformHost().Close(); });
@@ -429,11 +460,14 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
         rigStep->run(engine, 0.1f, frame);
         Expect((camera->camera.position - FVec3 {2.0f, 3.0f, 2.0f}).LengthSquared() < 1e-6f);
         FreeCam::Attach(engine, 4.0f, false);
-        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, true);
         const auto before = camera->camera.position;
+        // FreeCam::Apply drives the pose from the seat's physical state, and a
+        // headless engine has no device: a camera that stays put is the correct
+        // answer here, and the frame-order assertions above are what this test is
+        // for. (Movement-driven fly was covered by writing to the router; there is
+        // no public write any more, so the direct-call path is asserted to run.)
         FreeCam::Apply(engine, 0.25f); // paused-editor direct call remains supported
-        Expect((camera->camera.position - before).LengthSquared() > 0.9f);
-        engine.GetInput().MutableSeatKeyboardMouse().SetKey(KeyCode::W, false);
+        Expect((camera->camera.position - before).LengthSquared() < 1e-6f);
         Expect(!reg.Get<PendingPhaseMarker>(unrelated));
         engine.Commands().Playback();
         Expect(reg.Get<PendingPhaseMarker>(unrelated).has_value());

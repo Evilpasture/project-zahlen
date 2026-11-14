@@ -13,6 +13,8 @@
 // there is nothing to put them on.
 
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
 
@@ -25,7 +27,6 @@ struct CullingStats;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
-class InputContext;
 class ArticulationSystem;
 
 struct DebugSettings {
@@ -52,11 +53,19 @@ class EventBus;
 // whole life, so a system never sees a null service and a resolver never checks
 // for one. The simulation domain has no renderer -- see PoseUploadQueue for the
 // one channel it has out.
+//
+// Input arrives as the two capabilities, never as the router. A system taking
+// Res<InputReader> can only read; one taking ResMut<InputHaptics> can only pulse
+// a pad (and gets an isolated ServiceToken<InputHaptics> write edge, so it does
+// not serialize against readers). A system naming InputActions -- and therefore
+// anything that could rebind a key mid-frame -- is rejected at
+// AddSystem<...>() by the parameter-resolver gate, not at review time.
 struct SimServices {
     PhysicsContext&         physics;
     AudioContext&           audio;
     AssetManager&           assets;
-    InputContext&           input;
+    InputReader             input;
+    InputHaptics            haptics;
     ArticulationSystem&     articulation;
     ECS::EventBus&          events;
     ECS::ExtensionServices& extensions;
@@ -69,7 +78,7 @@ struct RenderServices {
     RenderContext&          render;
     SceneData&              scene;
     AssetManager&           assets;
-    InputContext&           input;
+    InputReader             input;
     ECS::ExtensionServices& extensions;
     CullingStats&           cullingStats;
     DebugSettings&          debugSettings;

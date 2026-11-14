@@ -421,46 +421,35 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
 }
 
 void CheckActions(ZHLN::COM::IActionContext& actions) {
-    actions.BeginFrame();
+    // The COM action surface is authoring plus reads. It has no lifecycle of its
+    // own and no way to fabricate a device event: a host that wants input to
+    // happen runs IEngine::ProcessEvents() and IEngine::Tick(), and this test
+    // proves the boundary agrees by checking only what the boundary owns.
+    //
+    // Nothing below asserts on a key press, because nothing below can produce
+    // one -- which is the invariant, not an omission.
 
-    actions.InjectKey(ZHLN::KeyCode::W, true, ZHLN::kPrimarySeat);
-    ZHLN::Test::ExpectTrue(actions.KeyDown(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
-    ZHLN::Test::ExpectTrue(actions.KeyPressed(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
-    ZHLN::Test::ExpectTrue(!actions.KeyDown(ZHLN::KeyCode::S, ZHLN::kPrimarySeat));
-
-    actions.InjectKey(ZHLN::KeyCode::W, false, ZHLN::kPrimarySeat);
-    ZHLN::Test::ExpectTrue(!actions.KeyDown(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
-    ZHLN::Test::ExpectTrue(actions.KeyReleased(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
-
-    actions.InjectMouseMove(40.0F, 25.0F, ZHLN::kPrimarySeat);
-    const ZHLN::Axis2DValue mouse = actions.MousePosition(ZHLN::kPrimarySeat);
-    ZHLN::Test::ExpectEq(mouse.x, 40.0F);
-    ZHLN::Test::ExpectEq(mouse.y, 25.0F);
-
-    actions.InjectMouseScroll(2.0F, ZHLN::kPrimarySeat);
-    ZHLN::Test::ExpectEq(actions.MouseWheel(ZHLN::kPrimarySeat), 2.0F);
-
-    ZHLN::Test::ExpectEq(actions.ConnectedGamepadCount(), uint32_t {0});
-    actions.InjectGamepadConnection(ZHLN::GamepadSlot {0}, true, "Boundary Test Pad");
-    ZHLN::Test::ExpectTrue(actions.GamepadConnected(ZHLN::GamepadSlot {0}));
-    ZHLN::Test::ExpectEq(actions.ConnectedGamepadCount(), uint32_t {1});
-
-    actions.InjectGamepadButton(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::South, true);
-    ZHLN::Test::ExpectTrue(actions.GamepadButtonDown(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::South));
-    ZHLN::Test::ExpectTrue(!actions.GamepadButtonDown(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::North));
-
-    actions.InjectGamepadAxis(ZHLN::GamepadSlot {0}, ZHLN::GamepadAxis::LeftTrigger, 1.0F);
-    ZHLN::Test::ExpectTrue(actions.GamepadAxisValue(ZHLN::GamepadSlot {0}, ZHLN::GamepadAxis::LeftTrigger) > 0.5F);
-
-    ZHLN::Test::ExpectTrue(!actions.GamepadConnected(ZHLN::GamepadSlot {3}));
-    ZHLN::Test::ExpectEq(actions.GamepadAxisValue(ZHLN::GamepadSlot {3}, ZHLN::GamepadAxis::LeftTrigger), 0.0F);
-
-    actions.RefreshActions();
     const ZHLN::ActionState unbound = actions.Action(ZHLN::ActionID {"NothingBindsThis"}, ZHLN::kPrimarySeat);
     ZHLN::Test::ExpectTrue(!unbound.down);
     ZHLN::Test::ExpectEq(unbound.x, 0.0F);
     ZHLN::Test::ExpectTrue(!actions.ActionDown(ZHLN::ActionID {"NothingBindsThis"}));
     ZHLN::Test::ExpectEq(actions.ActionAxis2D(ZHLN::ActionID {"NothingBindsThis"}).x, 0.0F);
+
+    // A headless host has no pad, and the boundary reports that honestly rather
+    // than holding a synthetic device it could be asked to poke.
+    ZHLN::Test::ExpectEq(actions.ConnectedGamepadCount(), uint32_t {0});
+    ZHLN::Test::ExpectTrue(!actions.GamepadConnected(ZHLN::GamepadSlot {0}));
+    ZHLN::Test::ExpectTrue(!actions.GamepadConnected(ZHLN::GamepadSlot {3}));
+    ZHLN::Test::ExpectEq(actions.GamepadAxisValue(ZHLN::GamepadSlot {3}, ZHLN::GamepadAxis::LeftTrigger), 0.0F);
+    ZHLN::Test::ExpectTrue(!actions.GamepadButtonDown(ZHLN::GamepadSlot {0}, ZHLN::GamepadButton::South));
+
+    // Physical reads answer for a device that is not there.
+    ZHLN::Test::ExpectTrue(!actions.KeyDown(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
+    ZHLN::Test::ExpectTrue(!actions.KeyPressed(ZHLN::KeyCode::W, ZHLN::kPrimarySeat));
+    const ZHLN::Axis2DValue mouse = actions.MousePosition(ZHLN::kPrimarySeat);
+    ZHLN::Test::ExpectEq(mouse.x, 0.0F);
+    ZHLN::Test::ExpectEq(mouse.y, 0.0F);
+    ZHLN::Test::ExpectEq(actions.MouseWheel(ZHLN::kPrimarySeat), 0.0F);
 
     // Chained action-map creation, binding, rebinding, defaults reset and routing.
     ZHLN::Test::ExpectTrue(actions.CreateActionMap("Gameplay", 10, true).HasValue());
@@ -471,23 +460,18 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
     const auto jumpRes = actions.AddAction("Gameplay", "Jump", ZHLN::ActionKind::Digital, jumpBindings);
     if (ZHLN::Test::ExpectTrue(jumpRes.HasValue())) {
         const ZHLN::ActionID jumpId = jumpRes.value;
+
+        // The action exists and is authorable, but it is not actuated: nobody
+        // pressed anything, and the boundary cannot pretend somebody did.
+        ZHLN::Test::ExpectTrue(!actions.ActionDown(jumpId, ZHLN::kPrimarySeat));
+        ZHLN::Test::ExpectTrue(!actions.ActionPressed(jumpId, ZHLN::kPrimarySeat));
+
         ZHLN::Test::ExpectTrue(
             actions.AddBinding("Gameplay", jumpId, ZHLN::InputBinding::GamepadBtn(ZHLN::GamepadButton::North))
                 .HasValue());
+        ZHLN::Test::ExpectTrue(actions.Rebind("Gameplay", jumpId, 0U, ZHLN::InputBinding::Key(ZHLN::KeyCode::E)).HasValue());
         actions.SnapshotDefaults();
 
-        actions.BeginFrame();
-        actions.InjectKey(ZHLN::KeyCode::Space, true, ZHLN::kPrimarySeat);
-        actions.RefreshActions();
-        ZHLN::Test::ExpectTrue(actions.ActionDown(jumpId, ZHLN::kPrimarySeat));
-        ZHLN::Test::ExpectTrue(actions.ActionPressed(jumpId, ZHLN::kPrimarySeat));
-
-        actions.BeginFrame();
-        actions.InjectKey(ZHLN::KeyCode::Space, false, ZHLN::kPrimarySeat);
-        actions.RefreshActions();
-        ZHLN::Test::ExpectTrue(actions.ActionReleased(jumpId, ZHLN::kPrimarySeat));
-
-        ZHLN::Test::ExpectTrue(actions.Rebind("Gameplay", jumpId, 0U, ZHLN::InputBinding::Key(ZHLN::KeyCode::E)).HasValue());
         ZHLN::Test::ExpectTrue(actions.ResetActionMapToDefaults("Gameplay"));
         ZHLN::Test::ExpectTrue(actions.ClearBindings("Gameplay", jumpId));
     }
