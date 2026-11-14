@@ -220,10 +220,10 @@ CrosshairPick g_pick;
 // needs a button held down. InputState keeps reporting motion either
 // way -- this flag is only what stops the look code from *gating* on RMB.
 //
-// Note the trap this does NOT trip: InputState::wantCaptureMouse also
-// suppresses every delta and button read, but it is an editor concept
-// (app/main.cpp) and Engine::ProcessEvents clears it for any host with a real
-// window, so a sample never sees it set.
+// Note the trap this does NOT trip: UI capture state in InputContext also
+// suppresses every delta and button read when gating is applied, but it is
+// an editor concept (app/main.cpp) and Engine::ProcessEvents clears it for
+// any host with a real window, so a sample never sees it set.
 bool g_mouseCaptured = false;
 
 // The frame's dt, for the UI callback's BeginFrame. The sample's own loop owns
@@ -1207,7 +1207,7 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
         // Captured mouse: look every frame, no button. Uncaptured: keep the
         // RMB drag so a host that never captures still works exactly as before.
         const auto& input = engine.GetInput().SeatKeyboardMouse();
-        if (g_mouseCaptured || input.IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+        if (g_mouseCaptured || input.IsMouseButtonDown(ZHLN::MouseButton::Right)) {
             g_view.yaw += input.GetMouseDeltaX() * kLookSensitivity;
             g_view.pitch = std::clamp(g_view.pitch - (input.GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
         }
@@ -1898,7 +1898,7 @@ auto main(int argc, char* argv[]) -> int {
         {
             // Raw, like the other samples' edge detection: no console or text
             // field in this sample captures the keyboard.
-            const bool freeCamKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+            const bool freeCamKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::V);
             if (freeCamKeyDown && !freeCamKeyWasDown) {
                 const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
                 bool               flying = false;
@@ -1942,7 +1942,7 @@ auto main(int argc, char* argv[]) -> int {
         // bound to nothing else (WASD, Q, E, Space, Shift, V, Escape and F are
         // taken).
         {
-            const bool captureKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::M));
+            const bool captureKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::M);
             if (captureKeyDown && !captureKeyWasDown) {
                 SetMouseCaptured(*engine, !g_mouseCaptured);
                 ZHLN::Log(
@@ -1958,7 +1958,7 @@ auto main(int argc, char* argv[]) -> int {
         // captures the keyboard. The panel owns its own buttons -- start/stop,
         // step, reset, add bodies -- so this is the whole binding.
         {
-            const bool benchKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F3));
+            const bool benchKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::F3);
             if (benchKeyDown && !benchKeyWasDown && g_benchmarkViewer != nullptr) {
                 g_benchmarkViewer->ToggleVisible();
                 ZHLN::Log(
@@ -1974,7 +1974,7 @@ auto main(int argc, char* argv[]) -> int {
         // scope timings the engine's profiler records every frame. The panel
         // owns its own buttons (capture, clear), so this is the whole binding.
         {
-            const bool telemetryKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F4));
+            const bool telemetryKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::F4);
             if (telemetryKeyDown && !telemetryKeyWasDown && g_benchmarkViewer != nullptr) {
                 g_benchmarkViewer->ToggleTelemetryVisible();
                 ZHLN::Log("[BSPSample] Frame telemetry panel {}.", g_benchmarkViewer->IsTelemetryVisible() ? "on" : "off");
@@ -1987,7 +1987,7 @@ auto main(int argc, char* argv[]) -> int {
         // normal, which is enough to tell a brush face from a prop hull from a
         // displacement without attaching a debugger.
         {
-            const bool pickKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F));
+            const bool pickKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::F);
             if (pickKeyDown && !pickKeyWasDown) {
                 if (g_pick.hasHit) {
                     ZHLN::Log(
@@ -2008,7 +2008,7 @@ auto main(int argc, char* argv[]) -> int {
         // orbit around the rig. The switch is a component swap on the main
         // camera and the player, so it takes effect inside the next Tick.
         {
-            const bool viewKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::T));
+            const bool viewKeyDown = input && input->IsKeyDown(ZHLN::KeyCode::T);
             if (viewKeyDown && !viewKeyWasDown) {
                 ApplyProceduralView(*engine, !g_view.firstPerson);
             }

@@ -245,7 +245,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::CheckForCrashes(crashState, engine.get());
         engine->ProcessEvents();
 
-        const bool f9Down = engine->GetInput().SeatKeyboardMouse().IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F9));
+        const bool f9Down = engine->GetInput().SeatKeyboardMouse().IsKeyDown(ZHLN::KeyCode::F9);
 
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;

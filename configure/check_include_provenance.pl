@@ -73,7 +73,11 @@ my %FIRST_PARTY = (
     InvalidMaterialID => ['include/Zahlen/Core/AssetID.hpp'],
     HashAssetID      => ['include/Zahlen/Core/AssetID.hpp'],
     EnableEnumFlags  => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumBitMask      => ['include/Zahlen/Core/EnumFlags.hpp'],
     EnumFlag         => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumIndex        => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasAnyFlags      => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasFlag          => ['include/Zahlen/Core/EnumFlags.hpp'],
     # Native math values
     FVec2 => ['include/Zahlen/Math/Vec2.hpp'],
     DVec2 => ['include/Zahlen/Math/Vec2.hpp'],

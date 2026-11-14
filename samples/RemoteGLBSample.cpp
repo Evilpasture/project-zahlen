@@ -892,9 +892,9 @@ void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
 }
 
 void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
-    const bool  lmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool  rmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    const bool  mmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
+    const bool  lmb = input.IsMouseButtonDown(ZHLN::MouseButton::Left);
+    const bool  rmb = input.IsMouseButtonDown(ZHLN::MouseButton::Right);
+    const bool  mmb = input.IsMouseButtonDown(ZHLN::MouseButton::Middle);
     const float dx  = input.mouseDeltaX;
     const float dy  = input.mouseDeltaY;
 
@@ -1092,10 +1092,10 @@ void SelectModel(SampleState& state, int index) {
 // Edge detection for the handful of keys the sample owns: the level is in the
 // input singleton, the previous frame's level is here.
 [[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::InputState& input, ZHLN::KeyCode key) -> bool {
-    const uint8_t code = static_cast<uint8_t>(key);
-    const bool    down = input.IsKeyDownRaw(code);
-    const bool    was  = state.keyWasDown[code];
-    state.keyWasDown[code] = down;
+    const size_t idx  = ZHLN::EnumIndex(key);
+    const bool   down = input.IsKeyDown(key);
+    const bool   was  = state.keyWasDown[idx];
+    state.keyWasDown[idx] = down;
     return down && !was;
 }
 

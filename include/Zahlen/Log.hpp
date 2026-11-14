@@ -61,12 +61,12 @@ struct LogContext {
     }
 };
 
-void              InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message);
+void              InternalWriteLog(LogChannel channel, LogSeverity severity, const char* file, uint32_t line, std::string_view message);
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message);
 
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, LogSeverity Severity = LogSeverity::Info, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
-    if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
+    if (GetLogLevel() < Level) {
         if (const LogObserver observer = GetLogObserver(); observer != nullptr) {
             std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
             observer(Severity, formatted);
@@ -74,7 +74,7 @@ void Log(LogContext ctx, Args&&... args) {
         return;
     }
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
-    InternalWriteLog(static_cast<uint8_t>(Channel), static_cast<uint8_t>(Severity), ctx.loc.file_name(), ctx.loc.line(), formatted);
+    InternalWriteLog(Channel, Severity, ctx.loc.file_name(), ctx.loc.line(), formatted);
 }
 
 // Severity shorthands. Prefer these over hand-written "ERROR: "/"WARNING: "

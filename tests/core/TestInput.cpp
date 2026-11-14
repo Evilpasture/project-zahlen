@@ -18,6 +18,38 @@ namespace {
 [[nodiscard]] auto Near(float a, float b, float eps = 1e-4f) noexcept -> bool {
     return std::abs(a - b) <= eps;
 }
+
+// Negative compile-time pins: InputState accepts typed KeyCode / MouseButton only, never raw integers.
+// Dependent template parameters ensure SFINAE / concept evaluation on both GCC and Clang.
+template <typename Arg>
+concept InputStateAcceptsSetKey = requires(InputState s, Arg a) { s.SetKey(a, true); };
+template <typename Arg>
+concept InputStateAcceptsKeyQueries =
+    requires(const InputState s, Arg a) {
+        s.IsKeyDown(a);
+        s.IsKeyPressed(a);
+        s.IsKeyHeld(a);
+        s.IsKeyReleased(a);
+        s.IsKeyDown(a);
+        s.IsKeyPressed(a);
+    };
+template <typename Arg>
+concept InputStateAcceptsMouseQueries =
+    requires(const InputState s, Arg a) {
+        s.IsMouseButtonDown(a);
+        s.IsMouseButtonPressed(a);
+        s.IsMouseButtonHeld(a);
+        s.IsMouseButtonReleased(a);
+        s.IsMouseButtonDown(a);
+    };
+
+static_assert(InputStateAcceptsSetKey<KeyCode>);
+static_assert(!InputStateAcceptsSetKey<uint8_t>);
+static_assert(InputStateAcceptsKeyQueries<KeyCode>);
+static_assert(!InputStateAcceptsKeyQueries<uint8_t>);
+static_assert(InputStateAcceptsMouseQueries<MouseButton>);
+static_assert(!InputStateAcceptsMouseQueries<uint8_t>);
+static_assert(!InputStateAcceptsMouseQueries<KeyCode>);
 } // namespace
 
 struct InputGraphServices {
@@ -57,7 +89,9 @@ void test_input_state_component_edges_and_subframe_taps() {
     // Frame 1: rising edge on W + accumulated mouse deltas + side button X1.
     state.BeginFrame();
     state.SetKey(KeyCode::W, true);
-    state.SetKey(ToKeyCode(MouseButton::X1), true);
+    state.SetMouseButton(MouseButton::X1, true);
+    state.QueueKeyPress(KeyCode::Enter);
+    state.QueueChar(U'Z');
     state.ApplyLocalMotion(100.0f, 200.0f);
     state.ApplyLocalMotion(112.0f, 195.0f);
     state.ApplyLocalMotion(120.0f, 190.0f);
@@ -70,6 +104,9 @@ void test_input_state_component_edges_and_subframe_taps() {
     Expect(!state.IsKeyReleased(KeyCode::W));
     Expect(state.IsMouseButtonDown(MouseButton::X1));
     Expect(state.IsMouseButtonPressed(MouseButton::X1));
+    ExpectEq(state.queuedInputCount, size_t {2});
+    Expect(!state.queuedInput[0].isChar && state.queuedInput[0].key == KeyCode::Enter);
+    Expect(state.queuedInput[1].isChar && state.queuedInput[1].codepoint == U'Z');
     Expect(Near(state.GetMouseDeltaX(), 20.0f));
     Expect(Near(state.GetMouseDeltaY(), -10.0f));
     Expect(Near(state.GetMouseWheel(), 1.5f));
@@ -105,13 +142,13 @@ void test_input_state_component_edges_and_subframe_taps() {
     Expect(!state.HasModifiers(KeyModifiers::Ctrl, /*exact=*/true));
     Expect(state.HasModifiers(KeyModifiers::Ctrl, /*exact=*/false));
 
-    state.wantCaptureKeyboard = true;
-    Expect(!state.IsKeyDown(KeyCode::S));
-    Expect(!state.IsKeyPressed(KeyCode::S));
-    Expect(state.IsKeyDownRaw(KeyCode::S));
-    Expect(state.IsKeyPressedRaw(KeyCode::S));
-    Expect(state.Modifiers() == KeyModifiers::None);
-    Expect(state.ModifiersRaw() == (KeyModifiers::Ctrl | KeyModifiers::Shift));
+    const UiCaptureState captured {true, false};
+    Expect(!state.IsKeyDown(KeyCode::S, captured));
+    Expect(!state.IsKeyPressed(KeyCode::S, captured));
+    Expect(state.IsKeyDown(KeyCode::S));
+    Expect(state.IsKeyPressed(KeyCode::S));
+    Expect(state.Modifiers() == (KeyModifiers::Ctrl | KeyModifiers::Shift));
+    Expect(state.Modifiers(captured) == KeyModifiers::None);
 }
 
 void test_gamepad_deadzone_curves_and_trigger_edges() {
@@ -191,13 +228,13 @@ void test_multiseat_routing_hotplug_events_and_haptics() {
     // DedicatedGamepadSeats: Seat 0 owns KB/M, so Gamepad 0 claims Seat 1 and Gamepad 1 claims Seat 2.
     input.SetRoutingPolicy(SeatRoutingPolicy::DedicatedGamepadSeats);
     input.BeginFrame();
-    input.InjectGamepadConnection(0, true, "DualSense Wireless");
-    input.InjectGamepadConnection(1, true, "Xbox Series Controller");
+    input.InjectGamepadConnection(GamepadSlot {0}, true, "DualSense Wireless");
+    input.InjectGamepadConnection(GamepadSlot {1}, true, "Xbox Series Controller");
     input.RefreshActionsForCurrentFrame(&bus);
 
     ExpectEq(input.ConnectedGamepadCount(), size_t {2});
-    ExpectEq(input.GamepadSeat(0), PlayerSeat {1});
-    ExpectEq(input.GamepadSeat(1), PlayerSeat {2});
+    ExpectEq(input.GamepadSeat(GamepadSlot {0}), PlayerSeat {1});
+    ExpectEq(input.GamepadSeat(GamepadSlot {1}), PlayerSeat {2});
     ExpectEq(bus.Reader<GamepadConnectionEvent>().Size(), size_t {2});
 
     // Rumble Seat 1 for 0.20s, step 0.10s (still active), step another 0.15s (auto-expires & sends zero stop).
@@ -217,14 +254,14 @@ void test_multiseat_routing_hotplug_events_and_haptics() {
 
     // Disconnect while rumbling immediately stops rumble and emits a disconnect event.
     bus.ClearEvents();
-    Expect(input.SetGamepadRumble(1, GamepadRumble {.lowFrequency = 1.0f, .durationSeconds = 1.0f}));
+    Expect(input.SetGamepadRumble(GamepadSlot {1}, GamepadRumble {.lowFrequency = 1.0f, .durationSeconds = 1.0f}));
     ExpectEq(rumbleLog.size(), size_t {3});
 
     input.BeginFrame();
-    input.InjectGamepadConnection(1, false);
+    input.InjectGamepadConnection(GamepadSlot {1}, false);
     input.RefreshActionsForCurrentFrame(&bus);
     ExpectEq(rumbleLog.size(), size_t {4});
-    Expect(rumbleLog.back().slot == 1 && rumbleLog.back().rumble.IsZero());
+    Expect(rumbleLog.back().slot == GamepadSlot {1} && rumbleLog.back().rumble.IsZero());
 
     const auto reader = bus.Reader<GamepadConnectionEvent>();
     ExpectEq(reader.Size(), size_t {1});
@@ -235,8 +272,8 @@ void test_multiseat_routing_hotplug_events_and_haptics() {
 void test_virtual_actions_context_priority_chords_and_composites() {
     InputContext input;
     // SharePrimarySeat by default: Seat 0 gets KB/M + Gamepad 0; Seat 1 gets Gamepad 1.
-    input.InjectGamepadConnection(0, true, "Pad0");
-    input.InjectGamepadConnection(1, true, "Pad1");
+    input.InjectGamepadConnection(GamepadSlot {0}, true, "Pad0");
+    input.InjectGamepadConnection(GamepadSlot {1}, true, "Pad1");
 
     auto& gameplay = input.CreateActionMap("Gameplay", /*priority=*/0);
     gameplay.AddAction("Move", ActionKind::Axis2D)
@@ -264,31 +301,31 @@ void test_virtual_actions_context_priority_chords_and_composites() {
     input.InjectKey(KeyCode::W, true);
     input.InjectKey(KeyCode::D, true);
     input.InjectKey(KeyCode::Space, true);
-    input.InjectGamepadAxis(1, GamepadAxis::LeftX, 0.57f);
+    input.InjectGamepadAxis(GamepadSlot {1}, GamepadAxis::LeftX, 0.57f);
     input.RefreshActionsForCurrentFrame();
 
-    const Axis2DValue move0 = input.ActionAxis2D("Move", 0);
+    const Axis2DValue move0 = input.ActionAxis2D("Move", PlayerSeat {0});
     Expect(Near(move0.Length(), 1.0f));
     Expect(move0.x > 0.70f && move0.y > 0.70f);
-    Expect(input.ActionPressed("Jump", 0));
-    ExpectEq(input.LastActiveDevice(0), InputDeviceKind::KeyboardMouse);
+    Expect(input.ActionPressed("Jump", PlayerSeat {0}));
+    ExpectEq(input.LastActiveDevice(PlayerSeat {0}), InputDeviceKind::KeyboardMouse);
 
-    const Axis2DValue move1 = input.ActionAxis2D("Move", 1);
+    const Axis2DValue move1 = input.ActionAxis2D("Move", PlayerSeat {1});
     Expect(move1.x > 0.45f && move1.x < 0.65f);
-    ExpectEq(input.LastActiveDevice(1), InputDeviceKind::Gamepad);
+    ExpectEq(input.LastActiveDevice(PlayerSeat {1}), InputDeviceKind::Gamepad);
 
     // Frame 2: Enable PauseMenu ONLY for Seat 0 -> Seat 0's held Gameplay Jump transitions cleanly to Released,
     // Confirm fires in PauseMenu, while Seat 1 continues unblocked in Gameplay!
     input.BeginFrame();
     pauseMenu.SetEnabled(true);
-    pauseMenu.SetSeatMask(1U << 0U);
-    input.InjectGamepadButton(1, GamepadButton::South, true);
+    pauseMenu.SetSeatMask(SeatMask::FromSeat(PlayerSeat {0}));
+    input.InjectGamepadButton(GamepadSlot {1}, GamepadButton::South, true);
     input.RefreshActionsForCurrentFrame();
 
-    Expect(!input.ActionDown("Jump", 0));
-    Expect(input.ActionReleased("Jump", 0));
-    Expect(input.ActionDown("Confirm", 0));
-    Expect(input.ActionPressed("Jump", 1));
+    Expect(!input.ActionDown("Jump", PlayerSeat {0}));
+    Expect(input.ActionReleased("Jump", PlayerSeat {0}));
+    Expect(input.ActionDown("Confirm", PlayerSeat {0}));
+    Expect(input.ActionPressed("Jump", PlayerSeat {1}));
 
     // Frame 3: Disable PauseMenu; test chord specificity preemption (`Ctrl+S` fires QuickSave AND consumes `S`
     // so `Move` does NOT walk backward; `LB+RB` fires `Ultimate` and consumes `LB` before `ShoulderPing`).
@@ -299,30 +336,32 @@ void test_virtual_actions_context_priority_chords_and_composites() {
     input.InjectKey(KeyCode::Space, false);
     input.InjectKey(KeyCode::LControl, true);
     input.InjectKey(KeyCode::S, true);
-    input.InjectGamepadButton(0, GamepadButton::LeftBumper, true);
-    input.InjectGamepadButton(0, GamepadButton::RightBumper, true);
+    input.InjectGamepadButton(GamepadSlot {0}, GamepadButton::LeftBumper, true);
+    input.InjectGamepadButton(GamepadSlot {0}, GamepadButton::RightBumper, true);
     input.RefreshActionsForCurrentFrame();
 
-    Expect(input.ActionPressed("QuickSave", 0));
-    Expect(Near(input.ActionAxis2D("Move", 0).y, 0.0f, 1e-5f));
-    Expect(input.ActionPressed("Ultimate", 0));
-    Expect(!input.ActionDown("ShoulderPing", 0));
+    Expect(input.ActionPressed("QuickSave", PlayerSeat {0}));
+    Expect(Near(input.ActionAxis2D("Move", PlayerSeat {0}).y, 0.0f, 1e-5f));
+    Expect(input.ActionPressed("Ultimate", PlayerSeat {0}));
+    Expect(!input.ActionDown("ShoulderPing", PlayerSeat {0}));
 
     // Strict modifiers: adding Shift (`Ctrl+Shift+S`) must NOT trigger `Ctrl+S` QuickSave.
     input.BeginFrame();
     input.InjectKey(KeyCode::LShift, true);
     input.RefreshActionsForCurrentFrame();
-    Expect(!input.ActionDown("QuickSave", 0));
+    Expect(!input.ActionDown("QuickSave", PlayerSeat {0}));
 }
 
 void test_runtime_rebinding_conflict_detection_capture_and_serialization() {
     InputContext input;
-    input.InjectGamepadConnection(0, true, "Pad0");
+    input.InjectGamepadConnection(GamepadSlot {0}, true, "Pad0");
 
     auto& map = input.CreateActionMap("Combat", 10);
     map.AddAction("Fire", ActionKind::Digital).Bind(InputBinding::Mouse(MouseButton::Left));
     map.AddAction("Reload", ActionKind::Digital).Bind(InputBinding::Key(KeyCode::R));
     map.AddAction("Dash", ActionKind::Digital).Bind(InputBinding::Key(KeyCode::LShift));
+    map.AddAction("Move", ActionKind::Axis2D).Bind(InputBinding::WASD()).Bind(InputBinding::LeftStick2D());
+    map.AddAction("AimZoom", ActionKind::Axis1D).Bind(InputBinding::GamepadAxis1D(GamepadAxis::RightTrigger));
     input.SnapshotAllDefaults();
 
     // Conflict detection finds Reload when probing Key(R), unless Reload itself is ignored.
@@ -376,6 +415,10 @@ void test_runtime_rebinding_conflict_detection_capture_and_serialization() {
     Expect(restoredReload.has_value());
     ExpectEq(restoredReload->Bindings().size(), size_t {1});
     Expect(restoredReload->Bindings()[0] == InputBinding::Key(KeyCode::G, KeyModifiers::Ctrl));
+    Expect(restoredMap->FindAction("Fire")->Bindings()[0] == InputBinding::Mouse(MouseButton::Left));
+    Expect(restoredMap->FindAction("Move")->Bindings()[0] == InputBinding::WASD());
+    Expect(restoredMap->FindAction("Move")->Bindings()[1] == InputBinding::LeftStick2D());
+    Expect(restoredMap->FindAction("AimZoom")->Bindings()[0] == InputBinding::GamepadAxis1D(GamepadAxis::RightTrigger));
 
     // Reject malformed header cleanly via ErrorCode without exceptions.
     const auto badHeader = restored.DeserializeBindings("NOT_A_HEADER\n");
@@ -400,7 +443,7 @@ void test_ecs_system_graph_input_context_service_resolution() {
     graph.Compile();
 
     input.BeginFrame();
-    input.InjectGamepadConnection(0, true, "TestPad");
+    input.InjectGamepadConnection(GamepadSlot {0}, true, "TestPad");
     input.InjectKey(KeyCode::Space, true);
     input.InjectKey(KeyCode::D, true);
     input.RefreshActionsForCurrentFrame(&events);

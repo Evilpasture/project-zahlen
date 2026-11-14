@@ -792,13 +792,13 @@ auto main(int argc, char* argv[]) -> int {
 
         // 1. Mouse Look and edge-triggered handgun equip input.
         auto& st           = engine->GetInput().MutableSeatKeyboardMouse();
-        bool  equipKeyDown = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::E));
-        bool  viewKeyDown  = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
-        bool  tabKeyDown   = st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Tab));
+        bool  equipKeyDown = st.IsKeyDown(ZHLN::KeyCode::E);
+        bool  viewKeyDown  = st.IsKeyDown(ZHLN::KeyCode::V);
+        bool  tabKeyDown   = st.IsKeyDown(ZHLN::KeyCode::Tab);
         if (viewState.enabled) {
             st.mouseWheel = 0.0f;
         }
-        if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+        if (st.IsMouseButtonDown(ZHLN::MouseButton::Right)) {
             if (viewState.enabled) {
                 viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
                 viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);

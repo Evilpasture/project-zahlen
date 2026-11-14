@@ -702,9 +702,9 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
 
     const float dx  = input.mouseDeltaX;
     const float dy  = input.mouseDeltaY;
-    const bool  lmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool  rmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    const bool  mmb = input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton));
+    const bool  lmb = input.IsMouseButtonDown(ZHLN::MouseButton::Left);
+    const bool  rmb = input.IsMouseButtonDown(ZHLN::MouseButton::Right);
+    const bool  mmb = input.IsMouseButtonDown(ZHLN::MouseButton::Middle);
 
     constexpr float kOrbitSpeed = 0.30f;
     constexpr float kPanSpeed   = 0.0015f;

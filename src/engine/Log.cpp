@@ -151,9 +151,9 @@ auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
     return logFile;
 }
 
-void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message) {
+void InternalWriteLog(LogChannel channel, LogSeverity severity, const char* file, uint32_t line, std::string_view message) {
     if (const LogObserver observer = s_LogObserver.load(std::memory_order::acquire); observer != nullptr) {
-        observer(static_cast<LogSeverity>(severity), message);
+        observer(severity, message);
     }
     if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
         return;
@@ -181,12 +181,11 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
     // at Verbose and suppress per-test instead of going Quiet, so a failure
     // dump keeps even debug-level lines.
     {
-        const auto  capturedSeverity = static_cast<LogSeverity>(severity);
         std::string plain;
-        if (capturedSeverity == LogSeverity::Info) {
+        if (severity == LogSeverity::Info) {
             plain = std::format("[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
         } else {
-            plain = std::format("[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(capturedSeverity), message);
+            plain = std::format("[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(severity), message);
         }
         std::lock_guard<std::mutex> lock(s_CaptureMutex);
         if (s_Capturing) {
@@ -202,26 +201,29 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
         }
     }
 
-    FILE* outStream = nullptr;
-    if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
-        outStream = stdout;
-    } else if (channel == static_cast<uint8_t>(LogChannel::File)) {
-        outStream = GetCustomLogFile();
-    } else {
-        outStream = stderr;
+    FILE* outStream = stderr;
+    switch (channel) {
+        case LogChannel::StdOut:
+            outStream = stdout;
+            break;
+        case LogChannel::File:
+            outStream = GetCustomLogFile();
+            break;
+        case LogChannel::StdErr:
+            outStream = stderr;
+            break;
     }
 
-    const auto level = static_cast<LogSeverity>(severity);
-    if (level == LogSeverity::Info) {
+    if (severity == LogSeverity::Info) {
         std::println(outStream, "[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
         return;
     }
     // The log file keeps the tag but never ANSI escapes, whatever the TTY.
-    if ((channel == static_cast<uint8_t>(LogChannel::File)) || !ShouldColorize(outStream)) {
-        std::println(outStream, "[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(level), message);
+    if ((channel == LogChannel::File) || !ShouldColorize(outStream)) {
+        std::println(outStream, "[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(severity), message);
         return;
     }
-    std::println(outStream, "[{}:{}] [Fiber:{}] [{}{}{}] {}", file_name, line, fiberTag, SeverityColor(level), SeverityTag(level), Color::Reset, message);
+    std::println(outStream, "[{}:{}] [Fiber:{}] [{}{}{}] {}", file_name, line, fiberTag, SeverityColor(severity), SeverityTag(severity), Color::Reset, message);
 }
 
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
@@ -229,7 +231,7 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
     // before forcing Verbose, so the panic line below reaches the channel.
     CancelLogCapture();
     s_LogLevel.store(LogLevel::Verbose, std::memory_order::release);
-    InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), static_cast<uint8_t>(LogSeverity::Error), file, line, message);
+    InternalWriteLog(LogChannel::StdErr, LogSeverity::Error, file, line, message);
     std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
     std::abort();
 }
@@ -253,26 +255,31 @@ void LogManual(std::string_view file, int line, std::string_view message, const 
 
 namespace ZHLN::Diagnostics {
 
-void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
-    if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
+void WriteToChannel(LogChannel channel, std::string_view msg) noexcept {
+    switch (channel) {
+        case LogChannel::StdOut:
 #if defined(_WIN32)
-        ::_write(1, msg.data(), static_cast<unsigned int>(msg.size()));
+            ::_write(1, msg.data(), static_cast<unsigned int>(msg.size()));
 #else
-        ::write(1, msg.data(), msg.size());
+            ::write(1, msg.data(), msg.size());
 #endif
-    } else if (channel == static_cast<uint8_t>(LogChannel::File)) {
-        FILE* f = ZHLN::GetCustomLogFile();
-        if (f != nullptr) {
-            std::fwrite(msg.data(), 1, msg.size(), f);
-            std::fflush(f);
+            return;
+        case LogChannel::File: {
+            FILE* f = ZHLN::GetCustomLogFile();
+            if (f != nullptr) {
+                std::fwrite(msg.data(), 1, msg.size(), f);
+                std::fflush(f);
+            }
+            return;
         }
-    } else {
-#if defined(_WIN32)
-        ::_write(2, msg.data(), static_cast<unsigned int>(msg.size()));
-#else
-        ::write(2, msg.data(), msg.size());
-#endif
+        case LogChannel::StdErr:
+            break;
     }
+#if defined(_WIN32)
+    ::_write(2, msg.data(), static_cast<unsigned int>(msg.size()));
+#else
+    ::write(2, msg.data(), msg.size());
+#endif
 }
 
 void WriteDiagnosticError(std::string_view msg) noexcept {

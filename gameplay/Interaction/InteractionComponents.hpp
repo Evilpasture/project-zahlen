@@ -16,6 +16,8 @@
 
 namespace ZHLN::Interaction {
 
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
 using ZHLN::operator|;
 using ZHLN::operator&;
 using ZHLN::operator^;

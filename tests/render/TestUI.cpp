@@ -178,7 +178,7 @@ struct UITestSuite {
                 auto& in  = engine->GetInput().MutableSeatKeyboardMouse();
                 in.mouseX = mx;
                 in.mouseY = my;
-                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+                in.SetMouseButton(ZHLN::MouseButton::Left, lbutton);
             };
 
             uint32_t clickCountA = 0;

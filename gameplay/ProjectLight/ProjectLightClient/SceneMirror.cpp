@@ -702,7 +702,7 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     (void)dt;
 
     const auto& input    = engine.GetInput().SeatKeyboardMouse();
-    const bool  jumpDown = input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
+    const bool  jumpDown = input.IsKeyDown(KeyCode::Space);
     if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
     state.wasJumpDown = jumpDown;
     state.jumpRemaining = std::max(0.0f, state.jumpRemaining - std::max(0.0f, dt));

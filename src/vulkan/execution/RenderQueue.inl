@@ -8,14 +8,6 @@
 
 namespace ZHLN::Vk {
 
-constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage {
-    return static_cast<BarrierStage>(static_cast<std::underlying_type_t<BarrierStage>>(a) | static_cast<std::underlying_type_t<BarrierStage>>(b));
-}
-
-constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess {
-    return static_cast<BarrierAccess>(static_cast<std::underlying_type_t<BarrierAccess>>(a) | static_cast<std::underlying_type_t<BarrierAccess>>(b));
-}
-
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {
     return handle;

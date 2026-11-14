@@ -16,9 +16,11 @@
 // Every type here is a fixed layout of scalars, which is what lets them cross
 // the COM boundary.
 
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <string_view>
@@ -119,23 +121,23 @@ enum class InputBindingKind : uint8_t {
 // Trivially copyable physical-to-virtual binding descriptor.
 // Construct via the semantic static factories (`InputBinding::Key`, `WASD`, `LeftStick2D`, ...).
 struct InputBinding {
-    InputBindingKind kind            = InputBindingKind::None;
-    uint8_t          code0           = 0;
-    uint8_t          code1           = 0;
-    uint8_t          code2           = 0;
-    uint8_t          code3           = 0;
-    KeyModifiers     modifiers       = KeyModifiers::None;
-    bool             strictModifiers = false;
-    bool             rawBypassUI     = false;
-    float            scaleX          = 1.0f;
-    float            scaleY          = 1.0f;
-    float            threshold       = 0.50f;
+    InputBindingKind             kind            = InputBindingKind::None;
+    std::array<KeyCode, 4>       keys            = {KeyCode::Unknown, KeyCode::Unknown, KeyCode::Unknown, KeyCode::Unknown};
+    MouseButton                  mouseButton     = MouseButton::Left;
+    std::array<GamepadButton, 4> gamepadButtons  = {GamepadButton::South, GamepadButton::South, GamepadButton::South, GamepadButton::South};
+    std::array<GamepadAxis, 2>   gamepadAxes     = {GamepadAxis::LeftX, GamepadAxis::LeftX};
+    KeyModifiers                 modifiers       = KeyModifiers::None;
+    bool                         strictModifiers = false;
+    bool                         bypassUiCapture = false;
+    float                        scaleX          = 1.0f;
+    float                        scaleY          = 1.0f;
+    float                        threshold       = 0.50f;
 
     [[nodiscard]] static constexpr auto Key(KeyCode key, KeyModifiers requiredMods = KeyModifiers::None, float scale = 1.0f) noexcept
         -> InputBinding {
         return InputBinding {
             .kind            = InputBindingKind::Key,
-            .code0           = static_cast<uint8_t>(key),
+            .keys            = {key, KeyCode::Unknown, KeyCode::Unknown, KeyCode::Unknown},
             .modifiers       = requiredMods,
             .strictModifiers = (requiredMods != KeyModifiers::None),
             .scaleX          = scale,
@@ -146,8 +148,7 @@ struct InputBinding {
         -> InputBinding {
         return InputBinding {
             .kind            = InputBindingKind::KeyChord,
-            .code0           = static_cast<uint8_t>(first),
-            .code1           = static_cast<uint8_t>(second),
+            .keys            = {first, second, KeyCode::Unknown, KeyCode::Unknown},
             .modifiers       = requiredMods,
             .strictModifiers = (requiredMods != KeyModifiers::None),
         };
@@ -156,7 +157,7 @@ struct InputBinding {
     [[nodiscard]] static constexpr auto Mouse(MouseButton button, KeyModifiers requiredMods = KeyModifiers::None) noexcept -> InputBinding {
         return InputBinding {
             .kind            = InputBindingKind::MouseButton,
-            .code0           = static_cast<uint8_t>(button),
+            .mouseButton     = button,
             .modifiers       = requiredMods,
             .strictModifiers = (requiredMods != KeyModifiers::None),
         };
@@ -180,35 +181,33 @@ struct InputBinding {
 
     [[nodiscard]] static constexpr auto GamepadBtn(GamepadButton button, float scale = 1.0f) noexcept -> InputBinding {
         return InputBinding {
-            .kind   = InputBindingKind::GamepadButton,
-            .code0  = static_cast<uint8_t>(button),
-            .scaleX = scale,
+            .kind           = InputBindingKind::GamepadButton,
+            .gamepadButtons = {button, GamepadButton::South, GamepadButton::South, GamepadButton::South},
+            .scaleX         = scale,
         };
     }
 
     [[nodiscard]] static constexpr auto GamepadChord(GamepadButton first, GamepadButton second) noexcept -> InputBinding {
         return InputBinding {
-            .kind  = InputBindingKind::GamepadChord,
-            .code0 = static_cast<uint8_t>(first),
-            .code1 = static_cast<uint8_t>(second),
+            .kind           = InputBindingKind::GamepadChord,
+            .gamepadButtons = {first, second, GamepadButton::South, GamepadButton::South},
         };
     }
 
     [[nodiscard]] static constexpr auto GamepadAxis1D(GamepadAxis axis, float scale = 1.0f, float actuationThreshold = 0.50f) noexcept
         -> InputBinding {
         return InputBinding {
-            .kind      = InputBindingKind::GamepadAxis1D,
-            .code0     = static_cast<uint8_t>(axis),
-            .scaleX    = scale,
-            .threshold = actuationThreshold,
+            .kind        = InputBindingKind::GamepadAxis1D,
+            .gamepadAxes = {axis, GamepadAxis::LeftX},
+            .scaleX      = scale,
+            .threshold   = actuationThreshold,
         };
     }
 
     [[nodiscard]] static constexpr auto Composite1DKeys(KeyCode negative, KeyCode positive, float scale = 1.0f) noexcept -> InputBinding {
         return InputBinding {
             .kind   = InputBindingKind::Composite1DKeys,
-            .code0  = static_cast<uint8_t>(negative),
-            .code1  = static_cast<uint8_t>(positive),
+            .keys   = {negative, positive, KeyCode::Unknown, KeyCode::Unknown},
             .scaleX = scale,
         };
     }
@@ -216,10 +215,9 @@ struct InputBinding {
     [[nodiscard]] static constexpr auto Composite1DGamepad(GamepadButton negative, GamepadButton positive, float scale = 1.0f) noexcept
         -> InputBinding {
         return InputBinding {
-            .kind   = InputBindingKind::Composite1DGamepad,
-            .code0  = static_cast<uint8_t>(negative),
-            .code1  = static_cast<uint8_t>(positive),
-            .scaleX = scale,
+            .kind           = InputBindingKind::Composite1DGamepad,
+            .gamepadButtons = {negative, positive, GamepadButton::South, GamepadButton::South},
+            .scaleX         = scale,
         };
     }
 
@@ -227,10 +225,7 @@ struct InputBinding {
         -> InputBinding {
         return InputBinding {
             .kind   = InputBindingKind::Composite2DKeys,
-            .code0  = static_cast<uint8_t>(up),
-            .code1  = static_cast<uint8_t>(down),
-            .code2  = static_cast<uint8_t>(left),
-            .code3  = static_cast<uint8_t>(right),
+            .keys   = {up, down, left, right},
             .scaleX = scale,
             .scaleY = scale,
         };
@@ -248,13 +243,10 @@ struct InputBinding {
         Composite2DGamepad(GamepadButton up, GamepadButton down, GamepadButton left, GamepadButton right, float scale = 1.0f) noexcept
         -> InputBinding {
         return InputBinding {
-            .kind   = InputBindingKind::Composite2DGamepad,
-            .code0  = static_cast<uint8_t>(up),
-            .code1  = static_cast<uint8_t>(down),
-            .code2  = static_cast<uint8_t>(left),
-            .code3  = static_cast<uint8_t>(right),
-            .scaleX = scale,
-            .scaleY = scale,
+            .kind           = InputBindingKind::Composite2DGamepad,
+            .gamepadButtons = {up, down, left, right},
+            .scaleX         = scale,
+            .scaleY         = scale,
         };
     }
 
@@ -267,11 +259,10 @@ struct InputBinding {
     [[nodiscard]] static constexpr auto
         GamepadStick2D(GamepadAxis xAxis, GamepadAxis yAxis, float scaleX = 1.0f, float scaleY = 1.0f) noexcept -> InputBinding {
         return InputBinding {
-            .kind   = InputBindingKind::GamepadStick2D,
-            .code0  = static_cast<uint8_t>(xAxis),
-            .code1  = static_cast<uint8_t>(yAxis),
-            .scaleX = scaleX,
-            .scaleY = scaleY,
+            .kind        = InputBindingKind::GamepadStick2D,
+            .gamepadAxes = {xAxis, yAxis},
+            .scaleX      = scaleX,
+            .scaleY      = scaleY,
         };
     }
 
@@ -283,9 +274,9 @@ struct InputBinding {
         return GamepadStick2D(GamepadAxis::RightX, GamepadAxis::RightY, scaleX, scaleY);
     }
 
-    [[nodiscard]] constexpr auto WithBypassUICapture(bool bypass = true) const noexcept -> InputBinding {
-        InputBinding copy = *this;
-        copy.rawBypassUI  = bypass;
+    [[nodiscard]] constexpr auto WithBypassUiCapture(bool bypass = true) const noexcept -> InputBinding {
+        InputBinding copy        = *this;
+        copy.bypassUiCapture    = bypass;
         return copy;
     }
 
@@ -295,14 +286,13 @@ struct InputBinding {
         return copy;
     }
 
-    [[nodiscard]] constexpr auto Specificity() const noexcept -> uint8_t {
-        uint8_t score = 1;
+    [[nodiscard]] constexpr auto Specificity() const noexcept -> uint32_t {
+        uint32_t score = 1;
         if (kind == InputBindingKind::KeyChord || kind == InputBindingKind::GamepadChord) {
             score += 2;
         }
-        const auto modBits = static_cast<uint8_t>(modifiers);
-        for (uint8_t b = 0; b < 4; ++b) {
-            if ((modBits & (1U << b)) != 0) {
+        for (const KeyModifiers bit : {KeyModifiers::Shift, KeyModifiers::Ctrl, KeyModifiers::Alt, KeyModifiers::Super}) {
+            if (HasFlag(modifiers, bit)) {
                 ++score;
             }
         }
@@ -317,7 +307,7 @@ struct InputBinding {
 struct ActionMapConfig {
     String64 name {};
     int32_t  priority              = 0;
-    uint8_t  seatMask              = static_cast<uint8_t>((1U << kMaxPlayerSeats) - 1U);
+    SeatMask seatMask              = SeatMask::All();
     bool     enabled               = true;
     bool     blocksLowerPriority   = false;
     bool     consumePhysicalInputs = true;
@@ -341,7 +331,7 @@ struct ActionRebindConfig {
 
 struct InputRoutingConfig {
     SeatRoutingPolicy policy                = SeatRoutingPolicy::SharePrimarySeat;
-    uint8_t           keyboardMouseSeatMask = static_cast<uint8_t>(1U << kPrimarySeat);
+    SeatMask          keyboardMouseSeatMask = SeatMask::FromSeat(kPrimarySeat);
 };
 
 static_assert(std::is_trivially_copyable_v<InputBinding>);

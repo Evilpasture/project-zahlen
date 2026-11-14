@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "presentation/PresentationTarget.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
@@ -16,7 +15,6 @@
 #include <variant>
 
 namespace ZHLN {
-
 
 namespace {
 
@@ -65,10 +63,7 @@ struct TTYBackendState {
         ttyContext = TTYBackend::Init(width, height);
 
         auto surface = NativeSurfaceHandle(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0});
-        target       = PresentationTarget::ForTTY(
-            ttyContext, [](void* ) noexcept {  }, {.width = width, .height = height},
-            std::move(surface)
-        );
+        target       = PresentationTarget::ForTTY(ttyContext, [](void*) noexcept {}, {.width = width, .height = height}, std::move(surface));
     }
 
     ~TTYBackendState() {
@@ -173,7 +168,7 @@ struct WindowedBackend {
     }
 };
 
-}
+} // namespace
 
 struct PlatformHost::Impl {
     using BackendVariant = std::variant<std::monostate, HeadlessBackend, TTYBackendState, WindowedBackend>;
@@ -182,7 +177,6 @@ struct PlatformHost::Impl {
 
     PresentationTarget fallback = PresentationTarget::ForHeadless({.width = 0, .height = 0});
 };
-
 
 PlatformHost::PlatformHost() noexcept: _impl(std::make_unique<Impl>()) {
 }
@@ -243,7 +237,6 @@ auto PlatformHost::Valid() const noexcept -> bool {
     );
 }
 
-
 auto PlatformHost::IsRunning() const noexcept -> bool {
     return std::visit(
         Overloaded {
@@ -274,7 +267,6 @@ void PlatformHost::Close() const noexcept {
     );
 }
 
-
 auto PlatformHost::Target() noexcept -> PresentationTarget& {
     return std::visit(
         Overloaded {
@@ -294,7 +286,6 @@ auto PlatformHost::Target() const noexcept -> const PresentationTarget& {
 auto PlatformHost::TargetFor(Window& window) noexcept -> PresentationTarget& {
     return window.Target();
 }
-
 
 auto PlatformHost::GetSize() const noexcept -> Extent2D {
     return Target().GetFramebufferExtent();
@@ -347,7 +338,6 @@ auto PlatformHost::IsMouseCaptured() const noexcept -> bool {
         _impl->backend
     );
 }
-
 
 void PlatformHost::Focus() noexcept {
     std::visit(
@@ -433,8 +423,8 @@ void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const File
     );
 }
 
-auto PlatformHost::SetGamepadRumble(uint8_t slot, [[maybe_unused]] const GamepadRumble& rumble) noexcept -> bool {
-    if (slot >= kMaxGamepads) {
+auto PlatformHost::SetGamepadRumble(GamepadSlot slot, [[maybe_unused]] const GamepadRumble& rumble) noexcept -> bool {
+    if (!slot.IsValid()) {
         return false;
     }
 #if defined(_WIN32)
@@ -466,7 +456,6 @@ auto PlatformHost::SetGamepadRumble(uint8_t slot, [[maybe_unused]] const Gamepad
     return false;
 }
 
-
 auto PlatformHost::AsWindow() noexcept -> ZHLN::Optional<Window&> {
     if (auto* backend = std::get_if<WindowedBackend>(&_impl->backend)) {
         if (backend->window != nullptr) {
@@ -485,4 +474,4 @@ auto PlatformHost::AsWindow() const noexcept -> ZHLN::Optional<const Window&> {
     return std::nullopt;
 }
 
-}
+} // namespace ZHLN

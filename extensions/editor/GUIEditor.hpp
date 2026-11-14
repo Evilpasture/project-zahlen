@@ -51,6 +51,16 @@ class Frame;
 
 namespace ZHLN::Editor {
 
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
+
 // Raw input levels the modal transform mode watches, sampled once per frame.
 // Presses are the edge between two samples (`level & ~previous`), which is why
 // the whole set is kept rather than the individual keys.

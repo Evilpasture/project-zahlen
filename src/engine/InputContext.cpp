@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
@@ -35,12 +36,36 @@ namespace {
 }
 
 struct SeatConsumptionMask {
-    std::bitset<kKeyCodeCount>     keys {};
-    std::bitset<kGamepadButtonCount> gamepadButtons {};
-    uint8_t                        gamepadAxesMask = 0;
-    bool                           mouseMotionX    = false;
-    bool                           mouseMotionY    = false;
-    bool                           mouseWheel      = false;
+    std::bitset<kKeyCodeCount>           keys {};
+    std::bitset<kGamepadButtonCount>     gamepadButtons {};
+    EnumBitMask<GamepadAxis>             gamepadAxes {};
+    bool                                 mouseMotionX = false;
+    bool                                 mouseMotionY = false;
+    bool                                 mouseWheel   = false;
+
+    [[nodiscard]] auto IsKeyConsumed(KeyCode key) const noexcept -> bool {
+        const size_t idx = EnumIndex(key);
+        return key != KeyCode::Unknown && idx < kKeyCodeCount && keys.test(idx);
+    }
+
+    void MarkKey(KeyCode key) noexcept {
+        const size_t idx = EnumIndex(key);
+        if (key != KeyCode::Unknown && idx < kKeyCodeCount) {
+            keys.set(idx);
+        }
+    }
+
+    [[nodiscard]] auto IsGamepadButtonConsumed(GamepadButton button) const noexcept -> bool {
+        const size_t idx = EnumIndex(button);
+        return idx < kGamepadButtonCount && gamepadButtons.test(idx);
+    }
+
+    void MarkGamepadButton(GamepadButton button) noexcept {
+        const size_t idx = EnumIndex(button);
+        if (idx < kGamepadButtonCount) {
+            gamepadButtons.set(idx);
+        }
+    }
 };
 
 struct BindingEvalSample {
@@ -54,35 +79,59 @@ struct BindingEvalSample {
     const InputState& kbm,
     KeyModifiers      required,
     bool              strict,
-    bool              rawBypass
+    UiCaptureState    uiCapture,
+    bool              bypassUiCapture
 ) noexcept -> bool {
-    const KeyModifiers current = rawBypass ? kbm.ModifiersRaw() : kbm.Modifiers();
+    const UiCaptureState effective = bypassUiCapture ? UiCaptureState {} : uiCapture;
+    const KeyModifiers   current   = kbm.Modifiers(effective);
     if (strict) {
         return current == required;
     }
     return (current & required) == required;
 }
 
-[[nodiscard]] auto KeyDownForBinding(const InputState& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
-    if (key == 0 || key >= kKeyCodeCount) {
-        return false;
-    }
-    const auto kc = static_cast<KeyCode>(key);
-    if (MouseButtonFromKeyCode(kc).has_value()) {
-        return rawBypass ? kbm.IsMouseButtonDownRaw(key) : kbm.IsMouseButtonDown(key);
-    }
-    return rawBypass ? kbm.IsKeyDownRaw(key) : kbm.IsKeyDown(key);
+[[nodiscard]] constexpr auto IsValidKeyCode(KeyCode key) noexcept -> bool {
+    return key != KeyCode::Unknown && EnumIndex(key) < kKeyCodeCount;
 }
 
-[[nodiscard]] auto KeyPressedEdgeForBinding(const InputState& kbm, uint8_t key, bool rawBypass) noexcept -> bool {
-    if (key == 0 || key >= kKeyCodeCount) {
+[[nodiscard]] constexpr auto IsValidGamepadButton(GamepadButton button) noexcept -> bool {
+    return EnumIndex(button) < kGamepadButtonCount;
+}
+
+[[nodiscard]] constexpr auto IsValidGamepadAxis(GamepadAxis axis) noexcept -> bool {
+    return EnumIndex(axis) < kGamepadAxisCount;
+}
+
+[[nodiscard]] auto KeyDownForBinding(
+    const InputState& kbm,
+    KeyCode           key,
+    UiCaptureState    uiCapture,
+    bool              bypassUiCapture
+) noexcept -> bool {
+    if (!IsValidKeyCode(key)) {
         return false;
     }
-    const auto kc = static_cast<KeyCode>(key);
-    if (const auto mb = MouseButtonFromKeyCode(kc); mb.has_value()) {
-        return rawBypass ? kbm.IsMouseButtonPressedRaw(*mb) : kbm.IsMouseButtonPressed(*mb);
+    const UiCaptureState effective = bypassUiCapture ? UiCaptureState {} : uiCapture;
+    if (const auto mb = MouseButtonFromKeyCode(key); mb.has_value()) {
+        return kbm.IsMouseButtonDown(*mb, effective);
     }
-    return rawBypass ? kbm.IsKeyPressedRaw(key) : kbm.IsKeyPressed(key);
+    return kbm.IsKeyDown(key, effective);
+}
+
+[[nodiscard]] auto KeyPressedEdgeForBinding(
+    const InputState& kbm,
+    KeyCode           key,
+    UiCaptureState    uiCapture,
+    bool              bypassUiCapture
+) noexcept -> bool {
+    if (!IsValidKeyCode(key)) {
+        return false;
+    }
+    const UiCaptureState effective = bypassUiCapture ? UiCaptureState {} : uiCapture;
+    if (const auto mb = MouseButtonFromKeyCode(key); mb.has_value()) {
+        return kbm.IsMouseButtonPressed(*mb, effective);
+    }
+    return kbm.IsKeyPressed(key, effective);
 }
 
 [[nodiscard]] auto EvaluateSingleBinding(
@@ -90,20 +139,22 @@ struct BindingEvalSample {
     ActionKind                           actionKind,
     float                                actionThreshold,
     const InputState*                    kbm,
+    UiCaptureState                       uiCapture,
     std::span<const GamepadState* const> seatGamepads,
     const SeatConsumptionMask&           consumed
 ) noexcept -> BindingEvalSample {
     BindingEvalSample out {};
 
-    const auto evalKeyLike = [&](uint8_t keyCode, KeyModifiers mods, bool strictMods, bool rawBypass, float scale) noexcept {
-        if (kbm == nullptr || keyCode == 0 || keyCode >= kKeyCodeCount || consumed.keys.test(keyCode)) {
+    const auto evalKeyLike =
+        [&](KeyCode keyCode, KeyModifiers mods, bool strictMods, bool bypassUiCapture, float scale) noexcept {
+        if (kbm == nullptr || !IsValidKeyCode(keyCode) || consumed.IsKeyConsumed(keyCode)) {
             return;
         }
-        if (!CheckBindingModifiers(*kbm, mods, strictMods, rawBypass)) {
+        if (!CheckBindingModifiers(*kbm, mods, strictMods, uiCapture, bypassUiCapture)) {
             return;
         }
-        const bool isDown    = KeyDownForBinding(*kbm, keyCode, rawBypass);
-        const bool tapRising = KeyPressedEdgeForBinding(*kbm, keyCode, rawBypass);
+        const bool isDown    = KeyDownForBinding(*kbm, keyCode, uiCapture, bypassUiCapture);
+        const bool tapRising = KeyPressedEdgeForBinding(*kbm, keyCode, uiCapture, bypassUiCapture);
         if (isDown || tapRising) {
             out.active = true;
             out.x      = scale;
@@ -116,30 +167,29 @@ struct BindingEvalSample {
             break;
 
         case InputBindingKind::Key:
-            evalKeyLike(binding.code0, binding.modifiers, binding.strictModifiers, binding.rawBypassUI, binding.scaleX);
+            evalKeyLike(binding.keys[0], binding.modifiers, binding.strictModifiers, binding.bypassUiCapture, binding.scaleX);
             break;
 
-        case InputBindingKind::MouseButton: {
-            const KeyCode kc = ToKeyCode(static_cast<MouseButton>(binding.code0));
-            evalKeyLike(static_cast<uint8_t>(kc), binding.modifiers, binding.strictModifiers, binding.rawBypassUI, binding.scaleX);
+        case InputBindingKind::MouseButton:
+            evalKeyLike(ToKeyCode(binding.mouseButton), binding.modifiers, binding.strictModifiers, binding.bypassUiCapture, binding.scaleX);
             break;
-        }
 
         case InputBindingKind::KeyChord: {
-            if (kbm == nullptr || binding.code0 == 0 || binding.code1 == 0 || binding.code0 >= kKeyCodeCount ||
-                binding.code1 >= kKeyCodeCount) {
+            const KeyCode k0 = binding.keys[0];
+            const KeyCode k1 = binding.keys[1];
+            if (kbm == nullptr || !IsValidKeyCode(k0) || !IsValidKeyCode(k1)) {
                 break;
             }
-            if (consumed.keys.test(binding.code0) || consumed.keys.test(binding.code1)) {
+            if (consumed.IsKeyConsumed(k0) || consumed.IsKeyConsumed(k1)) {
                 break;
             }
-            if (!CheckBindingModifiers(*kbm, binding.modifiers, binding.strictModifiers, binding.rawBypassUI)) {
+            if (!CheckBindingModifiers(*kbm, binding.modifiers, binding.strictModifiers, uiCapture, binding.bypassUiCapture)) {
                 break;
             }
-            const bool d0 = KeyDownForBinding(*kbm, binding.code0, binding.rawBypassUI) ||
-                            KeyPressedEdgeForBinding(*kbm, binding.code0, binding.rawBypassUI);
-            const bool d1 = KeyDownForBinding(*kbm, binding.code1, binding.rawBypassUI) ||
-                            KeyPressedEdgeForBinding(*kbm, binding.code1, binding.rawBypassUI);
+            const bool d0 = KeyDownForBinding(*kbm, k0, uiCapture, binding.bypassUiCapture) ||
+                            KeyPressedEdgeForBinding(*kbm, k0, uiCapture, binding.bypassUiCapture);
+            const bool d1 = KeyDownForBinding(*kbm, k1, uiCapture, binding.bypassUiCapture) ||
+                            KeyPressedEdgeForBinding(*kbm, k1, uiCapture, binding.bypassUiCapture);
             if (d0 && d1) {
                 out.active = true;
                 out.x      = binding.scaleX;
@@ -152,7 +202,7 @@ struct BindingEvalSample {
             if (kbm == nullptr || consumed.mouseMotionX) {
                 break;
             }
-            const float dx = binding.rawBypassUI ? kbm->mouseDeltaX : kbm->GetMouseDeltaX();
+            const float dx = kbm->GetMouseDeltaX(binding.bypassUiCapture ? UiCaptureState {} : uiCapture);
             if (std::abs(dx) > 1e-6f) {
                 out.x      = dx * binding.scaleX;
                 out.active = std::abs(out.x) >= actionThreshold || actionKind != ActionKind::Digital;
@@ -165,7 +215,7 @@ struct BindingEvalSample {
             if (kbm == nullptr || consumed.mouseMotionY) {
                 break;
             }
-            const float dy = binding.rawBypassUI ? kbm->mouseDeltaY : kbm->GetMouseDeltaY();
+            const float dy = kbm->GetMouseDeltaY(binding.bypassUiCapture ? UiCaptureState {} : uiCapture);
             if (std::abs(dy) > 1e-6f) {
                 out.x      = dy * binding.scaleX;
                 out.active = std::abs(out.x) >= actionThreshold || actionKind != ActionKind::Digital;
@@ -178,8 +228,8 @@ struct BindingEvalSample {
             if (kbm == nullptr || (consumed.mouseMotionX && consumed.mouseMotionY)) {
                 break;
             }
-            const float dx = consumed.mouseMotionX ? 0.0f : (binding.rawBypassUI ? kbm->mouseDeltaX : kbm->GetMouseDeltaX());
-            const float dy = consumed.mouseMotionY ? 0.0f : (binding.rawBypassUI ? kbm->mouseDeltaY : kbm->GetMouseDeltaY());
+            const float dx = consumed.mouseMotionX ? 0.0f : kbm->GetMouseDeltaX(binding.bypassUiCapture ? UiCaptureState {} : uiCapture);
+            const float dy = consumed.mouseMotionY ? 0.0f : kbm->GetMouseDeltaY(binding.bypassUiCapture ? UiCaptureState {} : uiCapture);
             if (std::abs(dx) > 1e-6f || std::abs(dy) > 1e-6f) {
                 out.x      = dx * binding.scaleX;
                 out.y      = dy * binding.scaleY;
@@ -193,7 +243,7 @@ struct BindingEvalSample {
             if (kbm == nullptr || consumed.mouseWheel) {
                 break;
             }
-            const float w = binding.rawBypassUI ? kbm->mouseWheel : kbm->GetMouseWheel();
+            const float w = kbm->GetMouseWheel(binding.bypassUiCapture ? UiCaptureState {} : uiCapture);
             if (std::abs(w) > 1e-6f) {
                 out.x      = w * binding.scaleX;
                 out.active = (actionKind == ActionKind::Digital) ? (std::abs(out.x) >= 0.01f) : true;
@@ -203,10 +253,10 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::GamepadButton: {
-            if (binding.code0 >= kGamepadButtonCount || consumed.gamepadButtons.test(binding.code0)) {
+            const GamepadButton btn = binding.gamepadButtons[0];
+            if (!IsValidGamepadButton(btn) || consumed.IsGamepadButtonConsumed(btn)) {
                 break;
             }
-            const auto btn = static_cast<GamepadButton>(binding.code0);
             for (const GamepadState* gp : seatGamepads) {
                 if (gp != nullptr && (gp->IsButtonDown(btn) || gp->IsButtonPressed(btn))) {
                     out.active = true;
@@ -219,14 +269,14 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::GamepadChord: {
-            if (binding.code0 >= kGamepadButtonCount || binding.code1 >= kGamepadButtonCount) {
+            const GamepadButton b0 = binding.gamepadButtons[0];
+            const GamepadButton b1 = binding.gamepadButtons[1];
+            if (!IsValidGamepadButton(b0) || !IsValidGamepadButton(b1)) {
                 break;
             }
-            if (consumed.gamepadButtons.test(binding.code0) || consumed.gamepadButtons.test(binding.code1)) {
+            if (consumed.IsGamepadButtonConsumed(b0) || consumed.IsGamepadButtonConsumed(b1)) {
                 break;
             }
-            const auto b0 = static_cast<GamepadButton>(binding.code0);
-            const auto b1 = static_cast<GamepadButton>(binding.code1);
             for (const GamepadState* gp : seatGamepads) {
                 if (gp == nullptr) {
                     continue;
@@ -244,10 +294,10 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::GamepadAxis1D: {
-            if (binding.code0 >= kGamepadAxisCount || ((consumed.gamepadAxesMask & (1U << binding.code0)) != 0U)) {
+            const GamepadAxis axis = binding.gamepadAxes[0];
+            if (!IsValidGamepadAxis(axis) || consumed.gamepadAxes.Contains(axis)) {
                 break;
             }
-            const auto  axis   = static_cast<GamepadAxis>(binding.code0);
             const float thresh = (binding.threshold > 0.0f) ? binding.threshold : actionThreshold;
             float       best   = 0.0f;
             for (const GamepadState* gp : seatGamepads) {
@@ -278,10 +328,10 @@ struct BindingEvalSample {
                 break;
             }
             float sum = 0.0f;
-            if (!consumed.keys.test(binding.code0) && KeyDownForBinding(*kbm, binding.code0, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[0]) && KeyDownForBinding(*kbm, binding.keys[0], uiCapture, binding.bypassUiCapture)) {
                 sum -= 1.0f;
             }
-            if (!consumed.keys.test(binding.code1) && KeyDownForBinding(*kbm, binding.code1, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[1]) && KeyDownForBinding(*kbm, binding.keys[1], uiCapture, binding.bypassUiCapture)) {
                 sum += 1.0f;
             }
             if (std::abs(sum) > 1e-5f) {
@@ -293,18 +343,18 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::Composite1DGamepad: {
-            float best = 0.0f;
+            const GamepadButton neg = binding.gamepadButtons[0];
+            const GamepadButton pos = binding.gamepadButtons[1];
+            float               best = 0.0f;
             for (const GamepadState* gp : seatGamepads) {
                 if (gp == nullptr) {
                     continue;
                 }
                 float sum = 0.0f;
-                if (binding.code0 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code0) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code0))) {
+                if (IsValidGamepadButton(neg) && !consumed.IsGamepadButtonConsumed(neg) && gp->IsButtonDown(neg)) {
                     sum -= 1.0f;
                 }
-                if (binding.code1 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code1) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code1))) {
+                if (IsValidGamepadButton(pos) && !consumed.IsGamepadButtonConsumed(pos) && gp->IsButtonDown(pos)) {
                     sum += 1.0f;
                 }
                 if (std::abs(sum) > std::abs(best)) {
@@ -325,16 +375,16 @@ struct BindingEvalSample {
             }
             float x = 0.0f;
             float y = 0.0f;
-            if (!consumed.keys.test(binding.code0) && KeyDownForBinding(*kbm, binding.code0, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[0]) && KeyDownForBinding(*kbm, binding.keys[0], uiCapture, binding.bypassUiCapture)) {
                 y += 1.0f;
             }
-            if (!consumed.keys.test(binding.code1) && KeyDownForBinding(*kbm, binding.code1, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[1]) && KeyDownForBinding(*kbm, binding.keys[1], uiCapture, binding.bypassUiCapture)) {
                 y -= 1.0f;
             }
-            if (!consumed.keys.test(binding.code2) && KeyDownForBinding(*kbm, binding.code2, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[2]) && KeyDownForBinding(*kbm, binding.keys[2], uiCapture, binding.bypassUiCapture)) {
                 x -= 1.0f;
             }
-            if (!consumed.keys.test(binding.code3) && KeyDownForBinding(*kbm, binding.code3, binding.rawBypassUI)) {
+            if (!consumed.IsKeyConsumed(binding.keys[3]) && KeyDownForBinding(*kbm, binding.keys[3], uiCapture, binding.bypassUiCapture)) {
                 x += 1.0f;
             }
             if (std::abs(x) > 1e-5f || std::abs(y) > 1e-5f) {
@@ -347,26 +397,26 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::Composite2DGamepad: {
+            const GamepadButton up    = binding.gamepadButtons[0];
+            const GamepadButton down  = binding.gamepadButtons[1];
+            const GamepadButton left  = binding.gamepadButtons[2];
+            const GamepadButton right = binding.gamepadButtons[3];
             for (const GamepadState* gp : seatGamepads) {
                 if (gp == nullptr) {
                     continue;
                 }
                 float x = 0.0f;
                 float y = 0.0f;
-                if (binding.code0 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code0) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code0))) {
+                if (IsValidGamepadButton(up) && !consumed.IsGamepadButtonConsumed(up) && gp->IsButtonDown(up)) {
                     y += 1.0f;
                 }
-                if (binding.code1 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code1) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code1))) {
+                if (IsValidGamepadButton(down) && !consumed.IsGamepadButtonConsumed(down) && gp->IsButtonDown(down)) {
                     y -= 1.0f;
                 }
-                if (binding.code2 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code2) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code2))) {
+                if (IsValidGamepadButton(left) && !consumed.IsGamepadButtonConsumed(left) && gp->IsButtonDown(left)) {
                     x -= 1.0f;
                 }
-                if (binding.code3 < kGamepadButtonCount && !consumed.gamepadButtons.test(binding.code3) &&
-                    gp->IsButtonDown(static_cast<GamepadButton>(binding.code3))) {
+                if (IsValidGamepadButton(right) && !consumed.IsGamepadButtonConsumed(right) && gp->IsButtonDown(right)) {
                     x += 1.0f;
                 }
                 if (std::abs(x) > 1e-5f || std::abs(y) > 1e-5f) {
@@ -381,10 +431,12 @@ struct BindingEvalSample {
         }
 
         case InputBindingKind::GamepadStick2D: {
-            if (binding.code0 >= kGamepadAxisCount || binding.code1 >= kGamepadAxisCount) {
+            const GamepadAxis xAxis = binding.gamepadAxes[0];
+            const GamepadAxis yAxis = binding.gamepadAxes[1];
+            if (!IsValidGamepadAxis(xAxis) || !IsValidGamepadAxis(yAxis)) {
                 break;
             }
-            if ((consumed.gamepadAxesMask & ((1U << binding.code0) | (1U << binding.code1))) != 0U) {
+            if (consumed.gamepadAxes.Contains(xAxis) || consumed.gamepadAxes.Contains(yAxis)) {
                 break;
             }
             float bestLenSq = 0.0f;
@@ -394,18 +446,17 @@ struct BindingEvalSample {
                 }
                 float sx = 0.0f;
                 float sy = 0.0f;
-                if (binding.code0 == static_cast<uint8_t>(GamepadAxis::LeftX) && binding.code1 == static_cast<uint8_t>(GamepadAxis::LeftY)) {
+                if (xAxis == GamepadAxis::LeftX && yAxis == GamepadAxis::LeftY) {
                     const StickSample stick = gp->LeftStick();
                     sx                      = stick.x;
                     sy                      = stick.y;
-                } else if (binding.code0 == static_cast<uint8_t>(GamepadAxis::RightX) &&
-                           binding.code1 == static_cast<uint8_t>(GamepadAxis::RightY)) {
+                } else if (xAxis == GamepadAxis::RightX && yAxis == GamepadAxis::RightY) {
                     const StickSample stick = gp->RightStick();
                     sx                      = stick.x;
                     sy                      = stick.y;
                 } else {
-                    sx = gp->Axis(static_cast<GamepadAxis>(binding.code0));
-                    sy = gp->Axis(static_cast<GamepadAxis>(binding.code1));
+                    sx = gp->Axis(xAxis);
+                    sy = gp->Axis(yAxis);
                 }
                 sx *= binding.scaleX;
                 sy *= binding.scaleY;
@@ -428,32 +479,22 @@ struct BindingEvalSample {
 void MarkBindingConsumed(
     const InputBinding&                  binding,
     const InputState*                    kbm,
+    UiCaptureState                       uiCapture,
     std::span<const GamepadState* const> seatGamepads,
     SeatConsumptionMask&                 consumed
 ) noexcept {
-    const auto markKey = [&](uint8_t k) noexcept {
-        if (k != 0 && k < kKeyCodeCount) {
-            consumed.keys.set(k);
-        }
-    };
-    const auto markGpBtn = [&](uint8_t b) noexcept {
-        if (b < kGamepadButtonCount) {
-            consumed.gamepadButtons.set(b);
-        }
-    };
-
     switch (binding.kind) {
         case InputBindingKind::None:
             break;
         case InputBindingKind::Key:
-            markKey(binding.code0);
+            consumed.MarkKey(binding.keys[0]);
             break;
         case InputBindingKind::MouseButton:
-            markKey(static_cast<uint8_t>(ToKeyCode(static_cast<MouseButton>(binding.code0))));
+            consumed.MarkKey(ToKeyCode(binding.mouseButton));
             break;
         case InputBindingKind::KeyChord:
-            markKey(binding.code0);
-            markKey(binding.code1);
+            consumed.MarkKey(binding.keys[0]);
+            consumed.MarkKey(binding.keys[1]);
             break;
         case InputBindingKind::MouseDeltaX:
             consumed.mouseMotionX = true;
@@ -469,24 +510,23 @@ void MarkBindingConsumed(
             consumed.mouseWheel = true;
             break;
         case InputBindingKind::GamepadButton:
-            markGpBtn(binding.code0);
+            consumed.MarkGamepadButton(binding.gamepadButtons[0]);
             break;
         case InputBindingKind::GamepadChord:
-            markGpBtn(binding.code0);
-            markGpBtn(binding.code1);
+            consumed.MarkGamepadButton(binding.gamepadButtons[0]);
+            consumed.MarkGamepadButton(binding.gamepadButtons[1]);
             break;
         case InputBindingKind::GamepadAxis1D:
-            if (binding.code0 < kGamepadAxisCount) {
-                consumed.gamepadAxesMask = static_cast<uint8_t>(consumed.gamepadAxesMask | (1U << binding.code0));
+            if (IsValidGamepadAxis(binding.gamepadAxes[0])) {
+                consumed.gamepadAxes.Set(binding.gamepadAxes[0]);
             }
             break;
         case InputBindingKind::Composite1DKeys:
             if (kbm != nullptr) {
-                if (KeyDownForBinding(*kbm, binding.code0, binding.rawBypassUI)) {
-                    markKey(binding.code0);
-                }
-                if (KeyDownForBinding(*kbm, binding.code1, binding.rawBypassUI)) {
-                    markKey(binding.code1);
+                for (const KeyCode k : {binding.keys[0], binding.keys[1]}) {
+                    if (KeyDownForBinding(*kbm, k, uiCapture, binding.bypassUiCapture)) {
+                        consumed.MarkKey(k);
+                    }
                 }
             }
             break;
@@ -495,19 +535,18 @@ void MarkBindingConsumed(
                 if (gp == nullptr) {
                     continue;
                 }
-                if (binding.code0 < kGamepadButtonCount && gp->IsButtonDown(static_cast<GamepadButton>(binding.code0))) {
-                    markGpBtn(binding.code0);
-                }
-                if (binding.code1 < kGamepadButtonCount && gp->IsButtonDown(static_cast<GamepadButton>(binding.code1))) {
-                    markGpBtn(binding.code1);
+                for (const GamepadButton b : {binding.gamepadButtons[0], binding.gamepadButtons[1]}) {
+                    if (IsValidGamepadButton(b) && gp->IsButtonDown(b)) {
+                        consumed.MarkGamepadButton(b);
+                    }
                 }
             }
             break;
         case InputBindingKind::Composite2DKeys:
             if (kbm != nullptr) {
-                for (uint8_t c : {binding.code0, binding.code1, binding.code2, binding.code3}) {
-                    if (KeyDownForBinding(*kbm, c, binding.rawBypassUI)) {
-                        markKey(c);
+                for (const KeyCode k : binding.keys) {
+                    if (KeyDownForBinding(*kbm, k, uiCapture, binding.bypassUiCapture)) {
+                        consumed.MarkKey(k);
                     }
                 }
             }
@@ -517,17 +556,17 @@ void MarkBindingConsumed(
                 if (gp == nullptr) {
                     continue;
                 }
-                for (uint8_t c : {binding.code0, binding.code1, binding.code2, binding.code3}) {
-                    if (c < kGamepadButtonCount && gp->IsButtonDown(static_cast<GamepadButton>(c))) {
-                        markGpBtn(c);
+                for (const GamepadButton b : binding.gamepadButtons) {
+                    if (IsValidGamepadButton(b) && gp->IsButtonDown(b)) {
+                        consumed.MarkGamepadButton(b);
                     }
                 }
             }
             break;
         case InputBindingKind::GamepadStick2D:
-            if (binding.code0 < kGamepadAxisCount && binding.code1 < kGamepadAxisCount) {
-                consumed.gamepadAxesMask =
-                    static_cast<uint8_t>(consumed.gamepadAxesMask | (1U << binding.code0) | (1U << binding.code1));
+            if (IsValidGamepadAxis(binding.gamepadAxes[0]) && IsValidGamepadAxis(binding.gamepadAxes[1])) {
+                consumed.gamepadAxes.Set(binding.gamepadAxes[0]);
+                consumed.gamepadAxes.Set(binding.gamepadAxes[1]);
             }
             break;
     }
@@ -543,48 +582,61 @@ void MarkBindingConsumed(
     if (a.kind != b.kind) {
         // MouseButton(Left) overlaps Key(LButton)
         if (a.kind == InputBindingKind::MouseButton && b.kind == InputBindingKind::Key) {
-            return static_cast<uint8_t>(ToKeyCode(static_cast<MouseButton>(a.code0))) == b.code0 && a.modifiers == b.modifiers;
+            return ToKeyCode(a.mouseButton) == b.keys[0] && a.modifiers == b.modifiers;
         }
         if (b.kind == InputBindingKind::MouseButton && a.kind == InputBindingKind::Key) {
-            return static_cast<uint8_t>(ToKeyCode(static_cast<MouseButton>(b.code0))) == a.code0 && a.modifiers == b.modifiers;
+            return ToKeyCode(b.mouseButton) == a.keys[0] && a.modifiers == b.modifiers;
         }
         return false;
     }
     switch (a.kind) {
         case InputBindingKind::Key:
+            return a.keys[0] == b.keys[0] && a.modifiers == b.modifiers;
         case InputBindingKind::MouseButton:
-            return a.code0 == b.code0 && a.modifiers == b.modifiers;
+            return a.mouseButton == b.mouseButton && a.modifiers == b.modifiers;
         case InputBindingKind::KeyChord: {
-            const bool samePair = (a.code0 == b.code0 && a.code1 == b.code1) || (a.code0 == b.code1 && a.code1 == b.code0);
+            const bool samePair = (a.keys[0] == b.keys[0] && a.keys[1] == b.keys[1]) ||
+                                  (a.keys[0] == b.keys[1] && a.keys[1] == b.keys[0]);
             return samePair && a.modifiers == b.modifiers;
         }
         case InputBindingKind::GamepadButton:
+            return a.gamepadButtons[0] == b.gamepadButtons[0];
         case InputBindingKind::GamepadAxis1D:
-            return a.code0 == b.code0;
+            return a.gamepadAxes[0] == b.gamepadAxes[0];
         case InputBindingKind::GamepadChord:
-            return (a.code0 == b.code0 && a.code1 == b.code1) || (a.code0 == b.code1 && a.code1 == b.code0);
+            return (a.gamepadButtons[0] == b.gamepadButtons[0] && a.gamepadButtons[1] == b.gamepadButtons[1]) ||
+                   (a.gamepadButtons[0] == b.gamepadButtons[1] && a.gamepadButtons[1] == b.gamepadButtons[0]);
         case InputBindingKind::MouseDeltaX:
         case InputBindingKind::MouseDeltaY:
         case InputBindingKind::MouseDelta2D:
         case InputBindingKind::MouseWheel:
             return true;
         case InputBindingKind::Composite1DKeys:
+            return a.keys[0] == b.keys[0] || a.keys[1] == b.keys[1] || a.keys[0] == b.keys[1] || a.keys[1] == b.keys[0];
         case InputBindingKind::Composite1DGamepad:
+            return a.gamepadButtons[0] == b.gamepadButtons[0] || a.gamepadButtons[1] == b.gamepadButtons[1] ||
+                   a.gamepadButtons[0] == b.gamepadButtons[1] || a.gamepadButtons[1] == b.gamepadButtons[0];
         case InputBindingKind::GamepadStick2D:
-            return a.code0 == b.code0 || a.code1 == b.code1 || a.code0 == b.code1 || a.code1 == b.code0;
+            return a.gamepadAxes[0] == b.gamepadAxes[0] || a.gamepadAxes[1] == b.gamepadAxes[1] ||
+                   a.gamepadAxes[0] == b.gamepadAxes[1] || a.gamepadAxes[1] == b.gamepadAxes[0];
         case InputBindingKind::Composite2DKeys:
-        case InputBindingKind::Composite2DGamepad: {
-            const std::array<uint8_t, 4> ca {a.code0, a.code1, a.code2, a.code3};
-            const std::array<uint8_t, 4> cb {b.code0, b.code1, b.code2, b.code3};
-            for (uint8_t x : ca) {
-                for (uint8_t y : cb) {
-                    if (x != 0 && x == y) {
+            for (const KeyCode x : a.keys) {
+                for (const KeyCode y : b.keys) {
+                    if (x != KeyCode::Unknown && x == y) {
                         return true;
                     }
                 }
             }
             return false;
-        }
+        case InputBindingKind::Composite2DGamepad:
+            for (const GamepadButton x : a.gamepadButtons) {
+                for (const GamepadButton y : b.gamepadButtons) {
+                    if (x == y) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         case InputBindingKind::None:
             return false;
     }
@@ -662,74 +714,96 @@ void MarkBindingConsumed(
     return value;
 }
 
-[[nodiscard]] auto FormatCodeToken(InputBindingKind kind, size_t index, uint8_t raw) -> std::string_view {
-    switch (kind) {
+[[nodiscard]] auto FormatBindingSlotToken(const InputBinding& binding, size_t index) -> std::string_view {
+    switch (binding.kind) {
         case InputBindingKind::Key:
-            return (index == 0) ? Reflect::EnumToString(static_cast<KeyCode>(raw)) : "-";
+            return (index == 0) ? Reflect::EnumToString(binding.keys[0]) : "-";
         case InputBindingKind::KeyChord:
-            return (index < 2) ? Reflect::EnumToString(static_cast<KeyCode>(raw)) : "-";
         case InputBindingKind::Composite1DKeys:
-            return (index < 2) ? Reflect::EnumToString(static_cast<KeyCode>(raw)) : "-";
+            return (index < 2) ? Reflect::EnumToString(binding.keys[index]) : "-";
         case InputBindingKind::Composite2DKeys:
-            return Reflect::EnumToString(static_cast<KeyCode>(raw));
+            return (index < 4) ? Reflect::EnumToString(binding.keys[index]) : "-";
         case InputBindingKind::MouseButton:
-            return (index == 0) ? Reflect::EnumToString(static_cast<MouseButton>(raw)) : "-";
+            return (index == 0) ? Reflect::EnumToString(binding.mouseButton) : "-";
         case InputBindingKind::GamepadButton:
-            return (index == 0) ? Reflect::EnumToString(static_cast<GamepadButton>(raw)) : "-";
+            return (index == 0) ? Reflect::EnumToString(binding.gamepadButtons[0]) : "-";
         case InputBindingKind::GamepadChord:
         case InputBindingKind::Composite1DGamepad:
-            return (index < 2) ? Reflect::EnumToString(static_cast<GamepadButton>(raw)) : "-";
+            return (index < 2) ? Reflect::EnumToString(binding.gamepadButtons[index]) : "-";
         case InputBindingKind::Composite2DGamepad:
-            return Reflect::EnumToString(static_cast<GamepadButton>(raw));
+            return (index < 4) ? Reflect::EnumToString(binding.gamepadButtons[index]) : "-";
         case InputBindingKind::GamepadAxis1D:
-            return (index == 0) ? Reflect::EnumToString(static_cast<GamepadAxis>(raw)) : "-";
+            return (index == 0) ? Reflect::EnumToString(binding.gamepadAxes[0]) : "-";
         case InputBindingKind::GamepadStick2D:
-            return (index < 2) ? Reflect::EnumToString(static_cast<GamepadAxis>(raw)) : "-";
+            return (index < 2) ? Reflect::EnumToString(binding.gamepadAxes[index]) : "-";
         default:
             return "-";
     }
 }
 
-[[nodiscard]] auto ParseCodeToken(InputBindingKind kind, size_t index, std::string_view token) noexcept -> Optional<uint8_t> {
+template <typename EnumT>
+[[nodiscard]] auto ParseEnumSlotToken(std::string_view token, EnumT emptyValue = EnumT {}) noexcept -> Optional<EnumT> {
     if (token == "-") {
-        return uint8_t {0};
+        return emptyValue;
     }
-    switch (kind) {
+    return Reflect::StringToEnum<EnumT>(token);
+}
+
+[[nodiscard]] auto ParseBindingCodeTokens(InputBinding& binding, std::span<const std::string_view, 4> tokens) noexcept -> bool {
+    switch (binding.kind) {
         case InputBindingKind::Key:
         case InputBindingKind::KeyChord:
         case InputBindingKind::Composite1DKeys:
-        case InputBindingKind::Composite2DKeys: {
-            if (auto kc = Reflect::StringToEnum<KeyCode>(token)) {
-                return static_cast<uint8_t>(*kc);
+        case InputBindingKind::Composite2DKeys:
+            for (size_t i = 0; i < 4; ++i) {
+                const auto parsed = ParseEnumSlotToken<KeyCode>(tokens[i], KeyCode::Unknown);
+                if (!parsed) {
+                    return false;
+                }
+                binding.keys[i] = *parsed;
             }
-            return Optional<uint8_t> {};
-        }
+            return true;
+
         case InputBindingKind::MouseButton: {
-            if (auto mb = Reflect::StringToEnum<MouseButton>(token)) {
-                return static_cast<uint8_t>(*mb);
+            const auto mb = ParseEnumSlotToken<MouseButton>(tokens[0], MouseButton::Left);
+            if (!mb) {
+                return false;
             }
-            return Optional<uint8_t> {};
+            binding.mouseButton = *mb;
+            for (size_t i = 1; i < 4; ++i) {
+                if (!ParseEnumSlotToken<MouseButton>(tokens[i], MouseButton::Left)) {
+                    return false;
+                }
+            }
+            return true;
         }
+
         case InputBindingKind::GamepadButton:
         case InputBindingKind::GamepadChord:
         case InputBindingKind::Composite1DGamepad:
-        case InputBindingKind::Composite2DGamepad: {
-            if (auto gb = Reflect::StringToEnum<GamepadButton>(token)) {
-                return static_cast<uint8_t>(*gb);
-            }
-            return Optional<uint8_t> {};
-        }
-        case InputBindingKind::GamepadAxis1D:
-        case InputBindingKind::GamepadStick2D: {
-            if (index < 2) {
-                if (auto ga = Reflect::StringToEnum<GamepadAxis>(token)) {
-                    return static_cast<uint8_t>(*ga);
+        case InputBindingKind::Composite2DGamepad:
+            for (size_t i = 0; i < 4; ++i) {
+                const auto parsed = ParseEnumSlotToken<GamepadButton>(tokens[i], GamepadButton::South);
+                if (!parsed) {
+                    return false;
                 }
+                binding.gamepadButtons[i] = *parsed;
             }
-            return Optional<uint8_t> {};
-        }
+            return true;
+
+        case InputBindingKind::GamepadAxis1D:
+        case InputBindingKind::GamepadStick2D:
+            for (size_t i = 0; i < 2; ++i) {
+                const auto parsed = ParseEnumSlotToken<GamepadAxis>(tokens[i], GamepadAxis::LeftX);
+                if (!parsed) {
+                    return false;
+                }
+                binding.gamepadAxes[i] = *parsed;
+            }
+            return tokens[2] == "-" && tokens[3] == "-";
+
         default:
-            return uint8_t {0};
+            return true;
     }
 }
 
@@ -847,8 +921,9 @@ void InputActionMap::ResetToDefaults() {
 
 InputContext::InputContext() {
     for (size_t i = 0; i < kMaxPlayerSeats; ++i) {
-        _seats[i].kbm.seat              = static_cast<PlayerSeat>(i);
-        _seats[i].receivesKeyboardMouse = (i == kPrimarySeat);
+        const PlayerSeat seat {static_cast<uint8_t>(i)};
+        _seats[i].kbm.seat              = seat;
+        _seats[i].receivesKeyboardMouse = (seat == kPrimarySeat);
     }
 }
 
@@ -865,10 +940,10 @@ void InputContext::BeginFrame() noexcept {
 }
 
 void InputContext::InjectKey(KeyCode key, bool down, PlayerSeat targetSeat) noexcept {
-    if (targetSeat >= kMaxPlayerSeats || key == KeyCode::Unknown) {
+    if (!targetSeat.IsValid() || key == KeyCode::Unknown) {
         return;
     }
-    SeatRuntime& seat = _seats[targetSeat];
+    SeatRuntime& seat = _seats[targetSeat.Index()];
     seat.kbm.SetKey(key, down);
     if (down) {
         seat.kbm.QueueKeyPress(key);
@@ -876,11 +951,15 @@ void InputContext::InjectKey(KeyCode key, bool down, PlayerSeat targetSeat) noex
     }
 }
 
+void InputContext::InjectMouseButton(MouseButton button, bool down, PlayerSeat targetSeat) noexcept {
+    InjectKey(ToKeyCode(button), down, targetSeat);
+}
+
 void InputContext::InjectMouseMove(float x, float y, PlayerSeat targetSeat) noexcept {
-    if (targetSeat >= kMaxPlayerSeats) {
+    if (!targetSeat.IsValid()) {
         return;
     }
-    SeatRuntime& seat   = _seats[targetSeat];
+    SeatRuntime& seat   = _seats[targetSeat.Index()];
     const float  before = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
     seat.kbm.ApplyLocalMotion(x, y);
     const float after = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
@@ -890,10 +969,10 @@ void InputContext::InjectMouseMove(float x, float y, PlayerSeat targetSeat) noex
 }
 
 void InputContext::InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat targetSeat) noexcept {
-    if (targetSeat >= kMaxPlayerSeats) {
+    if (!targetSeat.IsValid()) {
         return;
     }
-    SeatRuntime& seat   = _seats[targetSeat];
+    SeatRuntime& seat   = _seats[targetSeat.Index()];
     const float  before = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
     seat.kbm.ApplyRelativeMotion(x, y, dx, dy);
     const float after = std::abs(seat.kbm.mouseDeltaX) + std::abs(seat.kbm.mouseDeltaY);
@@ -903,10 +982,10 @@ void InputContext::InjectMouseRelative(float x, float y, float dx, float dy, Pla
 }
 
 void InputContext::InjectMouseScroll(float delta, PlayerSeat targetSeat) noexcept {
-    if (targetSeat >= kMaxPlayerSeats) {
+    if (!targetSeat.IsValid()) {
         return;
     }
-    SeatRuntime& seat = _seats[targetSeat];
+    SeatRuntime& seat = _seats[targetSeat.Index()];
     seat.kbm.ApplyWheel(delta);
     if (std::abs(delta) > 1e-4f) {
         seat.lastActiveDevice = InputDeviceKind::KeyboardMouse;
@@ -914,10 +993,10 @@ void InputContext::InjectMouseScroll(float delta, PlayerSeat targetSeat) noexcep
 }
 
 void InputContext::InjectChar(uint32_t codepoint, PlayerSeat targetSeat) noexcept {
-    if (targetSeat >= kMaxPlayerSeats) {
+    if (!targetSeat.IsValid()) {
         return;
     }
-    _seats[targetSeat].kbm.QueueChar(codepoint);
+    _seats[targetSeat.Index()].kbm.QueueChar(codepoint);
 }
 
 void InputContext::InjectResize(Extent2D extent) noexcept {
@@ -933,26 +1012,30 @@ auto InputContext::HasPendingResize() const noexcept -> bool {
 }
 
 void InputContext::SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat) noexcept {
-    if (seat >= kMaxPlayerSeats) {
+    if (!seat.IsValid()) {
         return;
     }
-    _seats[seat].kbm.wantCaptureKeyboard = wantCaptureKeyboard;
-    _seats[seat].kbm.wantCaptureMouse    = wantCaptureMouse;
+    _seats[seat.Index()].uiCapture = UiCaptureState {.keyboard = wantCaptureKeyboard, .mouse = wantCaptureMouse};
 }
 
-auto InputContext::SelectAutoSeatForGamepad(uint8_t slot) const noexcept -> PlayerSeat {
+auto InputContext::UiCapture(PlayerSeat seat) const noexcept -> UiCaptureState {
+    return seat.IsValid() ? _seats[seat.Index()].uiCapture : UiCaptureState {};
+}
+
+auto InputContext::SelectAutoSeatForGamepad(GamepadSlot slot) const noexcept -> PlayerSeat {
     if (_routingPolicy == SeatRoutingPolicy::SharePrimarySeat) {
-        return (slot < kMaxPlayerSeats) ? static_cast<PlayerSeat>(slot) : kUnassignedSeat;
+        return (slot.value < kMaxPlayerSeats) ? PlayerSeat {slot.value} : kUnassignedSeat;
     }
 
     // DedicatedGamepadSeats: prefer seats that do NOT already have KB/M or another connected gamepad.
-    for (PlayerSeat s = 0; s < kMaxPlayerSeats; ++s) {
-        if (_seats[s].receivesKeyboardMouse) {
+    for (size_t si = 0; si < kMaxPlayerSeats; ++si) {
+        const PlayerSeat s {static_cast<uint8_t>(si)};
+        if (_seats[si].receivesKeyboardMouse) {
             continue;
         }
         bool occupied = false;
         for (size_t g = 0; g < kMaxGamepads; ++g) {
-            if (g != slot && _gamepads[g].connected && _gamepads[g].assignedSeat == s) {
+            if (GamepadSlot {static_cast<uint8_t>(g)} != slot && _gamepads[g].connected && _gamepads[g].assignedSeat == s) {
                 occupied = true;
                 break;
             }
@@ -963,10 +1046,11 @@ auto InputContext::SelectAutoSeatForGamepad(uint8_t slot) const noexcept -> Play
     }
 
     // Fallback: any seat without a connected gamepad.
-    for (PlayerSeat s = 0; s < kMaxPlayerSeats; ++s) {
+    for (size_t si = 0; si < kMaxPlayerSeats; ++si) {
+        const PlayerSeat s {static_cast<uint8_t>(si)};
         bool occupied = false;
         for (size_t g = 0; g < kMaxGamepads; ++g) {
-            if (g != slot && _gamepads[g].connected && _gamepads[g].assignedSeat == s) {
+            if (GamepadSlot {static_cast<uint8_t>(g)} != slot && _gamepads[g].connected && _gamepads[g].assignedSeat == s) {
                 occupied = true;
                 break;
             }
@@ -978,11 +1062,11 @@ auto InputContext::SelectAutoSeatForGamepad(uint8_t slot) const noexcept -> Play
     return kUnassignedSeat;
 }
 
-void InputContext::InjectGamepadConnection(uint8_t slot, bool connected, std::string_view name) noexcept {
-    if (slot >= kMaxGamepads) {
+void InputContext::InjectGamepadConnection(GamepadSlot slot, bool connected, std::string_view name) noexcept {
+    if (!slot.IsValid()) {
         return;
     }
-    GamepadState& gp = _gamepads[slot];
+    GamepadState& gp = _gamepads[slot.Index()];
     if (gp.connected == connected) {
         if (connected && !name.empty()) {
             gp.name.assign(name);
@@ -994,11 +1078,11 @@ void InputContext::InjectGamepadConnection(uint8_t slot, bool connected, std::st
         gp.connected = true;
         gp.name.assign(name.empty() ? std::string_view("Gamepad") : name);
         gp.ResetTransientState();
-        if (gp.assignedSeat == kUnassignedSeat || gp.assignedSeat >= kMaxPlayerSeats) {
+        if (gp.assignedSeat == kUnassignedSeat || !gp.assignedSeat.IsValid()) {
             gp.assignedSeat = SelectAutoSeatForGamepad(slot);
         }
-        if (gp.assignedSeat < kMaxPlayerSeats) {
-            _seats[gp.assignedSeat].lastActiveDevice = InputDeviceKind::Gamepad;
+        if (gp.assignedSeat.IsValid()) {
+            _seats[gp.assignedSeat.Index()].lastActiveDevice = InputDeviceKind::Gamepad;
         }
     } else {
         StopRumble(slot);
@@ -1023,45 +1107,45 @@ void InputContext::InjectGamepadConnection(uint8_t slot, bool connected, std::st
     });
 }
 
-void InputContext::InjectGamepadSample(uint8_t slot, const GamepadRawSample& sample) noexcept {
-    if (slot >= kMaxGamepads) {
+void InputContext::InjectGamepadSample(GamepadSlot slot, const GamepadHardwareSample& sample) noexcept {
+    if (!slot.IsValid()) {
         return;
     }
-    GamepadState& gp = _gamepads[slot];
+    GamepadState& gp = _gamepads[slot.Index()];
     if (!gp.connected) {
         InjectGamepadConnection(slot, true, "Gamepad");
     }
     gp.ApplySample(sample);
-    if (gp.assignedSeat < kMaxPlayerSeats && gp.HasAnyActivity()) {
-        _seats[gp.assignedSeat].lastActiveDevice = InputDeviceKind::Gamepad;
+    if (gp.assignedSeat.IsValid() && gp.HasAnyActivity()) {
+        _seats[gp.assignedSeat.Index()].lastActiveDevice = InputDeviceKind::Gamepad;
     }
 }
 
-void InputContext::InjectGamepadButton(uint8_t slot, GamepadButton button, bool down) noexcept {
-    if (slot >= kMaxGamepads) {
+void InputContext::InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept {
+    if (!slot.IsValid()) {
         return;
     }
-    GamepadState& gp = _gamepads[slot];
+    GamepadState& gp = _gamepads[slot.Index()];
     if (!gp.connected) {
         return;
     }
     gp.SetButton(button, down);
-    if (down && gp.assignedSeat < kMaxPlayerSeats) {
-        _seats[gp.assignedSeat].lastActiveDevice = InputDeviceKind::Gamepad;
+    if (down && gp.assignedSeat.IsValid()) {
+        _seats[gp.assignedSeat.Index()].lastActiveDevice = InputDeviceKind::Gamepad;
     }
 }
 
-void InputContext::InjectGamepadAxis(uint8_t slot, GamepadAxis axis, float value) noexcept {
-    if (slot >= kMaxGamepads) {
+void InputContext::InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept {
+    if (!slot.IsValid()) {
         return;
     }
-    GamepadState& gp = _gamepads[slot];
+    GamepadState& gp = _gamepads[slot.Index()];
     if (!gp.connected) {
         return;
     }
     gp.SetAxis(axis, value);
-    if (gp.assignedSeat < kMaxPlayerSeats && std::abs(gp.Axis(axis)) > 0.05f) {
-        _seats[gp.assignedSeat].lastActiveDevice = InputDeviceKind::Gamepad;
+    if (gp.assignedSeat.IsValid() && std::abs(gp.Axis(axis)) > 0.05f) {
+        _seats[gp.assignedSeat.Index()].lastActiveDevice = InputDeviceKind::Gamepad;
     }
 }
 
@@ -1078,15 +1162,15 @@ void InputContext::UpdateCaptureSession() noexcept {
     if (_capture.status != BindingCaptureStatus::Waiting) {
         return;
     }
-    if (_capture.seat >= kMaxPlayerSeats) {
+    if (!_capture.seat.IsValid()) {
         _capture.status = BindingCaptureStatus::Cancelled;
         return;
     }
 
-    const SeatRuntime& seat = _seats[_capture.seat];
+    const SeatRuntime& seat = _seats[_capture.seat.Index()];
     if (seat.receivesKeyboardMouse) {
         const auto& kbm = seat.kbm;
-        if (_capture.cancelKey != KeyCode::Unknown && kbm.IsKeyPressedRaw(_capture.cancelKey)) {
+        if (_capture.cancelKey != KeyCode::Unknown && kbm.IsKeyPressed(_capture.cancelKey)) {
             _capture.status     = BindingCaptureStatus::Cancelled;
             _capture.latchedMod = KeyCode::Unknown;
             return;
@@ -1099,20 +1183,20 @@ void InputContext::UpdateCaptureSession() noexcept {
                 continue;
             }
             if (IsModifierKeyCode(kc)) {
-                if (kbm.IsKeyPressedRaw(kc)) {
+                if (kbm.IsKeyPressed(kc)) {
                     _capture.latchedMod = kc;
                 }
                 continue;
             }
             if (const auto mb = MouseButtonFromKeyCode(kc); mb.has_value()) {
-                if (kbm.IsMouseButtonPressedRaw(*mb)) {
-                    _capture.result     = InputBinding::Mouse(*mb, kbm.ModifiersRaw());
+                if (kbm.IsMouseButtonPressed(*mb)) {
+                    _capture.result     = InputBinding::Mouse(*mb, kbm.Modifiers());
                     _capture.status     = BindingCaptureStatus::Captured;
                     _capture.latchedMod = KeyCode::Unknown;
                     return;
                 }
-            } else if (kbm.IsKeyPressedRaw(kc)) {
-                _capture.result     = InputBinding::Key(kc, kbm.ModifiersRaw());
+            } else if (kbm.IsKeyPressed(kc)) {
+                _capture.result     = InputBinding::Key(kc, kbm.Modifiers());
                 _capture.status     = BindingCaptureStatus::Captured;
                 _capture.latchedMod = KeyCode::Unknown;
                 return;
@@ -1120,7 +1204,7 @@ void InputContext::UpdateCaptureSession() noexcept {
         }
 
         // Standalone modifier key bound on clean release without any chorded key.
-        if (_capture.latchedMod != KeyCode::Unknown && kbm.IsKeyReleasedRaw(_capture.latchedMod)) {
+        if (_capture.latchedMod != KeyCode::Unknown && kbm.IsKeyReleased(_capture.latchedMod)) {
             _capture.result     = InputBinding::Key(_capture.latchedMod);
             _capture.status     = BindingCaptureStatus::Captured;
             _capture.latchedMod = KeyCode::Unknown;
@@ -1180,8 +1264,9 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
         return _actionMaps[a].Priority() > _actionMaps[b].Priority();
     });
 
-    for (PlayerSeat seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
-        SeatRuntime& seat = _seats[seatIdx];
+    for (size_t seatIdxRaw = 0; seatIdxRaw < kMaxPlayerSeats; ++seatIdxRaw) {
+        const PlayerSeat seatIdx {static_cast<uint8_t>(seatIdxRaw)};
+        SeatRuntime&     seat = _seats[seatIdxRaw];
 
         const InputState* kbm = seat.receivesKeyboardMouse ? &seat.kbm : nullptr;
 
@@ -1226,11 +1311,11 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
                 std::vector<size_t> actionOrder(actions.size());
                 std::iota(actionOrder.begin(), actionOrder.end(), size_t {0});
                 std::stable_sort(actionOrder.begin(), actionOrder.end(), [&](size_t lhs, size_t rhs) noexcept {
-                    uint8_t maxL = 0;
+                    uint32_t maxL = 0;
                     for (const InputBinding& b : actions[lhs].Bindings()) {
                         maxL = std::max(maxL, b.Specificity());
                     }
-                    uint8_t maxR = 0;
+                    uint32_t maxR = 0;
                     for (const InputBinding& b : actions[rhs].Bindings()) {
                         maxR = std::max(maxR, b.Specificity());
                     }
@@ -1248,7 +1333,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
 
                     for (const InputBinding& binding : action.Bindings()) {
                         const BindingEvalSample sample = EvaluateSingleBinding(
-                            binding, action.Kind(), action.ActuationThreshold(), kbm, seatPads, consumed
+                            binding, action.Kind(), action.ActuationThreshold(), kbm, seat.uiCapture, seatPads, consumed
                         );
                         if (!sample.active && std::abs(sample.x) <= 1e-6f && std::abs(sample.y) <= 1e-6f) {
                             continue;
@@ -1260,7 +1345,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
                                 accumX     = std::abs(sample.x) > std::abs(accumX) ? sample.x : (accumX == 0.0f ? 1.0f : accumX);
                                 winningDev = sample.device;
                                 if (map.ConsumePhysicalInputs()) {
-                                    MarkBindingConsumed(binding, kbm, seatPads, consumed);
+                                    MarkBindingConsumed(binding, kbm, seat.uiCapture, seatPads, consumed);
                                 }
                             }
                         } else if (action.Kind() == ActionKind::Axis1D) {
@@ -1268,7 +1353,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
                             anyActive  = anyActive || sample.active || std::abs(sample.x) >= action.ActuationThreshold();
                             winningDev = sample.device;
                             if (map.ConsumePhysicalInputs() && std::abs(sample.x) > 1e-5f) {
-                                MarkBindingConsumed(binding, kbm, seatPads, consumed);
+                                MarkBindingConsumed(binding, kbm, seat.uiCapture, seatPads, consumed);
                             }
                         } else {
                             accumX += sample.x;
@@ -1276,7 +1361,7 @@ void InputContext::RefreshActionsForCurrentFrame(ECS::EventBus* eventBus) {
                             anyActive  = true;
                             winningDev = sample.device;
                             if (map.ConsumePhysicalInputs() && (std::abs(sample.x) > 1e-5f || std::abs(sample.y) > 1e-5f)) {
-                                MarkBindingConsumed(binding, kbm, seatPads, consumed);
+                                MarkBindingConsumed(binding, kbm, seat.uiCapture, seatPads, consumed);
                             }
                         }
                     }
@@ -1352,8 +1437,9 @@ void InputContext::StepHaptics(float dt) noexcept {
     if (!(dt > 0.0f)) {
         return;
     }
-    for (uint8_t slot = 0; slot < kMaxGamepads; ++slot) {
-        RumbleChannel& ch = _rumble[slot];
+    for (size_t slotIdx = 0; slotIdx < kMaxGamepads; ++slotIdx) {
+        const GamepadSlot slot {static_cast<uint8_t>(slotIdx)};
+        RumbleChannel&    ch   = _rumble[slotIdx];
         if (!ch.active) {
             continue;
         }
@@ -1376,58 +1462,58 @@ void InputContext::SetRoutingPolicy(SeatRoutingPolicy policy) noexcept {
 }
 
 void InputContext::SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept {
-    if (seat >= kMaxPlayerSeats) {
+    if (!seat.IsValid()) {
         return;
     }
-    _seats[seat].receivesKeyboardMouse = enabled;
+    _seats[seat.Index()].receivesKeyboardMouse = enabled;
 }
 
 auto InputContext::SeatReceivesKeyboardMouse(PlayerSeat seat) const noexcept -> bool {
-    return seat < kMaxPlayerSeats && _seats[seat].receivesKeyboardMouse;
+    return seat.IsValid() && _seats[seat.Index()].receivesKeyboardMouse;
 }
 
 auto InputContext::SeatKeyboardMouse(PlayerSeat seat) const noexcept -> const InputState& {
-    return (seat < kMaxPlayerSeats) ? _seats[seat].kbm : _nullKbm;
+    return seat.IsValid() ? _seats[seat.Index()].kbm : _nullKbm;
 }
 
 auto InputContext::MutableSeatKeyboardMouse(PlayerSeat seat) noexcept -> InputState& {
-    return (seat < kMaxPlayerSeats) ? _seats[seat].kbm : _nullKbm;
+    return seat.IsValid() ? _seats[seat.Index()].kbm : _nullKbm;
 }
 
-auto InputContext::AssignGamepadToSeat(uint8_t gamepadSlot, PlayerSeat seat) noexcept -> bool {
-    if (gamepadSlot >= kMaxGamepads || (seat >= kMaxPlayerSeats && seat != kUnassignedSeat)) {
+auto InputContext::AssignGamepadToSeat(GamepadSlot gamepadSlot, PlayerSeat seat) noexcept -> bool {
+    if (!gamepadSlot.IsValid() || (!seat.IsValid() && seat != kUnassignedSeat)) {
         return false;
     }
-    _gamepads[gamepadSlot].assignedSeat = seat;
+    _gamepads[gamepadSlot.Index()].assignedSeat = seat;
     return true;
 }
 
-void InputContext::UnassignGamepad(uint8_t gamepadSlot) noexcept {
-    if (gamepadSlot < kMaxGamepads) {
-        _gamepads[gamepadSlot].assignedSeat = kUnassignedSeat;
+void InputContext::UnassignGamepad(GamepadSlot gamepadSlot) noexcept {
+    if (gamepadSlot.IsValid()) {
+        _gamepads[gamepadSlot.Index()].assignedSeat = kUnassignedSeat;
     }
 }
 
-auto InputContext::GamepadSeat(uint8_t gamepadSlot) const noexcept -> PlayerSeat {
-    return (gamepadSlot < kMaxGamepads) ? _gamepads[gamepadSlot].assignedSeat : kUnassignedSeat;
+auto InputContext::GamepadSeat(GamepadSlot gamepadSlot) const noexcept -> PlayerSeat {
+    return gamepadSlot.IsValid() ? _gamepads[gamepadSlot.Index()].assignedSeat : kUnassignedSeat;
 }
 
-auto InputContext::Gamepad(uint8_t gamepadSlot) const noexcept -> Optional<const GamepadState&> {
-    if (gamepadSlot >= kMaxGamepads || !_gamepads[gamepadSlot].connected) {
+auto InputContext::Gamepad(GamepadSlot gamepadSlot) const noexcept -> Optional<const GamepadState&> {
+    if (!gamepadSlot.IsValid() || !_gamepads[gamepadSlot.Index()].connected) {
         return {};
     }
-    return _gamepads[gamepadSlot];
+    return _gamepads[gamepadSlot.Index()];
 }
 
-auto InputContext::MutableGamepad(uint8_t gamepadSlot) noexcept -> Optional<GamepadState&> {
-    if (gamepadSlot >= kMaxGamepads) {
+auto InputContext::MutableGamepad(GamepadSlot gamepadSlot) noexcept -> Optional<GamepadState&> {
+    if (!gamepadSlot.IsValid()) {
         return {};
     }
-    return _gamepads[gamepadSlot];
+    return _gamepads[gamepadSlot.Index()];
 }
 
 auto InputContext::PrimaryGamepadForSeat(PlayerSeat seat) const noexcept -> Optional<const GamepadState&> {
-    if (seat >= kMaxPlayerSeats) {
+    if (!seat.IsValid()) {
         return {};
     }
     for (size_t g = 0; g < kMaxGamepads; ++g) {
@@ -1449,21 +1535,21 @@ auto InputContext::ConnectedGamepadCount() const noexcept -> size_t {
 }
 
 auto InputContext::LastActiveDevice(PlayerSeat seat) const noexcept -> InputDeviceKind {
-    return (seat < kMaxPlayerSeats) ? _seats[seat].lastActiveDevice : InputDeviceKind::KeyboardMouse;
+    return seat.IsValid() ? _seats[seat.Index()].lastActiveDevice : InputDeviceKind::KeyboardMouse;
 }
 
 void InputContext::SetGamepadDeadzones(
-    uint8_t               gamepadSlot,
+    GamepadSlot           gamepadSlot,
     const DeadzoneConfig& leftStick,
     const DeadzoneConfig& rightStick,
     float                 triggerDz
 ) noexcept {
-    if (gamepadSlot >= kMaxGamepads) {
+    if (!gamepadSlot.IsValid()) {
         return;
     }
-    _gamepads[gamepadSlot].leftStickDeadzone  = leftStick;
-    _gamepads[gamepadSlot].rightStickDeadzone = rightStick;
-    _gamepads[gamepadSlot].triggerDeadzone    = std::clamp(triggerDz, 0.0f, 0.95f);
+    _gamepads[gamepadSlot.Index()].leftStickDeadzone  = leftStick;
+    _gamepads[gamepadSlot.Index()].rightStickDeadzone = rightStick;
+    _gamepads[gamepadSlot.Index()].triggerDeadzone    = std::clamp(triggerDz, 0.0f, 0.95f);
 }
 
 void InputContext::SetSeatDeadzones(
@@ -1472,9 +1558,9 @@ void InputContext::SetSeatDeadzones(
     const DeadzoneConfig& rightStick,
     float                 triggerDz
 ) noexcept {
-    for (uint8_t slot = 0; slot < kMaxGamepads; ++slot) {
-        if (_gamepads[slot].assignedSeat == seat) {
-            SetGamepadDeadzones(slot, leftStick, rightStick, triggerDz);
+    for (size_t slotIdx = 0; slotIdx < kMaxGamepads; ++slotIdx) {
+        if (_gamepads[slotIdx].assignedSeat == seat) {
+            SetGamepadDeadzones(GamepadSlot {static_cast<uint8_t>(slotIdx)}, leftStick, rightStick, triggerDz);
         }
     }
 }
@@ -1486,8 +1572,8 @@ void InputContext::SetRumbleSink(GamepadRumbleSinkFn sink, void* userdata) noexc
     _rumbleSinkUserdata = userdata;
 }
 
-auto InputContext::SetGamepadRumble(uint8_t gamepadSlot, const GamepadRumble& rumble) noexcept -> bool {
-    if (gamepadSlot >= kMaxGamepads || !_gamepads[gamepadSlot].connected) {
+auto InputContext::SetGamepadRumble(GamepadSlot gamepadSlot, const GamepadRumble& rumble) noexcept -> bool {
+    if (!gamepadSlot.IsValid() || !_gamepads[gamepadSlot.Index()].connected) {
         return false;
     }
     GamepadRumble sanitized {
@@ -1502,7 +1588,7 @@ auto InputContext::SetGamepadRumble(uint8_t gamepadSlot, const GamepadRumble& ru
         return true;
     }
 
-    _rumble[gamepadSlot] = RumbleChannel {
+    _rumble[gamepadSlot.Index()] = RumbleChannel {
         .current          = sanitized,
         .remainingSeconds = sanitized.durationSeconds,
         .active           = true,
@@ -1514,13 +1600,13 @@ auto InputContext::SetGamepadRumble(uint8_t gamepadSlot, const GamepadRumble& ru
 }
 
 auto InputContext::RumbleSeat(PlayerSeat seat, const GamepadRumble& rumble) noexcept -> uint32_t {
-    if (seat >= kMaxPlayerSeats) {
+    if (!seat.IsValid()) {
         return 0;
     }
     uint32_t count = 0;
-    for (uint8_t slot = 0; slot < kMaxGamepads; ++slot) {
-        if (_gamepads[slot].connected && _gamepads[slot].assignedSeat == seat) {
-            if (SetGamepadRumble(slot, rumble)) {
+    for (size_t slotIdx = 0; slotIdx < kMaxGamepads; ++slotIdx) {
+        if (_gamepads[slotIdx].connected && _gamepads[slotIdx].assignedSeat == seat) {
+            if (SetGamepadRumble(GamepadSlot {static_cast<uint8_t>(slotIdx)}, rumble)) {
                 ++count;
             }
         }
@@ -1528,28 +1614,28 @@ auto InputContext::RumbleSeat(PlayerSeat seat, const GamepadRumble& rumble) noex
     return count;
 }
 
-void InputContext::StopRumble(uint8_t gamepadSlot) noexcept {
-    if (gamepadSlot >= kMaxGamepads) {
+void InputContext::StopRumble(GamepadSlot gamepadSlot) noexcept {
+    if (!gamepadSlot.IsValid()) {
         return;
     }
-    const bool wasActive = _rumble[gamepadSlot].active;
-    _rumble[gamepadSlot] = RumbleChannel {};
+    const bool wasActive = _rumble[gamepadSlot.Index()].active;
+    _rumble[gamepadSlot.Index()] = RumbleChannel {};
     if (wasActive && _rumbleSink != nullptr) {
         _rumbleSink(_rumbleSinkUserdata, gamepadSlot, GamepadRumble {});
     }
 }
 
 void InputContext::StopAllRumble() noexcept {
-    for (uint8_t slot = 0; slot < kMaxGamepads; ++slot) {
-        StopRumble(slot);
+    for (size_t slotIdx = 0; slotIdx < kMaxGamepads; ++slotIdx) {
+        StopRumble(GamepadSlot {static_cast<uint8_t>(slotIdx)});
     }
 }
 
-auto InputContext::ActiveRumble(uint8_t gamepadSlot) const noexcept -> GamepadRumble {
-    if (gamepadSlot >= kMaxGamepads || !_rumble[gamepadSlot].active) {
+auto InputContext::ActiveRumble(GamepadSlot gamepadSlot) const noexcept -> GamepadRumble {
+    if (!gamepadSlot.IsValid() || !_rumble[gamepadSlot.Index()].active) {
         return GamepadRumble {};
     }
-    return _rumble[gamepadSlot].current;
+    return _rumble[gamepadSlot.Index()].current;
 }
 
 // --- Action Maps & Queries ---------------------------------------------------
@@ -1614,15 +1700,15 @@ auto InputContext::SetActionMapEnabledForSeat(std::string_view name, PlayerSeat 
 }
 
 auto InputContext::Action(ActionID id, PlayerSeat seat) const noexcept -> ActionState {
-    if (seat >= kMaxPlayerSeats || !id.Valid()) {
+    if (!seat.IsValid() || !id.Valid()) {
         return {};
     }
-    for (const EvaluatedActionEntry& entry : _seats[seat].actions) {
+    for (const EvaluatedActionEntry& entry : _seats[seat.Index()].actions) {
         if (entry.id == id) {
             return entry.current;
         }
     }
-    return ActionState {.activeDevice = _seats[seat].lastActiveDevice};
+    return ActionState {.activeDevice = _seats[seat.Index()].lastActiveDevice};
 }
 
 // --- Runtime Rebinding, Capture & Serialization ------------------------------
@@ -1753,13 +1839,13 @@ auto InputContext::SerializeBindings() const -> std::string {
                     map.Name(),
                     action.Name(),
                     Reflect::EnumToString(b.kind),
-                    FormatCodeToken(b.kind, 0, b.code0),
-                    FormatCodeToken(b.kind, 1, b.code1),
-                    FormatCodeToken(b.kind, 2, b.code2),
-                    FormatCodeToken(b.kind, 3, b.code3),
+                    FormatBindingSlotToken(b, 0),
+                    FormatBindingSlotToken(b, 1),
+                    FormatBindingSlotToken(b, 2),
+                    FormatBindingSlotToken(b, 3),
                     FormatModifiers(b.modifiers),
                     b.strictModifiers ? 1 : 0,
-                    b.rawBypassUI ? 1 : 0,
+                    b.bypassUiCapture ? 1 : 0,
                     b.scaleX,
                     b.scaleY,
                     b.threshold
@@ -1864,40 +1950,33 @@ auto InputContext::DeserializeBindings(std::string_view text) -> std::expected<v
             if (!bKind) {
                 return std::unexpected(InputBindingParseError::UnknownBindingKind);
             }
-            const auto c0   = ParseCodeToken(*bKind, 0, cols[4]);
-            const auto c1   = ParseCodeToken(*bKind, 1, cols[5]);
-            const auto c2   = ParseCodeToken(*bKind, 2, cols[6]);
-            const auto c3   = ParseCodeToken(*bKind, 3, cols[7]);
             const auto mods = ParseModifiers(cols[8]);
             const auto sx   = ParseFloatToken(cols[11]);
             const auto sy   = ParseFloatToken(cols[12]);
             const auto th   = ParseFloatToken(cols[13]);
-            if (!c0 || !c1 || !c2 || !c3 || !mods) {
+
+            InputBinding binding {
+                .kind            = *bKind,
+                .modifiers       = mods.value_or(KeyModifiers::None),
+                .strictModifiers = (cols[9] != "0"),
+                .bypassUiCapture     = (cols[10] != "0"),
+            };
+            const std::array<std::string_view, 4> slotTokens {cols[4], cols[5], cols[6], cols[7]};
+            if (!mods || !ParseBindingCodeTokens(binding, slotTokens)) {
                 return std::unexpected(InputBindingParseError::UnknownEnumerator);
             }
             if (!sx || !sy || !th) {
                 return std::unexpected(InputBindingParseError::InvalidNumericValue);
             }
+            binding.scaleX    = *sx;
+            binding.scaleY    = *sy;
+            binding.threshold = *th;
 
             InputActionMap& m   = findOrMakeMap(cols[1]);
             auto            act = m.FindAction(cols[2]);
             if (!act) {
                 act = m.AddAction(cols[2], ActionKind::Digital);
             }
-
-            InputBinding binding {
-                .kind            = *bKind,
-                .code0           = *c0,
-                .code1           = *c1,
-                .code2           = *c2,
-                .code3           = *c3,
-                .modifiers       = *mods,
-                .strictModifiers = (cols[9] != "0"),
-                .rawBypassUI     = (cols[10] != "0"),
-                .scaleX          = *sx,
-                .scaleY          = *sy,
-                .threshold       = *th,
-            };
 
             std::vector<InputBinding> current(act->Bindings().begin(), act->Bindings().end());
             current.push_back(binding);

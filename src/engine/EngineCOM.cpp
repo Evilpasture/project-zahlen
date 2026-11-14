@@ -1270,15 +1270,15 @@ public:
         Router().InjectMouseScroll(delta, seat);
     }
 
-    void InjectGamepadConnection(uint8_t slot, bool connected, StringView name) noexcept override {
+    void InjectGamepadConnection(GamepadSlot slot, bool connected, StringView name) noexcept override {
         Router().InjectGamepadConnection(slot, connected, std::string_view(name));
     }
 
-    void InjectGamepadButton(uint8_t slot, GamepadButton button, bool down) noexcept override {
+    void InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept override {
         Router().InjectGamepadButton(slot, button, down);
     }
 
-    void InjectGamepadAxis(uint8_t slot, GamepadAxis axis, float value) noexcept override {
+    void InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept override {
         Router().InjectGamepadAxis(slot, axis, value);
     }
 
@@ -1432,9 +1432,9 @@ public:
         if (!cfg.has_value()) return ComError::InvalidArgument;
 
         Router().SetRoutingPolicy(cfg->policy);
-        for (PlayerSeat seat = 0; seat < kMaxPlayerSeats; ++seat) {
-            const bool receives = (cfg->keyboardMouseSeatMask & (1U << seat)) != 0U;
-            Router().SetKeyboardMouseSeat(seat, receives);
+        for (size_t seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
+            const PlayerSeat seat {static_cast<uint8_t>(seatIdx)};
+            Router().SetKeyboardMouseSeat(seat, cfg->keyboardMouseSeatMask.Contains(seat));
         }
         return {};
     }
@@ -1442,10 +1442,11 @@ public:
     [[nodiscard]] Result<void> GetRouting(ChainOutNode* routingChain) const noexcept override {
         return DispatchOutChain<InputRoutingConfig>(routingChain, [&](InputRoutingConfig& outCfg) -> Result<void> {
             outCfg.policy = Router().RoutingPolicy();
-            uint8_t mask  = 0U;
-            for (PlayerSeat seat = 0; seat < kMaxPlayerSeats; ++seat) {
+            SeatMask mask = SeatMask::None();
+            for (size_t seatIdx = 0; seatIdx < kMaxPlayerSeats; ++seatIdx) {
+                const PlayerSeat seat {static_cast<uint8_t>(seatIdx)};
                 if (Router().SeatReceivesKeyboardMouse(seat)) {
-                    mask = static_cast<uint8_t>(mask | (1U << seat));
+                    mask.Set(seat);
                 }
             }
             outCfg.keyboardMouseSeatMask = mask;
@@ -1491,27 +1492,27 @@ public:
         return static_cast<uint32_t>(Router().ConnectedGamepadCount());
     }
 
-    [[nodiscard]] bool GamepadConnected(uint8_t slot) const noexcept override {
+    [[nodiscard]] bool GamepadConnected(GamepadSlot slot) const noexcept override {
         const auto pad = Router().Gamepad(slot);
         return static_cast<bool>(pad) && pad->connected;
     }
 
-    [[nodiscard]] bool GamepadButtonDown(uint8_t slot, GamepadButton button) const noexcept override {
+    [[nodiscard]] bool GamepadButtonDown(GamepadSlot slot, GamepadButton button) const noexcept override {
         const auto pad = Router().Gamepad(slot);
         return static_cast<bool>(pad) && pad->IsButtonDown(button);
     }
 
-    [[nodiscard]] float GamepadAxisValue(uint8_t slot, GamepadAxis axis) const noexcept override {
+    [[nodiscard]] float GamepadAxisValue(GamepadSlot slot, GamepadAxis axis) const noexcept override {
         const auto pad = Router().Gamepad(slot);
         if (!pad) return 0.0F;
         return pad->Axis(axis);
     }
 
-    [[nodiscard]] PlayerSeat GamepadSeat(uint8_t slot) const noexcept override {
+    [[nodiscard]] PlayerSeat GamepadSeat(GamepadSlot slot) const noexcept override {
         return Router().GamepadSeat(slot);
     }
 
-    bool AssignGamepadToSeat(uint8_t slot, PlayerSeat seat) noexcept override {
+    bool AssignGamepadToSeat(GamepadSlot slot, PlayerSeat seat) noexcept override {
         return Router().AssignGamepadToSeat(slot, seat);
     }
 

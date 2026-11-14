@@ -199,7 +199,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
     const auto& inputState = engine.GetInput().SeatKeyboardMouse();
-    bool        escDown    = inputState.IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
+    bool        escDown    = inputState.IsKeyDown(KeyCode::Escape);
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {

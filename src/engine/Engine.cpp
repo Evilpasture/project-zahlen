@@ -298,11 +298,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         static_cast<World*>(userdata)->GetInput().InjectChar(codepoint);
     };
 
-    auto onGamepadConnection = [](void* userdata, uint8_t slot, bool connected, std::string_view name) -> void {
+    auto onGamepadConnection = [](void* userdata, GamepadSlot slot, bool connected, std::string_view name) -> void {
         static_cast<World*>(userdata)->GetInput().InjectGamepadConnection(slot, connected, name);
     };
 
-    auto onGamepadState = [](void* userdata, uint8_t slot, const GamepadRawSample& sample) -> void {
+    auto onGamepadState = [](void* userdata, GamepadSlot slot, const GamepadHardwareSample& sample) -> void {
         static_cast<World*>(userdata)->GetInput().InjectGamepadSample(slot, sample);
     };
 
@@ -335,7 +335,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     );
 
     _impl->world->GetInput().SetRumbleSink(
-        [](void* userdata, uint8_t slot, const GamepadRumble& rumble) noexcept { static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble); },
+        [](void* userdata, GamepadSlot slot, const GamepadRumble& rumble) noexcept { static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble); },
         &_impl->kernel->GetPlatformHost()
     );
 
@@ -773,31 +773,17 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
     out.mouseX       = input.mouseX;
     out.mouseY       = input.mouseY;
     out.mouseScroll  = input.mouseWheel;
-    out.mouseDown[0] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
-    out.mouseDown[1] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::RButton));
-    out.mouseDown[2] = input.IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::MButton));
-
-    KeyModifiers mods = KeyModifiers::None;
-    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift))) {
-        mods |= KeyModifiers::Shift;
-    }
-    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl))) {
-        mods |= KeyModifiers::Ctrl;
-    }
-    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LAlt)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RAlt))) {
-        mods |= KeyModifiers::Alt;
-    }
-    if (input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LSuper)) || input.IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RSuper))) {
-        mods |= KeyModifiers::Super;
-    }
-    out.modifiers = mods;
+    out.mouseDown[0] = input.IsMouseButtonDown(MouseButton::Left);
+    out.mouseDown[1] = input.IsMouseButtonDown(MouseButton::Right);
+    out.mouseDown[2] = input.IsMouseButtonDown(MouseButton::Middle);
+    out.modifiers    = input.Modifiers();
 
     for (size_t i = 0; i < input.queuedInputCount; ++i) {
         const auto& queued = input.queuedInput[i];
         if (queued.isChar) {
-            _impl->uiCharacterStream.push_back(queued.value);
+            _impl->uiCharacterStream.push_back(queued.codepoint);
         } else {
-            _impl->uiPressedKeys.push_back(static_cast<KeyCode>(queued.value));
+            _impl->uiPressedKeys.push_back(queued.key);
         }
     }
     input.ClearQueuedInput();

@@ -1255,11 +1255,11 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
     if (const auto cameraComp = entities.GetSingleton<Components::CameraComponent>()) {
         m_lastControls.yaw = cameraComp->camera.yaw.value;
     }
-    m_lastControls.forward  = input.IsKeyDown(static_cast<uint8_t>(KeyCode::W));
-    m_lastControls.backward = input.IsKeyDown(static_cast<uint8_t>(KeyCode::S));
-    m_lastControls.left     = input.IsKeyDown(static_cast<uint8_t>(KeyCode::A));
-    m_lastControls.right    = input.IsKeyDown(static_cast<uint8_t>(KeyCode::D));
-    m_lastControls.jump     = input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
+    m_lastControls.forward  = input.IsKeyDown(KeyCode::W);
+    m_lastControls.backward = input.IsKeyDown(KeyCode::S);
+    m_lastControls.left     = input.IsKeyDown(KeyCode::A);
+    m_lastControls.right    = input.IsKeyDown(KeyCode::D);
+    m_lastControls.jump     = input.IsKeyDown(KeyCode::Space);
 
     MsgPackValue inputs = MsgPackValue::Map();
     inputs.Set("forward", MsgPackValue::Bool(m_lastControls.forward));

@@ -203,7 +203,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     }
 
     if (snap.slotGenerations[slot] == handle.generation) {
-        const auto snapState = static_cast<Physics::SlotState>(snap.slotStates[slot]);
+        const Physics::SlotState snapState = snap.slotStates[slot];
         if (Physics::GetSlotPredicate(snapState).isActive) {
             const uint32_t dense = snap.slotToDense[slot];
             if (dense < snap.count) {
@@ -767,7 +767,7 @@ auto PhysicsContext::IsCharacterOnGround(Physics::BodyID handle) const -> bool {
     }
 
     const Physics::TransformFrame& snap = world.transforms.GetReadSnapshot();
-    if (snap.slotGenerations[slot] != handle.generation || static_cast<Physics::SlotState>(snap.slotStates[slot]) != Physics::SlotState::Character) {
+    if (snap.slotGenerations[slot] != handle.generation || snap.slotStates[slot] != Physics::SlotState::Character) {
         return false;
     }
     const uint32_t dense = snap.slotToDense[slot];
@@ -786,7 +786,7 @@ auto PhysicsContext::IsBodyDynamic(Physics::BodyID handle) const -> bool {
         return false;
     }
 
-    return static_cast<JPH::EMotionType>(bt.slotMotionTypes[slot].load(std::memory_order::acquire)) == JPH::EMotionType::Dynamic;
+    return bt.slotMotionTypes[slot].load(std::memory_order::acquire) == JPH::EMotionType::Dynamic;
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {
@@ -873,7 +873,7 @@ auto PhysicsContext::BodyPosition(Physics::BodyID handle) const noexcept -> std:
 
     const Physics::TransformFrame& snap = world.transforms.GetReadSnapshot();
     if (snap.slotGenerations[slot] == handle.generation) {
-        const auto snapState = static_cast<Physics::SlotState>(snap.slotStates[slot]);
+        const Physics::SlotState snapState = snap.slotStates[slot];
         if (Physics::GetSlotPredicate(snapState).isActive) {
             const uint32_t dense = snap.slotToDense[slot];
             if (dense < snap.count) {

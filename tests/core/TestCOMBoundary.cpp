@@ -493,12 +493,12 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
     }
 
     ZHLN::Test::ExpectTrue(actions.SetRoutingPolicy(ZHLN::SeatRoutingPolicy::DedicatedGamepadSeats).HasValue());
-    ZHLN::Test::ExpectTrue(actions.SetKeyboardMouseSeat(1, true).HasValue());
+    ZHLN::Test::ExpectTrue(actions.SetKeyboardMouseSeat(ZHLN::PlayerSeat {1}, true).HasValue());
     ZHLN::Test::ExpectTrue(actions.RoutingPolicy() == ZHLN::SeatRoutingPolicy::DedicatedGamepadSeats);
 
     ZHLN::InputRoutingConfig routingOut {};
     ZHLN::Test::ExpectTrue(actions.GetRouting(ZHLN::COM::OutChain(routingOut)).HasValue());
-    ZHLN::Test::ExpectTrue((routingOut.keyboardMouseSeatMask & (1U << 1)) != 0U);
+    ZHLN::Test::ExpectTrue(routingOut.keyboardMouseSeatMask.Contains(ZHLN::PlayerSeat {1}));
 
     ZHLN::Test::ExpectTrue(actions.RemoveActionMap("Gameplay"));
     ZHLN::Test::ExpectTrue(!actions.HasActionMap("Gameplay"));

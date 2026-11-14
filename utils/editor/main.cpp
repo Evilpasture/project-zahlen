@@ -3,39 +3,36 @@
 
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <SceneDocument.hpp>
 #include "engine/Platform.hpp"
-#include <Zahlen/ConfigCli.hpp>
 #include <FreeCam/FreeCam.hpp>
+#include <SceneDocument.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Scene.hpp>
+#include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Input/InputContext.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Engine/Scene.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <editor/GUIEditor.hpp>
-#include <toml/SceneTOML.hpp>
-#include <toml/TOML.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -43,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <editor/GUIEditor.hpp>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -51,6 +49,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <toml/SceneTOML.hpp>
+#include <toml/TOML.hpp>
 #include <utility>
 
 namespace {
@@ -131,8 +131,8 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
     const auto invVP = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
 
-    FVec4 nearWorld = invVP * FVec4{ndcX, ndcY, 0.0f, 1.0f};
-    FVec4 farWorld  = invVP * FVec4{ndcX, ndcY, 1.0f, 1.0f};
+    FVec4 nearWorld = invVP * FVec4 {ndcX, ndcY, 0.0f, 1.0f};
+    FVec4 farWorld  = invVP * FVec4 {ndcX, ndcY, 1.0f, 1.0f};
 
     FVec3 pNear = {nearWorld.x / nearWorld.w, nearWorld.y / nearWorld.w, nearWorld.z / nearWorld.w};
     FVec3 pFar  = {farWorld.x / farWorld.w, farWorld.y / farWorld.w, farWorld.z / farWorld.w};
@@ -223,26 +223,24 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
     engine.SubmitUI(std::move(ui).End());
 }
 
-auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHLN::CrashState& crashState)
-    -> std::expected<void, ZHLN::ErrorCode> {
+auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHLN::CrashState& crashState) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Clock clock;
     // The editor poses the world's camera: a world with no main camera entity has
     // none to pose.
-    auto entities = engine.Entities();
+    auto       entities       = engine.Entities();
     const auto cameraEntities = entities.EntitiesWith<ZHLN::Components::CameraComponent>();
     if (cameraEntities.empty()) {
         return std::unexpected(ZHLN::AppError::SceneInitFailed);
     }
     entities.Patch<ZHLN::Components::CameraComponent>(cameraEntities.front(), [](auto& component) {
         component.camera.position = {0.0f, 20.0f, 40.0f};
-        component.camera.yaw = ZHLN::DegF {-90.0f};
-        component.camera.pitch = ZHLN::DegF {-20.0f};
+        component.camera.yaw      = ZHLN::DegF {-90.0f};
+        component.camera.pitch    = ZHLN::DegF {-20.0f};
     });
 
     const uint32_t maxFramesPerSecond = engine.MaxFramesPerSecond();
-    const double   targetFrameTime =
-        maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0;
-    auto         frameStart      = std::chrono::high_resolution_clock::now();
+    const double   targetFrameTime    = maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0;
+    auto           frameStart         = std::chrono::high_resolution_clock::now();
 
     ZHLN::Log("[WorldEditor] Editor session launched.");
 
@@ -255,11 +253,13 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         float frameTime = clock.Tick();
         ZHLN::CheckForCrashes(crashState, &engine);
         engine.ProcessEvents();
-        if (!engine.IsRunning()) break;
+        if (!engine.IsRunning())
+            break;
 
-        const auto* state = &engine.GetInput().SeatKeyboardMouse();
-        const auto cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
-        if (!cameraComp) return std::unexpected(ZHLN::AppError::SceneInitFailed);
+        const auto* state      = &engine.GetInput().SeatKeyboardMouse();
+        const auto  cameraComp = entities.GetSingleton<ZHLN::Components::CameraComponent>();
+        if (!cameraComp)
+            return std::unexpected(ZHLN::AppError::SceneInitFailed);
         const ZHLN::Camera cam = cameraComp->camera;
 
         auto winSize = engine.GetPlatformHost().GetSize();
@@ -310,12 +310,13 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // Viewport bounds: center area between the left hierarchy and right inspector
         const bool pointerInViewport = state && state->mouseX >= vpX0 && state->mouseX <= vpX1;
 
-        const bool uiCapturesMouse = state && (!pointerInViewport || state->wantCaptureMouse);
+        const auto& capture         = engine.GetInput().UiCapture(ZHLN::kPrimarySeat);
+        const bool  uiCapturesMouse = state && (!pointerInViewport || capture.mouse);
         // A focused text field owns the keyboard without setting a capture flag
         // of its own, so it has to be asked directly -- otherwise typing "wasd"
         // into a name box flies the editor camera. This reads last frame's
         // focus, which is the right question to ask before BeginFrame has run.
-        const bool uiCapturesKeyboard = (state && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
+        const bool uiCapturesKeyboard = (state && capture.keyboard) || gui.IsTextInputFocused();
 
         // Blender-style modal transform runs before Escape, picking and the
         // fly camera. Sample the mode BEFORE the update: UpdateTransformMode
@@ -333,7 +334,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // ladder instead: a live transform modal consumes it above to cancel;
         // a focused text field owns it (GUI unfocus); otherwise it clears the
         // current selection. Edge-detected so a held key clears once.
-        const bool escDown = state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+        const bool escDown = state && state->IsKeyDown(ZHLN::KeyCode::Escape);
         if (escDown && !escWasDown && !uiCapturesKeyboard && !transformActive) {
             s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
         }
@@ -344,20 +345,19 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         // chord would write the file once per frame. Gated on the same keyboard
         // capture as Escape and the camera, or Ctrl+S typed into a text field
         // would save too.
-        const bool controlDown =
-            state && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) || state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
-        const bool saveChordDown = controlDown && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+        const bool controlDown   = state && (state->IsKeyDown(ZHLN::KeyCode::LControl) || state->IsKeyDown(ZHLN::KeyCode::RControl));
+        const bool saveChordDown = controlDown && state->IsKeyDown(ZHLN::KeyCode::S);
         if (saveChordDown && !saveChordWasDown && !uiCapturesKeyboard) {
             SaveScene(engine);
         }
         saveChordWasDown = saveChordDown;
 
-        if (state && pointerInViewport && !transformActive && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+        if (state && pointerInViewport && !transformActive && !state->IsMouseButtonDown(ZHLN::MouseButton::Right) && !uiCapturesMouse) {
             // Window maps GLFW mouse buttons onto the same key stream (see
             // Window.cpp's mouse-button callback), so the raw level needs no
             // platform polling here -- the composition root stays GLFW-free.
             static bool wasMouseDown = false;
-            const bool  isMouseDown  = state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
+            const bool  isMouseDown  = state->IsMouseButtonDown(ZHLN::MouseButton::Left);
 
             if (isMouseDown && !wasMouseDown) {
                 const auto hit = CastPickingRay(engine, cam, sceneViewport);
@@ -392,9 +392,9 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             const int kind                     = s_NativeEditorState.requestedSpawn;
             s_NativeEditorState.requestedSpawn = -1;
 
-            const auto yawRad = cam.yaw.ToRadians();
-            const auto pitchRad = cam.pitch.ToRadians();
-            const FVec3 forward  = FVec3{ZHLN::Cos(yawRad) * ZHLN::Cos(pitchRad), ZHLN::Sin(pitchRad), ZHLN::Sin(yawRad) * ZHLN::Cos(pitchRad)}.Normalized();
+            const auto  yawRad   = cam.yaw.ToRadians();
+            const auto  pitchRad = cam.pitch.ToRadians();
+            const FVec3 forward  = FVec3 {ZHLN::Cos(yawRad) * ZHLN::Cos(pitchRad), ZHLN::Sin(pitchRad), ZHLN::Sin(yawRad) * ZHLN::Cos(pitchRad)}.Normalized();
 
             ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = (cam.position + forward * 8.0f).Cast<double>();
@@ -469,15 +469,16 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
 
 auto main(int argc, char* argv[]) -> int {
     static ZHLN::CrashState crashState;
-    ZHLN::EngineConfig config {.appName = "Zahlen World Editor"};
-    std::filesystem::path scenePath;
-    const std::array appHandlers = {
+    ZHLN::EngineConfig      config {.appName = "Zahlen World Editor"};
+    std::filesystem::path   scenePath;
+    const std::array        appHandlers = {
         ZHLN::CliFlag {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",
             .description = "Open a TOML or Lua scene document in the world editor",
             .action      = [&](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
-                if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                if (v.empty())
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
                 scenePath = std::filesystem::path(v);
                 return {};
             },
@@ -488,7 +489,8 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::LogError("[WorldEditor] command line: {}", parsed.error());
         return EXIT_FAILURE;
     }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested) return EXIT_SUCCESS;
+    if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested)
+        return EXIT_SUCCESS;
     if (config.headless) {
         ZHLN::LogError("[WorldEditor] this editor requires a window");
         return EXIT_FAILURE;
@@ -500,7 +502,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope tasks;
-    auto created = ZHLN::Engine::Create(config);
+    auto                    created = ZHLN::Engine::Create(config);
     if (!created) {
         ZHLN::LogError("[WorldEditor] engine creation failed: {}", created.error());
         return EXIT_FAILURE;
@@ -512,6 +514,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     const auto ran = RunWorldEditor(*engine, config, crashState);
-    if (!ran) ZHLN::LogError("[WorldEditor] run failed: {}", ran.error());
+    if (!ran)
+        ZHLN::LogError("[WorldEditor] run failed: {}", ran.error());
     return ran ? EXIT_SUCCESS : EXIT_FAILURE;
 }

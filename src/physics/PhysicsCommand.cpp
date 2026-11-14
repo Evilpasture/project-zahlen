@@ -74,9 +74,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
 
                 // Only transition PendingCreateRigid -> Alive if a concurrent
                 // DestroyBody did not already mark this slot PendingDestroy.
-                auto expected = static_cast<uint8_t>(SlotState::PendingCreateRigid);
+                SlotState expected = SlotState::PendingCreateRigid;
                 bt.slotStates[slot].compare_exchange_strong(
-                    expected, static_cast<uint8_t>(SlotState::Alive), std::memory_order::acq_rel, std::memory_order::relaxed
+                    expected, SlotState::Alive, std::memory_order::acq_rel, std::memory_order::relaxed
                 );
                 break;
             }
@@ -106,9 +106,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                     (character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround) ? kCharacterFlagOnGround : 0u;
                 backFrame.WriteInitialPose(dense, JPH::RVec3(c.px, c.py, c.pz), JPH::Quat::sIdentity(), charFlags);
 
-                auto expected = static_cast<uint8_t>(SlotState::PendingCreateChar);
+                SlotState expected = SlotState::PendingCreateChar;
                 bt.slotStates[slot].compare_exchange_strong(
-                    expected, static_cast<uint8_t>(SlotState::Character), std::memory_order::acq_rel, std::memory_order::relaxed
+                    expected, SlotState::Character, std::memory_order::acq_rel, std::memory_order::relaxed
                 );
                 break;
             }

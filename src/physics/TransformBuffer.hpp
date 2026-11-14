@@ -19,6 +19,15 @@ namespace ZHLN::Physics {
 
 struct BodyTable;
 
+enum class SlotState : uint8_t {
+    Empty              = 0,
+    PendingCreateRigid = 1,
+    PendingCreateChar  = 2,
+    Alive              = 3,
+    Character          = 4,
+    PendingDestroy     = 5,
+};
+
 inline constexpr uint8_t kCharacterFlagOnGround = 1u << 0;
 
 // Immutable-while-front SoA snapshot. Readers acquire `frontIndex` and read a
@@ -37,7 +46,7 @@ struct TransformFrame {
     uint32_t*  slotToDense       = nullptr;
     uint32_t*  denseToSlot       = nullptr;
     uint32_t*  slotGenerations   = nullptr;
-    uint8_t*   slotStates        = nullptr;
+    SlotState* slotStates        = nullptr;
 
     void WriteInitialPose(uint32_t dense, JPH::RVec3Arg pos, JPH::QuatArg rot, uint8_t charFlags = 0u) noexcept;
     void WriteTeleportPose(uint32_t dense, JPH::RVec3Arg pos, JPH::QuatArg rot) noexcept;

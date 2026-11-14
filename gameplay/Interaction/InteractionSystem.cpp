@@ -138,7 +138,7 @@ void InteractionSystem::Update(
 
     const FVec3 playerPos = playerTrans->position;
 
-    const bool  interactPressed     = input && input->SeatKeyboardMouse().IsKeyDown(static_cast<uint8_t>(KeyCode::E));
+    const bool  interactPressed     = input && input->SeatKeyboardMouse().IsKeyDown(KeyCode::E);
     static bool wasInteractPressed  = false;
     const bool  interactJustPressed = interactPressed && !wasInteractPressed;
     wasInteractPressed              = interactPressed;

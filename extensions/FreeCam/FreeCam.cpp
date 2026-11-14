@@ -32,9 +32,9 @@ void Drive(Components::CameraComponent& cc, const InputState& input, const FreeC
     if (!knobs.enabled) {
         return;
     }
-    Camera&     cam  = cc.camera;
-    const float look = knobs.lookSensitivity;
-    const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton)) : true;
+    Camera&     cam        = cc.camera;
+    const float look       = knobs.lookSensitivity;
+    const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(MouseButton::Right) : true;
     if (lookButton) {
         cam.yaw += DegF{input.GetMouseDeltaX() * look};
         cam.pitch = std::clamp(cam.pitch - DegF{input.GetMouseDeltaY() * look}, DegF{-89.0f}, DegF{89.0f});
@@ -49,25 +49,25 @@ void Drive(Components::CameraComponent& cc, const InputState& input, const FreeC
         right = right.Normalized();
     }
     const FVec3 up    = FVec3::UnitY();
-    const float     speed = input.IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
+    const float speed = input.IsKeyDown(KeyCode::LShift) ? (knobs.speed * knobs.sprintMultiplier) : knobs.speed;
 
     FVec3 move = FVec3::Zero();
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
+    if (input.IsKeyDown(KeyCode::W)) {
         move += forward;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
+    if (input.IsKeyDown(KeyCode::S)) {
         move -= forward;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
+    if (input.IsKeyDown(KeyCode::A)) {
         move -= right;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
+    if (input.IsKeyDown(KeyCode::D)) {
         move += right;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::E)) || input.IsKeyDown(static_cast<uint8_t>(KeyCode::Space))) {
+    if (input.IsKeyDown(KeyCode::E) || input.IsKeyDown(KeyCode::Space)) {
         move += up;
     }
-    if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::Q))) {
+    if (input.IsKeyDown(KeyCode::Q)) {
         move -= up;
     }
     if (move.LengthSquared() > 0.0f && dt > 0.0f) {

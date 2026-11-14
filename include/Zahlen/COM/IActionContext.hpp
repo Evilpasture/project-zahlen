@@ -49,9 +49,9 @@ struct IActionContext : IObject {
     virtual void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat seat) noexcept = 0;
     virtual void InjectMouseScroll(float delta, PlayerSeat seat) noexcept = 0;
 
-    virtual void InjectGamepadConnection(uint8_t slot, bool connected, StringView name) noexcept = 0;
-    virtual void InjectGamepadButton(uint8_t slot, GamepadButton button, bool down) noexcept = 0;
-    virtual void InjectGamepadAxis(uint8_t slot, GamepadAxis axis, float value) noexcept = 0;
+    virtual void InjectGamepadConnection(GamepadSlot slot, bool connected, StringView name) noexcept = 0;
+    virtual void InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept = 0;
+    virtual void InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept = 0;
 
     // --- Action-map & binding setup -----------------------------------------
 
@@ -101,11 +101,11 @@ struct IActionContext : IObject {
     [[nodiscard]] virtual InputDeviceKind LastActiveDevice(PlayerSeat seat) const noexcept = 0;
 
     [[nodiscard]] virtual uint32_t   ConnectedGamepadCount() const noexcept = 0;
-    [[nodiscard]] virtual bool       GamepadConnected(uint8_t slot) const noexcept = 0;
-    [[nodiscard]] virtual bool       GamepadButtonDown(uint8_t slot, GamepadButton button) const noexcept = 0;
-    [[nodiscard]] virtual float      GamepadAxisValue(uint8_t slot, GamepadAxis axis) const noexcept = 0;
-    [[nodiscard]] virtual PlayerSeat GamepadSeat(uint8_t slot) const noexcept = 0;
-    virtual bool                     AssignGamepadToSeat(uint8_t slot, PlayerSeat seat) noexcept = 0;
+    [[nodiscard]] virtual bool       GamepadConnected(GamepadSlot slot) const noexcept = 0;
+    [[nodiscard]] virtual bool       GamepadButtonDown(GamepadSlot slot, GamepadButton button) const noexcept = 0;
+    [[nodiscard]] virtual float      GamepadAxisValue(GamepadSlot slot, GamepadAxis axis) const noexcept = 0;
+    [[nodiscard]] virtual PlayerSeat GamepadSeat(GamepadSlot slot) const noexcept = 0;
+    virtual bool                     AssignGamepadToSeat(GamepadSlot slot, PlayerSeat seat) noexcept = 0;
 
     // --- Ergonomics & derived reads: not in the vtable ----------------------
 
@@ -154,13 +154,13 @@ struct IActionContext : IObject {
     }
 
     [[nodiscard]] auto SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept -> Result<void> {
-        if (seat >= kMaxPlayerSeats) return ComError::InvalidArgument;
+        if (!seat.IsValid()) return ComError::InvalidArgument;
         InputRoutingConfig current {};
         (void)GetRouting(OutChain(current));
         if (enabled) {
-            current.keyboardMouseSeatMask = static_cast<uint8_t>(current.keyboardMouseSeatMask | (1U << seat));
+            current.keyboardMouseSeatMask.Set(seat);
         } else {
-            current.keyboardMouseSeatMask = static_cast<uint8_t>(current.keyboardMouseSeatMask & ~(1U << seat));
+            current.keyboardMouseSeatMask.Clear(seat);
         }
         return ConfigureRouting(InChain(current));
     }

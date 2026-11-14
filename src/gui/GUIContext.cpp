@@ -90,7 +90,7 @@ struct Context::Impl {
 
     struct PendingEvent {
         bool     isChar    = false;
-        uint32_t key       = 0;
+        KeyCode  key       = KeyCode::Unknown;
         uint32_t codepoint = 0;
         bool     consumed  = false;
     };
@@ -396,10 +396,10 @@ auto Context::BeginFrame(const UIInput& input) noexcept -> Frame {
 
     _impl->ClearPendingEvents();
     for (const KeyCode key: input.pressedKeys) {
-        _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = static_cast<uint32_t>(key), .codepoint = 0});
+        _impl->QueueEvent(Impl::PendingEvent {.isChar = false, .key = key, .codepoint = 0});
     }
     for (const uint32_t cp: input.characterStream) {
-        _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = 0, .codepoint = cp});
+        _impl->QueueEvent(Impl::PendingEvent {.isChar = true, .key = KeyCode::Unknown, .codepoint = cp});
     }
 
     if (_impl->clayContext == nullptr) {
@@ -1063,7 +1063,7 @@ auto Frame::TextInputImpl(std::string_view label, std::string& value, size_t max
                 }
                 continue;
             }
-            const auto result = TextEdit::HandleKey(buf, state.caret, static_cast<KeyCode>(ev.key), mods, _impl->activeClipboard);
+            const auto result = TextEdit::HandleKey(buf, state.caret, ev.key, mods, _impl->activeClipboard);
             if (result == TextEdit::KeyResult::Edited) {
                 changed = true;
             }
@@ -1258,7 +1258,7 @@ auto Frame::Dropdown(std::string_view label, std::span<const std::string_view> o
             if (ev.isChar || ev.consumed) {
                 continue;
             }
-            switch (static_cast<KeyCode>(ev.key)) {
+            switch (ev.key) {
                 case KeyCode::Up:
                     state.highlightIndex = (state.highlightIndex + optionCount - 1) % optionCount;
                     ev.consumed          = true;

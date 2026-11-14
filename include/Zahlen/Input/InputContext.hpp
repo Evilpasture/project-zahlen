@@ -80,7 +80,7 @@ class ZHLN_API InputAction {
 
 class ZHLN_API InputActionMap {
   public:
-    static constexpr uint8_t kAllSeatsMask = static_cast<uint8_t>((1U << kMaxPlayerSeats) - 1U);
+    static constexpr SeatMask kAllSeatsMask = SeatMask::All();
 
     InputActionMap(std::string_view name, int32_t priority = 0) noexcept;
 
@@ -112,23 +112,23 @@ class ZHLN_API InputActionMap {
     }
 
     [[nodiscard]] auto EnabledForSeat(PlayerSeat seat) const noexcept -> bool {
-        return _enabled && seat < kMaxPlayerSeats && ((_seatMask & (1U << seat)) != 0U);
+        return _enabled && _seatMask.Contains(seat);
     }
     void SetEnabledForSeat(PlayerSeat seat, bool enabled) noexcept {
-        if (seat >= kMaxPlayerSeats) {
+        if (!seat.IsValid()) {
             return;
         }
         if (enabled) {
-            _seatMask = static_cast<uint8_t>(_seatMask | (1U << seat));
+            _seatMask.Set(seat);
         } else {
-            _seatMask = static_cast<uint8_t>(_seatMask & ~(1U << seat));
+            _seatMask.Clear(seat);
         }
     }
-    [[nodiscard]] auto SeatMask() const noexcept -> uint8_t {
+    [[nodiscard]] auto seatMask() const noexcept -> SeatMask {
         return _seatMask;
     }
-    void SetSeatMask(uint8_t mask) noexcept {
-        _seatMask = static_cast<uint8_t>(mask & kAllSeatsMask);
+    void SetSeatMask(SeatMask mask) noexcept {
+        _seatMask = SeatMask {static_cast<uint8_t>(mask.bits & kAllSeatsMask.bits)};
     }
 
     [[nodiscard]] auto BlocksLowerPriority() const noexcept -> bool {
@@ -156,7 +156,7 @@ class ZHLN_API InputActionMap {
     uint64_t                 _id                    = 0;
     String64                 _name {};
     int32_t                  _priority              = 0;
-    uint8_t                  _seatMask              = kAllSeatsMask;
+    SeatMask                 _seatMask              = kAllSeatsMask;
     bool                     _enabled               = true;
     bool                     _blocksLowerPriority   = false;
     bool                     _consumePhysicalInputs = true;
@@ -178,7 +178,7 @@ enum class InputBindingParseError : uint8_t {
     InvalidNumericValue ZHLN_ANNOTATION(ZHLN::Description<"Input bindings line contains an invalid numeric parameter"> {}),
 };
 
-using GamepadRumbleSinkFn = void (*)(void* userdata, uint8_t gamepadSlot, const GamepadRumble& rumble) noexcept;
+using GamepadRumbleSinkFn = void (*)(void* userdata, GamepadSlot gamepadSlot, const GamepadRumble& rumble) noexcept;
 
 // Core multi-seat input router, gamepad manager, haptics controller, and virtual action stack.
 class ZHLN_API InputContext {
@@ -191,12 +191,13 @@ class ZHLN_API InputContext {
     InputContext(InputContext&&) noexcept                = default;
     auto operator=(InputContext&&) noexcept -> InputContext& = default;
 
-    // --- Frame Lifecycle & Raw Device Ingestion ------------------------------
+    // --- Frame Lifecycle & Hardware Device Ingestion -----------------------
 
     // Advances the frame boundary (snapshots previous physical and virtual action states).
     void BeginFrame() noexcept;
 
     void InjectKey(KeyCode key, bool down, PlayerSeat targetSeat = kPrimarySeat) noexcept;
+    void InjectMouseButton(MouseButton button, bool down, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseMove(float x, float y, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseRelative(float x, float y, float dx, float dy, PlayerSeat targetSeat = kPrimarySeat) noexcept;
     void InjectMouseScroll(float delta, PlayerSeat targetSeat = kPrimarySeat) noexcept;
@@ -206,10 +207,10 @@ class ZHLN_API InputContext {
     [[nodiscard]] auto HasPendingResize() const noexcept -> bool;
     void SyncCaptureFlags(bool wantCaptureKeyboard, bool wantCaptureMouse, PlayerSeat seat = kPrimarySeat) noexcept;
 
-    void InjectGamepadConnection(uint8_t slot, bool connected, std::string_view name = {}) noexcept;
-    void InjectGamepadSample(uint8_t slot, const GamepadRawSample& sample) noexcept;
-    void InjectGamepadButton(uint8_t slot, GamepadButton button, bool down) noexcept;
-    void InjectGamepadAxis(uint8_t slot, GamepadAxis axis, float value) noexcept;
+    void InjectGamepadConnection(GamepadSlot slot, bool connected, std::string_view name = {}) noexcept;
+    void InjectGamepadSample(GamepadSlot slot, const GamepadHardwareSample& sample) noexcept;
+    void InjectGamepadButton(GamepadSlot slot, GamepadButton button, bool down) noexcept;
+    void InjectGamepadAxis(GamepadSlot slot, GamepadAxis axis, float value) noexcept;
 
     // Evaluates all enabled action maps in priority order against the previous frame's
     // action snapshot and flushes queued `GamepadConnectionEvent`s to `eventBus` (if non-null).
@@ -234,29 +235,30 @@ class ZHLN_API InputContext {
 
     [[nodiscard]] auto SeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) const noexcept -> const InputState&;
     [[nodiscard]] auto MutableSeatKeyboardMouse(PlayerSeat seat = kPrimarySeat) noexcept -> InputState&;
+    [[nodiscard]] auto UiCapture(PlayerSeat seat = kPrimarySeat) const noexcept -> UiCaptureState;
 
-    auto AssignGamepadToSeat(uint8_t gamepadSlot, PlayerSeat seat) noexcept -> bool;
-    void UnassignGamepad(uint8_t gamepadSlot) noexcept;
-    [[nodiscard]] auto GamepadSeat(uint8_t gamepadSlot) const noexcept -> PlayerSeat;
+    auto AssignGamepadToSeat(GamepadSlot gamepadSlot, PlayerSeat seat) noexcept -> bool;
+    void UnassignGamepad(GamepadSlot gamepadSlot) noexcept;
+    [[nodiscard]] auto GamepadSeat(GamepadSlot gamepadSlot) const noexcept -> PlayerSeat;
 
-    [[nodiscard]] auto Gamepad(uint8_t gamepadSlot) const noexcept -> Optional<const GamepadState&>;
-    [[nodiscard]] auto MutableGamepad(uint8_t gamepadSlot) noexcept -> Optional<GamepadState&>;
+    [[nodiscard]] auto Gamepad(GamepadSlot gamepadSlot) const noexcept -> Optional<const GamepadState&>;
+    [[nodiscard]] auto MutableGamepad(GamepadSlot gamepadSlot) noexcept -> Optional<GamepadState&>;
     [[nodiscard]] auto PrimaryGamepadForSeat(PlayerSeat seat = kPrimarySeat) const noexcept -> Optional<const GamepadState&>;
     [[nodiscard]] auto ConnectedGamepadCount() const noexcept -> size_t;
 
     [[nodiscard]] auto LastActiveDevice(PlayerSeat seat = kPrimarySeat) const noexcept -> InputDeviceKind;
 
-    void SetGamepadDeadzones(uint8_t gamepadSlot, const DeadzoneConfig& leftStick, const DeadzoneConfig& rightStick, float triggerDz = 0.05f) noexcept;
+    void SetGamepadDeadzones(GamepadSlot gamepadSlot, const DeadzoneConfig& leftStick, const DeadzoneConfig& rightStick, float triggerDz = 0.05f) noexcept;
     void SetSeatDeadzones(PlayerSeat seat, const DeadzoneConfig& leftStick, const DeadzoneConfig& rightStick, float triggerDz = 0.05f) noexcept;
 
     // --- Gamepad Haptics / Rumble --------------------------------------------
 
     void SetRumbleSink(GamepadRumbleSinkFn sink, void* userdata = nullptr) noexcept;
-    auto SetGamepadRumble(uint8_t gamepadSlot, const GamepadRumble& rumble) noexcept -> bool;
+    auto SetGamepadRumble(GamepadSlot gamepadSlot, const GamepadRumble& rumble) noexcept -> bool;
     auto RumbleSeat(PlayerSeat seat, const GamepadRumble& rumble) noexcept -> uint32_t;
-    void StopRumble(uint8_t gamepadSlot) noexcept;
+    void StopRumble(GamepadSlot gamepadSlot) noexcept;
     void StopAllRumble() noexcept;
-    [[nodiscard]] auto ActiveRumble(uint8_t gamepadSlot) const noexcept -> GamepadRumble;
+    [[nodiscard]] auto ActiveRumble(GamepadSlot gamepadSlot) const noexcept -> GamepadRumble;
 
     // --- Action Map Priority Stack -------------------------------------------
 
@@ -331,6 +333,7 @@ class ZHLN_API InputContext {
 
     struct SeatRuntime {
         InputState                      kbm {};
+        UiCaptureState                uiCapture {};
         bool                            receivesKeyboardMouse = false;
         InputDeviceKind                 lastActiveDevice      = InputDeviceKind::KeyboardMouse;
         std::vector<EvaluatedActionEntry> actions;
@@ -351,7 +354,7 @@ class ZHLN_API InputContext {
         Optional<InputBinding> result {};
     };
 
-    auto SelectAutoSeatForGamepad(uint8_t slot) const noexcept -> PlayerSeat;
+    auto SelectAutoSeatForGamepad(GamepadSlot slot) const noexcept -> PlayerSeat;
     void UpdateCaptureSession() noexcept;
     void FlushPendingHotplugEvents(ECS::EventBus* eventBus);
 

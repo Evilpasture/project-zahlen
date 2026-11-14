@@ -260,7 +260,7 @@ namespace {
 
 auto ReadTransformInput(const ZHLN::InputState& input) noexcept -> TransformInput {
     TransformInput bits = TransformInput::None;
-    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input.IsKeyDownRaw(static_cast<uint8_t>(k)); };
+    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input.IsKeyDown(k); };
     if (key(ZHLN::KeyCode::G))
         bits |= TransformInput::G;
     if (key(ZHLN::KeyCode::R))
@@ -279,9 +279,9 @@ auto ReadTransformInput(const ZHLN::InputState& input) noexcept -> TransformInpu
         bits |= TransformInput::Esc;
     if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl))
         bits |= TransformInput::Ctrl;
-    if (input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)))
+    if (input.IsMouseButtonDown(ZHLN::MouseButton::Left))
         bits |= TransformInput::LMB;
-    if (input.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))
+    if (input.IsMouseButtonDown(ZHLN::MouseButton::Right))
         bits |= TransformInput::RMB;
     return bits;
 }

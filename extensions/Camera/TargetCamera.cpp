@@ -108,7 +108,7 @@ void TargetCameraSystem::Update(RigQuery query, ECS::Res<InputContext> input, Fr
 
         // 4. MOUSE LOOK ORBITING
         const float sensitivity = 0.15f;
-        if (inputState.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
+        if (inputState.IsMouseButtonDown(MouseButton::Right)) {
             camComp.yaw += inputState.GetMouseDeltaX() * sensitivity;
             camComp.pitch = std::clamp(camComp.pitch - (inputState.GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
         }
