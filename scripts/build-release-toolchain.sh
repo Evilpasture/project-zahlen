@@ -404,6 +404,7 @@ cmake -B "${build}" -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
     -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
+    -DZHLN_DEV_MODE=OFF \
     -DZHLN_GLIBC_BASELINE="${glibc_baseline}" \
     -DUSE_SANITIZERS=OFF \
     -DZHLN_HAS_BLENDER=OFF \
@@ -432,6 +433,11 @@ cmake -B "${build}" -S . -G Ninja \
 #       with dxc -- is skipped, leaving every Jolt shader rule to run a program named
 #       "Vulkan_GLSLC_EXECUTABLE-NOTFOUND". Naming the vendored headers is enough to
 #       make Vulkan_FOUND true; the loader is a NEEDED soname the consumer supplies.
+#   ZHLN_DEV_MODE=OFF         this is the packaging lane, and the option defaults ON.
+#       Left alone, libzahlen_engine.so would be compiled for loose-file development
+#       loading (the root CMakeLists refuses ZHLN_INSTALL_TOOLCHAIN_PACKAGES with
+#       ZHLN_DEV_MODE on precisely because of that). A released toolchain reads
+#       packed assets.
 #   ZHLN_BUILD_SVG=OFF        resvg is not packaged for jammy and building it needs
 #       cargo; without this the configure drops the plugin with a warning on every
 #       run. It is not one of the 17 released components.

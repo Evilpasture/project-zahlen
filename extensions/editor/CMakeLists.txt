@@ -3,7 +3,7 @@
 
 # extensions/editor -- the native world editor (Hierarchy + Inspector).
 #
-# A separate STATIC target, not part of the zahlen_extras aggregate: the composition
+# A separate STATIC target -- not folded into a shared aggregate: the composition
 # root links it only when present, and a host that does not want the editor
 # is not forced to compile it. Public headers are included as
 # <editor/GUIEditor.hpp>.

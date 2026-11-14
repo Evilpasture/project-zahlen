@@ -44,7 +44,18 @@ target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/utils/zcook
 )
 
-set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")
+# ${CMAKE_BINARY_DIR}, not ${CMAKE_SOURCE_DIR}/build: this directory holds a
+# zcook symlink, a generated assets.ninja and the cooked data/base.pak, and
+# every one of them is replaced by a POST_BUILD/regeneration step. Pointed at
+# the source tree it was a single mutable location shared by every
+# configuration, so build/release and build/asan (or a gcc tree and a clang
+# tree) fought over the same symlink and the same pack -- whichever configured
+# or built last won, and neither could tell.
+#
+# The cache variable keeps its name, so a developer who wants a genuinely
+# shared cook cache (one asset build feeding several build dirs) can still say
+# -DZHLN_SHARED_ASSET_DIR=/some/absolute/path and get exactly that, explicitly.
+set(ZHLN_SHARED_ASSET_DIR "${CMAKE_BINARY_DIR}/shared_assets" CACHE PATH "Shared cooked asset cache")
 
 function(zahlen_configure_game_assets GAME_SOURCE_DIR)
     file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")

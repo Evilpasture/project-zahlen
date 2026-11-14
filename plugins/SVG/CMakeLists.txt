@@ -3,7 +3,7 @@
 
 # plugins/SVG -- the resvg-backed SVG rasterizer (zahlen_svg).
 #
-# Not part of the zahlen_extras aggregate, and for the same reason the other
+# Deliberately its own target, and for the same reason the other
 # dependency-carrying format plugins have a target of their own: resvg is a Rust
 # library, it is not vendored, and a host without it must still build the other optional layers. This file lists its own sources, so nothing here is compiled twice and
 # nothing here is compiled at all when resvg is missing.

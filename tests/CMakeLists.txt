@@ -160,7 +160,10 @@ zahlen_register_ztest_target(ztest_cpu
 
 zahlen_add_runtime_dlls(ztest_cpu)
 
-if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
+# Was `ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras`. The option alone is the
+# right test: zahlen_extras no longer exists (root CMakeLists), and this block
+# is the only thing that ever read it.
+if(ZHLN_BUILD_EXTRAS)
     add_subdirectory(extras)
 endif()
 

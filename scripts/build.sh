@@ -254,7 +254,11 @@ if [[ -f "$BASE_BUILD_DIR/CMakeCache.txt" ]]; then
     rm -rf "$BASE_BUILD_DIR/CMakeCache.txt" "$BASE_BUILD_DIR/CMakeFiles" "$BASE_BUILD_DIR"/*.ninja "$BASE_BUILD_DIR"/transpiled
 fi
 
-mkdir -p "$BASE_BUILD_DIR/shared_assets"
+# The asset cache belongs to this build dir, matching
+# ${CMAKE_BINARY_DIR}/shared_assets in cmake/AssetPipeline.cmake. It used to be
+# $BASE_BUILD_DIR/shared_assets -- one directory for every compiler tag -- so two
+# configured trees replaced each other's zcook symlink and base.pak.
+mkdir -p "$BUILD_DIR/shared_assets"
 mkdir -p "$BUILD_DIR"
 
 # Truncate/initialize log file for this run

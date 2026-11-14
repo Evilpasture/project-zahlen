@@ -1,7 +1,11 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
+# The option is the whole test. This used to also require `TARGET zahlen_extras`,
+# an aggregate nothing linked (see the root CMakeLists note); keeping a target
+# check for a target that no longer exists would make this whole directory
+# silently unreachable.
+if(NOT ZHLN_BUILD_EXTRAS)
     return()
 endif()
 

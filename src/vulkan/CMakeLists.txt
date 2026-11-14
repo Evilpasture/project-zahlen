@@ -114,7 +114,12 @@ target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
 # Rendering.hpp as a precompiled header, for speed only: every header in this tree
 # includes what it uses, so a build without PCH (ZHLN_ENABLE_PCH=OFF) compiles the
 # same sources with nothing force-included.
-if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+# GCC only, for the reason the root CMakeLists gives for zahlen_engine's PCH:
+# clang-p2996's ASTReader crashes deserializing P2996 reflection expressions out
+# of a PCH, and Rendering.hpp is a far larger AST than Math3D.hpp. This used to
+# match "GNU|Clang", so the one compiler the rule exists for was the one it let
+# through -- and the resulting crash looked like a corruption, not a config.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_precompile_headers(
       zahlen_vulkan PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")

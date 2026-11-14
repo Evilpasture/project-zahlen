@@ -87,6 +87,35 @@ endif()
 
 option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
 
+# --- Apple SDK / OBJCXX / build type, before ANY compiler probe -------------
+#
+# This is the first thing that has to be true about the toolchain, so it is set
+# before the first zhln_check_cxx_compiler_flag() below. Three of these change
+# what a probe *means* or *measuring* it too late changes the answer:
+#
+#   CMAKE_SYSROOT     decides which SDK headers a probe compiles against, so a
+#                     probe run before it answers about the wrong SDK.
+#   CMAKE_BUILD_TYPE  selects CMAKE_CXX_FLAGS_<CONFIG>, which every flag probe
+#                     feeds to the compiler. Setting it afterwards left the
+#                     probes measuring an empty flag set and made
+#                     CMAKE_BUILD_TYPE the one cache entry that disagreed with
+#                     the probes that had already run.
+#   OBJCXX            Jolt's Metal backend is Objective-C++; a language enabled
+#                     halfway down the file is invisible to every probe above
+#                     it, and CompilerFlagProbe is above it.
+if(APPLE)
+    set(MACOS_SDK_PATH "${_ZHLN_MAC_SDK}")
+    set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
+endif()
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE
+      "Release"
+      CACHE STRING "Choose the type of build." FORCE)
+endif()
+
 include(CompilerFlagProbe)
 zhln_check_cxx_compiler_flag("-Qunused-arguments" ZHLN_HAS_QUNUSED_ARGUMENTS)
 zhln_check_cxx_compiler_flag("-fblocks" ZHLN_HAS_FBLOCKS)
@@ -107,12 +136,6 @@ else()
     set(ZHLN_HAVE_WINSOCK FALSE)
 endif()
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE
-      "Release"
-      CACHE STRING "Choose the type of build." FORCE)
-endif()
-
 if(ZHLN_HAS_QUNUSED_ARGUMENTS)
     add_compile_options(-Qunused-arguments)
     add_link_options(-Qunused-arguments)
@@ -131,24 +154,36 @@ if(UNIX OR APPLE)
       CACHE STRING "ASM compile command" FORCE)
 endif()
 
-if(APPLE)
-    enable_language(OBJCXX)
-    set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
-    set(MACOS_SDK_PATH "${_ZHLN_MAC_SDK}")
-    set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
-endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ${CMAKE_SOURCE_DIR}/compile_commands.json is a convenience symlink for clangd,
+# which only ever reads one of them. Configuring a second tree used to replace
+# it silently, so the editor then described whatever was configured last -- a
+# 40-target Release build while the developer was working in a Debug tree. With
+# several build directories in play the link is now first-writer-wins: an
+# existing link to a *different* build tree is left alone and reported, and
+# removing it (or configuring once) takes it back.
 if(NOT WIN32)
-    file(CREATE_LINK "${CMAKE_BINARY_DIR}/compile_commands.json"
-       "${CMAKE_SOURCE_DIR}/compile_commands.json" SYMBOLIC
-       RESULT _zhln_compdb_link)
-    if(_zhln_compdb_link)
-        message(
-      STATUS
-        "clangd: could not symlink compile_commands.json (${_zhln_compdb_link})"
-    )
+    set(_zhln_compdb_target "${CMAKE_SOURCE_DIR}/compile_commands.json")
+    set(_zhln_compdb_source "${CMAKE_BINARY_DIR}/compile_commands.json")
+    set(_zhln_compdb_skip FALSE)
+    if(IS_SYMLINK "${_zhln_compdb_target}")
+        file(READ_SYMLINK "${_zhln_compdb_target}" _zhln_compdb_existing)
+        if(NOT _zhln_compdb_existing STREQUAL _zhln_compdb_source)
+            set(_zhln_compdb_skip TRUE)
+            message(STATUS
+                "clangd: ${_zhln_compdb_target} already points at ${_zhln_compdb_existing}; "
+                "leaving it. Remove the link to point it at ${_zhln_compdb_source}.")
+        endif()
+    endif()
+    if(NOT _zhln_compdb_skip)
+        file(CREATE_LINK "${_zhln_compdb_source}" "${_zhln_compdb_target}"
+           SYMBOLIC RESULT _zhln_compdb_link)
+        if(_zhln_compdb_link)
+            message(STATUS
+                "clangd: could not symlink compile_commands.json (${_zhln_compdb_link})")
+        endif()
     endif()
 endif()
 
@@ -177,6 +212,28 @@ include(ToolchainCapabilities)
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
+endif()
+
+# --- packaging lanes pin the shipped runtime, not just its interface ---------
+#
+# ZHLN_DEV_MODE defaults ON because the in-tree workflow wants loose-file asset
+# loading. A package is the other case: its payload is a shared library that was
+# *already compiled* with whatever this option said, so withholding the define
+# from zahlen_engine's INTERFACE (cmake/Toolchains.cmake) only fixed half of it
+# -- a consumer configured against the package would read Config::isDev == false
+# and then load libzahlen_engine.so, whose Config::isDev is true, which is worse
+# than either answer alone.
+#
+# So a toolchain build states the two explicitly. The packaging lane passes
+# ZHLN_DEV_MODE=OFF and nothing here fires; a developer who configured the
+# packaging lane from a tree that left the default alone gets a configure error
+# naming the flag rather than a package with a split personality.
+if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES AND ZHLN_DEV_MODE AND NOT ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES)
+    message(FATAL_ERROR
+        "ZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON with ZHLN_DEV_MODE=ON (the default) would ship a "
+        "library compiled for loose-file development loading. Configure the packaging lane with "
+        "-DZHLN_DEV_MODE=OFF, or pass -DZHLN_DEV_MODE_IN_INSTALLED_PACKAGES=ON to ship dev mode "
+        "deliberately.")
 endif()
 
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
@@ -227,27 +284,24 @@ add_subdirectory(src/ecs)
 add_subdirectory(src/audio)
 add_subdirectory(src/gui)
 
-set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
-if(CMAKE_BUILD_TYPE)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
-    set(COMPILER_FLAGS_LIST
-      "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
-else()
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
-endif()
-
-set(COMPILER_FLAGS_LIST
-    "${COMPILER_FLAGS_LIST} ${ZHLN_COMPILE_WARNINGS_STR} -fno-exceptions -fno-rtti"
-)
-
-if(COMPILER_HAS_REFLECTION)
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
-endif()
-if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -fparameter-reflection")
-elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
-    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection-latest")
-endif()
+# --- what `zahlen --version` reports as the build's flags --------------------
+#
+# This string is baked into extensions/CommandLine and is the only description
+# of the compile line a user ever sees, so it has to name the flags the build
+# actually used -- not the ones this file happened to know about at the point it
+# was assembled.
+#
+# It used to be built here, which is *before* ThirdParty.cmake (line 248) appends
+# the Apple flags to CMAKE_CXX_FLAGS, before the sanitizer options from
+# cmake/Sanitizers.cmake (included at 193) reach anything, and before
+# zahlen_enable_reflection adds -fannotation-attributes per target. The result
+# reported neither -stdlib=libc++, nor any sanitizer flag, nor
+# -fconstexpr-steps, nor -fannotation-attributes -- and it also left out
+# -std=c++26, which is the single most load-bearing item.
+#
+# Assembled late instead -- see zahlen_assemble_compiler_flags() below, called
+# after ThirdParty.cmake and after the reflection helpers exist, so every
+# contributor has already run.
 
 # The flags above record what the driver accepts. These probes record what it
 # produces, with the same flags, before anything is built: Jolt's incomplete
@@ -280,7 +334,71 @@ endif()
 set(ZHLN_PR125280_PROBE_SOURCE "${_zhln_pr125280_source}" CACHE INTERNAL
     "GCC PR c++/125280 reproduction, substituted into installed package configs")
 
-string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
+# --- the reported flag set, assembled now that every contributor has run -----
+#
+# Sources, in order:
+#   * CMAKE_CXX_FLAGS and the configuration's own CMAKE_CXX_FLAGS_<CONFIG>,
+#     which ThirdParty.cmake has finished appending Apple flags to by now;
+#   * CMAKE_CXX_COMPILE_OPTIONS_<LANG>, the same variable CMake itself reads
+#     when it builds a compile line, so directory-scoped add_compile_options
+#     (the sanitizer set, -stdlib=libc++, -Qunused-arguments) is included
+#     without this file keeping a second copy of it;
+#   * -std=, from the CXX_STANDARD the targets are actually built with;
+#   * the project warning set, the exception/RTTI policy, and the reflection
+#     flags -- including -fannotation-attributes, which is decided per target
+#     but is the same decision everywhere it applies.
+set(ZHLN_REPORTED_FLAGS "")
+
+macro(_zhln_report_flags)
+    string(APPEND ZHLN_REPORTED_FLAGS " ${ARGN}")
+endmacro()
+
+_zhln_report_flags("${CMAKE_CXX_FLAGS}")
+if(CMAKE_BUILD_TYPE)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
+    _zhln_report_flags("${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
+else()
+    _zhln_report_flags("${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+# add_compile_options() writes the COMPILE_OPTIONS *directory property*; it does
+# NOT write CMAKE_CXX_COMPILE_OPTIONS_CXX, which is a platform variable and is
+# empty in this project. Reading the wrong one silently dropped every flag
+# applied that way -- the sanitizer set, -stdlib=libc++, -Qunused-arguments.
+#
+# The property values are still generator expressions at this point
+# ($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>), so they are reported verbatim
+# rather than evaluated: what `--version` prints is the option list as the build
+# applies it, and a language-conditioned flag reads correctly as one.
+get_directory_property(_zhln_dir_compile_options COMPILE_OPTIONS)
+if(_zhln_dir_compile_options)
+    string(JOIN " " _zhln_dir_compile_options_str ${_zhln_dir_compile_options})
+    _zhln_report_flags("${_zhln_dir_compile_options_str}")
+endif()
+_zhln_report_flags("${ZHLN_COMPILE_WARNINGS_STR} -fno-exceptions -fno-rtti")
+
+# There is no CXX_STANDARD property on the interface targets this describes, so
+# the value is stated once here rather than read back per target.
+_zhln_report_flags("-std=c++26")
+
+if(COMPILER_HAS_REFLECTION)
+    _zhln_report_flags("-freflection")
+endif()
+if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+    _zhln_report_flags("-fparameter-reflection")
+elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
+    _zhln_report_flags("-freflection-latest")
+endif()
+if(COMPILER_HAS_CONSTEXPR_STEPS_FLAG)
+    _zhln_report_flags("-fconstexpr-steps=33554432")
+endif()
+# zahlen_enable_reflection() applies this inside its `if(COMPILER_HAS_REFLECTION)`
+# branch, so a toolchain that has the flag but not -freflection never passes it
+# to a compiler. Reporting it there too would describe a flag the build omits.
+if(COMPILER_HAS_REFLECTION AND ZHLN_HAS_ANNOTATION_ATTRIBUTES)
+    _zhln_report_flags("-fannotation-attributes")
+endif()
+
+string(STRIP "${ZHLN_REPORTED_FLAGS}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
 add_library(zahlen_engine SHARED)
@@ -599,7 +717,12 @@ if(ZHLN_BUILD_RENDER)
         zahlen_enable_reflection(zahlen_shader_bytecode)
     endif()
     zahlen_enable_reflection(zshader)
-    zahlen_enable_reflection(HostBlitSwapchain)
+    # Only declared on Apple (src/render/OpenGLHacks/CMakeLists.txt), and not
+    # needing reflection anyway -- it reaches no reflected header. Kept behind
+    # the TARGET check so a non-Apple configure does not call this on nothing.
+    if(TARGET HostBlitSwapchain)
+        zahlen_enable_reflection(HostBlitSwapchain)
+    endif()
 endif()
 
 if(ZHLN_BUILD_EXTRAS)
@@ -626,31 +749,16 @@ if(ZHLN_BUILD_EXTRAS)
     # <UI/UITree.hpp> lives. The targets that do call GUI:: symbols -- the UI
     # editor and Extras_UI -- link zahlen_ui_schema themselves.
     #
-    # Nothing is linked here on purpose. Do not reintroduce it: the archive is
-    # not needed to compile or link anything that consumes this target.
-    add_library(zahlen_extras INTERFACE)
-    target_link_libraries(zahlen_extras INTERFACE
-    zahlen_module
-    zahlen_animation
-    zahlen_socket
-    zahlen_discord_rpc
-    zahlen_discord_engine
-    zahlen_network
-    zahlen_datamodel
-    zahlen_vfx
-    zahlen_alife
-    zahlen_gltf
-    zahlen_serialization
-    zahlen_character_controller
-    zahlen_interaction
-    zahlen_terrain
-    zahlen_fallback_scene
-    zahlen_fonts
-    zahlen_ui_schema
-    zahlen_camera
-    zahlen_freecam
-    zahlen_ragdoll_authoring
-  )
+    # There was a `zahlen_extras` INTERFACE target here linking 19 of the above.
+    # Nothing in the project ever linked it: its only reader was the
+    # `ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras` guard in tests/CMakeLists.txt,
+    # which is already inside `if(ZHLN_BUILD_EXTRAS)` and so tested nothing. It
+    # was also wrong about what "extras" means -- zahlen_module is built
+    # unconditionally -- and incomplete, omitting bsp, widgets, scripting,
+    # console, editor, benchmark, lua, http, remote_asset, cdn, github and svg.
+    # A list that nothing consumes and that is wrong in both directions is worse
+    # than no list: it reads as an inventory. Removed; the guard in
+    # tests/CMakeLists.txt now tests the option alone.
 
     # The UI-document editor remains its own existing executable. The game
     # does not inherit scene, Discord, editor, benchmark, or fallback targets.

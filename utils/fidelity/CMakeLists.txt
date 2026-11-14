@@ -50,7 +50,14 @@ target_include_directories(fidelity SYSTEM PRIVATE
 )
 # No ${CMAKE_SOURCE_DIR}/src root: main.cpp includes FidelityCore.hpp,
 # ImageIO.hpp and <json/JSONSchema.hpp> only.
-target_compile_definitions(fidelity PRIVATE JPH_DOUBLE_PRECISION)
+#
+# No JPH_DOUBLE_PRECISION either. The note above already said Jolt was linked
+# for a macro nothing here uses; defining it by hand kept the macro and dropped
+# only the link, which is the worse half -- a define that changes Jolt's ABI
+# names in a binary that never includes a Jolt header. Jolt's own
+# INTERFACE_COMPILE_DEFINITIONS arrive through zahlen_serialization ->
+# zahlen_engine -> zahlen_jolt_headers, so a TU that does reach one still gets
+# the same value the engine was built with.
 
 # Reflection gate, identical to every target that reaches a reflected header
 # through zahlen_serialization (JSONSchema.hpp walks aggregates reflectively).
