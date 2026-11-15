@@ -344,8 +344,14 @@ void Window::RebuildNativeSurface() noexcept {
     _impl->target.SetNativeSurface(NativeSurfaceHandle(QueryNativeTarget(_impl->handle)));
 }
 
-Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver): _impl(std::make_unique<Impl>()) {
+auto Window::ID() const noexcept -> WindowID {
+    return _impl->id;
+}
+
+Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, WindowID id):
+    _impl(std::make_unique<Impl>()) {
     _impl->receiver = receiver;
+    _impl->id       = id;
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 

@@ -27,9 +27,6 @@
 
 namespace ZHLN {
 class Engine;
-class RenderContext;
-class AssetManager;
-class PhysicsContext;
 
 namespace GLTF {
 
@@ -107,7 +104,6 @@ struct ImportOptions {
     uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 };
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& physics, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
 auto LoadGLBPrefab(Engine& engine, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
 
 // Both loaders create colliders through physics, associated with the same
@@ -119,22 +115,12 @@ auto LoadGLBPrefab(Engine& engine, std::string_view path, ImportOptions options 
 // self-contained .glb). It is used only to resolve external resources, never
 // to re-read the file.
 auto LoadGLBPrefabFromMemory(
-    RenderContext&           ctx,
-    AssetManager&            cwMgr,
-    PhysicsContext&          physics,
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    std::string_view         bytesPath = {},
-    ImportOptions            options   = {}
-) -> ZHLN::Optional<ModelPrefab&>;
-auto LoadGLBPrefabFromMemory(
     Engine&                  engine,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
     std::string_view         bytesPath = {},
     ImportOptions            options   = {}
 ) -> ZHLN::Optional<ModelPrefab&>;
-void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 void RebuildPrefabGPUResources(GraphicsDevice ctx, ModelPrefab* prefab);
 
 // Import straight from a byte buffer and spawn it in one call. Core has no
@@ -152,7 +138,6 @@ auto InstantiatePrefabFromMemory(
 // under the asset keys the ECS instances were built against. This is the
 // device-lost half of importing: after a VkDevice is recreated the GPU handles
 // in a ModelPrefab are dead, and recovering them means reading the .glb again.
-void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr);
 void RebuildCachedPrefabs(Engine& engine);
 
 // Subscribes RebuildCachedPrefabs to the engine's device-lost notification.

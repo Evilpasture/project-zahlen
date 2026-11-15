@@ -23,7 +23,7 @@ add_executable(zcook ${ZHLN_ZCOOK_SOURCES})
 # only out-of-line callee is Dispatch -- both exported by libzahlen_engine.so.
 # The archives were linked ahead of the .so, so the executable ran a second copy
 # of the scheduler next to the one the engine uses.
-target_link_libraries(zcook PRIVATE zahlen_engine zahlen_asset_cooking)
+target_link_libraries(zcook PRIVATE zahlen_engine zahlen_stb_image zahlen_asset_cooking)
 
 # main.cpp calls Reflect::EnumToString, and ErrorCode's names come from the
 # reflection configuration, so the cooker is one of the targets that reads a

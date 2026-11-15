@@ -122,8 +122,8 @@ class EntityCommandBuffer {
         return _commands.empty();
     }
 
-    void Playback();
-    void Reset() noexcept;
+    ZHLN_API void Playback();
+    ZHLN_API void Reset() noexcept;
 
   private:
     enum class CommandType : uint8_t { Create, Destroy, AddComponent, RemoveComponent };

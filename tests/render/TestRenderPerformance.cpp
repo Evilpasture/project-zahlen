@@ -512,7 +512,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
     PrepareEngineForTest(engine);
 
     ZHLN::GUI::Context perfGui(engine.GetFontAtlas());
-    engine.SetUICallback([&](ZHLN::Engine& eng) {
+    engine.SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
         perfGui.SetFontAtlas(eng.GetFontAtlas());
         ZHLN::GUI::Frame ui = perfGui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
@@ -827,7 +827,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // 7. Immediate-Mode UI HUD Callback
     ZHLN::GUI::Context hudGui(engine.GetFontAtlas());
-    engine.SetUICallback([&](ZHLN::Engine& eng) {
+    engine.SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
         hudGui.SetFontAtlas(eng.GetFontAtlas());
         ZHLN::GUI::Frame ui = hudGui.BeginFrame(eng.ConsumeUIInput(0.016f));
 

@@ -7,7 +7,7 @@
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -59,7 +59,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     engine->GetPlatformHost().Focus();
 
     // Publish the effective kernel-owned value before installers and graph
-    // construction. Its pipeline byte span now points into Kernel-owned storage
+    // construction. Its pipeline byte span now points into KernelSession-owned storage
     // (including on device recovery), never a caller-owned temporary. No argv
     // or handler borrows enter services, including on no-CLI Run.
     engine->EmplaceService<EngineConfig>(engine->State().Configuration());
@@ -80,7 +80,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         }
     }
     if (!uiLayers.empty()) {
-        engine->SetUICallback([layers = std::move(uiLayers)](Engine& active) {
+        engine->SetUICallback(WindowID::Primary, [layers = std::move(uiLayers)](Engine& active, WindowID) {
             for (const auto& layer: layers) {
                 layer.ui(layer.state.get(), active);
             }

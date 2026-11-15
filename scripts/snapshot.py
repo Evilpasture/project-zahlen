@@ -11,16 +11,16 @@ from pathlib import Path
 # Subsystem directory & file mappings based on repo layout
 PRESETS = {
     "test": [
-        "tests",                        # suites, fixtures, CMake lists, and test docs
-        "utils/ztest",                  # runner, debugger replay, and smoke tests
-        "utils/fidelity",               # standalone render-fidelity test tooling
+        "tests",  # suites, fixtures, CMake lists, and test docs
+        "utils/ztest",  # runner, debugger replay, and smoke tests
+        "utils/fidelity",  # standalone render-fidelity test tooling
         "scripts/run_fidelity.sh",
         "scripts/capture_fidelity.sh",
         "samples/FidelityHarness.cpp",
         "samples/FidelityHarness.md",
-        "cmake/ZTest.cmake",            # worker/manifest integration
-        "cmake/Sanitizers.cmake",       # test environment and sanitizer runtime
-        "cmake/VulkanSandbox.cmake",    # test sandbox environment
+        "cmake/ZTest.cmake",  # worker/manifest integration
+        "cmake/Sanitizers.cmake",  # test environment and sanitizer runtime
+        "cmake/VulkanSandbox.cmake",  # test sandbox environment
         "configure/check_tests_public_api.py",
         "extensions/Signal/WorkerCrashReports.cpp",
         "extensions/Signal/WorkerCrashReports.hpp",
@@ -82,7 +82,6 @@ PRESETS = {
     ],
     "engine": [
         "include/Zahlen/Engine/Engine.hpp",
-        "include/Zahlen/Engine/Kernel.hpp",
         "include/Zahlen/Engine/Scene.hpp",
         "include/Zahlen/Engine/World.hpp",
         "include/Zahlen/Engine/SystemContext.hpp",
@@ -209,7 +208,9 @@ def get_git_tracked_files(
         )
 
     if os.path.isfile(target):
-        if cmake_only and not (Path(target).suffix == ".cmake" or Path(target).name == "CMakeLists.txt"):
+        if cmake_only and not (
+            Path(target).suffix == ".cmake" or Path(target).name == "CMakeLists.txt"
+        ):
             return []
         # A file target bypasses extension/ignore filtering as before, but
         # must still match an explicitly selected preset.
@@ -348,7 +349,9 @@ def print_stats(tracked_files):
     tf = tc = tl = 0
     for key, (n, chars, lines) in sorted(budget.items(), key=lambda kv: -kv[1][1]):
         print(f"{key:<40} {n:>6} {chars:>12,} {round(chars / 4):>10,} {lines:>9,}")
-        tf += n; tc += chars; tl += lines
+        tf += n
+        tc += chars
+        tl += lines
     print(f"{'TOTAL':<40} {tf:>6} {tc:>12,} {round(tc / 4):>10,} {tl:>9,}")
     print("Token estimate: chars / 4 (o200k_base is ~chars / 4.0 for this codebase).")
 
@@ -513,12 +516,14 @@ if __name__ == "__main__":
         help="Dump Math3D, Geometry, and Math utilities.",
     )
     parser.add_argument(
-        "--test-only", action="store_true",
+        "--test-only",
+        action="store_true",
         help="Dump test suites, ztest infrastructure, and render-fidelity harness files.",
     )
 
     parser.add_argument(
-        "--cmake-only", action="store_true",
+        "--cmake-only",
+        action="store_true",
         help="Include only .cmake files and CMakeLists.txt; retain target, preset and ignore filters.",
     )
 

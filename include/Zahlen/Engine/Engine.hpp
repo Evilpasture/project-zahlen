@@ -14,11 +14,13 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/UIData.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -26,9 +28,10 @@
 
 namespace ZHLN {
 
-class Kernel;
+class KernelSession;
 class World;
 class RenderContext;
+class FrameScope;
 struct SceneData;
 class PhysicsContext;
 class AudioContext;
@@ -75,7 +78,11 @@ class InputActions;
 
 class ZHLN_API Engine {
   public:
-    using UICallback = std::function<void(Engine&)>;
+    // Per-window UI. The callback is told which window it is drawing: one
+    // engine can host an editor window and a preview window, and each draws its
+    // own view. There is no session-wide callback -- a single one forced every
+    // window to share one view and one submitted UIDrawData.
+    using UICallback = std::function<void(Engine&, WindowID)>;
 
     // What runs around every fixed-timestep substep PhysicsSystem takes, inside
     // its accumulator loop and not once per frame.
@@ -115,6 +122,11 @@ class ZHLN_API Engine {
 
     void PollLateInput();
 
+    // The windows this engine drives, primary first. A host asks for this when
+    // it wants to key its own per-window state; a frame iterates it to learn
+    // which windows exist without holding a Window& across one.
+    [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
+
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
     [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
     [[nodiscard]] auto GetWindow() noexcept -> ZHLN::Optional<Window&>;
@@ -128,7 +140,7 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
 
     // Capability facades: small value-type views of engine-owned subsystems.
-    // The concrete Kernel/World/RenderContext/... stay inside the engine.
+    // The concrete session/World/RenderContext/... stay inside the engine.
     [[nodiscard]] auto Graphics() noexcept -> GraphicsDevice;
     [[nodiscard]] auto Physics() noexcept -> Simulation;
     [[nodiscard]] auto Debug() noexcept -> DebugDraw;
@@ -189,13 +201,46 @@ class ZHLN_API Engine {
     // container handed to the caller.
     void ClearVisibilityLists() noexcept;
 
+    // One window's drawable state for one frame: which window, which acquired
+    // image, how big, and which frame index. The engine builds this, so a host
+    // never acquires a target itself and never holds a Window& across a frame.
+    struct WindowRenderView {
+        WindowID   id;
+        FrameTarget target;
+        Extent2D   size;
+        uint32_t   frameIndex;
+    };
+
+    // Per-window draw hook: called once per window, per frame, inside that
+    // window's acquired frame, after the engine's own render step. This is what
+    // a preview viewport, a second camera or a debug overlay draws through, and
+    // it is how one engine drives several windows in one Tick.
+    using WindowDrawCallback = std::function<void(Engine&, const WindowRenderView&, FrameScope&)>;
+    void SetWindowDrawCallback(WindowID window, WindowDrawCallback callback);
+    [[nodiscard]] auto GetWindowDrawCallback(WindowID window) const noexcept -> ZHLN::Optional<const WindowDrawCallback&>;
+
     // Host-owned, per-engine state (also used by the glTF inspector).
     [[nodiscard]] auto GetGameState() const -> void*;
     void               SetGameState(void* state);
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
 
+    // Installs (or clears, with an empty function) the UI callback for one
+    // window. The primary window is registered by default with an empty
+    // callback; a window that never installs one draws no UI.
+    void SetUICallback(WindowID window, UICallback callback);
+
+    // Compatibility for a single-window host: the primary window's callback.
     void SetUICallback(UICallback callback);
 
+    [[nodiscard]] auto GetUICallback(WindowID window) const noexcept -> ZHLN::Optional<const UICallback&>;
+
+    // UI submitted by the callback for `window`, consumed by that window's
+    // render view in the same frame.
+    void               SetPendingUIData(WindowID window, UIDrawData uiData) noexcept;
+    [[nodiscard]] auto GetPendingUIData(WindowID window) const noexcept -> UIDrawData;
+
+    // Single-window spellings, kept so an existing host does not have to name
+    // the primary window to do the only thing it does.
     void               SetPendingUIData(UIDrawData uiData) noexcept;
     [[nodiscard]] auto GetPendingUIData() const noexcept -> UIDrawData;
 
@@ -278,7 +323,6 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
     [[nodiscard]] auto DeviceGeneration() const noexcept -> uint64_t;
-    [[nodiscard]] auto GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&>;
 
     void ProvokeDeviceLost();
 
@@ -344,6 +388,6 @@ class ZHLN_API Engine {
 
 // Mark an entity and its hierarchy for the Engine's batched scene cleanup.
 // Components remain readable until ProcessPendingDestroy/SceneCleanup runs.
-void DespawnEntity(Engine& engine, Entity entity);
+ZHLN_API void DespawnEntity(Engine& engine, Entity entity);
 
 } // namespace ZHLN

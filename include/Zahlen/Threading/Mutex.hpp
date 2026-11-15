@@ -120,8 +120,11 @@ class Mutex {
 
     [[no_unique_address]] Owner _owner;
 
-    [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
-    [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
+    // Reached from the inline Lock()/Unlock() fast paths, so these cannot be
+    // hidden: every consumer's own objects call them. Exported for that reason
+    // even though no caller ever names them.
+    [[gnu::cold, gnu::noinline]] ZHLN_API void LockSlow() noexcept;
+    [[gnu::cold, gnu::noinline]] ZHLN_API void UnlockSlow() noexcept;
 
     void CheckPreLock() noexcept;
     void PostLock() noexcept;

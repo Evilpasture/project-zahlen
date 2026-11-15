@@ -32,7 +32,6 @@
 #include <string_view>
 
 namespace ZHLN {
-class AssetManager;
 class Engine;
 }
 
@@ -88,13 +87,10 @@ inline constexpr std::string_view kVendoredFontFntPath = "resources/fonts/JetBra
 /// cached CPU-side, so device-loss rebuilds re-upload without touching disk.
 ///
 /// The hook is process-global and single: install one loader per process, from
-/// the composition root, before the first CreateFontAtlas. This
-/// lower-level overload registers no teardown; uninstall with
-/// GUI::UninstallBakedFontLoader() (the Engine& overload below does both).
-void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source = {});
-
-/// Engine-aware convenience: InstallBakedFontLoader above plus a teardown hook
-/// that uninstalls the loader when the engine goes away.
+/// the composition root, before the first CreateFontAtlas. Installing through
+/// an Engine also registers a teardown that uninstalls it when the engine goes
+/// away. There is no AssetManager spelling: the engine owns its asset cache, and
+/// it is the only thing that can hand one out.
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
 
 /// Fonts are first-class assets with an AssetID. Loads the baked font from
@@ -119,7 +115,6 @@ void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
 /// own reason as it goes, so the code names the condition for the caller
 /// (which should fall back to the embedded default) and formats as that
 /// reason's annotated message.
-auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
 auto LoadFontAsset(Engine& engine, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
 
 } // namespace ZHLN::Fonts

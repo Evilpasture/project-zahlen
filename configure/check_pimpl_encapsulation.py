@@ -122,7 +122,9 @@ ACCESS_SPECIFIER_RE = re.compile(r"^(public|private|protected)\s*:")
 FRIEND_CLASS_RE = re.compile(r"\bfriend\s+(?:class|struct)\s+([A-Za-z_]\w*)")
 CLASS_FRIENDS_ALLOWED_IN = {
     "include/Zahlen/Window/Window.hpp": frozenset({"PlatformHost"}),
-    "include/Zahlen/Window/PlatformHost.hpp": frozenset({"Kernel"}),
+    # KernelSession is the engine's session -- the same single caller the rule
+    # was written for, under the name it has now that it is private.
+    "include/Zahlen/Window/PlatformHost.hpp": frozenset({"KernelSession"}),
 }
 
 
@@ -176,8 +178,8 @@ def presentation_violations(relative: str, text: str) -> list[str]:
             line = text.count("\n", 0, match.start()) + 1
             violations.append(
                 f"{relative}:{line} grants class friendship to '{match.group(1)}'. Window may friend only PlatformHost, and "
-                "PlatformHost only Kernel: the engine resolves a frame's target through the host, never through an engine "
-                "class reachable from a window."
+                "PlatformHost only the engine's session: the engine resolves a frame's target through the host, never "
+                "through an engine class reachable from a window."
             )
 
     for match in PRESENTATION_ACCESSOR_RE.finditer(text):

@@ -22,9 +22,6 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
-    return assets.GetCachedPrefab(hash);
-}
 auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
     return assets.CachedPrefab(hash);
 }
@@ -339,17 +336,6 @@ auto LoadStudioModelPrefabImpl(
 } // namespace
 
 auto LoadStudioModelPrefab(
-    RenderContext&       ctx,
-    AssetManager&        assetMgr,
-    PhysicsContext&      /*physics*/,
-    const SourceVFS&     vfs,
-    std::string_view     path,
-    const ImportOptions& options
-) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadStudioModelPrefabImpl(ctx, assetMgr, vfs, path, options);
-}
-
-auto LoadStudioModelPrefab(
     Engine&              engine,
     const SourceVFS&     vfs,
     std::string_view     path,
@@ -358,21 +344,6 @@ auto LoadStudioModelPrefab(
     auto gfx    = engine.Graphics();
     auto assets = engine.Assets();
     return LoadStudioModelPrefabImpl(gfx, assets, vfs, path, options);
-}
-
-auto LoadStudioModelPrefabFromMemory(
-    RenderContext&             ctx,
-    AssetManager&              assetMgr,
-    PhysicsContext&            /*physics*/,
-    const SourceVFS&           vfs,
-    std::span<const std::byte> mdlBytes,
-    std::span<const std::byte> vvdBytes,
-    std::span<const std::byte> vtxBytes,
-    std::span<const std::byte> phyBytes,
-    std::string_view           virtualPath,
-    const ImportOptions&       options
-) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadStudioModelPrefabFromMemoryImpl(ctx, assetMgr, vfs, mdlBytes, vvdBytes, vtxBytes, phyBytes, virtualPath, options);
 }
 
 auto LoadStudioModelPrefabFromMemory(

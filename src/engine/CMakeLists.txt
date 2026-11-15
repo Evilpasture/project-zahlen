@@ -18,7 +18,7 @@ set(RAW_ENGINE_SOURCES
     Engine.cpp
     EngineGlobals.cpp
     InputContext.cpp
-    Kernel.cpp
+    KernelSession.cpp
     World.cpp
     VisibilityList.cpp
     Capabilities.cpp

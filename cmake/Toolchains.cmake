@@ -255,7 +255,7 @@ zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine Com
 # package so COM clients need not link its static libraries.
 install(FILES app/include/Zahlen/COM/App.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen/COM COMPONENT ZahlenCOMApp)
-install(FILES app/include/Zahlen/HostRunner.hpp app/include/Zahlen/KernelApp.hpp
+install(FILES app/include/Zahlen/HostRunner.hpp
     app/include/Zahlen/AppOutcome.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
     COMPONENT ZahlenHostRunner)
 install(FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp
@@ -298,7 +298,7 @@ endif()
 # There is deliberately no Data package. What used to be one was the sandbox's
 # cooked pack plus the whole resources/ tree, and a consumer needs neither: the
 # renderer #embeds its shaders (ShaderCompilation.cmake), src/gui/FontLoader.cpp
-# #embeds the default font, and Kernel.cpp only logs a warning when
+# #embeds the default font, and KernelSession.cpp only logs a warning when
 # data/base.pak is absent. A pack belongs to whoever owns the scene -- this
 # repository cooks one for its own samples, and an application cooks its own.
 #

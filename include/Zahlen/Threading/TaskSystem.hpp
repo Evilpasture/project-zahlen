@@ -14,9 +14,13 @@
 #include <type_traits>
 #include <utility>
 
+// The scheduler is engine-internal, but it is exported because its callers are
+// not always the engine: utilities drive it directly (zcook's ParallelFor), and
+// the threading tests are its own consumers. Exported is not the same as
+// supported -- nothing outside src/ should add a call to it.
 namespace ZHLN::TaskSystem {
-auto GetWorkerIndex() -> uint32_t;
-auto GetWorkerCount() -> uint32_t;
+ZHLN_API auto GetWorkerIndex() -> uint32_t;
+ZHLN_API auto GetWorkerCount() -> uint32_t;
 using TaskFn = void (*)(void*);
 
 struct Task {
@@ -44,8 +48,8 @@ inline constexpr uint32_t MaxParallelForChunks = 128;
 // Lifecycle transitions are serialized and redundant calls are no-ops. Call
 // Shutdown from an application control thread after all dispatched work has
 // completed; do not race task submission/Wait against a lifecycle transition.
-void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
-void Shutdown();
+ZHLN_API void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
+ZHLN_API void Shutdown();
 
 // Declare before resources that may schedule tasks during their destruction.
 // A Scope owns the process-global scheduler lifetime; do not overlap it with
@@ -62,16 +66,16 @@ struct Scope final {
     auto operator=(Scope&&) -> Scope&      = delete;
 };
 
-void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
+ZHLN_API void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 
 // Queue one long-lived job only for WorkerMain. Unlike Dispatch, it never runs
 // inline or through main-thread Dispatch/Wait work stealing; scheduler and
 // fiber-capacity failures are returned instead. The job occupies one worker
 // and one fiber until it returns.
-[[nodiscard]] auto DispatchBackground(Task task, Counter* counter = nullptr) noexcept
+[[nodiscard]] ZHLN_API auto DispatchBackground(Task task, Counter* counter = nullptr) noexcept
     -> std::expected<void, BackgroundDispatchError>;
 
-void Wait(Counter* counter);
+ZHLN_API void Wait(Counter* counter);
 
 void WakeUp(ZHLN::Fiber* fiber);
 

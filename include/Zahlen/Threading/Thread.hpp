@@ -40,12 +40,12 @@ struct alignas(128) Fiber {
     static auto Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fiber*;
     static void Destroy(Fiber* fiber) noexcept;
 
-    static void InitMainThread() noexcept;
+    ZHLN_API static void InitMainThread() noexcept;
 };
 
-auto GetCurrentFiber() noexcept -> Fiber*;
-void YieldFiber() noexcept;
+ZHLN_API auto GetCurrentFiber() noexcept -> Fiber*;
+ZHLN_API void YieldFiber() noexcept;
 
-auto GetCurrentFiberID() -> uint64_t;
+ZHLN_API auto GetCurrentFiberID() -> uint64_t;
 
 }

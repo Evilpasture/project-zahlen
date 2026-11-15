@@ -12,11 +12,11 @@ namespace ZHLN {
 class ConditionalVariable {
   public:
 
-    void Wait(Mutex& mutex) noexcept;
+    ZHLN_API void Wait(Mutex& mutex) noexcept;
 
-    void NotifyOne() noexcept;
+    ZHLN_API void NotifyOne() noexcept;
 
-    void NotifyAll() noexcept;
+    ZHLN_API void NotifyAll() noexcept;
 
   private:
     ZHLN::Atomic<uint8_t> _bits;

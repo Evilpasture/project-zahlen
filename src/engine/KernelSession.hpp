@@ -3,19 +3,29 @@
 
 #pragma once
 
-#include <Zahlen/Common.h>
+// The engine's session: OS windows, GPU device, audio device, asset cache and
+// file watching, owned for one Engine. It is not an entry point. It used to be
+// the public `Kernel`, which meant a second public runtime class with its own
+// GetRenderContext()/GetAssetManager() doors for the one host that wanted to
+// draw UI without a World -- and those doors are why AssetManager and the
+// importer's (RenderContext&, ...) overloads had to be exported at all.
+//
+// Engine owns one of these and is the only thing that may hold one. A host that
+// wants windows asks Engine::AddWindow/Windows/AcquireTarget.
+
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
-#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
+#include <vector>
 
 namespace ZHLN {
 
@@ -24,18 +34,24 @@ class PlatformHost;
 class RenderContext;
 class AudioContext;
 class AssetManager;
+struct FrameTarget;
 namespace FS {
 class FileSystemWatcher;
 }
-using FileSystemWatcher = FS::FileSystemWatcher;
 
-class ZHLN_API Kernel {
+namespace ECS {
+class EventBus;
+}
+
+// Engine-internal. Not ZHLN_API and not in include/: these are the engine's own
+// objects, and the engine is what hands out the capabilities built on them.
+class KernelSession {
   public:
-    static auto Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode>;
-    ~Kernel();
+    static auto Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode>;
+    ~KernelSession();
 
-    Kernel(const Kernel&)                    = delete;
-    auto operator=(const Kernel&) -> Kernel& = delete;
+    KernelSession(const KernelSession&)                    = delete;
+    auto operator=(const KernelSession&) -> KernelSession& = delete;
 
     [[nodiscard]] auto IsRunning() const -> bool;
 
@@ -46,9 +62,13 @@ class ZHLN_API Kernel {
 
     void ProcessEvents();
 
-    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
-        -> ZHLN::Optional<Window&>;
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver,
+                   WindowID id) -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);
+
+    [[nodiscard]] auto SecondaryWindows() const noexcept -> std::span<Window* const>;
+    [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
+    [[nodiscard]] auto NextWindowID() noexcept -> WindowID;
 
     [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
     [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget>;
@@ -58,7 +78,7 @@ class ZHLN_API Kernel {
     auto GetRenderContext() -> RenderContext&;
     auto GetAudioContext() -> AudioContext&;
     auto GetAssetManager() -> AssetManager&;
-    auto GetFileSystemWatcher() -> FileSystemWatcher&;
+    auto GetFileSystemWatcher() -> FS::FileSystemWatcher&;
 
     [[nodiscard]] auto GetConfig() const noexcept -> const EngineConfig&;
 
@@ -66,7 +86,7 @@ class ZHLN_API Kernel {
     void ProvokeDeviceLost();
 
   private:
-    Kernel() = default;
+    KernelSession() = default;
 
     auto InitInternal(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode>;
 
@@ -74,4 +94,4 @@ class ZHLN_API Kernel {
     std::unique_ptr<Impl> _impl;
 };
 
-}
+} // namespace ZHLN

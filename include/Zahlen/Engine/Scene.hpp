@@ -185,9 +185,9 @@ enum class SceneError : uint8_t {
     UnknownLightType,
 };
 
-[[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode>;
+[[nodiscard]] ZHLN_API auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode>;
 
-[[nodiscard]] auto Extract(Engine& engine) -> Scene;
+[[nodiscard]] ZHLN_API auto Extract(Engine& engine) -> Scene;
 
 struct MaterialLookup {
     const void* userdata                                                 = nullptr;
@@ -197,7 +197,7 @@ struct MaterialLookup {
 // The registry answers for scene content -- entities, transforms, lights. It no
 // longer answers for the environment, which belongs to whoever owns the
 // pipeline, so that half is passed in rather than scraped out.
-[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
+[[nodiscard]] ZHLN_API auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

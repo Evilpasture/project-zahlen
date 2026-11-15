@@ -1481,7 +1481,7 @@ auto main(int argc, char* argv[]) -> int {
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
-    engine->SetUICallback([&state](ZHLN::Engine& eng) -> void { DrawHUD(eng, state); });
+    engine->SetUICallback([&state](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawHUD(eng, state); });
 
     while (engine->IsRunning()) {
         state.dt  = clock.Tick();

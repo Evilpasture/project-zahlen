@@ -44,6 +44,28 @@ struct IEngine : IObject {
     [[nodiscard]] virtual IActionContext*  Actions() noexcept = 0;
     [[nodiscard]] virtual IState*          State() noexcept = 0;
 
+    // --- windows -----------------------------------------------------------
+    //
+    // A consumer addresses a window by WindowID, never by a Window*: the engine
+    // owns windows, adds and removes them while it runs, and a pointer taken
+    // from one call is not valid for the next. WindowID::Primary always exists;
+    // the rest are minted by AddWindow.
+    [[nodiscard]] virtual WindowID PrimaryWindow() const noexcept = 0;
+
+    // Writes up to `capacity` ids in window order (primary first) and returns
+    // the total count, so a caller sizes its buffer from the first answer. Same
+    // shape as IEntities::EntitiesWithRaw; nothing is allocated on either side
+    // of the boundary.
+    [[nodiscard]] virtual uint32_t Windows(WindowID* outWindows, uint32_t capacity) const noexcept = 0;
+
+    // The drawable extent of a window. A zero extent means the window is
+    // minimized or not presentable; drawing into it is a no-op, not an error.
+    [[nodiscard]] virtual Extent2D WindowExtent(WindowID window) const noexcept = 0;
+
+    // The window's keyboard/mouse focus, which is what a consumer needs to
+    // decide whether its own input belongs to this window.
+    [[nodiscard]] virtual bool IsWindowFocused(WindowID window) const noexcept = 0;
+
 protected:
     ~IEngine() = default;
 };

@@ -6,7 +6,7 @@
 #include "tty/TTYBackend.hpp"
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include "KernelSession.hpp"
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
@@ -59,18 +59,18 @@ void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::sp
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            ZHLN::Log("[Kernel] Could not open '{}' for writing the pipeline binaries.", temp.string());
+            ZHLN::Log("[KernelSession] Could not open '{}' for writing the pipeline binaries.", temp.string());
             return;
         }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
     std::filesystem::rename(temp, target, ec);
     if (ec) {
-        ZHLN::Log("[Kernel] Renaming '{}' into place failed: {}", temp.string(), ec.message());
+        ZHLN::Log("[KernelSession] Renaming '{}' into place failed: {}", temp.string(), ec.message());
         std::filesystem::remove(temp, ec);
         return;
     }
-    ZHLN::Log("[Kernel] Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
+    ZHLN::Log("[KernelSession] Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
 }
 
 } // namespace
@@ -82,7 +82,7 @@ enum class KernelInitError : uint8_t {
     KernelAllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"Kernel instance allocation failed"> {}),
 };
 
-struct Kernel::Impl {
+struct KernelSession::Impl {
     std::unique_ptr<FS::FileSystemWatcher> fileSystemWatcher;
     std::unique_ptr<RenderContext>         renderContext;
     std::unique_ptr<AudioContext>          audioContext;
@@ -92,6 +92,8 @@ struct Kernel::Impl {
     Extent2D     primaryExtent {}; // last size synchronized during ProcessEvents
 
     std::vector<std::unique_ptr<Window>> secondaryWindows;
+    std::vector<Window*>                secondaryRaw; // mirrors secondaryWindows, for per-frame iteration
+    mutable std::vector<Window*>       allRaw;       // scratch for Windows()
 
     EngineConfig config;
     // Own the bytes backing config.initialPipelineBinaryData across renderer
@@ -100,6 +102,7 @@ struct Kernel::Impl {
     FS::FileWatchID      shaderDirectoryWatch    = 0;
     bool                 persistPipelineBinaries = false;
     bool                 glfwAcquired            = false;
+    WindowID             nextWindowID            = WindowID(2); // 1 is Primary
 
     void BeginShaderObservation() {
         if constexpr (isDev) {
@@ -127,8 +130,8 @@ struct Kernel::Impl {
     }
 };
 
-auto Kernel::Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
-    auto instance = std::unique_ptr<Kernel>(new (std::nothrow) Kernel());
+auto KernelSession::Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
+    auto instance = std::unique_ptr<KernelSession>(new (std::nothrow) KernelSession());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
     }
@@ -138,7 +141,7 @@ auto Kernel::Create(const EngineConfig& config, const WindowInputReceiver& input
     return instance;
 }
 
-auto Kernel::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
+auto KernelSession::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
     _impl->config            = cfg;
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
@@ -162,7 +165,7 @@ auto Kernel::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& in
         if (!TTYBackend::IsSupported()) {
             return std::unexpected(KernelInitError::WindowCreationFailed);
         }
-        ZHLN::Log("[Kernel] GLFW unavailable; falling back to a direct-to-display TTY session.");
+        ZHLN::Log("[KernelSession] GLFW unavailable; falling back to a direct-to-display TTY session.");
         _impl->primaryHost = PlatformHost::CreateTTY(cfg.width, cfg.height, inputReceiver);
         if (!_impl->primaryHost.Valid()) {
             return std::unexpected(KernelInitError::TTYInitializationFailed);
@@ -202,7 +205,7 @@ auto Kernel::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& in
     return {};
 }
 
-Kernel::~Kernel() {
+KernelSession::~KernelSession() {
     if (_impl == nullptr) {
         return;
     }
@@ -226,28 +229,27 @@ Kernel::~Kernel() {
     }
 }
 
-auto Kernel::IsRunning() const -> bool {
+auto KernelSession::IsRunning() const -> bool {
     return _impl->primaryHost.IsRunning();
 }
 
-auto Kernel::GetPlatformHost() noexcept -> PlatformHost& {
+auto KernelSession::GetPlatformHost() noexcept -> PlatformHost& {
     return _impl->primaryHost;
 }
 
-auto Kernel::GetPlatformHost() const noexcept -> const PlatformHost& {
+auto KernelSession::GetPlatformHost() const noexcept -> const PlatformHost& {
     return _impl->primaryHost;
 }
 
-auto Kernel::GetWindow() noexcept -> ZHLN::Optional<Window&> {
+auto KernelSession::GetWindow() noexcept -> ZHLN::Optional<Window&> {
     return _impl->primaryHost.AsWindow();
 }
 
-void Kernel::ProcessEvents() {
+void KernelSession::ProcessEvents() {
     _impl->primaryHost.PollEvents();
 
     // The primary presentation target reports the actual framebuffer extent.
-    // Synchronize at event-poll time, before either Engine or a Kernel-only
-    // tool begins its frame. A headless caller's SetResolution is still valid:
+    // Synchronize at event-poll time, before the engine begins its frame. A headless caller's SetResolution is still valid:
     // its target size changes here only when the caller changed it explicitly.
     const Extent2D size = _impl->primaryHost.GetSize();
     if (size.width != _impl->primaryExtent.width || size.height != _impl->primaryExtent.height) {
@@ -270,24 +272,25 @@ void Kernel::ProcessEvents() {
     }
 }
 
-auto Kernel::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
+auto KernelSession::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, WindowID id)
     -> ZHLN::Optional<Window&> {
     if (!_impl->primaryHost.Valid() || !_impl->primaryHost.AsWindow() || !_impl->glfwAcquired) {
-        ZHLN::Log("[Kernel] AddWindow requires a windowed session");
+        ZHLN::Log("[KernelSession] AddWindow requires a windowed session");
         return std::nullopt;
     }
 
-    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver);
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, id);
     if (window->GetNativeHandle() == nullptr) {
-        ZHLN::Log("[Kernel] AddWindow: OS window creation failed");
+        ZHLN::Log("[KernelSession] AddWindow: OS window creation failed");
         return std::nullopt;
     }
     Window& raw = *window;
     _impl->secondaryWindows.push_back(std::move(window));
+    _impl->secondaryRaw.push_back(&raw);
     return raw;
 }
 
-void Kernel::RemoveWindow(Window& window) {
+void KernelSession::RemoveWindow(Window& window) {
     if (const auto primary = _impl->primaryHost.AsWindow(); primary && &*primary == &window) {
         return;
     }
@@ -295,42 +298,65 @@ void Kernel::RemoveWindow(Window& window) {
         _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(window));
     }
     std::erase_if(_impl->secondaryWindows, [&](const auto& owned) -> bool { return owned.get() == &window; });
+    std::erase(_impl->secondaryRaw, &window);
 }
 
-auto Kernel::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
+auto KernelSession::SecondaryWindows() const noexcept -> std::span<Window* const> {
+    return _impl->secondaryRaw;
+}
+
+auto KernelSession::NextWindowID() noexcept -> WindowID {
+    const WindowID id = _impl->nextWindowID;
+    _impl->nextWindowID = WindowID(static_cast<uint64_t>(id) + 1);
+    return id;
+}
+
+auto KernelSession::Windows() const noexcept -> std::span<Window* const> {
+    // Rebuilt per call: the list is small (a session is a handful of windows)
+    // and rebuilding it keeps the primary-first order correct without a second
+    // mirror to keep in sync.
+    _impl->allRaw.clear();
+    if (const auto primary = _impl->primaryHost.AsWindow()) {
+        _impl->allRaw.push_back(&*primary);
+    }
+    _impl->allRaw.insert(_impl->allRaw.end(), _impl->secondaryRaw.begin(), _impl->secondaryRaw.end());
+    return _impl->allRaw;
+}
+
+auto KernelSession::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
+auto KernelSession::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(window));
 }
 
-auto Kernel::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
+auto KernelSession::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
     return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
+auto KernelSession::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
     return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.TargetFor(window));
 }
 
-auto Kernel::GetRenderContext() -> RenderContext& {
+auto KernelSession::GetRenderContext() -> RenderContext& {
     return *_impl->renderContext;
 }
-auto Kernel::GetAudioContext() -> AudioContext& {
+auto KernelSession::GetAudioContext() -> AudioContext& {
     return *_impl->audioContext;
 }
-auto Kernel::GetAssetManager() -> AssetManager& {
+auto KernelSession::GetAssetManager() -> AssetManager& {
     return *_impl->assetManager;
 }
-auto Kernel::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
+auto KernelSession::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return *_impl->fileSystemWatcher;
 }
 
-auto Kernel::GetConfig() const noexcept -> const EngineConfig& {
+auto KernelSession::GetConfig() const noexcept -> const EngineConfig& {
     return _impl->config;
 }
 
-auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->assetManager->InvalidateGPUMeshes();
     _impl->StopShaderObservation();
     _impl->renderContext.reset();
@@ -345,7 +371,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     return {};
 }
 
-void Kernel::ProvokeDeviceLost() {
+void KernelSession::ProvokeDeviceLost() {
     _impl->renderContext->ProvokeDeviceLost();
 }
 

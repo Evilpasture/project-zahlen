@@ -17,7 +17,7 @@ namespace ZHLN {
 
 class PresentationTarget;
 class Window;
-class Kernel;
+class KernelSession;
 
 class ZHLN_API PlatformHost {
   public:
@@ -79,7 +79,7 @@ class ZHLN_API PlatformHost {
     [[nodiscard]] auto AsWindow() const noexcept -> ZHLN::Optional<const Window&>;
 
   private:
-    friend class Kernel;
+    friend class KernelSession;
 
     [[nodiscard]] auto Target() noexcept -> PresentationTarget&;
     [[nodiscard]] auto Target() const noexcept -> const PresentationTarget&;

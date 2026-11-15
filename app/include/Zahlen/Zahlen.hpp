@@ -64,7 +64,7 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -74,4 +74,3 @@
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/KernelApp.hpp>

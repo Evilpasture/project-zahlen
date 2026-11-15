@@ -7,6 +7,15 @@
 
 namespace ZHLN {
 
+// One OS window in the session. A plain key, like the IDs below: the engine
+// owns the windows, and a caller that has a WindowID can address one without
+// holding a `Window&` across a frame (which device loss, AddWindow and
+// RemoveWindow all invalidate). Engines that draw one window use Primary.
+enum class WindowID : uint64_t {
+    Invalid = 0,
+    Primary = 1,
+};
+
 // Naming taxonomy for the four concepts that used to share the word "Handle":
 //
 //   1. inert numeric key         -> *ID   (the enums/structs in this header)
@@ -23,6 +32,7 @@ enum class BufferID : uint64_t { Invalid = 0 };
 enum class PipelineID : uint64_t { Invalid = 0 };
 // NOLINTEND(performance-enum-size)
 
+static_assert(sizeof(WindowID) == 8);
 static_assert(sizeof(BufferID) == 8);
 static_assert(sizeof(PipelineID) == 8);
 static_assert(sizeof(TextureID) == 8);

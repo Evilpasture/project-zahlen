@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Process/pace policy and the Kernel-only host are shared by the game and
+# Process/pace policy and the KernelSession-only host are shared by the game and
 # standalone 2D tools. This target has no optional gameplay dependencies.
-add_library(zahlen_host_runner STATIC HostRunner.cpp KernelApp.cpp)
+add_library(zahlen_host_runner STATIC HostRunner.cpp )
 set_target_properties(zahlen_host_runner PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
@@ -61,7 +61,10 @@ configure_file(
 )
 target_sources(zahlen_application PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/DefaultModules.cpp")
 
-# The UI-tree editor uses the Kernel-only runner, not application gameplay.
+# The UI-tree editor is an Application, not a KernelSession-only tool: it composes no
+# gameplay modules, but it runs on the same runner as every other app, so it
+# links both. zahlen_host_runner stays for the shared ProcessScope/crash/pacing
+# code Application is built on.
 if(TARGET zahlen_ui_editor)
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_host_runner)
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_application zahlen_host_runner)
 endif()

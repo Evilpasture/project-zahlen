@@ -1039,38 +1039,20 @@ auto ProcessCPUTasks(
     return outTextureJobs;
 }
 
-void BindRender(AssetManager& assets, RenderContext& ctx) noexcept {
-    assets.UseRenderContext(ctx);
-}
 void BindRender(AssetLibrary& assets, GraphicsDevice ctx) noexcept {
     assets.UseGraphicsDevice(ctx);
-}
-auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
-    return assets.GetCachedPrefab(hash);
 }
 auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
     return assets.CachedPrefab(hash);
 }
-auto CollectPrefabs(AssetManager& assets, ModelPrefab** out, uint32_t maxCount) -> uint32_t {
-    return assets.GetCachedPrefabs(out, maxCount);
-}
 auto CollectPrefabs(AssetLibrary& assets, ModelPrefab** out, uint32_t maxCount) -> uint32_t {
     return assets.CachedPrefabs(out, maxCount);
-}
-void RegisterMeshEntry(RenderContext& ctx, AssetID id, Mesh mesh) noexcept {
-    ctx.RegisterGPUMesh(id, mesh);
 }
 void RegisterMeshEntry(GraphicsDevice& ctx, AssetID id, Mesh mesh) noexcept {
     ctx.RegisterMesh(id, mesh);
 }
-void UnregisterMeshEntry(RenderContext& ctx, AssetID id) noexcept {
-    ctx.UnregisterGPUMesh(id);
-}
 void UnregisterMeshEntry(GraphicsDevice& ctx, AssetID id) noexcept {
     ctx.UnregisterMesh(id);
-}
-void RegisterMaterialEntry(RenderContext& ctx, MaterialID id, Material mat) noexcept {
-    ctx.RegisterGPUMaterial(id, mat);
 }
 void RegisterMaterialEntry(GraphicsDevice& ctx, MaterialID id, Material mat) noexcept {
     ctx.RegisterMaterial(id, mat);
@@ -1767,26 +1749,10 @@ void RebuildCachedPrefabsImpl(Gfx& ctx, Assets& cwMgr) {
 // Public Entry Points
 // ============================================================================
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, PhysicsContext& /*physics*/, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadGLBPrefabImpl(ctx, cwMgr, path, options);
-}
-
 auto LoadGLBPrefab(Engine& engine, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
     auto gfx    = engine.Graphics();
     auto assets = engine.Assets();
     return LoadGLBPrefabImpl(gfx, assets, path, options);
-}
-
-auto LoadGLBPrefabFromMemory(
-    RenderContext&           ctx,
-    AssetManager&            cwMgr,
-    PhysicsContext&          /*physics*/,
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    std::string_view         bytesPath,
-    ImportOptions            options
-) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadGLBPrefabFromMemoryImpl(ctx, cwMgr, bytes, virtualPath, bytesPath, options);
 }
 
 auto LoadGLBPrefabFromMemory(
@@ -1799,10 +1765,6 @@ auto LoadGLBPrefabFromMemory(
     auto gfx    = engine.Graphics();
     auto assets = engine.Assets();
     return LoadGLBPrefabFromMemoryImpl(gfx, assets, bytes, virtualPath, bytesPath, options);
-}
-
-void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
-    RebuildPrefabGPUResourcesImpl(ctx, prefab);
 }
 
 void RebuildPrefabGPUResources(GraphicsDevice ctx, ModelPrefab* prefab) {
@@ -1822,10 +1784,6 @@ auto InstantiatePrefabFromMemory(
         return 0;
     }
     return PrefabFactory::InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
-}
-
-void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr) {
-    RebuildCachedPrefabsImpl(ctx, cwMgr);
 }
 
 void RebuildCachedPrefabs(Engine& engine) {

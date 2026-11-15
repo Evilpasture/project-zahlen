@@ -9,9 +9,8 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Render/SceneData.hpp>
-#include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
@@ -872,34 +871,6 @@ void test_app_engine_config_service_is_available_before_install_and_scene_start(
     Expect(prepared && installed && started && updated);
 }
 
-void test_kernel_app_owns_process_input_and_shutdown_without_an_ecs_world() {
-    bool started = false;
-    bool inputReset = false;
-    bool updated = false;
-    bool rendered = false;
-    bool shutdown = false;
-    const auto result = KernelApp(EngineConfig {
-        .appName        = "KernelApplicationTest",
-        .width          = 320,
-        .height         = 180,
-        .validationMode = ValidationMode::Off,
-        .headless       = true,
-    })
-        .OnStart([&](Kernel&) { started = true; })
-        .OnInputFrame([&](Kernel&, float) { inputReset = true; })
-        .OnUpdate([&](Kernel& kernel, float dt) {
-            Expect(started && inputReset);
-            Expect(dt >= 0.0f);
-            updated = true;
-            kernel.GetPlatformHost().Close(); // no GPU frame or Window required
-        })
-        .OnRender([&](Kernel&, FrameScope&) { rendered = true; })
-        .OnShutdown([&](Kernel&) { shutdown = true; })
-        .Run();
-    ExpectUserClosed(result);
-    Expect(started && inputReset && updated && shutdown);
-    Expect(!rendered);
-}
 
 struct ModuleSceneProbeLocal {
     int runs = 0;

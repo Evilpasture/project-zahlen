@@ -103,7 +103,7 @@ struct UITestSuite {
 
             // Set up a simple UI scene
             ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng) {
+            engine->SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
                 gui.SetFontAtlas(eng.GetFontAtlas());
                 ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 
@@ -199,7 +199,7 @@ struct UITestSuite {
             bool     wasClickedB = false;
 
             ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng) {
+            engine->SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
                 gui.SetFontAtlas(eng.GetFontAtlas());
                 ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
 

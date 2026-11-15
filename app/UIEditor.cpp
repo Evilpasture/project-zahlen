@@ -6,7 +6,7 @@
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //
-// It runs on a Kernel alone -- windows, GPU, audio, assets -- with explicit
+// It runs on Engine with no scene: the editor's windows, GPU, assets and
 // GUI::Context + GUI::UIInput state per window. No World, no ECS::Registry, no
 // physics, no camera, no frame scheduler: the document is a UINode tree and
 // the chrome is immediate-mode Clay, so nothing here needs a simulation.
@@ -30,8 +30,8 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
-#include <Zahlen/KernelApp.hpp>
+#include <Zahlen/App.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
@@ -267,7 +267,8 @@ struct Session {
     bool                          confirmWasDown = false;
     float                         dt                   = 0.016f;
     bool                          openPreviewRequested = false;
-    ZHLN::Optional<ZHLN::Window&> previewWindow; // kernel-owned; see Kernel::AddWindow
+    ZHLN::Optional<ZHLN::Window&> previewWindow; // engine-owned; see Engine::AddWindow
+    ZHLN::WindowID                previewID = ZHLN::WindowID::Invalid;
     GUI::Context                  editorGui;
     GUI::Context                  previewGui;
     WindowUIInputCollector        editorInput;
@@ -660,17 +661,41 @@ void LoadTree(Session& session, std::string_view path);
     };
 }
 
-void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
-    if (!session.previewWindow) {
+// The host draws its own cursor into whichever window the pointer is in. It is
+// a draw hook rather than part of UIDrawData because the cursor is not UI: it
+// follows the device, not the tree.
+void DrawCustomCursor(ZHLN::Engine& engine, const ZHLN::Engine::WindowRenderView& view, const Session& session,
+                      const WindowUIInputCollector& input, ZHLN::FrameScope& gpuFrame) {
+    if (view.size.width == 0 || view.size.height == 0 || !engine.GetPlatformHost().UsesCustomCursor()) {
         return;
     }
-    const ZHLN::Extent2D previewSize = session.previewWindow->GetSize();
-    if (previewSize.width == 0 || previewSize.height == 0) {
+    const float cursorX = std::clamp(input.state.mouseX, 0.0f, static_cast<float>(view.size.width - 1));
+    const float cursorY = std::clamp(input.state.mouseY, 0.0f, static_cast<float>(view.size.height - 1));
+    const ZHLN::CustomCursor cursor(cursorX, cursorY);
+    if (const auto drawn = gpuFrame.RenderUI(
+            ZHLN::UIView {
+                .viewport   = {.x = 0, .y = 0, .width = view.size.width, .height = view.size.height},
+                .target     = view.target,
+                .frameIndex = view.frameIndex,
+            },
+            cursor.DrawData()
+        );
+        !drawn) {
+        ZHLN::Log("[UIEditor] Custom cursor draw failed: {}", drawn.error());
+    }
+}
+
+// The preview window's UI. This is the draw hook the engine calls for the
+// preview window inside that window's own acquired frame -- the editor and the
+// preview are two windows of one engine, drawn in one Tick.
+void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
+    if (!session.previewWindow || view.size.width == 0 || view.size.height == 0) {
         return;
     }
+    const ZHLN::Extent2D previewSize = view.size;
     session.previewGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.previewGui.BeginFrame(
-        session.previewInput.Consume(previewSize, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+        session.previewInput.Consume(previewSize, session.dt, MakeHostClipboard(engine.GetPlatformHost()))
     );
     gui.Box(
         "PreviewRoot",
@@ -685,72 +710,45 @@ void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFr
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    auto&                  rc               = kernel.GetRenderContext();
-    const ZHLN::UIDrawData uiData           = std::move(gui).End();
-    const bool             drawCustomCursor = session.previewWindow->UsesCustomCursor();
-    if (!uiData.Empty() || drawCustomCursor) {
-        const auto target = kernel.AcquireTarget(*session.previewWindow);
-        if (!target) {
-            ZHLN::Log("[UIEditor] Preview window acquisition failed: {}", target.error());
+    const ZHLN::UIDrawData uiData = std::move(gui).End();
+    const auto             draw   = [&](const ZHLN::UIDrawData& data) {
+        if (data.Empty()) {
             return;
         }
-        if (!target->has_value()) {
-            return;
+        if (const auto drawn = gpuFrame.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                    .target     = view.target,
+                    .frameIndex = view.frameIndex,
+                },
+                data
+            );
+            !drawn) {
+            ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
         }
-        if (!uiData.Empty()) {
-            if (const auto drawn = gpuFrame.RenderUI(
-                    ZHLN::UIView {
-                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                        .target     = **target,
-                        .frameIndex = rc.GetFrameIndex(),
-                    },
-                    uiData
-                );
-                !drawn) {
-                ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
-            }
-        }
-        if (drawCustomCursor) {
-            const float cursorX = previewSize.width > 0
-                                      ? std::clamp(session.previewInput.state.mouseX, 0.0f, static_cast<float>(previewSize.width - 1))
-                                      : session.previewInput.state.mouseX;
-            const float cursorY = previewSize.height > 0
-                                      ? std::clamp(session.previewInput.state.mouseY, 0.0f, static_cast<float>(previewSize.height - 1))
-                                      : session.previewInput.state.mouseY;
-            const ZHLN::CustomCursor cursor(cursorX, cursorY);
-            if (const auto drawn = gpuFrame.RenderUI(
-                    ZHLN::UIView {
-                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                        .target     = **target,
-                        .frameIndex = rc.GetFrameIndex(),
-                    },
-                    cursor.DrawData()
-                );
-                !drawn) {
-                ZHLN::Log("[UIEditor] Preview custom cursor draw failed: {}", drawn.error());
-            }
-        }
-    }
+    };
+    draw(uiData);
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
     return session.previewWindow && session.previewWindow->IsRunning();
 }
 
-void StopPreview(ZHLN::Kernel& kernel, Session& session) {
+void StopPreview(ZHLN::Engine& engine, Session& session) {
     if (!session.previewWindow) {
         return;
     }
-    kernel.RemoveWindow(*session.previewWindow);
+    engine.RemoveWindow(*session.previewWindow);
     session.previewWindow.reset();
+    session.previewID = ZHLN::WindowID::Invalid;
 }
 
-void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
+void OpenPreview(ZHLN::Engine& engine, Session& session) {
     if (PreviewIsRunning(session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
-    StopPreview(kernel, session);
+    StopPreview(engine, session);
     session.previewProperties = session.properties;
     session.previewInput      = {};
     session.previewGui        = GUI::Context(session.fontAtlas);
@@ -758,11 +756,23 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
     // The preview window is an ordinary destination: the editor draws its 2D
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
+    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
     if (!session.previewWindow) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
+    session.previewID = session.previewWindow->ID();
+
+    // The preview window's own two hooks, keyed by its id. Nothing is shared
+    // with the editor window except the Session: the engine asks each window
+    // for its own UI and its own drawing.
+    engine.SetWindowDrawCallback(
+        session.previewID,
+        [&session](ZHLN::Engine& active, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
+            DrawPreview(active, session, view, gpuFrame);
+            DrawCustomCursor(active, view, session, session.previewInput, gpuFrame);
+        }
+    );
     ZHLN::Log("[UIEditor] Preview window open");
 }
 
@@ -801,7 +811,11 @@ void LoadTree(Session& session, std::string_view path) {
 }
 #endif
 
-void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
+// Builds this window's UI and publishes it. The render step draws whatever is
+// published for a window into that window's acquired target, which is why this
+// does not touch a FrameScope: it runs in the UI phase, before any frame is
+// acquired.
+void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
     auto&      state          = session.editorInput.state;
     const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || session.editorInput.wantCaptureKeyboard;
 
@@ -823,10 +837,10 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
     session.saveWasDown = saveDown;
 #endif
 
-    const ZHLN::Extent2D size = kernel.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D size = engine.GetPlatformHost().GetSize();
     session.editorGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.editorGui.BeginFrame(
-        session.editorInput.Consume(size, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+        session.editorInput.Consume(size, session.dt, MakeHostClipboard(engine.GetPlatformHost()))
     );
     gui.Box(
         "UIEditorWorkspace",
@@ -935,55 +949,14 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
             );
         }
     );
-    auto&                  rc     = kernel.GetRenderContext();
-    const ZHLN::UIDrawData uiData = std::move(gui).End();
+    ZHLN::UIDrawData uiData = std::move(gui).End();
     session.editorInput.wantCaptureMouse    = uiData.wantsCaptureMouse;
     session.editorInput.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
-    const bool drawCustomCursor                   = kernel.GetPlatformHost().UsesCustomCursor();
-    if (uiData.Empty() && !drawCustomCursor) {
+    if (uiData.Empty()) {
         return;
     }
-    // Pure 2D frame: the editor draws into this frame's acquired window target.
-    const auto target = kernel.AcquireTarget();
-    if (!target) {
-        ZHLN::Log("[UIEditor] Window acquisition failed: {}", target.error());
-        return;
-    }
-    if (!target->has_value()) {
-        return;
-    }
-    if (!uiData.Empty()) {
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                    .target     = **target,
-                    .frameIndex = rc.GetFrameIndex(),
-                },
-                uiData
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
-        }
-    }
+    engine.SetPendingUIData(ZHLN::WindowID::Primary, std::move(uiData));
 
-    if (drawCustomCursor) {
-        const float cursorX =
-            size.width > 0 ? std::clamp(session.editorInput.state.mouseX, 0.0f, static_cast<float>(size.width - 1)) : session.editorInput.state.mouseX;
-        const float cursorY =
-            size.height > 0 ? std::clamp(session.editorInput.state.mouseY, 0.0f, static_cast<float>(size.height - 1)) : session.editorInput.state.mouseY;
-        const ZHLN::CustomCursor cursor(cursorX, cursorY);
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                    .target     = **target,
-                    .frameIndex = rc.GetFrameIndex(),
-                },
-                cursor.DrawData()
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Custom cursor draw failed: {}", drawn.error());
-        }
-    }
 }
 
 } // namespace
@@ -995,62 +968,45 @@ auto main(int argc, char* argv[]) -> int {
     BindHostActions(session);
 
     ZHLN::AssetID activeFontAssetID = ZHLN::GUI::kDefaultFontAssetID;
-    auto rebuildFonts = [&](ZHLN::Kernel& kernel) {
-        // The restored renderer is a new device; never reuse its predecessor's
-        // FontAtlas handles, and do not hold a RenderContext reference across
-        // Kernel::HandleDeviceLost.
-        session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(
-            kernel.GetRenderContext(), kernel.GetAssetManager(), activeFontAssetID
-        );
+    auto          rebuildFonts      = [&](ZHLN::Engine& engine) {
+        // The engine builds the atlas from its own renderer and asset cache, and
+        // rebuilds it after device loss. The editor takes a copy; it never holds
+        // a RenderContext or AssetManager reference across recovery.
+        engine.EnsureFontAtlas();
+        session.fontAtlas = engine.GetFontAtlas();
         session.editorGui.SetFontAtlas(session.fontAtlas);
         session.previewGui.SetFontAtlas(session.fontAtlas);
     };
 
-    const auto result = ZHLN::KernelApp()
-        .Named("Zahlen UI Editor")
-        .Input(session.editorInput.MakeReceiver())
-        .OnStart([&](ZHLN::Kernel& kernel) {
+    ZHLN::EngineConfig editorConfig {};
+    editorConfig.appName = "Zahlen UI Editor";
+
+    const auto result = ZHLN::Application(editorConfig)
+        .OnStart([&](ZHLN::Engine& engine) {
             // Fonts are assets, not a renderer-owned outline parser. Prime the
             // baked fallback before creating the application's two GUI atlases.
 #if defined(ZHLN_HAS_FONTS)
-            if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel.GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource())) {
+            if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource())) {
                 activeFontAssetID = *fontAssetID;
             } else {
                 ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
             }
 #endif
-            ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel.GetAssetManager());
-            rebuildFonts(kernel);
-        })
-        .OnInputFrame([&](ZHLN::Kernel&, float) {
-            session.previewInput.state.BeginFrame();
-            session.editorInput.state.BeginFrame();
-        })
-        .OnUpdate([&](ZHLN::Kernel& kernel, float dt) {
-            session.dt = dt;
-            if (session.previewWindow && !session.previewWindow->IsRunning()) {
-                StopPreview(kernel, session);
-            }
-            if (session.openPreviewRequested) {
-                session.openPreviewRequested = false;
-                OpenPreview(kernel, session);
-            }
-        })
-        .OnRender([&](ZHLN::Kernel& kernel, ZHLN::FrameScope& gpuFrame) {
-            DrawFrame(kernel, session, gpuFrame);
-            if (session.previewWindow) {
-                DrawPreview(kernel, session, gpuFrame);
-            }
-        })
-        .OnDeviceRestored([&](ZHLN::Kernel& kernel) { rebuildFonts(kernel); })
-        .OnFrameEnd([&](ZHLN::Kernel&) {
-            session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
-                if (event.id == "editor.save_scene") {
-                    ZHLN::Log("[UIEditor] editor.save_scene");
+            (void) engine;  // PrimeDefaultBakedFont runs inside LoadFontAsset above.
+            rebuildFonts(engine);
+
+            // The editor window's UI. It is the primary window's callback, so it
+            // is asked to draw once per frame for that window and never for the
+            // preview.
+            engine.SetUICallback(ZHLN::WindowID::Primary, [&session](ZHLN::Engine& active, ZHLN::WindowID) { SubmitEditorUI(active, session); });
+            engine.SetWindowDrawCallback(
+                ZHLN::WindowID::Primary,
+                [&session](ZHLN::Engine& active, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
+                    DrawCustomCursor(active, view, session, session.editorInput, gpuFrame);
                 }
-            });
+            );
+            engine.AddDeviceLostCallback([&rebuildFonts](ZHLN::Engine& restored) { rebuildFonts(restored); });
         })
-        .OnShutdown([&](ZHLN::Kernel& kernel) { StopPreview(kernel, session); })
         .Run(argc, argv);
     return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

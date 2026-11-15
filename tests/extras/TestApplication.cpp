@@ -5,7 +5,6 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
@@ -90,7 +89,6 @@ concept HasApplicationOnUI = requires(T& app, Engine::UICallback callback) { app
 static_assert(!HasApplicationOnUI<Application>); // application UI only comes from layers
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
-static_assert(std::same_as<decltype(KernelApp().Run()), AppRunResult>);
 
 // Exercise CLI success without creating a GPU/Engine: --help follows the
 // tokens under test, while failures stop before reaching it.
@@ -443,22 +441,6 @@ void test_layered_application_help_does_not_invoke_any_layer_phase() {
     Expect(!called); // early CLI exits never reach Start, Tick, UI or Stop
 }
 
-void test_kernel_app_early_cli_exits_and_validates_c_arguments() {
-    char program[] = "test-kernel-app";
-    char help[]    = "--help";
-    char* args[]   = {program, help};
-    ExpectExit(KernelApp().Named("Test Kernel Tool").Run(2, args), AppExitReason::CliHelpRequested);
-    ExpectError(KernelApp().Run(-1, args), AppError::InvalidArguments);
-    ExpectError(KernelApp().Run(1, nullptr), AppError::InvalidArguments);
-
-    char version[] = "--version";
-    char* versionArgs[] = {program, version};
-    ExpectExit(KernelApp().Run(2, versionArgs), AppExitReason::CliVersionRequested);
-
-    char invalid[] = "--not-a-kernel-option";
-    char* badArgs[] = {program, invalid};
-    ExpectError(KernelApp().Run(2, badArgs), CommandLineError::UnknownArgument);
-}
 
 void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
     FramePacer uncapped;

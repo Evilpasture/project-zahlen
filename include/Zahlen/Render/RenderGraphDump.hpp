@@ -8,6 +8,6 @@
 
 namespace ZHLN {
 
-[[nodiscard]] auto GetRenderGraphDump(AAMode currentMode) noexcept -> std::string_view;
+ZHLN_API auto GetRenderGraphDump(AAMode currentMode) noexcept -> std::string_view;
 
 } // namespace ZHLN

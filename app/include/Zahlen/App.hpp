@@ -40,7 +40,9 @@ concept AppLayer = requires(std::remove_cvref_t<T>& layer, Engine& engine) {
     layer.Stop(engine);
 };
 
-class Application {
+// Application is a public entry point (app/ is its own library), so its
+// out-of-line members have to be part of the export set like any other API.
+class ZHLN_API Application {
   public:
     explicit Application(EngineConfig config = {}): _config(std::move(config)) {}
 

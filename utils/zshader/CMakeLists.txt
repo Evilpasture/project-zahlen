@@ -73,8 +73,10 @@ target_link_libraries(zshader PRIVATE
 # (cmake/HostToolRuntime.cmake), and a plain set would drop it.
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
-    "${CMAKE_SOURCE_DIR}/extern/stb"
 )
+# ImageCook.cpp defines STB_IMAGE_IMPLEMENTATION itself; the rest of zshader that
+# includes stb_image.h links the one implementation.
+target_link_libraries(zshader PRIVATE zahlen_stb_image)
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")

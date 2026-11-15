@@ -1606,7 +1606,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
     ZHLN::GUI::Context hudGui;
-    engine->SetUICallback([&hudGui](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng, hudGui); });
+    engine->SetUICallback([&hudGui](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawCrosshairHUD(eng, hudGui); });
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {

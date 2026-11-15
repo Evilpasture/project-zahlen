@@ -22,7 +22,7 @@
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include "KernelSession.hpp"
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include "InputContext.hpp"

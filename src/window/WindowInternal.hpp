@@ -9,6 +9,7 @@
 
 namespace ZHLN {
 struct Window::Impl {
+    WindowID                           id               = WindowID::Invalid;
     GLFWwindow*                        handle           = nullptr;
     WindowInputReceiver                receiver         = {};
     CursorMode                         cursorMode       = CursorMode::System;

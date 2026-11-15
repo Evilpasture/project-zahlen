@@ -58,9 +58,6 @@ inline constexpr float kMissingTextureDim          = 0.25f;
 // exposure and contributes to bloom instead of stopping at the bloom threshold.
 inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
-auto LookupPrefab(AssetManager& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
-    return assets.GetCachedPrefab(hash);
-}
 auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
     return assets.CachedPrefab(hash);
 }
@@ -911,21 +908,6 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     }
 }
 
-auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
-    const uint64_t hash   = HashAssetPath(path);
-    const auto     cached = assetMgr.GetCachedPrefab(hash);
-    if (cached) {
-        return cached;
-    }
-
-    const auto bytes = ReadWholeFile(path);
-    if (!bytes) {
-        LogWarning("BSP Importer: failed to read {}", path);
-        return std::nullopt;
-    }
-    return LoadBSPPrefabFromMemory(ctx, assetMgr, physics, *bytes, path, options);
-}
-
 auto LoadBSPPrefab(Engine& engine, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash   = HashAssetPath(path);
     auto           assets = engine.Assets();
@@ -940,28 +922,6 @@ auto LoadBSPPrefab(Engine& engine, std::string_view path, const ImportOptions& o
         return std::nullopt;
     }
     return LoadBSPPrefabFromMemory(engine, *bytes, path, options);
-}
-
-auto LoadBSPPrefabFromMemory(
-    RenderContext&             ctx,
-    AssetManager&              assetMgr,
-    PhysicsContext&            /*physics*/,
-    std::span<const std::byte> bytes,
-    std::string_view           virtualPath,
-    const ImportOptions&       options
-) -> ZHLN::Optional<ModelPrefab&> {
-    const uint64_t hash   = HashAssetPath(virtualPath);
-    const auto     cached = assetMgr.GetCachedPrefab(hash);
-    if (cached) {
-        return cached;
-    }
-
-    const auto parsed = ParseBsp(bytes);
-    if (!parsed) {
-        LogWarning("BSP Importer: {}: {}", virtualPath, parsed.error());
-        return std::nullopt;
-    }
-    return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
 }
 
 auto LoadBSPPrefabFromMemory(
@@ -984,33 +944,6 @@ auto LoadBSPPrefabFromMemory(
     }
     auto gfx = engine.Graphics();
     return BuildModelPrefab(gfx, assets, *parsed, virtualPath, options);
-}
-
-auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, PhysicsContext& physics, const BSPMap& map, const ImportOptions& options) -> size_t {
-    SourceVFS vfs;
-    if (!options.assetRoot.empty()) {
-        vfs.AddSearchPath(options.assetRoot);
-    }
-
-    size_t loaded = 0;
-    for (const auto& sp: map.staticProps) {
-        if (!sp.modelName.empty()) {
-            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, sp.modelName, options); model.has_value()) {
-                ++loaded;
-            }
-        }
-    }
-
-    for (const auto& ent: map.entities) {
-        const std::string_view model = ent.Find("model");
-        if (model.ends_with(".mdl")) {
-            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, physics, vfs, model, options); m.has_value()) {
-                ++loaded;
-            }
-        }
-    }
-
-    return loaded;
 }
 
 auto PreloadStaticProps(Engine& engine, const BSPMap& map, const ImportOptions& options) -> size_t {

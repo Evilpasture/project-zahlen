@@ -1081,7 +1081,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
 
     auto ran = ZHLN::Engine::Run(
         runConfig,
-        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
+        [self, &uiClock](ZHLN::Engine& engine, ZHLN::WindowID) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
     );
 
     // The engine is gone, and with it the scheduler the benchmark's World waits

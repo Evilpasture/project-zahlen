@@ -88,7 +88,7 @@ struct CookedAnimTrack {
 
 using AssetLoadRequest = FS::LoadRequest;
 
-class AssetManager {
+class ZHLN_API AssetManager {
   public:
     AssetManager() = default;
     ~AssetManager();

@@ -803,7 +803,7 @@ void Initialize(ZHLN::Engine& engine) {
     AddInspectorLighting(engine);
 
     engine.GetPlatformHost().SetFileDropHandler(&OnFileDropped, state);
-    engine.SetUICallback([](ZHLN::Engine& eng) -> void { RenderFrame(eng); });
+    engine.SetUICallback([](ZHLN::Engine& eng, ZHLN::WindowID) -> void { RenderFrame(eng); });
 
     ZHLN::Log("[glTF Inspector] Initialized. Drop a .glb / .gltf file to begin.");
 }

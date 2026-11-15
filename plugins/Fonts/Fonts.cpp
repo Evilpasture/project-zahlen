@@ -340,24 +340,6 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
 // State lives on the heap and is owned via core's hook user pointer.
 // No namespace-scope globals.
 
-void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source) {
-    // Retire previous heap instance, if any, via core's current user pointer.
-    // Ownership is held by a unique_ptr even across the C-style void* seam
-    // (R.11: avoid explicit new/delete, R.20: unique_ptr represents ownership).
-    if (GUI::HasBakedFontLoader()) {
-        if (void* old = GUI::GetBakedFontLoaderUser(); old != nullptr) {
-            std::unique_ptr<LoaderInstance> oldOwner{static_cast<LoaderInstance*>(old)};
-        }
-    }
-
-    auto instance = std::make_unique<LoaderInstance>();
-    instance->assets = &assets;
-    instance->source = source;
-    instance->cache = {};
-    instance->attempted = false;
-    GUI::InstallBakedFontLoader(&LoaderFn, instance.release());
-}
-
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
     if (GUI::HasBakedFontLoader()) {
         if (void* old = GUI::GetBakedFontLoaderUser(); old != nullptr) {
@@ -379,81 +361,6 @@ void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
         GUI::UninstallBakedFontLoader();
         (void)e;
     });
-}
-
-auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
-    // Install the loader hook first so fontbm pairs are resolvable.
-    InstallBakedFontLoader(assets, source);
-
-    // Cooked 'FNT0' out of the mounted paks (the shipped path: data/base.pak).
-    // Silent on failure here -- whether a container exists is the pak's business.
-    const auto loadCookedContainer = [&]() -> std::expected<AssetID, ErrorCode> {
-        auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath);
-        if (!res.has_value()) {
-            return std::unexpected(res.error());
-        }
-        Log("[Fonts] Baked font resolved from the cooked container '{}'.", source.zfontPath);
-        return *res;
-    };
-
-    // The fontbm pair, read here rather than through the hook: the hook falls
-    // back to the cooked container internally, which would put the placeholder
-    // back in play and make the source of the bake unknowable. The hook stays
-    // installed regardless -- core consults it on its own resolution path.
-    // AssetCache owns lifetime; the factory does the parsing. Cached as
-    // kDefaultFontAssetID so the atlas lookup finds it without touching disk.
-    const auto loadFontbmPair = [&]() -> std::expected<AssetID, ErrorCode> {
-        LoaderInstance self;
-        self.assets = &assets;
-        self.source = source;
-
-        auto baked = LoadFontBMPair(self);
-        if (!baked.has_value()) {
-            // MissingMetrics means the descriptor is not there at all (the normal
-            // case for a stock virtual path); anything else means it was read and
-            // rejected, which the caller cannot see from the failed return alone.
-            if (!baked.error().Is(FontBMError::MissingMetrics)) {
-                LogWarning("BMFont descriptor '{}' failed to parse ({}).", source.fntPath, baked.error());
-            }
-            return std::unexpected(baked.error());
-        }
-        if (baked->coverage.empty()) {
-            return std::unexpected(FontBMError::MissingMetrics);
-        }
-        auto heap = std::make_unique<GUI::BakedFontAsset>(*baked);
-        assets.CacheFont(GUI::kDefaultFontAssetID, std::move(heap));
-        GUI::SetDefaultBakedFont(*baked);
-        Log("[Fonts] Baked font resolved from the fontbm pair '{}' ({} glyphs).", source.fntPath, baked->glyphs.size());
-        return GUI::kDefaultFontAssetID;
-    };
-
-    // The order is the source's to choose (see BakedFontSource::preferFontbmPair):
-    // zcook always packs the Font8x8 placeholder at fonts/default.zfont, so a
-    // host that names its own pair would otherwise be handed the placeholder.
-    // Whichever source is tried last is the one whose failure goes back to the
-    // caller -- each source logs its own reason as it is tried, so the return
-    // only has to name the condition, not re-describe it.
-    if (source.preferFontbmPair) {
-        auto pair = loadFontbmPair();
-        if (pair.has_value()) {
-            return *pair;
-        }
-        auto cooked = loadCookedContainer();
-        if (!cooked.has_value()) {
-            return std::unexpected(cooked.error());
-        }
-        return *cooked;
-    }
-
-    auto cooked = loadCookedContainer();
-    if (cooked.has_value()) {
-        return *cooked;
-    }
-    auto pair = loadFontbmPair();
-    if (!pair.has_value()) {
-        return std::unexpected(pair.error());
-    }
-    return *pair;
 }
 
 auto VendoredDefaultFontSource() -> BakedFontSource {

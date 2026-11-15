@@ -7,6 +7,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -31,8 +32,13 @@ class PresentationTarget;
 
 class ZHLN_API Window {
   public:
-    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver);
+    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver,
+           WindowID id = WindowID::Invalid);
     ~Window();
+
+    // Stable for the window's lifetime, and never reused within one session: a
+    // host keys its per-window state (callbacks, viewport, camera) by this.
+    [[nodiscard]] auto ID() const noexcept -> WindowID;
 
     Window(const Window&)            = delete;
     Window& operator=(const Window&) = delete;

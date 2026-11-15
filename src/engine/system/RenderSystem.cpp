@@ -560,7 +560,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return std::unexpected(scene_res.error());
     }
 
-    if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
+    // This window's UI, drawn into this window's attachment.
+    if (const UIDrawData uiData = engine.GetPendingUIData(WindowID::Primary); !uiData.Empty()) {
         if (auto ui_res = gpuFrame.RenderUI(
                 UIView {
                     .viewport   = {},
@@ -572,7 +573,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
             !ui_res) {
             return std::unexpected(ui_res.error());
         }
-        engine.SetPendingUIData(UIDrawData {});
+        engine.SetPendingUIData(WindowID::Primary, UIDrawData {});
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
@@ -598,6 +599,37 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
             !cursor_res) {
             return std::unexpected(cursor_res.error());
         }
+    }
+
+    // Every other window in the session, in the same frame: the host's draw hook
+    // for that window runs against that window's own acquired image, so one Tick
+    // drives an editor window and its preview without a second runner.
+    for (Window* window: engine.Windows()) {
+        if (window == nullptr || window->ID() == WindowID::Primary) {
+            continue;
+        }
+        const auto draw = engine.GetWindowDrawCallback(window->ID());
+        if (!draw || !static_cast<bool>(*draw)) {
+            continue;
+        }
+        const Extent2D size = window->GetSize();
+        if (size.width == 0 || size.height == 0) {
+            continue;
+        }
+        auto windowTarget = engine.AcquireTarget(*window);
+        if (!windowTarget) {
+            return std::unexpected(windowTarget.error());
+        }
+        if (!windowTarget->has_value()) {
+            continue; // minimized or not presentable this frame
+        }
+        const Engine::WindowRenderView view {
+            .id         = window->ID(),
+            .target     = **windowTarget,
+            .size       = size,
+            .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+        };
+        (*draw)(engine, view, gpuFrame);
     }
 
     if (auto end_res = std::move(gpuFrame).End(); !end_res) {

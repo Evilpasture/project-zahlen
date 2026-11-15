@@ -462,29 +462,22 @@ add_subdirectory(src/render)
 # consumers it was written for. Visibility is now stated where it can be read:
 # on the target in src/vulkan/CMakeLists.txt, or at the declaration itself.
 
-if(MINGW)
-    # PE side of the question visibility answers for ELF: what does the engine's
-    # shared library export?
-    #
-    # On ELF the engine exports everything its own consumers reach, and only the
-    # renderer and the fiber trampoline are hidden -- an exception that exists for
-    # symbol preemption, something PE does not have, since a DLL binds intra-image
-    # by default. What PE does have is a much
-    # narrower export set: GNU ld stops auto-exporting as soon as one object carries
-    # __declspec(dllexport), which every ZHLN_API declaration does. Only the
-    # annotated public API would be exported, and the engine's own consumers call
-    # more than that on purpose -- the header-inline Panic<> reaches InternalPanic,
-    # the ECS Registry holds a Mutex whose slow paths are out of line,
-    # EntityCommandBuffer::Playback, Fiber and TaskSystem are non-public by design
-    # and all reachable from a test. They link on Linux because the .so exports
-    # everything; without this flag the Windows test executables fail with
-    # `undefined reference to ZHLN::Mutex::LockSlow()`.
-    #
-    # Exporting the whole image restores the ELF behaviour. The DLL is a private
-    # build artifact and its import library is what consumers link, so the wider
-    # export table costs nothing.
-    target_link_options(zahlen_engine PRIVATE -Wl,--export-all-symbols)
-endif()
+# The engine's shared library exports its annotated API and nothing else.
+#
+# ZHLN_API is the whole export set: on Windows it is __declspec(dllexport), off
+# it is [[gnu::visibility("default")]]. The preset below makes that annotation
+# decide, on both toolchains, which is what keeps ZHLN_API honest -- a symbol a
+# consumer reaches has to be declared, not merely linked. zahlen_vulkan already
+# states the same thing the same way.
+#
+# This replaces -Wl,--export-all-symbols, which was here because objects that
+# are not part of the public API (Mutex::LockSlow, EntityCommandBuffer::Playback,
+# TaskSystem, Fiber) are reached from the engine's own consumers. Those
+# consumers are first-party and build against this target, so they link the
+# internal archive instead of importing the hidden symbols back out of the DLL.
+set_target_properties(zahlen_engine PROPERTIES C_VISIBILITY_PRESET hidden
+                                               CXX_VISIBILITY_PRESET hidden
+                                               VISIBILITY_INLINES_HIDDEN ON)
 
 set_target_properties(zahlen_engine PROPERTIES CXX_STANDARD 26
                                                CXX_STANDARD_REQUIRED ON)
@@ -593,6 +586,15 @@ if(ZHLN_BUILD_RENDER)
 endif()
 foreach(ZHLN_ENGINE_LIB_TARGET IN LISTS ZHLN_ENGINE_LIB_TARGETS)
     target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
+    # Same reason as the definition above, for export rather than import: these
+    # archives' objects end up inside libzahlen_engine.so, so the export set is
+    # theirs to decide too. A preset on zahlen_engine alone would only cover the
+    # objects it compiles itself -- src/engine and src/core -- and leave Mutex,
+    # EntityCommandBuffer, TaskSystem and the whole renderer at default
+    # visibility, which is exactly the leak this is here to close.
+    set_target_properties(${ZHLN_ENGINE_LIB_TARGET} PROPERTIES C_VISIBILITY_PRESET hidden
+                                                              CXX_VISIBILITY_PRESET hidden
+                                                              VISIBILITY_INLINES_HIDDEN ON)
 endforeach()
 
 # Windows: the MinGW link surface the engine's own sources need.

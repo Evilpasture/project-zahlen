@@ -46,7 +46,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
-target_link_libraries(${TARGET_NAME} PRIVATE
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_stb_image
     zahlen_serialization
     zahlen_warnings
 )

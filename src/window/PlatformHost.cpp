@@ -218,7 +218,7 @@ auto PlatformHost::CreateWindowed(const String32& title, uint32_t width, uint32_
     -> PlatformHost {
     PlatformHost host;
 
-    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver);
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, WindowID::Primary);
     if (window->GetNativeHandle() == nullptr) {
         ZHLN::Log("[Host] Windowed session failed: the OS window could not be created.");
         return host;

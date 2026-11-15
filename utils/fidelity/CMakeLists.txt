@@ -41,6 +41,7 @@ zahlen_add_runtime_dlls(fidelity)
 # is noise; Jolt was linked for a JPH_DOUBLE_PRECISION that nothing here uses.
 target_link_libraries(fidelity PRIVATE
     zahlen_serialization
+    zahlen_stb_image
 )
 
 target_include_directories(fidelity SYSTEM PRIVATE

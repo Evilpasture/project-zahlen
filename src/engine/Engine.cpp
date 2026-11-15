@@ -31,10 +31,11 @@
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
+#include "KernelSession.hpp"
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include "PrefabFactoryInternal.hpp"
@@ -71,7 +72,7 @@ enum class EngineInitError : uint8_t {
 };
 
 struct EngineImpl {
-    std::unique_ptr<Kernel> kernel;
+    std::unique_ptr<KernelSession> kernel;
     std::unique_ptr<World>  world;
 
     // The input router. It lives here, not in the World, because nothing in the
@@ -83,8 +84,15 @@ struct EngineImpl {
     // once in InitInternal. There is no Inject* path from outside the engine.
     InputContext input;
 
-    Engine::UICallback                      uiCallback = nullptr;
-    UIDrawData                              pendingUIData {};
+    // Per-window UI and draw hooks, keyed by WindowID. Keyed rather than
+    // indexed by a slot in a vector: windows are added and removed while the
+    // engine runs, and a WindowID stays valid for the window's lifetime.
+    ZHLN::HashMap<WindowID, Engine::UICallback>         uiCallbacks;
+    ZHLN::HashMap<WindowID, UIDrawData>                 pendingUIData;
+    ZHLN::HashMap<WindowID, Engine::WindowDrawCallback> windowDrawCallbacks;
+    // Window* -> the ID the engine gave it, so RemoveWindow can release that
+    // window's state without the caller having to keep the ID as well.
+    ZHLN::HashMap<const Window*, WindowID>              windowIDs;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
     uint64_t                                deviceGeneration = 0;
 
@@ -342,13 +350,13 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         .onGamepadState      = onGamepadState,
     };
 
-    auto kernel_res = Kernel::Create(cfg, receiver);
+    auto kernel_res = KernelSession::Create(cfg, receiver);
     if (!kernel_res) {
         return std::unexpected(kernel_res.error());
     }
     _impl->kernel = std::move(kernel_res.value());
 
-    // World and Kernel outlive the binding; it must exist before the lazy
+    // World and KernelSession outlive the binding; it must exist before the lazy
     // SimServices graph is created and before the first Engine::Physics call.
     _impl->world->GetPhysics().BindCollisionAssetResolver(
         [](void* context, CollisionAssetID id) noexcept -> std::shared_ptr<const Physics::MeshGeometry> {
@@ -381,7 +389,7 @@ Engine::~Engine() {
             hook(*this);
         }
 
-        // Release external handles while both the World and Kernel still live.
+        // Release external handles while both the World and KernelSession still live.
         // The World destructor can safely clear its already-empty registry.
         ReleaseSceneContents();
     }
@@ -413,7 +421,7 @@ void Engine::SynchronizeResize() {
     const Extent2D actual = _impl->kernel->GetPlatformHost().GetSize();
     if (resized->width != actual.width || resized->height != actual.height) {
         // Headless/TTY receivers can submit a size without a primary-window
-        // extent change; windowed targets were already handled by the Kernel.
+        // extent change; windowed targets were already handled by the KernelSession.
         _impl->kernel->GetRenderContext().SetResolution(*resized);
     }
 }
@@ -442,11 +450,29 @@ auto Engine::GetWindow() noexcept -> ZHLN::Optional<Window&> {
 
 auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
     -> ZHLN::Optional<Window&> {
-    return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver);
+    // The ID is the engine's to assign: a host addressing a window it did not
+    // create still needs a stable key, and a window that invented its own would
+    // be a second source of identity.
+    const WindowID id = _impl->kernel->NextWindowID();
+    auto           window = _impl->kernel->AddWindow(title, width, height, fullscreen, receiver, id);
+    if (window) {
+        _impl->windowIDs.Insert(&*window, id);
+    }
+    return window;
 }
 
 void Engine::RemoveWindow(Window& window) {
+    if (const auto id = _impl->windowIDs.Find(&window)) {
+        _impl->uiCallbacks.Erase(*id);
+        _impl->pendingUIData.Erase(*id);
+        _impl->windowDrawCallbacks.Erase(*id);
+        _impl->windowIDs.Erase(&window);
+    }
     _impl->kernel->RemoveWindow(window);
+}
+
+auto Engine::Windows() const noexcept -> std::span<Window* const> {
+    return _impl->kernel->Windows();
 }
 
 auto Engine::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
@@ -535,7 +561,16 @@ struct EngineCore {
     // every action map against what has arrived since the last evaluation.
     // Re-evaluation is safe to repeat within a frame by design.
     static auto EvaluateInput(Engine& engine, float, FrameContext&) -> void {
-        if (engine._impl->pendingUIData.Empty()) {
+        // Any window that drew UI this frame keeps the capture it asked for.
+        // The question is session-wide because the pointer is: one OS cursor
+        // cannot be captured for one window and not another.
+        bool anyUIDrawn = false;
+        engine._impl->pendingUIData.ForEach([&](const WindowID&, const UIDrawData& data) {
+            if (!data.Empty()) {
+                anyUIDrawn = true;
+            }
+        });
+        if (!anyUIDrawn) {
             engine._impl->input.SyncCaptureFlags(false, false);
         }
         engine._impl->input.RefreshActionsForCurrentFrame(&engine._impl->world->GetEventBus());
@@ -772,16 +807,49 @@ void Engine::SetGameState(void* state) {
     _impl->gameState = state;
 }
 
+void Engine::SetUICallback(WindowID window, UICallback callback) {
+    if (callback) {
+        _impl->uiCallbacks.Insert(window, std::move(callback));
+    } else {
+        _impl->uiCallbacks.Erase(window);
+    }
+}
+
 void Engine::SetUICallback(UICallback callback) {
-    _impl->uiCallback = std::move(callback);
+    SetUICallback(WindowID::Primary, std::move(callback));
+}
+
+auto Engine::GetUICallback(WindowID window) const noexcept -> ZHLN::Optional<const UICallback&> {
+    return _impl->uiCallbacks.Find(window);
+}
+
+auto Engine::GetWindowDrawCallback(WindowID window) const noexcept -> ZHLN::Optional<const WindowDrawCallback&> {
+    return _impl->windowDrawCallbacks.Find(window);
+}
+
+void Engine::SetWindowDrawCallback(WindowID window, WindowDrawCallback callback) {
+    if (callback) {
+        _impl->windowDrawCallbacks.Insert(window, std::move(callback));
+    } else {
+        _impl->windowDrawCallbacks.Erase(window);
+    }
+}
+
+void Engine::SetPendingUIData(WindowID window, UIDrawData uiData) noexcept {
+    _impl->pendingUIData.Insert(window, uiData);
+}
+
+auto Engine::GetPendingUIData(WindowID window) const noexcept -> UIDrawData {
+    const auto found = _impl->pendingUIData.Find(window);
+    return found.has_value() ? *found : UIDrawData {};
 }
 
 void Engine::SetPendingUIData(UIDrawData uiData) noexcept {
-    _impl->pendingUIData = uiData;
+    SetPendingUIData(WindowID::Primary, uiData);
 }
 
 auto Engine::GetPendingUIData() const noexcept -> UIDrawData {
-    return _impl->pendingUIData;
+    return GetPendingUIData(WindowID::Primary);
 }
 
 void Engine::SetFontAtlas(const FontAtlas& fontAtlas) noexcept {
@@ -959,10 +1027,6 @@ void Engine::AddTeardownHook(TeardownHook hook) {
     }
 }
 
-auto Engine::GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&> {
-    return _impl->uiCallback ? ZHLN::Optional<const UICallback&> {_impl->uiCallback} : ZHLN::Optional<const UICallback&> {std::nullopt};
-}
-
 void Engine::ProvokeDeviceLost() {
     _impl->kernel->ProvokeDeviceLost();
 }
@@ -1022,7 +1086,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
     }
 
     if (uiCallback) {
-        engine->SetUICallback(std::move(uiCallback));
+        engine->SetUICallback(WindowID::Primary, std::move(uiCallback));
     }
     Clock        runClock({.maxDeltaTime = 0.1f});
 
@@ -1047,7 +1111,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         // belongs to Engine::Tick, so discard this unused one.
         runClock.ResetFixedAccumulator();
 
-        // Kernel/Engine already synchronized a resize during ProcessEvents.
+        // KernelSession/Engine already synchronized a resize during ProcessEvents.
         constexpr double           kFpsCapSlack = 1.05;
         const std::optional<float> pacedDt      = engine->Graphics().PacedDeltaTime();
         const bool  displayPaced = pacedDt.has_value() && (maxFramesPerSecond == 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);

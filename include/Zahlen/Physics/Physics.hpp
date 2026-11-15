@@ -138,8 +138,8 @@ static_assert(
 );
 
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
-auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
-auto GetBodyID(const PhysicsWorld& world, Physics::BodyID handle) -> JPH::BodyID;
+ZHLN_API auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
+ZHLN_API auto GetBodyID(const PhysicsWorld& world, Physics::BodyID handle) -> JPH::BodyID;
 
 struct DualShapeConfig {
     float lifterRadius   = 0.40f;
@@ -159,7 +159,7 @@ struct DualShapeConfig {
     }
 };
 
-auto CreateDualShape(const DualShapeConfig& config = {}) -> JPH::ShapeRefC;
+ZHLN_API auto CreateDualShape(const DualShapeConfig& config = {}) -> JPH::ShapeRefC;
 
 // Character creation owns Jolt shape/plane objects, so it belongs with the
 // physics implementation rather than in the Jolt-free query value types.

@@ -45,8 +45,18 @@ namespace { namespace Steps {
 // step that needs engine-private state has to be written where that state is
 // visible.
 void HostUICallback(Engine& engine, float, FrameContext&) {
-    if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
-        (*cb)(engine);
+    // Once per window, in window order. A window with no callback draws no UI,
+    // and a window's callback is told which window it is drawing -- that is the
+    // difference between an editor window and a preview window sharing one
+    // engine and one frame.
+    for (Window* window: engine.Windows()) {
+        if (window == nullptr) {
+            continue;
+        }
+        const WindowID id = window->ID();
+        if (const auto cb = engine.GetUICallback(id); cb && static_cast<bool>(*cb)) {
+            (*cb)(engine, id);
+        }
     }
 }
 

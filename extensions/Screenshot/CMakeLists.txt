@@ -14,7 +14,7 @@ target_include_directories(zahlen_screenshot
     PUBLIC ${PROJECT_SOURCE_DIR}/extensions
     PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb
 )
-target_link_libraries(zahlen_screenshot PUBLIC zahlen_engine PRIVATE zahlen_warnings)
+target_link_libraries(zahlen_screenshot PUBLIC zahlen_engine PRIVATE zahlen_stb_image zahlen_warnings)
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_screenshot)
 endif()
