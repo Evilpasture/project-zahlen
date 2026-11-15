@@ -55,13 +55,6 @@ auto Numbers(std::initializer_list<double> values) -> ZHLN::ScriptVal {
 }
 
 // A BoxedObject naming T and pointing at an existing instance.
-//
-// The name comes from the trait rather than Reflect::TypeName<T>() because the
-// no-reflection stub in Core/Reflection/Core.hpp returns "" for every type, which
-// would make the mismatch case below compare "" to "" and pass vacuously on a
-// build without reflection. On a reflection build these are the same string
-// std::meta::identifier_of produces, so the test reflects what a real producer
-// writes either way.
 template <typename T>
 auto BoxOf(T* ptr) -> ZHLN::ScriptVal {
     ZHLN::BoxedObject box {};

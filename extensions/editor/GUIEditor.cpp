@@ -4,9 +4,7 @@
 // extensions/editor/GUIEditor.cpp
 //
 // Native editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
-// for the design notes; this file is where the reflection iteration lives, so
-// that the transpiler fallback (scripts/transpile_reflection.py, which rewrites
-// reflection calls by translation-unit source offset) sees and flattens it.
+// for the design notes; this file is where the reflection iteration lives.
 
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Math/Matrix.hpp>
@@ -77,11 +75,7 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
 }
 
 // The components the editor can add -- the same set, in the same order, as the
-// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
-// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
-// static type, which the transpiler fallback requires (see the invariant note
-// in DrawInspectorPanel), and a table-driven version would make that type
-// dependent and flatten to zero rows.
+// sections DrawInspectorPanel draws below.
 constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
@@ -642,11 +636,6 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::Entities& reg, EditorState& state
     gui.Text(std::string_view(ZHLN::FormatTo(headerBuf, "Entity {}", sel.index)), 13.0f);
 
     // One collapsing section per editable component.
-    //
-    // Invariant: The call's object expression must have a CONCRETE static
-    // type. The transpiler fallback extracts the field list from the object's
-    // type, so a call inside a template with a dependent T would flatten to
-    // zero rows.
     const auto section = [&](std::string_view sectionId, std::string_view title, auto comp, auto&& reflect) -> void {
         if (!comp)
             return;

@@ -3,11 +3,13 @@
 
 # cmake/ReflectionConfig.cmake
 #
-# C++26 static reflection (-freflection / P2996): what the compiler supports,
-# the fallback transpiler for compilers that do not, and the per-target flag
-# helpers the root CMakeLists applies. Reflection is not a per-target feature --
-# it changes struct layout -- so the helpers are deliberately centralised here
-# and applied from the root's REFLECTION FLAGS PROPAGATION section.
+# C++26 static reflection (-freflection / P2996): what the compiler supports and
+# the per-target flag helpers the root CMakeLists applies. There is no fallback
+# transpiler; a compiler without -freflection is a configure error.
+#
+# Reflection is not a per-target feature -- it changes struct layout -- so the
+# helpers are deliberately centralised here and applied from the root's
+# REFLECTION FLAGS PROPAGATION section.
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CompilerFlagProbe)
@@ -30,60 +32,10 @@ if(COMPILER_HAS_REFLECTION)
         endif()
     endif()
 else()
-    if(NOT ZHLN_HAS_PYTHON)
-        message(FATAL_ERROR
-            "C++26 static reflection (-freflection) is not supported by ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}), "
-            "and Python 3 was not found (ZHLN_HAS_PYTHON=OFF) to run the fallback reflection transpiler "
-            "(scripts/transpile_reflection.py). Configure with a -freflection compiler (GCC 16+ or clang-p2996) "
-            "or install Python 3.")
-    endif()
-    message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
+    message(FATAL_ERROR
+        "C++26 static reflection (-freflection) is required, but ${CMAKE_CXX_COMPILER_ID} "
+        "(${CMAKE_CXX_COMPILER}) does not support it. Use GCC 16+ or a clang-p2996 fork.")
 endif()
-
-# --- FALLBACK TRANSPILER (compilers without -freflection) ---
-set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/transpile_reflection.py")
-
-function(zahlen_transpile_sources OUT_SOURCES_VAR)
-    if(COMPILER_HAS_REFLECTION)
-        # Native support: Return sources untouched
-        set(${OUT_SOURCES_VAR} ${ARGN} PARENT_SCOPE)
-        return()
-    endif()
-
-    set(PROCESSED_SRCS "")
-    set(ORIG_SOURCE_DIRS "")
-
-    foreach(SRC IN LISTS ARGN)
-        get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
-        get_filename_component(ABS_DIR "${ABS_SRC}" DIRECTORY)
-        list(APPEND ORIG_SOURCE_DIRS "${ABS_DIR}")
-
-        file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
-        set(OUT_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
-        get_filename_component(OUT_DIR "${OUT_SRC}" DIRECTORY)
-
-        file(MAKE_DIRECTORY "${OUT_DIR}")
-
-        # At build time, run the Python transpiler using the compilation database
-        add_custom_command(
-            OUTPUT "${OUT_SRC}"
-            COMMAND Python3::Interpreter "${ZHLN_TRANSPILER_SCRIPT}"
-                    --input "${ABS_SRC}"
-                    --output "${OUT_SRC}"
-                    --compdb "${CMAKE_BINARY_DIR}"
-            DEPENDS "${ABS_SRC}" "${ZHLN_TRANSPILER_SCRIPT}"
-            COMMENT "Flattening Reflection in ${REL_SRC}..."
-            VERBATIM
-        )
-        list(APPEND PROCESSED_SRCS "${OUT_SRC}")
-    endforeach()
-
-    # Register original source directories so transpiled files in build/ can locate relative headers
-    list(REMOVE_DUPLICATES ORIG_SOURCE_DIRS)
-    include_directories(${ORIG_SOURCE_DIRS})
-
-    set(${OUT_SOURCES_VAR} ${PROCESSED_SRCS} PARENT_SCOPE)
-endfunction()
 
 # --- PER-TARGET REFLECTION FLAGS & CUSTOM LIBC++ ---
 # --- the custom libc++ ------------------------------------------------------

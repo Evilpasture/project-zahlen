@@ -4,28 +4,17 @@
 // extensions/editor/GUIEditor.hpp
 //
 // The self-hosting editor's first native panels: a scene Hierarchy and a
-// reflection-driven Inspector, built entirely from ZHLN::GUI primitives.
-// No ImGui, no editor-private widget vocabulary — the editor is an ordinary
-// UI scene that edits another UI scene.
+// reflection-driven Inspector, built from ZHLN::GUI primitives. The editor is an
+// ordinary UI scene that edits another UI scene.
 //
-// Design notes:
-//
-//   * The editor draws into the same GUI::Context as the scene it edits.
-//     The entity capability is passed separately: GUI::Context is pure layout
-//     and does not own or expose ECS state.
-//
-//   * The inspector is generic. Component fields are enumerated through
-//     ZHLN::Reflect::ForEachFieldWithName, so a new component (or a new field
-//     on an existing one) shows up in the inspector without touching this
-//     file. Field dispatch: float -> Slider, bool -> Checkbox, int -> Slider
-//     with step 1, enum -> Dropdown (via ZHLN::Reflect::EnumNames), String64/
-//     String256 -> TextInput stub, FVec4 -> four sliders. Handles,
-//     textures and padding fields (leading '_') get no row in this version.
-//
-//   * The reflection iteration lives in extensions/editor/GUIEditor.cpp, not here.
-//
-//   * Both panels are plain frame functions: call them once per frame inside
-//     your editor layout (a Columns split, a dock, ...).
+//   * Both panels draw into the same GUI::Context as the scene they edit; the
+//     entity capability is passed separately.
+//   * The inspector is generic: fields are enumerated through
+//     Reflect::ForEachFieldWithName, so a new component or field shows up
+//     without touching this file. float -> Slider, bool -> Checkbox,
+//     int -> Slider(step 1), enum -> Dropdown, String -> TextInput,
+//     FVec4 -> four sliders. Handles, textures and '_' padding get no row.
+//   * Both are plain frame functions: call them once per frame.
 
 #pragma once
 

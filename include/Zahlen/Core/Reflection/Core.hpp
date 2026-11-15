@@ -158,13 +158,13 @@ consteval auto ScopedTypeName() -> std::string_view {
 
 #else
 
-// The stub era is over: no ZHLN_ALLOW_REFLECTION_STUBS exemption, no
-// __PRETTY_FUNCTION__ name extraction. A translation unit that reaches
-// here lacks -freflection and says so.
+// The single place a reflection-free build is turned away. Reflection changes
+// struct layout, so there is no useful degraded mode: the headers below carry no
+// stand-ins, and a TU that reaches here would be reading empty ones.
 static_assert(ReflectionAvailable,
               "ZHLN requires C++26 static reflection (-freflection); "
               "give the CMake target zahlen_enable_reflection(<target>)");
 
-#endif
+#endif  // ZHLN_REFLECTION_AVAILABLE
 
 }

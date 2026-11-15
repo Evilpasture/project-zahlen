@@ -5,47 +5,21 @@
 //
 // The interactive half of the benchmark extension: a Clay panel over an
 // Engine-hosted window, driving the same LogicBenchmark the headless target
-// measures.
+// measures. The benchmark's World is its own, so a host can hang this panel on
+// its frame without giving up its scene, input or HUD.
 //
-// The Engine is the host, not a participant. The benchmark's World is its own
-// -- no scene, no camera, no render components, nothing the host's world can
-// collide with -- so a game or sample that wants the numbers can hang this
-// panel on its own frame without giving up its scene, its input or its HUD.
+//   UpdateAndRenderUI(Engine&, float)  owns the UI frame. Run() drives it from
+//                                      a windowed loop for the standalone tool.
+//   DrawPanels(GUI::Context&, Engine&) draws into a frame the host already
+//                                      opened -- two authors, one Clay frame.
 //
-// Two entry points, two panels:
-//
-//   * UpdateAndRenderUI(Engine&, float) owns the UI frame -- BeginFrame, the
-//     visible panels, EndFrame, SetPendingUIData. A host whose UI callback *is*
-//     the benchmark calls it and nothing else. Run() drives it from a windowed
-//     loop for the standalone tool.
-//
-//   * DrawPanels(GUI::Context&, Engine&) draws into a frame the host already
-//     opened: two authors, one Clay frame. This is what a host with a HUD of
-//     its own wants -- BSPMurderDronesSample draws its crosshair and these
-//     panels between one pair of BeginFrame/EndFrame, because a second frame in
-//     the same tick would clear the first one's geometry. DrawPanel and
-//     DrawTelemetryPanel are the same thing one panel at a time.
-//
-// The panels themselves are two, because they measure two different things:
-//
-//   * the logic benchmark's panel (F3 in the app and the sample) times a World
-//     stepped on a fixed timestep -- what the engine costs per tick;
-//   * the telemetry panel (F4) times the host's own frames and reads the
-//     engine's profiler -- average FPS, the 1% / 0.1% lows, and the GPU stage
-//     timings the renderer already records and nobody was reading.
-//
-// Either way the benchmark advances at its own fixed timestep (see kFixedStep)
-// rather than at the host's frame rate, so the numbers do not move when the
-// host's dt does, and both panels start hidden: a host shows them.
+// Either way the benchmark advances at its own fixed timestep (see kFixedStep),
+// so the numbers do not move when the host's dt does.
 //
 // Lifetime: an attached viewer owns a World, and a World's teardown reaches the
-// TaskSystem (PhysicsContext's destructor waits on its job counter before it
-// releases anything). Keep the viewer in the same scope as the Engine it was
-// attached to -- inside the host's TaskSystem::Scope, which is where the
-// engine's own World lives out its life. Run() releases the benchmark itself
-// before it returns, so a viewer the host keeps afterwards holds no World;
-// BSPMurderDronesSample keeps its panel as a local of main() for the same
-// reason, and the app's overlay is owned by the engine's UI callback.
+// TaskSystem. Keep the viewer in the same scope as the Engine it was attached
+// to. Run() releases the benchmark before it returns, so a viewer the host
+// keeps afterwards holds no World.
 #pragma once
 
 #include <Benchmark/Benchmark.hpp>

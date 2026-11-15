@@ -4,35 +4,25 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
+
 // plugins/BSP/BSPLighting.hpp
 //
 // The lighting half of the BSP workflow: every rule that turns a compiled
 // Source map into light for the engine's PBR / RTGI / DDGI pipeline when the
-// map's own baked lighting (LUMP_LIGHTING / LUMP_LIGHTING_HDR, i.e. VRAD) is
-// not the source of truth.
+// map's own baked lighting (LUMP_LIGHTING, i.e. VRAD) is not the source of
+// truth.
 //
-// Source encodes lighting in four places, and only two of them are "light
-// entities":
+// Source encodes lighting in four places: LUMP_ENTITIES point lights
+// (light, light_spot, light_environment, ...), LUMP_TEXDATA material
+// properties (reflectivity, SURF_NOLIGHT), the .vmt behind each material
+// ($selfillum and friends, shader class), and the .vtf behind it (texel
+// luminance).
 //
-//   1. LUMP_ENTITIES point lights      -- light, light_spot,
-//                                         light_environment, point_spotlight,
-//                                         light_dynamic,
-//                                         env_projectedtexture
-//   2. LUMP_TEXDATA material properties -- reflectivity, and the SURF_NOLIGHT
-//                                         texinfo flag vbsp sets on
-//                                         self-illuminated surfaces
-//   3. The .vmt behind each material   -- $selfillum, $selfillumtint,
-//                                         $selfillummaskscale, shader class
-//                                         (UnlitGeneric / MonitorScreen / ...)
-//   4. The .vtf behind each material   -- actual texel luminance
+// Nothing here touches the GPU, the ECS or an instantiator: the same
+// engine-free contract as BSPGeometry.hpp.
 //
-// Nothing here touches the GPU, the ECS, or an instantiator: the same
-// engine-free contract as BSPGeometry.hpp. The importer adapter refines the
-// material-driven parts (VMT/VTF) and hands the results to the renderer.
-//
-// Every heuristic is a named, documented rule with a counter in
-// LightingDiagnostics, so "why is my scene dark?" is answerable from a log
-// line instead of a guess.
+// Every heuristic is a named rule with a counter in LightingDiagnostics, so
+// "why is my scene dark?" is answerable from a log line.
 
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"

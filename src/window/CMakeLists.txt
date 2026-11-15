@@ -7,9 +7,7 @@ set(RAW_WINDOW_SOURCES
     Window.cpp
 )
 
-zahlen_transpile_sources(WINDOW_SOURCES ${RAW_WINDOW_SOURCES})
-
-add_library(zahlen_window STATIC ${WINDOW_SOURCES})
+add_library(zahlen_window STATIC ${RAW_WINDOW_SOURCES})
 set_target_properties(zahlen_window PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 26

@@ -251,7 +251,7 @@ if [[ -f "$BASE_BUILD_DIR/CMakeCache.txt" ]]; then
         mv "$BASE_BUILD_DIR/data" "$BASE_BUILD_DIR/shared_assets/"
     fi
     
-    rm -rf "$BASE_BUILD_DIR/CMakeCache.txt" "$BASE_BUILD_DIR/CMakeFiles" "$BASE_BUILD_DIR"/*.ninja "$BASE_BUILD_DIR"/transpiled
+    rm -rf "$BASE_BUILD_DIR/CMakeCache.txt" "$BASE_BUILD_DIR/CMakeFiles" "$BASE_BUILD_DIR"/*.ninja
 fi
 
 # The asset cache belongs to this build dir, matching

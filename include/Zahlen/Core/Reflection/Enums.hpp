@@ -208,7 +208,6 @@ constexpr void DispatchEnum(E value, F&& f) {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumToMessage(E value) -> std::string_view {
-#if ZHLN_REFLECTION_AVAILABLE
     const auto& entries = kEnumEntries<E>;
     for (std::size_t i = entries.size(); i > 0; --i) {
         if (entries[i - 1].value == value) {
@@ -216,12 +215,6 @@ constexpr auto EnumToMessage(E value) -> std::string_view {
         }
     }
     return "Unknown";
-#else
-    if (auto message = EnumMessageOf(value); !message.empty()) {
-        return message;
-    }
-    return EnumToString(value);
-#endif
 }
 
 template <typename E>

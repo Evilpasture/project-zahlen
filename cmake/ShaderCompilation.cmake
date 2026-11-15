@@ -609,8 +609,7 @@ set(ZHLN_SHADER_CATALOG_SETS
 )
 
 
-# The tool itself: utils/zshader/CMakeLists.txt. Its own directory keeps the
-# transpiler's include_directories() out of the rest of the build.
+# The tool itself: utils/zshader/CMakeLists.txt.
 add_subdirectory("${CMAKE_SOURCE_DIR}/utils/zshader" "${CMAKE_BINARY_DIR}/utils/zshader")
 
 # The blue-noise tile is decoded here, at build time, rather than by the

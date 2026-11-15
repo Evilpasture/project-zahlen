@@ -93,7 +93,6 @@ set(RAW_RENDER_SOURCES
     passes/simulation/ParticleUpdatePass.cpp
 )
 
-zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})
 
 set_source_files_properties(
     "${ZHLN_SHADER_CATALOG_HEADER}"
@@ -141,7 +140,7 @@ if(NOT ZHLN_SYNTAX_ONLY)
     set(ZHLN_RENDER_SHADER_BYTECODE_OBJECTS $<TARGET_OBJECTS:zahlen_shader_bytecode>)
 endif()
 
-add_library(zahlen_render STATIC ${RENDER_SOURCES} ${ZHLN_RENDER_SHADER_BYTECODE_OBJECTS})
+add_library(zahlen_render STATIC ${RAW_RENDER_SOURCES} ${ZHLN_RENDER_SHADER_BYTECODE_OBJECTS})
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_features(zahlen_render PUBLIC cxx_std_26)

@@ -13,9 +13,9 @@
 
 namespace ZHLN {
 
-static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<KeyCode>() == kKeyCodeCount, "KeyCode enumerators must stay contiguous with kKeyCodeCount");
-static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<GamepadButton>() == kGamepadButtonCount, "GamepadButton enumerators must stay contiguous");
-static_assert(!Reflect::ReflectionAvailable || Reflect::EnumCount<GamepadAxis>() == kGamepadAxisCount, "GamepadAxis enumerators must stay contiguous");
+static_assert(Reflect::EnumCount<KeyCode>() == kKeyCodeCount, "KeyCode enumerators must stay contiguous with kKeyCodeCount");
+static_assert(Reflect::EnumCount<GamepadButton>() == kGamepadButtonCount, "GamepadButton enumerators must stay contiguous");
+static_assert(Reflect::EnumCount<GamepadAxis>() == kGamepadAxisCount, "GamepadAxis enumerators must stay contiguous");
 
 namespace {
 

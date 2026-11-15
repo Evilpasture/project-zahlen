@@ -382,14 +382,9 @@ const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/
 const auto       specInfos = spec.Infos(std::span {variants}); // fixed-size array of specialization infos
 ```
 
-The walk is a line at the call site, and that is load-bearing. A build without
-`-freflection` compiles these sources through `zahlen_transpile_sources`, which
-rewrites a `ForEachFieldInfo` call it can see into the per-field calls it stands
-for; hidden inside this type's own constructor body the call would compile
-against the no-op stand-in and the map would come out empty -- not a build
-error, just every variant silently keeping the shader's `= 1` default. The
-infos point at `variants` and at the object's own entry table, so both have to
-outlive the pipeline build they are handed to, as the arrays they replace did.
+The infos point at `variants` and at the object's own entry table, so both have
+to outlive the pipeline build they are handed to, as the arrays they replace
+did.
 
 An entry whose id a module does not declare is ignored by the driver, so a
 module with fewer constants than `T` has fields is fine: the NoRT modules of

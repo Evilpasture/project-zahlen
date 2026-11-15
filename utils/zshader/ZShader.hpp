@@ -164,10 +164,8 @@ void ReflectAllModules(
     std::span<const std::string>              searchPaths
 );
 
-// True when this translation unit can name enumerators at all: a compiler with
-// reflection, or a copy of this file that went through the AST transpiler. The
-// stubs name every value the same thing, so a value that certainly has a name
-// is what tells the two apart -- see Reflect.cpp.
+// True when this translation unit can name enumerators at all. A value that
+// certainly has a name is what tells the two apart -- see Reflect.cpp.
 auto NamesEnumerators() -> bool;
 
 // The generated header: one type per module, one `Vk::ShaderSet<...>` alias per

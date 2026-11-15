@@ -35,13 +35,9 @@
 // On type names
 // -------------
 // Each trait declares its own `scriptName` rather than asking
-// Reflect::TypeName<T>(), and the reason is that the no-reflection stub in
-// Core/Reflection/Core.hpp returns "" for every type. A guard written against
-// TypeName therefore compares "" to "" and accepts anything on a build without
-// reflection -- fail-open, silently. These names are the bare identifiers
-// std::meta::identifier_of produces, so on a reflection build they match what a
-// generic producer writes into BoxedObject::typeName, and on a stub build they
-// do not match "" and the boxed path is refused instead of guessed at.
+// Reflect::TypeName<T>(). These names are the bare identifiers
+// std::meta::identifier_of produces, so they match what a generic producer
+// writes into BoxedObject::typeName.
 
 #pragma once
 

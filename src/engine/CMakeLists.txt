@@ -49,8 +49,7 @@ set(RAW_ENGINE_SOURCES
     Scene.cpp
 )
 
-zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
-target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
+target_sources(zahlen_engine PRIVATE ${RAW_ENGINE_SOURCES})
 
 if(USE_SANITIZERS)
     add_library(zahlen_sanitizer_options OBJECT diagnostics/SanitizerOptions.cpp)

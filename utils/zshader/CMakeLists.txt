@@ -1,11 +1,9 @@
 # utils/zshader/CMakeLists.txt
 #
 # The catalog generator, as its own directory: it is the one target that has to
-# exist before the renderer's sources can be compiled at all, and it is built
-# from sources that go through the transpiler -- which registers source
-# directories with include_directories() for the transpiled copies to find their
-# headers through. Scoping that to this directory is why the target is not
-# declared inline in cmake/ShaderCompilation.cmake, where it used to live.
+# exist before the renderer's sources can be compiled at all. Scoping it to this
+# directory is why the target is not declared inline in
+# cmake/ShaderCompilation.cmake, where it used to live.
 
 # Eight translation units: the model they share (ZShader.hpp), the command line
 # (main.cpp), the argument and file helpers (ZShader.cpp), the batch manifest
@@ -30,15 +28,8 @@ set(ZHLN_ZSHADER_SOURCES
 # link the engine: zahlen_engine links zahlen_render, which compiles the catalog
 # this tool writes, so an edge back would be a cycle.
 #
-# It used to run its sources through zahlen_transpile_sources() for the benefit
-# of a compiler without -freflection. That path is gone: the reflection headers
-# require -freflection outright (Core/Reflection/Core.hpp takes the no-reflection
-# branch only so the *error* is comprehensible), the root CMakeLists rejects
-# toolchains that cannot do it, and zshader is compiled with
-# zahlen_enable_reflection like every other target that reads a reflected
-# header. Wrapping in the transpiler here also had a side effect nobody wanted:
-# under COMPILER_HAS_REFLECTION the function returns its arguments untouched but
-# the call site still reads as if a rewrite might happen.
+# It reads reflected headers, so it gets zahlen_enable_reflection like every
+# other target that does.
 #
 # The reflection flags themselves -- -freflection, -fannotation-attributes and
 # __cpp_impl_reflection -- arrive from zahlen_enable_reflection below, which is

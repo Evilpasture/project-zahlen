@@ -8,34 +8,17 @@
 // One frame's order of execution, as data instead of as a callback that reaches
 // into the engine.
 //
-// This header replaces FrameScheduler.hpp. The class it replaces could already
-// hold an ordered list of steps; what it could not do is say where a step goes.
-// A module was handed the scheduler and mutated it --
+// An earlier scheduler let a module mutate the timeline (InsertBefore, with an
+// append fallback). A missing anchor therefore did not fail: it silently moved
+// the step to the end of the frame. The inversion here is that a module
+// *declares* its steps -- ModuleStep: a phase, a name, a function and a
+// placement intent -- and FramePlan::Compose resolves them, reporting
+// FramePlanError::AnchorMissing rather than guessing and applying a module's
+// steps all-or-nothing.
 //
-//     if (!scheduler.InsertBefore("HostUICallback", FramePhase::Input, "CharacterInput", &Step)) {
-//         scheduler.Add(FramePhase::Input, "CharacterInput", &Step);   // <- the fallback
-//     }
-//
-// -- and the fallback is the problem. InsertBefore reports a missing anchor by
-// returning false, and the fallback silently appends the step at the *end of the
-// frame*, whatever phase it declared. A renamed core step, or an anchor that was
-// never registered, therefore did not fail: it moved gameplay input to the last
-// thing before present. The failure mode of an engine-owned timeline is not an
-// error, it is a schedule that is wrong and looks fine.
-//
-// The inversion here is that a module *declares* its steps (ModuleStep: a phase,
-// a name, a function and a placement intent) and something else resolves them.
-// The resolver is FramePlan::Compose, which reports FramePlanError::AnchorMissing
-// rather than guessing, and which applies a module's steps all-or-nothing so a
-// failed install leaves the timeline exactly as it was.
-//
-// Who resolves is the composition root's business, which is the other half of
-// the inversion. The engine still owns the plan for the frame it is running --
-// something has to execute it -- but the plan it starts from is core's own
-// steps, and every step beyond those arrives because the application installed
-// the module that declared it. There is no registry of extension callbacks
-// replayed on a schedule rebuild, and no way for a module to add a step that the
-// application did not ask for.
+// The plan a frame starts from is core's own steps; every step beyond those
+// exists because the application installed the module that declared it. No
+// module can add a step the application did not ask for.
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Description.hpp>

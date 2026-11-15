@@ -5,42 +5,25 @@
 
 // extensions/net/HTTP/HTTP.hpp
 //
-// Fetching things over HTTP: a synchronous client over libcurl's easy
-// interface. This is an extra, not core -- talking to a network means linking
-// libcurl (and whatever TLS backend it was built against), which the engine
-// needs nothing from, so the whole directory is optional. extensions/net/HTTP/CMakeLists.txt
-// looks for libcurl and, when it is not installed, warns and defines no target
-// at all; consumers guard on `if(TARGET zahlen_http)` exactly the way they
-// guard on zahlen_svg.
+// A synchronous HTTP client over libcurl's easy interface. Optional: the
+// directory links libcurl only when it is installed, and consumers guard on
+// `if(TARGET zahlen_http)`.
 //
-// curl/curl.h is never included from this header, and nothing that includes
-// this header needs libcurl's include path: the C types, the option constants
-// and the transfer codes all live in HTTP.cpp, which is also what keeps a
-// libcurl upgrade from recompiling the world.
+// curl/curl.h is never included here -- the C types, option constants and
+// transfer codes live in HTTP.cpp, which also keeps a libcurl upgrade from
+// recompiling the world.
 //
-// What is an error and what is not:
+// HTTPError is for the transfer (no DNS, no connect, timeout, redirect loop,
+// TLS handshake). An HTTP status is not a transfer failure: 404 and 500 come
+// back as an engaged Response with that statusCode and the server's body.
+// MalformedRequest and InvalidURL refuse a request this client will not put on
+// the wire; neither is retryable.
 //
-//   HTTPError is for the transfer -- a host that did not resolve, a socket that
-//   did not connect, a timeout, a redirect loop, a TLS handshake. An HTTP
-//   status is not a transfer failure, so a 404 and a 500 come back as an
-//   engaged Response with that statusCode and whatever body the server sent.
-//   Callers that want "only 2xx" write that check once, where they know what
-//   they are fetching; this layer does not guess it for them.
+// Fetch is safe to call from several threads at once -- each call owns its easy
+// handle, and CURLOPT_NOSIGNAL keeps curl's DNS timeout from installing a
+// process-wide SIGALRM handler.
 //
-//   MalformedRequest is the refusal of a request this client will not put on the
-//   wire -- a method or a header carrying a newline, or a name that is not an
-//   RFC 9110 token. InvalidURL is the same refusal for the URL. Neither is
-//   retryable, and both name a string the caller built.
-//
-// Threading: Fetch is safe to call from several threads at once. Each call owns
-// its easy handle, libcurl's one-time global initialisation happens behind a
-// function-local static, and CURLOPT_NOSIGNAL is set -- without it curl's DNS
-// timeout installs a process-wide SIGALRM handler, which is a race against
-// every other thread in the engine.
-//
-// TLS verification is always on and is not a knob here. A fetch that needs it
-// off is a fetch that has decided it does not care what it is talking to, and
-// that decision does not belong in an asset loader's defaults.
+// TLS verification is always on and is not a knob here.
 //
 // Bodies arrive decoded: libcurl is asked for every content encoding it was
 // built with and decompresses transparently, so Response::body is the document

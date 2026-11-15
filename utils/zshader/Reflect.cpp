@@ -15,13 +15,9 @@
 // guess: the catalog is the only record of what the modules declare, so an
 // unnamed kind would reach the engine as a slot nobody can write.
 //
-// Reflection is a property of the build: a compiler without it compiles the
-// engine's stand-ins, which name every value "Unknown". Rather than generate a
-// catalog full of sentinels, NamesEnumerators() is asked once, up front, and the
-// tool refuses to write anything -- see the guard in RunCommandLine. The
-// configuration that makes a reflection-free build work is the same one the
-// engine uses: zahlen_transpile_sources, which rewrites the EnumToString calls
-// below into the switch they stand in for.
+// Reflection is a property of the build, and the build requires it (see
+// cmake/ReflectionConfig.cmake), so the checks below guard against an
+// enumerator that genuinely has no name rather than against a compiler mode.
 
 #include "ZShader.hpp"
 
@@ -42,11 +38,8 @@ namespace ZHLN::ZShader {
 
 namespace {
 
-// The answer EnumToString gives for a value that names no enumerator: in a
-// reflection-capable build because there is no such enumerator, and in a
-// transpiled build because the switch the transpiler writes in its place ends
-// in the same default. Both ways of asking give the tool the same sentinel,
-// which is what every check below is built on.
+// The answer EnumToString gives for a value that names no enumerator. Every
+// check below is built on this sentinel.
 constexpr std::string_view kUnnamedEnumerator = "Unknown";
 
 // The descriptor type as the engine spells it, or a build error: a descriptor
@@ -192,12 +185,8 @@ auto StageFor(std::string_view path, std::string_view entry, SlangStage stage) -
 } // namespace
 
 auto NamesEnumerators() -> bool {
-    // A value that certainly has a name: the stand-ins answer "Unknown" for
-    // every value there is, so this is false exactly when the tool was compiled
-    // without the reflection helpers -- reflection off and not transpiled -- and
-    // every name it would generate is that sentinel. Asking once, up front, is
-    // what turns that into one sentence about the build instead of one lie per
-    // module about its descriptors.
+    // A value that certainly has a name, checked once up front: one sentence
+    // about the build instead of one wrong name per module.
     const std::string_view name = ZHLN::Reflect::EnumToString(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     return !name.empty() && name != kUnnamedEnumerator;
 }

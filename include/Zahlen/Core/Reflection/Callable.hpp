@@ -25,9 +25,7 @@ struct CallableInspector {
   private:
     static consteval auto FunctionEntity() -> std::meta::info {
         if constexpr (std::is_pointer_v<Callable> && std::is_function_v<std::remove_pointer_t<Callable>>) {
-#if !defined(__ASAN_ENABLED__) && !defined(__SANITIZE_ADDRESS__)
             static_assert(Fn != nullptr, "Cannot inspect a null function");
-#endif
             return std::meta::reflect_function(*Fn);
         } else if constexpr (std::is_class_v<Callable> && requires { &Callable::operator(); }) {
             return ^^Callable::operator();

@@ -46,17 +46,10 @@ set(ZHLN_PROBE_DIR "${CMAKE_CURRENT_LIST_DIR}/probes" CACHE INTERNAL
 #
 # <reflection flags> is the flag string this build passes for C++26 reflection:
 # "-freflection" for GCC, and for a clang-p2996 fork whatever ReflectionConfig
-# settled on (possibly with -fparameter-reflection or -freflection-latest). Pass
-# "" when reflection comes from the transpiler fallback: the probes then do not
-# run at all, because they would be testing a compiler mode this build is not
-# using, and a fallback build is legitimate on a compiler that fails them.
+# settled on (possibly with -fparameter-reflection or -freflection-latest).
 function(zhln_probe_toolchain_capabilities REFLECTION_FLAGS)
     if(ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES)
         message(STATUS "toolchain probes: skipped (ZHLN_SKIP_TOOLCHAIN_CAPABILITY_PROBES)")
-        return()
-    endif()
-    if(NOT REFLECTION_FLAGS)
-        message(STATUS "toolchain probes: skipped (reflection comes from the transpiler)")
         return()
     endif()
 
