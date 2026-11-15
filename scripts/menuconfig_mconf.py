@@ -753,8 +753,8 @@ class Mconf(object):
                         scr, "Save configuration?",
                         "Do you wish to save your new configuration?"):
                     return
-                if self.changed:
-                    self.save(scr, quiet=True)
+                # mconf writes on the way out even when nothing changed.
+                self.save(quiet=True)
                 return
             self.trail.pop()
             selected = None

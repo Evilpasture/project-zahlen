@@ -42,15 +42,24 @@ switches, wired in as a preset:
 
 ```sh
 pip install -r scripts/requirements-menuconfig.txt    # once; optional
-cmake --preset dev-menuconfig                          # menu, then configure
+./scripts/menuconfig.sh                                # menu, then configure
 ```
 
-`./scripts/menuconfig.sh [build-dir]` opens the menu on its own; re-run plain
-`cmake -B <dir>` afterwards to apply. The menu itself is `scripts/menuconfig_mconf.py`,
-a curses front end over Kconfiglib that draws the same screen as the kernel's
-`make menuconfig`: the menu path in the outer frame, arrow-key instructions, an
-inner frame for the entries, `< Select >  < Exit >  < Help >` buttons, and the
-help text in its own frame under `F`. Precedence is: an explicit `-D` wins, then
+That is the whole procedure: the script opens the menu and, when it exits,
+configures the same build directory from the `.config` it wrote. Pass a
+directory to work somewhere other than `build/menuconfig`, or `--no-configure`
+to stop after writing the file.
+
+An already-configured directory is reconfigured with whatever generator it
+already has; a fresh one uses Ninja (override with `MENUCONFIG_GENERATOR`), which
+is what the presets use. `cmake --preset menuconfig` is the same thing in preset
+form.
+
+The menu itself is `scripts/menuconfig_mconf.py`, a curses front end
+over Kconfiglib that draws the same screen as the kernel's `make menuconfig`:
+the path in the backtitle, arrow-key instructions, a bordered entry list,
+`<Select> < Exit > < Help > < Save > < Load >`, and help in its own box under
+`<Help>`. Precedence is: an explicit `-D` wins, then
 an edited `.config`, then the `option()` default in the CMake files. The menu
 module (`cmake/Kconfig.cmake`) is inert unless `ZHLN_KCACHE_CONFIG` points at a
 file, so nothing changes for a tree configured by hand, by CI or by an IDE.

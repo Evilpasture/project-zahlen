@@ -11,11 +11,15 @@
 #
 #   ./scripts/menuconfig.sh                 # configure build/menuconfig
 #   ./scripts/menuconfig.sh build/asan      # or any other build directory
+#   ./scripts/menuconfig.sh --no-configure  # just edit .config, run cmake yourself
 #
-# After it exits, re-run cmake in the same build directory. The preset
-# (<name>-menuconfig) does both steps for you:
+# The menu and the configure are one step: when the TUI exits, cmake runs in the
+# same build directory with the .config you just wrote. There is nothing to copy
+# out of this script and paste back.
 #
-#   cmake --preset dev-menuconfig
+# The generator is whatever the build directory already uses. For a directory
+# that has never been configured there is nothing to reuse, so Ninja is used --
+# the same one the presets use -- and MENUCONFIG_GENERATOR overrides it.
 #
 # Kconfiglib comes from the repo's .venv (see scripts/requirements-menuconfig.txt)
 # or from PATH; nothing is installed automatically.
@@ -23,7 +27,19 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${1:-${repo_root}/build/menuconfig}"
+
+configure=1
+args=()
+for arg in "$@"; do
+    case "${arg}" in
+        --no-configure) configure=0 ;;
+        -h|--help)
+            sed -n '6,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *) args+=("${arg}") ;;
+    esac
+done
+build_dir="${args[0]:-${repo_root}/build/menuconfig}"
 
 # --- a menu needs a terminal -------------------------------------------------
 # Checked before anything else: `cmake --preset <name>-menuconfig` from a CI
@@ -83,11 +99,31 @@ echo "Kconfig source: ${repo_root}/Kconfig"
 
 echo
 echo "Wrote ${KCONFIG_CONFIG}"
-# The preset reads ${repo_root}/build/dev-menuconfig/.config, so only point at it
-# when that is the directory that was just edited. Telling someone to re-run a
-# preset that reads a different file is how a menu setting appears to do nothing.
-if [[ "${build_dir}" == "${repo_root}/build/dev-menuconfig" ]]; then
-    echo "Now reconfigure:  cmake --preset dev-menuconfig"
-else
-    echo "Now reconfigure:  cmake -B ${build_dir} -DZHLN_KCACHE_CONFIG=${KCONFIG_CONFIG}"
+
+if (( ! configure )); then
+    exit 0
 fi
+
+# --- configure -----------------------------------------------------------------
+# An already-configured directory carries its own generator, and cmake reuses it
+# when -G is left out. Only a fresh directory needs one named.
+if [[ -f "${build_dir}/CMakeCache.txt" ]]; then
+    generator=()
+else
+    generator=(-G "${MENUCONFIG_GENERATOR:-Ninja}")
+fi
+
+if ! command -v cmake >/dev/null 2>&1; then
+    echo >&2
+    echo "cmake is not on PATH, so the .config was written but not applied." >&2
+    echo "Configure this build directory yourself, passing:" >&2
+    echo "  -DZHLN_KCACHE_CONFIG=${KCONFIG_CONFIG}" >&2
+    exit 1
+fi
+
+echo
+echo "Configuring ${build_dir}"
+# CMAKE_BUILD_TYPE is left to the build directory's own cache (or the presets);
+# repeating it here would silently override whatever it already had.
+cmake -S "${repo_root}" -B "${build_dir}" "${generator[@]}" \
+      -DZHLN_KCACHE_CONFIG="${KCONFIG_CONFIG}"
