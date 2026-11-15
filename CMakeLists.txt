@@ -264,6 +264,27 @@ option(ZHLN_SYNTAX_ONLY
        "Check C/C++ syntax only (-fsyntax-only) without emitting object code or linking"
        OFF)
 
+# --- the Kconfig menu as a front end to the cache ---------------------------
+#
+# Kconfiglib's menuconfig is wired in as a preset (CMakePresets.json) and
+# scripted by scripts/menuconfig.sh; it writes <build>/.config, and
+# cmake/Kconfig.cmake reads it back. The path is declared and validated here,
+# next to the other cache variables, so a typo fails before anything expensive
+# runs -- the apply itself has to wait for the option() declarations, which are
+# spread down this file and into cmake/ShaderCompilation.cmake.
+#
+# Inert unless ZHLN_KCACHE_CONFIG is set: a tree configured by hand, by CI or by
+# an IDE reads no .config and behaves exactly as it did before this existed.
+set(ZHLN_KCACHE_CONFIG "" CACHE FILEPATH
+    "Apply this Kconfig .config to the cache (set by the *-menuconfig presets)")
+if(ZHLN_KCACHE_CONFIG AND NOT EXISTS "${ZHLN_KCACHE_CONFIG}")
+    message(FATAL_ERROR
+        "ZHLN_KCACHE_CONFIG points at '${ZHLN_KCACHE_CONFIG}', which does not exist. "
+        "Run ./scripts/menuconfig.sh to create it, or unset ZHLN_KCACHE_CONFIG "
+        "to configure without a .config.")
+endif()
+
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
 endif()
@@ -408,6 +429,24 @@ add_subdirectory(src/engine)
 
 if(ZHLN_BUILD_RENDER)
     include(ShaderCompilation)
+endif()
+
+# The apply half of the Kconfig lane declared above. This runs after
+# include(ShaderCompilation), which is the last place in the tree that declares an
+# option a menu entry can name.
+#
+# The lane list names entries the menu always offers but this configuration may
+# not declare: ZHLN_SLANG_* lives inside include(ShaderCompilation), which only
+# runs when ZHLN_BUILD_RENDER is on. They are listed unconditionally -- that is
+# the point. With the renderer off they are "offered but not built", not "invented",
+# and the apply has to be able to tell those apart.
+set(ZHLN_KCONFIG_LANE_SYMBOLS
+    ZHLN_SLANG_VENDORED
+    ZHLN_SLANG_FROM_PREBUILT
+    ZHLN_SLANG_REQUIRE_PREBUILT)
+if(ZHLN_KCACHE_CONFIG)
+    include(Kconfig)
+    zhln_kconfig_apply("${ZHLN_KCACHE_CONFIG}" ${ZHLN_KCONFIG_LANE_SYMBOLS})
 endif()
 
 add_subdirectory(src/render)

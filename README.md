@@ -34,6 +34,27 @@ For compiled assets, the build system expects usually in resources/assets/ as an
 
 Run scripts/build.sh and fix every error you go along the way if you're missing dependencies.
 
+### Configuring the build (TUI)
+
+`ccmake` is not the only way to browse the options. The tree carries a
+[Kconfiglib](https://github.com/ulfalizer/Kconfiglib) menu for the `ZHLN_*`
+switches, wired in as a preset:
+
+```sh
+pip install -r scripts/requirements-menuconfig.txt    # once; optional
+cmake --preset dev-menuconfig                          # menu, then configure
+```
+
+`./scripts/menuconfig.sh [build-dir]` opens the menu on its own; re-run plain
+`cmake -B <dir>` afterwards to apply. The menu itself is `scripts/menuconfig_mconf.py`,
+a curses front end over Kconfiglib that draws the same screen as the kernel's
+`make menuconfig`: the menu path in the outer frame, arrow-key instructions, an
+inner frame for the entries, `< Select >  < Exit >  < Help >` buttons, and the
+help text in its own frame under `F`. Precedence is: an explicit `-D` wins, then
+an edited `.config`, then the `option()` default in the CMake files. The menu
+module (`cmake/Kconfig.cmake`) is inert unless `ZHLN_KCACHE_CONFIG` points at a
+file, so nothing changes for a tree configured by hand, by CI or by an IDE.
+
 ### Runtime Directories
 
 A dev tree keeps its caches and data under `build/`, while a distributed or

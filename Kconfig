@@ -1,0 +1,235 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Kconfig
+#
+# Menu definition for `cmake --preset <name>-menuconfig` (or ./scripts/menuconfig.sh).
+#
+# This file does not configure the build on its own. It is a *front end*: the
+# TUI writes a .config, cmake/Kconfig.cmake turns that .config into cache
+# entries, and the rest of the build reads the cache as it always has. Anything
+# you can set here you can still set with -D on the command line, and a -D wins.
+#
+# Defaults here are only the menu's opinion of a fresh configuration. The real
+# defaults live next to their option() in CMakeLists.txt; when the two disagree
+# the option() default is authoritative for a plain `cmake -S . -B build`, and
+# these exist so the TUI starts from the same place.
+
+mainmenu "Zahlen Engine configuration"
+
+comment "Values are written to the CMake cache. -D flags still win over this file."
+
+# ---------------------------------------------------------------------------
+menu "Build components"
+# ---------------------------------------------------------------------------
+
+config ZHLN_BUILD_TESTS
+    bool "Build the test suite"
+    default y
+    help
+      Builds the ztest worker binaries and the ztest orchestrator. The suite is
+      the only consumer of tests/, so turning this off drops a large fraction of
+      the build.
+
+config ZHLN_BUILD_SAMPLES
+    bool "Build sample applications"
+    default y
+    help
+      The samples/ directory: BSPMurderDrones, procedural animation, remote GLB,
+      device-lost recovery. Each is a full application, so this is the second
+      biggest switch here.
+
+config ZHLN_BUILD_EXTRAS
+    bool "Build optional plugins, extensions and gameplay systems"
+    default y
+    help
+      extensions/, plugins/ and gameplay/. The editor, the benchmark viewer, the
+      console, the BSP and glTF importers all live behind this.
+
+config ZHLN_BUILD_RENDER
+    bool "Build the Vulkan renderer"
+    default y
+    help
+      ON builds the descriptor-heap Vulkan renderer. OFF links the zero-overhead
+      world-only null RenderContext, which still runs the ECS, physics and audio
+      but draws nothing.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Performance and code generation"
+# ---------------------------------------------------------------------------
+
+config ZHLN_ENABLE_PCH
+    bool "Precompiled headers"
+    default y
+    help
+      Applies to high-TU non-module GCC targets. Turning this off makes a clean
+      build considerably slower and an incremental build slightly more precise.
+
+config ZHLN_ENABLE_THIRDPARTY_LTO
+    bool "Link-time optimisation for vendored third-party libraries"
+    default n
+    help
+      Runs IPO/LTO over the vendored libraries only. Links get slower; the win is
+      in Jolt and Slang, not in engine code.
+
+config ZHLN_USE_CUSTOM_LIBCXX
+    bool "Link against the Bloomberg custom libc++"
+    default n
+    help
+      Required for clang-p2996 forks whose reflection support lives in the
+      branch libc++. Inert on GCC, which ships its own C++26 reflection.
+
+config ZHLN_NO_ANNOTATION_EXTRACT
+    bool "Disable compile-time reflection annotation extraction"
+    default n
+    help
+      Turns off annotation extraction for targets built with -freflection.
+
+config ZHLN_SYNTAX_ONLY
+    bool "Syntax-check only (-fsyntax-only)"
+    default n
+    help
+      Emits no object code and links nothing. Useful for a fast CI sweep over a
+      tree that cannot be linked on the current host.
+
+config ZHLN_WARNINGS_AS_ERRORS
+    bool "Treat compiler warnings as errors"
+    default n
+    help
+      Adds -Werror. The tree is expected to be warning-clean, so this is mostly a
+      statement about intent.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Sanitizers and diagnostics"
+
+config USE_SANITIZERS
+    bool "AddressSanitizer + UndefinedBehaviorSanitizer"
+    default n
+    help
+      Builds with -fsanitize=address,undefined and links the suppressions object
+      into every executable that consumes the engine.
+
+config ZHLN_LINK_WHAT_YOU_USE
+    bool "Link what you use (-Wl,--no-as-needed diagnosis)"
+    default n
+    help
+      Reports direct dependencies that contribute no symbols.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Runtime behaviour"
+
+config ZHLN_DEV_MODE
+    bool "Development asset loading (loose files, not packed)"
+    default y
+    help
+      Loads assets from the source tree rather than a cooked pack. A released
+      toolchain wants this OFF.
+
+config ZHLN_IN_DOCKER
+    bool "Building inside a Docker container"
+    default n
+    help
+      Adjusts the assumptions the build makes about the host environment.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Testing"
+
+config ZHLN_TEST_VULKAN_SANDBOX
+    bool "Hermetic lavapipe Vulkan sandbox for GPU tests"
+    default n
+    depends on ZHLN_BUILD_TESTS
+    help
+      Uses the bundled lavapipe ICD so GPU tests run without a driver. Only
+      meaningful when the test suite is being built.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Packaging"
+
+config ZHLN_INSTALL_TOOLCHAIN_PACKAGES
+    bool "Install independently consumable toolchain packages"
+    default n
+    help
+      Turns the build into a shipped toolchain: exported targets, installed
+      runtime objects and a package config consumers can find_package.
+
+config ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES
+    bool "Ship dev-mode asset loading in the installed packages"
+    default n
+    depends on ZHLN_INSTALL_TOOLCHAIN_PACKAGES
+    help
+      Packaging with ZHLN_DEV_MODE on is a configure error unless this is also
+      on: a package whose headers say "not dev mode" while its shared library
+      was compiled for loose-file loading is worse than either answer.
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Third-party sourcing"
+# ---------------------------------------------------------------------------
+
+config ZHLN_GLFW_VENDORED
+    bool "Force the vendored GLFW source build"
+    default n
+    help
+      Otherwise a system GLFW is used when it is found.
+
+config ZHLN_VULKAN_HEADERS_VENDORED
+    bool "Force the vendored Vulkan headers"
+    default n
+
+config ZHLN_LUAJIT_VENDORED
+    bool "Force the vendored LuaJIT source build"
+    default n
+
+config ZHLN_SIMDJSON_VENDORED
+    bool "Force the vendored simdjson source build"
+    default n
+
+# There is no single "Slang source" knob: the resolver tries host config
+# package -> slangpy wheel -> Linux release -> pinned source on its own, and
+# these three booleans each override one step of that order. They are presented
+# as a list rather than a choice because they are not mutually exclusive in
+# CMake -- ZHLN_SLANG_VENDORED simply wins first.
+
+config ZHLN_SLANG_VENDORED
+    bool "Force the pinned vendored Slang source build"
+    default n
+    help
+      Skips the resolver entirely and builds extern/slang. Slowest and the most
+      reproducible.
+
+config ZHLN_SLANG_FROM_PREBUILT
+    bool "Download the official Slang release when no host Slang is usable"
+    default y
+    help
+      Default ON. Turning it off means a host without a usable Slang fails the
+      configure instead of fetching one.
+
+config ZHLN_SLANG_REQUIRE_PREBUILT
+    bool "Require the prebuilt Slang release, fail otherwise"
+    default n
+    depends on ZHLN_SLANG_FROM_PREBUILT
+
+
+endmenu
+
+# ---------------------------------------------------------------------------
+menu "Advanced"
+
+config ZHLN_JOLT_SLANG_FALLBACK
+    bool "Fall back to Slang for Jolt shader compilation"
+    default n
+    help
+      Only relevant on a host where the usual Jolt shader path is unavailable.
+
+endmenu

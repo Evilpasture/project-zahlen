@@ -42,7 +42,10 @@
       "name": "debug",
       "displayName": "Debug (Clang/Ninja)",
       "description": "Standard development and debugging profile",
-      "inherits": ["base-dev", "base-dev-windows"],
+      "inherits": [
+        "base-dev",
+        "base-dev-windows"
+      ],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -51,7 +54,9 @@
       "name": "sanitizers",
       "displayName": "Debug + Sanitizers",
       "description": "Debug build with ASan and UBSan enabled",
-      "inherits": ["debug"],
+      "inherits": [
+        "debug"
+      ],
       "cacheVariables": {
         "USE_SANITIZERS": "ON"
       }
@@ -60,7 +65,9 @@
       "name": "tests",
       "displayName": "Debug + Testing",
       "description": "Debug build with GTest suite execution enabled",
-      "inherits": ["debug"],
+      "inherits": [
+        "debug"
+      ],
       "cacheVariables": {
         "BUILD_TESTING": "ON"
       }
@@ -69,11 +76,35 @@
       "name": "release",
       "displayName": "Release Optimization",
       "description": "High performance build without assets cooking limitations",
-      "inherits": ["base-dev", "base-dev-windows"],
+      "inherits": [
+        "base-dev",
+        "base-dev-windows"
+      ],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ZHLN_DEV_MODE": "OFF"
       }
+    },
+    {
+      "name": "base-menuconfig",
+      "hidden": true,
+      "inherits": [
+        "base-dev",
+        "base-dev-windows"
+      ],
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "ZHLN_KCACHE_CONFIG": "${sourceDir}/build/dev-menuconfig/.config"
+      }
+    },
+    {
+      "name": "dev-menuconfig",
+      "displayName": "Development + Kconfig TUI",
+      "description": "Opens the Kconfiglib menuconfig TUI for build/dev-menuconfig, then configures using the .config it wrote.",
+      "inherits": [
+        "base-menuconfig"
+      ],
+      "binaryDir": "${sourceDir}/build/${presetName}"
     }
   ],
   "buildPresets": [

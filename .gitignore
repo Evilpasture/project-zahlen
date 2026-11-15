@@ -57,6 +57,12 @@ ipch/
 *.gcm
 *.pcm
 
+# --- Kconfig TUI (.config lives in the build dir, but a stray one in the tree
+# --- is still not source) ---
+.config
+.config.old
+*.config.stamp
+
 # --- Dependencies & Environment ---
 .venv/
 env/
