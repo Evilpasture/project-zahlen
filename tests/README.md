@@ -169,8 +169,6 @@ every `test_*` function in that namespace.
   runs and the remainder of a run after `S` are parallel. Timeouts and crashes
   outside a named case cannot be replayed as an exact case and do not prompt.
   On Windows, an installed LLDB or GDB executable on PATH is used if present.
-  The standalone PTY/fake-debugger smoke test is
-  `python3 utils/ztest/tests/test_debugger_replay.py`.
 - Crash stack traces: a worker arms `ZHLN::InstallWorkerCrashReports()`
   (`extensions/Signal/WorkerCrashReports.hpp`) in `--ztest-worker` mode. A fatal signal
   (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) or `std::terminate` makes the worker

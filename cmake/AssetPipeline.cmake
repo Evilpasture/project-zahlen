@@ -11,38 +11,15 @@
 # (src/, include/, modules/) must never depend on optional layers -- see
 # configure/check_core_layer_boundary.py -- so the cooker is outside core roots.
 #
-# This module defines the zcook target and the zahlen_configure_game_assets()
-# helper. The helper does add_custom_command(TARGET zcook ...) and
-# add_dependencies(zahlen cook_assets), so the root CMakeLists calls it only
-# after both targets exist.
+# The zcook target itself is utils/zcook/CMakeLists.txt. This module owns the
+# graph around it: zahlen_configure_game_assets() does
+# add_custom_command(TARGET zcook ...) and add_dependencies(zahlen cook_assets),
+# so the root CMakeLists calls it only after both targets exist.
 
 # Source-image and ZRD1/ZRD2 codecs are optional to the engine, but always needed
 # by the offline cooker. Keep them in the asset-cooking plugin target so an application (e.g.
 # FidelityHarness) can explicitly supply decoded pixels without pulling any
 # file formats into the runtime libraries.
-add_subdirectory(plugins/AssetCooking)
-add_executable(zcook
-    utils/zcook/main.cpp
-    utils/zcook/Transform.cpp
-    utils/zcook/GLB.cpp
-    utils/zcook/Cook.cpp
-    utils/zcook/Ninja.cpp
-    utils/zcook/FontBake.cpp
-)
-# Only the engine and the cooking helper. zcook reads FS::PakHeader/PakEntry
-# (POD structs in the public VFS.hpp) and calls TaskSystem::ParallelFor, whose
-# only out-of-line callee is Dispatch -- both exported by libzahlen_engine.so.
-# The archives were linked ahead of the .so, so the executable ran a second copy
-# of the scheduler next to the one the engine uses.
-target_link_libraries(zcook PRIVATE zahlen_engine zahlen_asset_cooking)
-zahlen_set_bin_output(zcook)
-zahlen_add_runtime_dlls(zcook)
-target_include_directories(zcook SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_SOURCE_DIR}/extern/stb
-    ${CMAKE_SOURCE_DIR}/plugins
-    ${CMAKE_SOURCE_DIR}/utils/zcook
-)
 
 # ${CMAKE_BINARY_DIR}, not ${CMAKE_SOURCE_DIR}/build: this directory holds a
 # zcook symlink, a generated assets.ninja and the cooked data/base.pak, and
@@ -57,9 +34,15 @@ target_include_directories(zcook SYSTEM PRIVATE
 # -DZHLN_SHARED_ASSET_DIR=/some/absolute/path and get exactly that, explicitly.
 set(ZHLN_SHARED_ASSET_DIR "${CMAKE_BINARY_DIR}/shared_assets" CACHE PATH "Shared cooked asset cache")
 
+add_subdirectory(plugins/AssetCooking)
+add_subdirectory(utils/zcook)
+
 function(zahlen_configure_game_assets GAME_SOURCE_DIR)
     file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")
 
+    # The POST_BUILD symlink below is attached in utils/zcook/CMakeLists.txt:
+    # add_custom_command(TARGET ...) has to run in the directory that created
+    # the target, and this function is called from the root CMakeLists.
     set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook${CMAKE_EXECUTABLE_SUFFIX}")
 
     # Blender is optional (cmake/BlenderProbe.cmake): without it the graph has no
@@ -73,12 +56,8 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         set(ZHLN_BLENDER_ARG --no-blender)
     endif()
 
-    # 1. Symlink the current build's zcook to a STABLE shared location
-    add_custom_command(
-        TARGET zcook POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "$<TARGET_FILE:zcook>" "${SHARED_ZCOOK}"
-        COMMENT "Updating stable shared zcook symlink..."
-    )
+    # 1. The symlink that puts the current build's zcook at a stable location
+    #    was attached as a POST_BUILD step when utils/zcook declared the target.
 
     # 2. Generate assets.ninja with zcook itself, through the FIXED path: the
     #    cooker writes the graph of its own invocations, so the rules and the

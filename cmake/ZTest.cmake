@@ -3,8 +3,8 @@
 
 # cmake/ZTest.cmake
 #
-# Native `ztest` test orchestrator, zero-boilerplate C++26 namespace collection
-# wrappers, and build-time manifest generation. Replaces CTest across the
+# Zero-boilerplate C++26 namespace collection wrappers, worker registration and
+# the build-time manifest the `ztest` orchestrator reads. Replaces CTest across the
 # repository without CMake globbing: explicit source lists are wrapped via
 # `zahlen_wrap_ztest_sources(...)` into idempotent `file(CONFIGURE)` epilogue TUs
 # that reflect `namespace ZHLN::Test` (`test_*` free functions + primary-TU suite
@@ -13,27 +13,10 @@
 
 include_guard(GLOBAL)
 
-add_executable(ztest
-    "${PROJECT_SOURCE_DIR}/utils/ztest/main.cpp"
-    "${PROJECT_SOURCE_DIR}/utils/ztest/DebuggerReplay.cpp"
-)
-set_target_properties(ztest PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
-zahlen_set_bin_output(ztest)
-target_link_libraries(ztest PRIVATE zahlen_command_line zahlen_signal)
-zahlen_enable_reflection(ztest)
-if(USE_SANITIZERS)
-    zahlen_install_sanitizer_runtime(ztest)
-endif()
-if(TARGET zahlen_warnings)
-    target_link_libraries(ztest PRIVATE zahlen_warnings)
-endif()
-if(WIN32)
-    target_compile_definitions(ztest PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-endif()
+# The ztest executable itself is utils/ztest/CMakeLists.txt. This module owns the
+# contract around it: source wrapping, worker registration and the manifest the
+# runner reads.
+add_subdirectory("${PROJECT_SOURCE_DIR}/utils/ztest" "${CMAKE_BINARY_DIR}/utils/ztest")
 
 set_property(GLOBAL PROPERTY ZHLN_ZTEST_MANIFEST_LINES "")
 
