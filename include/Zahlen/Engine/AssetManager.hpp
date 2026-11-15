@@ -34,10 +34,6 @@ namespace TaskSystem {
 struct Counter;
 }
 
-constexpr uint64_t HashAssetPath(std::string_view path) noexcept {
-    return Hash64(path);
-}
-
 #pragma pack(push, 1)
 
 struct CookedTextureHeader {
@@ -88,6 +84,15 @@ struct CookedAnimTrack {
 
 using AssetLoadRequest = FS::LoadRequest;
 
+// No caller outside the engine names this type: a host holds an AssetLibrary
+// (Engine::Assets()), a graph node gets one from its bundle, and every public
+// signature in include/ that used to take an AssetManager& takes the capability.
+//
+// It is still exported because the build-tree tools that reproduce the cook path
+// -- utils/zcook, and the suites that check what it wrote -- link its objects
+// directly instead of going through an Engine. Exported for linkage, not offered
+// as API: adding it to a new signature is what the boundary check exists to
+// catch.
 class ZHLN_API AssetManager {
   public:
     AssetManager() = default;

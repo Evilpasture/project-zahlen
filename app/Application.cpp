@@ -4,6 +4,7 @@
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
 #include <Zahlen/App.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Clock.hpp>
@@ -56,7 +57,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         return std::unexpected(created.error()); // preserve the underlying init error
     }
     auto engine = std::move(*created);
-    engine->GetPlatformHost().Focus();
+    engine->Host().Focus();
 
     // Publish the effective kernel-owned value before installers and graph
     // construction. Its pipeline byte span now points into KernelSession-owned storage

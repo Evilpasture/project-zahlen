@@ -19,25 +19,26 @@
 
 #pragma once
 
+#include "TestsFramework.hpp"
+#include "helpers/ImageTesting.hpp"
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include "TestsFramework.hpp"
-#include "helpers/ImageTesting.hpp"
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 // DisableAA calls Registry::GetEntitiesWith and Registry::Patch directly.
 // <Zahlen/Engine/Engine.hpp> only forward-declares ECS::Registry, so this header must
 // not rely on the including translation unit having pulled the definition in
@@ -48,9 +49,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <type_traits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace ZHLN::Test::Headless {
@@ -76,20 +77,19 @@ struct EngineOptions {
 // tests own the scene they measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     const ZHLN::EngineConfig cfg {
-        .physics = {
-            .maxBodies             = opts.maxBodies,
-            .maxBodyPairs          = opts.maxBodyPairs,
-            .maxContactConstraints = opts.maxContactConstraints,
-            .tempAllocatorSize     = opts.tempAllocatorSize
-        },
+        .physics =
+            {.maxBodies             = opts.maxBodies,
+             .maxBodyPairs          = opts.maxBodyPairs,
+             .maxContactConstraints = opts.maxContactConstraints,
+             .tempAllocatorSize     = opts.tempAllocatorSize},
         // String64 accepts string_view directly, unlike std::string.
-        .appName        = opts.appName,
-        .width          = opts.width,
-        .height         = opts.height,
-        .vsync          = false,
-        .fullscreen     = false,
-        .validationMode = ZHLN::ValidationMode::On,
-        .headless       = true,
+        .appName           = opts.appName,
+        .width             = opts.width,
+        .height            = opts.height,
+        .vsync             = false,
+        .fullscreen        = false,
+        .validationMode    = ZHLN::ValidationMode::On,
+        .headless          = true,
         .enableMeshShading = opts.enableMeshShading,
     };
 
@@ -151,17 +151,26 @@ struct EngineOptions {
 // reported through Valid(). Check it before dereferencing, exactly as you would
 // check a span before indexing it.
 class EngineView {
-public:
+  public:
     constexpr EngineView() noexcept = default;
-    explicit EngineView(ZHLN::Engine& engine) noexcept : _engine(&engine) {}
+    explicit EngineView(ZHLN::Engine& engine) noexcept: _engine(&engine) {
+    }
 
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool { return _engine != nullptr; }
-    explicit constexpr operator bool() const noexcept { return Valid(); }
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _engine != nullptr;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
 
-    auto operator->() const noexcept -> ZHLN::Engine* { return _engine; }
-    auto operator*() const noexcept -> ZHLN::Engine& { return *_engine; }
+    auto operator->() const noexcept -> ZHLN::Engine* {
+        return _engine;
+    }
+    auto operator*() const noexcept -> ZHLN::Engine& {
+        return *_engine;
+    }
 
-private:
+  private:
     ZHLN::Engine* _engine = nullptr;
 };
 
@@ -199,8 +208,8 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // is the one ASan caught). A fresh engine has no callback, so neither
     // does a reset one.
     engine.SetUICallback(nullptr);
-    engine.GetPlatformHost().SetCursorMode(ZHLN::CursorMode::System);
-    engine.GetPlatformHost().CaptureMouse(false);
+    engine.Host().SetCursorMode(ZHLN::CursorMode::System);
+    engine.Host().CaptureMouse(false);
 }
 
 namespace Detail {
@@ -216,7 +225,7 @@ namespace Detail {
 // initialisation, which is nearly all of them. Going back to a keyed pool is a
 // small change to this struct once a green run says coexistence works.
 struct EngineSlot {
-    EngineOptions      opts {};
+    EngineOptions                 opts {};
     std::unique_ptr<ZHLN::Engine> engine;
 };
 
@@ -234,8 +243,8 @@ struct EngineSlot {
 // smaller request. Mesh shading is a create-time hard match -- it cannot be
 // widened, and a one-slot pool cannot keep both paths alive.
 [[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
-    return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
-        && have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
+    return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints &&
+           have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
 }
 
 // The configuration to rebuild at: the element-wise ceiling of everything
@@ -362,8 +371,12 @@ inline void EndSession() {
 
 // RAII form for a group binary's main, and SessionFixture for DI consumers.
 struct ZHLN_ANNOTATION(ZHLN::Test::SessionFixture {}) SessionScope {
-    explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) { BeginSession(workerThreads, maxFibers); }
-    ~SessionScope() { EndSession(); }
+    explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) {
+        BeginSession(workerThreads, maxFibers);
+    }
+    ~SessionScope() {
+        EndSession();
+    }
 
     SessionScope(const SessionScope&)                    = delete;
     auto operator=(const SessionScope&) -> SessionScope& = delete;
@@ -373,7 +386,8 @@ struct ZHLN_ANNOTATION(ZHLN::Test::SessionFixture {}) SessionScope {
 // resets the scene and default camera on entry without recreating VkDevice.
 class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
   public:
-    explicit PooledEngine(SessionScope&) : _view(AcquireEngine()) {}
+    explicit PooledEngine(SessionScope&): _view(AcquireEngine()) {
+    }
     ~PooledEngine() = default;
 
     PooledEngine(const PooledEngine&)            = delete;
@@ -381,10 +395,18 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
     PooledEngine(PooledEngine&&)                 = delete;
     PooledEngine& operator=(PooledEngine&&)      = delete;
 
-    [[nodiscard]] auto View() const noexcept -> EngineView { return _view; }
-    auto               operator->() const noexcept -> ZHLN::Engine* { return _view.operator->(); }
-    auto               operator*() const noexcept -> ZHLN::Engine& { return *_view; }
-    explicit           operator bool() const noexcept { return _view.Valid(); }
+    [[nodiscard]] auto View() const noexcept -> EngineView {
+        return _view;
+    }
+    auto operator->() const noexcept -> ZHLN::Engine* {
+        return _view.operator->();
+    }
+    auto operator*() const noexcept -> ZHLN::Engine& {
+        return *_view;
+    }
+    explicit operator bool() const noexcept {
+        return _view.Valid();
+    }
 
   private:
     EngineView _view;
@@ -396,7 +418,7 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
 // are spatial edge filters that perturb high-contrast pixels. Every scene that
 // asserts on stability or on exact pixel values disables AA first.
 inline void DisableAA(ZHLN::Engine& engine) {
-    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
     engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
@@ -493,7 +515,7 @@ constexpr uint32_t kMaxDeviceLostRecoveries = 2;
 // failures are rolled back and the scenario is retried from a warm start.
 template <typename SceneFn>
 [[nodiscard]] StableRunResult
-RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
+    RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
     auto&        ctx         = ZHLN::Test::GetThreadLocalContext();
     const size_t failureMark = ctx.failures.size();
 

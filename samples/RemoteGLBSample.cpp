@@ -91,13 +91,13 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/QualityPresets.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -1389,7 +1389,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->Host().Focus();
     }
 
 #if defined(ZHLN_HAS_FONTS)

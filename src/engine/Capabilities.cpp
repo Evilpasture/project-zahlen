@@ -17,6 +17,7 @@
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/ECS/Inspection.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/InputActions.hpp>
 #include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
@@ -30,6 +31,7 @@
 #include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Render/SceneData.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 
 namespace ZHLN {
 
@@ -51,6 +53,74 @@ auto Entities::Inspect() const noexcept -> ECS::Inspection { return ECS::Inspect
 
 auto Entities::Registry() const noexcept -> ECS::Registry& {
     return _engine->GetInternalRegistry();
+}
+
+// --- HostWindow ---------------------------------------------------------------
+
+auto HostWindow::Extent() const noexcept -> Extent2D {
+    return _host->GetSize();
+}
+
+auto HostWindow::Present() const noexcept -> bool {
+    // A TTY session presents too, through its terminal target, but has no OS
+    // window: the question this answers is the window, not the target.
+    return _host->AsWindow().has_value();
+}
+
+auto HostWindow::CustomCursor() const noexcept -> bool {
+    return _host->UsesCustomCursor();
+}
+
+auto HostWindow::Cursor() const noexcept -> CursorMode {
+    return _host->GetCursorMode();
+}
+
+void HostWindow::SetCursorMode(CursorMode mode) noexcept {
+    _host->SetCursorMode(mode);
+}
+
+void HostWindow::CaptureMouse(bool captured) noexcept {
+    _host->CaptureMouse(captured);
+}
+
+auto HostWindow::MouseCaptured() const noexcept -> bool {
+    return _host->IsMouseCaptured();
+}
+
+void HostWindow::Focus() noexcept {
+    _host->Focus();
+}
+
+auto HostWindow::Focused() const noexcept -> bool {
+    return _host->IsFocused();
+}
+
+void HostWindow::Close() const noexcept {
+    _host->Close();
+}
+
+auto HostWindow::Clipboard() const -> std::string {
+    return _host->GetClipboardText();
+}
+
+void HostWindow::SetClipboard(std::string_view text) {
+    _host->SetClipboardText(text);
+}
+
+auto HostWindow::ClipboardSink() const noexcept -> GUI::TextEdit::ClipboardSink {
+    // The capability is the userdata, not the platform object: the sink's
+    // callbacks are the only two host calls text editing makes, and routing them
+    // through this facade keeps a caller holding this value instead of a
+    // PlatformHost&.
+    return GUI::TextEdit::ClipboardSink {
+        .userdata = const_cast<HostWindow*>(this),
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<HostWindow*>(ud)->SetClipboard(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<HostWindow*>(ud)->Clipboard(); },
+    };
+}
+
+void HostWindow::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
+    _host->SetFileDropHandler(handler, userdata);
 }
 
 // --- GraphicsDevice -----------------------------------------------------------

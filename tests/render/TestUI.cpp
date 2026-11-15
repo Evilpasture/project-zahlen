@@ -62,7 +62,7 @@ struct SolidPayload {
 // capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
     ZHLN::GUI::Context gui(engine.GetFontAtlas());
-    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
+    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.Host().Extent(), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
         ui.Text("X", 24.0f, color);
     });
@@ -448,7 +448,7 @@ struct UITestSuite {
             }
             const ZHLN::TextureID hdrTexture = *hdrTextureRes;
 
-            const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
+            const ZHLN::Extent2D size = engine->Host().Extent();
 
             // As above: the frame has to have begun, not merely to not have failed.
             auto began = rc.BeginFrame();
@@ -583,26 +583,26 @@ struct UITestSuite {
             return {};
         }
 
-        // 7. System vs. Custom Cursor Mode across PlatformHost + RenderSystem
+        // 7. System vs. Custom Cursor Mode across HostWindow + RenderSystem
         std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& host = engine->GetPlatformHost();
+            auto host = engine->Host();
             // The custom-cursor draw reads the seat's mouse position through the
             // read capability, so this asserts the value path rather than
             // writing to it: a headless host has no pointer, hence no position,
             // and the cursor is drawn at the origin. What the test checks below
-            // is the cursor *mode* transition, which is PlatformHost state.
+            // is the cursor *mode* transition, which is host state.
             const auto cursorInput = std::as_const(*engine).Input();
             ZHLN::Test::ExpectEq(cursorInput.MousePosition().x, 0.0f);
             ZHLN::Test::ExpectEq(cursorInput.MousePosition().y, 0.0f);
 
-            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
-                !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||
-                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+            if (!ZHLN::Test::ExpectEq(host.Cursor(), ZHLN::CursorMode::System) ||
+                !ZHLN::Test::ExpectFalse(host.MouseCaptured()) ||
+                !ZHLN::Test::ExpectFalse(host.CustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
@@ -629,8 +629,8 @@ struct UITestSuite {
 
             // Custom mode: custom cursor rendered at (320, 240).
             host.SetCursorMode(ZHLN::CursorMode::Custom);
-            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
-                !ZHLN::Test::ExpectTrue(host.UsesCustomCursor())) {
+            if (!ZHLN::Test::ExpectEq(host.Cursor(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectTrue(host.CustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
             ZHLN::Test::Headless::TickFrames(*engine, 2);
@@ -642,9 +642,9 @@ struct UITestSuite {
 
             // Mouse capture hides custom cursor while preserving CursorMode::Custom.
             host.CaptureMouse(true);
-            if (!ZHLN::Test::ExpectTrue(host.IsMouseCaptured()) ||
-                !ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
-                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+            if (!ZHLN::Test::ExpectTrue(host.MouseCaptured()) ||
+                !ZHLN::Test::ExpectEq(host.Cursor(), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectFalse(host.CustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
             ZHLN::Test::Headless::TickFrames(*engine, 2);
@@ -655,7 +655,7 @@ struct UITestSuite {
             const uint32_t capturedBright = countBrightCenterPixels(capturedFrame);
 
             host.CaptureMouse(false);
-            const bool restoredCustom = host.UsesCustomCursor();
+            const bool restoredCustom = host.CustomCursor();
             host.SetCursorMode(ZHLN::CursorMode::System);
 
             if (!ZHLN::Test::ExpectEq(systemBright, 0u) ||

@@ -4,18 +4,31 @@
 
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <cstdint>
+#include <expected>
+#include <string_view>
 
 namespace ZHLN {
 class ArticulationSystem;
+class AssetManager;
 class GraphicsDevice;
 class PhysicsContext;
+class RenderContext;
+struct FontAtlas;
 struct ModelPrefab;
+
 namespace ECS { class Registry; }
 namespace PrefabFactory {
+// The cache-parameterized forms: engine-internal, which is why they are not in
+// include/. A host reaches the same work through Engine (fonts) or through the
+// spawned-prefab entry points (models).
+auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, AssetID fontID) -> FontAtlas;
+auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+
 // Engine's device-recovery barrier and internal spawners.
 void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& registry);
 auto CreateBoxInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity;

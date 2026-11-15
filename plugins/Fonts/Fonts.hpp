@@ -89,12 +89,12 @@ inline constexpr std::string_view kVendoredFontFntPath = "resources/fonts/JetBra
 /// The hook is process-global and single: install one loader per process, from
 /// the composition root, before the first CreateFontAtlas. Installing through
 /// an Engine also registers a teardown that uninstalls it when the engine goes
-/// away. There is no AssetManager spelling: the engine owns its asset cache, and
+/// away. There is no cache-object spelling: the engine owns it, and
 /// it is the only thing that can hand one out.
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
 
 /// Fonts are first-class assets with an AssetID. Loads the baked font from
-/// the mounted paks (or fontbm pair) into AssetManager's font cache
+/// the mounted paks (or fontbm pair) into the engine's font cache
 /// and returns its AssetID. The asset cache outranks the embedded default;
 /// device-loss rebuilds re-upload from the cached asset. No TTF parsing at
 /// runtime.

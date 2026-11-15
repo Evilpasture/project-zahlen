@@ -39,6 +39,13 @@ class AsyncAssetFetcher;
 
 class ZHLN_API AssetLibrary {
   public:
+    // A caller that owns a cache -- the engine, a toolkit, a test that answers
+    // how the capability behaves -- wraps it here and hands out only the
+    // capability. The cache type itself is not part of the boundary, so nothing
+    // downstream can store or reach one through this.
+    explicit AssetLibrary(AssetManager& assets) noexcept: _assets(&assets) {
+    }
+
     // Non-owning borrow of a cached prefab. Invalidated by ClearCache() or
     // device-loss recovery; prefer WithCachedPrefab when the whole read must
     // be atomic with respect to the cache lock.
@@ -93,9 +100,7 @@ class ZHLN_API AssetLibrary {
         uint64_t hash, void (*visit)(const void*, const ModelPrefab&), const void* ctx
     ) const -> bool;
 
-    friend class Engine;
-    explicit AssetLibrary(AssetManager& assets) noexcept: _assets(&assets) {
-    }
+  private:
     AssetManager* _assets;
 };
 

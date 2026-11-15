@@ -12,12 +12,12 @@
 #include "RenderSystem.hpp"
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
@@ -72,7 +72,7 @@ auto DrawPendingUI(Engine& engine, FrameScope& gpuFrame, WindowID window, const 
 
 enum class RenderSystemError : uint8_t {
     NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
-    EnvironmentImageUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The scene's environment image was not supplied to AssetManager"> {}),
+    EnvironmentImageUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The scene's environment image was not supplied to the asset library"> {}),
 };
 
 namespace {
@@ -594,12 +594,12 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return std::unexpected(ui_res.error());
     }
 
-    if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
+    if (engine.Host().CustomCursor()) {
         // The cursor follows the device, not gameplay's view of it, so this
         // asks the read capability by value rather than gating on UiCapture.
         const auto     input    = std::as_const(engine).Input();
         const Axis2DValue where  = input.MousePosition();
-        const Extent2D hostSize  = host.GetSize();
+        const Extent2D hostSize  = engine.Host().Extent();
         const float    rawX      = where.x;
         const float    rawY      = where.y;
         const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
@@ -630,7 +630,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         (*draw)(engine, Engine::WindowRenderView {
                              .id         = WindowID::Primary,
                              .target     = attachment,
-                             .size       = engine.GetPlatformHost().GetSize(),
+                             .size       = engine.Host().Extent(),
                              .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
                          },
                 gpuFrame);

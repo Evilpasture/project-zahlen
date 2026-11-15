@@ -36,19 +36,14 @@ ZHLN_API auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 col
 ZHLN_API auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 ZHLN_API auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
+// A host builds its atlas through Engine::EnsureFontAtlas/GetFontAtlas, which
+// owns the renderer and the cache; the cache-parameterized forms are declared
+// in the engine's own header.
 ZHLN_API auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
-ZHLN_API auto CreateFontAtlas(RenderContext& ctx, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas;
-ZHLN_API auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> FontAtlas;
 
-ZHLN_API auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
-
-ZHLN_API auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+// The engine's own font entry points. A host asks Engine::EnsureFontAtlas /
+// Engine::GetFontAtlas, which is the same work without handing out a renderer.
 ZHLN_API auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode>;
-
-ZHLN_API auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::BakedFontAsset&>;
-ZHLN_API auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&>;
-
-ZHLN_API auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureID;
 
 ZHLN_API auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;
 
@@ -58,7 +53,6 @@ ZHLN_API auto CreateSphere(Engine& engine, float radius, const SpawnParams& para
 ZHLN_API auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 ZHLN_API auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
-auto LoadModelPrefab(GraphicsDevice gfx, AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 
 ZHLN_API auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;

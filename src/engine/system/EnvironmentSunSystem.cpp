@@ -3,7 +3,6 @@
 
 #include "EnvironmentSunSystem.hpp"
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -13,7 +12,7 @@
 
 namespace ZHLN {
 
-void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets) {
+void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetLibrary> assets) {
     using EnvironmentSunTagComponent = Components::EnvironmentSunTagComponent;
     using EnvironmentMapComponent = Components::EnvironmentMapComponent;
     using LightComponent = Components::LightComponent;

@@ -10,18 +10,6 @@
 
 namespace ZHLN::Lightning {
 namespace {
-struct LightningPhaseCapabilities {
-    GraphicsDevice graphics;
-    AudioEngine    audio;
-    Entities       entities;
-};
-
-void RunUpdateFromSimGraph(LightningUpdateQuery query, ECS::ResMut<ECS::ExtensionServices> extensions, FrameDt dt) {
-    if (auto caps = extensions->Get<LightningPhaseCapabilities>()) {
-        Update(query, ECS::ResMut<GraphicsDevice> {&caps->graphics}, ECS::ResMut<AudioEngine> {&caps->audio}, ECS::ResMut<Entities> {&caps->entities}, dt);
-    }
-}
-
 auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float {
     if (tUs <= 0.0f || i0 <= 0.0f) {
         return 0.0f;
@@ -192,6 +180,31 @@ void Update(LightningUpdateQuery query, ECS::ResMut<GraphicsDevice> graphics, EC
         setAmbientExposure(unflashedBaseExposure);
     }
 }
+
+namespace {
+
+// The phase's own node. Its only parameter is the query: the three capabilities
+// arrive in one value this domain owns, because a simulation node may not name
+// GraphicsDevice or AudioEngine (they belong to other service domains) and this
+// phase still has to run inside the graph's ordering.
+//
+// What the bundle is for is exactly this: handing a phase its capabilities
+// without widening SimServices. It is not a general store -- a node that puts
+// an engine-owned object in it is doing the thing ExtensionServices exists to
+// prevent, which is why this is the only type this module ever places there.
+struct LightningPhaseCapabilities {
+    GraphicsDevice graphics;
+    AudioEngine    audio;
+    Entities       entities;
+};
+
+void RunUpdateFromSimGraph(LightningUpdateQuery query, ECS::ResMut<ECS::ExtensionServices> extensions, FrameDt dt) {
+    if (auto caps = extensions->Get<LightningPhaseCapabilities>()) {
+        Update(query, ECS::ResMut<GraphicsDevice> {&caps->graphics}, ECS::ResMut<AudioEngine> {&caps->audio}, ECS::ResMut<Entities> {&caps->entities}, dt);
+    }
+}
+
+} // namespace
 
 void Step(Engine& engine, float dt) {
     engine.EmplaceService<LightningPhaseCapabilities>(LightningPhaseCapabilities {

@@ -13,7 +13,7 @@
 
 namespace ZHLN {
 
-class AssetManager;
+class AssetLibrary;
 class Engine;
 class PoseUploadQueue;
 
@@ -34,7 +34,7 @@ struct AnimationStepSystem {
             Components::AnimatorComponent&, const Components::HierarchyComponent, const Components::MeshComponent,
             const Components::SkeletalMeshComponent, Components::MorphTargetComponent&, Components::TransformComponent&> query,
         ECS::ResMut<AnimationContext>                                                                                    anim,
-        ECS::Res<AssetManager>                                                                                           assets,
+        ECS::Res<AssetLibrary>                                                                                           assets,
         ECS::ResMut<PoseUploadQueue>                                                                                     poseUploads,
         FrameDt                                                                                                          frameDt
     );

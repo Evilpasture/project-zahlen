@@ -52,7 +52,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Engine.hpp>
@@ -149,7 +149,7 @@ struct MorphPosePassSuite {
     }
 
     // One box part under one root node, `kMorphTargets` morph targets with real
-    // deltas in the shared pool, and a weights clip, cached in AssetManager.
+    // deltas in the shared pool, and a weights clip, cached in the asset library.
     //
     // `degenerateClip` appends the channel claim 2 is about: same path, same
     // target node, keyValues but no keyTimes.

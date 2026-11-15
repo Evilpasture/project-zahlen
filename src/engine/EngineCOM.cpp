@@ -37,6 +37,7 @@
 #include <Zahlen/Engine/Capabilities/InputActions.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
@@ -254,7 +255,7 @@ public:
     }
 
     void RequestClose() noexcept override {
-        m_engine->GetPlatformHost().Close();
+        m_engine->Host().Close();
     }
 
     [[nodiscard]] Result<void> Tick(float dt) noexcept override {

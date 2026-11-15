@@ -8,6 +8,7 @@
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,7 +27,7 @@
 enum class RadianceTestError : uint8_t {
     DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"A synthetic radiance blob did not decode to the expected pixels.">{}) = 1,
     CookedRoundTripFailed ZHLN_ANNOTATION(ZHLN::Description<"The cooked ZRD2 container did not round-trip.">{}),
-    CacheFailed ZHLN_ANNOTATION(ZHLN::Description<"AssetManager did not cache or drop the radiance map.">{}),
+    CacheFailed ZHLN_ANNOTATION(ZHLN::Description<"The asset library did not cache or drop the radiance map.">{}),
     FixtureFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not write or cook the synthetic radiance fixture.">{}),
 };
 
@@ -130,7 +131,8 @@ bool WriteRadianceFile(const fs::path& path, std::span<const std::byte> bytes) {
 
 struct RadianceFixture {
     TempSandbox sandbox {"radiance"};
-    ZHLN::AssetManager assets;
+    ZHLN::AssetManager  cache;
+    ZHLN::AssetLibrary  assets {cache};
 
     [[nodiscard]] auto Decode(std::span<const std::byte> bytes, std::string_view name = "environment.hdr")
         -> std::expected<ZHLN::EnvironmentImageView, ZHLN::ErrorCode> {
@@ -421,7 +423,7 @@ struct RadianceTestSuite {
             RadianceFixture fixture;
             const fs::path path = fixture.sandbox.SubPath("environments/unit.hdr");
             constexpr std::string_view virtualPath = "environments/unit.hdr";
-            if (!fixture.assets.MountDirectory(fixture.sandbox.rootPath.string()) || !WriteRadianceFile(path, RleHdr())) {
+            if (!fixture.cache.MountDirectory(fixture.sandbox.rootPath.string()) || !WriteRadianceFile(path, RleHdr())) {
                 return std::unexpected(RadianceTestError::FixtureFailed);
             }
             auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), virtualPath);

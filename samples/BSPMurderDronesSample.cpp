@@ -32,6 +32,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
@@ -48,7 +49,6 @@
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Common.h>
@@ -247,7 +247,7 @@ ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
     g_mouseCaptured = captured;
-    engine.GetPlatformHost().CaptureMouse(captured);
+    engine.Host().CaptureMouse(captured);
 }
 
 // Camera::GetViewMatrix builds its direction inline and exposes no accessor.
@@ -341,7 +341,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     hudGui.SetFontAtlas(engine.GetFontAtlas());
     ZHLN::GUI::Frame ui = hudGui.BeginFrame(engine.ConsumeUIInput(g_frameDt));
 
-    const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D viewport = engine.Host().Extent();
     const float          cx       = static_cast<float>(viewport.width) * 0.5f;
     const float          cy       = static_cast<float>(viewport.height) * 0.5f;
     const float          half     = kCrosshairThickness * 0.5f;
@@ -1544,7 +1544,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->Host().Focus();
     }
 
     // Install systems. The character controller comes first: it registers the
@@ -1636,7 +1636,7 @@ auto main(int argc, char* argv[]) -> int {
     const auto& prefab = *prefabOpt;
     ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)", prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
-    // 5b. Preload static prop models referenced by the map into AssetManager
+    // 5b. Preload static prop models referenced by the map into the asset cache
     const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(*engine, bspMap, importOpts);
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 

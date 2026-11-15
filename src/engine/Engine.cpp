@@ -32,6 +32,7 @@
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
@@ -168,7 +169,8 @@ void Engine::EnsureFontAtlas() {
     if (_impl->fontAtlasUploaded) {
         return;
     }
-    PrefabFactory::PrimeDefaultBakedFont(_impl->kernel->GetAssetManager());
+    // Loading the default cooked font also sets it as the process default.
+    (void) PrefabFactory::LoadFontAsset(*this, GUI::kDefaultFontAssetPath);
     const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(_impl->kernel->GetRenderContext(), _impl->kernel->GetAssetManager(), GUI::kDefaultFontAssetID);
     if (uploaded.glyphCount > 0) {
         _impl->fontAtlas = uploaded;
@@ -255,7 +257,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         std::construct_at(_impl->renderServices.get(), RenderServices {
             .render        = _impl->kernel->GetRenderContext(),
             .scene         = _impl->sceneData,
-            .assets        = _impl->kernel->GetAssetManager(),
+            .assets        = Assets(),
             .input         = InputReader {&_impl->input},
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
@@ -436,16 +438,8 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-auto Engine::GetPlatformHost() noexcept -> PlatformHost& {
-    return _impl->kernel->GetPlatformHost();
-}
-
-auto Engine::GetPlatformHost() const noexcept -> const PlatformHost& {
-    return _impl->kernel->GetPlatformHost();
-}
-
-auto Engine::GetWindow() noexcept -> ZHLN::Optional<Window&> {
-    return _impl->kernel->GetWindow();
+auto Engine::Host() noexcept -> HostWindow {
+    return HostWindow {_impl->kernel->GetPlatformHost()};
 }
 
 auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
@@ -595,7 +589,7 @@ struct EngineCore {
                 if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                     ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                     ctx.error = lost_res.error();
-                    engine.GetPlatformHost().Close();
+                    engine.Host().Close();
                 }
             }
         }
@@ -622,7 +616,9 @@ auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnPar
     return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
-    return LoadModelPrefab(engine.Graphics(), EngineCore::Assets(engine), path);
+    // A lookup, not a load: an importer has already cached the prefab by the
+    // time a scene names it.
+    return EngineCore::Assets(engine).GetCachedPrefab(HashAssetPath(path));
 }
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefabInternal(
@@ -659,7 +655,7 @@ void Engine::EnsureSystemGraphs() {
         _impl->simServices = std::make_unique<SimServices>(SimServices {
             .physics      = _impl->world->GetPhysics(),
             .audio        = _impl->kernel->GetAudioContext(),
-            .assets       = _impl->kernel->GetAssetManager(),
+            .assets       = Assets(),
             .input        = InputReader {&_impl->input},
             .haptics      = InputHaptics {&_impl->input},
             .articulation = _impl->world->GetArticulationSystem(),
@@ -671,7 +667,7 @@ void Engine::EnsureSystemGraphs() {
         _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
             .render        = render,
             .scene         = _impl->sceneData,
-            .assets        = _impl->kernel->GetAssetManager(),
+            .assets        = Assets(),
             .input         = InputReader {&_impl->input},
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
@@ -900,7 +896,7 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
     if (const auto& supplied = _impl->hostUIInput; supplied.has_value()) {
         GUI::UIInput out    = *supplied;
         out.dt              = dt;
-        out.viewport        = GetPlatformHost().GetSize();
+        out.viewport        = _impl->kernel->GetPlatformHost().GetSize();
         out.pressedKeys     = _impl->uiPressedKeys;
         out.characterStream = _impl->uiCharacterStream;
         _impl->hostUIInput.reset();
@@ -913,13 +909,9 @@ auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
     _impl->uiCharacterStream.clear();
 
     GUI::UIInput out {
-        .viewport  = GetPlatformHost().GetSize(),
+        .viewport  = _impl->kernel->GetPlatformHost().GetSize(),
         .dt        = dt,
-        .clipboard = {
-            .userdata = &GetPlatformHost(),
-            .set      = [](void* ud, std::string_view text) -> void { static_cast<PlatformHost*>(ud)->SetClipboardText(text); },
-            .get      = [](void* ud) -> std::string { return static_cast<PlatformHost*>(ud)->GetClipboardText(); },
-        },
+        .clipboard = Host().ClipboardSink(),
     };
 
     auto& input      = _impl->input.MutableSeatKeyboardMouse();
@@ -1087,7 +1079,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
     }
 
     auto engine = std::move(engine_res.value());
-    engine->GetPlatformHost().Focus();
+    engine->Host().Focus();
 
     // The application's install pass: modules contribute components, declare
     // their frame steps, and mark the system graphs dirty for the first Tick.

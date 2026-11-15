@@ -19,7 +19,7 @@ class Engine;
 namespace ZHLN::BSP {
 
 // Loads a Source engine StudioModel (.mdl + .vvd + .vtx + .phy) from disk via SourceVFS,
-// builds a ModelPrefab with GPU buffers, materials, and colliders, and caches it in AssetManager.
+// builds a ModelPrefab with GPU buffers, materials, and colliders, and caches it in the asset cache.
 [[nodiscard]] auto LoadStudioModelPrefab(
     Engine&              engine,
     const SourceVFS&     vfs,

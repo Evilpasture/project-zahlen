@@ -50,7 +50,7 @@ namespace ZHLN::BSP {
     const ImportOptions&       options = {}
 ) -> ZHLN::Optional<ModelPrefab&>;
 
-// Preloads all StudioModel static props referenced by the map into AssetManager.
+// Preloads all StudioModel static props referenced by the map into the asset cache.
 // Returns the count of successfully resolved and cached prefabs.
 auto PreloadStaticProps(
     Engine&              engine,

@@ -5,7 +5,7 @@
 
 // Engine-only graph entry point; the audio library exposes AudioContext, not
 // engine component queries. Keep Components.hpp out of its public API.
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
@@ -20,7 +20,7 @@ ZHLN_API void AudioSystem(
         Components::AudioSourceComponent&
     >                                             query,
     ZHLN::Optional<AudioContext&>                 audio,
-    ZHLN::Optional<AssetManager&>                 assets,
+    ECS::Res<AssetLibrary>                        assets,
     ECS::Query<const Components::CameraComponent> cameraQuery,
     FrameDt                                       dt
 );

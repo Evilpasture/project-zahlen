@@ -11,6 +11,7 @@
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/IK.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
@@ -63,7 +64,7 @@ struct UnregisteredService {
 };
 
 struct ExtensionGraphServices {
-    ZHLN::AssetManager&           assets;
+    ZHLN::AssetLibrary&           assets;
     ZHLN::PoseUploadQueue&        poseUploads;
     ZHLN::ECS::ExtensionServices& extensions;
 };
@@ -223,6 +224,7 @@ struct TwoBoneIKTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> extension_services_resolve_through_system_graph() {
             ZHLN::AssetManager          assets;
+            ZHLN::AssetLibrary          library {assets};
             ZHLN::PoseUploadQueue       uploads;
             ZHLN::ECS::ExtensionServices extensions;
             auto&                       counter = extensions.Emplace<TestCounterService>(TestCounterService {.ticks = 3});
@@ -234,7 +236,7 @@ struct TwoBoneIKTestSuite {
             }
 
             ZHLN::ECS::Registry registry;
-            ExtensionGraphServices services {.assets = assets, .poseUploads = uploads, .extensions = extensions};
+            ExtensionGraphServices services {.assets = library, .poseUploads = uploads, .extensions = extensions};
             ZHLN::ECS::SystemGraph<ExtensionGraphServices> graph(registry, services);
             graph.AddSystem<&ServiceProbeSystem::Update>();
             graph.Compile();
@@ -251,7 +253,8 @@ struct TwoBoneIKTestSuite {
             const ZHLN::AssetID        id    = ZHLN::HashAssetPath(kPath);
 
             ZHLN::AssetManager assets;
-            assets.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
+            ZHLN::AssetLibrary library {assets};
+            library.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
 
             ZHLN::PoseUploadQueue             uploads;
             ZHLN::Animation::AnimationContext ctx;
@@ -280,7 +283,7 @@ struct TwoBoneIKTestSuite {
                     }
             );
             ctx.SuppressPaletteUpload(h1);
-            ctx.Step(0.5f, assets, uploads);
+            ctx.Step(0.5f, library, uploads);
 
             // Suppressed upload produces zero palette entries this step, then resets for the next step.
             uint32_t uploadCalls = 0;
@@ -289,7 +292,7 @@ struct TwoBoneIKTestSuite {
                 return std::unexpected(TwoBoneIKTestError::HandleLifecycleFailed);
             }
 
-            ctx.Step(0.75f, assets, uploads);
+            ctx.Step(0.75f, library, uploads);
             uploads.Drain([&](const ZHLN::PoseUpload& u) {
                 if (u.jointOffset == 16 && u.matrices.size() == 3) {
                     ++uploadCalls;
@@ -313,7 +316,8 @@ struct TwoBoneIKTestSuite {
             const ZHLN::AssetID        id    = ZHLN::HashAssetPath(kPath);
 
             ZHLN::AssetManager assets;
-            assets.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
+            ZHLN::AssetLibrary library {assets};
+            library.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
 
             ZHLN::PoseUploadQueue             uploads;
             ZHLN::Animation::AnimationContext ctx;
@@ -346,7 +350,7 @@ struct TwoBoneIKTestSuite {
             // Step 30 resting frames with the same IK chain: pose must remain bit-identical without compounding drift.
             for (uint32_t frame = 0; frame < 30; ++frame) {
                 ctx.SetIKChains(h, chain);
-                ctx.Step(1.0f / 60.0f, assets, uploads);
+                ctx.Step(1.0f / 60.0f, library, uploads);
                 uploads.Clear();
 
                 const auto modelPose = ctx.ModelPose(h);
@@ -370,7 +374,7 @@ struct TwoBoneIKTestSuite {
             }
 
             // Dropping IK chains on the next frame restores the un-bent bind/clip reach (Hand at z = 4.0).
-            ctx.Step(1.0f / 60.0f, assets, uploads);
+            ctx.Step(1.0f / 60.0f, library, uploads);
             const auto restoredModel = ctx.ModelPose(h);
             if (!ZHLN::Test::ExpectTrue(Near(restoredModel[2].Column(3).XYZ(), FVec3{0.0f, 2.0f, 4.0f}, 1.0e-4f))) {
                 return std::unexpected(TwoBoneIKTestError::RestingIKDrift);
@@ -383,7 +387,8 @@ struct TwoBoneIKTestSuite {
             const ZHLN::AssetID        id    = ZHLN::HashAssetPath(kPath);
 
             ZHLN::AssetManager assets;
-            assets.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
+            ZHLN::AssetLibrary library {assets};
+            library.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
 
             ZHLN::PoseUploadQueue        uploads;
             ZHLN::ECS::ExtensionServices extensions;
@@ -393,7 +398,7 @@ struct TwoBoneIKTestSuite {
             registry.RegisterAllComponentsIn<ZHLN::Components>();
             registry.RegisterComponent<ZHLN::IK::TwoBoneIKComponent>();
 
-            ExtensionGraphServices services {.assets = assets, .poseUploads = uploads, .extensions = extensions};
+            ExtensionGraphServices services {.assets = library, .poseUploads = uploads, .extensions = extensions};
             ZHLN::ECS::SystemGraph<ExtensionGraphServices> graph(registry, services);
             graph.AddSystem<&ZHLN::Animation::AnimationSyncSystem::Update>();
             graph.AddSystem<&ZHLN::Animation::AnimationStepSystem::Update>();
@@ -469,7 +474,8 @@ struct TwoBoneIKTestSuite {
             const ZHLN::AssetID        id    = ZHLN::HashAssetPath(kPath);
 
             ZHLN::AssetManager assets;
-            assets.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
+            ZHLN::AssetLibrary library {assets};
+            library.CachePrefab(id, MakeFourNodeLimbPrefab(kPath));
 
             ZHLN::PoseUploadQueue        uploads;
             ZHLN::ECS::ExtensionServices extensions;
@@ -479,7 +485,7 @@ struct TwoBoneIKTestSuite {
             registry.RegisterAllComponentsIn<ZHLN::Components>();
             registry.RegisterComponent<ZHLN::IK::TwoBoneIKComponent>();
 
-            ExtensionGraphServices services {.assets = assets, .poseUploads = uploads, .extensions = extensions};
+            ExtensionGraphServices services {.assets = library, .poseUploads = uploads, .extensions = extensions};
             ZHLN::ECS::SystemGraph<ExtensionGraphServices> graph(registry, services);
             graph.AddSystem<&ZHLN::Animation::AnimationSyncSystem::Update>();
             graph.AddSystem<&ZHLN::Animation::AnimationStepSystem::Update>();

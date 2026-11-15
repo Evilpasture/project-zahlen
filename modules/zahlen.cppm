@@ -604,8 +604,6 @@ using ZHLN::PrefabFactory::CreatePlaneMesh;
 using ZHLN::PrefabFactory::CreateTetrahedronMesh;
 using ZHLN::PrefabFactory::InstantiatePrefab;
 using ZHLN::PrefabFactory::LoadModelPrefab;
-using ZHLN::PrefabFactory::LoadTexture;
-using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
 using ZHLN::PrefabFactory::SpawnParams;
 } // namespace PrefabFactory
 } // namespace ZHLN

@@ -28,6 +28,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
@@ -203,7 +204,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->Host().Focus();
     }
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored
@@ -260,7 +261,7 @@ auto main(int argc, char* argv[]) -> int {
                 );
                 if (auto lost = engine->HandleDeviceLost(); !lost) {
                     ZHLN::Log("[Sample] Recovery failed: {}", lost.error());
-                    engine->GetPlatformHost().Close();
+                    engine->Host().Close();
                     break;
                 }
             } else {

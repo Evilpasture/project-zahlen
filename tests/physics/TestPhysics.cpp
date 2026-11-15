@@ -17,6 +17,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -45,6 +46,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             static_assert(InvalidCollisionAssetID == CollisionAssetID::Invalid);
             PhysicsConfig cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             AssetManager assets; // outlives the context and its resolver binding
+            AssetLibrary library {assets};
             PhysicsContext pc(cfg);
             const auto id = HashCollisionAssetID("tests/collision/triangle");
             auto create = [&](CollisionAssetID shape) {
@@ -58,15 +60,15 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             }, &assets);
             ExpectTrue(create(id) == Physics::BodyID::Null()); // cache miss
             Physics::MeshGeometry triangle {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,2}};
-            ExpectTrue(!assets.CacheCollisionMesh(CollisionAssetID::Invalid, triangle));
+            ExpectTrue(!library.CacheCollisionMesh(CollisionAssetID::Invalid, triangle));
             auto bad = triangle; bad.indices[2] = 4;
-            ExpectTrue(!assets.CacheCollisionMesh(id, std::move(bad)));
-            ExpectTrue(assets.CacheCollisionMesh(id, triangle));
-            auto original = assets.FindCollisionMesh(id);
+            ExpectTrue(!library.CacheCollisionMesh(id, std::move(bad)));
+            ExpectTrue(library.CacheCollisionMesh(id, triangle));
+            auto original = library.FindCollisionMesh(id);
             ExpectTrue(original && original->vertices[0].x == 0.0f);
             Physics::MeshGeometry invalidReplacement {.vertices = {{0,0,0}, {1,0,0}, {0,1,0}}, .indices = {0,1,9}};
-            ExpectTrue(!assets.CacheCollisionMesh(id, std::move(invalidReplacement)));
-            ExpectTrue(assets.FindCollisionMesh(id) == original);
+            ExpectTrue(!library.CacheCollisionMesh(id, std::move(invalidReplacement)));
+            ExpectTrue(library.FindCollisionMesh(id) == original);
             const auto body1 = create(id);
             const auto body2 = create(id);
             ExpectTrue(body1 != Physics::BodyID::Null() && body2 != Physics::BodyID::Null());
@@ -81,7 +83,7 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             }
             ExpectTrue(s1 && s1 == s2); // same ID and same snapshot: interned
             for (auto& v: triangle.vertices) v.x += 10.0f;
-            ExpectTrue(assets.CacheCollisionMesh(id, std::move(triangle)));
+            ExpectTrue(library.CacheCollisionMesh(id, std::move(triangle)));
             ExpectTrue(original && original->vertices[0].x == 0.0f); // old pinned snapshot
             const auto replacement = create(id);
             ExpectTrue(replacement != Physics::BodyID::Null());
@@ -91,12 +93,12 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
             ExpectTrue(oldHit.hasHit && (oldHit.bodyID == body1 || oldHit.bodyID == body2));
             ExpectTrue(newHit.hasHit && newHit.bodyID == replacement);
             assets.ClearCache();
-            ExpectTrue(!assets.FindCollisionMesh(id));
+            ExpectTrue(!library.FindCollisionMesh(id));
             ExpectTrue(create(id) == Physics::BodyID::Null());
             ExpectTrue(pc.Raycast({10.2, 0.2, 5}, {0, 0, -1}, 10).hasHit); // body pins baked shape
             ExpectTrue(original && original->vertices.size() == 3); // snapshots survive clear
             Physics::MeshGeometry reloaded {.vertices = {{20,0,0}, {21,0,0}, {20,1,0}}, .indices = {0,1,2}};
-            ExpectTrue(assets.CacheCollisionMesh(id, std::move(reloaded)));
+            ExpectTrue(library.CacheCollisionMesh(id, std::move(reloaded)));
             const auto reloadedBody = create(id);
             ExpectTrue(reloadedBody != Physics::BodyID::Null());
             pc.Step(1.0f / 60.0f);
@@ -122,19 +124,20 @@ namespace ZHLN_ANNOTATION(UseFixtures<Fixture::TaskSystemAndJoltScope> {}) {
 
         std::expected<void, ZHLN::ErrorCode> test_collision_asset_snapshots_during_concurrent_updates(Fixture::TaskSystemAndJoltScope&) {
             AssetManager assets;
+            AssetLibrary library {assets};
             const auto id = HashCollisionAssetID("tests/concurrent-collision");
             std::atomic<bool> healthy {true};
             std::thread writer([&] {
                 for (int i = 0; i < 1000; ++i) {
                     const float x = static_cast<float>(i);
                     Physics::MeshGeometry g {.vertices = {{x,0,0}, {x+1,0,0}, {x,1,0}}, .indices = {0,1,2}};
-                    if (!assets.CacheCollisionMesh(id, std::move(g))) healthy.store(false);
-                    if (i % 17 == 0) assets.ClearCache();
+                    if (!library.CacheCollisionMesh(id, std::move(g))) healthy.store(false);
+                    if (i % 17 == 0) library.ClearCache();
                 }
             });
             std::thread reader([&] {
                 for (int i = 0; i < 3000; ++i) {
-                    const auto snapshot = assets.FindCollisionMesh(id);
+                    const auto snapshot = library.FindCollisionMesh(id);
                     if (!snapshot) continue; // ClearCache may have removed it.
                     if (snapshot->vertices.size() != 3 || snapshot->indices.size() != 3 ||
                         snapshot->vertices[1].x != snapshot->vertices[0].x + 1 ||

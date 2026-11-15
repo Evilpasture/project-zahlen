@@ -59,7 +59,7 @@
 #include <Zahlen/GUI/GUI.hpp>
 
 // --- engine composition -----------------------------------------------------
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>

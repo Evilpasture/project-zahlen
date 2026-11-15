@@ -70,6 +70,7 @@ class Simulation;
 class DebugDraw;
 class AssetLibrary;
 class AudioEngine;
+class HostWindow;
 class EngineState;
 class Entities;
 class InputReader;
@@ -137,9 +138,11 @@ class ZHLN_API Engine {
     // or TTY session.
     [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
 
-    [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
-    [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
-    [[nodiscard]] auto GetWindow() noexcept -> ZHLN::Optional<Window&>;
+    // The primary window as a host uses it: extent, clipboard, cursor policy,
+    // capture and the drop hook. The PlatformHost itself -- event polling,
+    // target acquisition, presentation lifetime -- stays inside the engine.
+    [[nodiscard]] auto Host() noexcept -> HostWindow;
+
     auto
         AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);

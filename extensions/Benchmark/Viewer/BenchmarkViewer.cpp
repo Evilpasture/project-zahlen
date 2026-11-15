@@ -3,6 +3,7 @@
 
 // extensions/Benchmark/Viewer/BenchmarkViewer.cpp
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Zahlen/Engine/Clock.hpp>
@@ -394,7 +395,7 @@ void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<con
 
     // What the screen can give the panel: the window, less the margin it keeps
     // at both edges, less the benchmark panel's half of the left side.
-    const ZHLN::Extent2D viewport  = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D viewport  = engine.Host().Extent();
     const float          available = std::max(240.0f, static_cast<float>(viewport.width) - (kPanelMargin * 3.0f) - kPanelWidth);
 
     // The GPU stages are identifiers: the column is as wide as the longest one,
@@ -939,7 +940,7 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& eng
     // viewport width is what puts this one at the other edge. Its width is what
     // its columns came to -- a floating box that is narrower than its content is
     // not clipped, it spills.
-    const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D viewport = engine.Host().Extent();
     const float          rightX   = static_cast<float>(viewport.width) - telemetryWidth - kPanelMargin;
 
     ui.Box(
@@ -1104,7 +1105,7 @@ void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
     // The Engine is consulted for exactly one thing: a headless host has no
     // window to draw a panel into, and saying so here is cheaper than drawing
     // into nothing every frame.
-    if (!static_cast<bool>(engine.GetWindow())) {
+    if (!engine.Host().Present()) {
         m_impl->visible = false;
     }
 

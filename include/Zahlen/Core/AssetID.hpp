@@ -26,4 +26,11 @@ constexpr AssetID HashAssetID(std::string_view name) noexcept {
     return Hash64(name);
 }
 
+// The cache key for a virtual path. Same hash as HashAssetID, kept as its own
+// name because the two are read as different questions ("which asset" vs
+// "which file").
+constexpr uint64_t HashAssetPath(std::string_view path) noexcept {
+    return Hash64(path);
+}
+
 }

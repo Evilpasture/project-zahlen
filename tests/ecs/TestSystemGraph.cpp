@@ -6,6 +6,8 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -148,6 +150,20 @@ static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::Optional<ZHLN::E
 static_assert(!ZHLN::ECS::ResolvableFrom<RegistryCarrier, ZHLN::Optional<const ZHLN::ECS::Registry&>>);
 template <typename W> concept PublicRegistry = requires(W& world) { world.GetRegistry(); };
 static_assert(!PublicRegistry<ZHLN::World>);
+
+// The extension store is reachable from every carrier that has the bundle, so a
+// bundle that withholds a service can only be enforced by the resolver. An
+// engine-owned object a capability fronts is never taken from the store: the
+// system asks for the capability, or it does not compile.
+struct ExtensionOnlyBundle { ZHLN::ECS::ExtensionServices& extensions; };
+using ExtensionOnlyCarrier = ZHLN::ECS::Carrier<ExtensionOnlyBundle>;
+static_assert(!ZHLN::ECS::ResolvableFrom<ExtensionOnlyCarrier, ZHLN::ECS::Res<ZHLN::AssetManager>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<ExtensionOnlyCarrier, ZHLN::ECS::ResMut<ZHLN::AssetManager>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<ExtensionOnlyCarrier, ZHLN::ECS::Res<ZHLN::RenderContext>>);
+static_assert(!ZHLN::ECS::ResolvableFrom<ExtensionOnlyCarrier, ZHLN::ECS::Res<ZHLN::PhysicsContext>>);
+// The optional spelling is still always resolvable; it just answers nullopt for
+// a withheld type rather than reaching into the store.
+static_assert(ZHLN::ECS::ResolvableFrom<ExtensionOnlyCarrier, ZHLN::Optional<ZHLN::AssetManager&>>);
 void CommandBufferSystemA(ZHLN::ECS::Query<TestCompA&> query, ZHLN::ECS::EntityCommandBuffer& ecb) {
     query.ForEach([&](ZHLN::Entity e, TestCompA& comp) {
         comp.value += 10;

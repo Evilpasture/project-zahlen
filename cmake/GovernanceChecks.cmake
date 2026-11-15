@@ -18,6 +18,7 @@
 #   - check_error_ordinals.py       (no raw ErrorCode ordinal casts outside allowlist)
 #   - check_include_provenance.pl   (direct/transitive header provenance across tracked symbols)
 #   - check_handle_taxonomy.py     (IDs, facades, scopes and owners stay separate; no public *Handle or *Id)
+#   - check_capability_boundary.py (optional layers consume capabilities, not the engine's internal services)
 #
 # configure/run_governance_checks.py runs all 12 checks concurrently across CPU
 # cores and caches passing tree fingerprints in ${CMAKE_BINARY_DIR}/.zhln_governance_cache.json

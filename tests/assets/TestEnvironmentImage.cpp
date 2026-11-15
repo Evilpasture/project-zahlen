@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <cstdint>
@@ -27,19 +28,21 @@ namespace {
 struct EnvironmentImageTestSuite {
     struct Tests {
         auto missing_environment_is_not_loaded_implicitly() -> std::expected<void, ZHLN::ErrorCode> {
-            ZHLN::AssetManager assets;
-            if (!ZHLN::Test::ExpectFalse(assets.FindEnvironmentImage("environment.hdr").has_value())) {
+            ZHLN::AssetManager assets; // owns the cache
+            ZHLN::AssetLibrary library {assets};
+            if (!ZHLN::Test::ExpectFalse(library.FindEnvironmentImage("environment.hdr").has_value())) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
             return {};
         }
 
         auto rejects_malformed_pixels_without_changing_cache() -> std::expected<void, ZHLN::ErrorCode> {
-            ZHLN::AssetManager assets;
-            if (!assets.CacheEnvironmentImage("lighting", Pixels(1.0f))) {
+            ZHLN::AssetManager assets; // owns the cache
+            ZHLN::AssetLibrary library {assets};
+            if (!library.CacheEnvironmentImage("lighting", Pixels(1.0f))) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
-            const auto first = assets.FindEnvironmentImage("lighting");
+            const auto first = library.FindEnvironmentImage("lighting");
             if (!first || !ZHLN::Test::ExpectEq(first->rgba[0], 1.0f) ||
                 !ZHLN::Test::ExpectEq(first->width, 2u) || !ZHLN::Test::ExpectEq(first->height, 1u)) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
@@ -47,12 +50,12 @@ struct EnvironmentImageTestSuite {
 
             auto bad = Pixels(2.0f);
             bad.rgba.pop_back();
-            if (!ZHLN::Test::ExpectFalse(assets.CacheEnvironmentImage("lighting", std::move(bad))) ||
-                !ZHLN::Test::ExpectFalse(assets.CacheEnvironmentImage("", Pixels(2.0f))) ||
-                !ZHLN::Test::ExpectFalse(assets.CacheEnvironmentImage("lighting", {}))) {
+            if (!ZHLN::Test::ExpectFalse(library.CacheEnvironmentImage("lighting", std::move(bad))) ||
+                !ZHLN::Test::ExpectFalse(library.CacheEnvironmentImage("", Pixels(2.0f))) ||
+                !ZHLN::Test::ExpectFalse(library.CacheEnvironmentImage("lighting", {}))) {
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             }
-            const auto stillFirst = assets.FindEnvironmentImage("lighting");
+            const auto stillFirst = library.FindEnvironmentImage("lighting");
             if (!stillFirst || !ZHLN::Test::ExpectEq(stillFirst->rgba.data(), first->rgba.data())) {
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             }
@@ -60,16 +63,17 @@ struct EnvironmentImageTestSuite {
         }
 
         auto validates_prepared_sun_and_both_panorama_lifetimes() -> std::expected<void, ZHLN::ErrorCode> {
-            ZHLN::AssetManager assets;
+            ZHLN::AssetManager assets; // owns the cache
+            ZHLN::AssetLibrary library {assets};
             auto prepared = Pixels(2.0f);
             prepared.lightingRgba = Pixels(0.5f).rgba;
             prepared.sun.emplace();
             prepared.sun->direction = {1.0f, 0.0f, 0.0f};
             prepared.sun->irradiance = {2.0f, 1.0f, 0.5f};
             prepared.contentHash = 42;
-            if (!assets.CacheEnvironmentImage("cooked", std::move(prepared)))
+            if (!library.CacheEnvironmentImage("cooked", std::move(prepared)))
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
-            const auto first = assets.FindEnvironmentImage("cooked");
+            const auto first = library.FindEnvironmentImage("cooked");
             if (!first || !first->sun || first->lightingRgba.size() != 8u ||
                 !ZHLN::Test::ExpectEq(first->rgba[0], 2.0f) ||
                 !ZHLN::Test::ExpectEq(first->lightingRgba[0], 0.5f) ||
@@ -80,44 +84,45 @@ struct EnvironmentImageTestSuite {
             auto invalid = Pixels(3.0f);
             invalid.sun.emplace();
             invalid.sun->direction = {1.0f, 0.0f, 0.0f};
-            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+            if (library.CacheEnvironmentImage("cooked", std::move(invalid)))
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             invalid = Pixels(3.0f);
             invalid.lightingRgba = {0.0f};
-            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+            if (library.CacheEnvironmentImage("cooked", std::move(invalid)))
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             invalid = Pixels(3.0f);
             invalid.lightingRgba = invalid.rgba;
             invalid.sun.emplace(); // zero is not a valid direction
-            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+            if (library.CacheEnvironmentImage("cooked", std::move(invalid)))
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
-            const auto retained = assets.FindEnvironmentImage("cooked");
+            const auto retained = library.FindEnvironmentImage("cooked");
             if (!retained || !ZHLN::Test::ExpectEq(retained->rgba.data(), first->rgba.data()) ||
                 !ZHLN::Test::ExpectEq(retained->lightingRgba.data(), first->lightingRgba.data())) {
                 return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             }
-            assets.ClearCache();
-            if (assets.FindEnvironmentImage("cooked")) return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            library.ClearCache();
+            if (library.FindEnvironmentImage("cooked")) return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
             return {};
         }
 
         auto replacement_and_clear_manage_borrowed_pixels() -> std::expected<void, ZHLN::ErrorCode> {
-            ZHLN::AssetManager assets;
-            if (!assets.CacheEnvironmentImage("lighting", Pixels(1.0f))) {
+            ZHLN::AssetManager assets; // owns the cache
+            ZHLN::AssetLibrary library {assets};
+            if (!library.CacheEnvironmentImage("lighting", Pixels(1.0f))) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
-            const auto first = assets.FindEnvironmentImage("lighting");
-            if (!assets.CacheEnvironmentImage("lighting", Pixels(2.0f))) {
+            const auto first = library.FindEnvironmentImage("lighting");
+            if (!library.CacheEnvironmentImage("lighting", Pixels(2.0f))) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
-            const auto next = assets.FindEnvironmentImage("lighting");
+            const auto next = library.FindEnvironmentImage("lighting");
             if (!first || !next || !ZHLN::Test::ExpectEq(first->rgba[0], 1.0f) ||
                 !ZHLN::Test::ExpectEq(next->rgba[0], 2.0f) ||
                 !ZHLN::Test::ExpectNe(first->rgba.data(), next->rgba.data())) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
-            assets.ClearCache(); // invalidates both borrowed spans
-            if (!ZHLN::Test::ExpectFalse(assets.FindEnvironmentImage("lighting").has_value())) {
+            library.ClearCache(); // invalidates both borrowed spans
+            if (!ZHLN::Test::ExpectFalse(library.FindEnvironmentImage("lighting").has_value())) {
                 return std::unexpected(EnvironmentImageTestError::CacheFailed);
             }
             return {};

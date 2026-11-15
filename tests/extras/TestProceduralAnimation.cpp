@@ -18,6 +18,7 @@
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/World.hpp>
@@ -181,7 +182,8 @@ struct ProceduralAnimationTestSuite {
             if (!created) return std::unexpected(created.error());
             auto world = std::move(*created);
             AudioContext audio {AudioConfig {.headless = true}};
-            AssetManager assets;
+            AssetManager  assets;
+            AssetLibrary  library {assets};
             ECS::ExtensionServices extensions;
             PoseUploadQueue uploads;
             // The simulation bundle carries the two input capabilities, and this
@@ -198,7 +200,7 @@ struct ProceduralAnimationTestSuite {
             // The reader comes from the const accessor and the haptics from the
             // mutable one, which is exactly the split the bundle mirrors.
             const Engine& constEngine = **engine;
-            SimServices   services {.physics = world->GetPhysics(), .audio = audio, .assets = assets,
+            SimServices   services {.physics = world->GetPhysics(), .audio = audio, .assets = library,
                                     .input = constEngine.Input(), .haptics = (*engine)->Haptics(),
                                   .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
                                   .extensions = extensions, .poseUploads = uploads};
@@ -213,7 +215,7 @@ struct ProceduralAnimationTestSuite {
             Skeleton skeleton;
             skeleton.joints.push_back(Joint {.name = String64("Root"), .nodeIndex = 0});
             prefab->skeletons.push_back(std::move(skeleton));
-            assets.CachePrefab(prefabID, std::move(prefab));
+            library.CachePrefab(prefabID, std::move(prefab));
 
             auto map = std::make_unique<RigBoneMap>();
             BuildStandardProceduralRig(*map);

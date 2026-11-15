@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "IK.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -673,7 +673,7 @@ void AnimationContext::SuppressPaletteUpload(AnimationID handle) noexcept {
     }
 }
 
-void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueue& poseUploads) {
+void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueue& poseUploads) {
     const size_t activeCount = _impl->instances.size();
     if (activeCount == 0) {
         return;
@@ -686,7 +686,7 @@ void AnimationContext::Step(float dt, const AssetManager& assets, PoseUploadQueu
     for (size_t i = 0; i < activeCount; ++i) {
         InstanceState& inst           = _impl->instances[i];
         inst.uploadSliceCount         = 0;
-        const auto prefabOpt          = assets.GetCachedPrefab(inst.prefabAsset);
+        const auto prefabOpt          = assets.CachedPrefab(inst.prefabAsset);
         if (!prefabOpt) {
             continue;
         }

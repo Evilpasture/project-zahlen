@@ -21,7 +21,7 @@ ZHLN_API void AudioSystem(
         Components::AudioSourceComponent&
     >                                             query,
     ZHLN::Optional<AudioContext&>                 audio,
-    ZHLN::Optional<AssetManager&>                 assets,
+    ECS::Res<AssetLibrary>                        assets,
     ECS::Query<const Components::CameraComponent> cameraQuery,
     FrameDt                                       dt
 ) {
@@ -115,12 +115,11 @@ ZHLN_API void AudioSystem(
 
             const std::string_view pathView(src.filepath);
             src.voiceID                 = device.CreateVoice(pathView, desc);
-            if (src.voiceID == VoiceID::Invalid && assets) {
-                if (const size_t byteSize = assets->ReadFile(pathView, nullptr, 0); byteSize > 0) {
-                    std::vector<uint8_t> encodedBytes(byteSize);
-                    if (assets->ReadFile(pathView, encodedBytes.data(), encodedBytes.size()) == byteSize) {
-                        src.voiceID = device.CreateVoiceFromMemory(encodedBytes, desc);
-                    }
+            // The file may live in a pak rather than on disk, so the engine's
+            // virtual layer is asked for the bytes before giving up.
+            if (src.voiceID == VoiceID::Invalid) {
+                if (auto encodedBytes = assets->ReadVirtualFile(pathView); encodedBytes && !encodedBytes->empty()) {
+                    src.voiceID = device.CreateVoiceFromMemory(*encodedBytes, desc);
                 }
             }
 

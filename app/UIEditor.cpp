@@ -31,6 +31,7 @@
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/App.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -660,20 +661,12 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-[[nodiscard]] auto MakeHostClipboard(ZHLN::PlatformHost& host) noexcept -> GUI::TextEdit::ClipboardSink {
-    return GUI::TextEdit::ClipboardSink {
-        .userdata = &host,
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
-    };
-}
-
 // The host draws its own cursor into whichever window the pointer is in. It is
 // a draw hook rather than part of UIDrawData because the cursor is not UI: it
 // follows the device, not the tree.
 void DrawCustomCursor(ZHLN::Engine& engine, const ZHLN::Engine::WindowRenderView& view, const Session& session,
                       const WindowUIInputCollector& input, ZHLN::FrameScope& gpuFrame) {
-    if (view.size.width == 0 || view.size.height == 0 || !engine.GetPlatformHost().UsesCustomCursor()) {
+    if (view.size.width == 0 || view.size.height == 0 || !engine.Host().CustomCursor()) {
         return;
     }
     const float cursorX = std::clamp(input.state.mouseX, 0.0f, static_cast<float>(view.size.width - 1));
@@ -702,7 +695,7 @@ void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::Win
     const ZHLN::Extent2D previewSize = view.size;
     session.previewGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.previewGui.BeginFrame(
-        session.previewInput.Consume(previewSize, session.dt, MakeHostClipboard(engine.GetPlatformHost()))
+        session.previewInput.Consume(previewSize, session.dt, engine.Host().ClipboardSink())
     );
     gui.Box(
         "PreviewRoot",
@@ -871,10 +864,10 @@ void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
     session.saveWasDown = saveDown;
 #endif
 
-    const ZHLN::Extent2D size = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D size = engine.Host().Extent();
     session.editorGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.editorGui.BeginFrame(
-        session.editorInput.Consume(size, session.dt, MakeHostClipboard(engine.GetPlatformHost()))
+        session.editorInput.Consume(size, session.dt, engine.Host().ClipboardSink())
     );
     gui.Box(
         "UIEditorWorkspace",
@@ -1005,7 +998,7 @@ auto main(int argc, char* argv[]) -> int {
     auto          rebuildFonts      = [&](ZHLN::Engine& engine) {
         // The engine builds the atlas from its own renderer and asset cache, and
         // rebuilds it after device loss. The editor takes a copy; it never holds
-        // a RenderContext or AssetManager reference across recovery.
+        // a renderer or asset-cache reference across recovery.
         engine.EnsureFontAtlas();
         session.fontAtlas = engine.GetFontAtlas();
         session.editorGui.SetFontAtlas(session.fontAtlas);

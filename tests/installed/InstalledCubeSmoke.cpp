@@ -100,7 +100,7 @@ bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
             }
         }
         if (!captured) std::println(stderr, "Rendered frame/readback/PPM validation failed");
-        engine.GetPlatformHost().Close();
+        engine.Host().Close();
     });
     SetLogObserver(nullptr);
     const auto errors = validationErrors.load(std::memory_order_relaxed);

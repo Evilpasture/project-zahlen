@@ -13,10 +13,12 @@
 // there is nothing to put them on.
 
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/ECS/ExtensionServices.hpp>
+#include <type_traits>
 
 namespace ZHLN {
 
@@ -63,7 +65,9 @@ class EventBus;
 struct SimServices {
     PhysicsContext&         physics;
     AudioContext&           audio;
-    AssetManager&           assets;
+    // The capability, not the cache: a simulation system resolves what it needs
+    // by type and cannot reach CachePrefab, UseRenderContext or the VFS handle.
+    AssetLibrary            assets;
     InputReader             input;
     InputHaptics            haptics;
     ArticulationSystem&     articulation;
@@ -77,7 +81,7 @@ struct SimServices {
 struct RenderServices {
     RenderContext&          render;
     SceneData&              scene;
-    AssetManager&           assets;
+    AssetLibrary            assets;
     InputReader             input;
     ECS::ExtensionServices& extensions;
     CullingStats&           cullingStats;
@@ -87,6 +91,17 @@ struct RenderServices {
 };
 
 namespace ECS {
+
+// The objects a node may never name. Each has a capability that fronts it, so a
+// graph that withholds the capability cannot be worked around by asking the
+// extension store for the object: `Res<T>` for any of these is rejected where
+// the node is added, not at run time.
+template <> struct IsWithheldService<AssetManager> : std::true_type {};
+template <> struct IsWithheldService<RenderContext> : std::true_type {};
+template <> struct IsWithheldService<PhysicsContext> : std::true_type {};
+template <> struct IsWithheldService<AudioContext> : std::true_type {};
+template <> struct IsWithheldService<SceneData> : std::true_type {};
+
 template <typename Services>
 class SystemGraph;
 

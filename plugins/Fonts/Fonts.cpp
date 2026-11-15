@@ -18,7 +18,6 @@
 #include "FontBMParser.hpp"
 
 #include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
@@ -41,18 +40,6 @@ namespace ZHLN::Fonts {
 namespace {
 
 // --- Byte sources: mounted paks first, then unpacked files -------------------
-
-auto ReadVirtual(AssetManager& mgr, std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    AssetLoadRequest req;
-    req.assetID = HashAssetPath(path);
-    if (!mgr.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
-        return std::nullopt;
-    }
-    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
-    std::vector<uint8_t> out(bytes, bytes + req.outSize);
-    mgr.FreeMemory(req);
-    return out;
-}
 
 auto ReadUnpacked(std::string_view path) -> std::optional<std::vector<uint8_t>> {
     std::ifstream file(fs::path(path), std::ios::binary | std::ios::ate);
@@ -81,7 +68,6 @@ auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string
 // --- Resolution -------------------------------------------------------------
 
 struct LoaderInstance {
-    AssetManager*               assets = nullptr;
     std::optional<AssetLibrary> library;
     BakedFontSource             source;
     GUI::BakedFontAsset         cache;
@@ -89,12 +75,10 @@ struct LoaderInstance {
 };
 
 auto ReadBytes(const LoaderInstance& self, std::string_view path) -> std::optional<std::vector<uint8_t>> {
+    // Mounted paks first, then an unpacked file: the capability answers the
+    // virtual path space, which is the whole of what this loader needs.
     if (self.library.has_value()) {
         if (auto out = self.library->ReadVirtualFile(path)) {
-            return out;
-        }
-    } else if (self.assets != nullptr) {
-        if (auto out = ReadVirtual(*self.assets, path)) {
             return out;
         }
     }

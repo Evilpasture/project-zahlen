@@ -3,7 +3,7 @@
 
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "AnimationSystem.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
@@ -156,7 +156,7 @@ void AnimationStepSystem::Update(
         Components::AnimatorComponent&, const Components::HierarchyComponent, const Components::MeshComponent,
         const Components::SkeletalMeshComponent, Components::MorphTargetComponent&, Components::TransformComponent&> query,
     ECS::ResMut<AnimationContext>                                                                                    anim,
-    ECS::Res<AssetManager>                                                                                           assets,
+    ECS::Res<AssetLibrary>                                                                                           assets,
     ECS::ResMut<PoseUploadQueue>                                                                                     poseUploads,
     FrameDt                                                                                                          frameDt
 ) {

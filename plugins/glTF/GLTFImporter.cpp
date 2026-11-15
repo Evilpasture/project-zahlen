@@ -9,7 +9,6 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "GLTFImporter.hpp"
 #include "TangentGenerator.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>

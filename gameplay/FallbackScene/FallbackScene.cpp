@@ -9,6 +9,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
@@ -298,7 +299,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         }
 
         if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f }, GUI::Sizing { .grow = 1.0f })) {
-            engine.GetPlatformHost().Close();
+            engine.Host().Close();
         }
 
         ui.EndRow();

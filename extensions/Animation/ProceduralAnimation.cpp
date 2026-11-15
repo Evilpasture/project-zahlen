@@ -20,7 +20,7 @@ module;
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
@@ -1672,7 +1672,7 @@ void ProceduralAnimationSystem(
     ProceduralAnimationQuery     query,
     FrameDt                      frameDt,
     ECS::Res<PhysicsContext>     physicsRes,
-    ECS::Res<AssetManager>       assetsRes,
+    ECS::Res<AssetLibrary>       assetsRes,
     ECS::ResMut<PoseUploadQueue> poseUploads
 ) noexcept;
 
@@ -1911,7 +1911,7 @@ void ProceduralAnimationSystem(
     ProceduralAnimationQuery     query,
     FrameDt                      frameDt,
     ECS::Res<PhysicsContext>     physicsRes,
-    ECS::Res<AssetManager>       assetsRes,
+    ECS::Res<AssetLibrary>       assetsRes,
     ECS::ResMut<PoseUploadQueue> poseUploads
 ) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
@@ -1946,7 +1946,7 @@ void ProceduralAnimationSystem(
 
         auto               animator    = query.Get<Components::AnimatorComponent>(entity);
         const AssetID      prefabAsset = (animator && animator->prefabAsset != InvalidAssetID) ? animator->prefabAsset : boneMap->sourcePrefabAsset;
-        const auto         prefabOpt   = prefabAsset != InvalidAssetID ? assets.GetCachedPrefab(prefabAsset) : ZHLN::Optional<const ModelPrefab&> {};
+        const auto         prefabOpt   = prefabAsset != InvalidAssetID ? assets.CachedPrefab(prefabAsset) : ZHLN::Optional<const ModelPrefab&> {};
         const ModelPrefab* prefab      = prefabOpt ? &*prefabOpt : nullptr;
         SkinBinding        skin        = FindSkinBinding(query.As<SkinBindingQuery>(), entity, prefab);
 

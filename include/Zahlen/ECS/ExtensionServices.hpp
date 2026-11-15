@@ -16,6 +16,16 @@ namespace ZHLN::ECS {
 // Type-erased, owning container for optional domain services (e.g.
 // AnimationContext). Kept reflection-free so headers included inside C++20
 // module global fragments never pull std::meta across module boundaries.
+// A service a graph node may not pull through the type-erased store.
+//
+// The store is reachable from every carrier that has the bundle, so without this
+// list `Res<AssetManager>`/`Res<RenderContext>` would resolve here even in a
+// SimGraph node whose bundle deliberately withholds them -- the bundle split
+// would be advisory. The types below are engine-owned objects a capability
+// fronts; naming one from a node is rejected where the node is added.
+template <typename T>
+struct IsWithheldService : std::false_type {};
+
 class ExtensionServices {
   public:
     ExtensionServices()                                    = default;

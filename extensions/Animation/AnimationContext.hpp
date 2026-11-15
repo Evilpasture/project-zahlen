@@ -24,7 +24,7 @@
 
 namespace ZHLN {
 
-class AssetManager;
+class AssetLibrary;
 class PoseUploadQueue;
 
 namespace Animation {
@@ -87,7 +87,7 @@ class AnimationContext {
     void SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept;
     void SuppressPaletteUpload(AnimationID handle) noexcept;
 
-    void Step(float dt, const AssetManager& assets, PoseUploadQueue& poseUploads);
+    void Step(float dt, const AssetLibrary& assets, PoseUploadQueue& poseUploads);
 
     [[nodiscard]] auto Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState>;
     [[nodiscard]] auto Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;

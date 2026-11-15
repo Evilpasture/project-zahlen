@@ -24,6 +24,7 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
@@ -802,7 +803,7 @@ void Initialize(ZHLN::Engine& engine) {
 
     AddInspectorLighting(engine);
 
-    engine.GetPlatformHost().SetFileDropHandler(&OnFileDropped, state);
+    engine.Host().SetFileDropHandler(&OnFileDropped, state);
     engine.SetUICallback([](ZHLN::Engine& eng, ZHLN::WindowID) -> void { RenderFrame(eng); });
 
     ZHLN::Log("[glTF Inspector] Initialized. Drop a .glb / .gltf file to begin.");

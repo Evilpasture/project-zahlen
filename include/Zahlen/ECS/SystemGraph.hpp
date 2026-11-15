@@ -34,6 +34,12 @@ namespace ZHLN::ECS {
 
 class Inspection;
 
+// Is this service one that only a capability may hand out? A graph node names
+// the capability and not the object behind it, so the extension store is not a
+// way around the bundle it was given.
+template <typename T>
+inline constexpr bool IsWithheld = IsWithheldService<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>>::value;
+
 template <typename T>
 inline constexpr bool IsUnscheduledWorldAccess =
     std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::remove_cvref_t<T>>>, Registry> ||
@@ -135,7 +141,7 @@ struct ParameterResolver<Res<T>> {
     template <typename CarrierType>
         requires(!IsUnscheduledWorldAccess<T> &&
                  (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
+                  (!IsWithheld<T> && Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())))
     static auto Resolve(CarrierType& carrier) noexcept -> Res<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -154,7 +160,7 @@ struct ParameterResolver<ResMut<T>> {
     template <typename CarrierType>
         requires(!IsUnscheduledWorldAccess<T> &&
                  (Reflect::BundleProvides<T, typename CarrierType::Services>() ||
-                  Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()))
+                  (!IsWithheld<T> && Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>())))
     static auto Resolve(CarrierType& carrier) noexcept -> ResMut<T> {
         if constexpr (Reflect::BundleProvides<T, typename CarrierType::Services>()) {
             return {Reflect::FindService<T>(carrier.services)};
@@ -240,12 +246,16 @@ struct ParameterResolver<Param> {
     using Value = typename Param::value_type;
     using Clean = std::remove_const_t<Value>;
 
+    // Always resolvable: a bundle that carries neither the service nor the
+    // extension store answers nullopt, which is what the optional spelling is
+    // for. A withheld type is never taken from the store -- it answers nullopt
+    // instead, so the capability the bundle withheld cannot be routed around.
     template <typename CarrierType>
         requires (!IsUnscheduledWorldAccess<Clean>)
     static auto Resolve(CarrierType& carrier) noexcept -> Param {
         if constexpr (Reflect::BundleProvides<Clean, typename CarrierType::Services>()) {
             return *Reflect::FindService<Clean>(carrier.services);
-        } else if constexpr (Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()) {
+        } else if constexpr (!IsWithheld<Clean> && Reflect::BundleProvides<ExtensionServices, typename CarrierType::Services>()) {
             auto* extensions = Reflect::FindService<ExtensionServices>(carrier.services);
             if constexpr (std::is_const_v<Value>) {
                 return std::as_const(*extensions).template Get<Clean>();

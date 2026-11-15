@@ -22,10 +22,12 @@ import ZHLN.Lightning;
 namespace ZHLN::Lightning {
 
 // Despawn expands PendingDestroy across the hierarchy immediately, so the
-// entire world is a write hazard. Resolve and invoke at an externally ordered
-// phase, using capabilities belonging to this query's world. The phase owner
-// must isolate graphics/audio and hierarchy side effects from other work;
-// these capability objects alias engine-owned services not tracked by the graph.
+// entire world is a write hazard, and graphics/audio work here has no place in
+// a simulation node's hazard graph. The update therefore runs at an externally
+// ordered phase -- Step() below -- which hands it the capabilities directly
+// rather than routing them through the extension store. A SimGraph node cannot
+// obtain GraphicsDevice or AudioEngine: they are bundle members of other
+// domains, and SimServices carries them for rendering, not for systems to pull.
 using LightningUpdateQuery = ECS::ExclusiveQuery<LightningComponent&, const Components::PendingDestroy,
                                                 const Components::CameraComponent, Components::LightComponent&>;
 

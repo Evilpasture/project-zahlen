@@ -26,7 +26,7 @@
 
 #include "engine/system/ArticulationSystem.hpp"
 
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
@@ -177,7 +177,7 @@ auto BuildRagdollFromRecipe(
     Entity               rootEntity,
     const RagdollRecipe& recipe,
     ECS::Registry&       reg,
-    const AssetManager&  assets,
+    const AssetLibrary&  assets,
     PhysicsContext&      pc,
     ArticulationSystem&  articulation
 ) -> bool {
@@ -187,7 +187,7 @@ auto BuildRagdollFromRecipe(
         return false;
     }
 
-    const auto prefab = assets.GetCachedPrefab(animComp->prefabAsset);
+    const auto prefab = assets.CachedPrefab(animComp->prefabAsset);
     if (!prefab) {
         ZHLN::LogWarning("[RagdollAuthoring] BuildRagdollFromRecipe could not resolve cached prefab for entity {}.", rootEntity.index);
         return false;
@@ -219,7 +219,7 @@ auto BuildRagdollFromRecipe(
 }
 
 auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
+    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationSystem& articulation
 ) -> bool {
     constexpr std::string_view kDefaultRecipePath = "config/ragdoll_humanoid.lua";
     if (std::filesystem::exists(kDefaultRecipePath)) {

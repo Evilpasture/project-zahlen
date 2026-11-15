@@ -5,9 +5,9 @@
 
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 
 namespace ZHLN {
-class AssetManager;
 namespace ECS {
 class EntityCommandBuffer;
 }
@@ -23,7 +23,7 @@ class EnvironmentSunSystem {
         const Components::SunTagComponent,
         const Components::PendingDestroy>;
 
-    static void Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets);
+    static void Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetLibrary> assets);
 };
 
 } // namespace ZHLN

@@ -10,6 +10,7 @@
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Zahlen.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
@@ -113,7 +114,7 @@ struct SandboxGame {
 
         const auto input = std::as_const(engine).Input();
         if (input.KeyPressed(ZHLN::KeyCode::Escape)) {
-            engine.GetPlatformHost().Close();
+            engine.Host().Close();
             return;
         }
         const auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
@@ -183,7 +184,7 @@ int main(int argc, char* argv[]) {
                 ZHLN::Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).",
                           frame->extent.width, frame->extent.height, launch.captureFrame, frame->metrics.meanLuma);
             }
-            engine.GetPlatformHost().Close();
+            engine.Host().Close();
         });
     if (!result) return EXIT_FAILURE;
     // Help/version/graph requests exit before creating a frame and remain success.

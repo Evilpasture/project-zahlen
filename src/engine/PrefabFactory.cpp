@@ -67,10 +67,6 @@ auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::Ba
 
 } // namespace
 
-auto CreateFontAtlas(RenderContext& render) -> FontAtlas {
-    return CreateFontAtlas(render, std::nullopt, GUI::kDefaultFontAssetID);
-}
-
 auto CreateFontAtlas(RenderContext& render, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas {
     GUI::BakedFontAsset        ownedAsset;
     const GUI::BakedFontAsset* asset = &ResolveFontAsset(assetMgr, fontID, ownedAsset);
@@ -99,19 +95,14 @@ auto CreateFontAtlas(RenderContext& render, ZHLN::Optional<AssetManager&> assetM
     return GUI::BuildFontAtlas(*asset, texID);
 }
 
-auto CreateFontAtlas(RenderContext& render, AssetManager& assetMgr, std::string_view path) -> FontAtlas {
-    const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
-    return CreateFontAtlas(render, assetMgr, id);
+// Engine-internal, declared in PrefabFactoryInternal.hpp. The optional form
+// below is the one implementation: this is the caching caller's spelling of it.
+auto CreateFontAtlas(RenderContext& render, AssetManager& assetMgr, AssetID fontID) -> FontAtlas {
+    return CreateFontAtlas(render, ZHLN::Optional<AssetManager&> {assetMgr}, fontID);
 }
 
-auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
-    if (auto res = LoadFontAsset(assetMgr, GUI::kDefaultFontAssetPath); res.has_value()) {
-        if (auto cached = assetMgr.GetCachedFont(*res)) {
-            GUI::SetDefaultBakedFont(*cached);
-        }
-        return true;
-    }
-    return false;
+auto CreateFontAtlas(RenderContext& render) -> FontAtlas {
+    return CreateFontAtlas(render, ZHLN::Optional<AssetManager&> {}, GUI::kDefaultFontAssetID);
 }
 
 auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
@@ -141,52 +132,6 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     assetMgr.CacheFont(id, std::move(heap));
     GUI::SetDefaultBakedFont(*raw);
     return id;
-}
-
-auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::BakedFontAsset&> {
-    return assetMgr.GetCachedFont(id);
-}
-
-auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&> {
-    return assetMgr.GetCachedFont(HashAssetPath(path));
-}
-
-auto LoadTexture(RenderContext& render, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> TextureID {
-    uint64_t hash = HashAssetPath(path);
-
-    AssetLoadRequest req;
-    req.assetID = hash;
-
-    if (!assetMgr.LoadSync(req)) {
-        ZHLN::LogWarning("Failed to load texture asset from VFS: {}", path);
-        return TextureID::Invalid;
-    }
-
-    int            width    = 0;
-    int            height   = 0;
-    int            channels = 0;
-    unsigned char* pixels   = stbi_load_from_memory(static_cast<const stbi_uc*>(req.outData), static_cast<int>(req.outSize), &width, &height, &channels, 4);
-
-    assetMgr.FreeMemory(req);
-
-    if (pixels == nullptr) {
-        ZHLN::LogError("stbi_load_from_memory failed for texture: {}", path);
-        return TextureID::Invalid;
-    }
-
-    auto texRes = render.CreateTexture(
-        path, std::span {pixels, static_cast<size_t>(width) * height * 4}, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB
-    );
-    stbi_image_free(pixels);
-
-    if (!texRes) {
-        ZHLN::LogError("Failed to upload texture asset {}: {}", path, texRes.error());
-    }
-    return texRes.value_or(TextureID::Invalid);
-}
-
-auto LoadModelPrefab(GraphicsDevice, AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
-    return assetMgr.GetCachedPrefab(HashAssetPath(path));
 }
 
 namespace {

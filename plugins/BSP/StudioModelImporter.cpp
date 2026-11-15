@@ -7,7 +7,6 @@
 #include "StudioModelLoader.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Engine.hpp>

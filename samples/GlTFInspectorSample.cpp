@@ -13,6 +13,7 @@
 #include <Zahlen/ConfigCli.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Log.hpp>
@@ -63,7 +64,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->Host().Focus();
     }
     ZHLN::Animation::Install(*engine);
 

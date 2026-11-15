@@ -31,7 +31,7 @@ struct RagdollPartParams;
 } // namespace Physics
 
 struct Skeleton;
-class AssetManager;
+class AssetLibrary;
 class PhysicsContext;
 class ArticulationSystem;
 
@@ -75,13 +75,13 @@ struct RagdollRecipe {
     Entity               rootEntity,
     const RagdollRecipe& recipe,
     ECS::Registry&       reg,
-    const AssetManager&  assets,
+    const AssetLibrary&  assets,
     PhysicsContext&      pc,
     ArticulationSystem&  articulation
 ) -> bool;
 
 [[nodiscard]] auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, const AssetManager& assets, PhysicsContext& pc, ArticulationSystem& articulation
+    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationSystem& articulation
 ) -> bool;
 
 auto Describe() -> Module;

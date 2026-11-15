@@ -17,6 +17,7 @@
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/Scene.hpp>
@@ -266,7 +267,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
             return std::unexpected(ZHLN::AppError::SceneInitFailed);
         const ZHLN::Camera cam = cameraComp->camera;
 
-        auto winSize = engine.GetPlatformHost().GetSize();
+        auto winSize = engine.Host().Extent();
 
         // Dynamic scene viewport: the 3D composition targets the centre
         // column between the two panels. Read the panels' REAL boxes from last
@@ -513,7 +514,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     auto engine = std::move(*created);
     ZHLN::InstallApplicationDefaults(*engine);
-    engine->GetPlatformHost().Focus();
+    engine->Host().Focus();
     if (!scenePath.empty() && !ZHLN::Tools::LoadSceneDocument(*engine, scenePath)) {
         return EXIT_FAILURE;
     }
