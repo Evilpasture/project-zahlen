@@ -93,7 +93,9 @@ struct KernelSession::Impl {
 
     std::vector<std::unique_ptr<Window>> secondaryWindows;
     std::vector<Window*>                secondaryRaw; // mirrors secondaryWindows, for per-frame iteration
-    mutable std::vector<Window*>       allRaw;       // scratch for Windows()
+    // Window identities, primary first. Maintained on AddWindow/RemoveWindow and
+    // once at Init, never rebuilt on read: a callback may be iterating it.
+    std::vector<WindowID>               windowIDs {WindowID::Primary};
 
     EngineConfig config;
     // Own the bytes backing config.initialPipelineBinaryData across renderer
@@ -287,6 +289,7 @@ auto KernelSession::AddWindow(const String32& title, uint32_t width, uint32_t he
     Window& raw = *window;
     _impl->secondaryWindows.push_back(std::move(window));
     _impl->secondaryRaw.push_back(&raw);
+    _impl->windowIDs.push_back(id);
     return raw;
 }
 
@@ -299,6 +302,7 @@ void KernelSession::RemoveWindow(Window& window) {
     }
     std::erase_if(_impl->secondaryWindows, [&](const auto& owned) -> bool { return owned.get() == &window; });
     std::erase(_impl->secondaryRaw, &window);
+    std::erase(_impl->windowIDs, window.ID());
 }
 
 auto KernelSession::SecondaryWindows() const noexcept -> std::span<Window* const> {
@@ -311,16 +315,23 @@ auto KernelSession::NextWindowID() noexcept -> WindowID {
     return id;
 }
 
-auto KernelSession::Windows() const noexcept -> std::span<Window* const> {
-    // Rebuilt per call: the list is small (a session is a handful of windows)
-    // and rebuilding it keeps the primary-first order correct without a second
-    // mirror to keep in sync.
-    _impl->allRaw.clear();
-    if (const auto primary = _impl->primaryHost.AsWindow()) {
-        _impl->allRaw.push_back(&*primary);
+auto KernelSession::WindowIDs() const noexcept -> std::span<const WindowID> {
+    return _impl->windowIDs;
+}
+
+auto KernelSession::WindowFor(WindowID id) const noexcept -> Window* {
+    if (id == WindowID::Primary) {
+        // Null in a headless or TTY session: there is a primary target but no
+        // Window to go with it.
+        const auto primary = _impl->primaryHost.AsWindow();
+        return primary ? &*primary : nullptr;
     }
-    _impl->allRaw.insert(_impl->allRaw.end(), _impl->secondaryRaw.begin(), _impl->secondaryRaw.end());
-    return _impl->allRaw;
+    for (Window* window: _impl->secondaryRaw) {
+        if (window != nullptr && window->ID() == id) {
+            return window;
+        }
+    }
+    return nullptr;
 }
 
 auto KernelSession::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {

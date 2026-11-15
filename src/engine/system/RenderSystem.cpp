@@ -39,6 +39,35 @@
 #include <span>
 
 namespace ZHLN {
+namespace {
+
+// Draws whatever `window` published this frame into that window's own acquired
+// attachment, then clears it. Clearing is part of drawing, not an optional
+// extra: a submission left behind is a set of spans into a GUI::Context that
+// has already moved on, and leaving it also makes the capture-flag pass think
+// UI is permanently on screen.
+auto DrawPendingUI(Engine& engine, FrameScope& gpuFrame, WindowID window, const FrameTarget& target) -> std::expected<void, ErrorCode> {
+    const UIDrawData uiData = engine.GetPendingUIData(window);
+    if (uiData.Empty()) {
+        return {};
+    }
+    if (auto drawn = gpuFrame.RenderUI(
+            UIView {
+                .viewport   = {},
+                .target     = target,
+                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+            },
+            uiData
+        );
+        !drawn) {
+        return std::unexpected(drawn.error());
+    }
+    engine.SetPendingUIData(window, UIDrawData {});
+    return {};
+}
+
+} // namespace
+
 
 
 enum class RenderSystemError : uint8_t {
@@ -561,19 +590,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     }
 
     // This window's UI, drawn into this window's attachment.
-    if (const UIDrawData uiData = engine.GetPendingUIData(WindowID::Primary); !uiData.Empty()) {
-        if (auto ui_res = gpuFrame.RenderUI(
-                UIView {
-                    .viewport   = {},
-                    .target     = attachment,
-                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-                },
-                uiData
-            );
-            !ui_res) {
-            return std::unexpected(ui_res.error());
-        }
-        engine.SetPendingUIData(WindowID::Primary, UIDrawData {});
+    if (auto ui_res = DrawPendingUI(engine, gpuFrame, WindowID::Primary, attachment); !ui_res) {
+        return std::unexpected(ui_res.error());
     }
 
     if (const auto& host = engine.GetPlatformHost(); host.UsesCustomCursor()) {
@@ -604,12 +622,36 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     // Every other window in the session, in the same frame: the host's draw hook
     // for that window runs against that window's own acquired image, so one Tick
     // drives an editor window and its preview without a second runner.
-    for (Window* window: engine.Windows()) {
-        if (window == nullptr || window->ID() == WindowID::Primary) {
+    // The primary window's draw hook. It runs *after* the engine's own render
+    // step for that window, which is where a host draws what the engine does not
+    // (a custom cursor, an overlay). Skipping it here was why a primary-window
+    // draw callback silently never fired.
+    if (const auto draw = engine.GetWindowDrawCallback(WindowID::Primary); draw && static_cast<bool>(*draw)) {
+        (*draw)(engine, Engine::WindowRenderView {
+                             .id         = WindowID::Primary,
+                             .target     = attachment,
+                             .size       = engine.GetPlatformHost().GetSize(),
+                             .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                         },
+                gpuFrame);
+    }
+
+    // Every other window in the session, in the same frame: its own UI, then its
+    // own draw hook, against its own acquired image, so one Tick drives an
+    // editor window and its preview without a second runner.
+    for (const WindowID id: engine.WindowIDs()) {
+        if (id == WindowID::Primary) {
             continue;
         }
-        const auto draw = engine.GetWindowDrawCallback(window->ID());
-        if (!draw || !static_cast<bool>(*draw)) {
+        const auto draw = engine.GetWindowDrawCallback(id);
+        Window*    window = engine.WindowFor(id);
+        const bool hasUI  = !engine.GetPendingUIData(id).Empty();
+        if ((!draw || !static_cast<bool>(*draw)) && !hasUI) {
+            continue;
+        }
+        // A session's secondary windows always have a Window; without one there
+        // is no size and no target to acquire.
+        if (window == nullptr) {
             continue;
         }
         const Extent2D size = window->GetSize();
@@ -623,13 +665,19 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         if (!windowTarget->has_value()) {
             continue; // minimized or not presentable this frame
         }
-        const Engine::WindowRenderView view {
-            .id         = window->ID(),
-            .target     = **windowTarget,
-            .size       = size,
-            .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-        };
-        (*draw)(engine, view, gpuFrame);
+        const FrameTarget target = **windowTarget;
+        if (auto ui_res = DrawPendingUI(engine, gpuFrame, id, target); !ui_res) {
+            return std::unexpected(ui_res.error());
+        }
+        if (draw && static_cast<bool>(*draw)) {
+            (*draw)(engine, Engine::WindowRenderView {
+                                 .id         = id,
+                                 .target     = target,
+                                 .size       = size,
+                                 .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                             },
+                    gpuFrame);
+        }
     }
 
     if (auto end_res = std::move(gpuFrame).End(); !end_res) {

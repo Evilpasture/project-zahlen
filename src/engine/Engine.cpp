@@ -471,8 +471,18 @@ void Engine::RemoveWindow(Window& window) {
     _impl->kernel->RemoveWindow(window);
 }
 
+auto Engine::WindowIDs() const noexcept -> std::span<const WindowID> {
+    return _impl->kernel->WindowIDs();
+}
+
+auto Engine::WindowFor(WindowID id) const noexcept -> Window* {
+    return _impl->kernel->WindowFor(id);
+}
+
 auto Engine::Windows() const noexcept -> std::span<Window* const> {
-    return _impl->kernel->Windows();
+    // Secondary windows only: the primary is reachable through WindowFor, and a
+    // headless session has none of either.
+    return _impl->kernel->SecondaryWindows();
 }
 
 auto Engine::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {

@@ -232,7 +232,7 @@ struct WindowUIInputCollector {
         const float scroll = scrollDelta;
         scrollDelta        = 0.0f;
 
-        return GUI::UIInput {
+        const GUI::UIInput uiInput {
             .viewport    = viewport,
             .dt          = dt,
             .mouseX      = state.mouseX,
@@ -248,6 +248,11 @@ struct WindowUIInputCollector {
             .characterStream = std::span<const uint32_t>(latchedChars.data(), nChars),
             .clipboard       = clipboard,
         };
+        // The frame boundary is here, not before the poll: motion for this frame
+        // has already been consumed above, so what is left to clear is the
+        // edge/delta state the next frame's callbacks will append to.
+        state.BeginFrame();
+        return uiInput;
     }
 };
 
@@ -267,7 +272,9 @@ struct Session {
     bool                          confirmWasDown = false;
     float                         dt                   = 0.016f;
     bool                          openPreviewRequested = false;
-    ZHLN::Optional<ZHLN::Window&> previewWindow; // engine-owned; see Engine::AddWindow
+    // Only the id is held. The Window is engine-owned and looked up per use
+    // (Engine::WindowFor): a host must not keep a Window& across a frame, and a
+    // preview window that was closed underneath it would leave a dangling one.
     ZHLN::WindowID                previewID = ZHLN::WindowID::Invalid;
     GUI::Context                  editorGui;
     GUI::Context                  previewGui;
@@ -689,7 +696,7 @@ void DrawCustomCursor(ZHLN::Engine& engine, const ZHLN::Engine::WindowRenderView
 // preview window inside that window's own acquired frame -- the editor and the
 // preview are two windows of one engine, drawn in one Tick.
 void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
-    if (!session.previewWindow || view.size.width == 0 || view.size.height == 0) {
+    if (view.size.width == 0 || view.size.height == 0) {
         return;
     }
     const ZHLN::Extent2D previewSize = view.size;
@@ -730,21 +737,48 @@ void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::Win
     draw(uiData);
 }
 
-[[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
-    return session.previewWindow && session.previewWindow->IsRunning();
+[[nodiscard]] auto PreviewIsRunning(ZHLN::Engine& engine, const Session& session) -> bool {
+    if (session.previewID == ZHLN::WindowID::Invalid) {
+        return false;
+    }
+    const ZHLN::Window* window = engine.WindowFor(session.previewID);
+    return window != nullptr && window->IsRunning();
 }
 
 void StopPreview(ZHLN::Engine& engine, Session& session) {
-    if (!session.previewWindow) {
-        return;
+    if (session.previewID != ZHLN::WindowID::Invalid) {
+        if (ZHLN::Window* window = engine.WindowFor(session.previewID)) {
+            engine.RemoveWindow(*window);
+        }
+        session.previewID = ZHLN::WindowID::Invalid;
     }
-    engine.RemoveWindow(*session.previewWindow);
-    session.previewWindow.reset();
-    session.previewID = ZHLN::WindowID::Invalid;
+}
+
+void StopPreview(ZHLN::Engine& engine, Session& session);
+void OpenPreview(ZHLN::Engine& engine, Session& session);
+
+// Once per frame, before the engine's Tick: the editor's clock, the preview
+// window's life, and the actions the previous frame's Preview clicks pushed.
+// Actions are drained here rather than at the end of the frame because the push
+// happens inside Tick, in the window's draw hook.
+void UpdateEditor(ZHLN::Engine& engine, Session& session, float dt) {
+    session.dt = dt;
+    if (session.previewID != ZHLN::WindowID::Invalid && !PreviewIsRunning(engine, session)) {
+        StopPreview(engine, session);
+    }
+    if (session.openPreviewRequested) {
+        session.openPreviewRequested = false;
+        OpenPreview(engine, session);
+    }
+    session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
+        if (event.id == "editor.save_scene") {
+            ZHLN::Log("[UIEditor] editor.save_scene");
+        }
+    });
 }
 
 void OpenPreview(ZHLN::Engine& engine, Session& session) {
-    if (PreviewIsRunning(session)) {
+    if (PreviewIsRunning(engine, session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
@@ -756,12 +790,12 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
     // The preview window is an ordinary destination: the editor draws its 2D
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
-    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
-    if (!session.previewWindow) {
+    const auto previewWindow = engine.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
+    if (!previewWindow) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
-    session.previewID = session.previewWindow->ID();
+    session.previewID = previewWindow->ID();
 
     // The preview window's own two hooks, keyed by its id. Nothing is shared
     // with the editor window except the Session: the engine asks each window
@@ -891,7 +925,7 @@ void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
                             if (gui.Button("Preview", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 session.openPreviewRequested = true;
                             }
-                            if (PreviewIsRunning(session)) {
+                            if (PreviewIsRunning(engine, session)) {
                                 gui.Text("Preview window open", 12.0f, {0.55f, 0.75f, 0.55f, 1.0f});
                             }
                             if (session.xform == XformMode::Grab) {
@@ -1007,6 +1041,6 @@ auto main(int argc, char* argv[]) -> int {
             );
             engine.AddDeviceLostCallback([&rebuildFonts](ZHLN::Engine& restored) { rebuildFonts(restored); });
         })
-        .Run(argc, argv);
+        .Run(argc, argv, [&session](ZHLN::Engine& engine, float dt) { UpdateEditor(engine, session, dt); });
     return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

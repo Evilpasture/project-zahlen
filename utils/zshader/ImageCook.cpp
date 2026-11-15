@@ -8,10 +8,14 @@
 //
 // Lives in zshader so the shader catalog's embedded blobs do not depend on a
 // host Python interpreter: zshader is already built before zahlen_shader_catalog
-// runs, and stb_image (compiled with STBI_ONLY_PNG on this TU) decodes the
-// 1024x1024 tile directly to tightly packed RGBA bytes.
+// runs, and stb_image decodes the 1024x1024 tile directly to tightly packed
+// RGBA bytes.
+//
+// The implementation is zahlen_stb_image, which this target links -- the same
+// one the importers, the cooker and the screenshot writer use. Defining it here
+// as well would put a second copy of the decoder in the build and make this TU
+// and the library both own every stbi_* symbol.
 
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include "ZShader.hpp"

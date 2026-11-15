@@ -39,7 +39,6 @@ set(ZHLN_ZSHADER_SOURCES
 set(ZHLN_ZSHADER_IMAGE_COOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ImageCook.cpp")
 set_source_files_properties("${ZHLN_ZSHADER_IMAGE_COOK_SOURCE}" PROPERTIES
     SKIP_PRECOMPILE_HEADERS ON
-    COMPILE_DEFINITIONS "STBI_ONLY_PNG;STBI_NO_STDIO;STBI_NO_LINEAR;STBI_NO_HDR"
 )
 
 add_executable(zshader
@@ -74,8 +73,8 @@ target_link_libraries(zshader PRIVATE
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
 )
-# ImageCook.cpp defines STB_IMAGE_IMPLEMENTATION itself; the rest of zshader that
-# includes stb_image.h links the one implementation.
+# ImageCook.cpp is the only TU here that calls stbi_*, and the implementation it
+# calls is this library's: zahlen_stb_image owns the single definition.
 target_link_libraries(zshader PRIVATE zahlen_stb_image)
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)

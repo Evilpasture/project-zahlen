@@ -45,15 +45,10 @@ namespace { namespace Steps {
 // step that needs engine-private state has to be written where that state is
 // visible.
 void HostUICallback(Engine& engine, float, FrameContext&) {
-    // Once per window, in window order. A window with no callback draws no UI,
-    // and a window's callback is told which window it is drawing -- that is the
-    // difference between an editor window and a preview window sharing one
-    // engine and one frame.
-    for (Window* window: engine.Windows()) {
-        if (window == nullptr) {
-            continue;
-        }
-        const WindowID id = window->ID();
+    // Once per window identity, in window order. Keyed on WindowID, not Window*:
+    // a headless or TTY session has a primary window with no Window object, and
+    // its UI callback still has to run. A window with no callback draws no UI.
+    for (const WindowID id: engine.WindowIDs()) {
         if (const auto cb = engine.GetUICallback(id); cb && static_cast<bool>(*cb)) {
             (*cb)(engine, id);
         }

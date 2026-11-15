@@ -122,9 +122,19 @@ class ZHLN_API Engine {
 
     void PollLateInput();
 
-    // The windows this engine drives, primary first. A host asks for this when
-    // it wants to key its own per-window state; a frame iterates it to learn
-    // which windows exist without holding a Window& across one.
+    // The windows this engine drives, as identities, primary first.
+    // WindowID::Primary is always present, including in headless and TTY
+    // sessions where there is no Window object behind it -- a frame iterates
+    // this rather than a pointer list so those sessions still get their UI.
+    // The list is stable until AddWindow/RemoveWindow.
+    [[nodiscard]] auto WindowIDs() const noexcept -> std::span<const WindowID>;
+
+    // The Window behind an id, or nullptr when the session has none for it (the
+    // primary in a headless/TTY session). Never cached across a frame.
+    [[nodiscard]] auto WindowFor(WindowID id) const noexcept -> Window*;
+
+    // Every window that has a Window object, primary first. Empty in a headless
+    // or TTY session.
     [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
 
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;

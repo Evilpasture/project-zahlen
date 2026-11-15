@@ -66,8 +66,14 @@ class KernelSession {
                    WindowID id) -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);
 
+    // The session's windows as *identities*, primary first. WindowID::Primary
+    // is always present: a headless or TTY session has a primary host with a
+    // presentation target but no Window object, and a caller keyed on WindowID
+    // must still find it. `WindowFor` answers nullptr for that case.
+    [[nodiscard]] auto WindowIDs() const noexcept -> std::span<const WindowID>;
+    [[nodiscard]] auto WindowFor(WindowID id) const noexcept -> Window*;
+
     [[nodiscard]] auto SecondaryWindows() const noexcept -> std::span<Window* const>;
-    [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
     [[nodiscard]] auto NextWindowID() noexcept -> WindowID;
 
     [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
