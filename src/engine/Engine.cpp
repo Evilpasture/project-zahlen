@@ -1,3 +1,5 @@
+#include "COMJointAllocator.hpp"
+#include "ArticulationContext.hpp"
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -607,6 +609,10 @@ void Engine::ReleaseSceneContents() {
     if (_impl->renderGraph != nullptr) {
         _impl->renderGraph->ResetLocals();
     }
+}
+
+uint32_t COM::JointAllocator::AllocateJoints(Engine& engine, uint32_t count) noexcept {
+    return engine._impl->world->GetArticulationContext().AllocateJoints(count);
 }
 
 void Engine::ClearScene() {

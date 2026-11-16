@@ -88,6 +88,36 @@ struct IActionContext : IObject {
     [[nodiscard]] virtual PlayerSeat GamepadSeat(GamepadSlot slot) const noexcept = 0;
     virtual bool                     AssignGamepadToSeat(GamepadSlot slot, PlayerSeat seat) noexcept = 0;
 
+    // Physical-state parity. These read devices even while UI owns capture.
+    [[nodiscard]] virtual bool MouseButtonDown(MouseButton button, PlayerSeat seat) const noexcept = 0;
+    [[nodiscard]] virtual bool MouseButtonPressed(MouseButton button, PlayerSeat seat) const noexcept = 0;
+    [[nodiscard]] virtual bool MouseButtonReleased(MouseButton button, PlayerSeat seat) const noexcept = 0;
+    [[nodiscard]] virtual KeyModifiers Modifiers(PlayerSeat seat) const noexcept = 0;
+    [[nodiscard]] virtual bool HasModifiers(KeyModifiers required, bool exact, PlayerSeat seat) const noexcept = 0;
+    [[nodiscard]] virtual bool GamepadButtonPressed(GamepadSlot slot, GamepadButton button) const noexcept = 0;
+    [[nodiscard]] virtual bool GamepadButtonReleased(GamepadSlot slot, GamepadButton button) const noexcept = 0;
+    [[nodiscard]] virtual StickSample GamepadLeftStick(GamepadSlot slot) const noexcept = 0;
+    [[nodiscard]] virtual StickSample GamepadRightStick(GamepadSlot slot) const noexcept = 0;
+    [[nodiscard]] virtual float GamepadLeftTrigger(GamepadSlot slot) const noexcept = 0;
+    [[nodiscard]] virtual float GamepadRightTrigger(GamepadSlot slot) const noexcept = 0;
+
+    virtual bool SetGamepadRumble(GamepadSlot slot, const GamepadRumble& rumble) noexcept = 0;
+    virtual uint32_t RumbleSeat(PlayerSeat seat, const GamepadRumble& rumble) noexcept = 0;
+    virtual void StopRumble(GamepadSlot slot) noexcept = 0;
+    virtual void StopAllRumble() noexcept = 0;
+
+    virtual void BeginBindingCapture(PlayerSeat seat, bool captureAxes, KeyCode cancelKey) noexcept = 0;
+    virtual void CancelBindingCapture() noexcept = 0;
+    [[nodiscard]] virtual Option<InputBinding> TakeCapturedBinding() noexcept = 0;
+    [[nodiscard]] virtual BindingCaptureStatus CaptureStatus() const noexcept = 0;
+
+    // Returns required byte count, excluding any terminator. Null/zero queries
+    // size. A short buffer is left untouched; pass the returned size to retry.
+    // Successful copies are exact bytes with no trailing NUL. No allocator or
+    // std::string crosses the boundary. Null with nonzero capacity is invalid.
+    [[nodiscard]] virtual Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept = 0;
+    [[nodiscard]] virtual Result<void> DeserializeBindings(StringView text) noexcept = 0;
+
     // --- Ergonomics & derived reads: not in the vtable ----------------------
 
     [[nodiscard]] auto CreateActionMap(StringView name, int32_t priority = 0, bool enabled = true) noexcept

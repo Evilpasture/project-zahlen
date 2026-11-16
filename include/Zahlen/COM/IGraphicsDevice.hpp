@@ -13,6 +13,7 @@
 // ergonomics in the consumer's own translation unit.
 
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/GraphicsTypes.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 
@@ -195,6 +196,21 @@ struct IGraphicsDevice : IObject {
     [[nodiscard]] auto BuildMeshBLAS(ZHLN::Mesh& mesh) noexcept -> Result<void> {
         return BuildMeshBLAS(InChain(mesh), OutChain(mesh));
     }
+
+    // Monotonic allocations share the engine palette (8192 joints total).
+    // Exhaustion fails without wrapping; allocations last for the engine lifetime.
+    [[nodiscard]] virtual Result<uint32_t> AllocateJoints(uint32_t count) noexcept = 0;
+    [[nodiscard]] virtual Result<void> UpdateJointMatrices(uint32_t offset, Span<const Mat4x4> matrices) noexcept = 0;
+    [[nodiscard]] virtual Result<uint32_t> AllocateMorphDeltas(Span<const float> deltas) noexcept = 0;
+    // Supported chains: TextureCubeCreateInfo / RenderTextureCreateInfo.
+    [[nodiscard]] virtual Result<TextureID> CreateTextureCube(const ChainInNode* chain) noexcept = 0;
+    [[nodiscard]] virtual Result<TextureID> CreateRenderTexture(const ChainInNode* chain) noexcept = 0;
+    virtual void DestroyRenderTexture(TextureID texture) noexcept = 0;
+    [[nodiscard]] virtual Result<void> SetEnvironmentRadiance(const ChainInNode* chain) noexcept = 0;
+    // Captures the last rendered frame on every call. Metadata is CaptureInfo.
+    // Returns required byte count; short buffers are untouched. Do not Tick
+    // between a size query and a copy if the same snapshot is required.
+    [[nodiscard]] virtual Result<uint64_t> CaptureFrame(ChainOutNode* info, Span<uint8_t> pixels) noexcept = 0;
 
 protected:
     ~IGraphicsDevice() = default;

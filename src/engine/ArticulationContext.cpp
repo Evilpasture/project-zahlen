@@ -33,11 +33,13 @@ void ArticulationContext::BindSkeleton(uint32_t jointOffset, const Skeleton& ske
 }
 
 uint32_t ArticulationContext::AllocateJoints(uint32_t count) noexcept {
-    const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
-    if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
-        ZHLN::LogWarning("[ArticulationContext] Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
-    }
-    return offset % _jointStates.jointBlendWeights.size();
+    const auto capacity = static_cast<uint32_t>(_jointStates.jointBlendWeights.size());
+    if (count == 0 || count > capacity) return ~uint32_t {0};
+    auto offset = _nextJointOffset.load(std::memory_order::relaxed);
+    do {
+        if (offset > capacity - count) return ~uint32_t {0};
+    } while (!_nextJointOffset.compare_exchange_weak(offset, offset + count, std::memory_order::relaxed, std::memory_order::relaxed));
+    return offset;
 }
 
 bool ArticulationContext::AttachRagdoll(

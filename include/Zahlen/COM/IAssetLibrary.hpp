@@ -13,6 +13,7 @@
 // ChainInNode lists.
 
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/AssetTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
@@ -97,6 +98,23 @@ struct IAssetLibrary : IObject {
     // Borrowed linear RGBA floats owned by the cache: valid until the cache is
     // cleared or the engine is destroyed. Empty when the key is unknown.
     [[nodiscard]] virtual Span<const float> EnvironmentPixels(StringView key) const noexcept = 0;
+
+    [[nodiscard]] virtual Result<void> MountDirectory(StringView path) noexcept = 0;
+    [[nodiscard]] virtual Result<void> UnmountDirectory(StringView path) noexcept = 0;
+    [[nodiscard]] virtual Result<void> MountPak(StringView path) noexcept = 0;
+    [[nodiscard]] virtual bool VirtualFileExists(StringView path) const noexcept = 0;
+    // Exact bytes; short buffers are untouched. A present empty file returns 0.
+    [[nodiscard]] virtual Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept = 0;
+    virtual void ClearCache() noexcept = 0;
+    [[nodiscard]] virtual Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept = 0;
+    // Borrowed collision spans remain valid until cache replacement/clear or
+    // destruction; never retain them across those operations.
+    [[nodiscard]] virtual Result<void> GetCollisionMesh(CollisionAssetID id, ChainOutNode* out) const noexcept = 0;
+    [[nodiscard]] virtual Result<void> CacheEnvironmentImage(const ChainInNode* chain) noexcept = 0;
+    [[nodiscard]] virtual Result<void> GetEnvironmentImage(StringView key, ChainOutNode* out) const noexcept = 0;
+    // Copies flat data. Cached prefab GPU resources become cache-owned.
+    // Do not destroy transferred mesh resources independently after success.
+    [[nodiscard]] virtual Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept = 0;
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 

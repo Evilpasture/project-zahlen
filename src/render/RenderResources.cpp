@@ -879,8 +879,7 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
     const uint32_t offset   = _impl->nextMorphDeltaIndex;
     const size_t   capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
     if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
-        ZHLN::Assert(false, "morph deltas must fit in the buffer as complete float4s");
-        return offset;
+        return UINT32_MAX;
     }
     if (!deltas.empty()) {
         auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator);

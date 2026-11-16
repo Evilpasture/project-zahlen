@@ -55,6 +55,7 @@ class EventBus;
 
 namespace COM {
 class EngineCOM;
+struct JointAllocator;
 }
 
 class ArticulationContext;
@@ -306,6 +307,7 @@ class ZHLN_API Engine {
     friend class Entities;
     friend class EngineState;
     friend class COM::EngineCOM;
+    friend struct COM::JointAllocator;
     friend void DespawnEntity(Engine& engine, Entity entity);
 
     // Cold-start / build-tree-only path to the concrete registry. API consumers

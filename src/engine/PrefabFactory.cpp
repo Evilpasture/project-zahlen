@@ -239,6 +239,7 @@ auto InstantiateMeshPart(
             assignedJointOffset = it->second;
         } else {
             assignedJointOffset                    = art.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
+            if (assignedJointOffset == UINT32_MAX) return Entity::Null();
             allocatedSkeletons[part.skeletonIndex] = assignedJointOffset;
         }
     }
@@ -618,6 +619,7 @@ auto InstantiatePrefabInternal(
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         Entity meshEnt = InstantiateMeshPart(gfx, reg, pc, art, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
 
+        if (meshEnt == Entity::Null()) continue;
         instantiatedParts[prefab.parts[i].name.c_str()] = meshEnt;
 
         if (outBuffer != nullptr && spawnedCount < maxCount) {

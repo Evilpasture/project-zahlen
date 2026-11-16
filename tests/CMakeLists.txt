@@ -33,6 +33,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestCOM.cpp
     core/TestCOMApp.cpp
     core/TestCOMBoundary.cpp
+    core/TestCOMPhase2.cpp
     core/TestClock.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
