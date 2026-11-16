@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -332,14 +333,13 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 }
 
 // The crosshair and its readout. Registered as the sample's UI callback, which
-// the engine's HostUICallback step invokes in FramePhase::UI every frame.
+// the host loop invokes explicitly before Engine::Tick.
 //
-// SetPendingUIData is not optional: RenderSystem draws whatever
-// Engine::GetPendingUIData() returns and nothing else fills it in, so a callback
-// that builds a Context and forgets this call renders nothing at all.
-void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
-    hudGui.SetFontAtlas(engine.GetFontAtlas());
-    ZHLN::GUI::Frame ui = hudGui.BeginFrame(engine.ConsumeUIInput(g_frameDt));
+// The host submits copied draw streams explicitly through GraphicsDevice.
+
+void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui, ZHLN::HostUI& hostUI) {
+    hudGui.SetFontAtlas(hostUI.GetFontAtlas());
+    ZHLN::GUI::Frame ui = hudGui.BeginFrame(hostUI.ConsumeInput(g_frameDt));
 
     const ZHLN::Extent2D viewport = engine.Host().Extent();
     const float          cx       = static_cast<float>(viewport.width) * 0.5f;
@@ -423,7 +423,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     // The benchmark and telemetry panels, when F3 / F4 have shown them. They are
     // second authors of this same frame, not a second frame: they append their
     // boxes to the layout the crosshair above already opened, and the
-    // SetPendingUIData below publishes all of it.
+    // The host compositor below submits all of it.
     //
     // The viewer ticks here -- once per engine frame, whichever frame step calls
     // it, which is why it is safe beside the loop's own F4 handling -- so its
@@ -437,7 +437,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
         }
     }
 
-    engine.SubmitUI(std::move(ui).End());
+    hostUI.Submit(std::move(ui).End());
 }
 
 // --- First-person rig -----------------------------------------------------------
@@ -1606,7 +1606,8 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
     ZHLN::GUI::Context hudGui;
-    engine->SetUICallback([&hudGui](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawCrosshairHUD(eng, hudGui); });
+    ZHLN::HostUI hostUI(*engine);
+    hostUI.SetCallback([&hudGui, &hostUI](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawCrosshairHUD(eng, hudGui, hostUI); });
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {
@@ -2029,6 +2030,7 @@ auto main(int argc, char* argv[]) -> int {
             reg.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [&aim](auto& lookAt) -> auto { lookAt.targetWorldPos = aim; });
         }
 
+        hostUI.Update(dt);
         if (auto tick = engine->Tick(dt); !tick) {
             ZHLN::LogError("[BSPMurderDrones] frame failed: {}", tick.error());
             return EXIT_FAILURE;

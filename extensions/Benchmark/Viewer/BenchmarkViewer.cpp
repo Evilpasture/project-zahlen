@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -340,6 +341,7 @@ struct BenchmarkViewer::Impl {
     }
 
     GUI::Context gui;
+    std::unique_ptr<ZHLN::HostUI> hostUI;
 
     void DrawBenchmarkPanel(GUI::Frame& ui);
     void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine);
@@ -389,7 +391,7 @@ void BenchmarkViewer::Impl::Advance() noexcept {
 void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
     // The atlas the Context will draw with, so the columns are sized against the
     // font that is actually on screen rather than a guess at its metrics.
-    const ZHLN::FontAtlas& font    = engine.GetFontAtlas();
+    const ZHLN::FontAtlas& font    = hostUI->GetFontAtlas();
     const ZHLN::FontAtlas* atlas   = (font.glyphCount > 0) ? &font : nullptr;
     const float            advance = AdvancePerChar(atlas, kTableFontSize);
 
@@ -1082,7 +1084,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
 
     auto ran = ZHLN::Engine::Run(
         runConfig,
-        [self, &uiClock](ZHLN::Engine& engine, ZHLN::WindowID) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
+        [self, &uiClock](ZHLN::Engine& engine, float) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
     );
 
     // The engine is gone, and with it the scheduler the benchmark's World waits
@@ -1090,6 +1092,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
     // benchmark here, while that is the only thing left to do, rather than
     // leaving a World for whoever destroys the viewer afterwards. The viewer is
     // empty again and a later Attach() re-arms it.
+    m_impl->hostUI.reset();
     m_impl->benchmark.reset();
     m_impl->frameClock.ResetFixedAccumulator();
 
@@ -1100,6 +1103,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
 }
 
 void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
+    m_impl->hostUI = std::make_unique<ZHLN::HostUI>(engine);
     m_impl->pendingEntities = initialEntities;
 
     // The Engine is consulted for exactly one thing: a headless host has no
@@ -1168,15 +1172,15 @@ void BenchmarkViewer::UpdateAndRenderUI(ZHLN::Engine& engine, float dt) {
         return;
     }
 
-    m_impl->gui.SetFontAtlas(engine.GetFontAtlas());
-    GUI::Frame ui = m_impl->gui.BeginFrame(engine.ConsumeUIInput(dt));
+    m_impl->gui.SetFontAtlas(m_impl->hostUI->GetFontAtlas());
+    GUI::Frame ui = m_impl->gui.BeginFrame(m_impl->hostUI->ConsumeInput(dt));
     if (m_impl->visible && m_impl->benchmark != nullptr) {
         m_impl->DrawBenchmarkPanel(ui);
     }
     if (m_impl->telemetryVisible) {
         m_impl->DrawTelemetryPanel(ui, engine);
     }
-    engine.SubmitUI(std::move(ui).End());
+    m_impl->hostUI->Submit(std::move(ui).End());
 }
 
 void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::Engine& engine) {

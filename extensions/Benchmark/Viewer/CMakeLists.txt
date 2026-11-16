@@ -86,3 +86,5 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_host_ui)

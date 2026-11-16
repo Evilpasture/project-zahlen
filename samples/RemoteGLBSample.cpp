@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -983,6 +984,7 @@ struct SampleState {
     int                   dropdownSelected = 0;
     bool                  catalogSeeded    = false;
     ZHLN::GUI::Context    gui {};
+    std::unique_ptr<ZHLN::HostUI> hostUI;
 
     bool     rayTraced   = false;
     bool     reported    = false; // this download's outcome has been logged and imported
@@ -1294,8 +1296,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 }
 
 void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
-    state.gui.SetFontAtlas(engine.GetFontAtlas());
-    ZHLN::GUI::Frame ui = state.gui.BeginFrame(engine.ConsumeUIInput(state.dt));
+    state.gui.SetFontAtlas(state.hostUI->GetFontAtlas());
+    ZHLN::GUI::Frame ui = state.gui.BeginFrame(state.hostUI->ConsumeInput(state.dt));
 
     const ZHLN::RenderInfo info    = engine.Graphics().Info();
     const std::string      subject = state.subject.loaded ?
@@ -1352,7 +1354,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
         }
     );
 
-    engine.SubmitUI(std::move(ui).End());
+    state.hostUI->Submit(std::move(ui).End());
 }
 
 } // namespace
@@ -1481,7 +1483,8 @@ auto main(int argc, char* argv[]) -> int {
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
-    engine->SetUICallback([&state](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawHUD(eng, state); });
+    state.hostUI = std::make_unique<ZHLN::HostUI>(*engine);
+    state.hostUI->SetCallback([&state](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawHUD(eng, state); });
 
     while (engine->IsRunning()) {
         state.dt  = clock.Tick();
@@ -1497,6 +1500,7 @@ auto main(int argc, char* argv[]) -> int {
         UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
 
+        state.hostUI->Update(state.dt);
         const auto result = engine->Tick(state.dt);
         if (!result) {
             ZHLN::LogError("[RemoteGLB] frame failed: {}", result.error());

@@ -44,8 +44,14 @@ class AssetLibrary;
 class RenderContext;
 struct EnvironmentRadianceDesc;
 
+struct UIDrawData;
+
 class ZHLN_API GraphicsDevice {
   public:
+    void SubmitUI(WindowID window, const UIDrawData& data, bool append = false);
+    [[nodiscard]] auto HasSubmittedUI(WindowID window) const noexcept -> bool;
+    void ClearSubmittedUI() noexcept;
+
     [[nodiscard]] auto operator==(const GraphicsDevice&) const noexcept -> bool = default;
 
     // --- Device state ---------------------------------------------------------

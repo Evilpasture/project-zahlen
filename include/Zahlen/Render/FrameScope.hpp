@@ -39,6 +39,8 @@ class ZHLN_API FrameScope {
 
     [[nodiscard]] auto RenderScene(const SceneRenderPass& pass, const SceneData& scene) noexcept -> FrameOutcome<FrameSkipped>;
 
+    [[nodiscard]] auto RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped>;
+
     [[nodiscard]] auto RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped>;
 
     [[nodiscard]] auto End() && noexcept -> FrameOutcome<PresentSuboptimal>;

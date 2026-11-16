@@ -37,24 +37,6 @@
 namespace ZHLN {
 namespace { namespace Steps {
 
-// The host's UI callback. What runs immediately after it in the same phase --
-// releasing a capture the host did not ask for, then re-evaluating the action
-// maps -- reaches the engine-private input router, which this translation unit
-// cannot see. That half is `uiInputStep`, defined in Engine.cpp and placed here
-// by pointer, exactly like presentStep: a FrameStepFn carries no userdata, so a
-// step that needs engine-private state has to be written where that state is
-// visible.
-void HostUICallback(Engine& engine, float, FrameContext&) {
-    // Once per window identity, in window order. Keyed on WindowID, not Window*:
-    // a headless or TTY session has a primary window with no Window object, and
-    // its UI callback still has to run. A window with no callback draws no UI.
-    for (const WindowID id: engine.WindowIDs()) {
-        if (const auto cb = engine.GetUICallback(id); cb && static_cast<bool>(*cb)) {
-            (*cb)(engine, id);
-        }
-    }
-}
-
 void HotReload(Engine& engine, float, FrameContext&) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
@@ -139,11 +121,6 @@ void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep, FrameStepFn ui
         }
     };
 
-    // HostUICallback is the step's name and stays the UI callback, because
-    // modules anchor to it. The input half of the same phase runs beside it as
-    // its own step, so the name keeps meaning what it always did and the input
-    // evaluation has a name a module can anchor to as well.
-    require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
     require(plan.Append(Phase::UI, "EvaluateInput", uiInputStep));
     require(plan.Append(Phase::HotReload, "StateAndShaderReload", Steps::HotReload));
     require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));

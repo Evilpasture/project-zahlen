@@ -14,6 +14,7 @@
 // acquisition and event polling stay inside the engine.
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Render/RenderIDs.hpp>
 #include <Zahlen/GUI/TextBuffer.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
@@ -22,11 +23,13 @@
 
 namespace ZHLN {
 
-class PlatformHost;
+class KernelSession;
 
 class ZHLN_API HostWindow {
   public:
-    // The primary framebuffer extent. A UI host sizes its viewport from this,
+    [[nodiscard]] auto Running() const noexcept -> bool;
+
+    // The selected framebuffer extent. A UI host sizes its viewport from this,
     // and a presentation view is already built from the same value.
     [[nodiscard]] auto Extent() const noexcept -> Extent2D;
 
@@ -59,9 +62,10 @@ class ZHLN_API HostWindow {
 
   private:
     friend class Engine;
-    explicit HostWindow(PlatformHost& host) noexcept: _host(&host) {
+    explicit HostWindow(KernelSession& kernel, WindowID window) noexcept: _kernel(&kernel), _window(window) {
     }
-    PlatformHost* _host;
+    KernelSession* _kernel;
+    WindowID _window;
 };
 
 } // namespace ZHLN

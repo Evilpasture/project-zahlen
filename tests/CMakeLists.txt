@@ -178,3 +178,5 @@ if(ZHLN_BUILD_GPU_TESTS)
         add_subdirectory(render)
     endif()
 endif()
+
+target_link_libraries(ztest_cpu PRIVATE zahlen_host_ui)

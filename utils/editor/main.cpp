@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -144,10 +145,10 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
-void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float dt) {
+void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, ZHLN::HostUI& hostUI, float dt) {
     auto entities = engine.Entities();
-    gui.SetFontAtlas(engine.GetFontAtlas());
-    ZHLN::GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
+    gui.SetFontAtlas(hostUI.GetFontAtlas());
+    ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(dt));
 
     ui.Box(
         "EditorWorkspace",
@@ -221,7 +222,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
         }
     );
 
-    engine.SubmitUI(std::move(ui).End());
+    hostUI.Submit(std::move(ui).End());
 }
 
 auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHLN::CrashState& crashState) -> std::expected<void, ZHLN::ErrorCode> {
@@ -248,7 +249,8 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     bool saveChordWasDown = false;
     bool escWasDown       = false;
 
-    ZHLN::GUI::Context gui(engine.GetFontAtlas());
+    ZHLN::HostUI hostUI(engine);
+    ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
 
     while (engine.IsRunning()) {
         float frameTime = clock.Tick();
@@ -389,7 +391,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
         }
 
         // Native self-hosted editor frame using Clay
-        RunNativeEditorFrame(gui, engine, frameTime);
+        RunNativeEditorFrame(gui, engine, hostUI, frameTime);
 
         // The hierarchy's Add Shape dropdown only records a request; spawning
         // needs the Engine (GPU mesh + material), which lives here.

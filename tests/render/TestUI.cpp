@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -61,7 +62,8 @@ struct SolidPayload {
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
-    ZHLN::GUI::Context gui(engine.GetFontAtlas());
+    ZHLN::HostUI hostUI(engine);
+    ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
     ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.Host().Extent(), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
         ui.Text("X", 24.0f, color);
@@ -102,10 +104,11 @@ struct UITestSuite {
             auto rc = engine->Graphics();
 
             // Set up a simple UI scene
-            ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
-                gui.SetFontAtlas(eng.GetFontAtlas());
-                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
+            ZHLN::HostUI hostUI(*engine);
+            ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
+            hostUI.SetCallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
+                gui.SetFontAtlas(hostUI.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(0.016f));
 
                 ui.Box(
                     "TestBox",
@@ -120,13 +123,13 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SubmitUI(std::move(ui).End());
+                hostUI.Submit(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt);
+                const auto status = (hostUI.Update(dt), engine->Tick(dt));
                 ZHLN::Test::ExpectTrue(status.has_value());
             }
 
@@ -176,16 +179,17 @@ struct UITestSuite {
 
             // Drive the GUI the way a host that owns its pointer does: hand the
             // frame's UI input in, then run the frame. This is the real seam
-            // (Engine::SubmitUIInput), not a fabricated one: ConsumeUIInput
+            // (HostUI::SubmitInput), not a fabricated one: ConsumeInput
             // returns exactly this vector for the frame it was submitted for, and
             // the device path is not touched. A host with a compositor or a
             // remote pointer uses the same call.
+            ZHLN::HostUI hostUI(*engine);
             auto setInput = [&](float mx, float my, bool lbutton) {
                 ZHLN::GUI::UIInput ui {};
                 ui.mouseX       = mx;
                 ui.mouseY       = my;
                 ui.mouseDown[0] = lbutton;
-                engine->SubmitUIInput(ui);
+                hostUI.SubmitInput(ui);
             };
 
             uint32_t clickCountA = 0;
@@ -198,10 +202,10 @@ struct UITestSuite {
             bool     wasClickedA = false;
             bool     wasClickedB = false;
 
-            ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
-                gui.SetFontAtlas(eng.GetFontAtlas());
-                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
+            ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
+            hostUI.SetCallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
+                gui.SetFontAtlas(hostUI.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(0.016f));
 
                 ui.Box(
                     "Container",
@@ -223,7 +227,7 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SubmitUI(std::move(ui).End());
+                hostUI.Submit(std::move(ui).End());
             });
 
             constexpr float dt = 1.0f / 60.0f;
@@ -231,7 +235,7 @@ struct UITestSuite {
             // Frame 1: Initial layout establishment (mouse at 0, 0, unpressed)
             setInput(0.0f, 0.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectFalse(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 0u);
@@ -240,7 +244,7 @@ struct UITestSuite {
             // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 35), unpressed
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectFalse(isActiveA);
@@ -253,7 +257,7 @@ struct UITestSuite {
             // Frame 3: Mouse pressed down this frame over ButtonA
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectTrue(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectTrue(isActiveA);
@@ -264,7 +268,7 @@ struct UITestSuite {
             // Frame 4: Button is held down across next frame (single-fire guarantee: should NOT click again)
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectTrue(isActiveA);
@@ -274,7 +278,7 @@ struct UITestSuite {
             // Frame 5: Mouse released over ButtonA
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectFalse(isActiveA);
@@ -284,21 +288,21 @@ struct UITestSuite {
             // Drag-into-click prevention test
             setInput(500.0f, 400.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             // Move mouse over ButtonB while still held down from previous frame
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedB); // Drag-into-hover must NOT trigger click
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 7: Release mouse over ButtonB, then press again to verify ButtonB clicks cleanly
             setInput(50.0f, 85.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (hostUI.Update(dt), engine->Tick(dt));
             ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 1u);
@@ -583,7 +587,7 @@ struct UITestSuite {
             return {};
         }
 
-        // 7. System vs. Custom Cursor Mode across HostWindow + RenderSystem
+        // 7. Host-composed cursor mode across HostWindow + explicit UI submission
         std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -606,10 +610,20 @@ struct UITestSuite {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            auto countBrightCenterPixels = [](const RgbImage& img) -> uint32_t {
+            ZHLN::HostUI hostUI(*engine);
+            auto tickHostFrames = [&] {
+                for (uint32_t i = 0; i < 2; ++i) {
+                    engine->ProcessEvents();
+                    // No widgets are needed: the host still composes the cursor
+                    // every frame. Engine::Tick deliberately does not own UI.
+                    hostUI.Submit({});
+                    ZHLN::Test::ExpectTrue(engine->Tick(1.0f / 60.0f).has_value());
+                }
+            };
+            auto countBrightCursorPixels = [](const RgbImage& img) -> uint32_t {
                 uint32_t bright = 0;
-                for (int y = 236; y <= 244 && y < img.height; ++y) {
-                    for (int x = 316; x <= 324 && x < img.width; ++x) {
+                for (int y = 0; y <= 8 && y < img.height; ++y) {
+                    for (int x = 0; x <= 8 && x < img.width; ++x) {
                         const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3;
                         if (img.rgb[idx] > 200 && img.rgb[idx + 1] > 200 && img.rgb[idx + 2] > 200) {
                             ++bright;
@@ -620,25 +634,26 @@ struct UITestSuite {
             };
 
             // System mode: no custom cursor rendered into headless target.
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto systemFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_system.ppm");
             if (!systemFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t systemBright = countBrightCenterPixels(systemFrame);
+            const uint32_t systemBright = countBrightCursorPixels(systemFrame);
 
-            // Custom mode: custom cursor rendered at (320, 240).
+            // Custom mode: the host draws at the actual headless pointer (0, 0).
+            // Only a quadrant of the 3.5-pixel bright disc is on-screen.
             host.SetCursorMode(ZHLN::CursorMode::Custom);
             if (!ZHLN::Test::ExpectEq(host.Cursor(), ZHLN::CursorMode::Custom) ||
                 !ZHLN::Test::ExpectTrue(host.CustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto customFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_custom.ppm");
             if (!customFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t customBright = countBrightCenterPixels(customFrame);
+            const uint32_t customBright = countBrightCursorPixels(customFrame);
 
             // Mouse capture hides custom cursor while preserving CursorMode::Custom.
             host.CaptureMouse(true);
@@ -647,19 +662,19 @@ struct UITestSuite {
                 !ZHLN::Test::ExpectFalse(host.CustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto capturedFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_captured.ppm");
             if (!capturedFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t capturedBright = countBrightCenterPixels(capturedFrame);
+            const uint32_t capturedBright = countBrightCursorPixels(capturedFrame);
 
             host.CaptureMouse(false);
             const bool restoredCustom = host.CustomCursor();
             host.SetCursorMode(ZHLN::CursorMode::System);
 
             if (!ZHLN::Test::ExpectEq(systemBright, 0u) ||
-                !ZHLN::Test::ExpectGt(customBright, 12u) ||
+                !ZHLN::Test::ExpectGt(customBright, 4u) ||
                 !ZHLN::Test::ExpectEq(capturedBright, 0u) ||
                 !ZHLN::Test::ExpectTrue(restoredCustom)) {
                 return std::unexpected(UITestError::UINotRendered);

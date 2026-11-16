@@ -46,7 +46,7 @@ void PlayerIntentStep(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 // The steps this module contributes, declared rather than inserted. The input
-// step ran first in the core schedule, and anchoring before "HostUICallback" is
+// step ran first in the core schedule, and anchoring before "EvaluateInput" is
 // that position restored now that core no longer registers it; player intent
 // sits after hot-reload dispatch and before Physics, where the core
 // PlayerIntent phase step used to.
@@ -62,7 +62,7 @@ constexpr ModuleStep kFrameSteps[] = {
         .name      = "CharacterInput",
         .run       = &CharacterInputStep,
         .placement = StepPlacement::Before,
-        .anchor    = "HostUICallback",
+        .anchor    = "EvaluateInput",
     },
     {
         .phase     = FramePhase::PlayerIntent,

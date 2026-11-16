@@ -95,6 +95,14 @@ namespace Resource {
 }
 
 struct RenderContext::Impl: Renderer {
+    struct UISubmission {
+        WindowID window;
+        std::vector<UIBatch> batches;
+        std::vector<VertexPosition> positions;
+        std::vector<VertexSurface> surfaces;
+    };
+    std::vector<UISubmission> submittedUI;
+
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;

@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -467,16 +468,17 @@ void test_binding_capture_requires_a_device_edge() {
 }
 
 // The UI seam is the one place a caller hands input *in*, so it is the one
-// place a borrowed buffer could outlive its owner. SubmitUIInput is documented
-// as replacing the next ConsumeUIInput, which means it is read on a different
-// call than the one that supplied it -- so the engine has to own the contents.
+// place a borrowed buffer could outlive its owner. SubmitInput is documented
+// as replacing the next ConsumeInput, which means it is read on a different
+// call than the one that supplied it -- so the host compositor has to own the contents.
 void test_submitted_ui_input_owns_its_spans() {
     auto engine = MakeHeadlessEngine();
     if (!engine) return;
+    HostUI hostUI(*engine);
 
     // The caller's storage stays alive but is overwritten after the call, which
     // is what a host's frame-local vector looks like one statement later. If the
-    // engine kept either span instead of a copy, the checks below would report
+    // compositor kept either span instead of a copy, the checks below would report
     // the overwrite rather than the submission.
     std::vector<KeyCode>  keys {KeyCode::A, KeyCode::B};
     std::vector<uint32_t> characters {U'a', U'b'};
@@ -486,12 +488,12 @@ void test_submitted_ui_input_owns_its_spans() {
     ui.mouseY          = 34.0f;
     ui.pressedKeys     = keys;
     ui.characterStream = characters;
-    engine->SubmitUIInput(ui);
+    hostUI.SubmitInput(ui);
 
     keys.assign(1, KeyCode::Z);
     characters.assign(1, U'z');
 
-    const GUI::UIInput consumed = engine->ConsumeUIInput(1.0f / 60.0f);
+    const GUI::UIInput consumed = hostUI.ConsumeInput(1.0f / 60.0f);
     ExpectEq(consumed.pressedKeys.size(), size_t {2});
     ExpectEq(consumed.characterStream.size(), size_t {2});
     if (consumed.pressedKeys.size() == 2) {
@@ -510,15 +512,15 @@ void test_submitted_ui_input_owns_its_spans() {
 
     // A submission is consumed exactly once: the next call falls through to the
     // device path, where a headless engine has nothing queued.
-    const GUI::UIInput next = engine->ConsumeUIInput(1.0f / 60.0f);
+    const GUI::UIInput next = hostUI.ConsumeInput(1.0f / 60.0f);
     ExpectEq(next.pressedKeys.size(), size_t {0});
     ExpectEq(next.characterStream.size(), size_t {0});
 
     // A second submission replaces the first wholesale, and an empty one does
     // not leave the previous frame's vector behind.
-    engine->SubmitUIInput(GUI::UIInput {.pressedKeys = keys});
-    engine->SubmitUIInput(GUI::UIInput {});
-    const GUI::UIInput replaced = engine->ConsumeUIInput(0.0f);
+    hostUI.SubmitInput(GUI::UIInput {.pressedKeys = keys});
+    hostUI.SubmitInput(GUI::UIInput {});
+    const GUI::UIInput replaced = hostUI.ConsumeInput(0.0f);
     ExpectEq(replaced.pressedKeys.size(), size_t {0});
 }
 

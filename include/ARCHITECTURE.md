@@ -920,13 +920,13 @@ finished scene in the same frame.
 
 ```cpp
 // Persistent GUI::Context owned by the host session:
-gui.SetFontAtlas(engine.GetFontAtlas());
-GUI::Frame ui = gui.BeginFrame(engine.ConsumeUIInput(dt));
+gui.SetFontAtlas(hostUI.GetFontAtlas());
+GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(dt));
 ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-engine.SubmitUI(std::move(ui).End());   // drawn by RenderSystem
+hostUI.Submit(std::move(ui).End());   // drawn by RenderSystem
 ```
 
 A host that owns the frame outright (the UI-tree editor) calls `RenderUI`
@@ -936,7 +936,7 @@ itself:
 auto& rc = kernel.GetRenderContext();
 auto began = rc.BeginFrame();
 FrameScope gpuFrame = std::move(**began);
-const auto target = kernel.AcquireTarget(window); // the kernel owns the presentation seam
+const auto target = engine.AcquireTarget(windowID); // the kernel owns the presentation seam
 if (!target) { ... }                              // acquisition error
 if (!*target) { ... }                             // no drawable image this frame
 const auto ui = gpuFrame.RenderUI(UIView {.viewport = ..., .target = **target}, std::move(uiFrame).End());

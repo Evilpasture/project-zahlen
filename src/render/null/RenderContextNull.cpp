@@ -57,6 +57,13 @@ std::atomic<uint64_t> gNextNullRendererToken {1};
 } // namespace
 
 struct RenderContext::Impl {
+    struct UISubmission {
+        WindowID window;
+        std::vector<UIBatch> batches;
+        std::vector<VertexPosition> positions;
+        std::vector<VertexSurface> surfaces;
+    };
+    std::vector<UISubmission> submittedUI;
     PresentationTarget&                       primaryTarget;
     uint64_t                                  rendererToken   = gNextNullRendererToken.fetch_add(1, std::memory_order_relaxed);
     Extent2D                                  resolution      {.width = 1280, .height = 720};
@@ -595,6 +602,33 @@ void RenderContext::ApplyDrawData(const SceneData& /*scene*/) noexcept {
 
 auto RenderContext::RenderScene(const SceneView& /*view*/, const GraphicsSettings& /*settings*/) noexcept -> FrameOutcome<FrameSkipped> {
     return std::optional<FrameSkipped> {};
+}
+
+void RenderContext::SubmitUI(WindowID window, const UIDrawData& data, bool append) {
+    if (!append) std::erase_if(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
+    if (data.Empty() || data.positions.size() != data.surfaces.size()) return;
+    for (const auto& batch: data.batches) {
+        if (batch.vertexStart > data.positions.size() || batch.vertexCount > data.positions.size() - batch.vertexStart) return;
+    }
+    _impl->submittedUI.push_back({window, {data.batches.begin(), data.batches.end()},
+                                 {data.positions.begin(), data.positions.end()}, {data.surfaces.begin(), data.surfaces.end()}});
+}
+bool RenderContext::HasSubmittedUI(WindowID window) const noexcept {
+    return std::ranges::any_of(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
+}
+void RenderContext::ClearSubmittedUI() noexcept { _impl->submittedUI.clear(); }
+auto RenderContext::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
+    for (const auto& data: _impl->submittedUI) {
+        if (data.window != window) continue;
+        const auto drawn = RenderUI(UIView {.viewport = {}, .target = target, .frameIndex = GetFrameIndex()},
+                                    UIDrawData {.batches = data.batches, .positions = data.positions, .surfaces = data.surfaces});
+        if (!drawn) return std::unexpected(drawn.error());
+    }
+    return std::optional<FrameSkipped> {};
+}
+auto FrameScope::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
+    if (_rc == nullptr) return std::optional<FrameSkipped> {};
+    return _rc->RenderSubmittedUI(window, target);
 }
 
 auto RenderContext::RenderUI(const UIView& /*view*/, UIDrawData /*uiData*/) noexcept -> FrameOutcome<FrameSkipped> {

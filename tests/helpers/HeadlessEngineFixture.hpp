@@ -207,7 +207,7 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // previous test's lambda into dead frames (the button test's wasClickedA
     // is the one ASan caught). A fresh engine has no callback, so neither
     // does a reset one.
-    engine.SetUICallback(nullptr);
+    engine.Graphics().ClearSubmittedUI();
     engine.Host().SetCursorMode(ZHLN::CursorMode::System);
     engine.Host().CaptureMouse(false);
 }

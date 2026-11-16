@@ -36,13 +36,11 @@ ZHLN_API auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 col
 ZHLN_API auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 ZHLN_API auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
-// A host builds its atlas through Engine::EnsureFontAtlas/GetFontAtlas, which
-// owns the renderer and the cache; the cache-parameterized forms are declared
-// in the engine's own header.
+// Legacy render-tool helper. Runtime hosts own atlases and upload them through
+// GraphicsDevice::CreateTexture (see the host-side HostUI composition).
 ZHLN_API auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
 
-// The engine's own font entry points. A host asks Engine::EnsureFontAtlas /
-// Engine::GetFontAtlas, which is the same work without handing out a renderer.
+// Asset loading only; this does not allocate or own a runtime UI atlas.
 ZHLN_API auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
 ZHLN_API auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;

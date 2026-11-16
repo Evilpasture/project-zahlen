@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -111,12 +112,6 @@ constexpr size_t kPointLightIndex = 1;
 
 } // namespace
 
-namespace {
-
-std::unique_ptr<GUI::Context> s_FallbackGui;
-
-} // namespace
-
 auto DefaultPreset::FallbackScene() noexcept -> const Scene::Scene& {
     // Built on first use: a description holds strings and vectors, so it cannot
     // be a constexpr object, and there is no reason to pay for it in a process
@@ -140,7 +135,6 @@ void DefaultPreset::ClearFallback() noexcept {
     s_BtnQuit      = Entity::Null();
     s_AccumTime    = 0.0f;
     s_PopupVisible = true;
-    s_FallbackGui.reset();
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine) {
@@ -153,9 +147,6 @@ void DefaultPreset::BuildFallbackScene(Engine& engine) {
     s_PopupVisible = true;
 
     Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
-
-    engine.EnsureFontAtlas();
-    s_FallbackGui = std::make_unique<GUI::Context>(engine.GetFontAtlas());
 
     // ========================================================================
     // 1. 3D SCENE SETUP
@@ -196,7 +187,6 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
     s_AccumTime += dt;
     auto reg = engine.Entities();
-    auto rc = engine.Graphics();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
     const auto input       = std::as_const(engine).Input();
@@ -224,13 +214,14 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         });
     }
 
+}
+
+void DefaultPreset::DrawUI(Engine& engine, HostUI& hostUI, float dt) {
+    if (!s_IsActive || s_Owner != &engine) return;
+    auto rc = engine.Graphics();
     // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
     if (s_PopupVisible) {
-        if (!s_FallbackGui) {
-            s_FallbackGui = std::make_unique<GUI::Context>();
-        }
-        s_FallbackGui->SetFontAtlas(engine.GetFontAtlas());
-        GUI::Frame ui = s_FallbackGui->BeginFrame(engine.ConsumeUIInput(dt));
+        GUI::Frame ui = hostUI.Context().BeginFrame(hostUI.ConsumeInput(dt));
 
         // Full-screen centering container
         ui.BeginBox("FallbackCenterScreen", GUI::BoxConfig {
@@ -309,7 +300,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
         // Bank the geometry: the renderer composes it over the scene once
         // the frame it belongs to is open (RenderSystem's HUD overlay pass).
-        engine.SubmitUI(std::move(ui).End());
+        hostUI.Submit(std::move(ui).End());
 
         // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
         // but Clay has no UI entities; leave them as null.

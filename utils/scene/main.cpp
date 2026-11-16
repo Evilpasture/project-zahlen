@@ -10,6 +10,7 @@
 #include <FallbackScene/FallbackScene.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
+#include <Zahlen/HostUI.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -219,8 +220,24 @@ auto main(int argc, char* argv[]) -> int {
     }
 #endif
     ZHLN::SetupSignalHandler(crashState);
-    const auto pollCrashes = [](ZHLN::Engine& engine) { ZHLN::CheckForCrashes(crashState, &engine); };
-    auto result = ZHLN::Engine::Run(config, nullptr, &InstallHostWithState, pollCrashes);
+    struct DiagnosticUI {
+        std::unique_ptr<ZHLN::HostUI> ui;
+        float dt = 0.0f;
+        void Start(ZHLN::Engine& engine) {
+            if (s_HostLaunchConfig.scenePath.empty()) {
+                ui = std::make_unique<ZHLN::HostUI>(engine);
+                ZHLN::FallbackScene::DefaultPreset::BuildFallbackScene(engine);
+            }
+        }
+        void Tick(ZHLN::Engine&, float delta) { dt = delta; }
+        void UI(ZHLN::Engine& engine) {
+            if (ui) ZHLN::FallbackScene::DefaultPreset::DrawUI(engine, *ui, dt);
+        }
+        void Stop(ZHLN::Engine&) { ui.reset(); }
+    };
+    auto app = ZHLN::App(config);
+    app.Install(&InstallHostWithState).AddLayer(DiagnosticUI {});
+    auto result = app.Run();
     if (!result) {
         ZHLN::LogError("[SceneHost] run failed: {}", result.error());
         return EXIT_FAILURE;

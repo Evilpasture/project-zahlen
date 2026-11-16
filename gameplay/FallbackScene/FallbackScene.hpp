@@ -18,6 +18,7 @@
 namespace ZHLN {
 
 class Engine;
+class HostUI;
 
 namespace Scene {
 struct Scene;
@@ -40,6 +41,8 @@ class DefaultPreset {
     // require a text parser just to show this diagnostic scene.
     [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
     static void               Update(Engine& engine, float dt);
+    // Called explicitly by the scene host, with its own compositor/context/atlas.
+    static void               DrawUI(Engine& engine, HostUI& hostUI, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;
 

@@ -30,6 +30,7 @@
 namespace ZHLN {
 
 class Window;
+class InputContext;
 class PlatformHost;
 class RenderContext;
 class AudioContext;
@@ -47,7 +48,7 @@ class EventBus;
 // objects, and the engine is what hands out the capabilities built on them.
 class KernelSession {
   public:
-    static auto Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode>;
+    static auto Create(const EngineConfig& config) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode>;
     ~KernelSession();
 
     KernelSession(const KernelSession&)                    = delete;
@@ -62,9 +63,10 @@ class KernelSession {
 
     void ProcessEvents();
 
-    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver,
-                   WindowID id) -> ZHLN::Optional<Window&>;
-    void RemoveWindow(Window& window);
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen) -> WindowID;
+    void RemoveWindow(WindowID window);
+    void BeginInputFrame();
+    auto InputFor(WindowID window = WindowID::Primary) noexcept -> InputContext&;
 
     // The session's windows as *identities*, primary first. WindowID::Primary
     // is always present: a headless or TTY session has a primary host with a
@@ -73,13 +75,9 @@ class KernelSession {
     [[nodiscard]] auto WindowIDs() const noexcept -> std::span<const WindowID>;
     [[nodiscard]] auto WindowFor(WindowID id) const noexcept -> Window*;
 
-    [[nodiscard]] auto SecondaryWindows() const noexcept -> std::span<Window* const>;
-    [[nodiscard]] auto NextWindowID() noexcept -> WindowID;
 
-    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
-    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget>;
-    [[nodiscard]] auto GetAcquiredTarget() noexcept -> std::optional<FrameTarget>;
-    [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
+    [[nodiscard]] auto AcquireTarget(WindowID window = WindowID::Primary) noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget(WindowID window = WindowID::Primary) noexcept -> std::optional<FrameTarget>;
 
     auto GetRenderContext() -> RenderContext&;
     auto GetAudioContext() -> AudioContext&;
@@ -94,7 +92,7 @@ class KernelSession {
   private:
     KernelSession() = default;
 
-    auto InitInternal(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode>;
+    auto InitInternal(const EngineConfig& config) -> std::expected<void, ErrorCode>;
 
     struct Impl;
     std::unique_ptr<Impl> _impl;

@@ -59,6 +59,10 @@ class ZHLN_API RenderContext {
     };
 
   public:
+    void SubmitUI(WindowID window, const UIDrawData& data, bool append = false);
+    [[nodiscard]] auto HasSubmittedUI(WindowID window) const noexcept -> bool;
+    void ClearSubmittedUI() noexcept;
+
     struct Impl;
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
@@ -247,6 +251,7 @@ class ZHLN_API RenderContext {
 
   private:
     friend class FrameScope;
+    auto RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped>;
     void               SubmitParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureID texture, bool additive);
     void               SubmitMeshParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat);
     void               DrawBillboards(TextureID texture, std::span<const BillboardQuad> billboards, bool additive);

@@ -19,5 +19,6 @@ export namespace ZHLN::glTF {
 // it, and nothing installs a callback in between.
 
 void Initialize(ZHLN::Engine& engine);
+void DrawUI(ZHLN::Engine& engine);
 
 } // namespace ZHLN::glTF

@@ -302,43 +302,12 @@ public:
     }
 
     [[nodiscard]] uint32_t Windows(WindowID* outWindows, uint32_t capacity) const noexcept override {
-        const auto windows = m_engine->Windows();
-        uint32_t   written = 0;
-        for (Window* window: windows) {
-            if (window == nullptr) {
-                continue;
-            }
-            if (outWindows != nullptr && written < capacity) {
-                outWindows[written] = window->ID();
-            }
-            ++written;
-        }
-        return written;
+        const auto windows = m_engine->WindowIDs();
+        if (outWindows) std::copy_n(windows.begin(), std::min<size_t>(capacity, windows.size()), outWindows);
+        return static_cast<uint32_t>(windows.size());
     }
-
-    [[nodiscard]] Extent2D WindowExtent(WindowID window) const noexcept override {
-        const Window* found = FindWindow(window);
-        return found != nullptr ? found->GetSize() : Extent2D {};
-    }
-
-    [[nodiscard]] bool IsWindowFocused(WindowID window) const noexcept override {
-        const Window* found = FindWindow(window);
-        return found != nullptr && found->IsFocused();
-    }
-
-  private:
-    // Resolved through the engine's list rather than a cached Window*: the
-    // window may have been removed since the consumer last saw the id.
-    [[nodiscard]] const Window* FindWindow(WindowID window) const noexcept {
-        for (const Window* candidate: m_engine->Windows()) {
-            if (candidate != nullptr && candidate->ID() == window) {
-                return candidate;
-            }
-        }
-        return nullptr;
-    }
-
-  public:
+    [[nodiscard]] Extent2D WindowExtent(WindowID window) const noexcept override { return m_engine->Host(window).Extent(); }
+    [[nodiscard]] bool IsWindowFocused(WindowID window) const noexcept override { return m_engine->Host(window).Focused(); }
 
     // ----------------------------------------------------------------- IState
     [[nodiscard]] ZHLN::CullingStats CullingStats() const noexcept override {

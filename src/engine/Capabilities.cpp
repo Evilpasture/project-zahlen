@@ -32,6 +32,7 @@
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Window/Window.hpp>
 
 namespace ZHLN {
 
@@ -57,70 +58,67 @@ auto Entities::Registry() const noexcept -> ECS::Registry& {
 
 // --- HostWindow ---------------------------------------------------------------
 
+auto HostWindow::Running() const noexcept -> bool {
+    if (_window == WindowID::Primary) return _kernel->IsRunning();
+    const auto* window = _kernel->WindowFor(_window);
+    return window != nullptr && window->IsRunning();
+}
 auto HostWindow::Extent() const noexcept -> Extent2D {
-    return _host->GetSize();
+    if (_window == WindowID::Primary) return _kernel->GetPlatformHost().GetSize();
+    const auto* window = _kernel->WindowFor(_window);
+    return window ? window->GetSize() : Extent2D {};
 }
-
-auto HostWindow::Present() const noexcept -> bool {
-    // A TTY session presents too, through its terminal target, but has no OS
-    // window: the question this answers is the window, not the target.
-    return _host->AsWindow().has_value();
-}
-
+auto HostWindow::Present() const noexcept -> bool { return _kernel->WindowFor(_window) != nullptr; }
 auto HostWindow::CustomCursor() const noexcept -> bool {
-    return _host->UsesCustomCursor();
+    if (_window == WindowID::Primary) return _kernel->GetPlatformHost().UsesCustomCursor();
+    const auto* window = _kernel->WindowFor(_window);
+    return window ? window->UsesCustomCursor() : false;
 }
-
 auto HostWindow::Cursor() const noexcept -> CursorMode {
-    return _host->GetCursorMode();
+    if (_window == WindowID::Primary) return _kernel->GetPlatformHost().GetCursorMode();
+    const auto* window = _kernel->WindowFor(_window);
+    return window ? window->GetCursorMode() : CursorMode::System;
 }
-
-void HostWindow::SetCursorMode(CursorMode mode) noexcept {
-    _host->SetCursorMode(mode);
-}
-
-void HostWindow::CaptureMouse(bool captured) noexcept {
-    _host->CaptureMouse(captured);
-}
-
 auto HostWindow::MouseCaptured() const noexcept -> bool {
-    return _host->IsMouseCaptured();
+    if (_window == WindowID::Primary) return _kernel->GetPlatformHost().IsMouseCaptured();
+    const auto* window = _kernel->WindowFor(_window);
+    return window ? window->IsMouseCaptured() : false;
 }
-
-void HostWindow::Focus() noexcept {
-    _host->Focus();
-}
-
 auto HostWindow::Focused() const noexcept -> bool {
-    return _host->IsFocused();
+    if (_window == WindowID::Primary) return _kernel->GetPlatformHost().IsFocused();
+    const auto* window = _kernel->WindowFor(_window);
+    return window ? window->IsFocused() : false;
 }
-
+void HostWindow::SetCursorMode(CursorMode mode) noexcept {
+    if (_window == WindowID::Primary) { _kernel->GetPlatformHost().SetCursorMode(mode); return; }
+    if (auto* window = _kernel->WindowFor(_window)) window->SetCursorMode(mode);
+}
+void HostWindow::CaptureMouse(bool captured) noexcept {
+    if (_window == WindowID::Primary) { _kernel->GetPlatformHost().CaptureMouse(captured); return; }
+    if (auto* window = _kernel->WindowFor(_window)) window->CaptureMouse(captured);
+}
+void HostWindow::Focus() noexcept {
+    if (_window == WindowID::Primary) { _kernel->GetPlatformHost().Focus(); return; }
+    if (auto* window = _kernel->WindowFor(_window)) window->Focus();
+}
 void HostWindow::Close() const noexcept {
-    _host->Close();
+    if (_window == WindowID::Primary) { _kernel->GetPlatformHost().Close(); return; }
+    if (auto* window = _kernel->WindowFor(_window)) window->Close();
 }
-
-auto HostWindow::Clipboard() const -> std::string {
-    return _host->GetClipboardText();
-}
-
-void HostWindow::SetClipboard(std::string_view text) {
-    _host->SetClipboardText(text);
-}
-
+auto HostWindow::Clipboard() const -> std::string { return _kernel->GetPlatformHost().GetClipboardText(); }
+void HostWindow::SetClipboard(std::string_view text) { _kernel->GetPlatformHost().SetClipboardText(text); }
 auto HostWindow::ClipboardSink() const noexcept -> GUI::TextEdit::ClipboardSink {
-    // The capability is the userdata, not the platform object: the sink's
-    // callbacks are the only two host calls text editing makes, and routing them
-    // through this facade keeps a caller holding this value instead of a
-    // PlatformHost&.
-    return GUI::TextEdit::ClipboardSink {
-        .userdata = const_cast<HostWindow*>(this),
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<HostWindow*>(ud)->SetClipboard(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<HostWindow*>(ud)->Clipboard(); },
+    // Clipboard is process-wide. The kernel outlives the callback; never use
+    // the address of a temporary HostWindow facade as userdata.
+    return {
+        .userdata = _kernel,
+        .set = [](void* ud, std::string_view text) { static_cast<KernelSession*>(ud)->GetPlatformHost().SetClipboardText(text); },
+        .get = [](void* ud) -> std::string { return static_cast<KernelSession*>(ud)->GetPlatformHost().GetClipboardText(); },
     };
 }
-
-void HostWindow::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
-    _host->SetFileDropHandler(handler, userdata);
+void HostWindow::SetFileDropHandler(void (*handler)(void*, const FileDrop*, uint32_t), void* userdata) noexcept {
+    if (_window == WindowID::Primary) { _kernel->GetPlatformHost().SetFileDropHandler(handler, userdata); return; }
+    if (auto* window = _kernel->WindowFor(_window)) window->SetFileDropHandler(handler, userdata);
 }
 
 // --- GraphicsDevice -----------------------------------------------------------
@@ -996,3 +994,19 @@ void InputActions::StopAllRumble() noexcept {
 }
 
 } // namespace ZHLN
+
+namespace ZHLN {
+auto InputActions::ConsumePhysicalInput() noexcept -> InputState {
+    auto& state = _context->MutableSeatKeyboardMouse();
+    auto snapshot = state;
+    state.ClearQueuedInput();
+    return snapshot;
+}
+void InputActions::SetUICapture(bool keyboard, bool mouse) noexcept { _context->SyncCaptureFlags(keyboard, mouse); }
+}
+
+namespace ZHLN {
+void GraphicsDevice::SubmitUI(WindowID window, const UIDrawData& data, bool append) { _ctx->SubmitUI(window, data, append); }
+bool GraphicsDevice::HasSubmittedUI(WindowID window) const noexcept { return _ctx->HasSubmittedUI(window); }
+void GraphicsDevice::ClearSubmittedUI() noexcept { _ctx->ClearSubmittedUI(); }
+}

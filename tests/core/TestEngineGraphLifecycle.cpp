@@ -6,6 +6,10 @@
 #include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
+#include <Zahlen/Engine/Capabilities/EngineState.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN::Test {
@@ -40,6 +44,42 @@ void test_module_install_compiles_graphs_before_return_and_getters_are_observers
     auto& render = engine.GetRenderGraph();
     const auto initialCount = update.GetSystemCount();
     ExpectTrue(initialCount > 0);
+    // Headless primary identity remains addressable without an OS Window.
+    const auto ids = engine.WindowIDs();
+    ExpectEq(ids.size(), size_t {1});
+    ExpectTrue(ids.front() == WindowID::Primary);
+    ExpectFalse(engine.Host().Present());
+    ExpectTrue(engine.Host().Running());
+    ExpectTrue(engine.AddWindow("unavailable", 32, 32, false) == WindowID::Invalid);
+    const auto absent = WindowID {9999};
+    ExpectFalse(engine.Host(absent).Running());
+    ExpectEq(engine.Host(absent).Extent().width, uint32_t {0});
+    const auto unavailable = engine.AcquireTarget(absent);
+    ExpectTrue(unavailable.has_value() && !unavailable->has_value());
+    ExpectFalse(engine.GetAcquiredTarget(absent).has_value());
+    engine.RemoveWindow(absent);
+    engine.RemoveWindow(WindowID::Primary); // removal never destroys the primary host
+    ExpectTrue(engine.Host().Running());
+    ExpectEq(engine.WindowIDs().size(), size_t {1});
+
+    auto graphics = engine.Graphics();
+    {
+        const UIBatch batch {.vertexCount = 3};
+        const VertexPosition positions[3] {};
+        const VertexSurface surfaces[3] {};
+        graphics.SubmitUI(WindowID::Primary, UIDrawData {.batches = {&batch, 1}, .positions = positions, .surfaces = surfaces});
+    }
+    ExpectTrue(graphics.HasSubmittedUI(WindowID::Primary));
+    graphics.ClearSubmittedUI();
+    ExpectFalse(graphics.HasSubmittedUI(WindowID::Primary));
+
+    // Scene-local debug policy resets along with culling and graph locals.
+    engine.State().SetPhysicsDrawMode(2);
+    engine.State().SetFreezeFrustum(true);
+    engine.ClearScene();
+    ExpectEq(engine.State().PhysicsDrawMode(), 0);
+    ExpectFalse(engine.State().CullingStats().FreezeFrustum);
+
     graphRegistrationCalls = 0;
     const Module probe {
         .name            = "EagerGraphRegistrationProbe",

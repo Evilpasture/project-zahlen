@@ -12,8 +12,6 @@
 #include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Engine/SystemContext.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GUI/Font.hpp>
-#include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
@@ -54,9 +52,6 @@ class EntityCommandBuffer;
 class EventBus;
 } // namespace ECS
 
-namespace GUI {
-struct UIInput;
-}
 
 namespace COM {
 class EngineCOM;
@@ -79,11 +74,8 @@ class InputActions;
 
 class ZHLN_API Engine {
   public:
-    // Per-window UI. The callback is told which window it is drawing: one
-    // engine can host an editor window and a preview window, and each draws its
-    // own view. There is no session-wide callback -- a single one forced every
-    // window to share one view and one submitted UIDrawData.
-    using UICallback = std::function<void(Engine&, WindowID)>;
+    // Bespoke host work runs before Tick, outside the core frame plan.
+    using FrameCallback = std::function<void(Engine&, float)>;
 
     // What runs around every fixed-timestep substep PhysicsSystem takes, inside
     // its accumulator loop and not once per frame.
@@ -130,27 +122,11 @@ class ZHLN_API Engine {
     // The list is stable until AddWindow/RemoveWindow.
     [[nodiscard]] auto WindowIDs() const noexcept -> std::span<const WindowID>;
 
-    // The Window behind an id, or nullptr when the session has none for it (the
-    // primary in a headless/TTY session). Never cached across a frame.
-    [[nodiscard]] auto WindowFor(WindowID id) const noexcept -> Window*;
-
-    // Every window that has a Window object, primary first. Empty in a headless
-    // or TTY session.
-    [[nodiscard]] auto Windows() const noexcept -> std::span<Window* const>;
-
-    // The primary window as a host uses it: extent, clipboard, cursor policy,
-    // capture and the drop hook. The PlatformHost itself -- event polling,
-    // target acquisition, presentation lifetime -- stays inside the engine.
-    [[nodiscard]] auto Host() noexcept -> HostWindow;
-
-    auto
-        AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> ZHLN::Optional<Window&>;
-    void RemoveWindow(Window& window);
-
-    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
-    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget>;
-    [[nodiscard]] auto GetAcquiredTarget() noexcept -> std::optional<FrameTarget>;
-    [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
+    [[nodiscard]] auto Host(WindowID window = WindowID::Primary) noexcept -> HostWindow;
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen) -> WindowID;
+    void RemoveWindow(WindowID window);
+    [[nodiscard]] auto AcquireTarget(WindowID window = WindowID::Primary) noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget(WindowID window = WindowID::Primary) noexcept -> std::optional<FrameTarget>;
 
     // Capability facades: small value-type views of engine-owned subsystems.
     // The concrete session/World/RenderContext/... stay inside the engine.
@@ -175,8 +151,8 @@ class ZHLN_API Engine {
     // simulation graph gets the read-only pair only (see SimServices), so
     // rebinding a key from inside the simulation is a compile error rather
     // than a convention.
-    [[nodiscard]] auto Input() noexcept -> InputActions;
-    [[nodiscard]] auto Input() const noexcept -> InputReader;
+    [[nodiscard]] auto Input(WindowID window = WindowID::Primary) noexcept -> InputActions;
+    [[nodiscard]] auto Input(WindowID window = WindowID::Primary) const noexcept -> InputReader;
     [[nodiscard]] auto Haptics() noexcept -> InputHaptics;
     // In-frame mutations are recorded here, played back at MainECBPlayback and
     // cleaned up by SceneCleanup. Systems declare EntityCommandBuffer& instead.
@@ -238,49 +214,6 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetGameState() const -> void*;
     void               SetGameState(void* state);
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
-
-    // Installs (or clears, with an empty function) the UI callback for one
-    // window. The primary window is registered by default with an empty
-    // callback; a window that never installs one draws no UI.
-    void SetUICallback(WindowID window, UICallback callback);
-
-    // Compatibility for a single-window host: the primary window's callback.
-    void SetUICallback(UICallback callback);
-
-    [[nodiscard]] auto GetUICallback(WindowID window) const noexcept -> ZHLN::Optional<const UICallback&>;
-
-    // UI submitted by the callback for `window`, consumed by that window's
-    // render view in the same frame.
-    void               SetPendingUIData(WindowID window, UIDrawData uiData) noexcept;
-    [[nodiscard]] auto GetPendingUIData(WindowID window) const noexcept -> UIDrawData;
-
-    // Single-window spellings, kept so an existing host does not have to name
-    // the primary window to do the only thing it does.
-    void               SetPendingUIData(UIDrawData uiData) noexcept;
-    [[nodiscard]] auto GetPendingUIData() const noexcept -> UIDrawData;
-
-    void               SetFontAtlas(const FontAtlas& fontAtlas) noexcept;
-    [[nodiscard]] auto GetFontAtlas() -> const FontAtlas&;
-    [[nodiscard]] auto GetFontAtlas() const noexcept -> const FontAtlas&;
-
-    [[nodiscard]] auto ConsumeUIInput(float dt) noexcept -> GUI::UIInput;
-
-    // Hand a frame's UI input in from outside the device path.
-    //
-    // The GUI is fed through ConsumeUIInput, which reads the router. That is
-    // right for a running game and wrong for a host that owns the pointer
-    // itself -- a virtual-reality compositor, a remote-desktop host, an
-    // input-recording harness -- because those already have the frame's pointer
-    // vector and must not have to fabricate device events to deliver it.
-    //
-    // This is the *UI* seam and nothing else: it replaces what the next
-    // ConsumeUIInput returns for one frame. It cannot set a key the action maps
-    // evaluate, so it is not a way to synthesise gameplay input, and it is not
-    // reachable from a simulation system (SimServices carries the read and
-    // haptic capabilities only).
-    void SubmitUIInput(GUI::UIInput uiInput) noexcept;
-
-    void               SubmitUI(UIDrawData uiData) noexcept;
 
     void AddDeviceLostCallback(DeviceLostCallback callback);
 
@@ -351,7 +284,6 @@ class ZHLN_API Engine {
     void               SetMaxFramesPerSecond(uint32_t fps) noexcept;
     [[nodiscard]] auto MaxFramesPerSecond() const noexcept -> uint32_t;
 
-    void EnsureFontAtlas();
 
     // Best-effort diagnostic snapshot (engine summary, active camera + SIMD
     // frustum planes, and physics body/contact trace) exposed for caller-owned
@@ -366,7 +298,7 @@ class ZHLN_API Engine {
     // Low-level runner for custom hosts. The optional event poller is an
     // explicit frame seam (not a lifecycle hook smuggled through EngineConfig).
     static auto
-        Run(const EngineConfig& config = {}, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr, EventPoller pollEvents = nullptr)
+        Run(const EngineConfig& config = {}, FrameCallback onFrame = nullptr, ModuleInstaller installModules = nullptr, EventPoller pollEvents = nullptr)
             -> std::expected<void, ErrorCode>;
 
   private:

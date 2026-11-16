@@ -7,6 +7,8 @@
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include "KernelSession.hpp"
+#include "InputContext.hpp"
+#include <unordered_map>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
@@ -26,6 +28,54 @@ namespace {
 
 // The kernel is the host: it owns the on-disk pipeline binaries. The renderer
 // only ever sees bytes in and bytes out, so all of this lives here.
+auto MakeInputReceiver(InputContext& input) -> WindowInputReceiver {
+    auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
+        static_cast<InputContext*>(userdata)->InjectKey(key, pressed);
+    };
+
+    auto onMouseMove = [](void* userdata, float x, float y) -> void {
+        static_cast<InputContext*>(userdata)->InjectMouseMove(x, y);
+    };
+
+    auto onMouseRelative = [](void* userdata, float x, float y, float dx, float dy) -> void {
+        static_cast<InputContext*>(userdata)->InjectMouseRelative(x, y, dx, dy);
+    };
+
+    auto onMouseScroll = [](void* userdata, float delta) -> void {
+        static_cast<InputContext*>(userdata)->InjectMouseScroll(delta);
+    };
+
+    auto onResize = [](void* userdata, Extent2D extent) -> void {
+        static_cast<InputContext*>(userdata)->InjectResize(extent);
+    };
+
+    auto onChar = [](void* userdata, unsigned int codepoint) -> void {
+        static_cast<InputContext*>(userdata)->InjectChar(codepoint);
+    };
+
+    auto onGamepadConnection = [](void* userdata, GamepadSlot slot, bool connected, std::string_view name) -> void {
+        static_cast<InputContext*>(userdata)->InjectGamepadConnection(slot, connected, name);
+    };
+
+    auto onGamepadState = [](void* userdata, GamepadSlot slot, const GamepadHardwareSample& sample) -> void {
+        static_cast<InputContext*>(userdata)->InjectGamepadSample(slot, sample);
+    };
+
+    InputContext*       inputPtr = &input;
+    return WindowInputReceiver {
+        .userdata            = inputPtr,
+        .onKey               = onKey,
+        .onMouseMove         = onMouseMove,
+        .onMouseRelative     = onMouseRelative,
+        .onMouseScroll       = onMouseScroll,
+        .onResize            = onResize,
+        .onChar              = onChar,
+        .onGamepadConnection = onGamepadConnection,
+        .onGamepadState      = onGamepadState,
+    };
+
+}
+
 constexpr uint64_t kMaxPipelineBinaryBytes = 64ull * 1024 * 1024;
 
 [[nodiscard]] auto LoadPipelineBinaryBytes(const std::filesystem::path& file) -> std::vector<uint8_t> {
@@ -91,8 +141,10 @@ struct KernelSession::Impl {
     PlatformHost primaryHost;
     Extent2D     primaryExtent {}; // last size synchronized during ProcessEvents
 
+    InputContext primaryInput;
+    InputContext absentInput;
+    std::unordered_map<WindowID, std::unique_ptr<InputContext>> secondaryInputs;
     std::vector<std::unique_ptr<Window>> secondaryWindows;
-    std::vector<Window*>                secondaryRaw; // mirrors secondaryWindows, for per-frame iteration
     // Window identities, primary first. Maintained on AddWindow/RemoveWindow and
     // once at Init, never rebuilt on read: a callback may be iterating it.
     std::vector<WindowID>               windowIDs {WindowID::Primary};
@@ -132,20 +184,21 @@ struct KernelSession::Impl {
     }
 };
 
-auto KernelSession::Create(const EngineConfig& config, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
+auto KernelSession::Create(const EngineConfig& config) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
     auto instance = std::unique_ptr<KernelSession>(new (std::nothrow) KernelSession());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
     }
-    if (auto result = instance->InitInternal(config, inputReceiver); !result) {
+    if (auto result = instance->InitInternal(config); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto KernelSession::InitInternal(const EngineConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
+auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
     _impl->config            = cfg;
+    const auto inputReceiver = MakeInputReceiver(_impl->primaryInput);
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
 
     // Own caller-supplied bytes as well as on-disk bytes: the config's span
@@ -274,45 +327,41 @@ void KernelSession::ProcessEvents() {
     }
 }
 
-auto KernelSession::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, WindowID id)
-    -> ZHLN::Optional<Window&> {
-    if (!_impl->primaryHost.Valid() || !_impl->primaryHost.AsWindow() || !_impl->glfwAcquired) {
-        ZHLN::Log("[KernelSession] AddWindow requires a windowed session");
-        return std::nullopt;
-    }
-
-    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, id);
-    if (window->GetNativeHandle() == nullptr) {
-        ZHLN::Log("[KernelSession] AddWindow: OS window creation failed");
-        return std::nullopt;
-    }
-    Window& raw = *window;
-    _impl->secondaryWindows.push_back(std::move(window));
-    _impl->secondaryRaw.push_back(&raw);
-    _impl->windowIDs.push_back(id);
-    return raw;
-}
-
-void KernelSession::RemoveWindow(Window& window) {
-    if (const auto primary = _impl->primaryHost.AsWindow(); primary && &*primary == &window) {
-        return;
-    }
-    if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(window));
-    }
-    std::erase_if(_impl->secondaryWindows, [&](const auto& owned) -> bool { return owned.get() == &window; });
-    std::erase(_impl->secondaryRaw, &window);
-    std::erase(_impl->windowIDs, window.ID());
-}
-
-auto KernelSession::SecondaryWindows() const noexcept -> std::span<Window* const> {
-    return _impl->secondaryRaw;
-}
-
-auto KernelSession::NextWindowID() noexcept -> WindowID {
+auto KernelSession::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen) -> WindowID {
+    if (!_impl->primaryHost.Valid() || !_impl->primaryHost.AsWindow() || !_impl->glfwAcquired ||
+        _impl->nextWindowID == WindowID::Invalid) return WindowID::Invalid;
     const WindowID id = _impl->nextWindowID;
     _impl->nextWindowID = WindowID(static_cast<uint64_t>(id) + 1);
+    auto input = std::make_unique<InputContext>();
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, MakeInputReceiver(*input), id);
+    if (window->GetNativeHandle() == nullptr) return WindowID::Invalid;
+    _impl->secondaryInputs.emplace(id, std::move(input));
+    _impl->secondaryWindows.push_back(std::move(window));
+    _impl->windowIDs.push_back(id);
     return id;
+}
+
+void KernelSession::RemoveWindow(WindowID id) {
+    if (id == WindowID::Primary) return;
+    auto* window = WindowFor(id);
+    if (window == nullptr) return;
+    if (_impl->renderContext) _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window));
+    // Save identity before destroying the window; never read through a freed reference.
+    std::erase_if(_impl->secondaryWindows, [window](const auto& owned) { return owned.get() == window; });
+    _impl->secondaryInputs.erase(id);
+    std::erase(_impl->windowIDs, id);
+}
+
+void KernelSession::BeginInputFrame() {
+    _impl->primaryInput.BeginFrame();
+    for (auto& [id, input]: _impl->secondaryInputs) input->BeginFrame();
+}
+
+auto KernelSession::InputFor(WindowID id) noexcept -> InputContext& {
+    if (id == WindowID::Primary) return _impl->primaryInput;
+    if (const auto it = _impl->secondaryInputs.find(id); it != _impl->secondaryInputs.end()) return *it->second;
+    // Invalid identities must not expose primary input or redirect input policy.
+    return _impl->absentInput;
 }
 
 auto KernelSession::WindowIDs() const noexcept -> std::span<const WindowID> {
@@ -326,7 +375,8 @@ auto KernelSession::WindowFor(WindowID id) const noexcept -> Window* {
         const auto primary = _impl->primaryHost.AsWindow();
         return primary ? &*primary : nullptr;
     }
-    for (Window* window: _impl->secondaryRaw) {
+    for (const auto& owned: _impl->secondaryWindows) {
+        auto* window = owned.get();
         if (window != nullptr && window->ID() == id) {
             return window;
         }
@@ -334,20 +384,18 @@ auto KernelSession::WindowFor(WindowID id) const noexcept -> Window* {
     return nullptr;
 }
 
-auto KernelSession::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
-    return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
+auto KernelSession::AcquireTarget(WindowID id) noexcept -> FrameOutcome<FrameTarget> {
+    if (id == WindowID::Primary) return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
+    auto* window = WindowFor(id);
+    if (window == nullptr) return std::optional<FrameTarget> {};
+    return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(*window));
 }
 
-auto KernelSession::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
-    return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(window));
-}
-
-auto KernelSession::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
-    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.Target());
-}
-
-auto KernelSession::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
-    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.TargetFor(window));
+auto KernelSession::GetAcquiredTarget(WindowID id) noexcept -> std::optional<FrameTarget> {
+    if (id == WindowID::Primary) return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.Target());
+    auto* window = WindowFor(id);
+    if (window == nullptr) return std::nullopt;
+    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.TargetFor(*window));
 }
 
 auto KernelSession::GetRenderContext() -> RenderContext& {

@@ -44,8 +44,6 @@
 #include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -76,24 +74,8 @@ struct EngineImpl {
     std::unique_ptr<KernelSession> kernel;
     std::unique_ptr<World>  world;
 
-    // The input router. It lives here, not in the World, because nothing in the
-    // World reads or writes input: the World only ever held it so callers could
-    // reach it through World::GetInput(), which made a world hold a device
-    // router it had no use for and made the router public API.
-    //
-    // Hardware arrives exclusively through the WindowInputReceiver below, wired
-    // once in InitInternal. There is no Inject* path from outside the engine.
-    InputContext input;
-
-    // Per-window UI and draw hooks, keyed by WindowID. Keyed rather than
-    // indexed by a slot in a vector: windows are added and removed while the
-    // engine runs, and a WindowID stays valid for the window's lifetime.
-    ZHLN::HashMap<WindowID, Engine::UICallback>         uiCallbacks;
-    ZHLN::HashMap<WindowID, UIDrawData>                 pendingUIData;
+    // Host-owned custom draw hooks, keyed by stable window identity.
     ZHLN::HashMap<WindowID, Engine::WindowDrawCallback> windowDrawCallbacks;
-    // Window* -> the ID the engine gave it, so RemoveWindow can release that
-    // window's state without the caller having to keep the ID as well.
-    ZHLN::HashMap<const Window*, WindowID>              windowIDs;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
     uint64_t                                deviceGeneration = 0;
 
@@ -134,20 +116,6 @@ struct EngineImpl {
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
 
-    // A host-supplied UI frame, when SubmitUIInput was called since the last
-    // ConsumeUIInput. See Engine::SubmitUIInput.
-    //
-    // Its two spans point at uiPressedKeys / uiCharacterStream below, never at
-    // the caller's storage: the caller's arrays are frame-local and this value
-    // outlives the call that produced it. Nothing else may touch those two
-    // vectors while this holds a value.
-    Optional<GUI::UIInput> hostUIInput {};
-
-    FontAtlas             fontAtlas         = GUI::BuildFontAtlas(GUI::GetDefaultBakedFont(), TextureID::Invalid);
-    bool                  fontAtlasUploaded = false;
-    std::vector<KeyCode>  uiPressedKeys;
-    std::vector<uint32_t> uiCharacterStream;
-
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
     // Read by the pacing loop in Run() on every iteration; settable at any
@@ -162,19 +130,6 @@ void Engine::SetMaxFramesPerSecond(uint32_t fps) noexcept {
 
 auto Engine::MaxFramesPerSecond() const noexcept -> uint32_t {
     return _impl->maxFramesPerSecond;
-}
-
-void Engine::EnsureFontAtlas() {
-    if (_impl->fontAtlasUploaded) {
-        return;
-    }
-    // Loading the default cooked font also sets it as the process default.
-    (void) PrefabFactory::LoadFontAsset(*this, GUI::kDefaultFontAssetPath);
-    const FontAtlas uploaded = PrefabFactory::CreateFontAtlas(_impl->kernel->GetRenderContext(), _impl->kernel->GetAssetManager(), GUI::kDefaultFontAssetID);
-    if (uploaded.glyphCount > 0) {
-        _impl->fontAtlas = uploaded;
-    }
-    _impl->fontAtlasUploaded = true;
 }
 
 void Engine::TraceDiagnostics() const noexcept {
@@ -257,7 +212,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
             .render        = _impl->kernel->GetRenderContext(),
             .scene         = _impl->sceneData,
             .assets        = Assets(),
-            .input         = InputReader {&_impl->input},
+            .input         = InputReader {&_impl->kernel->InputFor()},
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
             .debugSettings = _impl->world->GetDebugSettings(),
@@ -266,8 +221,6 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         });
     }
     PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
-    _impl->fontAtlasUploaded = false;
-    EnsureFontAtlas();
 
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
@@ -304,54 +257,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->world = std::move(world_res.value());
 
-    // The one door hardware input walks through. Every callback lands on the
-    // router this EngineImpl owns; nothing outside this file can call Inject*.
-    auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        static_cast<InputContext*>(userdata)->InjectKey(key, pressed);
-    };
-
-    auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        static_cast<InputContext*>(userdata)->InjectMouseMove(x, y);
-    };
-
-    auto onMouseRelative = [](void* userdata, float x, float y, float dx, float dy) -> void {
-        static_cast<InputContext*>(userdata)->InjectMouseRelative(x, y, dx, dy);
-    };
-
-    auto onMouseScroll = [](void* userdata, float delta) -> void {
-        static_cast<InputContext*>(userdata)->InjectMouseScroll(delta);
-    };
-
-    auto onResize = [](void* userdata, Extent2D extent) -> void {
-        static_cast<InputContext*>(userdata)->InjectResize(extent);
-    };
-
-    auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        static_cast<InputContext*>(userdata)->InjectChar(codepoint);
-    };
-
-    auto onGamepadConnection = [](void* userdata, GamepadSlot slot, bool connected, std::string_view name) -> void {
-        static_cast<InputContext*>(userdata)->InjectGamepadConnection(slot, connected, name);
-    };
-
-    auto onGamepadState = [](void* userdata, GamepadSlot slot, const GamepadHardwareSample& sample) -> void {
-        static_cast<InputContext*>(userdata)->InjectGamepadSample(slot, sample);
-    };
-
-    InputContext*       inputPtr = &_impl->input;
-    WindowInputReceiver receiver = {
-        .userdata            = inputPtr,
-        .onKey               = onKey,
-        .onMouseMove         = onMouseMove,
-        .onMouseRelative     = onMouseRelative,
-        .onMouseScroll       = onMouseScroll,
-        .onResize            = onResize,
-        .onChar              = onChar,
-        .onGamepadConnection = onGamepadConnection,
-        .onGamepadState      = onGamepadState,
-    };
-
-    auto kernel_res = KernelSession::Create(cfg, receiver);
+    auto kernel_res = KernelSession::Create(cfg);
     if (!kernel_res) {
         return std::unexpected(kernel_res.error());
     }
@@ -366,7 +272,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         &_impl->kernel->GetAssetManager()
     );
 
-    _impl->input.SetRumbleSink(
+    _impl->kernel->InputFor().SetRumbleSink(
         [](void* userdata, GamepadSlot slot, const GamepadRumble& rumble) noexcept { static_cast<PlatformHost*>(userdata)->SetGamepadRumble(slot, rumble); },
         &_impl->kernel->GetPlatformHost()
     );
@@ -407,15 +313,15 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    auto& input = _impl->input;
-    input.BeginFrame();
+    auto& input = _impl->kernel->InputFor();
+    _impl->kernel->BeginInputFrame();
     _impl->kernel->ProcessEvents();
     SynchronizeResize();
     input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 void Engine::SynchronizeResize() {
-    const auto resized = _impl->input.ConsumePendingResize();
+    const auto resized = _impl->kernel->InputFor().ConsumePendingResize();
     if (!resized) {
         return;
     }
@@ -430,69 +336,25 @@ void Engine::SynchronizeResize() {
 void Engine::PollLateInput() {
     _impl->kernel->ProcessEvents();
     SynchronizeResize();
-    _impl->input.RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
+    _impl->kernel->InputFor().RefreshActionsForCurrentFrame(&_impl->world->GetEventBus());
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-auto Engine::Host() noexcept -> HostWindow {
-    return HostWindow {_impl->kernel->GetPlatformHost()};
+auto Engine::Host(WindowID window) noexcept -> HostWindow { return HostWindow {*_impl->kernel, window}; }
+auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen) -> WindowID {
+    return _impl->kernel->AddWindow(title, width, height, fullscreen);
 }
-
-auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
-    -> ZHLN::Optional<Window&> {
-    // The ID is the engine's to assign: a host addressing a window it did not
-    // create still needs a stable key, and a window that invented its own would
-    // be a second source of identity.
-    const WindowID id = _impl->kernel->NextWindowID();
-    auto           window = _impl->kernel->AddWindow(title, width, height, fullscreen, receiver, id);
-    if (window) {
-        _impl->windowIDs.Insert(&*window, id);
-    }
-    return window;
-}
-
-void Engine::RemoveWindow(Window& window) {
-    if (const auto id = _impl->windowIDs.Find(&window)) {
-        _impl->uiCallbacks.Erase(*id);
-        _impl->pendingUIData.Erase(*id);
-        _impl->windowDrawCallbacks.Erase(*id);
-        _impl->windowIDs.Erase(&window);
-    }
+void Engine::RemoveWindow(WindowID window) {
+    if (window == WindowID::Primary) return;
+    _impl->windowDrawCallbacks.Erase(window);
     _impl->kernel->RemoveWindow(window);
 }
-
-auto Engine::WindowIDs() const noexcept -> std::span<const WindowID> {
-    return _impl->kernel->WindowIDs();
-}
-
-auto Engine::WindowFor(WindowID id) const noexcept -> Window* {
-    return _impl->kernel->WindowFor(id);
-}
-
-auto Engine::Windows() const noexcept -> std::span<Window* const> {
-    // Secondary windows only: the primary is reachable through WindowFor, and a
-    // headless session has none of either.
-    return _impl->kernel->SecondaryWindows();
-}
-
-auto Engine::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
-    return _impl->kernel->AcquireTarget();
-}
-
-auto Engine::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
-    return _impl->kernel->AcquireTarget(window);
-}
-
-auto Engine::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
-    return _impl->kernel->GetAcquiredTarget();
-}
-
-auto Engine::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
-    return _impl->kernel->GetAcquiredTarget(window);
-}
+auto Engine::WindowIDs() const noexcept -> std::span<const WindowID> { return _impl->kernel->WindowIDs(); }
+auto Engine::AcquireTarget(WindowID window) noexcept -> FrameOutcome<FrameTarget> { return _impl->kernel->AcquireTarget(window); }
+auto Engine::GetAcquiredTarget(WindowID window) noexcept -> std::optional<FrameTarget> { return _impl->kernel->GetAcquiredTarget(window); }
 
 // --- Capability facades -------------------------------------------------------
 // Each facade is a value carrying a pointer to an engine-owned subsystem. The
@@ -556,27 +418,8 @@ struct EngineCore {
     static auto Articulation(Engine& e) noexcept -> ArticulationContext& {
         return e._impl->world->GetArticulationContext();
     }
-    // The input half of the UI phase, next to HostUICallback.
-    //
-    // The host's UI callback runs first and may submit UIDrawData, which is what
-    // sets the capture flags. So the order inside this step is: if the host
-    // drew nothing, drop the capture it asked for last frame; then re-evaluate
-    // every action map against what has arrived since the last evaluation.
-    // Re-evaluation is safe to repeat within a frame by design.
     static auto EvaluateInput(Engine& engine, float, FrameContext&) -> void {
-        // Any window that drew UI this frame keeps the capture it asked for.
-        // The question is session-wide because the pointer is: one OS cursor
-        // cannot be captured for one window and not another.
-        bool anyUIDrawn = false;
-        engine._impl->pendingUIData.ForEach([&](const WindowID&, const UIDrawData& data) {
-            if (!data.Empty()) {
-                anyUIDrawn = true;
-            }
-        });
-        if (!anyUIDrawn) {
-            engine._impl->input.SyncCaptureFlags(false, false);
-        }
-        engine._impl->input.RefreshActionsForCurrentFrame(&engine._impl->world->GetEventBus());
+        engine._impl->kernel->InputFor().RefreshActionsForCurrentFrame(&engine._impl->world->GetEventBus());
     }
 
     static auto Present(Engine& engine, float dt, FrameContext& ctx) -> void {
@@ -654,8 +497,8 @@ void Engine::InitializeSystemGraphs() {
         .physics      = _impl->world->GetPhysics(),
         .audio        = _impl->kernel->GetAudioContext(),
         .assets       = Assets(),
-        .input        = InputReader {&_impl->input},
-        .haptics      = InputHaptics {&_impl->input},
+        .input        = InputReader {&_impl->kernel->InputFor()},
+        .haptics      = InputHaptics {&_impl->kernel->InputFor()},
         .articulation = _impl->world->GetArticulationContext(),
         .events       = _impl->world->GetEventBus(),
         .extensions   = _impl->extensions,
@@ -666,7 +509,7 @@ void Engine::InitializeSystemGraphs() {
         .render        = render,
         .scene         = _impl->sceneData,
         .assets        = Assets(),
-        .input         = InputReader {&_impl->input},
+        .input         = InputReader {&_impl->kernel->InputFor()},
         .extensions    = _impl->extensions,
         .cullingStats  = _impl->world->GetCullingStats(),
         .debugSettings = _impl->world->GetDebugSettings(),
@@ -700,14 +543,14 @@ void Engine::ResetWorkerScratch() noexcept {
 
 // The capability accessors the engine hands out. They are two pointers wide and
 // construct nothing: an InputReader is an address, not a subscription.
-auto Engine::Input() noexcept -> InputActions {
-    return InputActions {&_impl->input};
+auto Engine::Input(WindowID window) noexcept -> InputActions {
+    return InputActions {&_impl->kernel->InputFor(window)};
 }
-auto Engine::Input() const noexcept -> InputReader {
-    return InputReader {&_impl->input};
+auto Engine::Input(WindowID window) const noexcept -> InputReader {
+    return InputReader {&_impl->kernel->InputFor(window)};
 }
 auto Engine::Haptics() noexcept -> InputHaptics {
-    return InputHaptics {&_impl->input};
+    return InputHaptics {&_impl->kernel->InputFor()};
 }
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
@@ -757,6 +600,7 @@ void Engine::ReleaseSceneContents() {
     ClearVisibilityLists();
     _impl->world->GetEventBus().ClearEvents();
     _impl->world->GetCullingStats() = {};
+    _impl->world->GetDebugSettings() = {};
     if (_impl->updateGraph != nullptr) {
         _impl->updateGraph->ResetLocals();
     }
@@ -803,22 +647,6 @@ void Engine::SetGameState(void* state) {
     _impl->gameState = state;
 }
 
-void Engine::SetUICallback(WindowID window, UICallback callback) {
-    if (callback) {
-        _impl->uiCallbacks.Insert(window, std::move(callback));
-    } else {
-        _impl->uiCallbacks.Erase(window);
-    }
-}
-
-void Engine::SetUICallback(UICallback callback) {
-    SetUICallback(WindowID::Primary, std::move(callback));
-}
-
-auto Engine::GetUICallback(WindowID window) const noexcept -> ZHLN::Optional<const UICallback&> {
-    return _impl->uiCallbacks.Find(window);
-}
-
 auto Engine::GetWindowDrawCallback(WindowID window) const noexcept -> ZHLN::Optional<const WindowDrawCallback&> {
     return _impl->windowDrawCallbacks.Find(window);
 }
@@ -829,108 +657,6 @@ void Engine::SetWindowDrawCallback(WindowID window, WindowDrawCallback callback)
     } else {
         _impl->windowDrawCallbacks.Erase(window);
     }
-}
-
-void Engine::SetPendingUIData(WindowID window, UIDrawData uiData) noexcept {
-    _impl->pendingUIData.Insert(window, uiData);
-}
-
-auto Engine::GetPendingUIData(WindowID window) const noexcept -> UIDrawData {
-    const auto found = _impl->pendingUIData.Find(window);
-    return found.has_value() ? *found : UIDrawData {};
-}
-
-void Engine::SetPendingUIData(UIDrawData uiData) noexcept {
-    SetPendingUIData(WindowID::Primary, uiData);
-}
-
-auto Engine::GetPendingUIData() const noexcept -> UIDrawData {
-    return GetPendingUIData(WindowID::Primary);
-}
-
-void Engine::SetFontAtlas(const FontAtlas& fontAtlas) noexcept {
-    _impl->fontAtlas         = fontAtlas;
-    _impl->fontAtlasUploaded = true;
-}
-
-auto Engine::GetFontAtlas() -> const FontAtlas& {
-    EnsureFontAtlas();
-    return _impl->fontAtlas;
-}
-
-auto Engine::GetFontAtlas() const noexcept -> const FontAtlas& {
-    return _impl->fontAtlas;
-}
-
-void Engine::SubmitUIInput(GUI::UIInput uiInput) noexcept {
-    // The two spans in UIInput are non-owning, and this value is read back on a
-    // later ConsumeUIInput -- so a caller's frame-local array would be a
-    // dangling span by the time it is used. Copy the contents into the engine's
-    // own buffers and point the stored spans at those.
-    _impl->uiPressedKeys.assign(uiInput.pressedKeys.begin(), uiInput.pressedKeys.end());
-    _impl->uiCharacterStream.assign(uiInput.characterStream.begin(), uiInput.characterStream.end());
-    uiInput.pressedKeys     = _impl->uiPressedKeys;
-    uiInput.characterStream = _impl->uiCharacterStream;
-    _impl->hostUIInput      = uiInput;
-}
-
-auto Engine::ConsumeUIInput(float dt) noexcept -> GUI::UIInput {
-    // A host that handed its own frame in gets it back once, verbatim (bar the
-    // frame clock and viewport it does not own). The router is not consulted,
-    // and the device state is left exactly as the platform left it.
-    //
-    // The two spans are re-pointed at the engine's buffers here rather than
-    // trusted as stored: the vectors are only stable until something assigns to
-    // them, and a second SubmitUIInput would have reallocated them. Re-binding
-    // makes the returned value correct regardless of that ordering.
-    if (const auto& supplied = _impl->hostUIInput; supplied.has_value()) {
-        GUI::UIInput out    = *supplied;
-        out.dt              = dt;
-        out.viewport        = _impl->kernel->GetPlatformHost().GetSize();
-        out.pressedKeys     = _impl->uiPressedKeys;
-        out.characterStream = _impl->uiCharacterStream;
-        _impl->hostUIInput.reset();
-        return out;
-    }
-
-    // Device path only: these buffers are cleared here, not at the top, because
-    // while hostUIInput holds a value they are the storage it is reading from.
-    _impl->uiPressedKeys.clear();
-    _impl->uiCharacterStream.clear();
-
-    GUI::UIInput out {
-        .viewport  = _impl->kernel->GetPlatformHost().GetSize(),
-        .dt        = dt,
-        .clipboard = Host().ClipboardSink(),
-    };
-
-    auto& input      = _impl->input.MutableSeatKeyboardMouse();
-    out.mouseX       = input.mouseX;
-    out.mouseY       = input.mouseY;
-    out.mouseScroll  = input.mouseWheel;
-    out.mouseDown[0] = input.IsMouseButtonDown(MouseButton::Left);
-    out.mouseDown[1] = input.IsMouseButtonDown(MouseButton::Right);
-    out.mouseDown[2] = input.IsMouseButtonDown(MouseButton::Middle);
-    out.modifiers    = input.Modifiers();
-
-    for (size_t i = 0; i < input.queuedInputCount; ++i) {
-        const auto& queued = input.queuedInput[i];
-        if (queued.isChar) {
-            _impl->uiCharacterStream.push_back(queued.codepoint);
-        } else {
-            _impl->uiPressedKeys.push_back(queued.key);
-        }
-    }
-    input.ClearQueuedInput();
-
-    out.pressedKeys     = _impl->uiPressedKeys;
-    out.characterStream = _impl->uiCharacterStream;
-    return out;
-}
-
-void Engine::SubmitUI(UIDrawData uiData) noexcept {
-    SetPendingUIData(uiData);
-    _impl->input.SyncCaptureFlags(uiData.wantsCaptureKeyboard, uiData.wantsCaptureMouse);
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {
@@ -1026,9 +752,8 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
-    EnsureFontAtlas();
 
-    _impl->input.StepHaptics(dt);
+    _impl->kernel->InputFor().StepHaptics(dt);
 
     // The clock owns the fixed-step accumulator and is drained exactly once per
     // frame, here, before any step of the plan can run. The physics step runs
@@ -1057,7 +782,7 @@ auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
     return {};
 }
 
-auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
+auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
     Platform::Init();
     SetLogLevel(config.logLevel);
     // Construct before the engine so its destructor (and any cleanup tasks)
@@ -1078,9 +803,6 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         installModules(*engine);
     }
 
-    if (uiCallback) {
-        engine->SetUICallback(WindowID::Primary, std::move(uiCallback));
-    }
     Clock        runClock({.maxDeltaTime = 0.1f});
 
     while (engine->IsRunning()) {
@@ -1111,6 +833,7 @@ auto Engine::Run(const EngineConfig& config, UICallback uiCallback, ModuleInstal
         const float tickDt       = displayPaced ? *pacedDt : rawDt;
         // Propagate the frame's real ErrorCode; Engine::Run has no richer
         // diagnosis of its own and must not flatten it to a generic one.
+        if (onFrame) onFrame(*engine, tickDt);
         if (auto tick = engine->Tick(tickDt); !tick) {
             return std::unexpected(tick.error());
         }

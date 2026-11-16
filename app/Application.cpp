@@ -4,6 +4,7 @@
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
 #include <Zahlen/App.hpp>
+#include <Zahlen/Engine/Capabilities/InputActions.hpp>
 #include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -71,22 +72,6 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     for (const auto& install: _installers) {
         install(*engine);
     }
-    // Core has one host UI step; dispatch the UI-capable layers there in
-    // registration order. Snapshot their slots so the Engine's callback owns
-    // their (possibly move-only) state for this Run.
-    std::vector<LayerSlot> uiLayers;
-    for (const auto& layer: _layers) {
-        if (layer.ui != nullptr) {
-            uiLayers.push_back(layer);
-        }
-    }
-    if (!uiLayers.empty()) {
-        engine->SetUICallback(WindowID::Primary, [layers = std::move(uiLayers)](Engine& active, WindowID) {
-            for (const auto& layer: layers) {
-                layer.ui(layer.state.get(), active);
-            }
-        });
-    }
     for (const auto& layer: _layers) {
         if (layer.start != nullptr) {
             layer.start(layer.state.get(), *engine);
@@ -107,6 +92,8 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
             break;
         }
 
+        for (const auto id: engine->WindowIDs()) engine->Input(id).SetUICapture(false, false);
+
         const float                rawDt   = runClock.Tick();
         const std::optional<float> pacedDt = engine->Graphics().PacedDeltaTime();
         const float                dt      = pacer.SelectDelta(rawDt, pacedDt);
@@ -121,6 +108,11 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         if (!engine->IsRunning()) {
             break;
         }
+        for (const auto& layer: _layers) {
+            if (layer.ui != nullptr) layer.ui(layer.state.get(), *engine);
+            if (!engine->IsRunning()) break;
+        }
+        if (!engine->IsRunning()) break;
         if (update) {
             update(*engine, dt);
             if (!engine->IsRunning()) {

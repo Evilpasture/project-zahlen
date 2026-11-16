@@ -1,3 +1,4 @@
+#include <Zahlen/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -532,7 +533,8 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectGt(updateSystems, 0);
             ZHLN::Test::ExpectGt(renderSystems, 0);
 
-            const ZHLN::FontAtlas&    firstFont = engine->GetFontAtlas();
+            ZHLN::HostUI hostUI(*engine);
+            const ZHLN::FontAtlas& firstFont = hostUI.GetFontAtlas();
             const ZHLN::TextureID atlas     = firstFont.texture;
             ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureID::Invalid);
             // 'A' is never an empty box in any baked font, so a zero-area
@@ -550,7 +552,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const ZHLN::FontAtlas& font = engine->GetFontAtlas();
+                const ZHLN::FontAtlas& font = hostUI.GetFontAtlas();
                 // Same device-scoped atlas across resets rather than rebuilt or left blank.
                 ZHLN::Test::ExpectTrue(font.texture == atlas);
                 ZHLN::Test::ExpectTrue(font.GlyphFor('A').x1 == glyphA.x1);

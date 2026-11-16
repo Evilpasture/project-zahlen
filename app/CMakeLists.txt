@@ -1,3 +1,9 @@
+add_library(zahlen_host_ui STATIC HostUI.cpp)
+set_target_properties(zahlen_host_ui PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+target_include_directories(zahlen_host_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(zahlen_host_ui PUBLIC zahlen_engine PRIVATE zahlen_warnings)
+zahlen_enable_reflection(zahlen_host_ui)
+
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,7 +17,7 @@ set_target_properties(zahlen_host_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 target_link_libraries(zahlen_host_runner
-    PUBLIC zahlen_engine zahlen_command_line
+    PUBLIC zahlen_engine zahlen_command_line zahlen_host_ui
     PRIVATE zahlen_signal zahlen_warnings
 )
 # Only app-owned targets publish the host-facing headers under app/include/.
@@ -35,7 +41,7 @@ set_target_properties(zahlen_application PROPERTIES
 # App.hpp exposes ConfigCli/CliFlag. Publish the generic CLI include root
 # through the application target; no engine-specific CLI target exists.
 target_link_libraries(zahlen_application
-    PUBLIC zahlen_engine zahlen_command_line
+    PUBLIC zahlen_engine zahlen_command_line zahlen_host_ui
     PRIVATE zahlen_host_runner zahlen_warnings
 )
 target_include_directories(zahlen_application

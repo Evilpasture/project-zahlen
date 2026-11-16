@@ -65,7 +65,7 @@ class ZHLN_STATIC_API BenchmarkViewer {
     void Attach(Engine& engine, size_t initialEntities = 250);
 
     // The whole UI frame: BeginFrame(dt), the visible panels, EndFrame and
-    // Engine::SetPendingUIData. Attaches on first use if the host did not call
+    // the host-owned UI compositor. Attaches on first use if the host did not call
     // Attach itself, so Run() and a one-callback host need no other setup.
     // Draws nothing while both panels are hidden -- but still advances the
     // benchmark, since a hidden panel is not a paused one.

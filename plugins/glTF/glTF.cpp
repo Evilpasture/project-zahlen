@@ -12,6 +12,7 @@
 //     cursor is inside the explorer panel so clicks don't move the camera).
 
 module;
+#include <Zahlen/HostUI.hpp>
 
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -90,6 +91,7 @@ struct InspectorState {
     std::string                     selectedDetails {}; // details box body
     int32_t                         playingClip = -1;   // index into prefab.animations, -1 = stopped
     ZHLN::GUI::Context              gui {};
+    std::unique_ptr<ZHLN::HostUI> hostUI;
 };
 
 [[nodiscard]] FVec4 ThemeText() noexcept {
@@ -139,7 +141,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
     entities.Attach(ground, ZHLN::Components::NameComponent {.name = ZHLN::String64("glTFInspectorGround")});
 
-    engine.EnsureFontAtlas();
+
 }
 
 void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outCenter, float& outDistance) {
@@ -778,8 +780,8 @@ void RenderFrame(ZHLN::Engine& engine) {
 
     UpdateOrbit(*state, engine);
 
-    state->gui.SetFontAtlas(engine.GetFontAtlas());
-    ZHLN::GUI::Frame ui = state->gui.BeginFrame(engine.ConsumeUIInput(0.016667f));
+    state->gui.SetFontAtlas(state->hostUI->GetFontAtlas());
+    ZHLN::GUI::Frame ui = state->gui.BeginFrame(state->hostUI->ConsumeInput(0.016667f));
 
     if (state->loaded) {
         DrawSceneExplorer(ui, *state);
@@ -787,24 +789,28 @@ void RenderFrame(ZHLN::Engine& engine) {
         DrawDropPrompt(ui);
     }
 
-    engine.SubmitUI(std::move(ui).End());
+    state->hostUI->Submit(std::move(ui).End());
 }
 
 } // namespace
 
 namespace ZHLN::glTF {
 
+void DrawUI(ZHLN::Engine& engine) { RenderFrame(engine); }
+
+
 void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
     auto* state   = new InspectorState();
     state->engine = &engine;
+    state->hostUI = std::make_unique<ZHLN::HostUI>(engine);
     engine.SetGameState(state);
 
     AddInspectorLighting(engine);
 
     engine.Host().SetFileDropHandler(&OnFileDropped, state);
-    engine.SetUICallback([](ZHLN::Engine& eng, ZHLN::WindowID) -> void { RenderFrame(eng); });
+
 
     ZHLN::Log("[glTF Inspector] Initialized. Drop a .glb / .gltf file to begin.");
 }

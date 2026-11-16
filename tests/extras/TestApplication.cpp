@@ -5,6 +5,8 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/HostRunner.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
@@ -85,7 +87,7 @@ static_assert(AppLayer<MoveOnlyLayer>);
 static_assert(!AppLayer<NotALayer>);
 static_assert(!std::copy_constructible<MoveOnlyLayer>);
 template <typename T>
-concept HasApplicationOnUI = requires(T& app, Engine::UICallback callback) { app.OnUI(std::move(callback)); };
+concept HasApplicationOnUI = requires(T& app, std::function<void(Engine&, WindowID)> callback) { app.OnUI(std::move(callback)); };
 static_assert(!HasApplicationOnUI<Application>); // application UI only comes from layers
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
@@ -456,6 +458,39 @@ void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
     Expect(capped.SelectDelta(0.003f, 0.001f) == 0.003f);
     Expect(capped.SelectDelta(0.003f, 0.020f) == 0.020f);
     capped.EndFrame(FramePacer::BeginFrame(), 0.020f); // already display-paced: no sleep
+}
+
+// Runs in the ordinary extras worker, not only the opt-in render suite.
+// Stop before presentation with an explicit frame error after input evaluation.
+void test_host_ui_precedes_engine_tick_and_layers_stop_on_frame_error() {
+    struct HostLayer {
+        std::vector<std::string_view>* calls;
+        void Start(Engine&) { calls->push_back("start"); }
+        void Tick(Engine&, float) { calls->push_back("tick"); }
+        void UI(Engine& engine) {
+            ExpectEq(engine.GetCurrentFrame(), uint64_t {0});
+            for (const auto& step: engine.Steps()) Expect(step.name != "HostUICallback");
+            calls->push_back("ui");
+        }
+        void Stop(Engine&) { calls->push_back("stop"); }
+    };
+    std::vector<std::string_view> calls;
+    auto app = App(EngineConfig {.appName = "HostUILifecycle", .validationMode = ValidationMode::Off, .headless = true});
+    app.WithDefaultModules(false).AddLayer(HostLayer {&calls});
+    app.OnStart([](Engine& engine) {
+        static constexpr ModuleStep steps[] {{
+            .phase = FramePhase::UI,
+            .name = "HostUILifecycleAbort",
+            .run = +[](Engine&, float, FrameContext& frame) { frame.error = ErrorCode(FrameError::StepFailed); },
+            .placement = StepPlacement::After,
+            .anchor = "EvaluateInput",
+        }};
+        Expect(engine.InstallModule(Module {.name = "HostUILifecycleAbort", .frameSteps = steps}).has_value());
+    });
+    const auto result = app.Run([&](Engine&, float) { calls.push_back("update"); });
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(AppError::FrameTickFailed));
+    Expect(calls == std::vector<std::string_view> {"start", "tick", "ui", "update", "stop"});
 }
 
 } // namespace ZHLN::Test

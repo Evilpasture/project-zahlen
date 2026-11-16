@@ -35,6 +35,10 @@ class InputContext;
 
 class ZHLN_API InputActions {
   public:
+    // Host UI consumes queued text/presses by value, not mutable device state.
+    [[nodiscard]] auto ConsumePhysicalInput() noexcept -> InputState;
+    void SetUICapture(bool keyboard, bool mouse) noexcept;
+
     // --- Action maps ---------------------------------------------------------
 
     // Creates the map, or returns the existing one's id when the name is taken.

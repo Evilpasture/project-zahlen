@@ -102,6 +102,8 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
 
     EngineConfig config {
         .appName        = "ApplicationTest",
+        .width          = 800,
+        .height         = 600,
         .validationMode = ValidationMode::Off,
         .headless       = true,
     };
@@ -112,7 +114,8 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
     application.Install([&](Engine& engine) {
         calls.push_back("install");
         Expect(engine.Service<EngineConfig>().has_value()); // no-CLI uses the same canonical service
-        Expect(!engine.Entities().GetSingleton<Components::CameraComponent>());
+        // Engine::Create seeds the baseline scene before host installers run.
+        Expect(engine.Entities().GetSingleton<Components::CameraComponent>().has_value());
         const auto installed = engine.InstallModule(Module {.name = "AppTestModule"});
         Expect(installed.has_value());
     });
@@ -149,7 +152,8 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         ++updates;
         Expect(*state == 42);
         Expect(dt >= 0.0f);
-        // One real frame has run: ProcessEvents began it (clearing the previous
+        // The host has pumped events, but has not ticked the engine yet.
+        // ProcessEvents began the frame (clearing the previous
         // frame's deltas), SynchronizeResize consumed nothing because the headless
         // host reported no size change, and the renderer holds the extent it
         // started with.
@@ -214,19 +218,9 @@ struct HUDPhaseLayer {
     }
 };
 
-void RunHostUIPhaseForTest(Engine& engine) {
-    // Exercise the actual Core UI phase without running GPU/render steps.
-    const auto* uiStep = FindStep(engine, "HostUICallback");
-    Expect(uiStep != nullptr);
-    if (uiStep != nullptr) {
-        Expect(uiStep->phase == FramePhase::UI);
-        Expect(uiStep->run != nullptr);
-        if (uiStep->run != nullptr) {
-            FrameContext frame;
-            uiStep->run(engine, 0.0f, frame);
-            Expect(!frame.error.has_value());
-        }
-    }
+void AssertHostOwnsUI(Engine& engine) {
+    Expect(FindStep(engine, "HostUICallback") == nullptr);
+    Expect(FindStep(engine, "EvaluateInput") != nullptr);
 }
 
 // Observe the real fixed-step frame callback, without running a render frame.
@@ -380,7 +374,7 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
                     return i;
             return steps.size();
         };
-        const auto inputStep = index("CharacterInput"), ui = index("HostUICallback");
+        const auto inputStep = index("CharacterInput"), ui = index("EvaluateInput");
         const auto hotReload = index("StateAndShaderReload"), intentStep = index("PlayerInputTranslate"), physics = index("PhysicsSystem");
         Expect(inputStep < ui && hotReload < intentStep && intentStep < physics && physics < steps.size());
         if (inputStep >= steps.size() || intentStep >= steps.size() || physics >= steps.size())
@@ -421,7 +415,22 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
             ic.wantsToJump   = intent.jump;
             ic.wantsToSprint = intent.sprint;
         });
+        // The real late-latch step re-polls physical input, so in a headless
+        // session it must overwrite the synthetic latch with neutral intent.
         steps[intentStep].run(engine, 0.0f, frame);
+        Expect(reg.Get<Character::InputComponent>(entity)->localMoveZ == 0.0f);
+        Expect(reg.Get<Character::MovementComponent>(entity)->inputX == 0.0f);
+
+        // Exercise translation and fixed hooks separately from device polling.
+        // Do not pretend an injected component survives the late physical latch.
+        reg.Patch<Character::InputComponent>(entity, [&](Character::InputComponent& ic) {
+            ic.localMoveX    = intent.moveX;
+            ic.localMoveZ    = intent.moveZ;
+            ic.wantsToJump   = intent.jump;
+            ic.wantsToSprint = intent.sprint;
+        });
+        engine.GetUpdateGraph().InvokeSequential<&Character::PlayerInputSystem::PlayerInputTranslate>(
+            engine.MakeFrame(0.0f, FrameAlpha {}));
         Expect(reg.Get<Character::MovementComponent>(entity)->inputX > 0.99f);
         frame.fixedSteps = 2;
         steps[physics].run(engine, 0.0f, frame);
@@ -776,7 +785,7 @@ void test_render_graph_rebinds_renderer_after_device_recovery() {
     Expect(ran);
 }
 
-void test_app_ui_only_layer_uses_engine_ui_phase() {
+void test_app_ui_only_layer_runs_in_host_before_engine_tick() {
     std::vector<std::string_view> calls;
     auto                          app =
         App(EngineConfig {
@@ -786,7 +795,7 @@ void test_app_ui_only_layer_uses_engine_ui_phase() {
         });
     app.AddLayer(UIOnlyPhaseLayer {.calls = &calls});
     const auto result = app.Run([&](Engine& engine, float) {
-        RunHostUIPhaseForTest(engine);
+        AssertHostOwnsUI(engine);
         engine.Host().Close();
     });
     ExpectUserClosed(result);
@@ -809,12 +818,12 @@ void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
 
     const auto result = app.Run([&](Engine& engine, float) {
         calls.push_back("update");
-        RunHostUIPhaseForTest(engine);
+        AssertHostOwnsUI(engine);
         engine.Host().Close();
     });
     ExpectUserClosed(result);
     Expect(
-        calls == std::vector<std::string_view> {"layer-start", "app-start", "layer-tick", "update", "layer-ui", "ui-only", "hud-ui", "stop-only", "layer-stop"}
+        calls == std::vector<std::string_view> {"layer-start", "app-start", "layer-tick", "layer-ui", "ui-only", "hud-ui", "update", "stop-only", "layer-stop"}
     );
 }
 
@@ -828,7 +837,7 @@ void test_app_stops_layers_on_typed_frame_failure() {
         });
     app.AddLayer(UILifecycleLayer {.state = std::make_unique<int>(1), .calls = &calls});
     app.OnStart([&](Engine& engine) {
-        // Compose a deterministic failing step right after HostUICallback in
+        // Compose a deterministic failing step right after EvaluateInput in
         // FramePhase::UI. FramePlan::Execute aborts at the first engaged error,
         // so UI runs and no GPU frame executes.
         static constexpr ModuleStep kFailSteps[] {
@@ -837,7 +846,7 @@ void test_app_stops_layers_on_typed_frame_failure() {
                 .name      = "AbortAfterHostUI",
                 .run       = +[](Engine&, float, FrameContext& frame) { frame.error = ZHLN::ErrorCode(ZHLN::FrameError::StepFailed); },
                 .placement = StepPlacement::After,
-                .anchor    = "HostUICallback",
+                .anchor    = "EvaluateInput",
             },
         };
         const auto placed = engine.InstallModule(Module {.name = "FailAfterUI", .frameSteps = kFailSteps});
@@ -847,7 +856,7 @@ void test_app_stops_layers_on_typed_frame_failure() {
     Expect(!result.has_value());
     if (!result)
         Expect(result.error().Is(AppError::FrameTickFailed));
-    Expect(calls == std::vector<std::string_view> {"layer-start", "layer-tick", "update", "layer-ui", "layer-stop"});
+    Expect(calls == std::vector<std::string_view> {"layer-start", "layer-tick", "layer-ui", "update", "layer-stop"});
 }
 
 void test_app_engine_config_service_is_available_before_install_and_scene_start() {

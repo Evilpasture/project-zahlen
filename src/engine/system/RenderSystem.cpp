@@ -10,6 +10,7 @@
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RenderSystem.hpp"
+#include <Zahlen/Core/Defer.hpp>
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include <Zahlen/Math/Camera.hpp>
@@ -46,25 +47,6 @@ namespace {
 // extra: a submission left behind is a set of spans into a GUI::Context that
 // has already moved on, and leaving it also makes the capture-flag pass think
 // UI is permanently on screen.
-auto DrawPendingUI(Engine& engine, FrameScope& gpuFrame, WindowID window, const FrameTarget& target) -> std::expected<void, ErrorCode> {
-    const UIDrawData uiData = engine.GetPendingUIData(window);
-    if (uiData.Empty()) {
-        return {};
-    }
-    if (auto drawn = gpuFrame.RenderUI(
-            UIView {
-                .viewport   = {},
-                .target     = target,
-                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-            },
-            uiData
-        );
-        !drawn) {
-        return std::unexpected(drawn.error());
-    }
-    engine.SetPendingUIData(window, UIDrawData {});
-    return {};
-}
 
 } // namespace
 
@@ -438,6 +420,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     Mat4x4& outShadowProjView, float dt
 ) {
     auto rc = engine.Graphics();
+    defer clearUI([&] { rc.ClearSubmittedUI(); });
     const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
@@ -589,35 +572,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return std::unexpected(scene_res.error());
     }
 
-    // This window's UI, drawn into this window's attachment.
-    if (auto ui_res = DrawPendingUI(engine, gpuFrame, WindowID::Primary, attachment); !ui_res) {
-        return std::unexpected(ui_res.error());
-    }
-
-    if (engine.Host().CustomCursor()) {
-        // The cursor follows the device, not gameplay's view of it, so this
-        // asks the read capability by value rather than gating on UiCapture.
-        const auto     input    = std::as_const(engine).Input();
-        const Axis2DValue where  = input.MousePosition();
-        const Extent2D hostSize  = engine.Host().Extent();
-        const float    rawX      = where.x;
-        const float    rawY      = where.y;
-        const float    cursorX  = hostSize.width > 0 ? std::clamp(rawX, 0.0f, static_cast<float>(hostSize.width - 1)) : rawX;
-        const float    cursorY  = hostSize.height > 0 ? std::clamp(rawY, 0.0f, static_cast<float>(hostSize.height - 1)) : rawY;
-
-        const CustomCursor cursor(cursorX, cursorY);
-        if (auto cursor_res = gpuFrame.RenderUI(
-                UIView {
-                    .viewport   = {},
-                    .target     = attachment,
-                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-                },
-                cursor.DrawData()
-            );
-            !cursor_res) {
-            return std::unexpected(cursor_res.error());
-        }
-    }
+    if (auto drawn = gpuFrame.RenderSubmittedUI(WindowID::Primary, attachment); !drawn) return std::unexpected(drawn.error());
 
     // Every other window in the session, in the same frame: the host's draw hook
     // for that window runs against that window's own acquired image, so one Tick
@@ -644,21 +599,15 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
             continue;
         }
         const auto draw = engine.GetWindowDrawCallback(id);
-        Window*    window = engine.WindowFor(id);
-        const bool hasUI  = !engine.GetPendingUIData(id).Empty();
+        const bool hasUI  = rc.HasSubmittedUI(id);
         if ((!draw || !static_cast<bool>(*draw)) && !hasUI) {
             continue;
         }
-        // A session's secondary windows always have a Window; without one there
-        // is no size and no target to acquire.
-        if (window == nullptr) {
-            continue;
-        }
-        const Extent2D size = window->GetSize();
+        const Extent2D size = engine.Host(id).Extent();
         if (size.width == 0 || size.height == 0) {
             continue;
         }
-        auto windowTarget = engine.AcquireTarget(*window);
+        auto windowTarget = engine.AcquireTarget(id);
         if (!windowTarget) {
             return std::unexpected(windowTarget.error());
         }
@@ -666,7 +615,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
             continue; // minimized or not presentable this frame
         }
         const FrameTarget target = **windowTarget;
-        if (auto ui_res = DrawPendingUI(engine, gpuFrame, id, target); !ui_res) {
+        if (auto ui_res = gpuFrame.RenderSubmittedUI(id, target); !ui_res) {
             return std::unexpected(ui_res.error());
         }
         if (draw && static_cast<bool>(*draw)) {

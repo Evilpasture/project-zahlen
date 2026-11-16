@@ -26,9 +26,9 @@ namespace ZHLN {
 void InstallApplicationDefaults(Engine& engine);
 
 // A layer may implement any of Start, Tick, UI and Stop. Start runs after
-// scene creation; Tick runs after event/input pumping; UI runs in the Engine's
-// UI frame phase. These run in registration order, and Stop runs in reverse
-// order before Engine teardown. Layers can own move-only state.
+// scene creation; Tick runs after event/input pumping; UI runs in the host
+// loop before update and Engine::Tick, never in a core frame step. Hooks run
+// in registration order; Stop runs in reverse order before Engine teardown. Layers can own move-only state.
 template <typename T>
 concept AppLayer = requires(std::remove_cvref_t<T>& layer, Engine& engine) {
     layer.Start(engine);
