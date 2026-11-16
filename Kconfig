@@ -228,8 +228,16 @@ menu "Advanced"
 
 config ZHLN_JOLT_SLANG_FALLBACK
     bool "Fall back to Slang for Jolt shader compilation"
-    default n
+    default y
     help
-      Only relevant on a host where the usual Jolt shader path is unavailable.
+      Only relevant on a host where the usual Jolt shader path is unavailable
+      (no dxc and no glslc, e.g. aarch64 where no dxc is released). Jolt
+      compiles its Vulkan compute shaders with dxc, which it locates by
+      rewriting the glslc path; without either tool every .spv rule execs a
+      *-NOTFOUND string and exits 127. ON compiles them with zshader's
+      dxc-compat mode (libslang) instead. Must match the option() default
+      in cmake/ThirdParty.cmake: the menu writes this value into the cache,
+      so a mismatch here silently disables the fallback for menuconfig
+      builds.
 
 endmenu

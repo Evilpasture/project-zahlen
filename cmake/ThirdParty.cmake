@@ -626,7 +626,12 @@ option(ZHLN_JOLT_SLANG_FALLBACK
     "Compile Jolt's Vulkan compute shaders with zshader/libslang when no dxc/glslc exists" ON)
 if(ZHLN_BUILD_RENDER)
     find_package(Vulkan QUIET)
+    # find_package(Vulkan) leaves Vulkan_GLSLC_EXECUTABLE as the literal
+    # "Vulkan_GLSLC_EXECUTABLE-NOTFOUND" when glslc is absent. CMake's if()
+    # already treats a -NOTFOUND value as false, but name it explicitly so
+    # the fallback below cannot be skipped by a string comparison.
     if(Vulkan_FOUND AND (NOT Vulkan_GLSLC_EXECUTABLE
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "Vulkan_GLSLC_EXECUTABLE-NOTFOUND"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_SOURCE_DIR}/cmake/JoltDxcShim.sh"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_BINARY_DIR}/jolt-dxc-shim"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "$<TARGET_FILE:zshader>"))
@@ -642,11 +647,16 @@ if(ZHLN_BUILD_RENDER)
                 "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with zshader's dxc-compat mode (libslang). "
                 "Set ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
         else()
-            message(WARNING
+            # A warning here only defers the failure to build time, where
+            # every .spv rule execs the *-NOTFOUND string and exits 127.
+            # Fail at configure time instead, with the fix attached.
+            message(FATAL_ERROR
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
-                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), leave "
+                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), set "
                 "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build "
-                "without Jolt's Vulkan compute backend."
+                "without Jolt's Vulkan compute backend. If you set this through menuconfig, delete build/menuconfig/.config and "
+                "its .stamp (or toggle the entry ON in the menu) and re-run scripts/menuconfig.sh: an existing .config that says "
+                "\"# CONFIG_ZHLN_JOLT_SLANG_FALLBACK is not set\" keeps forcing the cache OFF."
             )
         endif()
     endif()
