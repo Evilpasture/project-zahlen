@@ -535,6 +535,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/ProjectLightClientTests.cmake)
 zahlen_add_extras_group(Extras_GLTFAssets
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestGLTFAssets.cpp)
 target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal zahlen_command_line)
+# ztest workers may run from a build/output directory, not the checkout root.
+target_compile_definitions(Extras_GLTFAssets PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 zahlen_register_extras_test(Extras_GLTFAssets)
 
 # Exercise the existing real importer suite against the shared decoder even

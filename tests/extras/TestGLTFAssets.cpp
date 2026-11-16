@@ -234,7 +234,12 @@ struct GLTFAssetsSuite {
         std::expected<void, ZHLN::ErrorCode> imports_real_rig_and_its_animation_through_capabilities() {
             using namespace ZHLN;
             using Test::ExpectTrue;
-            auto doc = GLTF::Read("resources/assets/ProceduralAnimationBaseRig.glb");
+            // Source fixtures must not depend on the worker's current directory.
+            const auto path       = std::filesystem::path(ZHLN_TEST_SOURCE_DIR) / "resources/assets/ProceduralAnimationBaseRig.glb";
+            const auto sourcePath = path.string();
+            auto       doc        = GLTF::Read(std::string_view(sourcePath));
+            if (!doc)
+                Println("    glTF rig fixture failed: '{}' (exists={}, error={})", sourcePath, std::filesystem::exists(path), doc.error());
             if (!ExpectTrue(doc.has_value()))
                 return {};
             ExpectTrue(!doc->parts.empty() && !doc->skeletons.empty() && !doc->animations.empty());
