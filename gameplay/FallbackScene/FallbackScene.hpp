@@ -18,7 +18,7 @@
 namespace ZHLN {
 
 class Engine;
-class HostUI;
+class NativeHostUI;
 
 namespace Scene {
 struct Scene;
@@ -42,7 +42,7 @@ class DefaultPreset {
     [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
     static void               Update(Engine& engine, float dt);
     // Called explicitly by the scene host, with its own compositor/context/atlas.
-    static void               DrawUI(Engine& engine, HostUI& hostUI, float dt);
+    static void               DrawUI(Engine& engine, NativeHostUI& hostUI, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;
 

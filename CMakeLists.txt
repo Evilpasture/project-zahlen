@@ -862,7 +862,11 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
 endif()
 
 target_link_libraries(zahlen PRIVATE zahlen_application zahlen_screenshot)
-target_link_libraries(zahlen_cube PRIVATE zahlen_application)
+# This consumer must not gain Application/HostRunner or concrete-engine helper
+# symbols transitively. The COM App is header-only; CLI and PNG are host policy.
+target_include_directories(zahlen_cube PRIVATE ${PROJECT_SOURCE_DIR}/app/include)
+target_link_libraries(zahlen_cube PRIVATE zahlen_engine zahlen_command_line zahlen_screenshot)
+zahlen_enable_reflection(zahlen_cube)
 
 # Tool-specific dependencies stay on tool targets. The core-only build still
 # produces a callable-driven game; extras add standalone editor, scene host and

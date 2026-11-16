@@ -21,7 +21,7 @@ if(TARGET zahlen_fallback_scene)
     add_executable(zahlen_scene_host main.cpp)
     set_target_properties(zahlen_scene_host PROPERTIES CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-scene-host")
-    target_link_libraries(zahlen_scene_host PRIVATE zahlen_application
+    target_link_libraries(zahlen_scene_host PRIVATE zahlen_application zahlen_native_host_ui
         zahlen_scene_documents zahlen_fallback_scene zahlen_warnings)
     target_include_directories(zahlen_scene_host PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_compile_definitions(zahlen_scene_host PRIVATE JPH_DOUBLE_PRECISION)

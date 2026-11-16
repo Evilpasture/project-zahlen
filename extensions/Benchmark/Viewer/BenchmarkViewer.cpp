@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -341,7 +341,7 @@ struct BenchmarkViewer::Impl {
     }
 
     GUI::Context gui;
-    std::unique_ptr<ZHLN::HostUI> hostUI;
+    std::unique_ptr<ZHLN::NativeHostUI> hostUI;
 
     void DrawBenchmarkPanel(GUI::Frame& ui);
     void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine);
@@ -1103,7 +1103,7 @@ auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCo
 }
 
 void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
-    m_impl->hostUI = std::make_unique<ZHLN::HostUI>(engine);
+    m_impl->hostUI = std::make_unique<ZHLN::NativeHostUI>(engine);
     m_impl->pendingEntities = initialEntities;
 
     // The Engine is consulted for exactly one thing: a headless host has no

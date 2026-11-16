@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Screenshot.hpp"
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <algorithm>
@@ -37,6 +39,34 @@ void WriteBytes(void* context, void* data, int size) {
     auto& stream = *static_cast<std::ofstream*>(context);
     stream.write(static_cast<const char*>(data), size);
 }
+}
+
+auto ZHLN::Screenshot::CaptureBuffer::Read(COM::IGraphicsDevice& graphics, Extent2D extent)
+    -> std::expected<const CapturedFrame*, ErrorCode> {
+    _frame.extent = {};
+    _frame.metrics = {};
+    const uint64_t texels = uint64_t(extent.width) * extent.height;
+    if (!texels || texels > _frame.pixels.max_size() / 8) return std::unexpected(COM::ComError::InvalidArgument);
+    const size_t initial = static_cast<size_t>(texels * 8);
+    // Keep high-water storage after a resize; never do a null size query.
+    _frame.pixels.resize(std::max(initial, _frame.pixels.size()));
+    COM::CaptureInfo info;
+    auto copied = graphics.CaptureFrame(COM::OutChain(info), _frame.pixels);
+    if (!copied.HasValue()) return std::unexpected(copied.error);
+    if (copied.value > _frame.pixels.size()) {
+        if (copied.value > _frame.pixels.max_size()) return std::unexpected(COM::ComError::InvalidArgument);
+        _frame.pixels.resize(static_cast<size_t>(copied.value));
+        copied = graphics.CaptureFrame(COM::OutChain(info), _frame.pixels);
+        if (!copied.HasValue()) return std::unexpected(copied.error);
+    }
+    if (copied.value > _frame.pixels.size() || copied.value != info.byteCount)
+        return std::unexpected(COM::ComError::InvalidArgument);
+    _frame.pixels.resize(static_cast<size_t>(copied.value));
+    _frame.extent = info.extent;
+    _frame.format = info.format;
+    _frame.metrics = info.metrics;
+    if (!_frame.Valid()) return std::unexpected(COM::ComError::InvalidArgument);
+    return &_frame;
 }
 
 auto ZHLN::Screenshot::WritePNG(std::string_view path, const ZHLN::CapturedFrame& frame) -> bool {

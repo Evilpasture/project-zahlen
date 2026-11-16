@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -337,7 +337,7 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 //
 // The host submits copied draw streams explicitly through GraphicsDevice.
 
-void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui, ZHLN::HostUI& hostUI) {
+void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui, ZHLN::NativeHostUI& hostUI) {
     hudGui.SetFontAtlas(hostUI.GetFontAtlas());
     ZHLN::GUI::Frame ui = hudGui.BeginFrame(hostUI.ConsumeInput(g_frameDt));
 
@@ -1582,8 +1582,10 @@ auto main(int argc, char* argv[]) -> int {
     }
 
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("[BSPSample] Font asset failed to load ({}), using embedded default.", fontID.error());
+    } else {
+        ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
 #endif
 
@@ -1606,7 +1608,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
     ZHLN::GUI::Context hudGui;
-    ZHLN::HostUI hostUI(*engine);
+    ZHLN::NativeHostUI hostUI(*engine);
     hostUI.SetCallback([&hudGui, &hostUI](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawCrosshairHUD(eng, hudGui, hostUI); });
 
     // 5. Import BSP into ModelPrefab

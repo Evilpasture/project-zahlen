@@ -198,6 +198,7 @@ endfunction()
 # package's manifest listed Zahlen::zahlen_fonts while every other package
 # advertised the short name.
 foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
+        "host_ui;HostUI" "native_host_ui;NativeHostUI"
         "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
@@ -249,12 +250,16 @@ install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
 zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extensions/CommandLine)
 zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)
+zhln_toolchain_package(HostUI TARGETS zahlen_host_ui DEPENDS Engine)
+zhln_toolchain_package(NativeHostUI TARGETS zahlen_native_host_ui DEPENDS Engine HEADERS extensions/NativeHostUI)
 zhln_toolchain_package(HostRunner TARGETS zahlen_host_runner DEPENDS Engine CommandLine Signal)
-zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine CommandLine HostRunner)
+zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine CommandLine HostRunner HostUI)
 # Consumer-side header only: install independently of the in-tree Application
 # package so COM clients need not link its static libraries.
 install(FILES app/include/Zahlen/COM/App.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen/COM COMPONENT ZahlenCOMApp)
+install(FILES app/include/Zahlen/HostUI.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
+    COMPONENT ZahlenHostUI)
 install(FILES app/include/Zahlen/HostRunner.hpp
     app/include/Zahlen/AppOutcome.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
     COMPONENT ZahlenHostRunner)
@@ -268,7 +273,7 @@ zhln_toolchain_package(UISchema TARGETS zahlen_ui_schema DEPENDS Engine HEADERS 
 # exported interface: the installed extensions/UI/*.hpp must exist for a
 # consumer to compile that header, so the package still declares it.
 zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine UISchema HEADERS plugins/json plugins/toml)
-zhln_toolchain_package(GLTF TARGETS zahlen_gltf DEPENDS Engine Serialization HEADERS plugins/glTF)
+zhln_toolchain_package(GLTF TARGETS zahlen_gltf DEPENDS Engine Serialization NativeHostUI HEADERS plugins/glTF)
 zhln_toolchain_package(FreeCam TARGETS zahlen_freecam DEPENDS Engine HEADERS extensions/FreeCam)
 zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine HEADERS extensions/Camera)
 zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine HEADERS extensions/CharacterController)

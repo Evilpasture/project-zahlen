@@ -3,12 +3,18 @@
 
 #include "TestsFramework.hpp"
 #include <Screenshot/Screenshot.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Config.hpp>
+#include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 
 namespace ZHLN::Test {
 
@@ -43,6 +49,35 @@ void test_screenshot_png_encoding_and_failures(TempDir& tmp) {
     ExpectFalse(Screenshot::WritePNG((tmp.Path() / "invalid.png").string(), frame));
     frame.pixels.push_back(127);
     ExpectFalse(Screenshot::WritePNG((tmp.Path() / "missing" / "frame.png").string(), frame));
+}
+
+void test_screenshot_com_consumer_readback(TempDir& tmp) {
+    auto created = COM::CreateEngineRef(COM::InChain(
+        COM::EngineAppConfig {.appName = String64("COM screenshot test"), .logLevel = LogLevel::Quiet},
+        COM::EngineWindowConfig {.width = 64, .height = 48, .vsync = false, .headless = true},
+        COM::EngineRenderConfig {.validationMode = ValidationMode::Off}));
+    if (!ExpectTrue(created.has_value())) return;
+    auto engine = std::move(*created);
+    Screenshot::CaptureBuffer capture;
+    ExpectFalse(capture.Read(*engine->Graphics(), {}).has_value());
+    engine->ProcessEvents();
+    if (!ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue())) return;
+    auto frame = capture.Read(*engine->Graphics(), engine->WindowExtent(engine->PrimaryWindow()));
+    if (!ExpectTrue(frame.has_value())) return;
+    ExpectTrue((*frame)->Valid());
+    ExpectEq((*frame)->extent.width, uint32_t {64});
+    ExpectEq((*frame)->extent.height, uint32_t {48});
+    ExpectTrue(Screenshot::WritePNG((tmp.Path() / "com-frame.png").string(), **frame));
+    // The second call reuses caller storage and still performs a fresh capture.
+    const auto* pixels = (*frame)->pixels.data();
+    frame = capture.Read(*engine->Graphics(), {64, 48});
+    if (!ExpectTrue(frame.has_value())) return;
+    ExpectTrue((*frame)->Valid());
+    ExpectTrue((*frame)->pixels.data() == pixels);
+    // Deliberately undersize the extent estimate to cover the bounded retry.
+    Screenshot::CaptureBuffer undersized;
+    frame = undersized.Read(*engine->Graphics(), {1, 1});
+    ExpectTrue(frame.has_value() && (*frame)->Valid());
 }
 
 } // namespace ZHLN::Test

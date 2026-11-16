@@ -3,12 +3,12 @@
 
 // Compatibility default pass. Optional systems are explicitly composed by
 // the application; installed Application never auto-links available extras.
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
 @AUTOLOAD_INCLUDES@
 namespace ZHLN {
 
-void InstallApplicationDefaults([[maybe_unused]] Engine& engine) {
+void InstallApplicationDefaults([[maybe_unused]] COM::IEngine& engine) {
 @AUTOLOAD_CALLS@}
 
 } // namespace ZHLN

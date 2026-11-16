@@ -1,9 +1,8 @@
 // Lifecycle/capture helper owned by the standalone installed-package consumer.
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "InstalledCubeSmoke.hpp"
 #include <Zahlen/Zahlen.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
+#include <vector>
 #include <print>
 #include <netpbm/PpmEncoder.hpp>
 #include <atomic>
@@ -52,7 +51,7 @@ bool WriteCapture(const char* path, const CapturedFrame& frame) {
 }
 } // namespace
 
-bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
+bool RunInstalledCubeSmoke(void (*createScene)(COM::IEngine&), const char* ppmPath) {
     validationErrors.store(0, std::memory_order_relaxed);
     EngineConfig config {
         .appName = "Installed toolchain cube",
@@ -64,24 +63,29 @@ bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
         .enableMeshShading = false,
     };
     bool captured = false;
+    std::vector<uint8_t> pixels(size_t(config.width) * config.height * 8);
     SetLogObserver(&ObserveLog);
     auto application = App(config);
     // The standalone consumer supplies its own scene callback. No engine
     // application source is copied, included, or needed by this project.
     application.OnStart(createScene);
-    const auto result = application.Run([&](Engine& engine) {
+    const auto result = application.Run([&](COM::IEngine& engine) {
         // Gameplay callbacks run before Tick. Allow eight startup ticks for
         // uploads and renderer history, then render one measured frame. Capture
         // that frame on the following callback, before another Tick starts.
         constexpr uint64_t warmupTicks = 8;
-        if (engine.GetCurrentFrame() <= warmupTicks) return;
-        const auto tickCount = engine.GetCurrentFrame();
-        auto frame = engine.Graphics().CaptureFrame();
-        if (!frame) {
+        if (engine.CurrentFrame() <= warmupTicks) return;
+        const auto tickCount = engine.CurrentFrame();
+        COM::CaptureInfo info;
+        const auto copied = engine.Graphics()->CaptureFrame(COM::OutChain(info), pixels);
+        if (!copied.HasValue() || copied.value > pixels.size()) {
             // ErrorCode's public formatter includes category and reason. A Tick
             // counter is not proof that a drawable GPU frame was completed.
-            LogError("CaptureFrame failed after {} engine tick(s): {}", tickCount, frame.error());
+            LogError("CaptureFrame failed after {} engine tick(s): {}", tickCount, copied.error);
         } else {
+            const CapturedFrame storage {.extent = info.extent, .format = info.format,
+                .pixels = std::vector<uint8_t>(pixels.begin(), pixels.begin() + copied.value), .metrics = info.metrics};
+            const auto* frame = &storage;
             std::println("Capture after ticks={}: extent={}x{}, format={}, bytes={}, expected bytes={}, valid={}, mean luma={}, lit pixels={}, transparent pixels={}",
                 tickCount, frame->extent.width, frame->extent.height, static_cast<unsigned>(frame->format),
                 frame->pixels.size(), frame->PixelCount() * frame->BytesPerPixel(), frame->Valid(),
@@ -100,7 +104,7 @@ bool RunInstalledCubeSmoke(void (*createScene)(Engine&), const char* ppmPath) {
             }
         }
         if (!captured) std::println(stderr, "Rendered frame/readback/PPM validation failed");
-        engine.Host().Close();
+        engine.RequestClose();
     });
     SetLogObserver(nullptr);
     const auto errors = validationErrors.load(std::memory_order_relaxed);

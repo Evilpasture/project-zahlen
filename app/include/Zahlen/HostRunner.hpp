@@ -10,7 +10,7 @@
 
 namespace ZHLN {
 
-class Engine;
+namespace COM { struct IEngine; }
 
 // Host lifetime shared by the Engine application and Kernel-only applications.
 // Construct before the host, destroy after it: the host must release any
@@ -25,7 +25,7 @@ class ProcessScope {
     ProcessScope(ProcessScope&&)                         = delete;
     auto operator=(ProcessScope&&) -> ProcessScope&      = delete;
 
-    static void PollCrashes(const Engine* engine = nullptr);
+    static void PollCrashes(COM::IEngine* engine = nullptr);
 
   private:
     struct Impl;

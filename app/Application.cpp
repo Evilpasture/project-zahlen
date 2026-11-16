@@ -4,16 +4,10 @@
 // Application composes the game and its frame plan. CMake generates the
 // optional default-module install pass in DefaultModules.cpp.
 #include <Zahlen/App.hpp>
-#include <Zahlen/Engine/Capabilities/InputActions.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -52,54 +46,56 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     // nest Engine::Run here: it creates another TaskSystem::Scope.
     ProcessScope process;
 
-    auto created = Engine::Create(config);
+    auto created = COM::CreateEngineRef(COM::InChain(
+        COM::EngineAppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+        COM::EngineWindowConfig {.width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless},
+        COM::EngineRenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading,
+            .initialPipelineBinary = config.initialPipelineBinaryData},
+        config.physics, COM::EngineDiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}));
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
         return std::unexpected(created.error()); // preserve the underlying init error
     }
-    auto engine = std::move(*created);
-    engine->Host().Focus();
-
-    // Publish the effective kernel-owned value before installers and graph
-    // construction. Its pipeline byte span now points into KernelSession-owned storage
-    // (including on device recovery), never a caller-owned temporary. No argv
-    // or handler borrows enter services, including on no-CLI Run.
-    engine->EmplaceService<EngineConfig>(engine->State().Configuration());
+    COM::Ref<COM::IEngine> engine = std::move(*created);
+    HostUI ui(*engine.Get()); // destroyed before the retained engine and ProcessScope
+    engine->FocusWindow(engine->PrimaryWindow());
 
     if (_defaultModules) {
-        InstallApplicationDefaults(*engine);
+        InstallApplicationDefaults(*engine.Get());
     }
     for (const auto& install: _installers) {
-        install(*engine);
+        install(*engine.Get());
     }
     for (const auto& layer: _layers) {
         if (layer.start != nullptr) {
-            layer.start(layer.state.get(), *engine);
+            layer.start(layer.state.get(), *engine.Get(), ui);
         }
     }
     if (_start) {
-        _start(*engine);
+        _start(*engine.Get());
     }
 
     FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
-    bool       frameFailed = false;
+    std::optional<ErrorCode> frameError;
     while (engine->IsRunning()) {
         const auto frameStart = FramePacer::BeginFrame();
-        ProcessScope::PollCrashes(engine.get());
+        ProcessScope::PollCrashes(engine.Get());
         engine->ProcessEvents(); // includes input and renderer resize synchronization
         if (!engine->IsRunning()) {
             break;
         }
 
-        for (const auto id: engine->WindowIDs()) engine->Input(id).SetUICapture(false, false);
+        const auto begun = ui.BeginFrame();
+        if (!begun.HasValue()) { frameError = begun.error; break; }
 
         const float                rawDt   = runClock.Tick();
-        const std::optional<float> pacedDt = engine->Graphics().PacedDeltaTime();
+        const auto pacing = engine->Graphics()->PacedDeltaTime();
+        const std::optional<float> pacedDt = pacing.HasValue() ? std::optional<float>(pacing.value) : std::nullopt;
         const float                dt      = pacer.SelectDelta(rawDt, pacedDt);
         for (const auto& layer: _layers) {
             if (layer.tick != nullptr) {
-                layer.tick(layer.state.get(), *engine, dt);
+                layer.tick(layer.state.get(), *engine.Get(), dt);
                 if (!engine->IsRunning()) {
                     break;
                 }
@@ -109,19 +105,23 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
             break;
         }
         for (const auto& layer: _layers) {
-            if (layer.ui != nullptr) layer.ui(layer.state.get(), *engine);
+            if (layer.ui != nullptr) {
+                const auto composed = layer.ui(layer.state.get(), *engine.Get(), ui);
+                if (!composed) { frameError = composed.error(); break; }
+            }
             if (!engine->IsRunning()) break;
         }
-        if (!engine->IsRunning()) break;
+        if (frameError || !engine->IsRunning()) break;
         if (update) {
-            update(*engine, dt);
+            auto updated = update(*engine.Get(), dt);
+            if (!updated) { frameError = updated.error(); break; }
             if (!engine->IsRunning()) {
                 break;
             }
         }
-        if (auto tick = engine->Tick(dt); !tick) {
-            LogError("[Application] engine frame failed: {}", tick.error());
-            frameFailed = true;
+        if (auto tick = engine->Tick(dt); !tick.HasValue()) {
+            LogError("[Application] engine frame failed: {}", tick.error);
+            frameError = tick.error;
             break;
         }
         pacer.EndFrame(frameStart, pacedDt);
@@ -130,11 +130,11 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     // alive, even if events, a layer/update, or a failed frame ended the loop.
     for (const auto& _layer: std::ranges::reverse_view(_layers)) {
         if (_layer.stop != nullptr) {
-            _layer.stop(_layer.state.get(), *engine);
+            _layer.stop(_layer.state.get(), *engine.Get());
         }
     }
-    if (frameFailed) {
-        return std::unexpected(AppError::FrameTickFailed);
+    if (frameError) {
+        return std::unexpected(*frameError);
     }
     return AppExitReason::UserClosed;
 }

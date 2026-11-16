@@ -104,4 +104,4 @@ endif()
 # libJolt.so on all 18 executables -- including the ones that never touch it.
 target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_stb_image zahlen_warnings)
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_host_ui)
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_native_host_ui)

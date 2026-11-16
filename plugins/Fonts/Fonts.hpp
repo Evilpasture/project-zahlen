@@ -13,31 +13,31 @@
 //   * cooked 'FNT0' containers (the output of `zcook font`), from a mounted
 //     pak or from disk.
 //
-// InstallBakedFontLoader wires the pair into core's baked-font hook. Core
+// LoadBakedFont explicitly returns decoded font data to the caller. Core
 // cannot depend on this directory (configure/check_core_layer_boundary.py); the
 // composition root is the one place that names both sides.
 //
 // This header is the public surface of zahlen_fonts: where the loader looks
-// and how to install it. The low-level BMFont scanner (FontBMChar,
+// and how to load/upload it explicitly. The low-level BMFont scanner (FontBMChar,
 // FontBMDescriptor, ParseFontBMDescriptor, AssembleBakedFont) is an internal
 // implementation detail and lives in FontBMParser.hpp, not here.
 
 #pragma once
 
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Error.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Error.hpp>
 #include <expected>
 #include <string>
 #include <string_view>
 
 namespace ZHLN {
-class Engine;
+namespace COM { struct IAssetLibrary; struct IGraphicsDevice; }
 }
 
 namespace ZHLN::Fonts {
 
-/// Where InstallBakedFontLoader looks for its bake. Virtual paths are served
+/// Where LoadBakedFont looks for its bake. Virtual paths are served
 /// from the mounted paks first (the production layout); the same paths are
 /// then tried relative to the working directory for unpacked runs.
 struct BakedFontSource {
@@ -81,40 +81,12 @@ inline constexpr std::string_view kVendoredFontFntPath = "resources/fonts/JetBra
 /// previous resolution order and core's embedded bake stays the last resort.
 [[nodiscard]] auto VendoredDefaultFontSource() -> BakedFontSource;
 
-/// Installs the baked-font loader hook (GUI::InstallBakedFontLoader). Virtual
-/// paths are served through @p assets (the mounted paks); the loader tries the
-/// fontbm pair first, then the cooked container. The first successful load is
-/// cached CPU-side, so device-loss rebuilds re-upload without touching disk.
-///
-/// The hook is process-global and single: install one loader per process, from
-/// the composition root, before the first CreateFontAtlas. Installing through
-/// an Engine also registers a teardown that uninstalls it when the engine goes
-/// away. There is no cache-object spelling: the engine owns it, and
-/// it is the only thing that can hand one out.
-void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
-
-/// Fonts are first-class assets with an AssetID. Loads the baked font from
-/// the mounted paks (or fontbm pair) into the engine's font cache
-/// and returns its AssetID. The asset cache outranks the embedded default;
-/// device-loss rebuilds re-upload from the cached asset. No TTF parsing at
-/// runtime.
-///
-/// Installs the loader hook and then tries the two sources in the order
-/// BakedFontSource::preferFontbmPair selects:
-///   * default: cooked 'FNT0' from paks via PrefabFactory::LoadFontAsset, then
-///     the fontbm pair, cached as kDefaultFontAssetID;
-///   * preferFontbmPair: the pair first, then the cooked container.
-///
-/// The pair is read directly (the loader hook is installed either way, but the
-/// hook falls back into the container itself), and both orders log which source
-/// resolved: the container step is otherwise silent on success, and the two are
-/// hard to tell apart from the rendered text alone.
-///
-/// Returns the AssetID on success. When neither source resolves, the
-/// ErrorCode is the failure of the source tried last -- each source logs its
-/// own reason as it goes, so the code names the condition for the caller
-/// (which should fall back to the embedded default) and formats as that
-/// reason's annotated message.
-auto LoadFontAsset(Engine& engine, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
+// Explicit decode: mounted VFS first (if supplied), then disk when enabled.
+// No global loader hook, engine service, cache insertion or teardown callback.
+[[nodiscard]] auto LoadBakedFont(COM::IAssetLibrary* assets, const BakedFontSource& source = {})
+    -> std::expected<GUI::BakedFontAsset, ErrorCode>;
+// Caller owns the returned texture; unload through the same live device.
+[[nodiscard]] auto UploadFontAtlas(COM::IGraphicsDevice& graphics, const GUI::BakedFontAsset& asset)
+    -> std::expected<FontAtlas, ErrorCode>;
 
 } // namespace ZHLN::Fonts

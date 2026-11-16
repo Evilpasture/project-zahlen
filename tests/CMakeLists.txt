@@ -180,4 +180,4 @@ if(ZHLN_BUILD_GPU_TESTS)
     endif()
 endif()
 
-target_link_libraries(ztest_cpu PRIVATE zahlen_host_ui)
+target_link_libraries(ztest_cpu PRIVATE zahlen_native_host_ui)

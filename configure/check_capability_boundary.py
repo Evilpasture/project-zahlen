@@ -52,6 +52,16 @@ SOURCE_SUFFIXES = frozenset({".h", ".hpp", ".hh", ".hxx", ".inl", ".ipp", ".cpp"
 
 SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", "node_modules", "extern", "third_party"})
 
+# Completed COM host ports are not allowed to regress to native facades. The
+# explicit set grows as plugin/extension ports land; remaining native targets
+# are not silently counted as migrated.
+COM_HOST_PORTS = frozenset({
+    "app/Application.cpp", "app/HostUI.cpp", "app/HostRunner.cpp", "app/main.cpp", "app/UIEditor.cpp",
+    "app/include/Zahlen/App.hpp", "app/include/Zahlen/HostUI.hpp", "app/include/Zahlen/HostRunner.hpp",
+    "app/include/Zahlen/Zahlen.hpp", "plugins/Fonts/Fonts.cpp", "plugins/Fonts/Fonts.hpp",
+})
+NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
+
 # The internal cache header, and the paths allowed to include it.
 INTERNAL_HEADERS = {"Zahlen/Engine/AssetManager.hpp": "Engine::Assets() -> AssetLibrary"}
 ALLOWED_INTERNAL_HEADER_INCLUDERS = {
@@ -124,10 +134,17 @@ def check_source(path: Path) -> list[str]:
         if match is None:
             continue
         header = match.group(1)
+        if relative in COM_HOST_PORTS and NATIVE_HOST_HEADER.search(header):
+            violations.append(f"{relative}:{line_number}: migrated COM host includes native header <{header}>")
         if header in INTERNAL_HEADERS and relative not in ALLOWED_INTERNAL_HEADER_INCLUDERS:
             violations.append(f"{relative}:{line_number}: includes <{header}>; use {INTERNAL_HEADERS[header]} instead")
 
     text = strip_comments(raw)
+
+    if relative in COM_HOST_PORTS:
+        native = re.compile(r"\bEngine\s*(?:[&*]|::)|\b(?:NativeHostUI|SetWindowDrawCallback|SetUICallback)\b")
+        if native.search(text):
+            violations.append(f"{relative}:{line_of(text, native)}: migrated host must use COM IEngine/capabilities and explicit UI submission")
 
     # 2. A removed accessor, called or declared.
     for accessor, replacement in REMOVED_ACCESSORS.items():

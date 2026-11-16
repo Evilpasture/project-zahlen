@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -145,7 +145,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
 
 // Draws one frame of the self-hosted editor using the Clay layout engine:
 // [Hierarchy | Viewport Toolbar | Inspector]
-void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, ZHLN::HostUI& hostUI, float dt) {
+void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, ZHLN::NativeHostUI& hostUI, float dt) {
     auto entities = engine.Entities();
     gui.SetFontAtlas(hostUI.GetFontAtlas());
     ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(dt));
@@ -249,7 +249,7 @@ auto RunWorldEditor(ZHLN::Engine& engine, const ZHLN::EngineConfig& options, ZHL
     bool saveChordWasDown = false;
     bool escWasDown       = false;
 
-    ZHLN::HostUI hostUI(engine);
+    ZHLN::NativeHostUI hostUI(engine);
     ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
 
     while (engine.IsRunning()) {
@@ -515,7 +515,6 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
     auto engine = std::move(*created);
-    ZHLN::InstallApplicationDefaults(*engine);
     engine->Host().Focus();
     if (!scenePath.empty() && !ZHLN::Tools::LoadSceneDocument(*engine, scenePath)) {
         return EXIT_FAILURE;

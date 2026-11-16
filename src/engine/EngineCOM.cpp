@@ -268,6 +268,8 @@ class EngineCOM final
 public:
     explicit EngineCOM(std::unique_ptr<Engine> engine) noexcept : m_engine(std::move(engine)) {}
 
+    void TraceDiagnostics() const noexcept override { m_engine->TraceDiagnostics(); }
+
     // ---------------------------------------------------------------- IEngine
     [[nodiscard]] bool IsRunning() const noexcept override {
         return m_engine->IsRunning();
@@ -415,6 +417,27 @@ public:
             call.callback(call.userdata, call.window, views);
         }, stable);
         return {};
+    }
+    [[nodiscard]] Option<float> PacedDeltaTime() const noexcept override {
+        const auto value = Device().PacedDeltaTime();
+        return value ? Option<float>(*value) : Option<float> {};
+    }
+    [[nodiscard]] Result<void> ReadHostInput(WindowID window, ChainOutNode* output, bool consume) noexcept override {
+        if (!output) return ComError::NullArgument;
+        if (!WindowExists(window)) return ComError::InvalidArgument;
+        const auto checked = DispatchOutChain<HostInputInfo>(output, [](HostInputInfo&) -> Result<void> { return {}; });
+        if (!checked.HasValue()) return checked;
+        const auto state = consume ? m_engine->Input(window).ConsumePhysicalInput() : std::as_const(*m_engine).Input(window).Snapshot();
+        HostInputInfo info;
+        info.mouseX = state.mouseX; info.mouseY = state.mouseY; info.mouseWheel = state.mouseWheel;
+        info.modifiers = state.Modifiers();
+        for (uint32_t i = 0; i < kKeyCodeCount; ++i) info.keyDown[i] = state.IsKeyDown(static_cast<KeyCode>(i));
+        for (size_t i = 0; i < state.queuedInputCount; ++i) {
+            const auto& event = state.queuedInput[i];
+            if (event.isChar) { if (info.characterCount < 64) info.characters[info.characterCount++] = event.codepoint; }
+            else if (info.pressedKeyCount < 64) info.pressedKeys[info.pressedKeyCount++] = event.key;
+        }
+        return DispatchOutChain<HostInputInfo>(output, [&](HostInputInfo& out) -> Result<void> { out = info; return {}; });
     }
     [[nodiscard]] Result<void> SubmitUI(WindowID window, const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<UISubmitInfo>(chain);
@@ -2041,9 +2064,12 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     uint32_t     maxFramesPerSecond = 0;
 
     const Result<void> chainRes =
-        DispatchInChain<EngineAppConfig, EngineWindowConfig, EngineRenderConfig, PhysicsConfig>(
+        DispatchInChain<EngineAppConfig, EngineWindowConfig, EngineRenderConfig, PhysicsConfig, EngineDiagnosticsInfo>(
             configChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
-                if constexpr (std::is_same_v<NodeT, EngineAppConfig>) {
+                if constexpr (std::is_same_v<NodeT, EngineDiagnosticsInfo>) {
+                    if (!Valid(node.crashDumpPath)) return ComError::NullArgument;
+                    config.crashDumpPath = Text(node.crashDumpPath);
+                } else if constexpr (std::is_same_v<NodeT, EngineAppConfig>) {
                     const std::string_view nameView(node.appName);
                     if (!nameView.empty()) config.appName = node.appName;
                     config.logLevel    = node.logLevel;
@@ -2065,10 +2091,12 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
             });
     if (!chainRes.HasValue()) return chainRes.error;
 
+    config.fpsLimit = maxFramesPerSecond;
     auto created = Engine::Create(config);
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
+    (*created)->EmplaceService<EngineConfig>((*created)->State().Configuration());
 
     auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
     if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);

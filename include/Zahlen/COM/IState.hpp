@@ -24,6 +24,8 @@ struct IState : IObject {
     [[nodiscard]] virtual int                PhysicsDrawMode() const noexcept = 0;
     virtual void                             SetPhysicsDrawMode(int mode) noexcept = 0;
 
+    virtual void TraceDiagnostics() const noexcept = 0;
+
 protected:
     ~IState() = default;
 };

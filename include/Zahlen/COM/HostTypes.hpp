@@ -6,6 +6,21 @@
 #include <Zahlen/Window/WindowInput.hpp>
 
 namespace ZHLN::COM {
+// Read-only physical UI input, per window. No router/injection/evaluation API.
+struct HostInputInfo {
+    float mouseX = 0, mouseY = 0, mouseWheel = 0;
+    KeyModifiers modifiers = KeyModifiers::None;
+    bool keyDown[kKeyCodeCount] {};
+    KeyCode pressedKeys[64] {};
+    uint32_t characters[64] {};
+    uint32_t pressedKeyCount = 0, characterCount = 0;
+    [[nodiscard]] bool IsKeyDown(KeyCode key) const noexcept {
+        const auto i = static_cast<uint32_t>(key);
+        return i < kKeyCodeCount && keyDown[i];
+    }
+    [[nodiscard]] bool IsMouseButtonDown(MouseButton button) const noexcept { return IsKeyDown(ToKeyCode(button)); }
+};
+static_assert(std::is_standard_layout_v<HostInputInfo> && std::is_trivially_copyable_v<HostInputInfo>);
 struct WindowCreateInfo {
     StringView title {};
     uint32_t width = 1280;

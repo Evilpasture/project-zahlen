@@ -6,7 +6,7 @@
 // Internal BMFont parser -- NOT part of the public zahlen_fonts API.
 //
 // The public header <Fonts/Fonts.hpp> exposes only BakedFontSource and
-// InstallBakedFontLoader. Everything that understands BMFont lives here:
+// explicit decode/upload helpers. Everything that understands BMFont lives here:
 // the char record, the parsed descriptor, the error enum and the two
 // functions that turn (descriptor JSON, RGBA page) into core's BakedFontAsset.
 //

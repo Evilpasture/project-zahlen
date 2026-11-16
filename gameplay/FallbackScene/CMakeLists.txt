@@ -51,4 +51,4 @@ endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_host_ui)
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_native_host_ui)

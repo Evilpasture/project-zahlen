@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -161,7 +161,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     engine.State().ResetCullingStats();
 }
 
-void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f, ZHLN::HostUI* hostUI = nullptr) {
+void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f, ZHLN::NativeHostUI* hostUI = nullptr) {
     for (uint32_t i = 0; i < frameCount; ++i) {
         engine.ProcessEvents();
         if (hostUI) hostUI->Update(dt);
@@ -513,7 +513,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
 
     PrepareEngineForTest(engine);
 
-    ZHLN::HostUI hostUI(engine);
+    ZHLN::NativeHostUI hostUI(engine);
     ZHLN::GUI::Context perfGui(hostUI.GetFontAtlas());
     hostUI.SetCallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
         perfGui.SetFontAtlas(hostUI.GetFontAtlas());
@@ -829,7 +829,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 7. Immediate-Mode UI HUD Callback
-    ZHLN::HostUI hostUI(engine);
+    ZHLN::NativeHostUI hostUI(engine);
     ZHLN::GUI::Context hudGui(hostUI.GetFontAtlas());
     hostUI.SetCallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
         hudGui.SetFontAtlas(hostUI.GetFontAtlas());

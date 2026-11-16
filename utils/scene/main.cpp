@@ -9,8 +9,9 @@
 #include <Zahlen/QualityPresets.hpp>
 #include <FallbackScene/FallbackScene.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/App.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <Zahlen/HostRunner.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -150,7 +151,6 @@ void TeardownHostState(ZHLN::Engine& engine) {
 }
 
 void InstallHostWithState(ZHLN::Engine& engine) {
-    ZHLN::InstallApplicationDefaults(engine);
     // The fallback is only for the no-document diagnostic mode. A loaded
     // document must not be replaced by a diagnostic popup in the same frame.
     if (s_HostLaunchConfig.scenePath.empty()) {
@@ -221,11 +221,11 @@ auto main(int argc, char* argv[]) -> int {
 #endif
     ZHLN::SetupSignalHandler(crashState);
     struct DiagnosticUI {
-        std::unique_ptr<ZHLN::HostUI> ui;
+        std::unique_ptr<ZHLN::NativeHostUI> ui;
         float dt = 0.0f;
         void Start(ZHLN::Engine& engine) {
             if (s_HostLaunchConfig.scenePath.empty()) {
-                ui = std::make_unique<ZHLN::HostUI>(engine);
+                ui = std::make_unique<ZHLN::NativeHostUI>(engine);
                 ZHLN::FallbackScene::DefaultPreset::BuildFallbackScene(engine);
             }
         }
@@ -235,12 +235,26 @@ auto main(int argc, char* argv[]) -> int {
         }
         void Stop(ZHLN::Engine&) { ui.reset(); }
     };
-    auto app = ZHLN::App(config);
-    app.Install(&InstallHostWithState).AddLayer(DiagnosticUI {});
-    auto result = app.Run();
-    if (!result) {
-        ZHLN::LogError("[SceneHost] run failed: {}", result.error());
-        return EXIT_FAILURE;
+    ZHLN::ProcessScope process;
+    auto created = ZHLN::Engine::Create(config);
+    if (!created) return EXIT_FAILURE;
+    auto engine = std::move(*created);
+    InstallHostWithState(*engine);
+    DiagnosticUI ui;
+    ui.Start(*engine);
+    ZHLN::Clock clock;
+    ZHLN::FramePacer pacer(config.fpsLimit);
+    while (engine->IsRunning()) {
+        const auto start = ZHLN::FramePacer::BeginFrame();
+        ZHLN::ProcessScope::PollCrashes();
+        engine->ProcessEvents();
+        if (!engine->IsRunning()) break;
+        const auto dt = clock.Tick();
+        ui.Tick(*engine, dt);
+        ui.UI(*engine);
+        if (auto tick = engine->Tick(dt); !tick) { ui.Stop(*engine); return EXIT_FAILURE; }
+        pacer.EndFrame(start, engine->Graphics().PacedDeltaTime());
     }
+    ui.Stop(*engine);
     return EXIT_SUCCESS;
 }

@@ -131,8 +131,10 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Animation::Install(*engine);
 
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
+    } else {
+        ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
 #endif
 

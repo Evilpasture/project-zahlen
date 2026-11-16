@@ -6,7 +6,7 @@
 add_executable(zahlen_world_editor main.cpp)
 set_target_properties(zahlen_world_editor PROPERTIES CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-editor")
-target_link_libraries(zahlen_world_editor PRIVATE zahlen_application
+target_link_libraries(zahlen_world_editor PRIVATE zahlen_application zahlen_native_host_ui
     zahlen_editor zahlen_freecam zahlen_scene_documents zahlen_warnings)
 target_include_directories(zahlen_world_editor PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(zahlen_world_editor PRIVATE JPH_DOUBLE_PRECISION)

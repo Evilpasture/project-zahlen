@@ -707,8 +707,10 @@ auto main(int argc, char* argv[]) -> int {
     // The composition root's default bake (see app/main.cpp): the vendored
     // JetBrains Mono NF. Installed before the scene boots, so the HUD and any
     // other UI text come from that atlas.
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
+    } else {
+        ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
 #endif
 

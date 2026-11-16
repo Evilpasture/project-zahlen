@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -984,7 +984,7 @@ struct SampleState {
     int                   dropdownSelected = 0;
     bool                  catalogSeeded    = false;
     ZHLN::GUI::Context    gui {};
-    std::unique_ptr<ZHLN::HostUI> hostUI;
+    std::unique_ptr<ZHLN::NativeHostUI> hostUI;
 
     bool     rayTraced   = false;
     bool     reported    = false; // this download's outcome has been logged and imported
@@ -1398,8 +1398,10 @@ auto main(int argc, char* argv[]) -> int {
     // The composition root's default bake (see app/main.cpp): the vendored
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
+    } else {
+        ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
 #endif
 
@@ -1483,7 +1485,7 @@ auto main(int argc, char* argv[]) -> int {
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
-    state.hostUI = std::make_unique<ZHLN::HostUI>(*engine);
+    state.hostUI = std::make_unique<ZHLN::NativeHostUI>(*engine);
     state.hostUI->SetCallback([&state](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawHUD(eng, state); });
 
     while (engine->IsRunning()) {

@@ -4,7 +4,7 @@
 // Opt-in local GPU test: whole application launches. Most stop before the
 // first Tick; a failure probe runs a UI-only frame without GPU rendering.
 #include "TestsFramework.hpp"
-#include <Zahlen/App.hpp>
+#include "NativeEngineHost.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -107,7 +107,7 @@ void test_app_composes_before_scene_and_runs_gameplay_after_events() {
         .validationMode = ValidationMode::Off,
         .headless       = true,
     };
-    auto application = App(config);
+    auto application = NativeApp(config);
     application.AddLayer(StartPhaseLayer {.calls = &calls});
     application.AddLayer(RecordingLayer {.calls = &calls});
     application.AddLayer(TickPhaseLayer {.calls = &calls});
@@ -268,7 +268,7 @@ void ProbePostStep(Engine& engine) {
 }
 
 void test_physics_substeps_consume_impulses_before_step_and_keep_main_buffer_deferred() {
-    auto app = App(EngineConfig {.appName = "PhysicsSubstepTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "PhysicsSubstepTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         const auto* physicsStep = FindStep(engine, "PhysicsSystem");
@@ -311,7 +311,7 @@ void test_physics_substeps_consume_impulses_before_step_and_keep_main_buffer_def
 }
 
 void test_camera_and_history_phase_calls_preserve_order_and_live_data() {
-    auto app = App(EngineConfig {.appName = "TypedFramePhaseTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "TypedFramePhaseTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         const auto steps = engine.Steps();
@@ -363,7 +363,7 @@ void test_camera_and_history_phase_calls_preserve_order_and_live_data() {
 
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
 void test_character_frame_steps_and_fixed_hooks_use_live_world() {
-    auto app = App(EngineConfig {.appName = "TypedCharacterPhaseTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "TypedCharacterPhaseTest", .validationMode = ValidationMode::Off, .headless = true});
     app.Install([](Engine& engine) { Character::Install(engine); });
     bool ran = false;
     app.OnStart([&](Engine& engine) {
@@ -446,7 +446,7 @@ void test_character_frame_steps_and_fixed_hooks_use_live_world() {
 
 #if defined(ZHLN_HAS_CAMERA_MODULES)
 void test_camera_modules_seed_before_drive_and_respect_opt_out() {
-    auto app = App(EngineConfig {.appName = "TypedCameraModulesTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "TypedCameraModulesTest", .validationMode = ValidationMode::Off, .headless = true});
     app.Install([](Engine& engine) {
         FreeCam::Install(engine);
         CameraRig::Install(engine);
@@ -518,7 +518,7 @@ void test_camera_modules_seed_before_drive_and_respect_opt_out() {
 #endif
 
 void test_presentation_draws_frozen_frustum_from_camera_query() {
-    auto app = App(EngineConfig {.appName = "DebugFrustumQueryTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "DebugFrustumQueryTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         const auto* present = FindStep(engine, "RenderSystem");
@@ -583,7 +583,7 @@ void ProbeCleanup(Engine& engine, bool all) {
 }
 
 void test_cleanup_releases_expanded_hierarchy_before_callbacks_and_clears_commands() {
-    auto app = App(EngineConfig {.appName = "TypedCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "TypedCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         auto reg        = engine.Entities();
@@ -620,7 +620,7 @@ void test_cleanup_releases_expanded_hierarchy_before_callbacks_and_clears_comman
 
 #if defined(ZHLN_HAS_ANIMATION)
 void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
-    auto app = App(EngineConfig {.appName = "AnimationQueryCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "AnimationQueryCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         Animation::Install(engine);
@@ -651,7 +651,7 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
 
 #if defined(ZHLN_HAS_EDITOR)
 void test_editor_capability_crud_is_immediate_and_destruction_is_deferred() {
-    auto app = App(EngineConfig {.appName = "EditorCapabilityTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "EditorCapabilityTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         auto                entities = engine.Entities();
@@ -694,7 +694,7 @@ void         ObserveTerrainHeight(Terrain::TerrainHeightQuery query) {
 }
 
 void test_terrain_typed_sampling_and_scene_cleanup() {
-    auto app = App(EngineConfig {.appName = "TerrainQueryBoundaryTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "TerrainQueryBoundaryTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         using namespace Terrain;
@@ -752,7 +752,7 @@ void                  ObserveRenderContext(ECS::ResMut<RenderContext> render) {
 }
 
 void test_render_graph_rebinds_renderer_after_device_recovery() {
-    auto app = App(EngineConfig {.appName = "RenderServiceRecoveryTest", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = NativeApp(EngineConfig {.appName = "RenderServiceRecoveryTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         auto&         graph       = engine.GetRenderGraph();
@@ -788,7 +788,7 @@ void test_render_graph_rebinds_renderer_after_device_recovery() {
 void test_app_ui_only_layer_runs_in_host_before_engine_tick() {
     std::vector<std::string_view> calls;
     auto                          app =
-        App(EngineConfig {
+        NativeApp(EngineConfig {
             .appName        = "UIOnlyAppLayerTest",
             .validationMode = ValidationMode::Off,
             .headless       = true,
@@ -805,7 +805,7 @@ void test_app_ui_only_layer_runs_in_host_before_engine_tick() {
 void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
     std::vector<std::string_view> calls;
     auto                          app =
-        App(EngineConfig {
+        NativeApp(EngineConfig {
             .appName        = "AppLayerLifecycleTest",
             .validationMode = ValidationMode::Off,
             .headless       = true,
@@ -830,7 +830,7 @@ void test_app_layers_render_ui_in_order_and_stop_before_engine_teardown() {
 void test_app_stops_layers_on_typed_frame_failure() {
     std::vector<std::string_view> calls;
     auto                          app =
-        App(EngineConfig {
+        NativeApp(EngineConfig {
             .appName        = "AppLayerFrameFailureTest",
             .validationMode = ValidationMode::Off,
             .headless       = true,
@@ -872,7 +872,7 @@ void test_app_engine_config_service_is_available_before_install_and_scene_start(
     bool             updated   = false;
     std::string_view region;
 
-    auto app = App(config);
+    auto app = NativeApp(config);
     app.AddCliOption("--region", "<name>", "Initial region", [&](std::string_view value) -> std::expected<void, CommandLineError> {
         region    = value;
         actionRan = true;
@@ -931,7 +931,7 @@ void AddModuleSceneProbe(ECS::SimGraph& updateGraph, ECS::RenderGraph&) {
 void test_clear_scene_preserves_graphs_resets_locals_and_scene_instantiate_recreates_camera() {
     g_moduleSceneProbeRuns = 0;
     auto app =
-        App(EngineConfig {
+        NativeApp(EngineConfig {
             .appName        = "SceneLifecycleSplitTest",
             .width          = 320,
             .height         = 180,

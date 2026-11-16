@@ -212,6 +212,8 @@ struct IGraphicsDevice : IObject {
     // between a size query and a copy if the same snapshot is required.
     [[nodiscard]] virtual Result<uint64_t> CaptureFrame(ChainOutNode* info, Span<uint8_t> pixels) noexcept = 0;
 
+    [[nodiscard]] virtual Option<float> PacedDeltaTime() const noexcept = 0;
+
 protected:
     ~IGraphicsDevice() = default;
 };

@@ -133,6 +133,23 @@ struct IEntities : IObject {
         return Reflect::CanonicalTypeName<T>();
     }
 
+    template <ComComponent T>
+    [[nodiscard]] auto GetSingleton() const noexcept -> T* {
+        const auto entity = SingletonEntity<T>();
+        return entity.HasValue() ? Get<T>(entity.value) : nullptr;
+    }
+    template <ComComponent T, typename Fn>
+    auto Patch(Entity entity, Fn&& patch) noexcept -> bool {
+        if (auto* value = Get<T>(entity)) { patch(*value); return true; }
+        return false;
+    }
+    template <ComComponent... T>
+    [[nodiscard]] auto Spawn(const T&... components) noexcept -> Entity {
+        const auto entity = CreateEntity();
+        if (!((Attach<T>(entity, components) != nullptr) && ...)) { Despawn(entity); return Entity::Null(); }
+        return entity;
+    }
+
 protected:
     ~IEntities() = default;
 };

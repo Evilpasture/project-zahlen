@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -533,7 +533,7 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectGt(updateSystems, 0);
             ZHLN::Test::ExpectGt(renderSystems, 0);
 
-            ZHLN::HostUI hostUI(*engine);
+            ZHLN::NativeHostUI hostUI(*engine);
             const ZHLN::FontAtlas& firstFont = hostUI.GetFontAtlas();
             const ZHLN::TextureID atlas     = firstFont.texture;
             ZHLN::Test::ExpectTrue(atlas != ZHLN::TextureID::Invalid);

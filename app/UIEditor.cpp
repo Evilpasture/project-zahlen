@@ -7,10 +7,9 @@
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //
-// It runs on Engine with no scene: the editor's windows, GPU, assets and
-// GUI::Context + GUI::UIInput state per window. No World, no ECS::Registry, no
-// physics, no camera, no frame scheduler: the document is a UINode tree and
-// the chrome is immediate-mode Clay, so nothing here needs a simulation.
+// The host owns GUI::Context + GUI::UIInput state per window. It drives the
+// COM engine without accessing a World, registry, renderer or native window.
+// The document is a UINode tree; both windows submit ordinary copied UI data.
 //
 //   Left   Hierarchy  -- one row per node id; click selects a container
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
@@ -29,18 +28,13 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/App.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Render/View.hpp>
 #include <Widget/TextFit.hpp>
-#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <UI/UITree.hpp>
@@ -189,7 +183,7 @@ struct Session {
     GUI::Context                  previewGui;
     GUI::UIInput                 editorInput {};
     bool editorCaptureKeyboard = false;
-    std::unique_ptr<ZHLN::HostUI> hostUI;
+    ZHLN::HostUI* hostUI = nullptr; // borrowed from Application, not engine-owned
     GUI::UIInput                 previewInput {};
     GUI::PropertyStore            previewProperties; // runtime instance; Design keeps `properties`
 
@@ -526,7 +520,7 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::InputState& state, bool uiOwnsKeyboard) {
+void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::COM::HostInputInfo& state, bool uiOwnsKeyboard) {
     const float mx          = state.mouseX;
     const float my          = state.mouseY;
     const bool  controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
@@ -571,38 +565,10 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-// The host draws its own cursor into whichever window the pointer is in. It is
-// a draw hook rather than part of UIDrawData because the cursor is not UI: it
-// follows the device, not the tree.
-void DrawCustomCursor(ZHLN::Engine& engine, const ZHLN::Engine::WindowRenderView& view, const Session& session,
-                      const GUI::UIInput& input, ZHLN::FrameScope& gpuFrame) {
-    if (view.size.width == 0 || view.size.height == 0 || !engine.Host().CustomCursor()) {
-        return;
-    }
-    const float cursorX = std::clamp(input.mouseX, 0.0f, static_cast<float>(view.size.width - 1));
-    const float cursorY = std::clamp(input.mouseY, 0.0f, static_cast<float>(view.size.height - 1));
-    const ZHLN::CustomCursor cursor(cursorX, cursorY);
-    if (const auto drawn = gpuFrame.RenderUI(
-            ZHLN::UIView {
-                .viewport   = {.x = 0, .y = 0, .width = view.size.width, .height = view.size.height},
-                .target     = view.target,
-                .frameIndex = view.frameIndex,
-            },
-            cursor.DrawData()
-        );
-        !drawn) {
-        ZHLN::Log("[UIEditor] Custom cursor draw failed: {}", drawn.error());
-    }
-}
-
-// The preview window's UI. This is the draw hook the engine calls for the
-// preview window inside that window's own acquired frame -- the editor and the
-// preview are two windows of one engine, drawn in one Tick.
-void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
-    if (view.size.width == 0 || view.size.height == 0) {
-        return;
-    }
-    const ZHLN::Extent2D previewSize = view.size;
+// Explicit host composition: both windows submit copied geometry before Tick.
+auto DrawPreview(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Result<void> {
+    const auto previewSize = engine.WindowExtent(session.previewID);
+    if (!previewSize.width || !previewSize.height) return {};
     session.previewGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.previewGui.BeginFrame(
         session.previewInput = session.hostUI->ConsumeInput(session.dt, session.previewID)
@@ -621,47 +587,29 @@ void DrawPreview(ZHLN::Engine& engine, Session& session, const ZHLN::Engine::Win
         }
     );
     const ZHLN::UIDrawData uiData = std::move(gui).End();
-    const auto             draw   = [&](const ZHLN::UIDrawData& data) {
-        if (data.Empty()) {
-            return;
-        }
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                    .target     = view.target,
-                    .frameIndex = view.frameIndex,
-                },
-                data
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
-        }
-    };
-    draw(uiData);
+    return session.hostUI->Submit(uiData, session.previewID);
 }
 
-[[nodiscard]] auto PreviewIsRunning(ZHLN::Engine& engine, const Session& session) -> bool {
+[[nodiscard]] auto PreviewIsRunning(ZHLN::COM::IEngine& engine, const Session& session) -> bool {
     if (session.previewID == ZHLN::WindowID::Invalid) {
         return false;
     }
-    return engine.Host(session.previewID).Running();
+    return engine.IsWindowRunning(session.previewID);
 }
 
-void StopPreview(ZHLN::Engine& engine, Session& session) {
+void StopPreview(ZHLN::COM::IEngine& engine, Session& session) {
     if (session.previewID != ZHLN::WindowID::Invalid) {
         engine.RemoveWindow(session.previewID);
         session.previewID = ZHLN::WindowID::Invalid;
     }
 }
 
-void StopPreview(ZHLN::Engine& engine, Session& session);
-void OpenPreview(ZHLN::Engine& engine, Session& session);
+void StopPreview(ZHLN::COM::IEngine& engine, Session& session);
+void OpenPreview(ZHLN::COM::IEngine& engine, Session& session);
 
 // Once per frame, before the engine's Tick: the editor's clock, the preview
-// window's life, and the actions the previous frame's Preview clicks pushed.
-// Actions are drained here rather than at the end of the frame because the push
-// happens inside Tick, in the window's draw hook.
-void UpdateEditor(ZHLN::Engine& engine, Session& session, float dt) {
+// window's life, and actions queued by the previous host UI composition.
+void UpdateEditor(ZHLN::COM::IEngine& engine, Session& session, float dt) {
     session.dt = dt;
     if (session.previewID != ZHLN::WindowID::Invalid && !PreviewIsRunning(engine, session)) {
         StopPreview(engine, session);
@@ -677,7 +625,7 @@ void UpdateEditor(ZHLN::Engine& engine, Session& session, float dt) {
     });
 }
 
-void OpenPreview(ZHLN::Engine& engine, Session& session) {
+void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
     if (PreviewIsRunning(engine, session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
@@ -690,23 +638,13 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
     // The preview window is an ordinary destination: the editor draws its 2D
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
-    const auto previewWindow = engine.AddWindow("UI Preview", 800, 600, false);
-    if (previewWindow == ZHLN::WindowID::Invalid) {
+    const auto previewWindow = engine.AddWindow(ZHLN::COM::WindowCreateInfo {.title = "UI Preview", .width = 800, .height = 600});
+    if (!previewWindow.HasValue()) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
-    session.previewID = previewWindow;
+    session.previewID = previewWindow.value;
 
-    // The preview window's own two hooks, keyed by its id. Nothing is shared
-    // with the editor window except the Session: the engine asks each window
-    // for its own UI and its own drawing.
-    engine.SetWindowDrawCallback(
-        session.previewID,
-        [&session](ZHLN::Engine& active, const ZHLN::Engine::WindowRenderView& view, ZHLN::FrameScope& gpuFrame) {
-            DrawPreview(active, session, view, gpuFrame);
-            DrawCustomCursor(active, view, session, session.previewInput, gpuFrame);
-        }
-    );
     ZHLN::Log("[UIEditor] Preview window open");
 }
 
@@ -749,8 +687,9 @@ void LoadTree(Session& session, std::string_view path) {
 // published for a window into that window's acquired target, which is why this
 // does not touch a FrameScope: it runs in the UI phase, before any frame is
 // acquired.
-void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
-    const auto state = std::as_const(engine).Input().Snapshot();
+auto SubmitEditorUI(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Result<void> {
+    ZHLN::COM::HostInputInfo state;
+    (void)engine.ReadHostInput(engine.PrimaryWindow(), ZHLN::COM::OutChain(state), false);
     const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || session.editorCaptureKeyboard;
 
     const bool xformWasActive = session.xform != XformMode::None;
@@ -771,7 +710,7 @@ void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
     session.saveWasDown = saveDown;
 #endif
 
-    const ZHLN::Extent2D size = engine.Host().Extent();
+    const ZHLN::Extent2D size = engine.WindowExtent(engine.PrimaryWindow());
     session.editorGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.editorGui.BeginFrame(
         session.editorInput = session.hostUI->ConsumeInput(session.dt)
@@ -886,9 +825,9 @@ void SubmitEditorUI(ZHLN::Engine& engine, Session& session) {
     ZHLN::UIDrawData uiData = std::move(gui).End();
     session.editorCaptureKeyboard = uiData.wantsCaptureKeyboard;
     if (uiData.Empty()) {
-        return;
+        return {};
     }
-    session.hostUI->Submit(std::move(uiData));
+    return session.hostUI->Submit(std::move(uiData));
 
 }
 
@@ -900,40 +839,40 @@ auto main(int argc, char* argv[]) -> int {
     session.selectedId = "panel";
     BindHostActions(session);
 
-    ZHLN::AssetID activeFontAssetID = ZHLN::GUI::kDefaultFontAssetID;
-    auto          rebuildFonts      = [&](ZHLN::Engine& engine) {
-        // The engine builds the atlas from its own renderer and asset cache, and
-        // rebuilds it after device loss. The editor takes a copy; it never holds
-        // a renderer or asset-cache reference across recovery.
-        if (!session.hostUI) session.hostUI = std::make_unique<ZHLN::HostUI>(engine);
-        session.fontAtlas = session.hostUI->GetFontAtlas();
-        session.editorGui.SetFontAtlas(session.fontAtlas);
-        session.previewGui.SetFontAtlas(session.fontAtlas);
+    struct EditorOptions { uint32_t frames = 0; } options;
+    struct EditorLayer {
+        Session* session;
+        uint32_t* frameLimit;
+        void Start(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) {
+            session->hostUI = &ui;
+#if defined(ZHLN_HAS_FONTS)
+            auto baked = ZHLN::Fonts::LoadBakedFont(engine.Assets(), ZHLN::Fonts::VendoredDefaultFontSource());
+            if (baked) ui.SetBakedFont(std::move(*baked));
+            else ZHLN::LogWarning("Font load failed ({}); using embedded default.", baked.error());
+#endif
+        }
+        void Tick(ZHLN::COM::IEngine& engine, float dt) {
+            UpdateEditor(engine, *session, dt);
+            if (*frameLimit && engine.CurrentFrame() >= *frameLimit) engine.RequestClose();
+        }
+        auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
+            // The host retains the CPU atlas and rebuilds its texture whenever
+            // the device generation changes; no engine callback captures Session.
+            session->fontAtlas = ui.GetFontAtlas();
+            session->editorGui.SetFontAtlas(session->fontAtlas);
+            session->previewGui.SetFontAtlas(session->fontAtlas);
+            const auto submitted = SubmitEditorUI(engine, *session);
+            if (!submitted.HasValue()) return std::unexpected(submitted.error);
+            if (PreviewIsRunning(engine, *session)) {
+                const auto preview = DrawPreview(engine, *session);
+                if (!preview.HasValue()) return std::unexpected(preview.error);
+            }
+            return {};
+        }
+        void Stop(ZHLN::COM::IEngine& engine) { StopPreview(engine, *session); session->hostUI = nullptr; }
     };
-
     ZHLN::EngineConfig editorConfig {};
     editorConfig.appName = "Zahlen UI Editor";
-
-    const auto result = ZHLN::Application(editorConfig)
-        .OnStart([&](ZHLN::Engine& engine) {
-            // Fonts are assets, not a renderer-owned outline parser. Prime the
-            // baked fallback before creating the application's two GUI atlases.
-#if defined(ZHLN_HAS_FONTS)
-            if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource())) {
-                activeFontAssetID = *fontAssetID;
-            } else {
-                ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
-            }
-#endif
-            (void) engine;  // PrimeDefaultBakedFont runs inside LoadFontAsset above.
-            rebuildFonts(engine);
-
-            // The editor window's UI. It is the primary window's callback, so it
-            // is asked to draw once per frame for that window and never for the
-            // preview.
-            session.hostUI->SetCallback(ZHLN::WindowID::Primary, [&session](ZHLN::Engine& active, ZHLN::WindowID) { SubmitEditorUI(active, session); });
-            engine.AddDeviceLostCallback([&rebuildFonts](ZHLN::Engine& restored) { rebuildFonts(restored); });
-        })
-        .Run(argc, argv, [&session](ZHLN::Engine& engine, float dt) { UpdateEditor(engine, session, dt); session.hostUI->Update(dt); });
+    const auto result = ZHLN::Application(editorConfig).WithConfig(options).AddLayer(EditorLayer {&session, &options.frames}).Run(argc, argv);
     return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

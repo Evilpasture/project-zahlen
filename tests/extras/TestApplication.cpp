@@ -5,8 +5,6 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
@@ -27,7 +25,7 @@ namespace ZHLN::Test {
 namespace {
 struct MoveOnlyFrameLogic {
     std::unique_ptr<int> counter;
-    void operator()(Engine&, float) { ++*counter; }
+    void operator()(COM::IEngine&, float) { ++*counter; }
 };
 static_assert(!std::copy_constructible<MoveOnlyFrameLogic>);
 static_assert(requires { App().Run(std::declval<MoveOnlyFrameLogic>()); });
@@ -60,24 +58,24 @@ struct RichLaunchOptions {
     String64       server {"localhost"};
     QualitySetting quality ZHLN_ANNOTATION(Description<"Quality preset"> {}, = CliShort<'q'> {}) = QualitySetting::Low;
 };
-struct StartOnlyLayer { void Start(Engine&) {} };
-struct TickOnlyLayer { void Tick(Engine&, float) {} };
+struct StartOnlyLayer { void Start(COM::IEngine&) {} };
+struct TickOnlyLayer { void Tick(COM::IEngine&, float) {} };
 struct UIOnlyLayer {
     bool* called = nullptr;
-    void UI(Engine&) { if (called) *called = true; }
+    void UI(COM::IEngine&) { if (called) *called = true; }
 };
 struct StopOnlyLayer {
     bool* called = nullptr;
-    void Stop(Engine&) { if (called) *called = true; }
+    void Stop(COM::IEngine&) { if (called) *called = true; }
 };
-struct NotALayer { void Update(Engine&) {} };
+struct NotALayer { void Update(COM::IEngine&) {} };
 struct MoveOnlyLayer {
     std::unique_ptr<int> value;
     bool* called = nullptr;
-    void Start(Engine&) { *called = true; }
-    void Tick(Engine&, float) { *called = true; }
-    void UI(Engine&) { *called = true; }
-    void Stop(Engine&) { *called = true; }
+    void Start(COM::IEngine&) { *called = true; }
+    void Tick(COM::IEngine&, float) { *called = true; }
+    void UI(COM::IEngine&) { *called = true; }
+    void Stop(COM::IEngine&) { *called = true; }
 };
 static_assert(AppLayer<StartOnlyLayer>);
 static_assert(AppLayer<TickOnlyLayer>);
@@ -87,7 +85,7 @@ static_assert(AppLayer<MoveOnlyLayer>);
 static_assert(!AppLayer<NotALayer>);
 static_assert(!std::copy_constructible<MoveOnlyLayer>);
 template <typename T>
-concept HasApplicationOnUI = requires(T& app, std::function<void(Engine&, WindowID)> callback) { app.OnUI(std::move(callback)); };
+concept HasApplicationOnUI = requires(T& app, std::function<void(COM::IEngine&, WindowID)> callback) { app.OnUI(std::move(callback)); };
 static_assert(!HasApplicationOnUI<Application>); // application UI only comes from layers
 static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
@@ -130,7 +128,7 @@ void test_app_help_exits_without_running_gameplay() {
     char option[]  = "--help";
     char* args[]   = {program, option};
     bool  ran      = false;
-    ExpectExit(App().Run(2, args, [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
+    ExpectExit(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran);
 }
 
@@ -154,9 +152,9 @@ void test_app_rejects_removed_tool_mode_flags_without_starting_engine() {
     char bench[]   = "--benchmark";
     char* args[]   = {program, editor};
     bool  ran      = false;
-    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
+    ExpectError(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), CommandLineError::UnknownArgument);
     args[1] = bench;
-    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
+    ExpectError(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), CommandLineError::UnknownArgument);
     Expect(!ran);
 }
 
@@ -176,8 +174,8 @@ void test_app_preparation_preserves_typed_failure_and_skips_cli_early_exits() {
         Expect(!installed && !started);
         return std::unexpected(PreparationFailure::Refused);
     });
-    app.Install([&](Engine&) { installed = true; });
-    app.OnStart([&](Engine&) { started = true; });
+    app.Install([&](COM::IEngine&) { installed = true; });
+    app.OnStart([&](COM::IEngine&) { started = true; });
 
     ExpectError(RunConfigCli(app, {"--scene=ready"}), PreparationFailure::Refused);
     Expect(prepared && cliActions == 1 && !installed && !started);
@@ -204,8 +202,8 @@ void test_app_rejects_invalid_args_before_engine_creation() {
     ExpectError(App().Run(2, args), CommandLineError::UnknownArgument);
     ExpectError(App().Run(-1, args), AppError::InvalidArguments);
     ExpectError(App().Run(1, nullptr), AppError::InvalidArguments);
-    ExpectError(App().Run(-1, args, [](Engine&) {}), AppError::InvalidArguments);
-    ExpectError(App().Run(1, nullptr, [](Engine&) {}), AppError::InvalidArguments);
+    ExpectError(App().Run(-1, args, [](COM::IEngine&) {}), AppError::InvalidArguments);
+    ExpectError(App().Run(1, nullptr, [](COM::IEngine&) {}), AppError::InvalidArguments);
 }
 
 void test_app_custom_flags_bulk_registration_and_help_via_span() {
@@ -251,7 +249,7 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     char dry[]     = "--dry-run";
     char help[]    = "--help";
     char* args[]   = {program, stage, number, dry, help};
-    ExpectExit(app.Run(std::span<char* const>(args), [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
+    ExpectExit(app.Run(std::span<char* const>(args), [&](COM::IEngine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran); // --help exits before Engine::Create
     Expect(level == "ruins");
     Expect(seed == 19);
@@ -460,37 +458,100 @@ void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
     capped.EndFrame(FramePacer::BeginFrame(), 0.020f); // already display-paced: no sleep
 }
 
-// Runs in the ordinary extras worker, not only the opt-in render suite.
-// Stop before presentation with an explicit frame error after input evaluation.
-void test_host_ui_precedes_engine_tick_and_layers_stop_on_frame_error() {
+// Public COM host: UI is host-owned, runs before Tick, and typed update
+// failures stop layers in reverse order without a native module-injection seam.
+void test_host_ui_precedes_engine_tick_and_layers_stop_on_host_error() {
     struct HostLayer {
         std::vector<std::string_view>* calls;
-        void Start(Engine&) { calls->push_back("start"); }
-        void Tick(Engine&, float) { calls->push_back("tick"); }
-        void UI(Engine& engine) {
-            ExpectEq(engine.GetCurrentFrame(), uint64_t {0});
-            for (const auto& step: engine.Steps()) Expect(step.name != "HostUICallback");
+        void Start(COM::IEngine&, HostUI&) { calls->push_back("start"); }
+        void Tick(COM::IEngine&, float) { calls->push_back("tick"); }
+        void UI(COM::IEngine& engine, HostUI& ui) {
+            ExpectEq(engine.CurrentFrame(), uint64_t {0});
+            Expect(ui.Submit({}).HasValue());
             calls->push_back("ui");
         }
-        void Stop(Engine&) { calls->push_back("stop"); }
+        void Stop(COM::IEngine&) { calls->push_back("stop"); }
     };
     std::vector<std::string_view> calls;
     auto app = App(EngineConfig {.appName = "HostUILifecycle", .validationMode = ValidationMode::Off, .headless = true});
     app.WithDefaultModules(false).AddLayer(HostLayer {&calls});
-    app.OnStart([](Engine& engine) {
-        static constexpr ModuleStep steps[] {{
-            .phase = FramePhase::UI,
-            .name = "HostUILifecycleAbort",
-            .run = +[](Engine&, float, FrameContext& frame) { frame.error = ErrorCode(FrameError::StepFailed); },
-            .placement = StepPlacement::After,
-            .anchor = "EvaluateInput",
-        }};
-        Expect(engine.InstallModule(Module {.name = "HostUILifecycleAbort", .frameSteps = steps}).has_value());
+    const auto result = app.Run([&](COM::IEngine&, float) -> std::expected<void, ErrorCode> {
+        calls.push_back("update"); return std::unexpected(PreparationFailure::Refused);
     });
-    const auto result = app.Run([&](Engine&, float) { calls.push_back("update"); });
     Expect(!result.has_value());
-    if (!result) Expect(result.error().Is(AppError::FrameTickFailed));
+    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
     Expect(calls == std::vector<std::string_view> {"start", "tick", "ui", "update", "stop"});
+}
+
+void test_com_application_owns_ui_atlas_and_renders_before_tick() {
+    struct UILayer {
+        int* frames;
+        void UI(COM::IEngine& engine, HostUI& ui) {
+            const auto& atlas = ui.GetFontAtlas();
+            Expect(atlas.texture != TextureID::Invalid);
+            auto gui = ui.Context().BeginFrame(ui.ConsumeInput(1.0f / 60.0f));
+            gui.Text("COM host UI");
+            const auto data = std::move(gui).End();
+            Expect(ui.Submit(data).HasValue());
+            ++*frames;
+            if (engine.CurrentFrame() >= 1) engine.RequestClose();
+        }
+    };
+    int frames = 0;
+    auto result = App(EngineConfig {.appName = "COMHostUIRender", .width = 96, .height = 64,
+        .validationMode = ValidationMode::Off, .headless = true}).AddLayer(UILayer {&frames}).Run();
+    Expect(result.has_value());
+    Expect(frames >= 2);
+}
+
+void test_com_application_injected_ui_input_owns_spans() {
+    struct Layer {
+        void Start(COM::IEngine& engine, HostUI& ui) {
+            std::vector<KeyCode> keys {KeyCode::A, KeyCode::B};
+            std::vector<uint32_t> chars {U'a', U'b'};
+            ui.SubmitInput(GUI::UIInput {.pressedKeys = keys, .characterStream = chars});
+            keys.assign(1, KeyCode::Z); chars.assign(1, U'z');
+            // An unrelated window read must not discard primary supplied input.
+            (void)ui.ConsumeInput(0, static_cast<WindowID>(0x7fffffffu));
+            const auto consumed = ui.ConsumeInput(0.01f);
+            ExpectEq(consumed.pressedKeys.size(), size_t {2});
+            ExpectEq(consumed.characterStream.size(), size_t {2});
+            if (consumed.pressedKeys.size() == 2) Expect(consumed.pressedKeys[0] == KeyCode::A);
+            if (consumed.characterStream.size() == 2) ExpectEq(consumed.characterStream[1], uint32_t {U'b'});
+            const auto next = ui.ConsumeInput(0.01f);
+            Expect(next.characterStream.empty() && next.pressedKeys.empty());
+            engine.RequestClose();
+        }
+    };
+    const auto result = App(EngineConfig {.appName = "COMHostUIInput", .validationMode = ValidationMode::Off, .headless = true})
+        .AddLayer(Layer {}).Run();
+    Expect(result.has_value());
+}
+
+void test_com_application_ui_errors_stop_layers_in_reverse() {
+    struct Layer {
+        int id;
+        std::vector<int>* calls;
+        HostUI* ui = nullptr;
+        void Start(COM::IEngine&, HostUI& hostUI) { ui = &hostUI; calls->push_back(id); }
+        auto UI(COM::IEngine& engine, HostUI&) -> std::expected<void, ErrorCode> {
+            ExpectEq(engine.CurrentFrame(), uint64_t {0});
+            calls->push_back(10 + id);
+            return std::unexpected(PreparationFailure::Refused);
+        }
+        void Stop(COM::IEngine&) {
+            // Host resources are alive during Stop; font upload is still legal.
+            Expect(ui->GetFontAtlas().texture != TextureID::Invalid);
+            calls->push_back(-id);
+            ui = nullptr;
+        }
+    };
+    std::vector<int> calls;
+    const auto result = App(EngineConfig {.appName = "COMHostUIFailure", .validationMode = ValidationMode::Off, .headless = true})
+        .AddLayer(Layer {1, &calls}).AddLayer(Layer {2, &calls}).Run();
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
+    Expect(calls == std::vector<int> {1, 2, 11, -2, -1});
 }
 
 } // namespace ZHLN::Test

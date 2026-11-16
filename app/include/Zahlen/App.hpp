@@ -6,7 +6,9 @@
 // Application facade: unlike Core's Engine.hpp, this host-facing header owns
 // its reflected CLI contract. zahlen_application publishes app/include/.
 #include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
+#include <Zahlen/HostUI.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <concepts>
 #include <cstddef>
@@ -23,20 +25,24 @@ namespace ZHLN {
 
 // Compatibility hook; the base Application installs no optional modules.
 // Compose modules explicitly with Install().
-void InstallApplicationDefaults(Engine& engine);
+void InstallApplicationDefaults(COM::IEngine& engine);
 
 // A layer may implement any of Start, Tick, UI and Stop. Start runs after
 // scene creation; Tick runs after event/input pumping; UI runs in the host
 // loop before update and Engine::Tick, never in a core frame step. Hooks run
 // in registration order; Stop runs in reverse order before Engine teardown. Layers can own move-only state.
 template <typename T>
-concept AppLayer = requires(std::remove_cvref_t<T>& layer, Engine& engine) {
+concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
     layer.Start(engine);
-} || requires(std::remove_cvref_t<T>& layer, Engine& engine, float dt) {
+} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) {
+    layer.Start(engine, ui);
+} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) {
     layer.Tick(engine, dt);
-} || requires(std::remove_cvref_t<T>& layer, Engine& engine) {
+} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
     layer.UI(engine);
-} || requires(std::remove_cvref_t<T>& layer, Engine& engine) {
+} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) {
+    layer.UI(engine, ui);
+} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
     layer.Stop(engine);
 };
 
@@ -53,7 +59,7 @@ class ZHLN_API Application {
         return *this;
     }
 
-    auto Install(std::function<void(Engine&)> installer) -> Application& {
+    auto Install(std::function<void(COM::IEngine&)> installer) -> Application& {
         if (installer) {
             _installers.push_back(std::move(installer));
         }
@@ -106,17 +112,29 @@ class ZHLN_API Application {
         using Stored = std::remove_cvref_t<Layer>;
         LayerSlot slot;
         slot.state = std::make_shared<Stored>(std::forward<Layer>(layer));
-        if constexpr (requires(Stored& l, Engine& engine) { l.Start(engine); }) {
-            slot.start = [](void* state, Engine& engine) { static_cast<Stored*>(state)->Start(engine); };
+        if constexpr (requires(Stored& l, COM::IEngine& engine, HostUI& ui) { l.Start(engine, ui); }) {
+            slot.start = [](void* state, COM::IEngine& engine, HostUI& ui) { static_cast<Stored*>(state)->Start(engine, ui); };
+        } else if constexpr (requires(Stored& l, COM::IEngine& engine) { l.Start(engine); }) {
+            slot.start = [](void* state, COM::IEngine& engine, HostUI&) { static_cast<Stored*>(state)->Start(engine); };
         }
-        if constexpr (requires(Stored& l, Engine& engine, float dt) { l.Tick(engine, dt); }) {
-            slot.tick = [](void* state, Engine& engine, float dt) { static_cast<Stored*>(state)->Tick(engine, dt); };
+        if constexpr (requires(Stored& l, COM::IEngine& engine, float dt) { l.Tick(engine, dt); }) {
+            slot.tick = [](void* state, COM::IEngine& engine, float dt) { static_cast<Stored*>(state)->Tick(engine, dt); };
         }
-        if constexpr (requires(Stored& l, Engine& engine) { l.UI(engine); }) {
-            slot.ui = [](void* state, Engine& engine) { static_cast<Stored*>(state)->UI(engine); };
+        if constexpr (requires(Stored& l, COM::IEngine& engine, HostUI& ui) { l.UI(engine, ui); }) {
+            slot.ui = [](void* state, COM::IEngine& engine, HostUI& ui) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->UI(engine, ui))>) {
+                    static_cast<Stored*>(state)->UI(engine, ui); return {};
+                } else return static_cast<Stored*>(state)->UI(engine, ui);
+            };
+        } else if constexpr (requires(Stored& l, COM::IEngine& engine) { l.UI(engine); }) {
+            slot.ui = [](void* state, COM::IEngine& engine, HostUI&) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->UI(engine))>) {
+                    static_cast<Stored*>(state)->UI(engine); return {};
+                } else return static_cast<Stored*>(state)->UI(engine);
+            };
         }
-        if constexpr (requires(Stored& l, Engine& engine) { l.Stop(engine); }) {
-            slot.stop = [](void* state, Engine& engine) { static_cast<Stored*>(state)->Stop(engine); };
+        if constexpr (requires(Stored& l, COM::IEngine& engine) { l.Stop(engine); }) {
+            slot.stop = [](void* state, COM::IEngine& engine) { static_cast<Stored*>(state)->Stop(engine); };
         }
         _layers.push_back(std::move(slot));
         return *this;
@@ -124,13 +142,13 @@ class ZHLN_API Application {
 
     // Application lifecycle, not launch configuration. Called once after the
     // initial scene is built (e.g. to spawn persistent entities).
-    auto OnStart(std::function<void(Engine&)> start) -> Application& {
+    auto OnStart(std::function<void(COM::IEngine&)> start) -> Application& {
         _start = std::move(start);
         return *this;
     }
 
     // System-driven apps need no per-frame callable. All paths publish the
-    // canonical EngineConfig service, whether or not CLI arguments were used.
+    // canonical EngineConfig, whether or not CLI arguments were used.
     [[nodiscard]] auto Run() const -> AppRunResult { return RunConfigured(_config, {}); }
     [[nodiscard]] auto Run(std::span<char* const> args) const -> AppRunResult { return RunFromCLI(_config, args, {}); }
 
@@ -144,22 +162,22 @@ class ZHLN_API Application {
     }
 
     // Gameplay runs once per frame after events/resize and before Engine::Tick.
-    // Both (Engine&) and (Engine&, float dt) work. The callable is borrowed
+    // Both (COM::IEngine&) and (COM::IEngine&, float dt) work. The callable is borrowed
     // synchronously until Run returns; even move-only state can be captured.
     template <typename GameLogic>
-        requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
+        requires(std::invocable<GameLogic&, COM::IEngine&> || std::invocable<GameLogic&, COM::IEngine&, float>)
     [[nodiscard]] auto Run(GameLogic&& logic) const -> AppRunResult {
         return RunConfigured(_config, BindLogic(logic));
     }
 
     template <typename GameLogic>
-        requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
+        requires(std::invocable<GameLogic&, COM::IEngine&> || std::invocable<GameLogic&, COM::IEngine&, float>)
     [[nodiscard]] auto Run(std::span<char* const> args, GameLogic&& logic) const -> AppRunResult {
         return RunFromCLI(_config, args, BindLogic(logic));
     }
 
     template <typename GameLogic>
-        requires(std::invocable<GameLogic&, Engine&> || std::invocable<GameLogic&, Engine&, float>)
+        requires(std::invocable<GameLogic&, COM::IEngine&> || std::invocable<GameLogic&, COM::IEngine&, float>)
     [[nodiscard]] auto Run(int argc, char* argv[], GameLogic&& logic) const -> AppRunResult {
         if (argc < 0 || (argc > 0 && argv == nullptr)) {
             return std::unexpected(AppError::InvalidArguments);
@@ -172,13 +190,13 @@ class ZHLN_API Application {
         // Shared ownership keeps the existing copyable Application API and
         // leaves no virtual dispatch in any of the four lifecycle phases.
         std::shared_ptr<void> state;
-        void (*start)(void*, Engine&)       = nullptr;
-        void (*tick)(void*, Engine&, float) = nullptr;
-        void (*ui)(void*, Engine&)          = nullptr;
-        void (*stop)(void*, Engine&)        = nullptr;
+        void (*start)(void*, COM::IEngine&, HostUI&)       = nullptr;
+        void (*tick)(void*, COM::IEngine&, float) = nullptr;
+        std::expected<void, ErrorCode> (*ui)(void*, COM::IEngine&, HostUI&)          = nullptr;
+        void (*stop)(void*, COM::IEngine&)        = nullptr;
     };
 
-    using Update = std::function<void(Engine&, float)>;
+    using Update = std::function<std::expected<void, ErrorCode>(COM::IEngine&, float)>;
 
     [[nodiscard]] static constexpr auto MakeSpan(int argc, char* argv[]) noexcept -> std::span<char* const> {
         return argc > 0 ? std::span<char* const>(argv, static_cast<size_t>(argc)) : std::span<char* const> {};
@@ -186,10 +204,16 @@ class ZHLN_API Application {
 
     template <typename GameLogic>
     static auto BindLogic(GameLogic& logic) -> Update {
-        if constexpr (std::invocable<GameLogic&, Engine&, float>) {
-            return [&logic](Engine& engine, float dt) { std::invoke(logic, engine, dt); };
+        if constexpr (std::invocable<GameLogic&, COM::IEngine&, float>) {
+            return [&logic](COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<std::invoke_result_t<GameLogic&, COM::IEngine&, float>>) { std::invoke(logic, engine, dt); return {}; }
+                else return std::invoke(logic, engine, dt);
+            };
         } else {
-            return [&logic](Engine& engine, float) { std::invoke(logic, engine); };
+            return [&logic](COM::IEngine& engine, float) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<std::invoke_result_t<GameLogic&, COM::IEngine&>>) { std::invoke(logic, engine); return {}; }
+                else return std::invoke(logic, engine);
+            };
         }
     }
 
@@ -198,8 +222,8 @@ class ZHLN_API Application {
 
     EngineConfig                                 _config;
     std::function<std::expected<void, ErrorCode>()> _prepare;
-    std::function<void(Engine&)>                    _start;
-    std::vector<std::function<void(Engine&)>>       _installers;
+    std::function<void(COM::IEngine&)>                    _start;
+    std::vector<std::function<void(COM::IEngine&)>>       _installers;
     ConfigCli                                        _cli;
     std::vector<LayerSlot>                          _layers;
     bool                                            _defaultModules = true;

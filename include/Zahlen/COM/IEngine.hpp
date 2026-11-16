@@ -98,6 +98,9 @@ struct IEngine : IObject {
     [[nodiscard]] virtual Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept = 0;
     // Views and their nested spans live only during callback. Null clears it.
     [[nodiscard]] virtual Result<void> SetFileDropCallback(WindowID window, FileDropCallback callback, void* userdata) noexcept = 0;
+    // Physical snapshot; consume clears only this window's queued UI keys/text
+    // after successful chain validation. Mouse/button state is never consumed.
+    [[nodiscard]] virtual Result<void> ReadHostInput(WindowID window, ChainOutNode* output, bool consume) noexcept = 0;
     // Supported chain: UISubmitInfo. Validates and copies all geometry now.
     [[nodiscard]] virtual Result<void> SubmitUI(WindowID window, const ChainInNode* uiChain) noexcept = 0;
 

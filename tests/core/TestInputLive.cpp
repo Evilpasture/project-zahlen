@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -474,7 +474,7 @@ void test_binding_capture_requires_a_device_edge() {
 void test_submitted_ui_input_owns_its_spans() {
     auto engine = MakeHeadlessEngine();
     if (!engine) return;
-    HostUI hostUI(*engine);
+    NativeHostUI hostUI(*engine);
 
     // The caller's storage stays alive but is overwritten after the call, which
     // is what a host's frame-local vector looks like one statement later. If the

@@ -37,40 +37,24 @@
 // --- threading --------------------------------------------------------------
 #include <Zahlen/Threading/TaskSystem.hpp>
 
-// --- ECS --------------------------------------------------------------------
+// --- fixed-layout engine vocabulary and COM capabilities ---------------------
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
-
-// --- simulation -------------------------------------------------------------
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Audio/Audio.hpp>
-
-// --- presentation -----------------------------------------------------------
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Render/RenderGraphDump.hpp>
-#include <Zahlen/Render/View.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/Window/WindowInput.hpp>
-#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IDebugDraw.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 
-// --- engine composition -----------------------------------------------------
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Scene.hpp>
-
-// --- application ------------------------------------------------------------
+// --- host policy (not linked into the engine) ---------------------------------
 #include <Zahlen/App.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/HostUI.hpp>
 #include <Zahlen/HostRunner.hpp>

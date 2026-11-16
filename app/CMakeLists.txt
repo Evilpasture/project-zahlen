@@ -1,3 +1,11 @@
+# Transitional native-extension UI helper, deliberately not a dependency of
+# the COM Application/HostUI targets. Removed as native plugins are migrated.
+add_library(zahlen_native_host_ui STATIC ${PROJECT_SOURCE_DIR}/extensions/NativeHostUI/NativeHostUI.cpp)
+target_include_directories(zahlen_native_host_ui PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
+target_link_libraries(zahlen_native_host_ui PUBLIC zahlen_engine PRIVATE zahlen_warnings)
+set_target_properties(zahlen_native_host_ui PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+zahlen_enable_reflection(zahlen_native_host_ui)
+
 add_library(zahlen_host_ui STATIC HostUI.cpp)
 set_target_properties(zahlen_host_ui PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_host_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -17,7 +25,7 @@ set_target_properties(zahlen_host_runner PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 target_link_libraries(zahlen_host_runner
-    PUBLIC zahlen_engine zahlen_command_line zahlen_host_ui
+    PUBLIC zahlen_engine zahlen_command_line
     PRIVATE zahlen_signal zahlen_warnings
 )
 # Only app-owned targets publish the host-facing headers under app/include/.

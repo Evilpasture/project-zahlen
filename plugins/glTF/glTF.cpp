@@ -12,7 +12,7 @@
 //     cursor is inside the explorer panel so clicks don't move the camera).
 
 module;
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -91,7 +91,7 @@ struct InspectorState {
     std::string                     selectedDetails {}; // details box body
     int32_t                         playingClip = -1;   // index into prefab.animations, -1 = stopped
     ZHLN::GUI::Context              gui {};
-    std::unique_ptr<ZHLN::HostUI> hostUI;
+    std::unique_ptr<ZHLN::NativeHostUI> hostUI;
 };
 
 [[nodiscard]] FVec4 ThemeText() noexcept {
@@ -804,7 +804,7 @@ void Initialize(ZHLN::Engine& engine) {
 
     auto* state   = new InspectorState();
     state->engine = &engine;
-    state->hostUI = std::make_unique<ZHLN::HostUI>(engine);
+    state->hostUI = std::make_unique<ZHLN::NativeHostUI>(engine);
     engine.SetGameState(state);
 
     AddInspectorLighting(engine);

@@ -6,7 +6,8 @@
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IState.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Render/RenderGraphDump.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -126,12 +127,13 @@ ProcessScope::ProcessScope() {
 
 ProcessScope::~ProcessScope() = default;
 
-void ProcessScope::PollCrashes(const Engine* engine) {
-    if (engine != nullptr) {
-        CheckForCrashes(SharedCrashState(), engine);
-    } else {
-        CheckForCrashes(SharedCrashState());
-    }
+void ProcessScope::PollCrashes(COM::IEngine* engine) {
+    struct Diagnostics {
+        COM::IEngine* engine;
+        void TraceDiagnostics() const { engine->State()->TraceDiagnostics(); }
+    } target {engine};
+    if (engine) CheckForCrashes(SharedCrashState(), &target);
+    else CheckForCrashes(SharedCrashState());
 }
 
 FramePacer::FramePacer(uint32_t maxFramesPerSecond) noexcept: _targetFrameTime(maxFramesPerSecond > 0 ? 1.0 / static_cast<double>(maxFramesPerSecond) : 0.0) {

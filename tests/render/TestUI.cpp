@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -62,7 +62,7 @@ struct SolidPayload {
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
-    ZHLN::HostUI hostUI(engine);
+    ZHLN::NativeHostUI hostUI(engine);
     ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
     ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.Host().Extent(), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
@@ -104,7 +104,7 @@ struct UITestSuite {
             auto rc = engine->Graphics();
 
             // Set up a simple UI scene
-            ZHLN::HostUI hostUI(*engine);
+            ZHLN::NativeHostUI hostUI(*engine);
             ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
             hostUI.SetCallback([&](ZHLN::Engine& eng, ZHLN::WindowID) {
                 gui.SetFontAtlas(hostUI.GetFontAtlas());
@@ -179,11 +179,11 @@ struct UITestSuite {
 
             // Drive the GUI the way a host that owns its pointer does: hand the
             // frame's UI input in, then run the frame. This is the real seam
-            // (HostUI::SubmitInput), not a fabricated one: ConsumeInput
+            // (NativeHostUI::SubmitInput), not a fabricated one: ConsumeInput
             // returns exactly this vector for the frame it was submitted for, and
             // the device path is not touched. A host with a compositor or a
             // remote pointer uses the same call.
-            ZHLN::HostUI hostUI(*engine);
+            ZHLN::NativeHostUI hostUI(*engine);
             auto setInput = [&](float mx, float my, bool lbutton) {
                 ZHLN::GUI::UIInput ui {};
                 ui.mouseX       = mx;
@@ -610,7 +610,7 @@ struct UITestSuite {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            ZHLN::HostUI hostUI(*engine);
+            ZHLN::NativeHostUI hostUI(*engine);
             auto tickHostFrames = [&] {
                 for (uint32_t i = 0; i < 2; ++i) {
                     engine->ProcessEvents();

@@ -8,7 +8,9 @@
 #include <ProjectLightClient/LightProtocol.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
-#include <Zahlen/App.hpp>
+#include <Zahlen/HostRunner.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Error.hpp>
 
 #include <cstddef>
@@ -100,18 +102,35 @@ int main(int argc, char* argv[]) {
     }
 
     ZHLN::ProjectLight::ClientSession session; // outlives Engine and its teardown hooks
-    auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Project Light Client"});
-    app.WithDefaultModules(false)
-        .BeforeEngineCreate([&] { return PrepareClient(*settings, session); })
-        .Install([&session](ZHLN::Engine& engine) {
-            ZHLN::Character::Install(engine);
-            ZHLN::CameraRig::Install(engine);
-            ZHLN::ProjectLight::InstallClient(engine, session);
-        });
-
-    // App handles the CLI once, returning help/version/graph before PrepareClient
-    // opens a socket. It owns process/crash handling, the Engine and frame loop.
-    const auto result = app.Run(std::span<char* const>(filteredArgPointers));
+    // This native module client remains standalone until CharacterController,
+    // Camera and ProjectLight are migrated; it is not a COM Application adapter.
+    const auto result = [&]() -> std::expected<void, ZHLN::ErrorCode> {
+        ZHLN::EngineConfig config {.appName = "Project Light Client"};
+        const auto parsed = ZHLN::ParseEngineConfig(std::span<char* const>(filteredArgPointers), config);
+        if (!parsed) return std::unexpected(parsed.error());
+        if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested) return {};
+        auto prepared = PrepareClient(*settings, session);
+        if (!prepared) return prepared;
+        ZHLN::ProcessScope process;
+        auto created = ZHLN::Engine::Create(config);
+        if (!created) return std::unexpected(created.error());
+        auto engine = std::move(*created);
+        ZHLN::Character::Install(*engine);
+        ZHLN::CameraRig::Install(*engine);
+        ZHLN::ProjectLight::InstallClient(*engine, session);
+        ZHLN::Clock clock;
+        ZHLN::FramePacer pacer(config.fpsLimit);
+        while (engine->IsRunning()) {
+            const auto start = ZHLN::FramePacer::BeginFrame();
+            ZHLN::ProcessScope::PollCrashes();
+            engine->ProcessEvents();
+            if (!engine->IsRunning()) break;
+            const auto tick = engine->Tick(clock.Tick());
+            if (!tick) return std::unexpected(tick.error());
+            pacer.EndFrame(start, std::nullopt);
+        }
+        return {};
+    }();
     if (!result) {
         if (result.error().Is<ZHLN::CommandLineError>()) {
             PrintConfigError(std::format("invalid command line ({}); use --help for engine options", result.error().ToError().Message()));

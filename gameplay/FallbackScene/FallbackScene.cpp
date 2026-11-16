@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -216,7 +216,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 }
 
-void DefaultPreset::DrawUI(Engine& engine, HostUI& hostUI, float dt) {
+void DefaultPreset::DrawUI(Engine& engine, NativeHostUI& hostUI, float dt) {
     if (!s_IsActive || s_Owner != &engine) return;
     auto rc = engine.Graphics();
     // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
