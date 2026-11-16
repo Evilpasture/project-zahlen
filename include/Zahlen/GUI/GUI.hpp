@@ -33,26 +33,26 @@ struct Sizing {
 };
 
 struct BoxConfig {
-    Sizing       width  = {};
-    Sizing       height = {};
+    Sizing      width  = {};
+    Sizing      height = {};
     ZHLN::FVec4 color {0.0f, 0.0f, 0.0f, 0.0f};
     ZHLN::FVec4 cornerRadius {0.0f, 0.0f, 0.0f, 0.0f};
-    float        padding      = 0.0f;
-    float        gap          = 0.0f;
-    Direction    direction    = Direction::Column;
-    Alignment    alignMain    = Alignment::Start;
-    Alignment    alignCross   = Alignment::Start;
-    float        offsetX      = 0.0f;
-    float        offsetY      = 0.0f;
-    bool         clipVertical = false;
+    float       padding      = 0.0f;
+    float       gap          = 0.0f;
+    Direction   direction    = Direction::Column;
+    Alignment   alignMain    = Alignment::Start;
+    Alignment   alignCross   = Alignment::Start;
+    float       offsetX      = 0.0f;
+    float       offsetY      = 0.0f;
+    bool        clipVertical = false;
 };
 
 // Appearance of the bar drawn by Frame::BeginScrollArea. Widths and heights
 // are in pixels, matching the units Clay lays out in.
 struct ScrollBarStyle {
-    float        width    = 6.0f;
-    float        minThumb = 20.0f;
-    float        margin   = 2.0f;
+    float       width    = 6.0f;
+    float       minThumb = 20.0f;
+    float       margin   = 2.0f;
     ZHLN::FVec4 trackColor {1.0f, 1.0f, 1.0f, 0.06f};
     ZHLN::FVec4 thumbColor {1.0f, 1.0f, 1.0f, 0.30f};
     ZHLN::FVec4 thumbHoverColor {1.0f, 1.0f, 1.0f, 0.55f};
@@ -350,12 +350,11 @@ class ZHLN_API Frame {
 
   private:
     friend class Context;
-    explicit Frame(Context::Impl* impl, void* prevClayContext) noexcept;
+    explicit Frame(Context::Impl* impl) noexcept;
 
     auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 
-    Context::Impl* _impl            = nullptr;
-    void*          _prevClayContext = nullptr;
+    Context::Impl* _impl = nullptr;
 };
 
 } // namespace ZHLN::GUI
