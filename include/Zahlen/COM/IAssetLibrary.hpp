@@ -43,6 +43,11 @@ struct PrefabInfo {
     uint32_t lightCount     = 0;
     // Largest per-part bounding radius, in metres. Zero for an empty prefab.
     float boundingRadius = 0.0F;
+    float emissiveFactorScale = 100.0f;
+    uint32_t maxTextureDimension = 1024;
+    // Conservative readiness: false if a part has neither mesh positions nor
+    // a material pipeline (including deliberately GPU-less placeholders).
+    bool gpuResourcesReady = true;
 };
 
 static_assert(std::is_standard_layout_v<PrefabInfo> && std::is_trivially_copyable_v<PrefabInfo>);

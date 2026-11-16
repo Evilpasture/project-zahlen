@@ -1417,6 +1417,11 @@ public:
             .animationCount = static_cast<uint32_t>(prefab->animations.size()),
             .lightCount     = static_cast<uint32_t>(prefab->lights.size()),
             .boundingRadius = maxRadius,
+            .emissiveFactorScale = prefab->emissiveFactorScale,
+            .maxTextureDimension = prefab->maxTextureDimension,
+            .gpuResourcesReady = std::none_of(prefab->parts.begin(), prefab->parts.end(), [](const auto& part) {
+                return part.mesh.posBuffer == BufferID::Invalid && part.defaultMaterial.pipeline == PipelineID::Invalid;
+            }),
         };
     }
 
@@ -1640,8 +1645,15 @@ public:
             if (!slice(skeleton.joints, desc.joints.size) || skeleton.joints.count > 8192) return ComError::InvalidArgument;
             for (uint32_t j = 0; j < skeleton.joints.count; ++j) {
                 const auto& joint = desc.joints.data[skeleton.joints.first + j];
-                if (!index(joint.nodeIndex, desc.nodes.size) || joint.parentIndex < -1 || joint.parentIndex >= int64_t(j))
+                if (!index(joint.nodeIndex, desc.nodes.size) || !index(joint.parentIndex, skeleton.joints.count))
                     return ComError::InvalidArgument;
+                // glTF skin.joints is not required to be parent-first.
+                auto parent = joint.parentIndex;
+                for (uint32_t hops = 0; parent >= 0; ++hops) {
+                    if (hops >= skeleton.joints.count || !index(parent, skeleton.joints.count))
+                        return ComError::InvalidArgument;
+                    parent = desc.joints.data[skeleton.joints.first + parent].parentIndex;
+                }
             }
         }
         for (const auto& part: std::span<const PrefabPartInfo>(desc.parts)) {
@@ -1665,7 +1677,7 @@ public:
             if (!index(channel.targetNodeIndex, desc.nodes.size) || channel.targetNodeIndex < 0 ||
                 !slice(channel.keyTimes, desc.keyTimes.size) || !slice(channel.keyValues, desc.keyValues.size) ||
                 channel.path > AnimationPathType::Weights || channel.interpolation > InterpolationType::CubicSpline) return ComError::InvalidArgument;
-            const uint64_t factor = channel.interpolation == InterpolationType::CubicSpline ? 3 : 1;
+            const uint64_t factor = channel.interpolation == InterpolationType::CubicSpline && channel.path != AnimationPathType::Weights ? 3 : 1;
             const uint64_t count = uint64_t(channel.keyTimes.count) * factor;
             if (!count || channel.keyValues.count % count != 0) return ComError::InvalidArgument;
             const auto width = channel.keyValues.count / count;
@@ -1733,6 +1745,7 @@ public:
         }
         for (const auto& light: std::span<const PrefabLightInfo>(desc.lights))
             prefab->lights.push_back({light.name, light.nodeIndex, light.type, light.color, light.intensity, light.range, light.innerConeAngle, light.outerConeAngle});
+        Library().UseGraphicsDevice(Device());
         Library().CachePrefab(hash, std::move(prefab));
         return hash;
     }

@@ -78,6 +78,8 @@ struct PrefabChannelInfo {
     AnimationPathType path = AnimationPathType::Translation;
     InterpolationType interpolation = InterpolationType::Linear;
     AssetSlice keyTimes {};
+    // Cubic TRS channels carry tangent/value/tangent triples. Weight channels
+    // retain the importer's compact value-only playback representation.
     AssetSlice keyValues {};
 };
 struct PrefabAnimationInfo { String64 name; float duration = 0.0f; AssetSlice channels {}; };

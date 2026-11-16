@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/AssetDefaults.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
@@ -26,11 +27,6 @@ namespace ZHLN {
 
 // Retained as a source-compatible helper now that prefab matrices are native.
 [[nodiscard]] inline auto PrefabMatrixToNative(const Mat4x4& source) noexcept -> Mat4x4 { return source; }
-
-// Artistic boost for the engine's low-exposure scene preset, not a glTF
-// requirement. Conformance imports use an explicit scale of 1 instead.
-inline constexpr float    kGLTFEmissiveDisplayScale       = 100.0f;
-inline constexpr uint32_t kGLTFDefaultMaxTextureDimension = 1024;
 
 struct ModelNode {
     String64   name;

@@ -531,3 +531,18 @@ if(TARGET zahlen_svg)
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/ProjectLightClientTests.cmake)
+
+zahlen_add_extras_group(Extras_GLTFAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestGLTFAssets.cpp)
+target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal zahlen_command_line)
+zahlen_register_extras_test(Extras_GLTFAssets)
+
+# Exercise the existing real importer suite against the shared decoder even
+# when the broad GPU render groups are disabled in menuconfig.
+zahlen_add_extras_group(Extras_GLTFNative
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp ../render/TestGLTFImport.cpp)
+target_link_libraries(Extras_GLTFNative PRIVATE zahlen_gltf zahlen_serialization zahlen_signal zahlen_command_line)
+target_include_directories(Extras_GLTFNative SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf ${PROJECT_SOURCE_DIR}/extern/stb)
+target_sources(Extras_GLTFNative PRIVATE ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
+target_compile_definitions(Extras_GLTFNative PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+zahlen_register_extras_test(Extras_GLTFNative)

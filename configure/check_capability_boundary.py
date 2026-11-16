@@ -65,6 +65,8 @@ COM_HOST_PORTS = frozenset({
     "plugins/BSP/BSPAssets.cpp", "plugins/BSP/BSPAssets.hpp", "plugins/BSP/BSPMaterial.hpp",
     "plugins/BSP/BSPPreparation.cpp", "plugins/BSP/BSPPreparation.hpp",
     "plugins/BSP/AssetUpload.hpp", "plugins/BSP/SourceAsset.hpp",
+    "plugins/glTF/GLTFDocument.cpp", "plugins/glTF/GLTFDocument.hpp",
+    "plugins/glTF/GLTFAssets.cpp", "plugins/glTF/GLTFAssets.hpp", "plugins/glTF/GLTFOptions.hpp",
 })
 NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 
