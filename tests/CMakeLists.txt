@@ -38,6 +38,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestContainers.cpp
     core/TestDefer.cpp
     core/TestEnumFlags.cpp
+    core/TestEngineGraphLifecycle.cpp
     core/TestError.cpp
     core/TestFileSystem.cpp
     core/TestFileSystemWatcher.cpp

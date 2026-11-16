@@ -17,7 +17,7 @@ namespace ZHLN {
 
 class VisibilityList;
 class PhysicsContext;
-class ArticulationSystem;
+class ArticulationContext;
 struct CullingStats;
 struct DebugSettings;
 
@@ -52,7 +52,7 @@ class ZHLN_API World {
     // backdoor this header used to be. The router lives in EngineImpl and is
     // reached only as InputReader/InputHaptics/InputActions.
 
-    auto GetArticulationSystem() -> ArticulationSystem&;
+    auto GetArticulationContext() -> ArticulationContext&;
     auto GetCullingStats() noexcept -> CullingStats&;
     [[nodiscard]] auto GetCullingStats() const noexcept -> const CullingStats&;
     auto GetDebugSettings() noexcept -> DebugSettings&;

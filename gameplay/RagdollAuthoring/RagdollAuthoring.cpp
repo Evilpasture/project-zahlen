@@ -24,7 +24,7 @@
 // gameplay/RagdollAuthoring/RagdollAuthoring.cpp
 #include "RagdollAuthoring.hpp"
 
-#include "engine/system/ArticulationSystem.hpp"
+#include "engine/ArticulationContext.hpp"
 
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -179,7 +179,7 @@ auto BuildRagdollFromRecipe(
     ECS::Registry&       reg,
     const AssetLibrary&  assets,
     PhysicsContext&      pc,
-    ArticulationSystem&  articulation
+    ArticulationContext& articulation
 ) -> bool {
     const auto animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
     if (!animComp || animComp->prefabAsset == InvalidAssetID) {
@@ -219,7 +219,7 @@ auto BuildRagdollFromRecipe(
 }
 
 auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationSystem& articulation
+    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationContext& articulation
 ) -> bool {
     constexpr std::string_view kDefaultRecipePath = "config/ragdoll_humanoid.lua";
     if (std::filesystem::exists(kDefaultRecipePath)) {

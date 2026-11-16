@@ -34,6 +34,7 @@ set(RAW_ENGINE_SOURCES
     system/RenderSystem.cpp
     system/DecalSystem.cpp
     system/AudioSystem.cpp
+    ArticulationContext.cpp
     system/ArticulationSystem.cpp
     system/CullingSystem.cpp
     system/PhysicsSystem.cpp

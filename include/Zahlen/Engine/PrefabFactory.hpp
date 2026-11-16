@@ -22,7 +22,7 @@ namespace ZHLN {
 class Engine;
 class RenderContext;
 class AssetManager;
-class ArticulationSystem;
+class ArticulationContext;
 } // namespace ZHLN
 
 namespace ZHLN::PrefabFactory {

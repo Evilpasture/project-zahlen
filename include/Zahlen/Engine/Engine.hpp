@@ -62,7 +62,7 @@ namespace COM {
 class EngineCOM;
 }
 
-class ArticulationSystem;
+class ArticulationContext;
 class Engine;
 struct EngineCore;
 class GraphicsDevice;
@@ -184,7 +184,7 @@ class ZHLN_API Engine {
 
     // This execution's clock, interpolation state and scratch pool. Engine
     // services are not part of it: they belong to the graphs, bound once (see
-    // EnsureSystemGraphs). Alpha comes from Clock::ConsumeFixedSteps.
+    // InitializeSystemGraphs). Alpha comes from Clock::ConsumeFixedSteps.
     auto MakeFrame(float dt, FrameAlpha alpha) -> Frame;
 
     // Hand every worker's scratch arena back. Called at the start of each graph,
@@ -194,6 +194,8 @@ class ZHLN_API Engine {
 
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;
 
+    // Already compiled during initialization / module installation. Reading
+    // these references never registers systems or resets Local<T> state.
     auto               GetUpdateGraph() -> SimGraph&;
     auto               GetRenderGraph() -> RenderGraph&;
     auto               GetEventBus() noexcept -> ECS::EventBus&;
@@ -383,9 +385,9 @@ class ZHLN_API Engine {
     // application and bespoke hosts never need to inspect ECS resize flags.
     void SynchronizeResize();
 
-    // Build the service bundles and the two typed graphs on first use, and
-    // recompile them when installed modules have marked them dirty.
-    void EnsureSystemGraphs();
+    // Bind services and compile both graphs during InitInternal. Module
+    // installation explicitly rebuilds them; getters and Tick only consume.
+    void InitializeSystemGraphs();
 
     void ReleaseSceneContents();
 

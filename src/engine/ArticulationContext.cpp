@@ -1,0 +1,97 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "ArticulationContext.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Skeleton/Skeleton.h>
+#include <Jolt/Skeleton/SkeletonPose.h>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
+#include <algorithm>
+#include <span>
+#include <string>
+
+namespace ZHLN {
+
+void ArticulationContext::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        _jointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
+    }
+}
+
+uint32_t ArticulationContext::AllocateJoints(uint32_t count) noexcept {
+    const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
+    if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
+        ZHLN::LogWarning("[ArticulationContext] Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
+    }
+    return offset % _jointStates.jointBlendWeights.size();
+}
+
+bool ArticulationContext::AttachRagdoll(
+    Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
+    uint32_t jointOffset
+) {
+    // Validate once at the authoring boundary, not by scanning every ragdoll
+    // every development frame. No skeleton or joint slice may index outside
+    // the context's storage.
+    const size_t capacity = _jointStates.inverseBindMatrices.size();
+    if (skeleton.joints.empty() || authoredParts.empty() || jointOffset > capacity ||
+        skeleton.joints.size() > capacity - jointOffset) {
+        return false;
+    }
+    for (const auto& joint: skeleton.joints) {
+        if (joint.parentIndex < -1 || joint.parentIndex >= static_cast<int32_t>(skeleton.joints.size())) {
+            return false;
+        }
+    }
+    for (const auto& part: authoredParts) {
+        if (part.jointIndex >= skeleton.joints.size() || part.parentJointIndex < -1 ||
+            part.parentJointIndex >= static_cast<int32_t>(skeleton.joints.size())) {
+            return false;
+        }
+    }
+
+    JPH::Ref<JPH::Skeleton> joltSkel = new JPH::Skeleton();
+    for (const auto& joint: skeleton.joints) {
+        std::string parentName = (joint.parentIndex >= 0) ? skeleton.joints[joint.parentIndex].name.c_str() : "";
+        joltSkel->AddJoint(joint.name.c_str(), parentName);
+    }
+    joltSkel->CalculateParentJointIndices();
+
+    const auto ragdollID = pc.CreateSkeletalRagdoll(joltSkel, authoredParts);
+    if (ragdollID == Physics::RagdollID::Invalid) {
+        return false;
+    }
+
+    BindSkeleton(jointOffset, skeleton);
+
+    SceneResources::Attach(
+        pc, reg, rootEntity, Components::RagdollComponent {
+                        .ragdollID    = ragdollID,
+                        .skeletonAsset    = InvalidAssetID,
+                        .state            = RagdollState::Inactive,
+                        .prevState        = RagdollState::Inactive,
+                        .jointOffset      = jointOffset,
+                        .jointCount       = static_cast<uint32_t>(skeleton.joints.size()),
+                        .isAddedToPhysics = false
+                    }
+    );
+    ZHLN::Log("[ArticulationContext] Skeletal ragdoll attached to entity {} ({} parts).", rootEntity.index, authoredParts.size());
+    return true;
+}
+
+
+}

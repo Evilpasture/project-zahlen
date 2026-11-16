@@ -202,7 +202,7 @@ struct ProceduralAnimationTestSuite {
             const Engine& constEngine = **engine;
             SimServices   services {.physics = world->GetPhysics(), .audio = audio, .assets = library,
                                     .input = constEngine.Input(), .haptics = (*engine)->Haptics(),
-                                  .articulation = world->GetArticulationSystem(), .events = world->GetEventBus(),
+                                  .articulation = world->GetArticulationContext(), .events = world->GetEventBus(),
                                   .extensions = extensions, .poseUploads = uploads};
             const Frame frame {.dt = {1.0f / 60.0f}};
             ECS::Registry reg;

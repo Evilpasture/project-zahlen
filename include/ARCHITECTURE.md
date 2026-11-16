@@ -13,6 +13,19 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ---
 
+## COM migration policy
+
+* Freeze the public method surface of `Engine`. New engine capabilities must be
+  designed on `include/Zahlen/COM/` first; `Engine` is a transitional internal
+  implementation, not the extension API.
+* Preserve `Core/COM/{IObject,Reflect,Chain,Ref,Types}.hpp`: this migration changes
+  capabilities and their consumers, not the object protocol.
+* Complete internal ownership cleanups before expanding COM. Do not add new
+  consumers of `Engine::GetInternalRegistry()` or `Engine::Commands()` outside
+  `src/engine/`; use entity capabilities and scheduled command buffers instead.
+* `World` owns `ArticulationContext`; `ArticulationSystem` is a stateless scheduled
+  adapter borrowing that context through `SimServices`.
+
 ## 1.1 State Ownership & Architectural Constraints
 
 Zahlen is data-oriented, which is a statement about how data is laid out and accessed -- not a rule that every value must be an ECS component. **ECS owns scene state: things there are many of, keyed by entity.** **Subsystems own their own state: things there is exactly one of.** `RenderContext` owns pipeline configuration, `InputContext` owns input, `AudioContext` owns audio. A singleton component is a global variable with extra indirection, and it pushes configuration through the registry for no benefit.

@@ -50,91 +50,12 @@ namespace {
 }
 } // namespace
 
-namespace Tests {
-static void VerifyArticulationStateConsistency(
-    std::span<const Entity>                       entities,
-    std::span<const Components::RagdollComponent> ragdolls
-) noexcept {
-    static bool testsRun = false;
-    if (testsRun) {
-        return;
-    }
-    testsRun = true;
-
-    for (size_t i = 0; i < entities.size(); ++i) {
-        Entity      e       = entities[i];
-        const auto& ragComp = ragdolls[i];
-
-        if (ragComp.state != RagdollState::Inactive && ragComp.state != RagdollState::Dynamic && ragComp.state != RagdollState::Kinematic &&
-            ragComp.state != RagdollState::PartialBlend) {
-            ZHLN::Log("[Test Fail] Articulation State: Entity {} has invalid ragdoll state {}", e.index, static_cast<int>(ragComp.state));
-        }
-        if (ragComp.jointCount > 2000 || ragComp.jointCount == 0) {
-            ZHLN::Log("[Test Fail] Articulation State: Entity {} has unreasonable joint count: {}", e.index, ragComp.jointCount);
-        }
-    }
-}
-}
-
-void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
-    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        _jointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
-    }
-}
-
-uint32_t ArticulationSystem::AllocateJoints(uint32_t count) noexcept {
-    const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
-    if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
-        ZHLN::LogWarning("[ArticulationSystem] Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
-    }
-    return offset % _jointStates.jointBlendWeights.size();
-}
-
-bool ArticulationSystem::AttachRagdoll(
-    Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
-    uint32_t jointOffset
-) {
-    if (authoredParts.empty()) {
-        return false;
-    }
-
-    auto* joltSkel = new JPH::Skeleton();
-    for (const auto& joint: skeleton.joints) {
-        std::string parentName = (joint.parentIndex >= 0) ? skeleton.joints[joint.parentIndex].name.c_str() : "";
-        joltSkel->AddJoint(joint.name.c_str(), parentName);
-    }
-    joltSkel->CalculateParentJointIndices();
-
-    const std::vector<Physics::RagdollPartParams> parts(authoredParts.begin(), authoredParts.end());
-
-    const auto ragdollID = pc.CreateSkeletalRagdoll(joltSkel, parts);
-    if (ragdollID == Physics::RagdollID::Invalid) {
-        return false;
-    }
-
-    BindSkeleton(jointOffset, skeleton);
-
-    SceneResources::Attach(
-        pc, reg, rootEntity, Components::RagdollComponent {
-                        .ragdollID    = ragdollID,
-                        .skeletonAsset    = InvalidAssetID,
-                        .state            = RagdollState::Inactive,
-                        .prevState        = RagdollState::Inactive,
-                        .jointOffset      = jointOffset,
-                        .jointCount       = static_cast<uint32_t>(skeleton.joints.size()),
-                        .isAddedToPhysics = false
-                    }
-    );
-    ZHLN::Log("[ArticulationSystem] Skeletal ragdoll attached to entity {} ({} parts).", rootEntity.index, parts.size());
-    return true;
-}
-
 void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
                                             const Components::SkeletalMeshComponent, Components::TransformComponent&,
                                             const Components::RagdollHitReactionCommand, const Components::RagdollImpulseCommand> query,
-                                 ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationSystem> articulation,
+                                 ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationContext> articulation,
                                  ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt) {
-    auto& sys = *articulation;
+    auto& context = *articulation;
     auto& pc  = *physics;
     const float dt = frameDt.value;
 
@@ -160,9 +81,9 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         if (auto hitCmd = query.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
-                sys._jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
-                sys._jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
-                sys._jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
+                context._jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
+                context._jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
+                context._jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
 
                 ragComp.state = RagdollState::PartialBlend;
             }
@@ -177,18 +98,18 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
             uint32_t globalIdx = offset + j;
-            float    decay     = sys._jointStates.jointBlendDecay[globalIdx];
+            float    decay     = context._jointStates.jointBlendDecay[globalIdx];
 
             if (decay > 0.0f) {
-                sys._jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, sys._jointStates.jointBlendWeights[globalIdx] - decay * dt);
-                sys._jointStates.jointStiffness[globalIdx]    = std::min(1.0f, sys._jointStates.jointStiffness[globalIdx] + dt * 1.5f);
+                context._jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, context._jointStates.jointBlendWeights[globalIdx] - decay * dt);
+                context._jointStates.jointStiffness[globalIdx]    = std::min(1.0f, context._jointStates.jointStiffness[globalIdx] + dt * 1.5f);
 
-                if (sys._jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
-                    sys._jointStates.jointBlendDecay[globalIdx] = 0.0f;
+                if (context._jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
+                    context._jointStates.jointBlendDecay[globalIdx] = 0.0f;
                 }
             }
 
-            if (sys._jointStates.jointBlendWeights[globalIdx] > 0.001f) {
+            if (context._jointStates.jointBlendWeights[globalIdx] > 0.001f) {
                 hasActiveBlend = true;
             }
         }
@@ -218,7 +139,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         std::vector<Mat4x4> localJoints(count, Mat4x4::Identity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = Inverse(sys._jointStates.inverseBindMatrices[offset + j]);
+            localJoints[j] = Inverse(context._jointStates.inverseBindMatrices[offset + j]);
         }
 
         std::vector<Mat4x4> modelJoints(count, Mat4x4::Identity());
@@ -289,11 +210,11 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             const auto invRoot = CreateTranslation(-rootPosition);
 
             for (uint32_t j = 0; j < count; ++j) {
-                const auto& ibm = sys._jointStates.inverseBindMatrices[offset + j];
+                const auto& ibm = context._jointStates.inverseBindMatrices[offset + j];
                 const auto physModel = invRoot * FromJolt(physicalWorldJoints[j]);
                 const auto& animModel = modelJoints[j];
 
-                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : sys._jointStates.jointBlendWeights[offset + j];
+                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : context._jointStates.jointBlendWeights[offset + j];
 
                 if (blendWeight <= 0.001f) {
                     finalSkinningMatrices[j] = animModel * ibm;
@@ -314,9 +235,6 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         }
     }
 
-    if constexpr (isDev) {
-        ZHLN::Tests::VerifyArticulationStateConsistency(entities, ragdolls);
-    }
 }
 
 }

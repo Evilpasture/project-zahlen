@@ -6,7 +6,7 @@
 -- Declarative joint-matching recipe hydrated into ZHLN::RagdollAuthoring::RagdollRecipe
 -- via plugins/lua/ReflectLua. Rules are evaluated in order against lower-cased
 -- joint names; the first matching pattern supplies collider shape, mass, and
--- motor limits for ArticulationSystem::AttachRagdoll.
+-- motor limits for ArticulationContext::AttachRagdoll.
 
 return {
     rules = {

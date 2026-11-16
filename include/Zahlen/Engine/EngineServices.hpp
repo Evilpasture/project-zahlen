@@ -29,7 +29,7 @@ struct CullingStats;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
-class ArticulationSystem;
+class ArticulationContext;
 
 struct DebugSettings {
     int physicsDrawMode = 0;
@@ -70,7 +70,7 @@ struct SimServices {
     AssetLibrary            assets;
     InputReader             input;
     InputHaptics            haptics;
-    ArticulationSystem&     articulation;
+    ArticulationContext&    articulation;
     ECS::EventBus&          events;
     ECS::ExtensionServices& extensions;
     PoseUploadQueue&        poseUploads;

@@ -13,7 +13,7 @@
 #include <string_view>
 
 namespace ZHLN {
-class ArticulationSystem;
+class ArticulationContext;
 class AssetManager;
 class GraphicsDevice;
 class PhysicsContext;
@@ -37,7 +37,7 @@ auto CreateCylinderInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Option
 auto CreateConeInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity;
 auto CreatePlaneInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity;
 auto InstantiatePrefabInternal(
-    GraphicsDevice gfx, ECS::Registry& reg, PhysicsContext& pc, ArticulationSystem& art, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount
+    GraphicsDevice gfx, ECS::Registry& reg, PhysicsContext& pc, ArticulationContext& art, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount
 ) -> uint32_t;
 }
 }

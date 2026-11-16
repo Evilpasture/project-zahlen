@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ArticulationSystem.hpp"
+#include "ArticulationContext.hpp"
 #include "Hierarchy.hpp"
 #include "EngineGlobals.hpp"
 #include <Zahlen/Core/Profiler.hpp>
@@ -33,7 +33,7 @@ struct World::Impl {
     ECS::EventBus                   eventBus;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
-    std::unique_ptr<ArticulationSystem>       articulationSystem;
+    std::unique_ptr<ArticulationContext>       articulationContext;
 
     VisibilityList visibleEntities;
     VisibilityList visibleShadowEntities;
@@ -59,7 +59,7 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
 
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
-    impl.articulationSystem  = std::make_unique<ArticulationSystem>();
+    impl.articulationContext  = std::make_unique<ArticulationContext>();
 
     return instance;
 }
@@ -71,7 +71,7 @@ World::~World() {
 
     _impl->visibleShadowEntities.Clear();
     _impl->visibleEntities.Clear();
-    _impl->articulationSystem.reset();
+    _impl->articulationContext.reset();
     _impl->mainECB.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
@@ -118,8 +118,8 @@ auto World::GetEventBus() const noexcept -> const ECS::EventBus& {
     return _impl->eventBus;
 }
 
-auto World::GetArticulationSystem() -> ArticulationSystem& {
-    return *_impl->articulationSystem;
+auto World::GetArticulationContext() -> ArticulationContext& {
+    return *_impl->articulationContext;
 }
 
 auto World::GetCullingStats() noexcept -> CullingStats& {

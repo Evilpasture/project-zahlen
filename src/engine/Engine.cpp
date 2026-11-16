@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ArticulationSystem.hpp"
+#include "ArticulationContext.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include "Hierarchy.hpp"
@@ -122,8 +122,8 @@ struct EngineImpl {
     std::unique_ptr<WorkerScratchPool> workerScratch;
 
     // The engine's services, bound once (they are references), and the two
-    // typed graphs built with them. Created on first use: the graphs need the
-    // world and the kernel to exist, and nothing runs before that.
+    // typed graphs built with them. Created during InitInternal once the
+    // world and kernel exist; graph getters never initialize or rebuild them.
     // The simulation -> renderer channel for skinning poses. Engine-owned, so
     // both graphs reach the same queue through services.
     PoseUploadQueue poseUploads;
@@ -133,7 +133,6 @@ struct EngineImpl {
     std::unique_ptr<RenderServices> renderServices;
     std::unique_ptr<SimGraph>       updateGraph;
     std::unique_ptr<RenderGraph>    renderGraph;
-    bool                            systemGraphsDirty = true;
 
     // A host-supplied UI frame, when SubmitUIInput was called since the last
     // ConsumeUIInput. See Engine::SubmitUIInput.
@@ -358,8 +357,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->kernel = std::move(kernel_res.value());
 
-    // World and KernelSession outlive the binding; it must exist before the lazy
-    // SimServices graph is created and before the first Engine::Physics call.
+    // World and KernelSession outlive the binding; it must exist before the
+    // SimServices graph is initialized and before the first Engine::Physics call.
     _impl->world->GetPhysics().BindCollisionAssetResolver(
         [](void* context, CollisionAssetID id) noexcept -> std::shared_ptr<const Physics::MeshGeometry> {
             return static_cast<AssetManager*>(context)->FindCollisionMesh(id);
@@ -376,7 +375,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     // wired here so an Engine returned by Create() is immediately ready to run.
     SeedBaselineScene(GetInternalRegistry());
     EnsureFramePlan();
-    EnsureSystemGraphs();
+    InitializeSystemGraphs();
 
     return {};
 }
@@ -554,8 +553,8 @@ struct EngineCore {
     static auto Physics(Engine& e) noexcept -> PhysicsContext& {
         return e._impl->world->GetPhysics();
     }
-    static auto Articulation(Engine& e) noexcept -> ArticulationSystem& {
-        return e._impl->world->GetArticulationSystem();
+    static auto Articulation(Engine& e) noexcept -> ArticulationContext& {
+        return e._impl->world->GetArticulationContext();
     }
     // The input half of the UI phase, next to HostUICallback.
     //
@@ -648,43 +647,36 @@ namespace {
 constexpr size_t kWorkerScratchBytes = 256 * 1024;
 } // namespace
 
-void Engine::EnsureSystemGraphs() {
-    if (_impl->updateGraph == nullptr) {
-        auto& render = _impl->kernel->GetRenderContext();
+void Engine::InitializeSystemGraphs() {
+    auto& render = _impl->kernel->GetRenderContext();
 
-        _impl->simServices = std::make_unique<SimServices>(SimServices {
-            .physics      = _impl->world->GetPhysics(),
-            .audio        = _impl->kernel->GetAudioContext(),
-            .assets       = Assets(),
-            .input        = InputReader {&_impl->input},
-            .haptics      = InputHaptics {&_impl->input},
-            .articulation = _impl->world->GetArticulationSystem(),
-            .events       = _impl->world->GetEventBus(),
-            .extensions   = _impl->extensions,
-            .poseUploads  = _impl->poseUploads,
-        });
+    _impl->simServices = std::make_unique<SimServices>(SimServices {
+        .physics      = _impl->world->GetPhysics(),
+        .audio        = _impl->kernel->GetAudioContext(),
+        .assets       = Assets(),
+        .input        = InputReader {&_impl->input},
+        .haptics      = InputHaptics {&_impl->input},
+        .articulation = _impl->world->GetArticulationContext(),
+        .events       = _impl->world->GetEventBus(),
+        .extensions   = _impl->extensions,
+        .poseUploads  = _impl->poseUploads,
+    });
 
-        _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
-            .render        = render,
-            .scene         = _impl->sceneData,
-            .assets        = Assets(),
-            .input         = InputReader {&_impl->input},
-            .extensions    = _impl->extensions,
-            .cullingStats  = _impl->world->GetCullingStats(),
-            .debugSettings = _impl->world->GetDebugSettings(),
-            .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
-        });
+    _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
+        .render        = render,
+        .scene         = _impl->sceneData,
+        .assets        = Assets(),
+        .input         = InputReader {&_impl->input},
+        .extensions    = _impl->extensions,
+        .cullingStats  = _impl->world->GetCullingStats(),
+        .debugSettings = _impl->world->GetDebugSettings(),
+        .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
+        .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+    });
 
-        _impl->updateGraph       = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
-        _impl->renderGraph       = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
-        _impl->systemGraphsDirty = true;
-    }
-
-    if (_impl->systemGraphsDirty) {
-        _impl->systemGraphsDirty = false;
-        BuildSystemGraphs(*this);
-    }
+    _impl->updateGraph       = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
+    _impl->renderGraph       = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices, &MarkPendingDestroy);
+    BuildSystemGraphs(*this);
 }
 
 auto Engine::MakeFrame(float dt, FrameAlpha alpha) -> Frame {
@@ -738,12 +730,10 @@ auto Engine::Entities() const noexcept -> ZHLN::Entities {
 }
 
 auto Engine::GetUpdateGraph() -> SimGraph& {
-    EnsureSystemGraphs();
     return *_impl->updateGraph;
 }
 
 auto Engine::GetRenderGraph() -> RenderGraph& {
-    EnsureSystemGraphs();
     return *_impl->renderGraph;
 }
 auto Engine::Commands() noexcept -> ECS::EntityCommandBuffer& {
@@ -983,7 +973,9 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
 
     _impl->modules.push_back(module);
     if (module.addGraphSystems != nullptr) {
-        _impl->systemGraphsDirty = true;
+        // Installation is the mutation boundary. Consumers observe a complete,
+        // compiled graph as soon as this call returns, never on a later read.
+        BuildSystemGraphs(*this);
     }
     return {};
 }
@@ -1035,7 +1027,6 @@ void Engine::ProvokeDeviceLost() {
 
 auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
     EnsureFontAtlas();
-    EnsureSystemGraphs();
 
     _impl->input.StepHaptics(dt);
 

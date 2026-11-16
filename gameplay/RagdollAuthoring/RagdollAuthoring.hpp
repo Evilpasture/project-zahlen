@@ -5,7 +5,7 @@
 //
 // Data-driven ragdoll authoring: reflected recipe structs (`RagdollRecipe`)
 // hydrated from Lua (`config/ragdoll_humanoid.lua`) or constructed in C++ and
-// lowered into `Physics::RagdollPartParams` for `ArticulationSystem::AttachRagdoll`.
+// lowered into `Physics::RagdollPartParams` for `ArticulationContext::AttachRagdoll`.
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -33,7 +33,7 @@ struct RagdollPartParams;
 struct Skeleton;
 class AssetLibrary;
 class PhysicsContext;
-class ArticulationSystem;
+class ArticulationContext;
 
 namespace RagdollAuthoring {
 
@@ -77,11 +77,11 @@ struct RagdollRecipe {
     ECS::Registry&       reg,
     const AssetLibrary&  assets,
     PhysicsContext&      pc,
-    ArticulationSystem&  articulation
+    ArticulationContext& articulation
 ) -> bool;
 
 [[nodiscard]] auto BuildHumanoidBipedRagdoll(
-    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationSystem& articulation
+    Entity rootEntity, ECS::Registry& reg, const AssetLibrary& assets, PhysicsContext& pc, ArticulationContext& articulation
 ) -> bool;
 
 auto Describe() -> Module;

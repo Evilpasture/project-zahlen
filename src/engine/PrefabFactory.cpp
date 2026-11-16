@@ -27,7 +27,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <optional>
 // TODO(Evilpasture): REMOVE SYSTEM LEAK
-#include "ArticulationSystem.hpp"
+#include "ArticulationContext.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <span>
@@ -209,7 +209,7 @@ auto InstantiateMeshPart(
     GraphicsDevice                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
-    ArticulationSystem&                    art,
+    ArticulationContext&                    art,
     const ModelPrefab&                     prefab,
     const ModelPart&                       part,
     const PreparedPart&                    prep,
@@ -576,7 +576,7 @@ auto InstantiatePrefabInternal(
     GraphicsDevice      gfx,
     ECS::Registry&      reg,
     PhysicsContext&     pc,
-    ArticulationSystem& art,
+    ArticulationContext& art,
     const ModelPrefab&  prefab,
     const SpawnParams&  params,
     Entity*             outBuffer,
