@@ -653,10 +653,8 @@ if(ZHLN_BUILD_RENDER)
             message(FATAL_ERROR
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
                 "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), set "
-                "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build "
-                "without Jolt's Vulkan compute backend. If you set this through menuconfig, delete build/menuconfig/.config and "
-                "its .stamp (or toggle the entry ON in the menu) and re-run scripts/menuconfig.sh: an existing .config that says "
-                "\"# CONFIG_ZHLN_JOLT_SLANG_FALLBACK is not set\" keeps forcing the cache OFF."
+                "ZHLN_JOLT_SLANG_FALLBACK=ON (Advanced menu: \"Fall back to Slang for Jolt shader compilation\") to compile them "
+                "with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build without Jolt's Vulkan compute backend."
             )
         endif()
     endif()

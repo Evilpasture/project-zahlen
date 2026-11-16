@@ -289,6 +289,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
 endif()
 
+# Early apply for the one menu entry ThirdParty reads before the full apply
+# below can run (see cmake/Kconfig.cmake). Without it the first configure
+# after a menuconfig run still sees the option() default here.
+if(ZHLN_KCACHE_CONFIG)
+    include(Kconfig)
+    zhln_kconfig_apply_early("${ZHLN_KCACHE_CONFIG}" ZHLN_JOLT_SLANG_FALLBACK)
+endif()
+
 include(ThirdParty)
 
 add_subdirectory(src/presentation)

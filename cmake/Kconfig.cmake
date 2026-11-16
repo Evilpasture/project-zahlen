@@ -151,3 +151,80 @@ function(zhln_kconfig_apply CONFIG_FILE)
     list(LENGTH _record _n)
     message(STATUS "Kconfig: applied ${_n} value(s) from ${CONFIG_FILE}")
 endfunction()
+
+# zhln_kconfig_apply_early(<config file> <symbol>...)
+#
+# Applies only the named symbols from <config file> to the cache, with the
+# same file-wins-once-then-cache-wins rule as zhln_kconfig_apply() but with
+# its own stamp file, so the late full apply still runs afterwards.
+#
+# Exists for entries whose value is read before the full apply can run.
+# Currently only ZHLN_JOLT_SLANG_FALLBACK: cmake/ThirdParty.cmake reads it to
+# choose Jolt's shader compiler, while the full apply must wait for every
+# option() declaration -- including the ones in cmake/ThirdParty.cmake
+# itself. Without this, the first configure after a menuconfig run still
+# sees the option() default (or a stale cache value) at that point, and a
+# FATAL_ERROR there aborts before the full apply could update the cache:
+# the build deadlocks, failing the same way on every re-run.
+function(zhln_kconfig_apply_early CONFIG_FILE)
+    if(NOT EXISTS "${CONFIG_FILE}")
+        return()
+    endif()
+
+    set(_want ${ARGN})
+    set(_record "")
+
+    file(STRINGS "${CONFIG_FILE}" _lines)
+    foreach(_line IN LISTS _lines)
+        if(_line MATCHES "^# CONFIG_([A-Za-z0-9_]+) is not set")
+            set(_name "${CMAKE_MATCH_1}")
+            set(_value "OFF")
+        elseif(_line MATCHES "^CONFIG_([A-Za-z0-9_]+)=(.*)$")
+            set(_name "${CMAKE_MATCH_1}")
+            set(_value "${CMAKE_MATCH_2}")
+            if(_value STREQUAL "y")
+                set(_value "ON")
+            elseif(_value STREQUAL "n")
+                set(_value "OFF")
+            endif()
+        else()
+            continue()
+        endif()
+
+        list(FIND _want "${_name}" _want_idx)
+        if(_want_idx EQUAL -1)
+            continue()
+        endif()
+        list(APPEND _record "${_name}=${_value}")
+    endforeach()
+
+    if(NOT _record)
+        return()
+    endif()
+
+    string(SHA256 _digest "${_record}")
+    set(_stamp "${CONFIG_FILE}.early.stamp")
+    if(EXISTS "${_stamp}")
+        file(READ "${_stamp}" _previous)
+        string(STRIP "${_previous}" _previous)
+        if(_previous STREQUAL _digest)
+            return()
+        endif()
+    endif()
+    file(WRITE "${_stamp}" "${_digest}\n")
+
+    foreach(_entry IN LISTS _record)
+        string(REGEX REPLACE "^([A-Za-z0-9_]+)=.*$" "\\1" _name "${_entry}")
+        string(REGEX REPLACE "^[A-Za-z0-9_]+=(.*)$" "\\1" _value "${_entry}")
+        if(DEFINED CACHE{${_name}})
+            get_property(_type CACHE ${_name} PROPERTY TYPE)
+            if(NOT _type)
+                set(_type BOOL)
+            endif()
+            set(${_name} "${_value}" CACHE ${_type} "" FORCE)
+        else()
+            set(${_name} "${_value}" CACHE BOOL
+                "Set by the Kconfig menu (${CONFIG_FILE})")
+        endif()
+    endforeach()
+endfunction()
