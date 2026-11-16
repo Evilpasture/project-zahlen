@@ -548,3 +548,13 @@ target_include_directories(Extras_GLTFNative SYSTEM PRIVATE ${PROJECT_SOURCE_DIR
 target_sources(Extras_GLTFNative PRIVATE ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
 target_compile_definitions(Extras_GLTFNative PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 zahlen_register_extras_test(Extras_GLTFNative)
+
+# Scene orchestration is a consumer library; this executable links no native adapter.
+zahlen_add_extras_group(Extras_SceneAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestSceneAssets.cpp)
+target_link_libraries(Extras_SceneAssets PRIVATE zahlen_scene zahlen_serialization zahlen_signal zahlen_command_line)
+zahlen_register_extras_test(Extras_SceneAssets POOL gpu LABELS GPU Extras)
+if(TARGET zahlen_scene_documents)
+    target_link_libraries(Extras_SceneAssets PRIVATE zahlen_scene_documents)
+    target_compile_definitions(Extras_SceneAssets PRIVATE ZHLN_TEST_SCENE_DOCUMENTS=1)
+endif()

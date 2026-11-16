@@ -1,14 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <cmath>
@@ -38,7 +38,7 @@ struct VertexStreams {
 
 } // namespace
 
-auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
+auto BuildTetrahedronMesh(GraphicsDevice gfx, bool buildBLAS) -> Mesh {
     std::vector<VertexPosition> positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
     std::vector<uint32_t>       indices   = {0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2};
     VertexStreams               streams;
@@ -69,7 +69,7 @@ auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error());
@@ -78,7 +78,7 @@ auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
     return finalMesh;
 }
 
-auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color) -> Mesh {
+auto BuildPlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
@@ -113,7 +113,7 @@ auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color) -> Mes
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreatePlaneMesh: Failed to build mesh BLAS: {}", res.error());
@@ -122,7 +122,7 @@ auto CreatePlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color) -> Mes
     return finalMesh;
 }
 
-auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color) -> Mesh {
+auto BuildBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     const float x = halfExtents.x;
     const float y = halfExtents.y;
     const float z = halfExtents.z;
@@ -210,7 +210,7 @@ auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 colo
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateBoxMesh: Failed to build mesh BLAS: {}", res.error());
@@ -219,7 +219,7 @@ auto CreateBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 colo
     return finalMesh;
 }
 
-auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color) -> Mesh {
+auto BuildSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -278,7 +278,7 @@ auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color) -> Me
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateSphereMesh: Failed to build mesh BLAS: {}", res.error());
@@ -287,7 +287,7 @@ auto CreateSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color) -> Me
     return finalMesh;
 }
 
-auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color) -> Mesh {
+auto BuildCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
@@ -354,7 +354,7 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FV
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateCylinderMesh: Failed to build mesh BLAS: {}", res.error());
@@ -363,7 +363,7 @@ auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FV
     return finalMesh;
 }
 
-auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color) -> Mesh {
+auto BuildConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;
@@ -425,13 +425,32 @@ auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = gfx.BuildMeshBLAS(finalMesh);
+    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
             ZHLN::LogWarning("CreateConeMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
+}
+
+auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
+    return BuildTetrahedronMesh(gfx, true);
+}
+auto CreateBoxMesh(GraphicsDevice gfx, FVec3 halfExtents, FVec4 color) -> Mesh {
+    return BuildBoxMesh(gfx, halfExtents, color, true);
+}
+auto CreatePlaneMesh(GraphicsDevice gfx, float extent, FVec4 color) -> Mesh {
+    return BuildPlaneMesh(gfx, extent, color, true);
+}
+auto CreateSphereMesh(GraphicsDevice gfx, float radius, FVec4 color) -> Mesh {
+    return BuildSphereMesh(gfx, radius, color, true);
+}
+auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, FVec4 color) -> Mesh {
+    return BuildCylinderMesh(gfx, radius, height, color, true);
+}
+auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, FVec4 color) -> Mesh {
+    return BuildConeMesh(gfx, radius, height, color, true);
 }
 
 } // namespace ZHLN::PrefabFactory

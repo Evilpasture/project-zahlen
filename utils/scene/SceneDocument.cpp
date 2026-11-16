@@ -1,10 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 #include "SceneDocument.hpp"
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
 #if defined(ZHLN_SCENE_DOC_HAS_LUA)
@@ -14,51 +12,41 @@
 #include <fstream>
 #include <iterator>
 #include <string>
-
 namespace ZHLN::Tools {
-
-[[nodiscard]] auto LoadSceneDocument(Engine& engine, const std::filesystem::path& path) -> bool {
-    const std::string ext = path.extension().string();
+auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene::Scene, ErrorCode> {
+    const auto ext = path.extension().string();
     if (ext == ".toml") {
         std::ifstream in(path, std::ios::binary);
-        if (!in) {
-            LogError("[Scene] could not open TOML scene '{}'", path.string());
-            return false;
-        }
-        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        auto parsed = ReflectTOML::Parse<Scene::Scene>(text);
-        if (!parsed) {
-            LogError("[Scene] failed to parse TOML scene '{}': {}", path.string(), parsed.error());
-            return false;
-        }
-        engine.ClearScene();
-        auto inst = Scene::Instantiate(engine, *parsed);
-        if (!inst) {
-            LogError("[Scene] failed to instantiate TOML scene '{}': {}", path.string(), inst.error());
-            return false;
-        }
-        Log("[Scene] instantiated '{}' ({} entities, {} lights)", path.string(), inst->entities.size(), inst->lights.size());
-        return true;
+        if (!in)
+            return std::unexpected(SceneDocumentError::ReadFailed);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (in.bad())
+            return std::unexpected(SceneDocumentError::ReadFailed);
+        return ReflectTOML::Parse<Scene::Scene>(text);
     }
 #if defined(ZHLN_SCENE_DOC_HAS_LUA)
-    if (ext == ".lua") {
-        auto parsed = ReflectLua::EvaluateFile<Scene::Scene>(path);
-        if (!parsed) {
-            LogError("[Scene] failed to evaluate Lua scene '{}': {}", path.string(), parsed.error());
-            return false;
-        }
-        engine.ClearScene();
-        auto inst = Scene::Instantiate(engine, *parsed);
-        if (!inst) {
-            LogError("[Scene] failed to instantiate Lua scene '{}': {}", path.string(), inst.error());
-            return false;
-        }
-        Log("[Scene] instantiated '{}' ({} entities, {} lights)", path.string(), inst->entities.size(), inst->lights.size());
-        return true;
-    }
+    if (ext == ".lua")
+        return ReflectLua::EvaluateFile<Scene::Scene>(path);
 #endif
-    LogError("[Scene] unsupported or disabled scene format for '{}'", path.string());
-    return false;
+    return std::unexpected(SceneDocumentError::UnsupportedFormat);
 }
-
-} // namespace ZHLN::Tools
+auto LoadSceneDocument(COM::IEngine& engine, const std::filesystem::path& path, Scene::InstantiateOptions options) -> bool {
+    const auto parsed = ReadSceneDocument(path);
+    if (!parsed) {
+        LogError("[Scene] document '{}': {}", path.string(), parsed.error());
+        return false;
+    }
+    if (const auto valid = Scene::Validate(*engine.Assets(), *parsed); !valid) {
+        LogError("[Scene] document dependencies '{}': {}", path.string(), valid.error());
+        return false;
+    }
+    engine.ClearScene();
+    const auto instance = Scene::Instantiate(engine, *parsed, options);
+    if (!instance) {
+        engine.ClearScene();
+        LogError("[Scene] instantiate '{}': {}", path.string(), instance.error());
+        return false;
+    }
+    return true;
+}
+}

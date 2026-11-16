@@ -42,7 +42,6 @@
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include "PrefabFactoryInternal.hpp"
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -459,6 +458,21 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
     return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
 }
+auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity {
+    return CreateBoxInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params, buildBLAS);
+}
+auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity {
+    return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params, buildBLAS);
+}
+auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity {
+    return CreateSphereInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params, buildBLAS);
+}
+auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+    return CreateCylinderInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+}
+auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+    return CreateConeInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+}
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     // A lookup, not a load: an importer has already cached the prefab by the
     // time a scene names it.
@@ -470,20 +484,6 @@ auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnPar
     );
 }
 } // namespace PrefabFactory
-
-namespace Scene {
-auto Extract(Engine& engine) -> Scene {
-    const auto camComp = EngineCore::Registry(engine).GetSingleton<Components::CameraComponent>();
-    const auto camera  = camComp ? camComp->camera : Camera {};
-    auto       gfx     = engine.Graphics();
-    return Extract(
-        camera, gfx.Settings(), EngineCore::Registry(engine),
-        MaterialLookup {.userdata = &gfx, .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
-                            return static_cast<const GraphicsDevice*>(userdata)->Material(id);
-                        }}
-    );
-}
-} // namespace Scene
 
 namespace {
 // Per-worker scratch. A system's SoAScratch allocation is capped by this, so it

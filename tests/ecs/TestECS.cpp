@@ -210,6 +210,40 @@ namespace ZHLN_ANNOTATION(UseFixtures<EcsComponentRegistration> {}) {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> test_dynamic_family_storage_is_per_registry(ZHLN::ECS::Registry& first) {
+            constexpr std::string_view name   = "ECS_Scene_MultiRegistry_Provenance";
+            const auto                 family = first.RegisterComponentDynamic(name, sizeof(uint32_t), alignof(uint32_t));
+            const auto                 a      = first.Create();
+            auto*                      pa     = static_cast<uint32_t*>(first.AddDynamic(a, family));
+            if (!ExpectTrue(pa != nullptr))
+                return {};
+            *pa = 17;
+            {
+                ZHLN::ECS::Registry second;
+                const auto          otherFamily = second.RegisterComponentDynamic(name, sizeof(uint32_t), alignof(uint32_t));
+                ExpectEq(otherFamily, family);
+                const auto b  = second.Create();
+                auto*      pb = static_cast<uint32_t*>(second.AddDynamic(b, otherFamily));
+                if (!ExpectTrue(pb != nullptr))
+                    return {};
+                *pb = 42;
+                ExpectEq(*pa, uint32_t(17));
+                ExpectEq(*pb, uint32_t(42));
+                ExpectEq(second.RegisterComponentDynamic(name, sizeof(uint64_t), alignof(uint64_t)), 0xFFFFFFFFu);
+                ExpectEq(second.RegisterComponentDynamic(name, sizeof(uint32_t), alignof(uint32_t) * 2), 0xFFFFFFFFu);
+                ExpectEq(*pb, uint32_t(42));
+            }
+            ZHLN::ECS::Registry third;
+            // A typed family registered by the fixture in another registry
+            // must not become raw storage merely because this registry is new.
+            ExpectEq(third.RegisterComponentDynamic("PositionComponent", sizeof(PositionComponent), alignof(PositionComponent)), 0xFFFFFFFFu);
+            const auto thirdFamily = third.RegisterComponentDynamic(name, sizeof(uint32_t), alignof(uint32_t));
+            ExpectEq(thirdFamily, family);
+            ExpectTrue(third.AddDynamic(third.Create(), thirdFamily) != nullptr);
+            ExpectEq(*pa, uint32_t(17));
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> test_dynamic_add_cannot_overwrite_typed_owners(ZHLN::ECS::Registry& reg) {
             reg.RegisterComponent<PositionComponent>("PositionComponent");
             const auto entity = reg.Create(PositionComponent {.x = 9.0f});

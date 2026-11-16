@@ -6,7 +6,8 @@
 // an ordinary game does not link this UI, document layer, or editor logic.
 #include "engine/Platform.hpp"
 #include <FreeCam/FreeCam.hpp>
-#include <SceneDocument.hpp>
+#include <NativeSceneDocument.hpp>
+#include <Scene/NativeScene.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/ConfigCli.hpp>
@@ -16,15 +17,14 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
+#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Camera.hpp>

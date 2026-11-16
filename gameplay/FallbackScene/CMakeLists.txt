@@ -33,7 +33,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # the immediate-mode GUI, reads InputContext and subscribes engine
 # teardown.
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+    zahlen_engine zahlen_native_scene
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

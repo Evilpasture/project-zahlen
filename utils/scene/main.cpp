@@ -3,22 +3,22 @@
 
 // Scene/document loading, Lua graphics hot reload and optional Discord
 // presence live in this diagnostic host, not in the ordinary game binary.
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include "SceneDocument.hpp"
-#include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/QualityPresets.hpp>
+#include "NativeSceneDocument.hpp"
 #include <FallbackScene/FallbackScene.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <NativeHostUI/NativeHostUI.hpp>
+#include <Signal/CrashHandler.hpp>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/QualityPresets.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/Render.hpp>
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)

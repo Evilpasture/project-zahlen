@@ -5,7 +5,7 @@
 add_library(zahlen_scene_documents STATIC SceneDocument.cpp)
 set_target_properties(zahlen_scene_documents PROPERTIES CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(zahlen_scene_documents PUBLIC zahlen_engine zahlen_serialization
+target_link_libraries(zahlen_scene_documents PUBLIC zahlen_scene zahlen_serialization
     PRIVATE zahlen_warnings)
 target_include_directories(zahlen_scene_documents PUBLIC ${PROJECT_SOURCE_DIR}/utils/scene)
 target_compile_definitions(zahlen_scene_documents PRIVATE JPH_DOUBLE_PRECISION)
@@ -15,6 +15,13 @@ if(TARGET zahlen_lua)
     target_compile_definitions(zahlen_scene_documents PRIVATE ZHLN_SCENE_DOC_HAS_LUA=1)
 endif()
 
+# Transitional native tools share the parser, not a Core dependency on documents.
+add_library(zahlen_native_scene_documents STATIC NativeSceneDocument.cpp)
+set_target_properties(zahlen_native_scene_documents PROPERTIES CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_native_scene_documents PUBLIC zahlen_scene_documents zahlen_native_scene PRIVATE zahlen_warnings)
+zahlen_enable_reflection(zahlen_native_scene_documents)
+
 # Unlike the game executable, this opt-in host tests document loading,
 # fallback and graphics-file watching (plus Discord when that target exists).
 if(TARGET zahlen_fallback_scene)
@@ -22,7 +29,7 @@ if(TARGET zahlen_fallback_scene)
     set_target_properties(zahlen_scene_host PROPERTIES CXX_STANDARD 26
         CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-scene-host")
     target_link_libraries(zahlen_scene_host PRIVATE zahlen_application zahlen_native_host_ui
-        zahlen_scene_documents zahlen_fallback_scene zahlen_warnings)
+        zahlen_native_scene_documents zahlen_fallback_scene zahlen_warnings)
     target_include_directories(zahlen_scene_host PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_compile_definitions(zahlen_scene_host PRIVATE JPH_DOUBLE_PRECISION)
     if(TARGET zahlen_lua)

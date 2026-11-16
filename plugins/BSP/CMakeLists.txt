@@ -13,7 +13,7 @@
 #
 # The format/geometry layers (BSPTypes, BSPRead, BSPGeometry) are engine-free
 # on purpose: they can be built and validated without configuring the full
-# renderer tree. BSPScene additionally consumes the native Scene model; the
+# renderer tree. BSPScene additionally consumes the consumer Scene document; the
 # remaining Engine-based entry points stay in the separate legacy archive.
 #
 # Public headers are reached as <BSP/...>.
@@ -26,17 +26,17 @@ set(TARGET_NAME zahlen_bsp)
 add_library(zahlen_bsp_assets STATIC
     BSPBakeField.cpp BSPGeometry.cpp BSPLighting.cpp BSPRead.cpp
     BSPVradLightmap.cpp SourceVFS.cpp StudioModelLoader.cpp VMTParser.cpp
-    VTFDecoder.cpp VMTLighting.cpp StudioModelAssets.cpp BSPPreparation.cpp BSPAssets.cpp)
+    VTFDecoder.cpp VMTLighting.cpp StudioModelAssets.cpp BSPPreparation.cpp BSPAssets.cpp BSPScene.cpp)
 set_target_properties(zahlen_bsp_assets PROPERTIES CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_bsp_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
 target_include_directories(zahlen_bsp_assets PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
-target_link_libraries(zahlen_bsp_assets PUBLIC zahlen_engine PRIVATE zahlen_stb_image zahlen_warnings)
+target_link_libraries(zahlen_bsp_assets PUBLIC zahlen_engine zahlen_scene PRIVATE zahlen_stb_image zahlen_warnings)
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_bsp_assets)
 endif()
 
-set(ZHLN_BSP_SOURCES BSPImporter.cpp BSPInteraction.cpp BSPScene.cpp StudioModelImporter.cpp)
+set(ZHLN_BSP_SOURCES BSPImporter.cpp BSPInteraction.cpp StudioModelImporter.cpp)
 
 add_library(${TARGET_NAME} STATIC)
 
@@ -53,7 +53,7 @@ target_sources(${TARGET_NAME} PRIVATE ${ZHLN_BSP_SOURCES})
 # RenderContext and AssetManager in its signatures, and <BSP/BSPScene.hpp>
 # names the public Scene model.
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine zahlen_bsp_assets
+    zahlen_engine zahlen_bsp_assets zahlen_scene
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

@@ -23,7 +23,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+    zahlen_engine zahlen_scene
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE

@@ -1,17 +1,17 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "helpers/BinaryWriter.hpp"
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
 #include <BSP/BSPTypes.hpp>
 #include <BSP/SourceVFS.hpp>
+#include <Scene/Scene.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/Scene.hpp>
-#include "helpers/BinaryWriter.hpp"
 #include <cmath>
 #include <cstring>
 #include <filesystem>

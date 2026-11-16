@@ -3,14 +3,20 @@
 
 #pragma once
 
-#include <Zahlen/Common.h>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/ECS/SceneValues.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -19,14 +25,11 @@
 
 namespace ZHLN {
 
-class Engine;
 struct Camera;
 
-namespace ECS {
-class Registry;
-}
-
 namespace Scene {
+
+enum class BodyKind : uint8_t { None, Static, Dynamic, Kinematic };
 
 struct Transform {
     ZHLN::FVec3 position = {0.0f, 0.0f, 0.0f};
@@ -34,26 +37,34 @@ struct Transform {
     ZHLN::FVec3 scale    = {1.0f, 1.0f, 1.0f};
 };
 
-enum class ShapeKind : uint8_t { Box, Plane, Prefab, Empty };
-
-enum class BodyKind : uint8_t { None, Static, Dynamic, Kinematic };
-
 struct SceneMaterial {
     ZHLN::FVec4 baseColor = {0.8f, 0.4f, 0.2f, 1.0f};
-    float        roughness = 0.5f;
-    float        metallic  = 0.0f;
+    float       roughness = 0.5f;
+    float       metallic  = 0.0f;
     ZHLN::FVec3 emissive  = {0.0f, 0.0f, 0.0f};
 
     bool emissiveVirtualLights = false;
 };
+
+// Host-owned POD provenance for values a prefab root's renderer components
+// cannot represent. Stored through IEntities' consumer-component path, not Core.
+struct AuthoringComponent {
+    SceneMaterial        material;
+    BodyKind             body           = BodyKind::None;
+    bool                 startsAsleep   = false;
+    DrawFlags            drawFlags      = DrawFlags::None;
+    bool                 hasAmbientCube = false;
+    std::array<FVec4, 6> ambientCube {};
+};
+static_assert(COM::ComComponent<AuthoringComponent>);
 
 struct SceneEntity {
     std::string name;
     ShapeKind   shape = ShapeKind::Box;
 
     ZHLN::FVec3 halfExtents = {0.5f, 0.5f, 0.5f};
-    float        extent      = 10.0f;
-    std::string  source;
+    float       extent      = 10.0f;
+    std::string source;
 
     Transform transform;
     BodyKind  body = BodyKind::None;
@@ -67,7 +78,7 @@ struct SceneEntity {
     DrawFlags drawFlags = DrawFlags::None;
     // Optional ambient cube (+X,-X,+Y,-Y,+Z,-Z linear radiance) sampled from the
     // BSP leaf. Used by props that have no lightmap of their own.
-    bool                        hasAmbientCube = false;
+    bool                       hasAmbientCube = false;
     std::array<ZHLN::FVec4, 6> ambientCube {};
 };
 
@@ -90,29 +101,17 @@ struct SceneEntity {
 // The distinction matters at close range: a proxy sits centimetres off its own
 // mounting surface, which is exactly where a punctual GGX lobe is largest. Left
 // live, every lamp in a map paints a clipped highlight on the floor beside it.
-inline constexpr uint32_t kBakeOwnsNone    = 0u;
-inline constexpr uint32_t kBakeOwnsDiffuse = 1u;
-inline constexpr uint32_t kBakeOwnsAll     = 2u;
-
-// uniforms.slang turns the class into the two masks the deferred pass uses
-// (`bakedDirect = baked > 0`, `specularOwned = baked > 1`), so the ordering is
-// part of the shader ABI, not an implementation detail.
-static_assert(
-    kBakeOwnsNone < kBakeOwnsDiffuse && kBakeOwnsDiffuse < kBakeOwnsAll,
-    "SceneLight::baked classes are compared, not tested for equality: keep them ordered."
-);
-
 struct SceneLight {
-    std::string  name;
-    std::string  type        = "Point";
+    std::string name;
+    std::string type        = "Point";
     ZHLN::FVec3 position    = {0.0f, 3.0f, 0.0f};
     ZHLN::FVec3 rotation    = {0.0f, 0.0f, 0.0f};
     ZHLN::FVec3 direction   = {0.0f, -1.0f, 0.0f};
     ZHLN::FVec3 color       = {1.0f, 1.0f, 1.0f};
-    float        intensity   = 100.0f;
-    float        radius      = 0.5f;
-    float        range       = 20.0f;
-    bool         castsShadow = false;
+    float       intensity   = 100.0f;
+    float       radius      = 0.5f;
+    float       range       = 20.0f;
+    bool        castsShadow = false;
     // Spot cone angles in radians from the axis (0 = none authored).
     float innerConeRadians = 0.0f;
     float outerConeRadians = 0.0f;
@@ -135,14 +134,14 @@ struct SceneLight {
 
 struct SceneCamera {
     ZHLN::FVec3 position = {0.0f, 2.0f, 8.0f};
-    float        yaw      = -90.0f;
-    float        pitch    = 0.0f;
-    float        fov      = 60.0f;
+    float       yaw      = -90.0f;
+    float       pitch    = 0.0f;
+    float       fov      = 60.0f;
 };
 
 struct SceneEnvironment {
-    float        ambientExposure = 25.0f;
-    float        giIntensity     = 1.2f;
+    float       ambientExposure = 25.0f;
+    float       giIntensity     = 1.2f;
     ZHLN::FVec3 skyZenith       = {0.003f, 0.008f, 0.020f};
     ZHLN::FVec3 skyHorizon      = {0.015f, 0.035f, 0.080f};
     ZHLN::FVec3 skyGround       = {0.001f, 0.001f, 0.003f};
@@ -158,11 +157,11 @@ struct SceneEnvironment {
     ZHLN::FVec3 probeMin = {-22.0f, 0.0f, -22.0f};
     ZHLN::FVec3 probeMax = {22.0f, 12.0f, 22.0f};
 
-    float        exposure      = 0.015f;
-    float        bloomStrength = 0.5f;
-    float        contrast      = 1.0f;
-    float        saturation    = 1.0f;
-    int32_t      tonemapper    = 1;
+    float       exposure      = 0.015f;
+    float       bloomStrength = 0.5f;
+    float       contrast      = 1.0f;
+    float       saturation    = 1.0f;
+    int32_t     tonemapper    = 1;
     ZHLN::FVec3 colorFilter   = {1.0f, 1.0f, 1.0f};
 };
 
@@ -183,21 +182,37 @@ enum class SceneError : uint8_t {
     MaterialCreationFailed = 1,
     PrefabNotFound,
     UnknownLightType,
+    EntityCreationFailed,
+    PhysicsCreationFailed,
 };
 
-[[nodiscard]] ZHLN_API auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode>;
+struct InstantiateOptions {
+    bool buildBLAS = true;
+};
 
-[[nodiscard]] ZHLN_API auto Extract(Engine& engine) -> Scene;
+[[nodiscard]] auto Validate(const COM::IAssetLibrary& assets, const Scene& description) -> std::expected<void, ErrorCode>;
+
+// Assets must already be decoded/uploaded by the host (glTF/BSP/etc.).
+// This operation never reads source files or installs importer callbacks.
+[[nodiscard]] auto Instantiate(COM::IEngine& engine, const Scene& description, InstantiateOptions options = {}) -> std::expected<Instance, ErrorCode>;
+[[nodiscard]] auto Instantiate(
+    COM::IEntities&       entities,
+    COM::IAssetLibrary&   assets,
+    COM::IGraphicsDevice& graphics,
+    COM::ISimulation&     simulation,
+    const Scene&          description,
+    InstantiateOptions    options = {}
+) -> std::expected<Instance, ErrorCode>;
+
+[[nodiscard]] auto Extract(COM::IEngine& engine) -> Scene;
 
 struct MaterialLookup {
     const void* userdata                                                 = nullptr;
     std::optional<Material> (*find)(const void* userdata, MaterialID id) = nullptr;
 };
 
-// The registry answers for scene content -- entities, transforms, lights. It no
-// longer answers for the environment, which belongs to whoever owns the
-// pipeline, so that half is passed in rather than scraped out.
-[[nodiscard]] ZHLN_API auto Extract(const Camera& camera, const GraphicsSettings& gfx, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
+// Snapshot at a host phase boundary. Returned document owns all its storage.
+[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const COM::IEntities& entities, MaterialLookup materials = {}) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

@@ -19,9 +19,9 @@
 #include "InteractionComponents.hpp"
 #include "InteractionDispatch.hpp"
 #include <BSP/BSPGeometry.hpp>
+#include <Scene/Scene.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <string_view>
 

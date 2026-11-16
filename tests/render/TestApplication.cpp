@@ -3,8 +3,11 @@
 
 // Opt-in local GPU test: whole application launches. Most stop before the
 // first Tick; a failure probe runs a UI-only frame without GPU rendering.
-#include "TestsFramework.hpp"
 #include "NativeEngineHost.hpp"
+#include "TestsFramework.hpp"
+#if defined(ZHLN_HAS_SCENE)
+#include <Scene/NativeScene.hpp>
+#endif
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -19,7 +22,6 @@
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
@@ -973,6 +975,7 @@ void test_clear_scene_preserves_graphs_resets_locals_and_scene_instantiate_recre
         engine.GetUpdateGraph().Execute(engine.MakeFrame(0.016f, FrameAlpha {0.0f}));
         Expect(g_moduleSceneProbeRuns == 1);
 
+#if defined(ZHLN_HAS_SCENE)
         // Even if a caller despawns the main camera entity explicitly,
         // Scene::Instantiate recreates it and applies the authored pose.
         const Entity oldCam = engine.Entities().SingletonEntity<Components::MainCameraTagComponent>();
@@ -987,6 +990,7 @@ void test_clear_scene_preserves_graphs_resets_locals_and_scene_instantiate_recre
         Expect(instantiated.has_value());
         const auto restoredCam = engine.Entities().GetSingleton<Components::CameraComponent>();
         Expect(restoredCam.has_value() && restoredCam->camera.position == FVec3 {3.0f, 4.0f, 5.0f});
+#endif
         ran = true;
     });
     ExpectUserClosed(app.Run([](Engine& engine, float) { engine.Host().Close(); }));

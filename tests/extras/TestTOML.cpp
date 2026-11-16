@@ -11,7 +11,7 @@
 // The scene types are exercised through the same path, because "scene
 // definition in the type system" only means anything if a scene document is
 // just another reflected struct. Note the direction of that dependency: the
-// core scene model (Zahlen/Engine/Scene.hpp) knows nothing about TOML, and it is
+// core scene model (Scene/Scene.hpp) knows nothing about TOML, and it is
 // plugins/toml/SceneTOML.hpp's Jolt vector bindings that make a
 // ZHLN::Scene::Scene a document.
 //
@@ -26,13 +26,14 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include "SceneTestEntities.hpp"
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Math/Camera.hpp>
+#include <Scene/Scene.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -680,7 +681,7 @@ onClickAction = "editor.save_scene"
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
-                camera, gfx, registry,
+                camera, gfx, SceneTestEntities {registry},
                 ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
                                                  const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
                                                  const auto  hit   = table.find(id);

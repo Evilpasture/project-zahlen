@@ -135,7 +135,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         zahlen_warnings
     )
     if(SAMPLE_NAME STREQUAL "BSPMurderDronesSample")
-        target_link_libraries(${SAMPLE_NAME} PRIVATE Jolt)
+        target_link_libraries(${SAMPLE_NAME} PRIVATE Jolt zahlen_native_scene)
     endif()
 
     # Link only the optional targets this sample uses (e.g. ZHLN.Locomotion and

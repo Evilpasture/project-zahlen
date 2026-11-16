@@ -47,7 +47,6 @@ set(RAW_ENGINE_SOURCES
     system/LightingSystem.cpp
     system/EnvironmentSunSystem.cpp
     system/CameraSystem.cpp
-    Scene.cpp
 )
 
 target_sources(zahlen_engine PRIVATE ${RAW_ENGINE_SOURCES})

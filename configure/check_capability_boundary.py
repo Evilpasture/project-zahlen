@@ -56,6 +56,10 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
+    "utils/scene/SceneDocument.cpp", "utils/scene/SceneDocument.hpp",
+    "plugins/Scene/Scene.cpp", "plugins/Scene/Scene.hpp",
+    "plugins/BSP/BSPScene.cpp", "plugins/BSP/BSPScene.hpp",
+    "plugins/Scene/SceneFields.hpp", "plugins/Scene/SceneExtraction.hpp",
     "app/Application.cpp", "app/HostUI.cpp", "app/HostRunner.cpp", "app/main.cpp", "app/UIEditor.cpp",
     "app/include/Zahlen/App.hpp", "app/include/Zahlen/HostUI.hpp", "app/include/Zahlen/HostRunner.hpp",
     "app/include/Zahlen/Zahlen.hpp", "plugins/Fonts/Fonts.cpp", "plugins/Fonts/Fonts.hpp",
@@ -68,7 +72,7 @@ COM_HOST_PORTS = frozenset({
     "plugins/glTF/GLTFDocument.cpp", "plugins/glTF/GLTFDocument.hpp",
     "plugins/glTF/GLTFAssets.cpp", "plugins/glTF/GLTFAssets.hpp", "plugins/glTF/GLTFOptions.hpp",
 })
-NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
+NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 
 # The internal cache header, and the paths allowed to include it.
 INTERNAL_HEADERS = {"Zahlen/Engine/AssetManager.hpp": "Engine::Assets() -> AssetLibrary"}

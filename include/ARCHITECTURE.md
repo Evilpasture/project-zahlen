@@ -200,16 +200,20 @@ unavailable library skips only the target that needs it.
 
 A few examples illustrate the intended seam:
 
-* **Scenes are Core data; text formats are plugins.** `Zahlen/Engine/Scene.hpp` and
-  `Scene::Instantiate()` remain Core. `plugins/toml/SceneTOML.hpp` turns a
-  scene into TOML and binds Jolt vectors; Core does not parse a document.
+* **Scenes are consumer documents and orchestration.** `plugins/Scene/Scene.hpp`
+  owns the STL document and capability-only Instantiate/Extract. `zahlen_scene`
+  uses IEntities/IAssetLibrary/IGraphicsDevice/ISimulation; hosts prepare prefab
+  sources explicitly. Core keeps only POD component values in ECS/SceneValues.hpp.
+  `zahlen_native_scene` is an explicit transitional adapter for unported native
+  hosts, never a dependency of the COM library. TOML/Lua document adapters remain
+  consumers; no Core source includes or invokes a Scene document.
 * **Model import is a plugin.** `plugins/glTF/GLTFImporter.cpp` reads a model
   using cgltf, stb_image, and `plugins/json`, then writes a plain
   `ZHLN::ModelPrefab` to the Core prefab cache. Core reads the cached structure
   and instantiates it; it never calls the importer or depends on glTF parsing.
-* **Fonts follow the same pattern.** Core owns the `BakedFontLoader` seam and
-  embedded fallback bake. `plugins/Fonts/` installs the production loader for
-  fontbm atlases or cooked font containers; Core parses no outline font.
+* **Fonts follow the same pattern.** Hosts explicitly read a bake through
+  `plugins/Fonts/` and upload it through capabilities into their host-owned
+  context/atlas. Core supplies no production font-loader callback.
 * **ProjectLight is application/gameplay policy.** Its `DataModel` owns stable
   Instance IDs and the object graph; bindings and the native client adapt that
   graph to existing engine APIs without making Core depend on LuaJIT, sockets,

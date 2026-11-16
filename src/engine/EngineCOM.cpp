@@ -1,4 +1,5 @@
 #include "COMJointAllocator.hpp"
+#include "PrefabFactoryInternal.hpp"
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -178,6 +179,7 @@ template <typename T>
 }
 
 constexpr std::array kPublishedComponents {
+    Publish<Components::PendingDestroy>(),
     Publish<Components::TransformComponent>(),
     Publish<Components::WorldTransformComponent>(),
     Publish<Components::HierarchyComponent>(),
@@ -946,18 +948,17 @@ public:
                 }
             }
         } else if (boxDesc.has_value()) {
-            createdMesh = PrefabFactory::CreateBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color);
+            createdMesh = PrefabFactory::BuildBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color, options.buildBLAS);
         } else if (planeDesc.has_value()) {
-            createdMesh = PrefabFactory::CreatePlaneMesh(gfx, planeDesc->extent, planeDesc->color);
+            createdMesh = PrefabFactory::BuildPlaneMesh(gfx, planeDesc->extent, planeDesc->color, options.buildBLAS);
         } else if (sphereDesc.has_value()) {
-            createdMesh = PrefabFactory::CreateSphereMesh(gfx, sphereDesc->radius, sphereDesc->color);
+            createdMesh = PrefabFactory::BuildSphereMesh(gfx, sphereDesc->radius, sphereDesc->color, options.buildBLAS);
         } else if (cylinderDesc.has_value()) {
-            createdMesh = PrefabFactory::CreateCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height,
-                                                            cylinderDesc->color);
+            createdMesh = PrefabFactory::BuildCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height, cylinderDesc->color, options.buildBLAS);
         } else if (coneDesc.has_value()) {
-            createdMesh = PrefabFactory::CreateConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color);
+            createdMesh = PrefabFactory::BuildConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color, options.buildBLAS);
         } else if (tetraDesc.has_value()) {
-            createdMesh = PrefabFactory::CreateTetrahedronMesh(gfx);
+            createdMesh = PrefabFactory::BuildTetrahedronMesh(gfx, options.buildBLAS);
         }
 
         return DispatchOutChain<ZHLN::Mesh>(outMeshChain, [&](ZHLN::Mesh& outMesh) -> Result<void> {
@@ -1432,6 +1433,29 @@ public:
         };
     }
 
+    [[nodiscard]] Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* out) const noexcept override {
+        if (!out)
+            return ComError::NullArgument;
+        const auto* prefab = Library().BorrowCachedPrefab(hash);
+        if (!prefab)
+            return ComError::AssetNotCached;
+        PrefabBoundsInfo bounds {};
+        for (const auto& part: prefab->parts) {
+            if (!bounds.hasParts) {
+                bounds.min      = part.localMin;
+                bounds.max      = part.localMax;
+                bounds.hasParts = true;
+            } else {
+                bounds.min = {std::min(bounds.min.x, part.localMin.x), std::min(bounds.min.y, part.localMin.y), std::min(bounds.min.z, part.localMin.z)};
+                bounds.max = {std::max(bounds.max.x, part.localMax.x), std::max(bounds.max.y, part.localMax.y), std::max(bounds.max.z, part.localMax.z)};
+            }
+        }
+        return DispatchOutChain<PrefabBoundsInfo>(out, [&](PrefabBoundsInfo& value) -> Result<void> {
+            value = bounds;
+            return {};
+        });
+    }
+
     [[nodiscard]] uint32_t PrefabVirtualPath(uint64_t hash, char* buffer, uint32_t capacity) const noexcept override {
         const ModelPrefab* prefab = Library().BorrowCachedPrefab(hash);
         if (prefab == nullptr) return 0;
@@ -1473,28 +1497,32 @@ public:
         std::optional<CylinderMeshDesc> cylinderDesc;
         std::optional<ConeMeshDesc>     coneDesc;
         uint32_t                        shapeCount = 0;
+        MeshBuildOptions                options {.buildBLAS = true};
 
         const Result<void> chainRes =
-            DispatchInChain<PrefabFactory::SpawnParams, BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc, CylinderMeshDesc,
-                            ConeMeshDesc>(primitiveChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
-                if constexpr (std::is_same_v<NodeT, PrefabFactory::SpawnParams>) {
-                    params = node;
-                } else {
-                    ++shapeCount;
-                    if constexpr (std::is_same_v<NodeT, BoxMeshDesc>) {
-                        boxDesc = node;
-                    } else if constexpr (std::is_same_v<NodeT, PlaneMeshDesc>) {
-                        planeDesc = node;
-                    } else if constexpr (std::is_same_v<NodeT, SphereMeshDesc>) {
-                        sphereDesc = node;
-                    } else if constexpr (std::is_same_v<NodeT, CylinderMeshDesc>) {
-                        cylinderDesc = node;
-                    } else if constexpr (std::is_same_v<NodeT, ConeMeshDesc>) {
-                        coneDesc = node;
+            DispatchInChain<MeshBuildOptions, PrefabFactory::SpawnParams, BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc, CylinderMeshDesc, ConeMeshDesc>(
+                primitiveChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+                    if constexpr (std::is_same_v<NodeT, MeshBuildOptions>) {
+                        options = node;
+                    } else if constexpr (std::is_same_v<NodeT, PrefabFactory::SpawnParams>) {
+                        params = node;
+                    } else {
+                        ++shapeCount;
+                        if constexpr (std::is_same_v<NodeT, BoxMeshDesc>) {
+                            boxDesc = node;
+                        } else if constexpr (std::is_same_v<NodeT, PlaneMeshDesc>) {
+                            planeDesc = node;
+                        } else if constexpr (std::is_same_v<NodeT, SphereMeshDesc>) {
+                            sphereDesc = node;
+                        } else if constexpr (std::is_same_v<NodeT, CylinderMeshDesc>) {
+                            cylinderDesc = node;
+                        } else if constexpr (std::is_same_v<NodeT, ConeMeshDesc>) {
+                            coneDesc = node;
+                        }
                     }
+                    return {};
                 }
-                return {};
-            });
+            );
         if (!chainRes.HasValue()) return chainRes.error;
         if (shapeCount != 1U) return ComError::InvalidArgument;
 
@@ -1506,26 +1534,26 @@ public:
                     resolved.materialOverride.baseColorFactor = boxDesc->color;
                 }
             }
-            return PrefabFactory::CreateBox(*m_engine, boxDesc->halfExtents, resolved);
+            return PrefabFactory::CreateBoxConfigured(*m_engine, boxDesc->halfExtents, resolved, options.buildBLAS);
         }
         if (planeDesc.has_value()) {
             const FVec4 planeColor = planeDesc->color.w >= 0.0F ? planeDesc->color : FVec4 {0.6F, 0.6F, 0.6F, 1.0F};
-            return PrefabFactory::CreatePlane(*m_engine, planeDesc->extent, planeColor, params);
+            return PrefabFactory::CreatePlaneConfigured(*m_engine, planeDesc->extent, planeColor, params, options.buildBLAS);
         }
         if (sphereDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (sphereDesc->color.w >= 0.0F) resolved.color = sphereDesc->color;
-            return PrefabFactory::CreateSphere(*m_engine, sphereDesc->radius, resolved);
+            return PrefabFactory::CreateSphereConfigured(*m_engine, sphereDesc->radius, resolved, options.buildBLAS);
         }
         if (cylinderDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (cylinderDesc->color.w >= 0.0F) resolved.color = cylinderDesc->color;
-            return PrefabFactory::CreateCylinder(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved);
+            return PrefabFactory::CreateCylinderConfigured(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved, options.buildBLAS);
         }
         if (coneDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (coneDesc->color.w >= 0.0F) resolved.color = coneDesc->color;
-            return PrefabFactory::CreateCone(*m_engine, coneDesc->radius, coneDesc->height, resolved);
+            return PrefabFactory::CreateConeConfigured(*m_engine, coneDesc->radius, coneDesc->height, resolved, options.buildBLAS);
         }
         return ComError::InvalidArgument;
     }

@@ -34,6 +34,13 @@ struct PrefabNodeInfo {
     Mat4x4 localTransform = Mat4x4::Identity();
     bool hasMesh = false;
 };
+// Union of prefab part-local AABBs, matching native kinematic-root policy.
+struct PrefabBoundsInfo {
+    FVec3 min {};
+    FVec3 max {};
+    bool  hasParts = false;
+};
+
 struct PrefabPartInfo {
     String64 name;
     AssetID meshAsset = InvalidAssetID;
@@ -127,6 +134,7 @@ struct PrefabGPUReplacementInfo {
     Span<const PrefabPartGPUInfo> parts {};
 };
 template <typename T> inline constexpr bool AssetWireValue = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
+static_assert(AssetWireValue<PrefabBoundsInfo>);
 static_assert(AssetWireValue<PrefabCSGModifierInfo>);
 static_assert(AssetWireValue<PrefabPartGPUInfo> && AssetWireValue<PrefabGPUReplacementInfo>);
 static_assert(AssetWireValue<CollisionMeshInfo> && AssetWireValue<EnvironmentImageCacheInfo>);

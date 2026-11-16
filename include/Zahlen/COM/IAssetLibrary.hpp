@@ -77,6 +77,8 @@ struct IAssetLibrary : IObject {
 
     [[nodiscard]] virtual Option<PrefabInfo> DescribePrefab(uint64_t hash) const noexcept = 0;
 
+    [[nodiscard]] virtual Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* bounds) const noexcept = 0;
+
     // Copies the prefab's virtual path into `buffer` and null-terminates it
     // when there is room. Returns the length the path actually needs, which
     // may exceed `capacity`; zero means nothing is cached under that hash.
@@ -97,6 +99,8 @@ struct IAssetLibrary : IObject {
     // transforms, OwnedMeshComponent, and optional PhysicsComponent). Accepts
     // exactly one shape node (BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc,
     // CylinderMeshDesc, or ConeMeshDesc) plus optional PrefabFactory::SpawnParams.
+    // Optional MeshBuildOptions explicitly selects BLAS construction (default
+    // true here for native spawn compatibility); retained across device rebuilds.
     [[nodiscard]] virtual Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept = 0;
 
     [[nodiscard]] virtual Option<EnvironmentImageInfo> FindEnvironmentImage(StringView key) const noexcept = 0;

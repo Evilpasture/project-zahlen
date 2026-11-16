@@ -3,26 +3,26 @@
 
 #pragma once
 #include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/ECS/SceneValues.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Render/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Engine/Scene.hpp>
-#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Render/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
+#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <span>
@@ -89,6 +89,7 @@ struct Components {
         Shape        shape      = Shape::None;
         FVec3    dimensions = FVec3::Zero(); // box: half extents; others: radius/extent, height
         ZHLN::FVec4 color      = {1.0f, 1.0f, 1.0f, 1.0f};
+        bool         buildBLAS  = true; // retained across explicit renderer recreation
     };
 
     struct SkeletalMeshComponent {

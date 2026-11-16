@@ -82,7 +82,8 @@ PRESETS = {
     ],
     "engine": [
         "include/Zahlen/Engine/Engine.hpp",
-        "include/Zahlen/Engine/Scene.hpp",
+        "include/Zahlen/ECS/SceneValues.hpp",
+        "plugins/Scene",
         "include/Zahlen/Engine/World.hpp",
         "include/Zahlen/Engine/SystemContext.hpp",
         "include/Zahlen/FrameScheduler.hpp",

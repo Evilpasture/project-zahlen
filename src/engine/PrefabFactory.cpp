@@ -161,6 +161,10 @@ auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnPara
 }
 
 auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> Mat4x4 {
+    // A standalone registered part need not have a logical node. -1 is the
+    // descriptor's explicit no-node sentinel, not an index into an empty tree.
+    if (nodeIndex < 0)
+        return Mat4x4::Identity();
     auto matrix = NativeModelMatrix(prefab.nodes[nodeIndex].localTransform);
     int32_t    parentIdx = prefab.nodes[nodeIndex].parentIndex;
 
@@ -358,13 +362,20 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 
 } // namespace
 
-auto CreateBoxInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBoxInternal(
+    GraphicsDevice                  gfx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    ZHLN::FVec3                     halfExtents,
+    const SpawnParams&              params,
+    bool                            buildBLAS
+) -> Entity {
     auto boxColor = params.materialOverride.baseColorFactor;
     if (!(boxColor.w >= 0.0f)) {
         boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
     }
 
-    Mesh mesh = CreateBoxMesh(gfx, halfExtents, boxColor);
+    Mesh mesh = BuildBoxMesh(gfx, halfExtents, boxColor, buildBLAS);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -398,7 +409,8 @@ auto CreateBoxInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<Ph
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Box,
                .dimensions = halfExtents,
-               .color      = boxColor
+               .color      = boxColor,
+               .buildBLAS  = buildBLAS
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
@@ -428,12 +440,13 @@ auto SpawnPrimitive(
     std::string_view                      shapeName,
     Mesh                                  mesh,
     Components::OwnedMeshComponent::Shape shape,
-    FVec3                             dimensions,
+    FVec3                                 dimensions,
     float                                 cullRadius,
     Physics::ShapeType                    physicsShape,
     float                                 physP1,
     float                                 physP2,
-    const SpawnParams&                    params
+    const SpawnParams&                    params,
+    bool                                  buildBLAS
 ) -> Entity {
     auto shapeColor = params.color;
     if (!(shapeColor.w >= 0.0f)) {
@@ -464,7 +477,11 @@ auto SpawnPrimitive(
     reg.Add(e, SpawnLocalTransform(params));
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
-    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor});
+    reg.Add(
+        e, Components::OwnedMeshComponent {
+               .meshAsset = meshAsset, .mesh = mesh, .shape = shape, .dimensions = dimensions, .color = shapeColor, .buildBLAS = buildBLAS
+           }
+    );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
@@ -484,19 +501,7 @@ auto SpawnPrimitive(
 
 } // namespace
 
-auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
-    SpawnParams resolved = params;
-    if (resolved.color.w < 0.0f) {
-        resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
-    }
-    const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
-    return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", CreateSphereMesh(gfx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere, FVec3{radius, 0.0f, 0.0f},
-        radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved
-    );
-}
-
-auto CreateCylinderInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params)
+auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params, bool buildBLAS)
     -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
@@ -504,27 +509,63 @@ auto CreateCylinderInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Option
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Cylinder", CreateCylinderMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
-        FVec3{radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
-        height * 0.5f * maxScale, resolved
+        gfx, reg, pc, "Sphere", BuildSphereMesh(gfx, radius, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Sphere,
+        FVec3 {radius, 0.0f, 0.0f}, radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved, buildBLAS
     );
 }
 
-auto CreateConeInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCylinderInternal(
+    GraphicsDevice                  gfx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    float                           radius,
+    float                           height,
+    const SpawnParams&              params,
+    bool                            buildBLAS
+) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", CreateConeMesh(gfx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone, FVec3{radius, height, 0.0f},
-        std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
+        gfx, reg, pc, "Cylinder", BuildCylinderMesh(gfx, radius, height, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Cylinder,
+        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
+        height * 0.5f * maxScale, resolved, buildBLAS
     );
 }
 
-auto CreatePlaneInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, ZHLN::FVec4 color, const SpawnParams& params)
-    -> Entity {
-    Mesh mesh = CreatePlaneMesh(gfx, extent, color);
+auto CreateConeInternal(
+    GraphicsDevice                  gfx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    float                           radius,
+    float                           height,
+    const SpawnParams&              params,
+    bool                            buildBLAS
+) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.w < 0.0f) {
+        resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
+    }
+    const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
+    return SpawnPrimitive(
+        gfx, reg, pc, "Cone", BuildConeMesh(gfx, radius, height, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Cone,
+        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale,
+        height * 0.5f * maxScale, resolved, buildBLAS
+    );
+}
+
+auto CreatePlaneInternal(
+    GraphicsDevice                  gfx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    float                           extent,
+    ZHLN::FVec4                     color,
+    const SpawnParams&              params,
+    bool                            buildBLAS
+) -> Entity {
+    Mesh mesh = BuildPlaneMesh(gfx, extent, color, buildBLAS);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -557,7 +598,8 @@ auto CreatePlaneInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<
                .mesh       = mesh,
                .shape      = Components::OwnedMeshComponent::Shape::Plane,
                .dimensions = {extent, 0.0f, 0.0f},
-               .color      = color
+               .color      = color,
+               .buildBLAS  = buildBLAS
            }
     );
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
@@ -736,19 +778,19 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
         auto& owned = owners[i];
         switch (owned.shape) {
             case Shape::Box:
-                owned.mesh = CreateBoxMesh(gfx, owned.dimensions, owned.color);
+                owned.mesh = BuildBoxMesh(gfx, owned.dimensions, owned.color, owned.buildBLAS);
                 break;
             case Shape::Plane:
-                owned.mesh = CreatePlaneMesh(gfx, owned.dimensions.x, owned.color);
+                owned.mesh = BuildPlaneMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
                 break;
             case Shape::Sphere:
-                owned.mesh = CreateSphereMesh(gfx, owned.dimensions.x, owned.color);
+                owned.mesh = BuildSphereMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
                 break;
             case Shape::Cylinder:
-                owned.mesh = CreateCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
+                owned.mesh = BuildCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
                 break;
             case Shape::Cone:
-                owned.mesh = CreateConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color);
+                owned.mesh = BuildConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
                 break;
             case Shape::None:
                 continue;

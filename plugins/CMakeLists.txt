@@ -15,6 +15,8 @@
 # JSON and TOML share one target because TOML scene/UI adapters consume the JSON
 # document layer, while neither format should define a second serializer
 # library. Their own subdirectories list the implementation sources.
+add_subdirectory(Scene)
+
 add_library(zahlen_serialization STATIC)
 add_subdirectory(json)
 add_subdirectory(toml)
@@ -26,7 +28,7 @@ set_target_properties(zahlen_serialization PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_link_libraries(zahlen_serialization PUBLIC zahlen_engine)
+target_link_libraries(zahlen_serialization PUBLIC zahlen_engine zahlen_scene)
 target_include_directories(zahlen_serialization PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
