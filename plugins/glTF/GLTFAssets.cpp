@@ -19,18 +19,29 @@ struct Pending {
             graphics.UnloadTexture(texture);
     }
 };
-} // namespace
-auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Document& document, UploadOptions options) -> std::expected<Asset, ErrorCode> {
+struct Replacement {
+    uint64_t generation;
+    uint64_t revision;
+};
+auto UploadImpl(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Document& document, UploadOptions options, const Replacement* replacement)
+    -> std::expected<Asset, ErrorCode> {
     const auto& path = document.virtualPath;
     if (path.empty() || path.size() >= 256 || path.find('\0') != std::string::npos)
         return std::unexpected(COM::ComError::InvalidArgument);
     const auto hash = assets.PrefabHash(std::string_view(path));
     if (const auto cached = assets.DescribePrefab(hash); cached.HasValue()) {
         if (cached.value.emissiveFactorScale != document.options.emissiveFactorScale ||
-            cached.value.maxTextureDimension != document.options.maxTextureDimension || !cached.value.gpuResourcesReady)
+            cached.value.maxTextureDimension != document.options.maxTextureDimension)
             return std::unexpected(COM::ComError::InvalidArgument);
-        return Asset {.hash = hash};
-    }
+        if (!replacement) {
+            if (!cached.value.gpuResourcesReady)
+                return std::unexpected(COM::ComError::InvalidArgument);
+            return Asset {.hash = hash};
+        }
+        if (cached.value.gpuRevision != replacement->revision || cached.value.partCount != document.parts.size())
+            return std::unexpected(COM::ComError::InvalidArgument);
+    } else if (replacement)
+        return std::unexpected(COM::ComError::AssetNotCached);
     for (const auto& part: document.parts)
         if (part.primitive >= document.primitives.size())
             return std::unexpected(COM::ComError::InvalidArgument);
@@ -54,8 +65,7 @@ auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Do
             continue; // original best-effort image policy
         if (!image.extent.width || !image.extent.height || uint64_t(image.extent.width) * image.extent.height * 4 != image.rgba.size())
             return std::unexpected(COM::ComError::InvalidArgument);
-        const auto texture =
-            graphics.CreateTexture(std::string_view(path + "#tex_" + std::to_string(i)), std::as_bytes(std::span(image.rgba)), image.extent, image.isSRGB);
+        const auto texture = graphics.CreateTexture(COM::StringView {}, std::as_bytes(std::span(image.rgba)), image.extent, image.isSRGB);
         if (!texture.HasValue())
             return std::unexpected(texture.error);
         textures[i] = texture.value;
@@ -90,7 +100,7 @@ auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Do
         }
         morphOffsets.push_back(offset);
         CollisionAssetID collision = CollisionAssetID::Invalid;
-        if (options.buildColliders && p.wantsMeshCollider && !p.indices.empty()) {
+        if (!replacement && options.buildColliders && p.wantsMeshCollider && !p.indices.empty()) {
             collision = static_cast<CollisionAssetID>(assets.AssetHash(std::string_view(path + "#collision_" + std::to_string(i))));
             std::vector<FVec3> vertices;
             for (const auto& v: p.positions)
@@ -100,6 +110,38 @@ auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Do
                 return std::unexpected(cached.error);
         }
         collisions.push_back(collision);
+    }
+    if (replacement) {
+        std::vector<COM::PrefabPartGPUInfo> parts;
+        for (size_t i = 0; i < document.parts.size(); ++i) {
+            const auto primitive = document.parts[i].primitive;
+            const auto key       = path + "#part" + std::to_string(i);
+            parts.push_back(
+                {.meshAsset        = assets.AssetHash(std::string_view(key)),
+                 .materialAsset    = assets.AssetHash(std::string_view(key + "_mat")),
+                 .mesh             = pending.meshes[primitive],
+                 .material         = materials[primitive],
+                 .morphOffset      = morphOffsets[primitive],
+                 .activeMorphCount = document.primitives[primitive].activeMorphCount}
+            );
+        }
+        const auto revision = assets.ReplacePrefabGPUResources(
+            COM::InChain(
+                COM::PrefabGPUReplacementInfo {
+                    .hash = hash, .deviceGeneration = replacement->generation, .expectedRevision = replacement->revision, .parts = parts
+                }
+            )
+        );
+        if (!revision.HasValue())
+            return std::unexpected(revision.error);
+        pending.committed = true;
+        return Asset {
+            .hash             = hash,
+            .deviceGeneration = replacement->generation,
+            .gpuRevision      = revision.value,
+            .ownsResources    = true,
+            .textures         = std::move(pending.textures)
+        };
     }
     std::vector<COM::PrefabPartInfo>        parts;
     std::vector<COM::PrefabCSGModifierInfo> csg;
@@ -181,6 +223,35 @@ auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Do
     if (!registered.HasValue())
         return std::unexpected(registered.error);
     pending.committed = true;
-    return Asset {.hash = registered.value, .textures = std::move(pending.textures)};
+    const auto info   = assets.DescribePrefab(registered.value);
+    return Asset {
+        .hash             = registered.value,
+        .deviceGeneration = info.value.gpuDeviceGeneration,
+        .gpuRevision      = info.value.gpuRevision,
+        .ownsResources    = true,
+        .textures         = std::move(pending.textures)
+    };
+}
+} // namespace
+
+auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Document& document, UploadOptions options) -> std::expected<Asset, ErrorCode> {
+    return UploadImpl(assets, graphics, document, options, nullptr);
+}
+
+auto RebuildGPUResources(COM::IEngine& engine, const Document& document, Asset& asset, UploadOptions options) -> std::expected<void, ErrorCode> {
+    auto& assets = *engine.Assets();
+    if (!asset.ownsResources || asset.hash != assets.PrefabHash(std::string_view(document.virtualPath)))
+        return std::unexpected(COM::ComError::InvalidArgument);
+    const Replacement replacement {engine.DeviceGeneration(), asset.gpuRevision};
+    auto              uploaded = UploadImpl(assets, *engine.Graphics(), document, options, &replacement);
+    if (!uploaded)
+        return std::unexpected(uploaded.error());
+    // Texture IDs are renderer-scoped, not device-generation-tagged. Never
+    // unload the old generation through a replacement renderer (ABA hazard).
+    if (asset.deviceGeneration == replacement.generation)
+        for (const auto texture: asset.textures)
+            engine.Graphics()->UnloadTexture(texture);
+    asset = std::move(*uploaded);
+    return {};
 }
 } // namespace ZHLN::GLTF

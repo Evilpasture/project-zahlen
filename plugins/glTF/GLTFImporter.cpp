@@ -110,6 +110,7 @@ void RefreshNative(GraphicsDevice& gfx, ModelPrefab& prefab, const Document& doc
         prefab.parts[i].morphOffset      = uploaded[primitive].morphOffset;
         prefab.parts[i].activeMorphCount = document.primitives[primitive].activeMorphCount;
     }
+    prefab.gpuResourcesReady = true;
     RegisterNative(gfx, prefab);
 }
 auto CacheNative(GraphicsDevice& gfx, AssetLibrary& assets, const Document& document) -> Optional<ModelPrefab&> {

@@ -109,8 +109,26 @@ struct PrefabRegistrationInfo {
     Span<const PrefabLightInfo> lights {};
     Span<const PrefabCSGModifierInfo> csgModifiers {};
 };
+// GPU-only replacement, never a replacement of CPU prefab/animation storage.
+// One entry per cached part, in the original order. Mesh ownership transfers
+// only on success; caller owns everything on failure. Call between frames.
+struct PrefabPartGPUInfo {
+    AssetID meshAsset = InvalidAssetID;
+    MaterialID materialAsset = InvalidMaterialID;
+    Mesh mesh {};
+    Material material {};
+    uint32_t morphOffset = 0;
+    uint32_t activeMorphCount = 0;
+};
+struct PrefabGPUReplacementInfo {
+    uint64_t hash = 0;
+    uint64_t deviceGeneration = 0;
+    uint64_t expectedRevision = 0;
+    Span<const PrefabPartGPUInfo> parts {};
+};
 template <typename T> inline constexpr bool AssetWireValue = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
 static_assert(AssetWireValue<PrefabCSGModifierInfo>);
+static_assert(AssetWireValue<PrefabPartGPUInfo> && AssetWireValue<PrefabGPUReplacementInfo>);
 static_assert(AssetWireValue<CollisionMeshInfo> && AssetWireValue<EnvironmentImageCacheInfo>);
 static_assert(AssetWireValue<AssetSlice> && AssetWireValue<PrefabNodeInfo> && AssetWireValue<PrefabPartInfo>);
 static_assert(AssetWireValue<PrefabJointInfo> && AssetWireValue<PrefabSkeletonInfo> && AssetWireValue<PrefabChannelInfo>);

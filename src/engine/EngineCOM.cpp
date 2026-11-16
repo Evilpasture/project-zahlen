@@ -62,6 +62,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -326,6 +327,12 @@ public:
     [[nodiscard]] uint32_t MaxFramesPerSecond() const noexcept override { return m_engine->MaxFramesPerSecond(); }
     [[nodiscard]] uint64_t CurrentFrame() const noexcept override { return m_engine->GetCurrentFrame(); }
     [[nodiscard]] uint64_t DeviceGeneration() const noexcept override { return m_engine->DeviceGeneration(); }
+
+    [[nodiscard]] Result<void> RecreateGraphicsDevice() noexcept override {
+        const auto result = m_engine->HandleDeviceLost();
+        if (!result) return result.error();
+        return {};
+    }
 
     [[nodiscard]] Result<uint64_t> AddDeviceLostCallback(void (*callback)(void*), void* userdata) noexcept override {
         if (callback == nullptr) return ComError::NullArgument;
@@ -1419,9 +1426,9 @@ public:
             .boundingRadius = maxRadius,
             .emissiveFactorScale = prefab->emissiveFactorScale,
             .maxTextureDimension = prefab->maxTextureDimension,
-            .gpuResourcesReady = std::none_of(prefab->parts.begin(), prefab->parts.end(), [](const auto& part) {
-                return part.mesh.posBuffer == BufferID::Invalid && part.defaultMaterial.pipeline == PipelineID::Invalid;
-            }),
+            .gpuResourcesReady = prefab->gpuResourcesReady,
+            .gpuDeviceGeneration = prefab->gpuDeviceGeneration,
+            .gpuRevision = prefab->gpuRevision,
         };
     }
 
@@ -1745,9 +1752,97 @@ public:
         }
         for (const auto& light: std::span<const PrefabLightInfo>(desc.lights))
             prefab->lights.push_back({light.name, light.nodeIndex, light.type, light.color, light.intensity, light.range, light.innerConeAngle, light.outerConeAngle});
+        if (m_nextPrefabGPURevision == 0) return ComError::InvalidArgument;
+        prefab->gpuRevision = m_nextPrefabGPURevision++;
+        prefab->gpuDeviceGeneration = DeviceGeneration();
         Library().UseGraphicsDevice(Device());
         Library().CachePrefab(hash, std::move(prefab));
         return hash;
+    }
+
+    [[nodiscard]] Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept override {
+        const auto info = ReadNode<PrefabGPUReplacementInfo>(chain);
+        if (!info.HasValue()) return info.error;
+        const auto& desc = info.value;
+        if (!Valid(desc.parts)) return ComError::NullArgument;
+        auto library = Library();
+        auto prefab = library.CachedPrefab(desc.hash);
+        if (!prefab) return ComError::AssetNotCached;
+        if (desc.deviceGeneration != DeviceGeneration() || desc.expectedRevision != prefab->gpuRevision ||
+            desc.parts.size != prefab->parts.size() || m_nextPrefabGPURevision == 0)
+            return ComError::InvalidArgument;
+        std::set<BufferID> oldBuffers;
+        std::set<PipelineID> oldPipelines;
+        std::set<MaterialID> replacementMaterialKeys;
+        std::map<AssetID, const PrefabPartGPUInfo*> replacements;
+        for (const auto& existing: prefab->parts) {
+            for (const auto buffer: {existing.mesh.posBuffer, existing.mesh.tangentFrameBuffer, existing.mesh.surfaceBuffer,
+                 existing.mesh.skinBuffer, existing.mesh.indexBuffer, existing.mesh.meshletBuffer,
+                 existing.mesh.meshletVertexBuffer, existing.mesh.meshletTriBuffer})
+                if (buffer != BufferID::Invalid) oldBuffers.insert(buffer);
+            if (existing.defaultMaterial.pipeline != PipelineID::Invalid) oldPipelines.insert(existing.defaultMaterial.pipeline);
+            if (existing.defaultMaterial.prePassPipeline != PipelineID::Invalid) oldPipelines.insert(existing.defaultMaterial.prePassPipeline);
+        }
+        // Complete validation precedes any publication or resource retirement.
+        for (size_t i = 0; i < desc.parts.size; ++i) {
+            const auto& part = desc.parts.data[i];
+            const auto& old = prefab->parts[i];
+            if (part.meshAsset == InvalidAssetID || part.materialAsset == InvalidMaterialID ||
+                part.meshAsset != old.meshAsset || part.materialAsset != old.materialAsset ||
+                part.activeMorphCount != old.activeMorphCount || part.mesh.posBuffer == BufferID::Invalid ||
+                part.material.pipeline == PipelineID::Invalid || !part.mesh.vertexCount)
+                return ComError::InvalidArgument;
+            // New resources may be shared by new parts, never borrowed from
+            // any old part: retirement must not destroy a replacement alias.
+            for (const auto fresh: {part.mesh.posBuffer, part.mesh.tangentFrameBuffer, part.mesh.surfaceBuffer,
+                 part.mesh.skinBuffer, part.mesh.indexBuffer, part.mesh.meshletBuffer,
+                 part.mesh.meshletVertexBuffer, part.mesh.meshletTriBuffer})
+                if (oldBuffers.contains(fresh)) return ComError::InvalidArgument;
+            if (oldPipelines.contains(part.material.pipeline) || oldPipelines.contains(part.material.prePassPipeline) ||
+                !replacements.emplace(part.meshAsset, &part).second || !replacementMaterialKeys.insert(part.materialAsset).second)
+                return ComError::InvalidArgument;
+        }
+        auto gfx = Device();
+        Library().UseGraphicsDevice(gfx);
+        // Every subsequent operation is non-failing. Retire all aliases before
+        // buffers (parts may share a primitive), then publish the complete set.
+        for (const auto& old: prefab->parts) {
+            gfx.UnregisterMesh(old.meshAsset);
+            // The cache owns its default material even before first spawn;
+            // an alias may not have been registered yet.
+            gfx.RegisterMaterial(old.materialAsset, old.defaultMaterial);
+            gfx.UnregisterMaterial(old.materialAsset);
+        }
+        for (const auto& old: prefab->parts) gfx.DestroyMesh(old.mesh);
+        auto& registry = m_engine->GetInternalRegistry();
+        for (const auto entity: registry.GetEntitiesWith<Components::MeshComponent>()) {
+            const auto mesh = registry.Get<Components::MeshComponent>(entity);
+            const auto replacement = replacements.find(mesh->meshAsset);
+            if (replacement == replacements.end()) continue;
+            const auto& part = *replacement->second;
+            if (auto morph = registry.Get<Components::MorphTargetComponent>(entity)) {
+                morph->offset = part.morphOffset;
+                morph->activeCount = part.activeMorphCount;
+            }
+            if (auto skin = registry.Get<Components::SkeletalMeshComponent>(entity)) {
+                // Engine::HandleDeviceLost already invalidates scratch on
+                // generation changes; this also handles same-device refresh.
+                gfx.DestroyBuffer(skin->skinnedScratch);
+                skin->skinnedScratch = BufferID::Invalid;
+                skin->scratchVertexCount = 0;
+            }
+        }
+        for (size_t i = 0; i < desc.parts.size; ++i) {
+            const auto& part = desc.parts.data[i]; auto& target = prefab->parts[i];
+            target.mesh = part.mesh; target.defaultMaterial = part.material;
+            target.morphOffset = part.morphOffset;
+            gfx.RegisterMesh(part.meshAsset, part.mesh);
+            gfx.RegisterMaterial(part.materialAsset, part.material);
+        }
+        prefab->gpuResourcesReady = true;
+        prefab->gpuDeviceGeneration = desc.deviceGeneration;
+        prefab->gpuRevision = m_nextPrefabGPURevision++;
+        return prefab->gpuRevision;
     }
 
     // --------------------------------------------------------- IActionContext
@@ -2079,6 +2174,7 @@ private:
         std::vector<DeviceLostEntry> entries;
         uint64_t nextToken = 1;
     };
+    uint64_t m_nextPrefabGPURevision = 1;
     std::unique_ptr<Engine> m_engine;
     std::shared_ptr<DeviceLostListeners> m_deviceLostListeners;
 };

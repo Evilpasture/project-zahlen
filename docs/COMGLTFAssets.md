@@ -67,16 +67,23 @@ RegisterPrefab now explicitly binds the cache's graphics owner before transfer
 non-parent-first joint arrays while still rejecting invalid indices/cycles.
 Both sides must rebuild for the extended POD `PrefabInfo` layout.
 
-## Deliberately unfinished
+## GPU recovery
 
-This slice covers CPU extraction and **initial** capability authoring. It does
-not yet provide capability GPU replacement/device-loss recovery. Conservative
-`PrefabInfo::gpuResourcesReady` lets Upload reject an invalidated glTF cache
-rather than returning a successful stale cache hit. The caller must stop using
-that asset after DeviceGeneration changes; do not clear caches underneath live
-animators as a recovery workaround. A subsequent slice must preserve prefab
-identity, retire replaced resources, and rebind live morph/skin resources.
-Native recovery entry points remain compatibility-only, not a COM callback API.
+GPU replacement and glTF host recovery are now provided by
+`IAssetLibrary::ReplacePrefabGPUResources` and `GLTF::RebuildGPUResources`.
+Retain the owning Asset and original Document, poll DeviceGeneration in the
+host loop, and rebuild before the next frame. The operation keeps CPU prefab
+identity and live animator state; it rebinds morph offsets and skinning scratch
+without clearing the cache or subscribing a callback. Palette matrices are
+republished by the normal animation step/explicit graphics upload.
 
-The inspector, Scene and extension/sample host ports are still outstanding;
-this document is not a claim that the whole consumer migration is complete.
+See [COMPrefabGPURecovery.md](COMPrefabGPURecovery.md) for generation/revision
+validation, texture ownership, controlled resets and failure limitations.
+RGBA8 glTF capability textures now use independent anonymous uploads.
+
+## Remaining consumer migration
+
+Scene documents/orchestration and inspector/editor/sample/extension host ports
+are still outstanding. This is not a claim that the whole consumer migration
+is complete. Native recovery entry points remain compatibility-only; do not
+mix them with a COM owning lease for the same prefab path.

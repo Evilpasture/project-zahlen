@@ -97,6 +97,7 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
     // The old RenderContext's buffer pool is being destroyed. Do not pass its
     // IDs to the replacement renderer even if it reuses the same slots.
     _prefabCache.ForEach([](ModelPrefab& prefab) {
+        prefab.gpuResourcesReady = false;
         for (auto& part: prefab.parts) {
             part.mesh                            = {};
             part.defaultMaterial.pipeline        = PipelineID::Invalid;

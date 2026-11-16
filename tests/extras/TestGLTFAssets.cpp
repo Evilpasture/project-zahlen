@@ -15,8 +15,199 @@ auto Fixture(std::string_view path) {
     const auto text = ZHLN::Test::GLTFFixture;
     return ZHLN::GLTF::Decode({reinterpret_cast<const uint8_t*>(text.data()), text.size()}, path);
 }
+enum class RecoveryExercise { StateOnly, InitialFrame, RecoveredFrame };
+auto ExerciseGPURecovery(RecoveryExercise mode) -> std::expected<void, ZHLN::ErrorCode> {
+    using namespace ZHLN;
+    using Test::ExpectEq;
+    using Test::ExpectTrue;
+    auto created = COM::CreateEngineRef(
+        COM::InChain(
+            COM::EngineAppConfig {.appName = String64("COM glTF recovery"), .logLevel = LogLevel::Quiet},
+            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+        )
+    );
+    if (!ExpectTrue(created.has_value()))
+        return {};
+    auto  engine = std::move(*created);
+    auto& assets = *engine->Assets();
+    auto& gfx    = *engine->Graphics();
+    auto& ecs    = *engine->Entities();
+    auto  doc    = Fixture("recover.gltf");
+    if (!ExpectTrue(doc.has_value()))
+        return {};
+    doc->parts.push_back(doc->parts[0]); // two instances of one uploaded primitive
+    auto asset = GLTF::Upload(assets, gfx, *doc, {.buildBLAS = false});
+    if (!ExpectTrue(asset.has_value()))
+        return {};
+    auto hit = GLTF::Upload(assets, gfx, *doc, {.buildBLAS = false});
+    if (ExpectTrue(hit.has_value()))
+        ExpectTrue(!GLTF::RebuildGPUResources(*engine.Get(), *doc, *hit, {.buildBLAS = false}).has_value());
+    ExpectTrue(gfx.AllocateJoints(7).HasValue()); // force a nonzero live palette offset
+    auto   entities = assets.Instantiate(asset->hash, {.isAnimated = true});
+    Entity root = Entity::Null(), part = Entity::Null();
+    for (const auto e: entities) {
+        if (ecs.Get<Components::AnimatorComponent>(e))
+            root = e;
+        if (ecs.Get<Components::MorphTargetComponent>(e))
+            part = e;
+    }
+    if (!ExpectTrue(root != Entity::Null() && part != Entity::Null()))
+        return {};
+    auto* animator                 = ecs.Get<Components::AnimatorComponent>(root);
+    animator->currentTrackTime     = .375f;
+    animator->currentPlaybackSpeed = 1.25f;
+    auto* morph                    = ecs.Get<Components::MorphTargetComponent>(part);
+    morph->weights                 = {.42f, 0, 0, 0};
+    const auto jointOffset         = ecs.Get<Components::SkeletalMeshComponent>(part)->jointOffset;
+    ExpectTrue(jointOffset >= 7);
+    const auto meshKey     = ecs.Get<Components::MeshComponent>(part)->meshAsset;
+    const auto materialKey = ecs.Get<Components::MeshComponent>(part)->materialAsset;
+    const auto original    = gfx.FindMesh(meshKey);
+    if (!ExpectTrue(original.HasValue()))
+        return {};
+    ExpectEq(gfx.FindMesh(assets.AssetHash("recover.gltf#part0")).value.posBuffer, gfx.FindMesh(assets.AssetHash("recover.gltf#part1")).value.posBuffer);
+    if (mode == RecoveryExercise::InitialFrame) {
+        const std::array<Mat4x4, 1> palette {Mat4x4::Identity()};
+        ExpectTrue(gfx.UpdateJointMatrices(jointOffset, palette).HasValue());
+        ExpectTrue(engine->Tick(1.f / 60.f).HasValue());
+        engine->ClearScene();
+        assets.ClearCache();
+        for (const auto texture: asset->textures)
+            gfx.UnloadTexture(texture);
+        return {};
+    }
+    const std::array<float, 12> scratchData {};
+    const auto                  scratch = gfx.CreateBuffer(BufferUsage::SkinScratch, std::as_bytes(std::span(scratchData)), sizeof(float));
+    ecs.Get<Components::SkeletalMeshComponent>(part)->skinnedScratch     = scratch;
+    ecs.Get<Components::SkeletalMeshComponent>(part)->scratchVertexCount = 3;
+    const auto oldOffset                                                 = morph->offset;
+    const auto oldRevision                                               = asset->gpuRevision;
+    const auto oldTextures                                               = asset->textures;
+    // Fail after GPU upload, at commit validation. The old publication
+    // and ownership manifest must remain usable and retryable.
+    Println("    [recovery] validating failed commit and retry");
+    auto incompatible                           = *doc;
+    incompatible.primitives[0].activeMorphCount = 0;
+    incompatible.primitives[0].morphDeltas.clear();
+    ExpectTrue(!GLTF::RebuildGPUResources(*engine.Get(), incompatible, *asset, {.buildBLAS = false}).has_value());
+    ExpectEq(asset->gpuRevision, oldRevision);
+    ExpectEq(asset->textures.size(), oldTextures.size());
+    ExpectEq(asset->textures[0], oldTextures[0]);
+    ExpectTrue(gfx.UpdateBuffer(scratch, std::as_bytes(std::span(scratchData))).HasValue());
+    ExpectEq(gfx.FindMesh(meshKey).value.posBuffer, original.value.posBuffer);
+    ExpectEq(morph->offset, oldOffset);
+    ExpectTrue(GLTF::RebuildGPUResources(*engine.Get(), *doc, *asset, {.buildBLAS = false}).has_value());
+    ExpectTrue(asset->gpuRevision != oldRevision);
+    ExpectTrue(asset->textures[0] != oldTextures[0]);
+    ExpectTrue(morph->offset != oldOffset);
+    ExpectEq(morph->weights.x, .42f);
+    ExpectEq(animator->currentTrackTime, .375f);
+    ExpectEq(animator->currentPlaybackSpeed, 1.25f);
+    ExpectEq(ecs.Get<Components::SkeletalMeshComponent>(part)->jointOffset, jointOffset);
+    ExpectTrue(gfx.FindMesh(meshKey).value.posBuffer != original.value.posBuffer);
+    ExpectTrue(gfx.FindMaterial(materialKey).HasValue());
+    ExpectEq(ecs.Get<Components::SkeletalMeshComponent>(part)->skinnedScratch, BufferID::Invalid);
+    const std::array<std::byte, 4> bytes {};
+    ExpectTrue(!gfx.UpdateBuffer(original.value.posBuffer, bytes).HasValue());
+    ExpectTrue(!gfx.UpdateBuffer(scratch, bytes).HasValue());
+    // Replacing aliases with a stale revision must not retire anything.
+    const auto                            now = gfx.FindMesh(meshKey).value;
+    std::array<COM::PrefabPartGPUInfo, 2> stale {};
+    for (size_t i = 0; i < stale.size(); ++i) {
+        const auto key    = std::string("recover.gltf#part") + std::to_string(i);
+        const auto meshID = assets.AssetHash(std::string_view(key));
+        const auto matID  = assets.AssetHash(std::string_view(key + "_mat"));
+        stale[i]          = {
+            .meshAsset        = meshID,
+            .materialAsset    = matID,
+            .mesh             = gfx.FindMesh(meshID).value,
+            .material         = gfx.FindMaterial(matID).value,
+            .morphOffset      = morph->offset,
+            .activeMorphCount = 1
+        };
+    }
+    ExpectTrue(!assets
+                    .ReplacePrefabGPUResources(
+                        COM::InChain(
+                            COM::PrefabGPUReplacementInfo {
+                                .hash = asset->hash, .deviceGeneration = engine->DeviceGeneration(), .expectedRevision = oldRevision, .parts = stale
+                            }
+                        )
+                    )
+                    .HasValue());
+    // With a current revision the same descriptor is still rejected:
+    // it borrows buffers/material slots that commit would retire.
+    ExpectTrue(!assets
+                    .ReplacePrefabGPUResources(
+                        COM::InChain(
+                            COM::PrefabGPUReplacementInfo {
+                                .hash = asset->hash, .deviceGeneration = engine->DeviceGeneration(), .expectedRevision = asset->gpuRevision, .parts = stale
+                            }
+                        )
+                    )
+                    .HasValue());
+    ExpectTrue(!assets
+                    .ReplacePrefabGPUResources(
+                        COM::InChain(
+                            COM::PrefabGPUReplacementInfo {
+                                .hash = asset->hash, .deviceGeneration = engine->DeviceGeneration() + 1, .expectedRevision = asset->gpuRevision, .parts = stale
+                            }
+                        )
+                    )
+                    .HasValue());
+    ExpectEq(gfx.FindMesh(meshKey).value.posBuffer, now.posBuffer);
+    Println("    [recovery] recreating graphics device");
+    const auto generation = engine->DeviceGeneration();
+    if (!ExpectTrue(engine->RecreateGraphicsDevice().HasValue()))
+        return {};
+    ExpectEq(engine->DeviceGeneration(), generation + 1);
+    ExpectTrue(!assets.DescribePrefab(asset->hash).value.gpuResourcesReady);
+    ExpectTrue(!GLTF::Upload(assets, gfx, *doc, {.buildBLAS = false}).has_value());
+    const auto invalidatedRevision = asset->gpuRevision;
+    ExpectTrue(!GLTF::RebuildGPUResources(*engine.Get(), incompatible, *asset, {.buildBLAS = false}).has_value());
+    ExpectEq(asset->gpuRevision, invalidatedRevision);
+    ExpectTrue(!assets.DescribePrefab(asset->hash).value.gpuResourcesReady);
+    ExpectTrue(GLTF::RebuildGPUResources(*engine.Get(), *doc, *asset, {.buildBLAS = false}).has_value());
+    ExpectTrue(assets.DescribePrefab(asset->hash).value.gpuResourcesReady);
+    ExpectEq(asset->deviceGeneration, engine->DeviceGeneration());
+    ExpectEq(animator->currentTrackTime, .375f);
+    ExpectEq(morph->weights.x, .42f);
+    ExpectEq(ecs.Get<Components::SkeletalMeshComponent>(part)->jointOffset, jointOffset);
+    Println("    [recovery] publishing recovered palette");
+    const std::array<Mat4x4, 1> joints {Mat4x4::Identity()};
+    ExpectTrue(gfx.UpdateJointMatrices(jointOffset, joints).HasValue());
+    if (mode == RecoveryExercise::RecoveredFrame)
+        ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+    Println("    [recovery] checking future instances and cleanup");
+    const auto liveOffset = ecs.Get<Components::MorphTargetComponent>(part)->offset;
+    auto       future     = assets.Instantiate(asset->hash, {.isAnimated = true});
+    for (const auto e: future)
+        if (const auto other = ecs.Get<Components::MorphTargetComponent>(e)) {
+            ExpectEq(other->offset, liveOffset);
+            ExpectEq(other->weights.x, .75f);
+        }
+    for (const auto e: future)
+        ecs.Despawn(e);
+    for (const auto e: entities)
+        ecs.Despawn(e);
+    assets.ClearCache();
+    for (const auto texture: asset->textures)
+        gfx.UnloadTexture(texture);
+    return {};
+}
 struct GLTFAssetsSuite {
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> rebuild_preserves_live_state_and_survives_renderer_recreation() {
+            return ExerciseGPURecovery(RecoveryExercise::StateOnly);
+        }
+        std::expected<void, ZHLN::ErrorCode> initial_skin_morph_frame() {
+            return ExerciseGPURecovery(RecoveryExercise::InitialFrame);
+        }
+        std::expected<void, ZHLN::ErrorCode> recovered_skin_morph_frame() {
+            return ExerciseGPURecovery(RecoveryExercise::RecoveredFrame);
+        }
+
         std::expected<void, ZHLN::ErrorCode> owns_decoded_skin_animation_morph_material_and_image() {
             using namespace ZHLN;
             using Test::ExpectEq;

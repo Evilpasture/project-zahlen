@@ -43,6 +43,7 @@ struct BufferCreateInfo {
 };
 
 struct TextureCreateInfo {
+    // Empty name requests an independently owned anonymous RGBA8 texture.
     StringView            name         = {};
     Span<const std::byte> pixels       = {};
     Extent2D              extent       = {};

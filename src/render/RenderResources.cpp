@@ -659,6 +659,8 @@ auto RenderContext::CreateTexture(std::string_view name, std::span<const std::by
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
+    if (name.empty())
+        return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
     return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
 }
 

@@ -54,6 +54,10 @@ struct IEngine : IObject {
     [[nodiscard]] virtual uint32_t MaxFramesPerSecond() const noexcept = 0;
     [[nodiscard]] virtual uint64_t CurrentFrame() const noexcept = 0;
     [[nodiscard]] virtual uint64_t DeviceGeneration() const noexcept = 0;
+    // Explicit, synchronous renderer recreation between frames (also useful
+    // for controlled resets). CPU scene state survives. Host assets must poll
+    // DeviceGeneration and re-upload before ticking/rendering their next frame.
+    [[nodiscard]] virtual Result<void> RecreateGraphicsDevice() noexcept = 0;
 
     // Registration tokens belong to this engine. Null callbacks are rejected;
     // unknown/zero tokens are inert on removal. Callbacks run on the recovery

@@ -127,6 +127,10 @@ struct ModelPrefab {
     // importer's resolution choice instead of silently reverting to 1024.
     uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 
+    bool gpuResourcesReady = true;
+    uint64_t gpuDeviceGeneration = 0;
+    uint64_t gpuRevision = 0;
+
     std::vector<ModelPart>     parts;
     std::vector<ModelNode>     nodes;
     std::vector<Skeleton>      skeletons;

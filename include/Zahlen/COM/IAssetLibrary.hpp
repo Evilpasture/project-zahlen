@@ -45,9 +45,10 @@ struct PrefabInfo {
     float boundingRadius = 0.0F;
     float emissiveFactorScale = 100.0f;
     uint32_t maxTextureDimension = 1024;
-    // Conservative readiness: false if a part has neither mesh positions nor
-    // a material pipeline (including deliberately GPU-less placeholders).
+    // False after device invalidation until replacement succeeds.
     bool gpuResourcesReady = true;
+    uint64_t gpuDeviceGeneration = 0;
+    uint64_t gpuRevision = 0;
 };
 
 static_assert(std::is_standard_layout_v<PrefabInfo> && std::is_trivially_copyable_v<PrefabInfo>);
@@ -120,6 +121,12 @@ struct IAssetLibrary : IObject {
     // Copies flat data. Cached prefab GPU resources become cache-owned.
     // Do not destroy transferred mesh resources independently after success.
     [[nodiscard]] virtual Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept = 0;
+
+    // Validates every part before replacing aliases/retiring old buffers.
+    // CPU nodes, colliders, animations and prefab address remain unchanged.
+    // Live morph offsets/scratch buffers are rebound; animated weights and
+    // joint palette offsets are retained. Returns the new monotonic revision.
+    [[nodiscard]] virtual Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept = 0;
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
