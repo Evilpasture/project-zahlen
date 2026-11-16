@@ -5,6 +5,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include "StudioModelImporter.hpp"
 #include "StudioModelLoader.hpp"
+#include "StudioMaterial.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
@@ -23,112 +24,6 @@ namespace {
 
 auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
     return assets.CachedPrefab(hash);
-}
-
-template <typename Gfx>
-auto LoadTextureFromBytes(Gfx& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
-    if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
-        auto vtfExp = DecodeVTF(bytes);
-        if (vtfExp.has_value()) {
-            if (sourceNormal) {
-                ConvertSourceNormalInPlace(*vtfExp);
-            }
-            auto texRes = ctx.CreateTexture(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
-            if (texRes.has_value()) {
-                return *texRes;
-            }
-        }
-    }
-
-    int            width    = 0;
-    int            height   = 0;
-    int            channels = 0;
-    unsigned char* pixels   = stbi_load_from_memory(
-        reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4
-    );
-    if (pixels) {
-        const std::span<const std::byte> rgba(reinterpret_cast<const std::byte*>(pixels), static_cast<size_t>(width) * height * 4);
-        auto texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
-        stbi_image_free(pixels);
-        if (texRes.has_value()) {
-            return *texRes;
-        }
-    }
-
-    return TextureID::Invalid;
-}
-
-template <typename Gfx>
-auto ResolveStudioMaterial(Gfx& ctx, const SourceVFS& vfs, std::string_view materialName, const ImportOptions& options) -> MaterialDesc {
-    MaterialDesc desc = MaterialDesc::Basic({1.0f, 1.0f, 1.0f, 1.0f}, 0.8f, 0.0f, false);
-    const auto vmtPath = vfs.ResolveMaterial(materialName);
-    if (!vmtPath.has_value()) {
-        return desc;
-    }
-
-    const auto vmtBytes = vfs.ReadFile(*vmtPath);
-    if (!vmtBytes.has_value() || vmtBytes->empty()) {
-        return desc;
-    }
-
-    const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-    const auto             vmtMatExp = ResolveVmtMaterial(
-        vmtText,
-        [&vfs](std::string_view includePath) -> std::optional<std::string> {
-            const auto includeBytes = vfs.ReadFile(std::string(includePath));
-            if (!includeBytes.has_value() || includeBytes->empty()) {
-                return std::nullopt;
-            }
-            return std::string(reinterpret_cast<const char*>(includeBytes->data()), includeBytes->size());
-        }
-    );
-    if (!vmtMatExp.has_value()) {
-        return desc;
-    }
-
-    const auto& vmt   = *vmtMatExp;
-    desc.baseColor   = {vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z, vmt.baseColor.w};
-    desc.doubleSided = vmt.noCull;
-    if (vmt.isTranslucent) {
-        desc.alphaBlend = true;
-        desc.alphaMode  = 2;
-    } else if (vmt.isAlphaTest) {
-        desc.alphaMode   = 1;
-        desc.alphaCutoff = vmt.alphaCutoff;
-    }
-
-    if (!vmt.baseTexture.empty()) {
-        const auto texPath = vfs.ResolveTexture(vmt.baseTexture);
-        if (texPath.has_value()) {
-            const auto texBytes = vfs.ReadFile(*texPath);
-            if (texBytes.has_value()) {
-                desc.albedoMap = LoadTextureFromBytes(ctx, vmt.baseTexture, *texBytes, true);
-            }
-        }
-    }
-
-    if (!vmt.bumpMap.empty()) {
-        const auto bumpPath = vfs.ResolveTexture(vmt.bumpMap);
-        if (bumpPath.has_value()) {
-            const auto bumpBytes = vfs.ReadFile(*bumpPath);
-            if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false, true);
-            }
-        }
-    }
-
-    // ---- shader class + emission -----------------------------------------
-    // Source puts its lamps on props: a wall light, a ceiling panel, an
-    // emergency light and a floodlight are all StudioModels whose material is
-    // `VertexLitGeneric` + `$selfillum 1`, and a glowing screen or sign is
-    // usually an `UnlitGeneric` panel. This pass reads the same keyvalues
-    // through the same rules the world material pass applies
-    // (ApplyVmtLighting), so a material renders identically on a prop and on a
-    // brush face -- and so the lamp surfaces stop coming up as plain, dark,
-    // lit albedo.
-    ApplyVmtLighting(vfs, vmt, desc);
-
-    return desc;
 }
 
 template <typename Assets>
@@ -242,7 +137,9 @@ auto LoadStudioModelPrefabFromMemoryImpl(
             }
         }
 
-        const Material subMaterial = ctx.CreateMaterial(ResolveStudioMaterial(ctx, vfs, partData.materialName, options)).value_or(Material {});
+        const Material subMaterial = ctx.CreateMaterial(StudioMaterial::Resolve([&](std::string_view name, std::span<const std::byte> bytes, Extent2D extent, bool srgb) {
+            return ctx.CreateTexture(name, bytes, extent, srgb).value_or(TextureID::Invalid);
+        }, vfs, partData.materialName)).value_or(Material {});
 
         ModelPart modelPart;
         modelPart.name            = String64(partData.materialName.c_str());

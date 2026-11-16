@@ -1649,6 +1649,8 @@ public:
                 (part.isSkinned && part.skeletonIndex < 0) || part.activeMorphCount > 4 ||
                 !slice(part.csgModifiers, desc.csgModifiers.size)) return ComError::InvalidArgument;
             if (part.collision != CollisionAssetID::Invalid && !Library().FindCollisionMesh(part.collision)) return ComError::AssetNotCached;
+            if (part.useBoxForMeshCollider && (!part.hasBoxCollider || part.collision != CollisionAssetID::Invalid))
+                return ComError::InvalidArgument;
             if (part.hasBoxCollider && (part.boxHalfExtents.x <= 0 || part.boxHalfExtents.y <= 0 || part.boxHalfExtents.z <= 0))
                 return ComError::InvalidArgument;
         }
@@ -1696,6 +1698,7 @@ public:
             if (authored.collision != CollisionAssetID::Invalid)
                 part.meshCollider = Physics::AnyShape(Physics::Shape<Physics::Mesh>(Library().FindCollisionMesh(authored.collision)));
             if (authored.hasBoxCollider) part.boxCollider = MakePrefabBoxCollider(authored.boxHalfExtents, authored.boxCenter);
+            if (authored.useBoxForMeshCollider) part.meshCollider = part.boxCollider;
             prefab->parts.push_back(std::move(part));
         }
         for (const auto& authored: std::span<const PrefabSkeletonInfo>(desc.skeletons)) {

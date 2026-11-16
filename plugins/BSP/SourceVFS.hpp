@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace ZHLN::COM { struct IAssetLibrary; }
+
 namespace ZHLN::BSP {
 
 // Virtual File System for resolving Source engine materials, textures, and
@@ -20,6 +22,9 @@ namespace ZHLN::BSP {
 class SourceVFS {
   public:
     SourceVFS() = default;
+    // Borrowed capability: it must outlive this SourceVFS (and its copies).
+    // Embedded map pak data wins, then the supplied VFS, then disk search paths.
+    explicit SourceVFS(COM::IAssetLibrary& assets): _assets(&assets) {}
 
     // Adds a search directory on disk (e.g. "import/engine_assets", "csgo").
     void AddSearchPath(std::string_view path);
@@ -28,7 +33,7 @@ class SourceVFS {
     void SetPakfileData(std::span<const std::byte> pakData);
 
     // Resolves a virtual path (e.g. "materials/brick/brickwall003d.vmt")
-    // to an actual disk path, case-insensitively.
+    // to a capability VFS path or an actual disk path, case-insensitively on disk.
     [[nodiscard]] auto ResolveFile(std::string_view virtualPath) const -> std::optional<std::string>;
 
     // Reads the entire contents of a file from disk or the embedded pakfile.
@@ -62,6 +67,7 @@ class SourceVFS {
     void IndexDirectory(const std::filesystem::path& root);
     void IndexPakfile(std::span<const std::byte> pakData);
 
+    COM::IAssetLibrary* _assets = nullptr;
     std::vector<std::string> _searchPaths;
     // Map from normalized lowercase relative path -> actual disk path
     mutable std::unordered_map<std::string, std::string> _diskIndex;

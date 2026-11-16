@@ -1,7 +1,8 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# plugins/BSP -- the Source engine BSP importer (zahlen_bsp).
+# plugins/BSP -- Source format decoding and asset authoring.
+# zahlen_bsp_assets is capability-only; zahlen_bsp retains legacy world/scene APIs.
 #
 # Same shape as plugins/glTF: an extra that produces data core then consumes.
 # It imports a .bsp into the plain ZHLN::ModelPrefab (native vertex streams,
@@ -12,28 +13,30 @@
 #
 # The format/geometry layers (BSPTypes, BSPRead, BSPGeometry) are engine-free
 # on purpose: they can be built and validated without configuring the full
-# renderer tree. BSPScene additionally consumes the public Scene model; BSPImporter is
-# the only file that names RenderContext.
+# renderer tree. BSPScene additionally consumes the native Scene model; the
+# remaining Engine-based entry points stay in the separate legacy archive.
 #
 # Public headers are reached as <BSP/...>.
 
 set(TARGET_NAME zahlen_bsp)
 
-set(ZHLN_BSP_SOURCES
-    BSPBakeField.cpp
-    BSPGeometry.cpp
-    BSPImporter.cpp
-    BSPInteraction.cpp
-    BSPLighting.cpp
-    BSPRead.cpp
-    BSPScene.cpp
-    BSPVradLightmap.cpp
-    SourceVFS.cpp
-    StudioModelImporter.cpp
-    StudioModelLoader.cpp
-    VMTParser.cpp
-    VTFDecoder.cpp
-)
+# Native-free Source decoding, material policy and capability authoring. Keep
+# this archive separate so a COM host cannot accidentally pull the legacy
+# Engine/PrefabFactory entry points through its link dependency graph.
+add_library(zahlen_bsp_assets STATIC
+    BSPBakeField.cpp BSPGeometry.cpp BSPLighting.cpp BSPRead.cpp
+    BSPVradLightmap.cpp SourceVFS.cpp StudioModelLoader.cpp VMTParser.cpp
+    VTFDecoder.cpp VMTLighting.cpp StudioModelAssets.cpp)
+set_target_properties(zahlen_bsp_assets PROPERTIES CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+target_include_directories(zahlen_bsp_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
+target_include_directories(zahlen_bsp_assets PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
+target_link_libraries(zahlen_bsp_assets PUBLIC zahlen_engine PRIVATE zahlen_stb_image zahlen_warnings)
+if(COMMAND zahlen_enable_reflection)
+    zahlen_enable_reflection(zahlen_bsp_assets)
+endif()
+
+set(ZHLN_BSP_SOURCES BSPImporter.cpp BSPInteraction.cpp BSPScene.cpp StudioModelImporter.cpp)
 
 add_library(${TARGET_NAME} STATIC)
 
@@ -50,7 +53,7 @@ target_sources(${TARGET_NAME} PRIVATE ${ZHLN_BSP_SOURCES})
 # RenderContext and AssetManager in its signatures, and <BSP/BSPScene.hpp>
 # names the public Scene model.
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+    zahlen_engine zahlen_bsp_assets
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

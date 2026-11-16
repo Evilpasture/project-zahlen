@@ -59,6 +59,9 @@ COM_HOST_PORTS = frozenset({
     "app/Application.cpp", "app/HostUI.cpp", "app/HostRunner.cpp", "app/main.cpp", "app/UIEditor.cpp",
     "app/include/Zahlen/App.hpp", "app/include/Zahlen/HostUI.hpp", "app/include/Zahlen/HostRunner.hpp",
     "app/include/Zahlen/Zahlen.hpp", "plugins/Fonts/Fonts.cpp", "plugins/Fonts/Fonts.hpp",
+    "plugins/BSP/StudioModelAssets.cpp", "plugins/BSP/StudioModelAssets.hpp",
+    "plugins/BSP/StudioMaterial.hpp", "plugins/BSP/VMTLighting.cpp", "plugins/BSP/VMTLighting.hpp",
+    "plugins/BSP/SourceVFS.cpp", "plugins/BSP/SourceVFS.hpp",
 })
 NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 

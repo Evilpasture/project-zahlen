@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SourceVFS.hpp"
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <limits>
 
 #include <algorithm>
 #include <array>
@@ -178,6 +180,9 @@ auto SourceVFS::ResolveFile(std::string_view virtualPath) const -> std::optional
         return std::nullopt;
     }
 
+    const auto normalized = NormalizePath(virtualPath);
+    if (_assets != nullptr && _assets->VirtualFileExists(std::string_view(normalized))) return normalized;
+
     // 1. Direct check
     std::error_code ec;
     if (std::filesystem::exists(virtualPath, ec) && std::filesystem::is_regular_file(virtualPath, ec)) {
@@ -233,7 +238,17 @@ auto SourceVFS::ReadFile(std::string_view virtualPath) const -> std::optional<st
         }
     }
 
-    // 2. Check disk
+    // 2. Read the supplied capability VFS without a native cache borrow.
+    if (_assets != nullptr && _assets->VirtualFileExists(std::string_view(norm))) {
+        const auto required = _assets->ReadVirtualFile(std::string_view(norm), {});
+        if (!required.HasValue() || required.value > std::numeric_limits<size_t>::max()) return std::nullopt;
+        std::vector<std::byte> bytes(static_cast<size_t>(required.value));
+        const auto read = _assets->ReadVirtualFile(std::string_view(norm), {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
+        if (!read.HasValue() || read.value != bytes.size()) return std::nullopt;
+        return bytes;
+    }
+
+    // 3. Check disk
     const auto resolved = ResolveFile(virtualPath);
     if (!resolved.has_value()) {
         return std::nullopt;

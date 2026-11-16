@@ -55,6 +55,10 @@ struct PrefabPartInfo {
     bool hasBoxCollider = false;
     FVec3 boxHalfExtents {0.5f, 0.5f, 0.5f};
     FVec3 boxCenter {};
+    // Some importers intentionally use the same simplified box for both the
+    // static/mesh and dynamic/box collider choices. Preserve that shape kind
+    // without a native Physics::AnyShape or a triangulated-box approximation.
+    bool useBoxForMeshCollider = false;
     DrawFlags drawFlags = DrawFlags::None;
     AssetSlice csgModifiers {};
 };

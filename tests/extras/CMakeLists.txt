@@ -311,6 +311,12 @@ if(TARGET zahlen_http)
     endif()
 endif()
 
+# Capability-only authoring must link without the legacy BSP/Interaction archive.
+zahlen_add_extras_group(Extras_BSPAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBSPAssets.cpp)
+target_link_libraries(Extras_BSPAssets PRIVATE zahlen_bsp_assets zahlen_signal zahlen_command_line)
+zahlen_register_extras_test(Extras_BSPAssets)
+
 # 6. Extras_BSP: BSP interactive entities, VMT/VTF materials, static props, StudioModel, VRAD/lighting.
 zahlen_add_extras_group(Extras_BSP
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
