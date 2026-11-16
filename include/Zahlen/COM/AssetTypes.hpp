@@ -59,6 +59,10 @@ struct PrefabPartInfo {
     // static/mesh and dynamic/box collider choices. Preserve that shape kind
     // without a native Physics::AnyShape or a triangulated-box approximation.
     bool useBoxForMeshCollider = false;
+    // Optional second mesh child, e.g. BSP invisible-but-solid tool faces.
+    // Combined with the selected mesh/box fallback as an engine-owned compound;
+    // does not enlarge or replace the independent box-collider choice.
+    CollisionAssetID additionalMeshCollision = CollisionAssetID::Invalid;
     DrawFlags drawFlags = DrawFlags::None;
     AssetSlice csgModifiers {};
 };

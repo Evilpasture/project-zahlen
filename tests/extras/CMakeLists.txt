@@ -313,7 +313,7 @@ endif()
 
 # Capability-only authoring must link without the legacy BSP/Interaction archive.
 zahlen_add_extras_group(Extras_BSPAssets
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBSPAssets.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBSPAssets.cpp TestBSPWorldAssets.cpp)
 target_link_libraries(Extras_BSPAssets PRIVATE zahlen_bsp_assets zahlen_signal zahlen_command_line)
 zahlen_register_extras_test(Extras_BSPAssets)
 

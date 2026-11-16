@@ -43,10 +43,10 @@ constexpr int32_t kSurfNodraw  = 0x80;
 constexpr int32_t kSurfHint    = 0x100;
 constexpr int32_t kSurfSkip    = 0x200;
 
-void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, FVec3 p) {
+void UpdateBounds(FVec3& boundsMin, FVec3& boundsMax, bool& first, FVec3 p) {
     if (first) {
-        boundsMin = JPH::Float3(p.x, p.y, p.z);
-        boundsMax = JPH::Float3(p.x, p.y, p.z);
+        boundsMin = FVec3 {p.x, p.y, p.z};
+        boundsMax = FVec3 {p.x, p.y, p.z};
         first     = false;
         return;
     }

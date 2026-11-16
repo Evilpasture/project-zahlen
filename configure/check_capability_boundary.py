@@ -62,6 +62,9 @@ COM_HOST_PORTS = frozenset({
     "plugins/BSP/StudioModelAssets.cpp", "plugins/BSP/StudioModelAssets.hpp",
     "plugins/BSP/StudioMaterial.hpp", "plugins/BSP/VMTLighting.cpp", "plugins/BSP/VMTLighting.hpp",
     "plugins/BSP/SourceVFS.cpp", "plugins/BSP/SourceVFS.hpp",
+    "plugins/BSP/BSPAssets.cpp", "plugins/BSP/BSPAssets.hpp", "plugins/BSP/BSPMaterial.hpp",
+    "plugins/BSP/BSPPreparation.cpp", "plugins/BSP/BSPPreparation.hpp",
+    "plugins/BSP/AssetUpload.hpp", "plugins/BSP/SourceAsset.hpp",
 })
 NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 

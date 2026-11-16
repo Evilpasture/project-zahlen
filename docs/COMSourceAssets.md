@@ -74,7 +74,8 @@ The native BSP suites remain enabled and passing against the shared helpers.
 
 Legacy LoadStudioModelPrefab(Engine&, ...) remains solely for the unported BSP
 world importer and its native consumers. It is not counted as a migrated entry
-point. World BSP authoring, glTF authoring/inspector/recovery, Scene document and
-orchestration relocation, then host-driven extensions are still required.
+point. World BSP capability authoring is now described in COMBSPWorldAssets.md.
+Native BSP world/scene callers, glTF authoring/inspector/recovery, Scene document
+and orchestration relocation, then host-driven extensions still require ports.
 This sub-cut does not add transparent device-loss reimport or installed-package
 integration; neither is implied by its runtime tests.

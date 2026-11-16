@@ -10,6 +10,8 @@
 // one node per light so ModelLight's node chain carries its transform.
 
 #include "BSPImporter.hpp"
+#include "BSPPreparation.hpp"
+#include "BSPMaterial.hpp"
 #include "BSPLighting.hpp"
 #include "BSPRead.hpp"
 #include "SourceVFS.hpp"
@@ -40,165 +42,8 @@
 namespace ZHLN::BSP {
 namespace {
 
-auto IsToolTexture(std::string_view name) -> bool {
-    return name.starts_with("tools/");
-}
-
-// UnlitGeneric surfaces bypass lighting entirely (baseColor goes straight to
-// the framebuffer): Source's white lamp panels (lights/white and friends)
-// would land at luma 1.0 -- exactly the bloom threshold -- and turn every
-// ceiling fixture into a blinding glare. Scale them to read as bright but
-// sub-threshold. Missing textures would otherwise fall back to the raw
-// baseColor (usually pure white) and blow out wherever direct light reaches.
-inline constexpr float kMissingTextureDim          = 0.25f;
 auto LookupPrefab(AssetLibrary& assets, uint64_t hash) noexcept -> ZHLN::Optional<ModelPrefab&> {
     return assets.CachedPrefab(hash);
-}
-
-template <typename Gfx>
-auto LoadTextureFromBytes(Gfx& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
-    // 1. Try VTF first
-    if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
-        auto vtfExp = DecodeVTF(bytes);
-        if (vtfExp.has_value()) {
-            if (sourceNormal) {
-                ConvertSourceNormalInPlace(*vtfExp);
-            }
-            auto texRes = ctx.CreateTexture(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
-            if (texRes.has_value()) {
-                return *texRes;
-            }
-        }
-    }
-
-    // 2. Try stb_image (PNG, JPG, TGA, etc.)
-    int            width    = 0;
-    int            height   = 0;
-    int            channels = 0;
-    unsigned char* pixels =
-        stbi_load_from_memory(reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
-    if (pixels) {
-        const std::span<const std::byte> rgba(reinterpret_cast<const std::byte*>(pixels), static_cast<size_t>(width) * height * 4);
-        auto                             texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
-        stbi_image_free(pixels);
-        if (texRes.has_value()) {
-            return *texRes;
-        }
-    }
-
-    return TextureID::Invalid;
-}
-
-// A material's .vmt, resolved and parsed once per import. Source's `patch`
-// shader is an include-plus-replace indirection that roughly a sixth of the
-// materials in a shipped map use (every cubemap-patched surface), so the
-// resolver follows it instead of treating the patch as the material.
-auto LoadMaterialVmt(const SourceVFS& vfs, std::string_view materialName) -> std::optional<VMTMaterial> {
-    const auto vmtPath = vfs.ResolveMaterial(materialName);
-    if (!vmtPath.has_value()) {
-        return std::nullopt;
-    }
-    const auto vmtBytes = vfs.ReadFile(*vmtPath);
-    if (!vmtBytes.has_value() || vmtBytes->empty()) {
-        return std::nullopt;
-    }
-    const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-    const auto             resolved = ResolveVmtMaterial(
-        vmtText,
-        [&vfs](std::string_view includePath) -> std::optional<std::string> {
-            const auto includeBytes = vfs.ReadFile(std::string(includePath));
-            if (!includeBytes.has_value() || includeBytes->empty()) {
-                return std::nullopt;
-            }
-            return std::string(reinterpret_cast<const char*>(includeBytes->data()), includeBytes->size());
-        }
-    );
-    if (!resolved.has_value()) {
-        return std::nullopt;
-    }
-    return std::optional<VMTMaterial>(std::move(*resolved));
-}
-
-template <typename Gfx>
-auto ResolveMaterialDesc(Gfx& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
-    if (IsToolTexture(part.materialName)) {
-        return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
-    }
-
-    // Neutral grey, not white: this desc is what ships when the VMT cannot be
-    // found or parsed, and a pure-white fallback turns every missing material
-    // into a blinding surface under direct light.
-    MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
-
-    if (vmt == nullptr) {
-        return desc;
-    }
-
-    const VMTMaterial& material = *vmt;
-    desc.baseColor              = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w};
-    // $nocull from the VMT, or the importer's single-sheet wall audit marking
-    // this part: Source draws undercovered faces from their back side (the
-    // vbsp leaffaces of the room include them), so honours match by rendering
-    // the whole material group double-sided. Backface physics is handled
-    // separately via reversed triangles in the collision stream.
-    desc.doubleSided = material.noCull || part.forceDoubleSided;
-    if (material.isTranslucent) {
-        desc.alphaBlend = true;
-        desc.alphaMode  = 2;
-    } else if (material.isAlphaTest) {
-        desc.alphaMode   = 1;
-        desc.alphaCutoff = material.alphaCutoff;
-    }
-
-    // Resolve base texture (albedo)
-    if (!material.baseTexture.empty()) {
-        const auto texPath = vfs.ResolveTexture(material.baseTexture);
-        if (texPath.has_value()) {
-            const auto texBytes = vfs.ReadFile(*texPath);
-            if (texBytes.has_value()) {
-                desc.albedoMap = LoadTextureFromBytes(ctx, material.baseTexture, *texBytes, true);
-            }
-        }
-        if (desc.albedoMap == TextureID::Invalid) {
-            // The VMT references art that is not on disk: darken the flat
-            // baseColor so the surface reads as missing (dark grey) instead
-            // of rendering as a pure-white wall.
-            desc.baseColor.x *= kMissingTextureDim;
-            desc.baseColor.y *= kMissingTextureDim;
-            desc.baseColor.z *= kMissingTextureDim;
-        }
-    }
-
-    // Resolve normal/bump map. The `true` at the end routes the pixels through
-    // the DXT5nm swizzle: Source bumpmaps are not straight RGB normals.
-    if (!material.bumpMap.empty()) {
-        const auto bumpPath = vfs.ResolveTexture(material.bumpMap);
-        if (bumpPath.has_value()) {
-            const auto bumpBytes = vfs.ReadFile(*bumpPath);
-            if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, material.bumpMap, *bumpBytes, false, true);
-            }
-        }
-    }
-
-    // Source self-illumination is normally masked. Keep that spatial detail:
-    // an explicit mask wins, otherwise the base texture is the mask Source's
-    // $selfillum path uses. Sampling only a constant emissive factor made whole
-    // materials glow uniformly and left the authored lamp pixels dark.
-    if (const auto mask = material.Find("$selfillummask"); mask && !mask->empty()) {
-        if (const auto maskPath = vfs.ResolveTexture(*mask); maskPath) {
-            if (const auto maskBytes = vfs.ReadFile(*maskPath); maskBytes) {
-                desc.emissiveMap = LoadTextureFromBytes(ctx, *mask, *maskBytes, true);
-            }
-        }
-    } else if (material.Find("$selfillum").has_value()) {
-        desc.emissiveMap = desc.albedoMap;
-    }
-
-    // Shader class + emission, through the rules every material pass shares.
-    ApplyVmtLighting(vfs, material, desc);
-
-    return desc;
 }
 
 auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte>> {
@@ -218,62 +63,6 @@ auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte
     return out;
 }
 
-// The second stage of the emissive heuristic: the geometry pass only applied
-// the material-name gate (it has no VFS), so this is where the evidence that
-// actually decides the strength is read -- the .vmt's shader class and
-// self-illumination keys, the measured luminance of the base .vtf, and the
-// texdata reflectivity vbsp baked. Every candidate is re-probed through
-// BSPLighting::ProbeEmissiveMaterial, and the ones that clear no threshold are
-// dropped: a `lights/white` sheet with reflectivity (1,1,1) and no
-// self-illumination is a lit surface, not a lamp, and spawning a light at its
-// centroid would double the map's illumination.
-//
-// Runs before the prefab is built so the parts' `unlit` flag and the spawned
-// lights agree on which surfaces are emitters.
-auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> surfaces, ImportedMapData& data)
-    -> std::vector<EmissiveSurface> {
-    if (surfaces.empty()) {
-        return {};
-    }
-    std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
-    std::vector<EmissiveSurface>                                kept;
-    kept.reserve(surfaces.size());
-
-    for (EmissiveSurface& surface: surfaces) {
-        const auto vmtIt = vmtCache.try_emplace(surface.materialName, std::nullopt);
-        if (vmtIt.second) {
-            vmtIt.first->second = LoadMaterialVmt(vfs, surface.materialName);
-        }
-        const VMTMaterial* vmt = vmtIt.first->second.has_value() ? &*vmtIt.first->second : nullptr;
-
-        // Measured luminance of the material's own base texture: the most
-        // direct evidence a surface emits, and it overrides the family name
-        // when the .vmt declares no self-illumination of its own.
-        const float luma = (vmt != nullptr && !vmt->baseTexture.empty()) ? MeasureVmtTextureLuma(vfs, *vmt) : -1.0f;
-
-        const EmissiveMaterialProbe probe = ProbeEmissiveMaterial(surface.materialName, surface.reflectivityLuma, vmt, surface.noLightFlag);
-        if (!probe.isEmissive || probe.strength <= 0.0f) {
-            continue;
-        }
-        surface.strength = std::max(probe.strength, (luma > 0.0f) ? luma * 0.85f : 0.0f);
-        surface.color    = probe.tint;
-        if (surface.reflectivityLuma < 0.0f) {
-            surface.reflectivityLuma = 0.0f;
-        }
-        kept.push_back(std::move(surface));
-    }
-
-    data.stats.emissiveFaces = 0;
-    for (const EmissiveSurface& surface: kept) {
-        data.stats.emissiveFaces += surface.faceCount;
-    }
-    data.stats.emissiveSurfaces = static_cast<uint32_t>(kept.size());
-    return kept;
-}
-
-// Fills prefab->parts from imported material streams: one compiled part per
-// material group (GPU buffers, material, meshlets, BLAS, colliders), then
-// folds the invisible-but-solid tool faces into the first part collider.
 // Uploads each packed VRAD page exactly once for this imported prefab. The
 // pages remain linear RGBA16F: Source's RGBExp luxels are already linear
 // radiance and must not take the sRGB texture path or the old VPL gain.
@@ -296,6 +85,9 @@ auto UploadVradLightmaps(Gfx& ctx, const VradLightmapAtlas& atlas, std::string_v
     return handles;
 }
 
+// Fills prefab->parts from imported material streams: one compiled part per
+// material group (GPU buffers, material, meshlets, BLAS, colliders), then
+// folds the invisible-but-solid tool faces into the first part collider.
 // Shared by the world prefab and the interactive submodel prefabs.
 template <typename Gfx>
 void AssemblePrefabParts(
@@ -349,7 +141,9 @@ void AssemblePrefabParts(
         }
         const VMTMaterial* vmt = vmtIt.first->second.has_value() ? &*vmtIt.first->second : nullptr;
 
-        MaterialDesc materialDesc = ResolveMaterialDesc(ctx, vfs, part, vmt);
+        MaterialDesc materialDesc = BSPMaterial::Resolve([&](std::string_view name, std::span<const std::byte> pixels, Extent2D extent, bool srgb) {
+            return ctx.CreateTexture(name, pixels, extent, srgb).value_or(TextureID::Invalid);
+        }, vfs, part, vmt);
         // Only opaque/masked lit Source surfaces own a VRAD diffuse chart.
         // UnlitGeneric and blend materials keep their Source shader semantics;
         // forcing a bake through a forward-only path would make it disappear
@@ -431,35 +225,6 @@ void AssemblePrefabParts(
             }
         }
     }
-}
-
-// Translates every stream (render parts and the collision-only fold) by
-// offset. Used to re-base rotating doors on their hinge pivot so the entity
-// transform -- placed at the pivot -- rotates the geometry about it.
-void ShiftImportedGeometry(ImportedMapData& data, FVec3 offset) {
-    const auto shiftStreams = [offset](MaterialStreams& streams) {
-        for (VertexPosition& vertex: streams.positions) {
-            vertex.position[0] += offset.x;
-            vertex.position[1] += offset.y;
-            vertex.position[2] += offset.z;
-        }
-        streams.boundsMin.x += offset.x;
-        streams.boundsMin.y += offset.y;
-        streams.boundsMin.z += offset.z;
-        streams.boundsMax.x += offset.x;
-        streams.boundsMax.y += offset.y;
-        streams.boundsMax.z += offset.z;
-    };
-    for (MaterialStreams& part: data.parts) {
-        shiftStreams(part);
-    }
-    shiftStreams(data.collisionOnly);
-    data.boundsMin.x += offset.x;
-    data.boundsMin.y += offset.y;
-    data.boundsMin.z += offset.z;
-    data.boundsMax.x += offset.x;
-    data.boundsMax.y += offset.y;
-    data.boundsMax.z += offset.z;
 }
 
 template <typename Gfx, typename Assets>

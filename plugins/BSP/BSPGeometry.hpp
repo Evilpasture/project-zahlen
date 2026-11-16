@@ -163,8 +163,8 @@ struct MaterialStreams {
     std::vector<VertexSurface>      surfaces;
     std::vector<uint32_t>           indices;
 
-    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMin {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMax {0.0f, 0.0f, 0.0f};
 
     // Set when at least one face in this group has no opposite-facing twin:
     // a single-sheet wall whose only geometry faces AWAY from the reachable
@@ -332,8 +332,8 @@ struct ImportedMapData {
     // geometry. Empty unless options.buildColliders is set.
     MaterialStreams collisionOnly;
 
-    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMin {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMax {0.0f, 0.0f, 0.0f};
     uint32_t    faceCount         = 0;
     uint32_t    displacementCount = 0;
     uint32_t    triangleCount     = 0;

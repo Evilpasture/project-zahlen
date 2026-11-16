@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "StudioModelAssets.hpp"
+#include "AssetUpload.hpp"
 #include "StudioMaterial.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <algorithm>
@@ -12,21 +13,6 @@
 
 namespace ZHLN::BSP {
 namespace {
-
-// Before registration this scope owns all uploaded meshes/textures. A failed
-// later material, collision or registration operation cannot leak GPU buffers.
-// On success the cache takes meshes; the caller receives the texture manifest.
-struct StudioUpload {
-    COM::IGraphicsDevice& graphics;
-    std::vector<Mesh> meshes;
-    std::vector<TextureID> textures;
-    bool committed = false;
-    ~StudioUpload() {
-        if (committed) return;
-        for (const auto& mesh: meshes) (void)graphics.DestroyMesh(mesh);
-        for (const auto texture: textures) graphics.UnloadTexture(texture);
-    }
-};
 
 auto ValidPath(std::string_view path) -> bool {
     return !path.empty() && path.size() < 256 && path.find('\0') == std::string_view::npos;
@@ -81,7 +67,7 @@ auto UploadStudioAsset(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphic
             return std::unexpected(COM::ComError::InvalidArgument);
     }
 
-    StudioUpload upload {graphics};
+    AssetAuthoring::Upload upload {graphics};
     std::vector<COM::PrefabPartInfo> parts;
     for (const auto& source: data.parts) {
         if (source.positions.empty() || source.indices.empty()) continue;

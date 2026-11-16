@@ -3,6 +3,7 @@
 #pragma once
 #include "BSPGeometry.hpp"
 #include "SourceVFS.hpp"
+#include "SourceAsset.hpp"
 #include "StudioModelLoader.hpp"
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -20,15 +21,8 @@ struct StudioAssetOptions {
     bool buildBLAS = true;
 };
 
-// Mesh ownership transfers to IAssetLibrary on successful registration. Texture
-// ownership does not: retain this manifest while the prefab is in use, and
-// unload these handles only AFTER clearing the prefab cache/despawning users.
-// Cache hits return the hash with an empty manifest (no ownership acquired).
-// This is intentionally not an RAII destructor that could invalidate instances.
-struct StudioAsset {
-    uint64_t hash = 0;
-    std::vector<TextureID> textures;
-};
+// Source-compatible name for the shared Source texture-ownership manifest.
+using StudioAsset = SourceAsset;
 
 // No Engine, native prefab, physics shape or render-context borrow is involved.
 // Upload accepts parsed CPU data, so tools and tests can author assets without

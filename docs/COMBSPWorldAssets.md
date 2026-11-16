@@ -1,0 +1,107 @@
+# Capability world BSP authoring
+
+This continuation adds real world and moving-brush authoring to the existing
+`zahlen_bsp_assets` archive. It does not claim that the native BSP sample,
+Scene runner or editor has already been ported.
+
+## Host-owned import documents
+
+`BSPAssets.hpp` exposes:
+
+- `ReadBSPAssets`: read a Source VFS/disk file, parse and prepare it.
+- `DecodeBSPAssets`: parse supplied bytes, retain embedded pak data and prepare.
+- `PrepareBSPAssets`: prepare an already parsed BSPMap.
+- `UploadBSPAsset`: upload/register one prepared prefab through IAssetLibrary and
+  IGraphicsDevice, returning its caller-owned SourceAsset texture manifest.
+
+`PreparedBSPAssets` is a consumer-side document containing a SourceVFS, world and
+moving-brush geometry documents, and deduplicated StudioModel import requests.
+Neither the documents nor their strings/vectors enter Core. Their decoded
+geometry uses FVec3 bounds rather than vendor JPH::Float3 values.
+
+```cpp
+BSP::BSPAssetOptions options;
+BSP::SourceVFS source(*engine.Assets());
+auto prepared = BSP::ReadBSPAssets(std::move(source), "maps/level.bsp", options.import);
+if (!prepared) return std::unexpected(prepared.error());
+for (const auto& document: prepared->prefabs) {
+    auto uploaded = BSP::UploadBSPAsset(*engine.Assets(), *engine.Graphics(),
+                                      prepared->source, document, options);
+    if (!uploaded) return std::unexpected(uploaded.error());
+    session.importedAssets.push_back(std::move(*uploaded)); // persistent ownership ledger
+}
+for (const auto& model: prepared->studioModels) {
+    auto uploaded = BSP::LoadStudioAsset(*engine.Assets(), *engine.Graphics(),
+        prepared->source, model, BSP::StudioAssetOptions {.import = options.import, .buildBLAS = options.buildBLAS});
+    if (!uploaded) return std::unexpected(uploaded.error());
+    session.importedAssets.push_back(std::move(*uploaded));
+}
+```
+
+On a later submodel failure, `session.importedAssets` still retains ownership of
+earlier successful textures. This is why there is no misleading multi-prefab
+"atomic" call: the current capability registers one prefab at a time. Despawn
+users and clear the prefab cache before unloading successful texture manifests.
+A cache hit returns no newly owned texture handles. As before, virtual path is
+cache identity; use another path for incompatible import options.
+
+## Preserved behavior
+
+The CPU importer still supplies displacement geometry, skybox placement, UVs,
+VRAD decoding, collision-only tool streams and lighting diagnostics. Material
+resolution, VMT includes, shader/emission/mask rules and normal conversion are
+shared with the legacy importer rather than reimplemented in the COM path.
+
+Moving door/button submodels are omitted from the world mesh and collider,
+cached under `<map>#model_N`, and rebased only when their vertices were authored
+in world space. Already-local geometry stays local. Moving brushes do not get
+static VRAD atlas pages. Authored lights are not gathered into the world prefab
+in addition to the scene description; existing optional lighting-floor behavior
+is retained. Static/dynamic Studio prop model requests remain explicit host work.
+
+World uploads retain:
+
+- linear RGBA16F VRAD pages, uploaded once per document;
+- dedicated baked-irradiance material binding and Source-unit scale, without
+  forcing it onto unlit/blended materials;
+- meshlets and default-enabled BLAS, with an explicit raster-only option;
+- skybox Background draw flags and no skybox physics;
+- triangle colliders, centered box alternatives and box fallback for degenerate
+  triangle streams;
+- invisible-but-solid tool faces as an additional child of the first solid
+  part's mesh collider, without changing its separate box-collider choice.
+
+`PrefabPartInfo::additionalMeshCollision` is the narrow fixed-layout descriptor
+addition for that final case. Core resolves the copied collision ID and builds
+its own compound shape. A missing base shape or uncached extra collision is
+rejected before prefab registration. No native Physics::AnyShape, registry or
+renderer escapes. The reflected descriptor layout changes; rebuild both sides.
+No Core/COM protocol or capability vtable changes are involved.
+
+Each upload validates streams before GPU allocation. On later upload/material/
+registration failure, its guard retires unpublished meshes and textures.
+Collision cache entries are copied engine data, owned until ClearCache; they
+are not rolled back if a later prefab-registration step fails. No success is
+reported for that failed prefab.
+
+The embedded-pak support uses SourceVFS's existing stored-entry ZIP policy; it
+is not a newly claimed general-purpose compressed ZIP implementation.
+
+## Scope and validation limits
+
+The new archive does not link the legacy native BSP/Interaction archive.
+Capability tests cover parsed and byte-backed preparation, moving-brush
+separation/rebasing, retained embedded pak bytes, deduplicated prop requests,
+real HDR texture/mesh upload, baked-material selection, background layers,
+compound tool collision raycasts, the independent box choice, cache reuse and
+resource rollback. Existing native BSP suites remain enabled against the shared
+material/preparation helpers.
+
+Positive GPU upload tests explicitly use buildBLAS=false on the VM. Production
+defaults remain true; this does not fix the historical lavapipe BLAS crash or
+claim hardware rendering. Transparent device-loss recovery, installed-package
+integration and native consumer removal are not completed by this cut.
+
+Next: glTF authoring and recovery, consumer-side Scene orchestration/documents,
+and host-driven extension/editor/sample ports. Retained native entry points do
+not count as migrated consumers.

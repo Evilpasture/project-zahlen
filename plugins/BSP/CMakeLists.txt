@@ -26,7 +26,7 @@ set(TARGET_NAME zahlen_bsp)
 add_library(zahlen_bsp_assets STATIC
     BSPBakeField.cpp BSPGeometry.cpp BSPLighting.cpp BSPRead.cpp
     BSPVradLightmap.cpp SourceVFS.cpp StudioModelLoader.cpp VMTParser.cpp
-    VTFDecoder.cpp VMTLighting.cpp StudioModelAssets.cpp)
+    VTFDecoder.cpp VMTLighting.cpp StudioModelAssets.cpp BSPPreparation.cpp BSPAssets.cpp)
 set_target_properties(zahlen_bsp_assets PROPERTIES CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_bsp_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
