@@ -26,7 +26,7 @@
 #include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
 #if defined(ZHLN_HAS_EDITOR)
-#include <editor/GUIEditor.hpp>
+#include <editor/NativeGUIEditor.hpp>
 #endif
 #if defined(ZHLN_HAS_ANIMATION)
 #include <Animation/AnimationSystem.hpp>
@@ -657,14 +657,14 @@ void test_editor_capability_crud_is_immediate_and_destruction_is_deferred() {
     bool ran = false;
     app.OnStart([&](Engine& engine) {
         auto                entities = engine.Entities();
-        Editor::EditorState state;
-        const Entity        entity = Editor::CreateEntity(entities, "Edited");
+        NativeEditor::EditorState state;
+        const Entity              entity = NativeEditor::CreateEntity(entities, "Edited");
         Expect(entities.IsAlive(entity));
         Expect(entities.Get<Components::NameComponent>(entity).has_value());
         Expect(entities.Get<Components::TransformComponent>(entity).has_value());
         Expect(entities.Get<Components::WorldTransformComponent>(entity).has_value());
         bool foundPBR = false;
-        for (const auto& kind: Editor::ComponentKinds()) {
+        for (const auto& kind: NativeEditor::ComponentKinds()) {
             if (kind.name == "PBRComponent") {
                 foundPBR = true;
                 Expect(!kind.has(entities, entity));
@@ -676,7 +676,7 @@ void test_editor_capability_crud_is_immediate_and_destruction_is_deferred() {
         }
         Expect(foundPBR);
         state.selectedEntity = entity;
-        Editor::DestroySelected(engine, state);
+        NativeEditor::DestroySelected(engine, state);
         Expect(state.selectedEntity == Entity::Null());
         Expect(entities.IsAlive(entity));
         Expect(entities.Get<Components::PendingDestroy>(entity).has_value());

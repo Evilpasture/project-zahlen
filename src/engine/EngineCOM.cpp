@@ -675,30 +675,39 @@ class EngineCOM final:
 
         GraphicsSettings merged   = Device().Settings();
         bool             modified = false;
+        std::optional<ViewportRect> viewport;
 
         const Result<void> chainRes =
-            DispatchInChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig,
-                            EnvironmentSettings>(settingsChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
-                if constexpr (std::is_same_v<NodeT, GraphicsSettings>) {
-                    merged = node;
-                } else if constexpr (std::is_same_v<NodeT, AAState>) {
-                    merged.antiAliasing = node;
-                } else if constexpr (std::is_same_v<NodeT, GISettings>) {
-                    merged.post = node;
-                } else if constexpr (std::is_same_v<NodeT, ShadowSettings>) {
-                    merged.shadows = node;
-                } else if constexpr (std::is_same_v<NodeT, RayTracingConfig>) {
-                    merged.rayTracing = node;
-                } else if constexpr (std::is_same_v<NodeT, EnvironmentSettings>) {
-                    merged.environment = node;
+            DispatchInChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig, EnvironmentSettings, ViewportInfo>(
+                settingsChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+                    if constexpr (std::is_same_v<NodeT, ViewportInfo>) {
+                        // Stage until the whole chain validates: no partial writes.
+                        viewport = node.viewport;
+                        return {};
+                    } else if constexpr (std::is_same_v<NodeT, GraphicsSettings>) {
+                        merged = node;
+                    } else if constexpr (std::is_same_v<NodeT, AAState>) {
+                        merged.antiAliasing = node;
+                    } else if constexpr (std::is_same_v<NodeT, GISettings>) {
+                        merged.post = node;
+                    } else if constexpr (std::is_same_v<NodeT, ShadowSettings>) {
+                        merged.shadows = node;
+                    } else if constexpr (std::is_same_v<NodeT, RayTracingConfig>) {
+                        merged.rayTracing = node;
+                    } else if constexpr (std::is_same_v<NodeT, EnvironmentSettings>) {
+                        merged.environment = node;
+                    }
+                    modified = true;
+                    return {};
                 }
-                modified = true;
-                return {};
-            });
+            );
         if (!chainRes.HasValue()) return chainRes;
-        if (!modified) return ComError::InvalidArgument;
-
-        m_engine->Graphics().ApplySettings(merged);
+        if (!modified && !viewport)
+            return ComError::InvalidArgument;
+        if (modified)
+            m_engine->Graphics().ApplySettings(merged);
+        if (viewport)
+            m_engine->Graphics().SetViewport(*viewport);
         return {};
     }
 

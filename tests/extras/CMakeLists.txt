@@ -596,3 +596,10 @@ zahlen_add_extras_group(Extras_ExplosionHost
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestExplosionHost.cpp)
 target_link_libraries(Extras_ExplosionHost PRIVATE zahlen_vfx)
 zahlen_register_extras_test(Extras_ExplosionHost POOL gpu LABELS "GPU;Extras;COM")
+
+if(TARGET zahlen_editor_session)
+    zahlen_add_extras_group(Extras_EditorHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestEditorHost.cpp)
+    target_link_libraries(Extras_EditorHost PRIVATE zahlen_editor_session zahlen_screenshot)
+    zahlen_register_extras_test(Extras_EditorHost POOL gpu LABELS "GPU;Extras;COM")
+endif()

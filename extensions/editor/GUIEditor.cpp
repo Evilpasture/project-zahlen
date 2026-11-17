@@ -3,23 +3,22 @@
 //
 // extensions/editor/GUIEditor.cpp
 //
-// Native editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
+// COM editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives.
 
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -33,7 +32,6 @@
 namespace ZHLN::Editor {
 
 namespace {
-
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components;
 
@@ -62,10 +60,10 @@ consteval auto MakeComponentKind() -> ComponentKind {
 
     return ComponentKind {// The same spelling the registry registers the component under, so the
                           // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
-                          .name   = ZHLN::ECS::BoxedName<C>(),
-                          .has    = [](const ZHLN::Entities& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
-                          .add    = [](ZHLN::Entities& reg, ZHLN::Entity entity) -> void { reg.Attach<C>(entity, C {}); },
-                          .remove = [](ZHLN::Entities& reg, ZHLN::Entity entity) -> void { reg.Detach<C>(entity); }
+                          .name   = ZHLN::Reflect::TypeName<C>(),
+                          .has    = [](const ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity) != nullptr; },
+                          .add    = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { (void) reg.Attach<C>(entity, C {}); },
+                          .remove = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { reg.Detach<C>(entity); }
     };
 }
 
@@ -82,7 +80,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
 // has to know which subtree is chrome. Walk HierarchyComponent upward
 // from `e`; anything that reaches `editorRoot` is the editor's own.
 // Bounded so a corrupted parent cycle cannot hang the frame.
-[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::Entities& reg, ZHLN::Entity editorRoot) -> bool {
+[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::COM::IEntities& reg, ZHLN::Entity editorRoot) -> bool {
     if (editorRoot == ZHLN::Entity::Null()) {
         return false;
     }
@@ -172,9 +170,9 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
             field = {v[0], v[1], v[2]};
-        } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const auto euler = field.GetEulerAngles() * (180.0f / JPH::JPH_PI);
-            float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
+        } else if constexpr (std::is_same_v<FT, Quat>) {
+            const auto      euler   = field.EulerAnglesDegrees();
+            float           deg[3]  = {euler.value.x, euler.value.y, euler.value.z};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 96> axisLabelBuf {};
@@ -185,7 +183,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::T
                     changed = true;
             }
             if (changed) {
-                field = ZHLN::Math::EulerDegreesToQuat({deg[0], deg[1], deg[2]});
+                field = Quat::FromEulerDegrees({{deg[0], deg[1], deg[2]}});
             }
         } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
             // rowId rather than name: two components in the same section can
@@ -205,8 +203,8 @@ auto ComponentKinds() noexcept -> std::span<const ComponentKind> {
     return kComponentKinds;
 }
 
-auto CreateEntity(ZHLN::Entities& reg, std::string_view name) -> ZHLN::Entity {
-    const ZHLN::Entity entity = reg.Create();
+auto CreateEntity(ZHLN::COM::IEntities& reg, std::string_view name) -> ZHLN::Entity {
+    const ZHLN::Entity entity = reg.CreateEntity();
 
     std::array<char, 64>   nameBuf {};
     const std::string_view label = name.empty() ? ZHLN::FormatTo(nameBuf, "Entity {}", entity.index) : name;
@@ -217,15 +215,20 @@ auto CreateEntity(ZHLN::Entities& reg, std::string_view name) -> ZHLN::Entity {
     // it on the same frame does not depend on a system having run.
     const auto local = Mat4x4::Identity();
 
-    reg.Attach(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
-    reg.Attach(entity, Comp::TransformComponent {});
-    reg.Attach(entity, Comp::WorldTransformComponent {.world = local, .previous = local});
+    if (entity == Entity::Null())
+        return entity;
+    if (!reg.Attach(entity, Comp::NameComponent {.name = String64 {label}}) || !reg.Attach(entity, Comp::TransformComponent {}) ||
+        !reg.Attach(entity, Comp::WorldTransformComponent {.world = local, .previous = local}) ||
+        !reg.Attach(entity, Comp::SceneSourceComponent {.shape = Scene::ShapeKind::Empty})) {
+        reg.Despawn(entity);
+        return Entity::Null();
+    }
 
     return entity;
 }
 
-void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
-    auto               reg    = engine.Entities();
+void DestroySelected(ZHLN::COM::IEngine& engine, EditorState& state) noexcept {
+    auto&              reg    = *engine.Entities();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -252,7 +255,7 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 
 namespace {
 
-auto ReadTransformInput(const ZHLN::InputState& input) noexcept -> TransformInput {
+auto ReadTransformInput(const ZHLN::COM::HostInputInfo& input) noexcept -> TransformInput {
     TransformInput bits = TransformInput::None;
     auto           key  = [&](ZHLN::KeyCode k) -> bool { return input.IsKeyDown(k); };
     if (key(ZHLN::KeyCode::G))
@@ -283,7 +286,7 @@ auto ReadTransformInput(const ZHLN::InputState& input) noexcept -> TransformInpu
 auto CameraForward(const Camera& camera) noexcept -> FVec3 {
     const float yaw   = camera.yaw.ToRadians().value;
     const float pitch = camera.pitch.ToRadians().value;
-    return FVec3{JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)}.Normalized();
+    return FVec3 {std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)}.Normalized();
 }
 
 // Unprojects the mouse exactly like the host's picking ray: same NDC
@@ -366,7 +369,12 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
 }
 
 void UpdateTransformMode(
-    ZHLN::Entities& reg, const ZHLN::InputState& input, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput
+    ZHLN::COM::IEntities&           reg,
+    const ZHLN::COM::HostInputInfo& input,
+    EditorState&                    state,
+    const Camera&                   camera,
+    const SceneViewport&            viewport,
+    bool                            uiOwnsInput
 ) noexcept {
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
@@ -399,7 +407,7 @@ void UpdateTransformMode(
                 state.transformAxis          = EditorState::TransformAxis::None;
                 state.transformEntity        = state.selectedEntity;
                 state.transformStartPosition = t->position;
-                state.transformStartRotation = JPH::Quat(t->rotation.x, t->rotation.y, t->rotation.z, t->rotation.w);
+                state.transformStartRotation = t->rotation;
                 state.transformStartScale    = t->scale;
 
                 state.transformPlaneNormal = CameraForward(camera);
@@ -426,7 +434,7 @@ void UpdateTransformMode(
             // Cancel: write the captures back, drop the mode.
             reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
                 t.position = state.transformStartPosition;
-                t.rotation = {state.transformStartRotation.GetX(), state.transformStartRotation.GetY(), state.transformStartRotation.GetZ(), state.transformStartRotation.GetW()};
+                t.rotation = {state.transformStartRotation.x, state.transformStartRotation.y, state.transformStartRotation.z, state.transformStartRotation.w};
                 t.scale    = state.transformStartScale;
             });
             state.transformMode = EditorState::TransformMode::None;
@@ -469,9 +477,11 @@ void UpdateTransformMode(
                         const float     angle  = std::atan2(oy - my, mx - ox);
                         const FVec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
                                                                                                              state.transformPlaneNormal * -1.0f;
-                        const JPH::Quat turn   = JPH::Quat::sRotation(JPH::Vec3(axis.x, axis.y, axis.z), angle - state.transformStartAngle);
-                        const JPH::Quat newRot = turn * state.transformStartRotation;
-                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = {newRot.GetX(), newRot.GetY(), newRot.GetZ(), newRot.GetW()}; });
+                        const Quat      turn   = Quat::FromAxisAngle(axis, RadF {angle - state.transformStartAngle});
+                        const Quat      newRot = turn * state.transformStartRotation;
+                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void {
+                            t.rotation = {newRot.x, newRot.y, newRot.z, newRot.w};
+                        });
                     }
                     break;
                 }
@@ -514,8 +524,8 @@ void UpdateTransformMode(
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
-    auto reg = engine.Entities();
+void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, EditorState& state, std::string_view id) {
+    auto& reg = *engine.Entities();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -621,7 +631,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     gui.EndColumn();
 }
 
-void DrawInspectorPanel(GUI::Frame& gui, ZHLN::Entities& reg, EditorState& state, std::string_view id) {
+void DrawInspectorPanel(GUI::Frame& gui, ZHLN::COM::IEntities& reg, EditorState& state, std::string_view id) {
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
@@ -639,7 +649,7 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::Entities& reg, EditorState& state
     const auto section = [&](std::string_view sectionId, std::string_view title, auto comp, auto&& reflect) -> void {
         if (!comp)
             return;
-        using CompT = std::remove_const_t<typename decltype(comp)::value_type>;
+        using CompT = std::remove_cv_t<std::remove_pointer_t<decltype(comp)>>;
         if (gui.BeginCollapsingHeader(title, true)) {
             CompT local = *comp;
             reflect(local, MakeRowSink(gui, sectionId));

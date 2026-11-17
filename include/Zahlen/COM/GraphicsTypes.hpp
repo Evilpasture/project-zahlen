@@ -9,6 +9,11 @@
 #include <array>
 
 namespace ZHLN::COM {
+struct ViewportInfo {
+    ViewportRect viewport {};
+};
+static_assert(std::is_standard_layout_v<ViewportInfo> && std::is_trivially_copyable_v<ViewportInfo>);
+
 // Copied diagnostic strings; no borrowed std::string_view crosses COM.
 struct GraphicsDeviceInfo {
     String64           rendererName;

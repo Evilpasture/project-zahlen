@@ -30,7 +30,7 @@ struct IGraphicsDevice : IObject {
 
     // Partial or full pipeline configuration via COM::InChain / COM::OutChain.
     // Supported nodes: GraphicsSettings, AAState, GISettings, ShadowSettings,
-    // RayTracingConfig, EnvironmentSettings.
+    // RayTracingConfig, EnvironmentSettings, ViewportInfo.
     [[nodiscard]] virtual Result<void> ApplySettings(const ChainInNode* settingsChain) noexcept = 0;
     // Read-only queries additionally accept GraphicsDeviceInfo.
     [[nodiscard]] virtual Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept = 0;

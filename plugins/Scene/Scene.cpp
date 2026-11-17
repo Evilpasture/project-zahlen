@@ -90,8 +90,11 @@ auto StampSource(COM::IEntities& entities, Entity entity, const SceneEntity& des
 auto Validate(const COM::IAssetLibrary& assets, const Scene& description) -> std::expected<void, ErrorCode> {
     // Resolve dependencies before touching the world. Importers remain host-owned.
     for (const auto& entity: description.entities) {
-        if (static_cast<uint8_t>(entity.shape) > static_cast<uint8_t>(ShapeKind::Empty) ||
+        if (static_cast<uint8_t>(entity.shape) > static_cast<uint8_t>(ShapeKind::Cone) ||
             static_cast<uint8_t>(entity.body) > static_cast<uint8_t>(BodyKind::Kinematic))
+            return std::unexpected(COM::ComError::InvalidArgument);
+        if ((entity.shape == ShapeKind::Sphere || entity.shape == ShapeKind::Cylinder || entity.shape == ShapeKind::Cone) &&
+            (!std::isfinite(entity.extent) || entity.extent <= 0 || !std::isfinite(entity.halfExtents.y) || entity.halfExtents.y <= 0))
             return std::unexpected(COM::ComError::InvalidArgument);
         if (entity.shape == ShapeKind::Prefab) {
             const auto info = assets.DescribePrefab(assets.PrefabHash(COM::StringView(entity.source)));
@@ -171,6 +174,37 @@ auto Instantiate(
                 if (!NameEntity(entities, created, entity.name) || !StampSource(entities, created, entity))
                     return std::unexpected(SceneError::EntityCreationFailed);
                 entities.Patch<Components::MeshComponent>(created, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
+                break;
+            }
+            case ShapeKind::Sphere:
+            case ShapeKind::Cylinder:
+            case ShapeKind::Cone: {
+                COM::Result<Entity>         spawned = COM::ComError::InvalidArgument;
+                const COM::MeshBuildOptions build {.buildBLAS = options.buildBLAS};
+                if (entity.shape == ShapeKind::Sphere)
+                    spawned =
+                        assets.SpawnPrimitive(COM::InChain(COM::SphereMeshDesc {.radius = entity.extent, .color = entity.material.baseColor}, params, build));
+                else if (entity.shape == ShapeKind::Cylinder)
+                    spawned = assets.SpawnPrimitive(
+                        COM::InChain(
+                            COM::CylinderMeshDesc {.radius = entity.extent, .height = entity.halfExtents.y * 2, .color = entity.material.baseColor}, params,
+                            build
+                        )
+                    );
+                else
+                    spawned = assets.SpawnPrimitive(
+                        COM::InChain(
+                            COM::ConeMeshDesc {.radius = entity.extent, .height = entity.halfExtents.y * 2, .color = entity.material.baseColor}, params, build
+                        )
+                    );
+                if (!spawned.HasValue())
+                    return std::unexpected(spawned.error);
+                if (spawned.value == Entity::Null())
+                    return std::unexpected(SceneError::EntityCreationFailed);
+                instance.entities.push_back(spawned.value);
+                if (!NameEntity(entities, spawned.value, entity.name) || !StampSource(entities, spawned.value, entity))
+                    return std::unexpected(SceneError::EntityCreationFailed);
+                entities.Patch<Components::MeshComponent>(spawned.value, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
                 break;
             }
             case ShapeKind::Prefab: {

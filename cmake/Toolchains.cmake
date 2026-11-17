@@ -200,7 +200,7 @@ endfunction()
 foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "host_ui;HostUI" "native_host_ui;NativeHostUI"
         "scene;Scene" "gltf_assets;GLTFAssets" "native_camera;NativeCamera" "native_freecam;NativeFreeCam"
-        "terrain;Terrain" "vfx;VFX" "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
+        "editor;Editor" "terrain;Terrain" "vfx;VFX" "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
         "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
@@ -249,6 +249,10 @@ endif()
 # Jolt's headers must retain their Jolt/ prefix.
 install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
+zhln_toolchain_package(Editor TARGETS zahlen_editor DEPENDS Engine)
+if(TARGET zahlen_editor)
+    install(FILES extensions/editor/GUIEditor.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/editor COMPONENT ZahlenEditor)
+endif()
 zhln_toolchain_package(Terrain TARGETS zahlen_terrain DEPENDS Engine)
 if(TARGET zahlen_terrain)
     install(FILES extensions/Terrain/TerrainHost.hpp extensions/Terrain/TerrainGeometry.hpp extensions/Terrain/TerrainComponents.hpp

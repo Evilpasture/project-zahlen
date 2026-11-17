@@ -1,15 +1,14 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
-
-# The low-level zahlen_editor target is an editor library; this is its dedicated
-# executable with a paused simulation loop, picking and TOML scene import/save.
+add_library(zahlen_editor_session STATIC EditorSession.cpp)
+set_target_properties(zahlen_editor_session PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_editor_session PUBLIC zahlen_application zahlen_editor zahlen_freecam zahlen_scene_documents)
+target_include_directories(zahlen_editor_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(zahlen_editor_session PRIVATE zahlen_warnings)
+zahlen_enable_reflection(zahlen_editor_session)
 add_executable(zahlen_world_editor main.cpp)
-set_target_properties(zahlen_world_editor PROPERTIES CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-editor")
-target_link_libraries(zahlen_world_editor PRIVATE zahlen_application zahlen_native_host_ui
-    zahlen_editor zahlen_native_freecam zahlen_native_scene_documents zahlen_warnings)
-target_include_directories(zahlen_world_editor PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_compile_definitions(zahlen_world_editor PRIVATE JPH_DOUBLE_PRECISION)
+set_target_properties(zahlen_world_editor PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-editor")
+target_link_libraries(zahlen_world_editor PRIVATE zahlen_editor_session zahlen_fallback_scene zahlen_warnings)
 zahlen_set_bin_output(zahlen_world_editor)
 zahlen_add_runtime_dlls(zahlen_world_editor)
 add_dependencies(zahlen_world_editor link_resources)

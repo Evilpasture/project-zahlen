@@ -63,6 +63,8 @@ struct SceneEntity {
     ShapeKind   shape = ShapeKind::Box;
 
     ZHLN::FVec3 halfExtents = {0.5f, 0.5f, 0.5f};
+    // Plane: extent. Sphere/Cylinder/Cone: radius; halfExtents.y is half-height
+    // for cylinder/cone. Existing serialized fields and component layout stay fixed.
     float       extent      = 10.0f;
     std::string source;
 

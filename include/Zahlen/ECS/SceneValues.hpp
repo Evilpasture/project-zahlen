@@ -3,7 +3,7 @@
 #pragma once
 #include <cstdint>
 namespace ZHLN::Scene {
-enum class ShapeKind : uint8_t { Box, Plane, Prefab, Empty };
+enum class ShapeKind : uint8_t { Box, Plane, Prefab, Empty, Sphere, Cylinder, Cone };
 inline constexpr uint32_t kBakeOwnsNone    = 0u;
 inline constexpr uint32_t kBakeOwnsDiffuse = 1u;
 inline constexpr uint32_t kBakeOwnsAll     = 2u;

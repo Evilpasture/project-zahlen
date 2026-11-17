@@ -56,6 +56,8 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
+    "extensions/editor/GUIEditor.cpp", "extensions/editor/GUIEditor.hpp",
+    "utils/editor/main.cpp", "utils/editor/EditorSession.cpp", "utils/editor/EditorSession.hpp",
     "extensions/VFX/ExplosionHost.hpp", "extensions/VFX/ExplosionHost.cpp", "extensions/VFX/ExplosionPolicy.hpp",
     "extensions/VFX/LightningHost.hpp", "extensions/VFX/LightningHost.cpp",
     "extensions/VFX/LightningGeometry.hpp", "extensions/VFX/LightningGeometry.cpp",
