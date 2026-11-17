@@ -4,7 +4,9 @@
 #include "TestsFramework.hpp"
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <array>
 #include <expected>
 #include <string>
 #include <vector>
@@ -15,10 +17,10 @@ struct SubTransform {
 };
 
 struct PlayerDataComponent {
-    std::string          playerName = "Explorer";
+    ZHLN::String64         playerName = "Explorer";
     int32_t              level      = 1;
     SubTransform         coords;
-    std::vector<int32_t> inventory;
+    std::array<int32_t, 3> inventory {};
 
     int32_t LevelUp(int32_t amount) {
         level += amount;
@@ -44,16 +46,22 @@ struct ScriptECSBridgeTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> ecs_bridge_property_access_and_drilling() {
-            ZHLN::ECS::Registry   reg;
-            ZHLN::ScriptECSBridge bridge(ZHLN::ECS::Inspection {reg});
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                  world = std::move(*created);
+            auto&                 reg   = *world->Entities();
+            ZHLN::ScriptECSBridge bridge {ZHLN::ScriptComponentAccess(reg)};
 
             // Register Manifest with both ECS and ScriptBinder
             bridge.RegisterComponentManifest<BridgeManifest>();
 
             // Create entity and attach component
-            ZHLN::Entity e = reg.Create();
-            reg.Add<PlayerDataComponent>(
-                e, PlayerDataComponent {.playerName = "Stalker_Alex", .level = 5, .coords = {.x = 100.0f, .y = 250.0f}, .inventory = {101, 102, 103}}
+            ZHLN::Entity e = reg.CreateEntity();
+            (void) reg.Attach(
+                e, PlayerDataComponent {
+                       .playerName = ZHLN::String64("Stalker_Alex"), .level = 5, .coords = {.x = 100.0f, .y = 250.0f}, .inventory = {101, 102, 103}
+                   }
             );
 
             // 1. Direct Component Property Reading via Bridge
@@ -67,7 +75,7 @@ struct ScriptECSBridgeTestSuite {
             auto setRes = bridge.SetProperty(e, "PlayerDataComponent", "level", ZHLN::ToScriptVal(10));
             ZHLN::Test::ExpectTrue(setRes.has_value());
             auto comp = reg.Get<PlayerDataComponent>(e);
-            ZHLN::Test::ExpectTrue(comp.has_value());
+            ZHLN::Test::ExpectTrue(comp != nullptr);
             ZHLN::Test::ExpectEq(comp->level, 10);
 
             // 3. Multi-level Sub-structure Property Drilling (coords.x)
@@ -97,16 +105,18 @@ struct ScriptECSBridgeTestSuite {
 
             // A boxed component member must be re-resolved after a sparse-set
             // swap removal, and must stop resolving when its owner is removed.
-            const auto other = reg.Create(PlayerDataComponent {.coords = {.x = 37.0f}});
+            const auto other = reg.CreateEntity();
+            (void) reg.Attach(other, PlayerDataComponent {.coords = {.x = 37.0f}});
             auto movedBox = bridge.GetProperty(other, "PlayerDataComponent", "coords");
             ZHLN::Test::ExpectTrue(movedBox.has_value());
-            reg.Remove<PlayerDataComponent>(e);
+            reg.Detach<PlayerDataComponent>(e);
             auto movedX = bridge.GetPropertyOf(*movedBox, "x");
             ZHLN::Test::ExpectTrue(movedX.has_value());
             if (movedX) ZHLN::Test::ExpectEq(*ZHLN::FromScriptVal<float>(*movedX), 37.0f);
-            reg.Remove<PlayerDataComponent>(other);
+            reg.Detach<PlayerDataComponent>(other);
             ZHLN::Test::ExpectTrue(!bridge.GetPropertyOf(*movedBox, "x"));
-            reg.Destroy(other);
+            reg.Despawn(other);
+            world->Flush();
             ZHLN::Test::ExpectTrue(!bridge.GetPropertyOf(*movedBox, "x"));
 
             return {};

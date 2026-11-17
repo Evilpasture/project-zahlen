@@ -4,6 +4,10 @@
 // Diagnostic document/fallback host. Application owns the engine reference,
 // process scope, GUI context/font atlas and explicit frame staging.
 #include "SceneDocument.hpp"
+#if defined(ZHLN_SCENE_HOST_HAS_CONSOLE)
+#include <Console/ConsoleDebugger.hpp>
+#endif
+#include <vector>
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
 #include "TerrainDiagnostic.hpp"
 #endif
@@ -37,6 +41,7 @@ struct HostLaunchConfig {
     uint32_t              frames             = 0;
     bool                  rasterOnly         = false;
     bool                  terrainDemo        = false;
+    std::vector<std::string> consoleCommands;
 };
 
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
@@ -99,6 +104,9 @@ struct DiagnosticHost {
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
     ZHLN::Tools::TerrainDiagnostic terrainDemo;
 #endif
+#if defined(ZHLN_SCENE_HOST_HAS_CONSOLE)
+    ZHLN::GameConsole console;
+#endif
     float dt = 0;
     auto  Start(ZHLN::COM::IEngine& engine) -> std::expected<void, ZHLN::ErrorCode> {
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
@@ -131,6 +139,21 @@ struct DiagnosticHost {
             engine.ClearScene();
             ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", launch->scenePath.string());
         }
+#if defined(ZHLN_SCENE_HOST_HAS_CONSOLE)
+        for (const auto& command: launch->consoleCommands) {
+            console.AddHistory(command);
+            ZHLN::ConsoleDebugger::Execute(engine, console, command);
+        }
+        for (size_t i = 0; i < console.GetEntryCount(); ++i) {
+            std::string_view line;
+            float            r, g, b, a;
+            console.GetEntry(i, line, r, g, b, a);
+            ZHLN::Log("[Console] {}", line);
+        }
+#else
+        if (!launch->consoleCommands.empty())
+            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+#endif
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
         const auto path = launch->graphicsConfigPath;
         if (!path.empty() && std::filesystem::exists(path)) {
@@ -195,6 +218,17 @@ struct DiagnosticHost {
 int main(int argc, char* argv[]) {
     HostLaunchConfig launch;
     const std::array handlers = {
+        ZHLN::CliFlag {
+            .key         = "--console-command",
+            .placeholder = "<command>",
+            .description = "Execute a COM debugger command after scene creation (repeatable)",
+            .action      = [&](std::string_view command) -> std::expected<void, ZHLN::CommandLineError> {
+                if (command.empty())
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                launch.consoleCommands.emplace_back(command);
+                return {};
+            }
+        },
         ZHLN::CliFlag {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",

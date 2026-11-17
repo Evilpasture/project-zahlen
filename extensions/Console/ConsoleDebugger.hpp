@@ -8,15 +8,17 @@
 #include <string_view>
 
 namespace ZHLN {
-class Engine;
-namespace ECS {
-class Inspection;
-}
+namespace COM {
+struct IEngine;
+struct IEntities;
+} // namespace COM
+class ScriptComponentAccess;
 
 class ZHLN_STATIC_API ConsoleDebugger {
   public:
-    static void Execute(Engine& engine, GameConsole& console, std::string_view commandLine);
-    static void Execute(ECS::Inspection inspection, GameConsole& console, std::string_view commandLine);
+    static void Execute(COM::IEngine& engine, GameConsole& console, std::string_view commandLine);
+    static void Execute(COM::IEntities& entities, GameConsole& console, std::string_view commandLine);
+    static void Execute(ScriptComponentAccess inspection, GameConsole& console, std::string_view commandLine);
 };
 
 } // namespace ZHLN

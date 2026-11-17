@@ -137,6 +137,22 @@ function(zhln_toolchain_package name)
     if(name STREQUAL "Serialization")
         string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES "find_dependency(simdjson CONFIG)\n")
     endif()
+    if(name STREQUAL "Lua")
+        # LuaJIT remains a private system link, never an include dependency of
+        # installed property/debugger headers. A vendored build needs its own
+        # runtime package; do not export a dangling build-tree archive path.
+        get_target_property(_lua_imported LuaJIT IMPORTED)
+        if(NOT _lua_imported)
+            message(FATAL_ERROR "Installed Lua/Console requires system LuaJIT (set ZHLN_LUAJIT_VENDORED=OFF)")
+        endif()
+        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES [=[
+if(NOT TARGET LuaJIT)
+    find_library(_zahlen_luajit NAMES luajit-5.1 luajit REQUIRED)
+    add_library(LuaJIT INTERFACE IMPORTED)
+    set_property(TARGET LuaJIT PROPERTY INTERFACE_LINK_LIBRARIES "${_zahlen_luajit};${CMAKE_DL_LIBS};m")
+endif()
+]=])
+    endif()
     foreach(target IN LISTS P_TARGETS)
         zhln_toolchain_interface(${target})
         set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN")
@@ -204,7 +220,7 @@ foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
         "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
-        "fonts;Fonts" "benchmark;Benchmark" "benchmark_viewer;BenchmarkViewer" "widgets;Widgets")
+        "scripting;Scripting" "console;Console" "lua;Lua" "fonts;Fonts" "benchmark;Benchmark" "benchmark_viewer;BenchmarkViewer" "widgets;Widgets")
     list(GET pair 0 internal)
     list(GET pair 1 public)
     if(TARGET zahlen_${internal})
@@ -258,6 +274,13 @@ zhln_toolchain_package(BenchmarkViewer TARGETS zahlen_benchmark_viewer DEPENDS E
 if(TARGET zahlen_benchmark_viewer)
     install(FILES extensions/Benchmark/Viewer/BenchmarkViewer.hpp extensions/Benchmark/Viewer/FrameTelemetry.hpp
         extensions/Benchmark/Viewer/SystemTelemetry.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Benchmark/Viewer COMPONENT ZahlenBenchmarkViewer)
+endif()
+zhln_toolchain_package(Scripting TARGETS zahlen_scripting DEPENDS Engine HEADERS extensions/Scripting)
+zhln_toolchain_package(Lua TARGETS zahlen_lua DEPENDS Engine Scene HEADERS plugins/lua)
+if(TARGET zahlen_lua)
+    zhln_toolchain_package(Console TARGETS zahlen_console DEPENDS Engine Scripting Lua HEADERS extensions/Console)
+else()
+    zhln_toolchain_package(Console TARGETS zahlen_console DEPENDS Engine Scripting HEADERS extensions/Console)
 endif()
 zhln_toolchain_package(Editor TARGETS zahlen_editor DEPENDS Engine)
 if(TARGET zahlen_editor)

@@ -2,20 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <Zahlen/ECS/ComponentPolicy.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <type_traits>
 #include <utility>
 
 namespace ZHLN::SceneResources {
-
-template <typename T>
-inline constexpr bool OwnsExternalResource =
-    std::is_same_v<T, Components::PhysicsComponent> || std::is_same_v<T, Components::RagdollComponent> ||
-    std::is_same_v<T, Components::AudioSourceComponent> ||
-    std::is_same_v<T, Components::OwnedMeshComponent> || std::is_same_v<T, Components::SkeletalMeshComponent>;
 
 // Typed, explicit ownership operations for the components that hold external
 // handles. These release the old resource before the registry erases or

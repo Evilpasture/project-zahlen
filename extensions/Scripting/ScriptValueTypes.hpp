@@ -8,13 +8,9 @@
 // Teaches ScriptBinder the value types the engine's scripting surface actually
 // passes around: Entity and Zahlen's FVec3/DVec3/Quat/FVec4.
 //
-// Why these need teaching at all is at ScriptValueTrait in ScriptBinder.hpp. The
-// short version: left generic, a FVec3 crosses as an opaque BoxedObject, so a
-// script could only hand back one it had already been given. Physics calls like
-//   SetCharacterVelocity(Entity, FVec3)
-//   Raycast(DVec3 origin, FVec3 dir, float max, Physics::BodyID ignore)
-// would be uncallable from Lua, which is most of the reason the
-// ZHLN_DispatchCommand table still exists.
+// These conversions are consumer-owned inspection values, not a command/RPC
+// dispatcher. Numbers, strings, booleans and array snapshots stay in the host;
+// entity-rooted boxes are resolved by ScriptECSBridge through COM capabilities.
 //
 // Representation
 // --------------
@@ -28,7 +24,7 @@
 // three-float vector that is a fair trade, and it is what the zero-copy buffer
 // views already do when they hand a component's floats to Lua as a flat array.
 //
-// A BoxedObject or OwnedObject naming the right type is still accepted on the
+// A host-owned BoxedObject naming the right type is still accepted on the
 // way in, so a vector read off a component can be passed straight back without
 // the script unpacking it into a literal first.
 //
@@ -41,18 +37,17 @@
 
 #pragma once
 
+#include <Scripting/ScriptBinder.hpp>
+#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <initializer_list>
-#include <Scripting/ScriptBinder.hpp>
 #include <string_view>
 
 namespace ZHLN {
@@ -174,7 +169,7 @@ struct ScriptValueTrait<FVec3> {
     }
 };
 
-// DVec3 is DVec3 under JPH_DOUBLE_PRECISION and FVec3 otherwise (Real.h:17,29).
+// Double-precision world positions retain their three-number representation.
 // Both are handled, so a physics origin crosses correctly in either build.
 template <>
 struct ScriptValueTrait<DVec3> {

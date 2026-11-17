@@ -15,12 +15,13 @@
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
-
 #include <cstddef>
 #include <expected>
 #include <functional>
+#include <memory>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -48,13 +49,24 @@ struct ScriptArray {
     std::vector<ScriptVal> elements;
 };
 
+struct BoxedPathStep {
+    std::string         property;
+    size_t              index = SIZE_MAX;
+    std::vector<size_t> nestedIndices;
+};
+
 struct BoxedObject {
     std::string_view typeName;
     Entity           ownerEntity  = Entity::Null();
-    std::string_view compName;
-    std::string_view propName;
+    std::string      compName;
+    std::string      propName;
     size_t           elementIndex = SIZE_MAX;
     void*            rawPtr       = nullptr;
+    // Host-only provenance. Entity boxes hold no cached component pointer;
+    // each use re-resolves this complete property/index path through COM.
+    std::vector<BoxedPathStep> path;
+    const void*                componentOwner = nullptr;
+    std::shared_ptr<void>      retainedOwner;
 };
 
 using ScriptValVariant = std::variant<std::monostate, double, bool, std::string, BoxedObject, ScriptArray>;
@@ -70,6 +82,24 @@ struct ScriptVal: ScriptValVariant {
 template <typename T, typename = void>
 struct ScriptValueTrait {
     static constexpr bool specialized = false;
+};
+
+// FixedString is POD at the boundary but a string in host reflection. Refuse
+// truncation on assignment instead of silently modifying the requested value.
+template <size_t N>
+struct ScriptValueTrait<FixedString<N>> {
+    static constexpr bool specialized = true;
+    static auto           To(const FixedString<N>& value) -> ScriptVal {
+        return std::string(std::string_view(value));
+    }
+    static auto From(const ScriptVal& value) -> std::expected<FixedString<N>, ErrorCode> {
+        const auto* text = std::get_if<std::string>(&value);
+        if (!text)
+            return std::unexpected(ScriptError::TypeMismatch);
+        if (text->size() >= N)
+            return std::unexpected(ScriptError::ArityMismatch);
+        return FixedString<N>(std::string_view(*text));
+    }
 };
 
 // ----------------------------------------------------------------------------

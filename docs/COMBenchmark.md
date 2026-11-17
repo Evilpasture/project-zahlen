@@ -19,7 +19,7 @@ physics once. It deliberately does not run a game loop or synchronize transforms
 Direct ISimulation::Step retains the existing simulation contract.
 
 The logic component publication is deliberately restricted to Transform,
-WorldTransform, Hierarchy, Name, Physics and PendingDestroy. Physics replacement,
+WorldTransform, Hierarchy, Name, PBR, Physics and PendingDestroy. Physics replacement,
 detach, deferred hierarchical despawn and Clear release bodies before storage.
 Clear removes entity-owned bodies/components; unattached simulation bodies
 remain explicitly caller-managed until DestroyBody or world teardown. Canonical

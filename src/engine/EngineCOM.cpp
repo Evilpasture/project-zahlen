@@ -1122,7 +1122,7 @@ class EngineCOM final:
     [[nodiscard]] void* GetRaw(Entity entity, StringView typeName) const noexcept override {
         const uint32_t family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return nullptr;
-        return m_engine->GetInternalRegistry().GetRawByFamily(entity, family);
+        return m_engine->GetInternalRegistry().GetDynamicRaw(entity, family);
     }
 
     [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {

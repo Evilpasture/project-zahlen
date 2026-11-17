@@ -21,21 +21,19 @@
 #pragma GCC optimize("no-inline")
 #endif
 
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "ConsoleDebugger.hpp"
 #include "SymbolResolver.hpp"
-
 #include <Console/Console.hpp>
 #include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptBinderRegistry.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 
 #if defined(ZHLN_CONSOLE_HAS_LUA)
+#include <lua/LuaValueTypes.hpp>
 #include <lua/ReflectLua.hpp>
-#include <lua/SceneLua.hpp>
 #endif
 
 #include <charconv>
@@ -111,7 +109,7 @@ namespace {
     auto ParseEntity(std::string_view sv) -> std::optional<Entity> {
         uint64_t raw   = 0;
         auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), raw);
-        if (ec == std::errc()) {
+        if (ec == std::errc() && ptr == sv.data() + sv.size()) {
             return Entity::Unpack(raw);
         }
         return std::nullopt;
@@ -123,7 +121,7 @@ namespace {
         }
         uintptr_t addr = 0;
         auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), addr, 16);
-        if (ec == std::errc()) {
+        if (ec == std::errc() && ptr == sv.data() + sv.size()) {
             return addr;
         }
         return std::nullopt;
@@ -151,11 +149,18 @@ namespace {
 
 } // namespace
 
-void ConsoleDebugger::Execute(Engine& engine, GameConsole& console, std::string_view commandLine) {
-    Execute(engine.Entities().Inspect(), console, commandLine);
+void ConsoleDebugger::Execute(COM::IEngine& engine, GameConsole& console, std::string_view commandLine) {
+    Execute(*engine.Entities(), console, commandLine);
 }
 
-void ConsoleDebugger::Execute(ECS::Inspection inspection, GameConsole& console, std::string_view commandLine) {
+void ConsoleDebugger::Execute(COM::IEntities& entities, GameConsole& console, std::string_view commandLine) {
+    RegisterCoreScriptTypes();
+    ScriptComponentAccess access(entities);
+    access.RegisterManifest<Components>(true);
+    Execute(std::move(access), console, commandLine);
+}
+
+void ConsoleDebugger::Execute(ScriptComponentAccess inspection, GameConsole& console, std::string_view commandLine) {
     auto tokens = Tokenize(commandLine);
     if (tokens.empty()) {
         return;
@@ -323,7 +328,7 @@ void ConsoleDebugger::Execute(ECS::Inspection inspection, GameConsole& console, 
         } else {
             double       d  = 0.0;
             auto [p, ec]    = std::from_chars(rawVal.data(), rawVal.data() + rawVal.size(), d);
-            if (ec == std::errc()) {
+            if (ec == std::errc() && p == rawVal.data() + rawVal.size()) {
                 valToSet = d;
             } else {
                 valToSet = std::string(rawVal);
@@ -358,6 +363,10 @@ void ConsoleDebugger::Execute(ECS::Inspection inspection, GameConsole& console, 
         const std::string_view compName = tokens[2];
         if (!inspection.IsRegistered(compName)) {
             console.Log(std::format("Component '{}' is not registered.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            return;
+        }
+        if (!inspection.CanWrite(compName)) {
+            console.Log("Resource-owning components are read-only; use the owning COM capability.");
             return;
         }
         void* compPtr = inspection.Component(*ent, compName);

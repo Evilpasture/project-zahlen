@@ -446,6 +446,14 @@ class ZHLN_API Registry {
         return {_components[familyID]->GetDenseArray(), _components[familyID]->Count()};
     }
 
+    // Dynamic-only storage for the COM raw path; never reveal a native typed
+    // component just because the caller guessed its registered family name.
+    [[nodiscard]] auto GetDynamicRaw(Entity entity, uint32_t familyID) const noexcept -> void* {
+        if (familyID >= _compCapacity || !_components[familyID] || !_typeInfo[familyID].isDynamic)
+            return nullptr;
+        return GetRawByFamily(entity, familyID);
+    }
+
     [[nodiscard]] auto GetRawByFamily(Entity entity, uint32_t familyID) const noexcept -> void* {
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return nullptr;

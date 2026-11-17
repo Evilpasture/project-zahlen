@@ -443,6 +443,7 @@ zahlen_register_extras_test(${TARGET_NAME}
 set(TARGET_NAME TestScripting)
 zahlen_wrap_ztest_sources(_scripting_sources _scripting_files
     scripting/TestScriptBinder.cpp
+    scripting/TestCOMScriptLifetime.cpp
     scripting/TestScriptECSBridge.cpp
     scripting/TestScriptValueTypes.cpp
 )
@@ -615,4 +616,10 @@ if(TARGET zahlen_benchmark_viewer)
         ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBenchmarkHost.cpp)
     target_link_libraries(Extras_BenchmarkHost PRIVATE zahlen_benchmark_viewer zahlen_host_ui zahlen_screenshot)
     zahlen_register_extras_test(Extras_BenchmarkHost POOL gpu LABELS "GPU;Extras;COM")
+endif()
+if(TARGET zahlen_console)
+    zahlen_add_extras_group(Extras_ConsoleHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestConsoleHost.cpp)
+    target_link_libraries(Extras_ConsoleHost PRIVATE zahlen_console zahlen_scene zahlen_screenshot zahlen_host_ui)
+    zahlen_register_extras_test(Extras_ConsoleHost POOL gpu LABELS "GPU;Extras;COM")
 endif()

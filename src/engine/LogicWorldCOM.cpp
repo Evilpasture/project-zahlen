@@ -44,7 +44,8 @@ consteval auto PublishLogic() -> LogicComponent {
 }
 constexpr std::array kLogicComponents {PublishLogic<Components::TransformComponent>(), PublishLogic<Components::WorldTransformComponent>(),
                                        PublishLogic<Components::HierarchyComponent>(), PublishLogic<Components::NameComponent>(),
-                                       PublishLogic<Components::PhysicsComponent>(),   PublishLogic<Components::PendingDestroy>()};
+                                       PublishLogic<Components::PBRComponent>(),       PublishLogic<Components::PhysicsComponent>(),
+                                       PublishLogic<Components::PendingDestroy>()};
 auto                 FindLogic(StringView name) noexcept -> const LogicComponent* {
     if (!name.data && name.size)
         return nullptr;
