@@ -23,21 +23,20 @@
 
 // gameplay/RagdollAuthoring/RagdollAuthoring.cpp
 #include "RagdollAuthoring.hpp"
-
 #include "engine/ArticulationContext.hpp"
-
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Animation/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Physics/MathConversions.hpp>
-#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Physics/MathConversions.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 
 #if defined(ZHLN_RAGDOLL_HAS_LUA)
 #include <lua/ReflectLua.hpp>
@@ -181,7 +180,7 @@ auto BuildRagdollFromRecipe(
     PhysicsContext&      pc,
     ArticulationContext& articulation
 ) -> bool {
-    const auto animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
+    const auto animComp = reg.Get<Animation::AnimatorComponent>(rootEntity);
     if (!animComp || animComp->prefabAsset == InvalidAssetID) {
         ZHLN::LogWarning("[RagdollAuthoring] BuildRagdollFromRecipe found no AnimatorComponent with a prefabAsset on entity {}.", rootEntity.index);
         return false;

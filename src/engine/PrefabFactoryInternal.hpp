@@ -104,7 +104,9 @@ auto InstantiatePrefabInternal(
     const ModelPrefab&   prefab,
     const SpawnParams&   params,
     Entity*              outBuffer,
-    uint32_t             maxCount
+    uint32_t             maxCount,
+    void (*onRoot)(void*, Entity),
+    void* rootUserdata
 ) -> uint32_t;
 } // namespace PrefabFactory
 } // namespace ZHLN

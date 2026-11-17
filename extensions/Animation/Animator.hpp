@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include <Zahlen/Animation/IKControls.hpp>
+#include "Components.hpp"
+#include <Animation/IKControls.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 namespace ZHLN::COM {
 struct IEntities;

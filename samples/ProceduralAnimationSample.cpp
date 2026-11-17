@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Animation/Components.hpp>
 #include <Animation/ProceduralMath.hpp>
 #include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/NativeCharacterController.hpp>
@@ -638,7 +639,7 @@ auto AttachCharacterRig(
         // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery
         reg.Attach(
             player,
-            ZHLN::Components::AnimatorComponent {
+            ZHLN::Animation::AnimatorComponent {
                 .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,

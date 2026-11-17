@@ -15,8 +15,6 @@
 #include "RenderSystem.hpp"
 #include "TransformSystem.hpp"
 #include "system/CharacterMotorSystem.hpp"
-#include <Zahlen/Animation/NativeAnimationSystem.hpp>
-#include <Zahlen/Animation/NativeIK.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -149,9 +147,6 @@ void BuildSystemGraphs(Engine& engine) {
     // Every graph node derives its name, thunk and component hazards from its
     // callable's signature. The camera is modified in the earlier frame phase.
     updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
-    updateGraph.AddSystem<&Animation::AnimationSyncSystem::Update>();
-    updateGraph.AddSystem<&IK::TwoBoneIKSystem::Update>();
-    updateGraph.AddSystem<&Animation::AnimationStepSystem::Update>();
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Animation/NativeAnimationContext.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
@@ -36,13 +35,6 @@ void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component)
     }
     graphics.DestroyMesh(std::exchange(component.mesh, Mesh {}));
     component.meshAsset = InvalidAssetID;
-}
-
-void Release(Engine& engine, Components::AnimatorComponent& component) {
-    const auto handle = std::exchange(component.animationID, AnimationID::Null());
-    if (auto context = engine.Service<Animation::AnimationContext>(); context && handle.IsValid()) {
-        (*context).Destroy(std::span {&handle, 1});
-    }
 }
 
 void Release(Engine& engine, Components::PhysicsComponent& component) {

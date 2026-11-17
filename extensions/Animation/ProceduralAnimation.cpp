@@ -3,6 +3,8 @@
 
 module;
 
+#include <Animation/Components.hpp>
+
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Math/Angles.hpp>
@@ -55,12 +57,25 @@ void UpdateItemDynamics(Physics::BodyID ignoredPhysics, const PhysicsContext& ph
 }
 
 using ProceduralAnimationQuery = ECS::ExclusiveQuery<
-    ProceduralLocomotionComponent&, HairStrandsComponent&, const ProceduralAnimationConfigComponent,
-    FirstPersonVisibilityComponent&, ProceduralLocomotionTracksComponent&, Animation::ItemHandlingComponent&,
-    const Character::MovementComponent, Components::TransformComponent&, const Components::PhysicsComponent,
-    RigBoneMap&, const Components::RagdollComponent, Components::AnimatorComponent&, const ProceduralLookAtComponent,
-    const Components::HierarchyComponent, Components::WorldTransformComponent&, Components::CameraComponent&,
-    const Components::MainCameraTagComponent, const Components::SkeletalMeshComponent, const Components::MeshComponent>;
+    ProceduralLocomotionComponent&,
+    HairStrandsComponent&,
+    const ProceduralAnimationConfigComponent,
+    FirstPersonVisibilityComponent&,
+    ProceduralLocomotionTracksComponent&,
+    Animation::ItemHandlingComponent&,
+    const Character::MovementComponent,
+    Components::TransformComponent&,
+    const Components::PhysicsComponent,
+    RigBoneMap&,
+    const Components::RagdollComponent,
+    Animation::AnimatorComponent&,
+    const ProceduralLookAtComponent,
+    const Components::HierarchyComponent,
+    Components::WorldTransformComponent&,
+    Components::CameraComponent&,
+    const Components::MainCameraTagComponent,
+    const Components::SkeletalMeshComponent,
+    const Components::MeshComponent>;
 using SkinBindingQuery = ECS::Query<const Components::SkeletalMeshComponent, const Components::HierarchyComponent>;
 using Animation::AttachmentQuery;
 
@@ -439,7 +454,7 @@ void SamplePoseChannel(
 }
 
 void ApplyAuthoredPose(
-    const Components::AnimatorComponent*       animator,
+    const Animation::AnimatorComponent*        animator,
     const ModelPrefab*                         prefab,
     const ProceduralLocomotionTracksComponent* tracks,
     const ProceduralAnimationConfigComponent*  config,
@@ -561,7 +576,7 @@ struct AuthoredUpperBodyCoverage {
 };
 
 [[nodiscard]] AuthoredUpperBodyCoverage
-    FindAuthoredUpperBodyCoverage(const Components::AnimatorComponent* animator, const ModelPrefab* prefab, const RigBoneMap& map) noexcept {
+    FindAuthoredUpperBodyCoverage(const Animation::AnimatorComponent* animator, const ModelPrefab* prefab, const RigBoneMap& map) noexcept {
     AuthoredUpperBodyCoverage coverage;
     if (animator == nullptr || prefab == nullptr || animator->currentTrackIdx < 0 ||
         animator->currentTrackIdx >= static_cast<int32_t>(prefab->animations.size())) {
@@ -596,7 +611,7 @@ struct AuthoredUpperBodyCoverage {
 }
 
 void SynchronizeLocomotionTrack(
-    Components::AnimatorComponent&       animator,
+    Animation::AnimatorComponent&        animator,
     const ModelPrefab*                   prefab,
     ProceduralLocomotionTracksComponent& tracks,
     const Character::MovementComponent*  movement,
@@ -1680,9 +1695,9 @@ namespace {
 
 struct ProceduralSuppressUploadSystem {
     static void
-        Update(ECS::Query<const ProceduralLocomotionComponent, const Components::AnimatorComponent> query, ECS::ResMut<Animation::AnimationContext> anim) {
+        Update(ECS::Query<const ProceduralLocomotionComponent, const Animation::AnimatorComponent> query, ECS::ResMut<Animation::AnimationContext> anim) {
         for (const Entity entity: query.Entities<ProceduralLocomotionComponent>()) {
-            if (const auto animator = query.Get<Components::AnimatorComponent>(entity); animator && animator->animationID.IsValid()) {
+            if (const auto animator = query.Get<Animation::AnimatorComponent>(entity); animator && animator->animationID.IsValid()) {
                 anim->SuppressPaletteUpload(animator->animationID);
             }
         }
@@ -1944,7 +1959,7 @@ void ProceduralAnimationSystem(
             continue;
         }
 
-        auto               animator    = query.Get<Components::AnimatorComponent>(entity);
+        auto               animator    = query.Get<Animation::AnimatorComponent>(entity);
         const AssetID      prefabAsset = (animator && animator->prefabAsset != InvalidAssetID) ? animator->prefabAsset : boneMap->sourcePrefabAsset;
         const auto         prefabOpt   = prefabAsset != InvalidAssetID ? assets.CachedPrefab(prefabAsset) : ZHLN::Optional<const ModelPrefab&> {};
         const ModelPrefab* prefab      = prefabOpt ? &*prefabOpt : nullptr;

@@ -2,32 +2,33 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/Components.hpp>
 #include <Animation/IK.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/ExtensionServices.hpp>
+#include <Zahlen/ECS/SystemGraph.hpp>
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/ECS/ExtensionServices.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PoseUploads.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
 #include <array>
 #include <cmath>
 #include <expected>
 #include <memory>
 #include <numbers>
-#include <vector>
 #include <type_traits>
+#include <vector>
 
 using ZHLN::FVec3;
 
@@ -405,7 +406,7 @@ struct TwoBoneIKTestSuite {
             graph.Compile();
 
             const ZHLN::Entity root = registry.Create(
-                ZHLN::Components::AnimatorComponent {
+                ZHLN::Animation::AnimatorComponent {
                     .prefabAsset     = id,
                     .currentTrackIdx = -1, // idle first: authored morph weights must stay untouched
                     .currentLoop     = false,
@@ -436,7 +437,7 @@ struct TwoBoneIKTestSuite {
             uploads.Clear();
 
             // 2. Degenerate keyless clip (track 1): morph weights still preserved.
-            registry.Patch<ZHLN::Components::AnimatorComponent>(root, [](auto& anim) {
+            registry.Patch<ZHLN::Animation::AnimatorComponent>(root, [](auto& anim) {
                 anim.currentTrackIdx  = 1;
                 anim.currentTrackTime = 0.0f;
             });
@@ -447,7 +448,7 @@ struct TwoBoneIKTestSuite {
             uploads.Clear();
 
             // 3. Valid clip (track 0) past end (1.2 s > 1.0 s): morph weights clamp to (1.0, 0.75), rigid child TRS updated, skinned child untouched.
-            registry.Patch<ZHLN::Components::AnimatorComponent>(root, [](auto& anim) {
+            registry.Patch<ZHLN::Animation::AnimatorComponent>(root, [](auto& anim) {
                 anim.currentTrackIdx  = 0;
                 anim.currentTrackTime = 0.0f;
                 anim.blendDuration    = 0.0f;
@@ -458,7 +459,7 @@ struct TwoBoneIKTestSuite {
 
             const auto rigidTr   = registry.Get<ZHLN::Components::TransformComponent>(rigidMorphChild);
             const auto skinnedTr = registry.Get<ZHLN::Components::TransformComponent>(skinnedChild);
-            const auto animAfter = registry.Get<ZHLN::Components::AnimatorComponent>(root);
+            const auto animAfter = registry.Get<ZHLN::Animation::AnimatorComponent>(root);
             if (!ZHLN::Test::ExpectTrue(animAfter.has_value()) || !ZHLN::Test::ExpectTrue(animAfter->isFinished) ||
                 !ZHLN::Test::ExpectEq(idleMorph->weights[0], 1.0f) || !ZHLN::Test::ExpectEq(idleMorph->weights[1], 0.75f) ||
                 !ZHLN::Test::ExpectTrue(rigidTr.has_value()) ||
@@ -518,13 +519,13 @@ struct TwoBoneIKTestSuite {
             }
 
             const ZHLN::Entity root = registry.Create(
-                ZHLN::Components::TransformComponent {.position = FVec3{10.0f, 0.0f, 5.0f}},
-                ZHLN::Components::AnimatorComponent {
-                    .prefabAsset     = id,
-                    .currentTrackIdx = 0,
+                ZHLN::Components::TransformComponent {.position = FVec3 {10.0f, 0.0f, 5.0f}},
+                ZHLN::Animation::AnimatorComponent {
+                    .prefabAsset      = id,
+                    .currentTrackIdx  = 0,
                     .currentTrackTime = 1.0f,
-                    .currentLoop     = false,
-                    .isFinished      = true,
+                    .currentLoop      = false,
+                    .isFinished       = true,
                 },
                 ikComp
             );
@@ -539,7 +540,7 @@ struct TwoBoneIKTestSuite {
                 uploads.Clear();
             }
 
-            const auto animComp = registry.Get<ZHLN::Components::AnimatorComponent>(root);
+            const auto animComp = registry.Get<ZHLN::Animation::AnimatorComponent>(root);
             const auto fingerTr = registry.Get<ZHLN::Components::TransformComponent>(fingerChild);
             if (!ZHLN::Test::ExpectTrue(animComp.has_value()) || !ZHLN::Test::ExpectTrue(fingerTr.has_value())) {
                 return std::unexpected(TwoBoneIKTestError::ECSBridgeFailed);

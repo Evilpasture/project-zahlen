@@ -54,8 +54,9 @@ frame. This is not a second character integrator.
 ## Animator controls
 
 Include `<Animation/Animator.hpp>` and link `zahlen_skeletal_animation` /
-`Zahlen::SkeletalAnimation`. The real playback evaluator is already in Engine as core service/graph/cleanup
-wiring, not an application-installed module;
+`Zahlen::SkeletalAnimation`. The playback evaluator belongs to the optional SkeletalAnimation runtime.
+Compose it explicitly via `<Animation/Runtime.hpp>` and
+`Animation::CreateEngineRef`, or native `Animation::Install`/`IK::Install`;
 this archive's new helpers only author published POD controls:
 
 - `Animator::Attach` starts from the root's existing playback settings.
@@ -107,15 +108,16 @@ changed to synthetic geometry. Its prior llvmpipe worker fault/timeout remains
 an unresolved rendering gate. The focused non-rendering regression explicitly
 filters that one test; those passing counts do not include it.
 
-### Final verification and limits
+### Historical verification before runtime extraction
 
 The broad host/native-character regression passed 135 tests with zero failures.
 A separate real-Uzi simulation-stage test passed 12 AdvanceFrame/CancelFrame
 updates, paused seek, handle stability, scene clear and recreation with a new
 handle. This deliberately does not call FinishFrame and is not rendered proof.
 The native GPU_Application lifecycle suite passed 16 tests after removing
-animation's implicit application-module installation. Core owns the evaluator,
-IK nodes and cleanup; native Install calls cannot add a duplicate evaluator.
+animation's implicit application-module installation. That checkpoint used core-owned animation and was superseded: the optional
+extension now owns the evaluator, IK nodes and cleanup. Native Install calls
+are explicit and idempotent.
 CancelFrame and scene clear discard unpublished palette uploads.
 
 The installed GNU C++26 Engine/CharacterController/SkeletalAnimation consumer
@@ -124,3 +126,12 @@ Clang integration success is claimed. An additional native procedural test
 translation unit was stopped after over 15 minutes of compilation; no test-run
 success is claimed for that optional suite. Its compatibility library built.
 The original full rendered real-skinned second-tick failure remains unresolved.
+
+## Animation extraction follow-up
+
+Engine no longer contains animation evaluation/state/IK or implicit module
+installation. Animator data types are now `Animation::AnimatorComponent` and
+`Animation::AnimatorControlComponent` from `<Animation/Components.hpp>`.
+See [COMRuntimeControls](COMRuntimeControls.md) for explicit optional-runtime
+composition and the ownership boundary. Earlier verification above is historical;
+consult the extraction delivery report for reruns on the extracted runtime.

@@ -1,21 +1,22 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/Components.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -112,7 +113,7 @@ struct RenderAnimatedMeshTestSuite {
             }
 
             const ZHLN::Entity rootEntity = spawnedParts[0];
-            const auto         animComp   = reg.Get<ZHLN::Components::AnimatorComponent>(rootEntity);
+            const auto         animComp   = reg.Get<ZHLN::Animation::AnimatorComponent>(rootEntity);
             if (!animComp) {
                 return std::unexpected(AnimatedMeshTestError::NoAnimatorFound);
             }

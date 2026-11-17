@@ -1,78 +1,59 @@
-# Engine-owned animation and character motor controls
+# Optional animation runtime and engine character motor
 
-**Status:** Engine controls and COM Character/Animator host slices have focused
-GNU and installed-consumer verification (see [COMCharacterHost](COMCharacterHost.md)).
-The full Uzi rendered workload remains an unresolved gate: it faults during the
-second rendered tick on llvmpipe, while a validated non-mesh-shader raster probe
-times out there. A diagnostic fault address was in generated code, not a resolved
-engine symbol. This is not proof of either a driver defect or a migration defect;
-that rendering test is not included in passing regression counts.
+Animation is not an Engine subsystem. `zahlen_engine` does not compile or link
+AnimationContext, skeletal evaluation, playback synchronization or TwoBoneIK.
+Plain Engine/COM engine creation installs no animation modules, owns no animation
+state and publishes no Animator or IK components.
 
-This change moves the existing skeletal evaluator and its ECS synchronization,
-IK, morph, rigid-node and palette-upload passes into `zahlen_engine`. Engine
-creation initializes them as core services and core graph/cleanup passes,
-not optional application modules. Native Install calls are compatibility no-ops. COM hosts do not install an Animation module, retain an
-`AnimationContext`, or acquire a native Engine. The old AnimationContext/AnimationSystem/IK headers remain native compatibility
-forwarders. The `zahlen_skeletal_animation` archive also supplies the new
-capability-only Animator host helpers; the actual evaluator is linked from
-Engine exactly once.
+## Explicit composition
 
-## Playback and IK
+Native composition roots link `zahlen_skeletal_animation` and call
+`Animation::Install(engine)` and, when required, `IK::Install(engine)`. Both are
+idempotent. IK installs its animation prerequisite. The optional runtime owns
+its context, graph systems, prefab-root seeding, component publication and scene
+cleanup through generic extension services and lifecycle hooks.
 
-Instantiate a prepared animated prefab through `IAssetLibrary::Instantiate`
-with `SpawnParams::isAnimated = true`. On its root, attach the published POD
-`Components::AnimatorControlComponent` using `IEntities::Attach`:
+COM consumers link `Zahlen::SkeletalAnimation`, include `<Animation/Runtime.hpp>`
+and explicitly use `Animation::CreateEngineRef(configChain)`. This extension
+factory installs the optional runtime before returning the ordinary COM engine;
+it does not add an animation interface or hidden native accessor to IEngine.
+`COM::CreateEngineRef` remains a plain, animation-free engine factory.
 
-- `trackIndex`, `playbackSpeed`, `blendDuration` and `loop` are persistent controls;
-- set `seekTime` and `seekRequested` for a consumed seek request;
-- read playback progress from `Components::AnimatorComponent`. Its runtime ID
-  is engine-owned: never copy it between roots or worlds.
+`<Animation/Animator.hpp>` provides capability-only helpers for attach/read,
+play/restart, seek, pause/speed and validated IK input. Runtime types are owned
+by `<Animation/Components.hpp>` (`Animation::AnimatorComponent` and
+`Animation::AnimatorControlComponent`), not by core's `Components` container.
+IK controls and AnimationID are likewise extension headers. The erroneous
+`Zahlen/Animation/Native*` headers have been removed, not retained as core-to-
+extension forwarding dependencies.
 
-The controller does not create a prefab or choose a clip for the application.
-`IK::TwoBoneIKComponent` and its fixed-capacity chains are published typed
-storage too. Their POD declarations live in `Zahlen/Animation/IKControls.hpp`,
-without an ECS system, module, registry, solver service or native Engine API.
-`AnimationID` similarly has a separate fixed-layout declaration.
+The engine supplies generic native module composition, optional component
+publication and prefab notification mechanisms. It has no animation-specific
+branch in its factory, graph wiring, resource release or prefab construction.
+Renderer skin/palette upload and imported model data remain graphics/asset
+facilities; they neither instantiate nor execute an animation evaluator.
 
-The Console/Scripting reflection policy treats runtime Animator data and
-CharacterMotorState as read-only; controls remain editable. This is not a new
-const-enforced `IEntities` ABI: the existing typed capability returns mutable
-component pointers. COM consumers must respect the documented ownership rule.
-COM replacement/detachment of an Animator now retires its old runtime handle.
-Pending destruction and scene reset use the real animation cleanup pass.
+## Ownership
+
+The extension reclaims runtime handles for pending entities and scene clear.
+Its managed-handle sweep also reclaims handles after generic component removal
+or replacement, without teaching Engine's ECS bridge about animation resources.
+Explicit raw AnimationContext clients still own their non-managed handles.
+Animator::Detach removes host controls/IK, not the prefab or Animator state.
+Cancelled frames and scene clear discard unpublished graphics palette uploads.
 
 ## Character motor
 
-Attach `Components::CharacterMotorComponent` to the entity owning a non-static
-character PhysicsComponent. Supply desired world-space X/Z velocity,
-acceleration, deceleration, gravity, and a jump speed/request. Y in desired
-velocity is intentionally ignored. Non-finite command inputs are sanitized.
-The engine creates `CharacterMotorStateComponent` and executes velocity
-integration and commit before **every fixed physics substep**, then reads
-velocity and grounded state back immediately afterward. Airborne jump requests
-are consumed rather than buffered. Pending destruction and active ragdolls do
-not receive motor steering. Scene destruction still retires the physics body
-through the existing owner cleanup.
+The fixed-step character motor remains a physics-facing engine facility. Hosts
+supply POD desired velocity, acceleration/deceleration, gravity, jump and facing
+controls. Input routing, camera-relative movement and gait decisions are host
+policy. See [COMCharacterHost](COMCharacterHost.md).
 
-Input routing, camera-relative intent, sprint/gait choice, facing, prop pushing,
-and procedural animation policy are not motor substrate. They remain host
-responsibilities. The new Character host implements input, sprint, facing and
-prop-interaction policy through COM capabilities. Native Locomotion/Rig and
-procedural demos remain separate compatibility workloads; they have **not**
-been relabeled as COM ports. Do not install two motor drivers on the same character.
+## Unresolved and remaining work
 
-## Verification and scope
-
-`Extras_RuntimeControls` links Engine, Application (process/task lifetime), and
-the COM glTF asset host and the skeletal host helper archive; it does not link
-the native character-controller adapter. It tests real character movement/retirement, published
-playback/IK storage, and the repository's real Uzi skinned prefab through COM
-Decode/Upload/Instantiate/Tick, including playback, pause/seek, skinning scratch,
-bounds and scene recreation. Fetch the Git LFS Uzi asset before running this
-suite; an LFS pointer is not a model and is not silently skipped.
-
-Existing native animated-mesh and animation-lifecycle workloads no longer call
-Animation::Install: they exercise the engine's automatic ownership. Installed Engine/CharacterController/SkeletalAnimation consumer verification
-passes on GNU. Full procedural-host migration and a Clang/libc++ integration
-run remain separate acceptance work; this document does not claim those are
-complete.
+The full Uzi rendered workload previously faulted/timed out on the second
+rendered tick. Its cause remains unknown. Simulation-only success is not
+presentation proof, and this extraction does not claim to fix that failure.
+ProceduralAnimation, Locomotion and Rig remain native extension workloads,
+not completed capability-only COM ports. The VM's Clang 22.1.8 rejects
+`-freflection`; no Clang integration success is claimed.

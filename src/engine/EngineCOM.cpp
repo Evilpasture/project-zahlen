@@ -13,7 +13,6 @@
 // Zahlen builds with -fno-exceptions, so the noexcept on every method here is
 // a statement of fact rather than a promise that needs a try/catch to keep.
 
-#include <Zahlen/Animation/IKControls.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
@@ -47,7 +46,9 @@
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/NativeEngineFactory.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/PublishedComponents.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
@@ -124,17 +125,6 @@ template <typename T> auto ReadNode(const ChainInNode* chain) noexcept -> Result
 // Components satisfying SceneResources::OwnsExternalResource<T> release their
 // owned Jolt bodies, ragdolls, audio voices, or GPU mesh/skin buffers before
 // overwrite or detach so COM consumers cannot leak external handles.
-struct PublishedComponent {
-    std::string_view name;
-    uint32_t         size;
-    uint32_t         alignment;
-    uint64_t         layoutHash;
-    uint32_t (*familyID)() noexcept;
-    void* (*ensure)(Engine&, ECS::Registry&, Entity) noexcept;
-    bool (*remove)(Engine&, ECS::Registry&, Entity) noexcept;
-    void* (*fetch)(const ECS::Registry&, Entity) noexcept;
-};
-
 template <typename T>
 [[nodiscard]] consteval auto Publish() -> PublishedComponent {
     static_assert(std::is_trivially_copyable_v<T>,
@@ -150,7 +140,7 @@ template <typename T>
         .ensure     = +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> void* {
             const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
             if (void* existing = registry.GetRawByFamily(entity, id)) {
-                if constexpr (SceneResources::OwnsExternalResource<T> || std::is_same_v<T, Components::AnimatorComponent>) {
+                if constexpr (SceneResources::OwnsExternalResource<T>) {
                     SceneResources::Release(engine, *static_cast<T*>(existing));
                     *static_cast<T*>(existing) = T {};
                 }
@@ -163,7 +153,7 @@ template <typename T>
             return &registry.Add<T>(entity);
         },
         .remove = +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> bool {
-            if constexpr (SceneResources::OwnsExternalResource<T> || std::is_same_v<T, Components::AnimatorComponent>) {
+            if constexpr (SceneResources::OwnsExternalResource<T>) {
                 return SceneResources::Detach<T>(engine, registry, entity);
             } else {
                 const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
@@ -204,11 +194,8 @@ constexpr std::array kPublishedComponents {
     Publish<Components::MeshParticleEmitterComponent>(),
     Publish<Components::VolumetricFogComponent>(),
     Publish<Components::VolumetricVolumeComponent>(),
-    Publish<Components::AnimatorComponent>(),
-    Publish<Components::AnimatorControlComponent>(),
     Publish<Components::CharacterMotorComponent>(),
     Publish<Components::CharacterMotorStateComponent>(),
-    Publish<IK::TwoBoneIKComponent>(),
     Publish<Components::PhysicsComponent>(),
     Publish<Components::ImpulseCommand>(),
     Publish<Components::RagdollComponent>(),
@@ -220,11 +207,15 @@ constexpr std::array kPublishedComponents {
     Publish<Components::PlayerSeatComponent>(),
 };
 
-[[nodiscard]] auto FindPublished(StringView typeName) noexcept -> const PublishedComponent* {
+[[nodiscard]] auto FindPublished(Engine& engine, StringView typeName) noexcept -> const PublishedComponent* {
     const std::string_view wanted(typeName);
     for (const auto& entry : kPublishedComponents) {
         if (entry.name == wanted) return &entry;
     }
+    if (auto extra = engine.Service<PublishedComponents>())
+        for (const auto& entry: extra->entries)
+            if (entry.name == wanted)
+                return &entry;
     return nullptr;
 }
 
@@ -1130,12 +1121,12 @@ class EngineCOM final:
     }
 
     [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
-        return FindPublished(typeName) != nullptr;
+        return FindPublished(*m_engine, typeName) != nullptr;
     }
 
     [[nodiscard]] void* AttachEngineRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment,
                                         uint64_t layoutHash) noexcept override {
-        const PublishedComponent* published = FindPublished(typeName);
+        const PublishedComponent* published = FindPublished(*m_engine, typeName);
         if (published == nullptr) return nullptr;
         // All three must agree. The hash subsumes the other two, but checking
         // them separately makes a stale consumer fail for a legible reason.
@@ -1148,7 +1139,7 @@ class EngineCOM final:
     }
 
     bool DetachEngineRaw(Entity entity, StringView typeName) noexcept override {
-        const PublishedComponent* published = FindPublished(typeName);
+        const PublishedComponent* published = FindPublished(*m_engine, typeName);
         if (published == nullptr) return false;
         auto& registry = m_engine->GetInternalRegistry();
         if (!registry.IsAlive(entity)) return false;
@@ -1156,7 +1147,7 @@ class EngineCOM final:
     }
 
     [[nodiscard]] void* GetEngineRaw(Entity entity, StringView typeName) const noexcept override {
-        const PublishedComponent* published = FindPublished(typeName);
+        const PublishedComponent* published = FindPublished(*m_engine, typeName);
         if (published == nullptr) return nullptr;
         return published->fetch(m_engine->GetInternalRegistry(), entity);
     }
@@ -1165,7 +1156,7 @@ class EngineCOM final:
                                            uint32_t capacity) const noexcept override {
         const auto& registry = m_engine->GetInternalRegistry();
         uint32_t    family   = kInvalidFamily;
-        if (const PublishedComponent* published = FindPublished(typeName)) {
+        if (const PublishedComponent* published = FindPublished(*m_engine, typeName)) {
             family = published->familyID();
         } else {
             family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
@@ -2280,7 +2271,7 @@ private:
 
 // --- Factory ----------------------------------------------------------------
 
-auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
+auto CreateConfiguredEngine(const ChainInNode* configChain, NativeEngineInitializer initialize) noexcept -> Result<IEngine*> {
     EngineConfig config {};
     uint32_t     maxFramesPerSecond = 0;
 
@@ -2319,9 +2310,16 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
     (*created)->EmplaceService<EngineConfig>((*created)->State().Configuration());
 
+    if (initialize)
+        initialize(**created);
+
     auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
     if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);
     return static_cast<IEngine*>(instance);
+}
+
+auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
+    return CreateConfiguredEngine(configChain, nullptr);
 }
 
 } // namespace ZHLN::COM

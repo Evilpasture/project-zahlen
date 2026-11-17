@@ -33,28 +33,29 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec3.hpp>
+#include <Animation/Components.hpp>
+#include <Signal/CrashHandler.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/QualityPresets.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/QualityPresets.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 
 // The optional layer targets this harness consumes. They remain independent of
 // Core. samples/CMakeLists.txt skips the sample when a required target is absent,
@@ -293,9 +294,7 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // settle ticks advance "Individuals" in MorphStressTest: its first target
     // lifts the yellow block while the untouched blocks stay level.
     if (written > 0 && !prefab->animations.empty() &&
-        !engine.Entities().Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
-            animator.currentTrackIdx = -1;
-        })) {
+        !engine.Entities().Patch<ZHLN::Animation::AnimatorComponent>(instances.front(), [](auto& animator) { animator.currentTrackIdx = -1; })) {
         ZHLN::Log("[Fidelity] Animated prefab '{}' has no animator root.", virtualPath);
         return 0;
     }

@@ -209,6 +209,20 @@ def main() -> int:
                 continue
             violations.extend(check_source(path))
 
+    # Animation is optional. The dependency must never be reversed again by
+    # putting evaluation, runtime components or installation into Engine.
+    runtime_pattern = re.compile(r"(?:AnimationContext|AnimatorComponent|AnimatorControlComponent|TwoBoneIK|Animation::|IK::|[<\"](?:Zahlen/)?Animation/)")
+    for root in ("src/engine", "include/Zahlen/Engine", "include/Zahlen/ECS"):
+        for path in sorted((REPOSITORY_ROOT / root).rglob("*")):
+            if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
+                continue
+            text = strip_comments(path.read_text())
+            if runtime_pattern.search(text):
+                violations.append(f"{path.relative_to(REPOSITORY_ROOT)}: optional animation runtime belongs in extensions/Animation, not Engine")
+    engine_cmake = (REPOSITORY_ROOT / "src/engine/CMakeLists.txt").read_text()
+    if re.search(r"(?:animation/|AnimationContext\.cpp|AnimationSystem\.cpp|TwoBoneIK\.cpp|zahlen_skeletal_animation)", engine_cmake):
+        violations.append("src/engine/CMakeLists.txt: Engine must not compile/link the optional animation runtime")
+
     if violations:
         print("Capability boundary violations:", file=sys.stderr)
         for violation in violations:

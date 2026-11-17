@@ -1,3 +1,4 @@
+#include <Animation/Components.hpp>
 #include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -956,7 +957,7 @@ auto AttachCharacterRig(
         // discovery on the evaluator's first frame.
         reg.Attach(
             player,
-            ZHLN::Components::AnimatorComponent {
+            ZHLN::Animation::AnimatorComponent {
                 .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,

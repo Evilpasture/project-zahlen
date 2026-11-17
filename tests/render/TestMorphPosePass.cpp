@@ -46,33 +46,33 @@
 // (up to four targets). This fixture exercises the same instantiate -> pose ->
 // extract -> shader path with a predictable authored base pose.
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Animation/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
-#include <span>
 
 enum class MorphPosePassTestError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the morph pose pass test."> {}) = 1,
@@ -266,7 +266,7 @@ struct MorphPosePassSuite {
             if (!hier || hier->parent == ZHLN::Entity::Null()) {
                 continue;
             }
-            auto animator = reg.Get<ZHLN::Components::AnimatorComponent>(hier->parent);
+            auto animator = reg.Get<ZHLN::Animation::AnimatorComponent>(hier->parent);
             if (!animator || animator->prefabAsset != expectedAsset) {
                 continue;
             }
@@ -315,9 +315,7 @@ struct MorphPosePassSuite {
             if (instances.size() != 1) {
                 return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
             }
-            if (!reg.Patch<ZHLN::Components::AnimatorComponent>(instances[0].root, [](auto& animator) {
-                    animator.currentTrackIdx = -1;
-                })) {
+            if (!reg.Patch<ZHLN::Animation::AnimatorComponent>(instances[0].root, [](auto& animator) { animator.currentTrackIdx = -1; })) {
                 return std::unexpected(MorphPosePassTestError::IdleAnimatorMissing);
             }
 
@@ -433,7 +431,7 @@ struct MorphPosePassSuite {
             // half looks like afterwards has to be the channel, not the scene.
             for (size_t i = 0; i < instances.size(); ++i) {
                 if (i < instances.size() / 2) {
-                    ZHLN::Test::ExpectTrue(reg.Patch<ZHLN::Components::AnimatorComponent>(instances[i].root, [](auto& animator) -> void {
+                    ZHLN::Test::ExpectTrue(reg.Patch<ZHLN::Animation::AnimatorComponent>(instances[i].root, [](auto& animator) -> void {
                         animator.currentTrackIdx = 1;
                     }));
                 }

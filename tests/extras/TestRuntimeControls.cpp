@@ -1,8 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Animation/Animator.hpp>
+#include <Animation/Components.hpp>
+#include <Animation/IKControls.hpp>
+#include <Animation/Runtime.hpp>
 #include <TestsFramework.hpp>
-#include <Zahlen/Animation/IKControls.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
@@ -16,20 +18,28 @@ namespace {
 using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
-auto RuntimeEngine() {
-    return COM::CreateEngineRef(
-        COM::InChain(
-            COM::EngineAppConfig {.appName = String64("Engine runtime controls"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
-        )
-    );
+auto RuntimeEngine(bool animated = true) {
+    return (animated ? Animation::CreateEngineRef : COM::CreateEngineRef)(COM::InChain(
+        COM::EngineAppConfig {.appName = String64("Engine runtime controls"), .logLevel = LogLevel::Quiet},
+        COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true}, COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+    ));
 }
 struct RuntimeControlsSuite {
     ProcessScope process;
     struct Tests {
+        std::expected<void, ErrorCode> plain_engine_has_no_animation_publications() {
+            auto made = RuntimeEngine(false);
+            if (!ExpectTrue(made.has_value()))
+                return {};
+            auto& entities = *(*made)->Entities();
+            ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<Animation::AnimatorComponent>())));
+            ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<Animation::AnimatorControlComponent>())));
+            ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<IK::TwoBoneIKComponent>())));
+            return {};
+        }
+
         std::expected<void, ErrorCode> motor_moves_without_host_hooks_or_native_modules() {
-            auto made = RuntimeEngine();
+            auto made = RuntimeEngine(false);
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto       engine   = std::move(*made);
@@ -66,7 +76,7 @@ struct RuntimeControlsSuite {
             ExpectTrue(entities.Get<Components::CharacterMotorStateComponent>(entity) == nullptr);
             return {};
         }
-        std::expected<void, ErrorCode> real_skinned_prefab_evaluates_through_com_without_animation_extension() {
+        std::expected<void, ErrorCode> real_skinned_prefab_evaluates_with_explicit_animation_extension() {
             Test::SetTimeout(180);
             auto made = RuntimeEngine();
             if (!ExpectTrue(made.has_value()))
@@ -93,7 +103,7 @@ struct RuntimeControlsSuite {
             for (int i = 0; i < 3; ++i) {
                 ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             }
-            const auto* animator = entities.Get<Components::AnimatorComponent>(root);
+            const auto* animator = entities.Get<Animation::AnimatorComponent>(root);
             if (ExpectTrue(animator != nullptr)) {
                 ExpectTrue(animator->animationID.IsValid());
                 ExpectTrue(animator->currentTrackTime > 0.0f);
@@ -110,7 +120,7 @@ struct RuntimeControlsSuite {
             ExpectTrue(Animator::Speed(entities, root, 0));
             ExpectTrue(Animator::Seek(entities, root, 0.125f));
             ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
-            animator = entities.Get<Components::AnimatorComponent>(root);
+            animator = entities.Get<Animation::AnimatorComponent>(root);
             if (ExpectTrue(animator != nullptr))
                 ExpectTrue(std::abs(animator->currentTrackTime - 0.125f) < 0.0001f);
             engine->ClearScene();
@@ -153,7 +163,7 @@ struct RuntimeControlsSuite {
             Animator::PlaybackSnapshot state;
             ExpectTrue(Animator::Read(entities, root, state));
             ExpectTrue(state.time > 0);
-            const auto* runtime = entities.Get<Components::AnimatorComponent>(root);
+            const auto* runtime = entities.Get<Animation::AnimatorComponent>(root);
             if (!ExpectTrue(runtime && runtime->animationID.IsValid()))
                 return {};
             const auto firstHandle = runtime->animationID;
@@ -162,7 +172,7 @@ struct RuntimeControlsSuite {
             advance();
             ExpectTrue(Animator::Read(entities, root, state));
             ExpectTrue(std::abs(state.time - .125f) < .0001f);
-            runtime = entities.Get<Components::AnimatorComponent>(root);
+            runtime = entities.Get<Animation::AnimatorComponent>(root);
             ExpectTrue(runtime && runtime->animationID == firstHandle);
             engine->ClearScene();
             ExpectTrue(!entities.IsAlive(root));
@@ -171,7 +181,7 @@ struct RuntimeControlsSuite {
                 return {};
             ExpectTrue(Animator::Play(entities, recreated.front(), 0));
             advance();
-            runtime = entities.Get<Components::AnimatorComponent>(recreated.front());
+            runtime = entities.Get<Animation::AnimatorComponent>(recreated.front());
             ExpectTrue(runtime && runtime->animationID.IsValid() && runtime->animationID != firstHandle);
             // This is a separate simulation-stage gate, not a replacement for
             // the retained full rendered skinning workload above.
@@ -185,7 +195,7 @@ struct RuntimeControlsSuite {
             auto&      entities = *engine->Entities();
             const auto plain    = entities.CreateEntity();
             ExpectTrue(!Animator::Play(entities, plain, 0));
-            const auto root = entities.Spawn(Components::AnimatorComponent {.currentTrackIdx = 2, .currentTrackTime = 3.5f});
+            const auto root = entities.Spawn(Animation::AnimatorComponent {.currentTrackIdx = 2, .currentTrackTime = 3.5f});
             ExpectTrue(Animator::Attach(entities, root));
             Animator::PlaybackSnapshot snapshot;
             ExpectTrue(Animator::Read(entities, root, snapshot));
@@ -208,8 +218,8 @@ struct RuntimeControlsSuite {
             ExpectTrue(!Animator::SetIK(entities, root, ik));
             ExpectEq(entities.Get<IK::TwoBoneIKComponent>(root)->chains[0].weight, 1.0f);
             Animator::Detach(entities, root);
-            ExpectTrue(entities.Get<Components::AnimatorComponent>(root) != nullptr);
-            ExpectTrue(entities.Get<Components::AnimatorControlComponent>(root) == nullptr);
+            ExpectTrue(entities.Get<Animation::AnimatorComponent>(root) != nullptr);
+            ExpectTrue(entities.Get<Animation::AnimatorControlComponent>(root) == nullptr);
             engine->ClearScene();
             ExpectTrue(!Animator::Read(entities, root, snapshot));
             return {};
@@ -220,17 +230,17 @@ struct RuntimeControlsSuite {
                 return {};
             auto  engine   = std::move(*made);
             auto& entities = *engine->Entities();
-            ExpectTrue(entities.IsEngineComponent(COM::IEntities::ComponentName<Components::AnimatorControlComponent>()));
+            ExpectTrue(entities.IsEngineComponent(COM::IEntities::ComponentName<Animation::AnimatorControlComponent>()));
             ExpectTrue(entities.IsEngineComponent(COM::IEntities::ComponentName<IK::TwoBoneIKComponent>()));
             IK::TwoBoneIKComponent ik;
             ExpectTrue(ik.AddChain(IK::TwoBoneIKChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
             const auto root = entities.Spawn(
-                Components::AnimatorComponent {},
-                Components::AnimatorControlComponent {.trackIndex = 3, .playbackSpeed = 0.5f, .seekTime = 1.25f, .seekRequested = true}, ik
+                Animation::AnimatorComponent {},
+                Animation::AnimatorControlComponent {.trackIndex = 3, .playbackSpeed = 0.5f, .seekTime = 1.25f, .seekRequested = true}, ik
             );
             ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
-            const auto* animator = entities.Get<Components::AnimatorComponent>(root);
-            const auto* control  = entities.Get<Components::AnimatorControlComponent>(root);
+            const auto* animator = entities.Get<Animation::AnimatorComponent>(root);
+            const auto* control  = entities.Get<Animation::AnimatorControlComponent>(root);
             if (ExpectTrue(animator && control)) {
                 ExpectEq(animator->currentTrackIdx, 3);
                 ExpectEq(animator->currentPlaybackSpeed, 0.5f);

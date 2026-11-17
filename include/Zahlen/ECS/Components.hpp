@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Animation/AnimationID.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -196,28 +195,6 @@ struct Components {
         ZHLN::String256 source;
         int             renderSkybox = 0;
     };
-    struct AnimatorComponent {
-        AnimationID animationID      = AnimationID::Null();
-        AssetID         prefabAsset          = InvalidAssetID;
-        int32_t         currentTrackIdx      = -1;
-        float           currentTrackTime     = 0.0f;
-        float           currentPlaybackSpeed = 1.0f;
-        float           blendDuration        = 0.15f;
-        bool            currentLoop          = true;
-        bool            isFinished           = false;
-    };
-    static_assert(std::is_trivially_copyable_v<AnimatorComponent>);
-
-    // COM-safe playback controls. AnimatorComponent is read-only runtime state.
-    // Attach to an animated prefab root. Seek is a consumed one-shot request.
-    struct AnimatorControlComponent {
-        int32_t trackIndex    = -1;
-        float   playbackSpeed = 1.0f;
-        float   blendDuration = 0.15f;
-        float   seekTime      = 0.0f;
-        bool    loop          = true;
-        bool    seekRequested = false;
-    };
     // Host supplies world-space horizontal velocity and one-shot vertical jump
     // speed. Input mapping, sprint, gait selection and facing remain host policy.
     struct CharacterMotorComponent {
@@ -236,7 +213,6 @@ struct Components {
         FVec3 velocity       = {};
         bool  grounded       = false;
     };
-    static_assert(std::is_trivially_copyable_v<AnimatorControlComponent>);
     static_assert(std::is_trivially_copyable_v<CharacterMotorComponent>);
     static_assert(std::is_trivially_copyable_v<CharacterMotorStateComponent>);
 

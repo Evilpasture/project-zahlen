@@ -6,7 +6,7 @@
 # Split into two targets so header-only / non-module consumers (samples, render
 # tests, scripting) get AnimationContext, AnimationSystem, and TwoBoneIK without
 # pulling in C++20 module BMIs or character-controller/camera dependencies:
-#   - zahlen_skeletal_animation: native forwarding headers; runtime is in Engine
+#   - zahlen_skeletal_animation: optional evaluator, state, ECS bridge and IK runtime
 #   - zahlen_animation:          ZHLN.Rig, ZHLN.Animator, ZHLN.Locomotion,
 #                                ZHLN.ProceduralAnimation + procedural solvers
 #
@@ -18,6 +18,7 @@
 set(SKELETAL_TARGET zahlen_skeletal_animation)
 
 add_library(${SKELETAL_TARGET} STATIC
+    RuntimeFactory.cpp
     AnimatorHost.cpp
     AnimationContext.cpp
     AnimationSystem.cpp

@@ -3,7 +3,6 @@
 
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
-#include "../animation/AnimationLifecycle.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
@@ -76,7 +75,6 @@ void ReleaseOwnedResources(Engine& engine, ECS::Registry& registry, bool all) {
     ReleaseSelected<Components::AudioSourceComponent>(engine, ECS::Query<Components::AudioSourceComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::OwnedMeshComponent>(engine, ECS::Query<Components::OwnedMeshComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::SkeletalMeshComponent>(engine, ECS::Query<Components::SkeletalMeshComponent&, const Components::PendingDestroy> {registry}, all);
-    Animation::ReleaseAnimations(engine, all);
     engine.RunSceneCleanupPasses(all);
 }
 

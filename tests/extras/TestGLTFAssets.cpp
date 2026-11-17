@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "helpers/GLTFFixture.hpp"
 #include "helpers/StudioGraphicsProbe.hpp"
+#include <Animation/Components.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -47,14 +48,14 @@ auto ExerciseGPURecovery(RecoveryExercise mode) -> std::expected<void, ZHLN::Err
     auto   entities = assets.Instantiate(asset->hash, {.isAnimated = true});
     Entity root = Entity::Null(), part = Entity::Null();
     for (const auto e: entities) {
-        if (ecs.Get<Components::AnimatorComponent>(e))
+        if (ecs.Get<Animation::AnimatorComponent>(e))
             root = e;
         if (ecs.Get<Components::MorphTargetComponent>(e))
             part = e;
     }
     if (!ExpectTrue(root != Entity::Null() && part != Entity::Null()))
         return {};
-    auto* animator                 = ecs.Get<Components::AnimatorComponent>(root);
+    auto* animator                 = ecs.Get<Animation::AnimatorComponent>(root);
     animator->currentTrackTime     = .375f;
     animator->currentPlaybackSpeed = 1.25f;
     auto* morph                    = ecs.Get<Components::MorphTargetComponent>(part);

@@ -21,6 +21,10 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )
 
+# Ragdoll authoring reads the optional animation runtime's prefab binding.
+# Keep this dependency here, rather than leaking extension headers via Engine.
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_skeletal_animation)
+
 if(TARGET zahlen_lua)
     target_link_libraries(${TARGET_NAME} PRIVATE zahlen_lua)
     target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_RAGDOLL_HAS_LUA=1)

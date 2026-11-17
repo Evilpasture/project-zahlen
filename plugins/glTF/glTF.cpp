@@ -12,34 +12,38 @@
 //     cursor is inside the explorer panel so clicks don't move the camera).
 
 module;
-#include <NativeHostUI/NativeHostUI.hpp>
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
+#include <Animation/Components.hpp>
+// Jolt configuration and namespace macros must precede every Jolt subheader.
+// clang-format off
+#include <Zahlen/Physics/Jolt.hpp>
+// clang-format on
+#include <Jolt/Math/Quat.h>
+#include <Jolt/Math/Vec3.h>
+#include <NativeHostUI/NativeHostUI.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/GUI.hpp>
 
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
@@ -206,12 +210,12 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if (root == ZHLN::Entity::Null() || !entities.IsAlive(root)) {
         return;
     }
-    if (!entities.Get<ZHLN::Components::AnimatorComponent>(root)) {
+    if (!entities.Get<ZHLN::Animation::AnimatorComponent>(root)) {
         return;
     }
 
     const bool stopping = (state.playingClip == clipIndex);
-    entities.Patch<ZHLN::Components::AnimatorComponent>(root, [&](auto& anim) -> auto {
+    entities.Patch<ZHLN::Animation::AnimatorComponent>(root, [&](auto& anim) -> auto {
         anim.currentTrackIdx      = stopping ? -1 : clipIndex;
         anim.currentTrackTime     = 0.0f;
         anim.currentPlaybackSpeed = 1.0f;

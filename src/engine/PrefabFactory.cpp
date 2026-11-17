@@ -615,14 +615,16 @@ auto CreatePlaneInternal(
 }
 
 auto InstantiatePrefabInternal(
-    GraphicsDevice      gfx,
-    ECS::Registry&      reg,
-    PhysicsContext&     pc,
+    GraphicsDevice       gfx,
+    ECS::Registry&       reg,
+    PhysicsContext&      pc,
     ArticulationContext& art,
-    const ModelPrefab&  prefab,
-    const SpawnParams&  params,
-    Entity*             outBuffer,
-    uint32_t            maxCount
+    const ModelPrefab&   prefab,
+    const SpawnParams&   params,
+    Entity*              outBuffer,
+    uint32_t             maxCount,
+    void (*onRoot)(void*, Entity),
+    void* rootUserdata
 ) -> uint32_t {
     uint32_t spawnedCount = 0;
     Entity   rootEntity   = Entity::Null();
@@ -631,16 +633,8 @@ auto InstantiatePrefabInternal(
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
 
-        if (params.isAnimated && (!prefab.animations.empty() || !prefab.skeletons.empty())) {
-            reg.Add(
-                rootEntity, Components::AnimatorComponent {
-                                .prefabAsset      = HashAssetPath(std::string_view(prefab.virtualPath)),
-                                .currentTrackIdx  = prefab.animations.empty() ? -1 : 0,
-                                .currentTrackTime = 0.0f,
-                                .currentLoop      = true,
-                            }
-            );
-        }
+        if (onRoot)
+            onRoot(rootUserdata, rootEntity);
 
         if (outBuffer != nullptr && maxCount > 0) {
             outBuffer[0] = rootEntity;

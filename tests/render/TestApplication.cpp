@@ -30,6 +30,8 @@
 #endif
 #if defined(ZHLN_HAS_ANIMATION)
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/Components.hpp>
+#include <Animation/IK.hpp>
 #endif
 #if defined(ZHLN_HAS_TERRAIN)
 #include <Terrain/TerrainSystem.hpp>
@@ -625,7 +627,14 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
     auto app = NativeApp(EngineConfig {.appName = "AnimationQueryCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
-        // Engine creation installs the skeletal runtime.
+        // Plain Engine has no animation state or installed animation module.
+        Expect(!engine.Service<Animation::AnimationContext>().has_value());
+        const auto before = engine.GetInstalledModules().size();
+        IK::Install(engine);
+        const auto composed = engine.GetInstalledModules().size();
+        Expect(composed == before + 2);
+        IK::Install(engine);
+        Expect(engine.GetInstalledModules().size() == composed);
         auto animations = engine.Service<Animation::AnimationContext>();
         Expect(animations.has_value());
         if (!animations)
@@ -634,8 +643,8 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
         const auto deadID   = animations->Create(1);
         const auto liveID   = animations->Create(2);
         const auto orphanID = animations->Create(3);
-        const auto dead     = registry.Spawn(Components::AnimatorComponent {.animationID = deadID});
-        const auto live     = registry.Spawn(Components::AnimatorComponent {.animationID = liveID});
+        const auto dead     = registry.Spawn(Animation::AnimatorComponent {.animationID = deadID});
+        const auto live     = registry.Spawn(Animation::AnimatorComponent {.animationID = liveID});
         engine.Commands().DestroyEntity(dead);
         engine.Commands().Playback();
         engine.ProcessPendingDestroy();
