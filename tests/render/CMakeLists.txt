@@ -120,7 +120,7 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
 # TestDecal pins its framing through the extension camera rig
 # (extensions/Camera); the component and the rig's frame step live in that
 # domain, so the group links it and publishes the extras include root.
-target_link_libraries(GPU_Lighting PRIVATE zahlen_camera zahlen_asset_cooking)
+target_link_libraries(GPU_Lighting PRIVATE zahlen_native_camera zahlen_asset_cooking)
 target_include_directories(GPU_Lighting PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # Pipeline, resource and culling mechanics, plus PBR robustness at distance.
@@ -166,7 +166,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera zahlen_skeletal_animation)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_native_camera zahlen_skeletal_animation)
 target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -235,8 +235,8 @@ if(TARGET zahlen_character_controller)
     target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
     target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
 endif()
-if(TARGET zahlen_camera AND TARGET zahlen_freecam)
-    target_link_libraries(GPU_Application PRIVATE zahlen_camera zahlen_freecam)
+if(TARGET zahlen_native_camera AND TARGET zahlen_native_freecam)
+    target_link_libraries(GPU_Application PRIVATE zahlen_native_camera zahlen_native_freecam)
     target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
     target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CAMERA_MODULES=1)
 endif()

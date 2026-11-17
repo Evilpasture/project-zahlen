@@ -33,7 +33,7 @@
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Physics/Physics.hpp>
-#include <Camera/TargetCamera.hpp>
+#include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>

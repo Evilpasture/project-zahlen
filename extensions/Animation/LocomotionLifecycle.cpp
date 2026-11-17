@@ -20,7 +20,7 @@ module;
 #include <Zahlen/ECS/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>

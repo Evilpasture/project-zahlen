@@ -38,8 +38,8 @@
 #include <CharacterController/CharacterController.hpp>
 #endif
 #if defined(ZHLN_HAS_CAMERA_MODULES)
-#include <Camera/TargetCamera.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <Camera/NativeTargetCamera.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #endif
 #include <algorithm>
 #include <expected>

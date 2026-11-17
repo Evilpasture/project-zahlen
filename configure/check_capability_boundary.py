@@ -56,6 +56,8 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
+    "extensions/FreeCam/FreeCam.cpp", "extensions/FreeCam/FreeCam.hpp",
+    "extensions/Camera/TargetCamera.cpp", "extensions/Camera/TargetCamera.hpp",
     "utils/scene/SceneDocument.cpp", "utils/scene/SceneDocument.hpp",
     "plugins/Scene/Scene.cpp", "plugins/Scene/Scene.hpp",
     "plugins/BSP/BSPScene.cpp", "plugins/BSP/BSPScene.hpp",
@@ -72,7 +74,7 @@ COM_HOST_PORTS = frozenset({
     "plugins/glTF/GLTFDocument.cpp", "plugins/glTF/GLTFDocument.hpp",
     "plugins/glTF/GLTFAssets.cpp", "plugins/glTF/GLTFAssets.hpp", "plugins/glTF/GLTFOptions.hpp",
 })
-NATIVE_HOST_HEADER = re.compile(r"^(?:NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
+NATIVE_HOST_HEADER = re.compile(r"^(?:FreeCam/NativeFreeCam\.hpp|Camera/NativeTargetCamera\.hpp|NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/ECS\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 
 # The internal cache header, and the paths allowed to include it.
 INTERNAL_HEADERS = {"Zahlen/Engine/AssetManager.hpp": "Engine::Assets() -> AssetLibrary"}
@@ -107,9 +109,9 @@ WITHHELD_PARAMETERS = {
 # rewritten. Listed so the set cannot grow: a new one fails this check, and a
 # fixed one should be deleted from here.
 PENDING_GRAPH_ACCESS = {
-    ("extensions/Camera/TargetCamera.cpp", "GetRenderGraph"),
+    ("extensions/Camera/NativeTargetCamera.cpp", "GetRenderGraph"),
     ("extensions/CharacterController/CharacterController.cpp", "GetUpdateGraph"),
-    ("extensions/FreeCam/FreeCam.cpp", "GetRenderGraph"),
+    ("extensions/FreeCam/NativeFreeCam.cpp", "GetRenderGraph"),
     ("extensions/VFX/LightningUpdate.cpp", "GetUpdateGraph"),
     ("extensions/net/Network/NetworkReplicator.cpp", "GetUpdateGraph"),
     ("gameplay/Interaction/BSPInteraction.cpp", "GetUpdateGraph"),

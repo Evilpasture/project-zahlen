@@ -32,7 +32,7 @@ set(SAMPLE_SOURCES
 #                              ground with <Terrain/TerrainFactory.hpp>
 #                              (zahlen_terrain), and drives its third-person
 #                              view through the extension camera rig
-#                              (<Camera/TargetCamera.hpp>, zahlen_camera), and
+#                              (<Camera/TargetCamera.hpp>, zahlen_native_camera), and
 #                              installs the character controller that drives
 #                              its WASD and physics steps
 #                              (<CharacterController/CharacterController.hpp>,
@@ -55,8 +55,8 @@ set(SAMPLE_SOURCES
 #                              (zahlen_animation) and loads that rig with
 #                              <glTF/GLTFImporter.hpp> (zahlen_gltf). V hands the
 #                              view to the fly cam (<FreeCam/FreeCam.hpp>,
-#                              zahlen_freecam) and T to the third-person orbit rig
-#                              (<Camera/TargetCamera.hpp>, zahlen_camera) while the
+#                              zahlen_native_freecam) and T to the third-person orbit rig
+#                              (<Camera/TargetCamera.hpp>, zahlen_native_camera) while the
 #                              character waits where it stood. F3 shows the logic
 #                              benchmark panel
 #                              (<Benchmark/Viewer/BenchmarkViewer.hpp>,
@@ -77,8 +77,8 @@ set(SAMPLE_SOURCES
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_native_freecam zahlen_skeletal_animation)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_native_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_interaction zahlen_animation zahlen_gltf zahlen_benchmark_viewer)
 

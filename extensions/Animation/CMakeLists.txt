@@ -90,8 +90,8 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_skeletal_animation
     zahlen_engine
     zahlen_character_controller
-    zahlen_camera
-    zahlen_freecam
+    zahlen_native_camera
+    zahlen_native_freecam
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

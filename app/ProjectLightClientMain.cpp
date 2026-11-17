@@ -6,7 +6,7 @@
 // deterministic and free of client CLI/configuration code.
 #include <ProjectLightClient/ClientConfig.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
-#include <Camera/TargetCamera.hpp>
+#include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/ConfigCli.hpp>

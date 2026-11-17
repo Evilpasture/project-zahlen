@@ -47,7 +47,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window/Window.hpp>
 #include <Zahlen/ECS/ECS.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>

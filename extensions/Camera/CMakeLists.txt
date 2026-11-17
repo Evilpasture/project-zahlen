@@ -1,15 +1,8 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/Camera -- third-person target camera rig (zahlen_camera).
-#
-# The spring-arm orbit camera (zoom, pitch clamps, smoothing) and its free-cam
-# branch are gameplay policy, not render substrate: core keeps the minimal
-# Camera, CameraComponent and CameraSystem. This target owns the rig's
-# component and system and contributes its frame step through the engine's
-# frame-plan step Describe() declares, before the core "CameraSystems" step.
-#
-# Public headers are reached as <Camera/...>.
+# Target-camera policy, explicitly driven by a COM host.
+# The Native* target below is a separate, transitional module adapter.
 
 set(TARGET_NAME zahlen_camera)
 
@@ -29,12 +22,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Core is a public dependency: the rig runs on the ECS, Camera and the frame
-# scheduler extension seam.
-# No zahlen_freecam edge. TargetCamera.cpp reads FreeCam::FreeCamTagComponent,
-# which is an empty struct: it crosses this boundary as a type identity and
-# brings no symbol, and TargetCamera.hpp does not include FreeCam.hpp, so no
-# consumer of this target needs its include root either.
+# Only COM interfaces and POD engine components are used by the implementation.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )
@@ -43,10 +31,15 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# RegisterComponent names the component through ZHLN::Reflect, which needs
-# the static reflection flags every component-registering domain carries.
+# IEntities component names/layouts use static reflection in the consumer.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+# Transitional native callers only; never linked by the COM implementation.
+add_library(zahlen_native_camera STATIC NativeTargetCamera.cpp)
+set_target_properties(zahlen_native_camera PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_native_camera PUBLIC zahlen_camera PRIVATE zahlen_warnings)
+zahlen_enable_reflection(zahlen_native_camera)

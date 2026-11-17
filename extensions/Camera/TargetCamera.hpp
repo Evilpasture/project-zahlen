@@ -1,40 +1,17 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Camera/TargetCamera.hpp
-//
-// Third-person target camera: a spring-arm orbit rig that follows a tracked
-// entity (zoom, pitch clamps, exponential smoothing), plus the free-cam
-// branch its boot configuration selects. Camera rig behavior is gameplay
-// policy, not render substrate: the core keeps the minimal Camera (optics,
-// position, orientation, frustum), CameraComponent (view-projection
-// matrices) and CameraSystem (matrix projection), and this module contributes
-// the rig as a frame step through the engine's extension seams.
 #pragma once
-
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <optional>
-
-namespace ZHLN {
-
-class Engine;
-class InputReader;
-
-namespace ECS {
-class Registry;
-} // namespace ECS
-
-struct Camera;
-namespace FreeCam { struct FreeCamTagComponent; }
-
-namespace CameraRig {
-
-// Spring-arm orbit camera state for one camera entity.
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Input/ActionValues.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+namespace ZHLN::COM {
+struct IEngine;
+struct IEntities;
+struct IActionContext;
+} // namespace ZHLN::COM
+namespace ZHLN::CameraRig {
 struct TargetCameraComponent {
     Entity    target         = Entity::Null();
     float     distance       = 4.5f;
@@ -56,29 +33,20 @@ struct TargetCameraComponent {
     uint32_t  hasInitSmoothTarget = 0;
 };
 
-// Resolves the rig's orbit around its tracked entity and writes the result
-// into the engine Camera. Runs as a frame step in the Camera phase, before
-// the core CameraSystem projects view-projection matrices, so the rig's
-// position and orientation are what the frame is actually rasterized with.
-class TargetCameraSystem {
-  public:
-    using RigQuery = ECS::Query<TargetCameraComponent&, Components::CameraComponent&, const Components::WorldTransformComponent,
-                                const Components::TransformComponent, const FreeCam::FreeCamTagComponent>;
-    static void Update(RigQuery query, ECS::Res<InputReader> input, FrameDt dt, FrameAlpha alpha) noexcept;
+struct InputSnapshot {
+    Axis2DValue look {};
+    float       wheel      = 0;
+    bool        lookButton = false;
 };
-
-// Composition-root entry point: registers TargetCameraComponent and installs
-// the module Describe() returns, whose frame step is placed before the core
-// "CameraSystems" step so it runs first. The step also re-seeds the boot
-// camera's component when a scene reset replaced the default camera (core no
-// longer creates any camera rig). Call once after Engine::Create. The plan is
-// composed once and is not rebuilt with the scene, so a second install reports
-// a duplicate step instead of registering a second copy of it.
-// The module as a value: registers TargetCameraComponent and declares the rig's
-// frame step, placed before core's "CameraSystems". See TargetCamera.cpp.
-auto Describe() -> Module;
-
-void Install(Engine& engine);
-
-} // namespace CameraRig
-} // namespace ZHLN
+auto ReadInput(const COM::IActionContext&) -> InputSnapshot;
+// Each rig writes its own CameraComponent; free-cam tagged cameras are skipped.
+// Prefer WorldTransform, with a local Transform fallback. No simulation step,
+// command playback or matrix projection is hidden here. Call before Tick.
+void Apply(COM::IEntities&, const InputSnapshot&, float dt);
+void Step(COM::IEngine&, float dt);
+struct Layer {
+    void Tick(COM::IEngine& engine, float dt) {
+        Step(engine, dt);
+    }
+};
+} // namespace ZHLN::CameraRig

@@ -5,7 +5,7 @@
 // Dedicated world editor. Its paused/simulating loop is intentionally custom;
 // an ordinary game does not link this UI, document layer, or editor logic.
 #include "engine/Platform.hpp"
-#include <FreeCam/FreeCam.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #include <NativeSceneDocument.hpp>
 #include <Scene/NativeScene.hpp>
 #include <Signal/CrashHandler.hpp>

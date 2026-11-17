@@ -558,3 +558,10 @@ if(TARGET zahlen_scene_documents)
     target_link_libraries(Extras_SceneAssets PRIVATE zahlen_scene_documents)
     target_compile_definitions(Extras_SceneAssets PRIVATE ZHLN_TEST_SCENE_DOCUMENTS=1)
 endif()
+
+if(TARGET zahlen_freecam AND TARGET zahlen_camera)
+    zahlen_add_extras_group(Extras_CameraHosts
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCameraHosts.cpp)
+    target_link_libraries(Extras_CameraHosts PRIVATE zahlen_freecam zahlen_camera zahlen_application)
+    zahlen_register_extras_test(Extras_CameraHosts POOL gpu LABELS GPU Extras)
+endif()

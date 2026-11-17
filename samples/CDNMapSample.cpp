@@ -20,7 +20,7 @@
 #include <Animation/AnimationSystem.hpp>
 #include <CDN/CDN.hpp>
 #include <Zahlen/ConfigCli.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/Math/Camera.hpp>

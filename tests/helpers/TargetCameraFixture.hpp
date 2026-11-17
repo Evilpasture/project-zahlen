@@ -17,7 +17,7 @@
 
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Camera/TargetCamera.hpp>
+#include <Camera/NativeTargetCamera.hpp>
 
 namespace ZHLN::Test::Headless {
 

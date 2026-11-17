@@ -850,7 +850,7 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
         zahlen_application
         zahlen_project_light_client
         zahlen_character_controller
-        zahlen_camera
+        zahlen_native_camera
         zahlen_warnings
     )
     add_dependencies(zahlen_project_light_app link_resources)
@@ -912,3 +912,8 @@ endif()
 # holds them to the floor they ship with, before anything is packaged or signed.
 include(GlibcFloor)
 zhln_add_glibc_floor_check(zahlen_engine Jolt)
+
+if(TARGET zahlen_freecam)
+    target_link_libraries(zahlen PRIVATE zahlen_freecam)
+    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_HOST_FREECAM=1)
+endif()

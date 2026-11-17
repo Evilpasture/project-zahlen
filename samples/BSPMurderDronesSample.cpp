@@ -31,9 +31,9 @@
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
-#include <Camera/TargetCamera.hpp>
+#include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
 #include <Scene/NativeScene.hpp>

@@ -16,6 +16,9 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Log.hpp>
 #include <Screenshot/Screenshot.hpp>
+#if defined(ZHLN_HAS_HOST_FREECAM)
+#include <FreeCam/FreeCam.hpp>
+#endif
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -164,10 +167,12 @@ int main(int argc, char* argv[]) {
     bool     captured = false;
     uint32_t completedFrames = 0;
     ZHLN::Screenshot::CaptureBuffer capture;
-    const auto result = ZHLN::App()
-        .WithConfig(launch)
-        .AddLayer(SandboxGame {.launch = launch})
-        .Run(argc, argv, [&](ZHLN::COM::IEngine& engine, float) {
+    auto app = ZHLN::App();
+    app.WithConfig(launch).AddLayer(SandboxGame {.launch = launch});
+#if defined(ZHLN_HAS_HOST_FREECAM)
+    app.AddLayer(ZHLN::FreeCam::Layer {});
+#endif
+    const auto result = app.Run(argc, argv, [&](ZHLN::COM::IEngine& engine, float) {
             if (launch.captureFrame.empty()) return;
             // This callback runs before Engine::Tick. Each prior invocation
             // that reaches here is followed by one completed engine frame.
