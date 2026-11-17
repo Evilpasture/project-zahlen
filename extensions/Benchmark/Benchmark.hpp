@@ -5,8 +5,8 @@
 //
 // The headless half of the logic benchmark (zahlen_benchmark).
 //
-// What it times is a standalone ECS registry and the Jolt PhysicsContext
-// of a ZHLN::World -- stepped at a fixed timestep, plus the per-entity
+// What it times is a standalone engine-owned COM logic world, stepped at a
+// fixed timestep, plus the per-entity
 // transform sync a game loop would run over the bodies physics just wrote.
 // Nothing here names the Engine, a render header, a window or Clay: the target
 // this header belongs to links zahlen_engine and nothing else, so a CI job, a
@@ -21,16 +21,14 @@
 // LuaJIT runtime under Lua/) and extensions/net are the same shape.
 #pragma once
 
-#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
-
-namespace ZHLN::ECS { class Registry; }
 
 namespace ZHLN::Bench {
 
@@ -108,19 +106,17 @@ class ZHLN_STATIC_API LogicBenchmark {
 
     [[nodiscard]] auto HasWorld() const noexcept -> bool;
 
-    // The world this benchmark owns, for a host that wants to look at what it
-    // stepped. Only valid between a successful Initialize() and Reset(), which
-    // is what HasWorld() answers without the precondition.
-    [[nodiscard]] auto GetWorld() noexcept -> World&;
+    // Borrowed COM world, null before Initialize()/after Reset(). Use Query or
+    // Ref to retain it independently. No native World/registry access.
+    [[nodiscard]] auto GetWorld() noexcept -> COM::ILogicWorld*;
 
   private:
     // The static slab the workload lands on, and the per-run bookkeeping the
     // spawn ceiling needs. Defined in Benchmark.cpp.
     auto SpawnFloor() -> void;
 
-    std::unique_ptr<World> m_world;
-    // Benchmark-owned data-only ECS; physics bodies are released before World.
-    std::unique_ptr<ECS::Registry> m_registry;
+    COM::Ref<COM::ILogicWorld> m_world;
+    std::vector<Entity>        m_entities;
     // The run clock: wall time since the object was constructed, so Initialize
     // seeds m_runStartSeconds from it and totalTimeSec is the difference.
     Clock              m_clock;

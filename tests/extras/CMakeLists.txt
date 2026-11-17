@@ -603,3 +603,16 @@ if(TARGET zahlen_editor_session)
     target_link_libraries(Extras_EditorHost PRIVATE zahlen_editor_session zahlen_screenshot)
     zahlen_register_extras_test(Extras_EditorHost POOL gpu LABELS "GPU;Extras;COM")
 endif()
+
+if(TARGET zahlen_benchmark)
+    zahlen_add_extras_group(Extras_LogicWorld
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLogicWorld.cpp)
+    target_link_libraries(Extras_LogicWorld PRIVATE zahlen_benchmark)
+    zahlen_register_extras_test(Extras_LogicWorld LABELS "Extras;COM;CPU")
+endif()
+if(TARGET zahlen_benchmark_viewer)
+    zahlen_add_extras_group(Extras_BenchmarkHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBenchmarkHost.cpp)
+    target_link_libraries(Extras_BenchmarkHost PRIVATE zahlen_benchmark_viewer zahlen_host_ui zahlen_screenshot)
+    zahlen_register_extras_test(Extras_BenchmarkHost POOL gpu LABELS "GPU;Extras;COM")
+endif()

@@ -30,7 +30,7 @@
 #include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
-#include <Benchmark/Viewer/BenchmarkViewer.hpp>
+#include <Benchmark/Viewer/NativeBenchmarkViewer.hpp>
 #include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <FreeCam/NativeFreeCam.hpp>
@@ -244,7 +244,7 @@ float g_frameDt = 0.0f;
 // viewer a local of main(), inside that scope; static storage is exactly what
 // that rule forbids. It is attached lazily, on the first frame it draws, so a
 // session that never presses F3 never builds the benchmark's world.
-ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
+ZHLN::Bench::NativeBenchmarkViewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
     g_mouseCaptured = captured;
@@ -1868,7 +1868,7 @@ auto main(int argc, char* argv[]) -> int {
     // The benchmark panel's owner. Declared here, inside the TaskSystem scope
     // and after the engine, so it is torn down before the scheduler retires --
     // see the pointer's declaration at the top of this file.
-    ZHLN::Bench::BenchmarkViewer benchmarkViewer;
+    ZHLN::Bench::NativeBenchmarkViewer benchmarkViewer;
     g_benchmarkViewer = &benchmarkViewer;
 
     // 10. Frame Loop

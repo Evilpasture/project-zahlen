@@ -204,7 +204,7 @@ foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
         "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
-        "fonts;Fonts")
+        "fonts;Fonts" "benchmark;Benchmark" "benchmark_viewer;BenchmarkViewer" "widgets;Widgets")
     list(GET pair 0 internal)
     list(GET pair 1 public)
     if(TARGET zahlen_${internal})
@@ -249,6 +249,16 @@ endif()
 # Jolt's headers must retain their Jolt/ prefix.
 install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
+zhln_toolchain_package(Widgets TARGETS zahlen_widgets DEPENDS Engine HEADERS extensions/Widget)
+zhln_toolchain_package(Benchmark TARGETS zahlen_benchmark DEPENDS Engine)
+if(TARGET zahlen_benchmark)
+    install(FILES extensions/Benchmark/Benchmark.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Benchmark COMPONENT ZahlenBenchmark)
+endif()
+zhln_toolchain_package(BenchmarkViewer TARGETS zahlen_benchmark_viewer DEPENDS Engine Benchmark Widgets)
+if(TARGET zahlen_benchmark_viewer)
+    install(FILES extensions/Benchmark/Viewer/BenchmarkViewer.hpp extensions/Benchmark/Viewer/FrameTelemetry.hpp
+        extensions/Benchmark/Viewer/SystemTelemetry.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Benchmark/Viewer COMPONENT ZahlenBenchmarkViewer)
+endif()
 zhln_toolchain_package(Editor TARGETS zahlen_editor DEPENDS Engine)
 if(TARGET zahlen_editor)
     install(FILES extensions/editor/GUIEditor.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/editor COMPONENT ZahlenEditor)

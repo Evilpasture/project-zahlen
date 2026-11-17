@@ -16,6 +16,9 @@
 #include <vector>
 
 namespace ZHLN {
+namespace COM {
+class LogicWorldAdapter;
+}
 
 class PhysicsContext;
 
@@ -72,6 +75,7 @@ class ZHLN_API Simulation {
 
   private:
     friend class Engine;
+    friend class COM::LogicWorldAdapter;
     explicit Simulation(PhysicsContext& ctx) noexcept: _ctx(&ctx) {
     }
     PhysicsContext* _ctx;

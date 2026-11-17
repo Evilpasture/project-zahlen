@@ -14,6 +14,9 @@
 #include <span>
 
 namespace ZHLN {
+namespace COM {
+class LogicWorldAdapter;
+}
 
 class VisibilityList;
 class PhysicsContext;
@@ -68,6 +71,7 @@ class ZHLN_API World {
     // needs the *writable* producer. These are deliberately not public: a
     // caller gets a std::span<const Entity>, never a container to mutate.
     friend class Engine;
+    friend class COM::LogicWorldAdapter;
     auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
     auto VisibleEntitiesForServices() noexcept -> VisibilityList&;

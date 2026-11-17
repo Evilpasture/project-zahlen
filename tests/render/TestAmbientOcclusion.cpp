@@ -24,6 +24,7 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
+#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>

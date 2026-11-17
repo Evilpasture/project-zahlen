@@ -1,0 +1,92 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The composition root owns every GUI frame and submission, not the plugin.
+#include <Benchmark/Viewer/BenchmarkViewer.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/HostRunner.hpp>
+#include <Zahlen/HostUI.hpp>
+#include <Zahlen/Log.hpp>
+#include <array>
+#include <charconv>
+#include <cstdlib>
+namespace {
+auto Run(const ZHLN::EngineConfig& config, uint32_t frames) -> std::expected<void, ZHLN::ErrorCode> {
+    using namespace ZHLN;
+    ProcessScope process;
+    auto         created = COM::CreateEngineRef(
+        COM::InChain(
+            COM::EngineAppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+            COM::EngineWindowConfig {
+                .width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless
+            },
+            COM::EngineRenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading}, config.physics
+        )
+    );
+    if (!created)
+        return std::unexpected(created.error());
+    auto                   engine = std::move(*created);
+    HostUI                 host(*engine.Get());
+    Bench::BenchmarkViewer viewer;
+    viewer.Attach(*engine.Get());
+    viewer.SetVisible(true);
+    viewer.SetTelemetryVisible(true);
+    Clock      clock;
+    FramePacer pacer(config.fpsLimit);
+    while (engine->IsRunning() && (!frames || engine->CurrentFrame() < frames)) {
+        const auto start = FramePacer::BeginFrame();
+        ProcessScope::PollCrashes(engine.Get());
+        engine->ProcessEvents();
+        if (!engine->IsRunning())
+            break;
+        auto        paced  = engine->Graphics()->PacedDeltaTime();
+        auto        pacing = paced.HasValue() ? std::optional<float>(paced.value) : std::nullopt;
+        const float dt     = pacer.SelectDelta(clock.Tick(), pacing);
+        if (auto ready = host.BeginFrame(); !ready.HasValue())
+            return std::unexpected(ready.error);
+        auto& gui = host.Context();
+        viewer.SetFontAtlas(&host.GetFontAtlas());
+        auto ui = gui.BeginFrame(host.ConsumeInput(dt));
+        viewer.DrawPanels(ui, *engine.Get());
+        if (auto sent = host.Submit(std::move(ui).End()); !sent.HasValue())
+            return std::unexpected(sent.error);
+        if (auto tick = engine->Tick(dt); !tick.HasValue())
+            return std::unexpected(tick.error);
+        pacer.EndFrame(start, pacing);
+    }
+    return {};
+}
+} // namespace
+int main(int argc, char** argv) {
+    using namespace ZHLN;
+    EngineConfig     config {.appName = "Zahlen Benchmark Viewer"};
+    uint32_t         frames = 0;
+    const std::array flags {CliFlag {
+        .key         = "--frames",
+        .placeholder = "<count>",
+        .description = "Close after a bounded number of frames",
+        .action      = [&](std::string_view text) -> std::expected<void, CommandLineError> {
+            auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), frames);
+            if (error != std::errc {} || end != text.data() + text.size() || !frames)
+                return std::unexpected(CommandLineError::MissingValue);
+            return {};
+        }
+    }};
+    auto             parsed = ParseEngineConfig(std::span(argv, size_t(argc)), config, flags);
+    if (!parsed)
+        return EXIT_FAILURE;
+    if (parsed->helpRequested || parsed->versionRequested)
+        return EXIT_SUCCESS;
+    if (config.headless && !frames) {
+        LogError("--headless requires --frames");
+        return EXIT_FAILURE;
+    }
+    auto ran = Run(config, frames);
+    if (!ran) {
+        LogError("Benchmark viewer failed: {}", ran.error());
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}

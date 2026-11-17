@@ -1,31 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-
-// extensions/Benchmark/Viewer/BenchmarkViewer.hpp
-//
-// The interactive half of the benchmark extension: a Clay panel over an
-// Engine-hosted window, driving the same LogicBenchmark the headless target
-// measures. The benchmark's World is its own, so a host can hang this panel on
-// its frame without giving up its scene, input or HUD.
-//
-//   UpdateAndRenderUI(Engine&, float)  owns the UI frame. Run() drives it from
-//                                      a windowed loop for the standalone tool.
-//   DrawPanels(GUI::Context&, Engine&) draws into a frame the host already
-//                                      opened -- two authors, one Clay frame.
-//
-// Either way the benchmark advances at its own fixed timestep (see kFixedStep),
-// so the numbers do not move when the host's dt does.
-//
-// Lifetime: an attached viewer owns a World, and a World's teardown reaches the
-// TaskSystem. Keep the viewer in the same scope as the Engine it was attached
-// to. Run() releases the benchmark before it returns, so a viewer the host
-// keeps afterwards holds no World.
+// COM benchmark/telemetry panels. The host owns its GUI context, font atlas,
+// input consumption and UI submission. This library installs no callbacks.
 #pragma once
 
 #include <Benchmark/Benchmark.hpp>
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -50,40 +32,29 @@ class ZHLN_STATIC_API BenchmarkViewer {
     BenchmarkViewer(const BenchmarkViewer&)                    = delete;
     auto operator=(const BenchmarkViewer&) -> BenchmarkViewer& = delete;
 
-    // The standalone tool: builds an Engine with the CLI defaults (windowed,
-    // vsync on, validation on), makes this viewer its UI, and runs until the
-    // window closes. argv is deliberately not consulted -- a host that wants
-    // --headless or --vsync parsed creates its own Engine and calls Attach(),
-    // which is what the samples do with every other extension. The benchmark is
-    // released on the way out: see the lifetime note above.
-    auto Run(size_t initialEntities = 250) -> std::expected<void, ErrorCode>;
-
     // Binds the panel to an Engine the caller owns: the benchmark's World is
     // created here, and the Engine is asked for exactly one thing -- whether
     // there is a window to draw into. A headless host keeps the metrics and
     // loses the overlay.
-    void Attach(Engine& engine, size_t initialEntities = 250);
-
-    // The whole UI frame: BeginFrame(dt), the visible panels, EndFrame and
-    // the host-owned UI compositor. Attaches on first use if the host did not call
-    // Attach itself, so Run() and a one-callback host need no other setup.
-    // Draws nothing while both panels are hidden -- but still advances the
-    // benchmark, since a hidden panel is not a paused one.
-    void UpdateAndRenderUI(Engine& engine, float dt);
+    void Attach(COM::IEngine& engine, size_t initialEntities = 250);
 
     // The benchmark panel inside a frame the host owns, for a host with a HUD
     // of its own: call it on the active GUI::Frame token between BeginFrame and
     // std::move(frame).End(), and let it be one of the frame's authors.
-    void DrawPanel(GUI::Frame& ui, Engine& engine);
+    void DrawPanel(GUI::Frame& ui, COM::IEngine& engine);
 
     // The same, for the telemetry panel: FPS and frame-time lows for the host's
     // own frames, then every GPU stage and CPU scope the engine's profiler
     // holds, on the right-hand side of the window.
-    void DrawTelemetryPanel(GUI::Frame& ui, Engine& engine);
+    void DrawTelemetryPanel(GUI::Frame& ui, COM::IEngine& engine);
 
     // Both panels, in one call, for a host that shows either -- what the sample
     // uses. Whichever is hidden is skipped; the frame is still the host's.
-    void DrawPanels(GUI::Frame& ui, Engine& engine);
+    void DrawPanels(GUI::Frame& ui, COM::IEngine& engine);
+    // Borrowed until replaced or the viewer is destroyed. Caller keeps the
+    // atlas alive across drawing calls. Null uses
+    // conservative text metrics (drawing still uses the host frame's font).
+    void SetFontAtlas(const FontAtlas* atlas) noexcept;
 
     // One frame's bookkeeping and no drawing: samples the frame interval, reads
     // the engine's profiler, and advances the benchmark while its panel is up.
@@ -97,7 +68,7 @@ class ZHLN_STATIC_API BenchmarkViewer {
     // the profiler's metrics, and no benchmark world -- the viewer attaches
     // lazily in the drawing entry points, and stepping happens only while the
     // benchmark panel is visible.
-    void Tick(Engine& engine);
+    void Tick(COM::IEngine& engine);
 
     // The telemetry half: the frame window, the profiler rows and the capture,
     // for a host that wants the numbers without the panel -- a logger, a
@@ -123,7 +94,7 @@ class ZHLN_STATIC_API BenchmarkViewer {
     [[nodiscard]] auto IsRunning() const noexcept -> bool;
 
     // The headless half, for a host that wants the metrics without the panel.
-    // Null until an Attach() or the first UpdateAndRenderUI/DrawPanel call
+    // Null until an Attach() or the first DrawPanel call
     // succeeded.
     [[nodiscard]] auto GetBenchmark() noexcept -> LogicBenchmark*;
     [[nodiscard]] auto GetBenchmark() const noexcept -> const LogicBenchmark*;
