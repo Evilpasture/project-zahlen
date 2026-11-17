@@ -31,9 +31,11 @@ void InstallApplicationDefaults(COM::IEngine& engine);
 // scene creation; Tick runs after event/input pumping; UI runs in the host
 // loop before update and Engine::Tick, never in a core frame step. Hooks run
 // in registration order; BeforeRender runs after simulation/transform cleanup and
-// before camera projection/culling/presentation. It may return a typed error;
+// before camera projection/culling/presentation. Start, Tick, UI and BeforeRender
+// may return void or expected<void, ErrorCode>;
 // failure or close cancels presentation before Stop. Stop runs in reverse order
-// before Engine teardown. Layers can own move-only state.
+// before Engine teardown for entered layers (including a partially failed Start).
+// Unvisited layers receive no Stop. Layers can own move-only state.
 template <typename T>
 concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Start(engine); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) { layer.Start(engine, ui); } ||
@@ -110,12 +112,30 @@ class ZHLN_API Application {
         LayerSlot slot;
         slot.state = std::make_shared<Stored>(std::forward<Layer>(layer));
         if constexpr (requires(Stored& l, COM::IEngine& engine, HostUI& ui) { l.Start(engine, ui); }) {
-            slot.start = [](void* state, COM::IEngine& engine, HostUI& ui) { static_cast<Stored*>(state)->Start(engine, ui); };
+            slot.start = [](void* state, COM::IEngine& engine, HostUI& ui) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->Start(engine, ui))>) {
+                    static_cast<Stored*>(state)->Start(engine, ui);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->Start(engine, ui);
+            };
         } else if constexpr (requires(Stored& l, COM::IEngine& engine) { l.Start(engine); }) {
-            slot.start = [](void* state, COM::IEngine& engine, HostUI&) { static_cast<Stored*>(state)->Start(engine); };
+            slot.start = [](void* state, COM::IEngine& engine, HostUI&) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->Start(engine))>) {
+                    static_cast<Stored*>(state)->Start(engine);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->Start(engine);
+            };
         }
         if constexpr (requires(Stored& l, COM::IEngine& engine, float dt) { l.Tick(engine, dt); }) {
-            slot.tick = [](void* state, COM::IEngine& engine, float dt) { static_cast<Stored*>(state)->Tick(engine, dt); };
+            slot.tick = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->Tick(engine, dt))>) {
+                    static_cast<Stored*>(state)->Tick(engine, dt);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->Tick(engine, dt);
+            };
         }
         if constexpr (requires(Stored& l, COM::IEngine& engine, HostUI& ui) { l.UI(engine, ui); }) {
             slot.ui = [](void* state, COM::IEngine& engine, HostUI& ui) -> std::expected<void, ErrorCode> {
@@ -196,8 +216,8 @@ class ZHLN_API Application {
         // Shared ownership keeps the existing copyable Application API and
         // leaves no virtual dispatch in any of the four lifecycle phases.
         std::shared_ptr<void> state;
-        void (*start)(void*, COM::IEngine&, HostUI&)       = nullptr;
-        void (*tick)(void*, COM::IEngine&, float) = nullptr;
+        std::expected<void, ErrorCode> (*start)(void*, COM::IEngine&, HostUI&)       = nullptr;
+        std::expected<void, ErrorCode> (*tick)(void*, COM::IEngine&, float)          = nullptr;
         std::expected<void, ErrorCode> (*ui)(void*, COM::IEngine&, HostUI&)          = nullptr;
         std::expected<void, ErrorCode> (*beforeRender)(void*, COM::IEngine&, float)  = nullptr;
         void (*stop)(void*, COM::IEngine&)        = nullptr;

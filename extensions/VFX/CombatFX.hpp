@@ -1,44 +1,21 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-
-module;
-
-// Public Engine & Jolt Headers
-// clang-format off
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-// clang-format on
-#include <Zahlen/Audio/Audio.hpp>
+#pragma once
+#include <Zahlen/COM/IDebugDraw.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Render/RenderIDs.hpp>
-
-// Standard Library Headers
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
+#include <expected>
 #include <numbers>
 #include <random>
 #include <unordered_map>
 #include <vector>
-
-export module ZHLN.CombatFX;
-
-export namespace ZHLN::CombatFX {
-
+namespace ZHLN::CombatFX {
 // ============================================================================
 // Data-Driven Surface & Impact Definitions
 // ============================================================================
@@ -49,18 +26,18 @@ export namespace ZHLN::CombatFX {
 struct SurfaceResponse {
     TextureID decalTexture   = TextureID::Invalid;
     TextureID normalTexture  = TextureID::Invalid;
-    float         decalSize      = 0.28f;
-    float         decalLifetime  = 15.0f;
-    float         decalRoughness = 0.90f;
-    bool          spawnDecal     = true;
+    float     decalSize      = 0.28f;
+    float     decalLifetime  = 15.0f;
+    float     decalRoughness = 0.90f;
+    bool      spawnDecal     = true;
 
     ZHLN::FVec4 sparkColor    = {1.0f, 0.82f, 0.55f, 1.0f};
-    uint32_t     sparkCount    = 8;
-    float        sparkSpeed    = 4.5f;
-    float        sparkLifetime = 0.35f;
-    float        sparkSize     = 0.035f;
-    float        sparkGravity  = -14.0f;
-    float        sparkDrag     = 1.5f;
+    uint32_t    sparkCount    = 8;
+    float       sparkSpeed    = 4.5f;
+    float       sparkLifetime = 0.35f;
+    float       sparkSize     = 0.035f;
+    float       sparkGravity  = -14.0f;
+    float       sparkDrag     = 1.5f;
 
     // Optional audio parameters (Hz, Q, Duration)
     bool  hasAudio      = true;
@@ -75,10 +52,10 @@ struct SurfaceResponse {
 struct BulletTracer {
     ZHLN::FVec3 start         = {};
     ZHLN::FVec3 direction     = {0.0f, 0.0f, 1.0f};
-    float        speed         = 350.0f;
-    float        length        = 2.5f;
-    float        totalDistance = 0.0f;
-    float        traveled      = 0.0f;
+    float       speed         = 350.0f;
+    float       length        = 2.5f;
+    float       totalDistance = 0.0f;
+    float       traveled      = 0.0f;
     ZHLN::FVec4 colorStart    = {1.0f, 0.92f, 0.65f, 1.0f};
     ZHLN::FVec4 colorEnd      = {1.0f, 0.45f, 0.10f, 0.0f};
 };
@@ -86,10 +63,10 @@ struct BulletTracer {
 struct EnergyRing {
     ZHLN::FVec3 position  = {};
     ZHLN::FVec3 normal    = {0.0f, 1.0f, 0.0f};
-    float        radius    = 0.0f;
-    float        maxRadius = 2.5f;
-    float        age       = 0.0f;
-    float        duration  = 0.25f;
+    float       radius    = 0.0f;
+    float       maxRadius = 2.5f;
+    float       age       = 0.0f;
+    float       duration  = 0.25f;
     ZHLN::FVec4 color     = {0.65f, 0.90f, 1.00f, 0.8f};
 };
 
@@ -97,11 +74,11 @@ struct ImpactParticle {
     ZHLN::FVec3 position = {};
     ZHLN::FVec3 velocity = {};
     ZHLN::FVec4 color    = {1.0f, 1.0f, 1.0f, 1.0f};
-    float        size     = 0.04f;
-    float        age      = 0.0f;
-    float        maxLife  = 0.35f;
-    float        drag     = 1.5f;
-    float        gravity  = -12.0f;
+    float       size     = 0.04f;
+    float       age      = 0.0f;
+    float       maxLife  = 0.35f;
+    float       drag     = 1.5f;
+    float       gravity  = -12.0f;
 };
 
 // ============================================================================
@@ -111,20 +88,66 @@ struct ImpactParticle {
 class System {
   public:
     System() = default;
+    ~System() {
+        Release();
+    }
+    System(const System&)                    = delete;
+    auto operator=(const System&) -> System& = delete;
+    System(System&&) noexcept                = default;
+    auto operator=(System&&) -> System&      = delete;
+    auto Start(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
+        return Init(engine);
+    }
+    void Stop(COM::IEngine&) {
+        Release();
+    }
+    auto BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+        return Update(engine, dt);
+    }
+    [[nodiscard]] auto TracerCount() const noexcept -> size_t {
+        return m_tracers.size();
+    }
+    [[nodiscard]] auto RingCount() const noexcept -> size_t {
+        return m_rings.size();
+    }
+    [[nodiscard]] auto ParticleCount() const noexcept -> size_t {
+        return m_particles.size();
+    }
+    [[nodiscard]] auto DecalCount() const noexcept -> size_t {
+        return m_decals.size();
+    }
 
     /**
      * @brief Registers default procedural textures (bullet hole, spark shapes).
      */
-    void Init(Engine& engine) {
+    [[nodiscard]] auto Init(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
+        if (m_engine.Get() != &engine) {
+            Release();
+            m_engine = COM::Ref<COM::IEngine>(&engine);
+        }
+        if (m_initialized && m_generation == engine.DeviceGeneration())
+            return {};
+        const auto pixels  = GenerateBulletHoleTexture(128);
+        const auto texture = engine.Graphics()->CreateTexture(
+            COM::InChain(COM::TextureCreateInfo {.pixels = std::as_bytes(std::span(pixels)), .extent = {128, 128}, .isSRGB = true})
+        );
+        if (!texture.HasValue())
+            return std::unexpected(texture.error);
+        const auto oldTexture = m_defaultHoleTex;
+        m_defaultHoleTex      = texture.value;
+        m_generation          = engine.DeviceGeneration();
         if (m_initialized) {
-            return;
+            for (auto& [id, surface]: m_surfaces)
+                if (surface.decalTexture == oldTexture)
+                    surface.decalTexture = m_defaultHoleTex;
+            for (const auto& decal: m_decals)
+                if (decal.usesDefault) {
+                    if (auto* component = engine.Entities()->Get<Components::DecalComponent>(decal.entity))
+                        component->albedoMap = m_defaultHoleTex;
+                }
+            return {};
         }
         m_initialized = true;
-
-        auto rc = engine.Graphics();
-
-        // 1. Build default bullet hole texture
-        m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", {128, 128}, GenerateBulletHoleTexture(128), true);
 
         // 2. Setup standard default surface presets
         // Preset 0: Generic Solid / Concrete
@@ -175,6 +198,7 @@ class System {
                    .soundFreq    = 600.0f
                }
         );
+        return {};
     }
 
     /**
@@ -187,7 +211,7 @@ class System {
     /**
      * @brief Spawns visual and acoustic impact effects given a hit position and normal.
      */
-    void SpawnImpact(Engine& engine, const FVec3& point, const FVec3& normal, uint32_t surfaceId = 0);
+    [[nodiscard]] auto SpawnImpact(COM::IEngine& engine, const FVec3& point, const FVec3& normal, uint32_t surfaceId = 0) -> std::expected<void, ErrorCode>;
 
     /**
      * @brief Spawns a high-speed ballistic tracer beam.
@@ -195,14 +219,16 @@ class System {
     void SpawnTracer(
         const FVec3& from,
         const FVec3& to,
-        float            speed      = 320.0f,
-        float            length     = 2.2f,
+        float        speed      = 320.0f,
+        float        length     = 2.2f,
         const FVec4& colorStart = {1.0f, 0.95f, 0.65f, 1.0f},
         const FVec4& colorEnd   = {1.0f, 0.45f, 0.10f, 0.0f}
     ) {
+        if (!std::isfinite(speed) || speed <= 0 || !std::isfinite(length) || length <= 0)
+            return;
         FVec3 diff = to - from;
-        float     dist = diff.Length();
-        if (dist <= 0.01f) {
+        float dist = diff.Length();
+        if (!std::isfinite(dist) || dist <= 0.01f) {
             return;
         }
 
@@ -226,10 +252,13 @@ class System {
     void SpawnShockwaveRing(
         const FVec3& position,
         const FVec3& normal,
-        float            maxRadius = 2.5f,
-        float            duration  = 0.25f,
+        float        maxRadius = 2.5f,
+        float        duration  = 0.25f,
         const FVec4& color     = {0.65f, 0.90f, 1.00f, 0.8f}
     ) {
+        if (!std::isfinite(duration) || duration <= 0 || !std::isfinite(maxRadius) || maxRadius <= 0 || !std::isfinite(normal.LengthSquared()) ||
+            normal.LengthSquared() < 1e-10f)
+            return;
         m_rings.push_back(
             EnergyRing {
                 .position = position, .normal = normal.Normalized(), .radius = 0.05f, .maxRadius = maxRadius, .age = 0.0f, .duration = duration, .color = color
@@ -240,8 +269,21 @@ class System {
     /**
      * @brief Simulates active effects and submits GPU batches.
      */
-    void Update(Engine& engine, float dt) {
-        auto scene = engine.Debug();
+    [[nodiscard]] auto Update(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+        if (!std::isfinite(dt) || dt < 0)
+            return std::unexpected(COM::ComError::InvalidArgument);
+        if (auto ready = Init(engine); !ready)
+            return ready;
+        auto& scene = *engine.Debug();
+        std::erase_if(m_decals, [&](auto& decal) {
+            if (!engine.Entities()->IsAlive(decal.entity) || engine.Entities()->Get<Components::PendingDestroy>(decal.entity))
+                return true;
+            decal.remaining -= dt;
+            if (decal.remaining > 0)
+                return false;
+            engine.Entities()->Despawn(decal.entity);
+            return true;
+        });
 
         // 1. Advance and Render Tracers via Zero-Allocation Line Pipeline (rc.DrawLine)
         for (auto& tracer: m_tracers) {
@@ -260,7 +302,7 @@ class System {
                 scene.AddLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
             }
         }
-        ZHLN::Ranges::EraseIf(m_tracers, [](const auto& t) -> auto { return (t.traveled - t.length) >= t.totalDistance; });
+        std::erase_if(m_tracers, [](const auto& t) -> auto { return (t.traveled - t.length) >= t.totalDistance; });
 
         // 2. Advance and Render Expanding Shockwave Rings
         for (auto& ring: m_rings) {
@@ -269,26 +311,26 @@ class System {
             float currentRadius = ring.maxRadius * std::sin(t * (std::numbers::pi_v<float> * 0.5f));
 
             // Approximate ring with 16-segment line loop
-            constexpr int   kSegments  = 16;
-            const FVec3 ringNormal = ring.normal;
-            const FVec4 ringColor  = ring.color;
-            const FVec3 ringOrigin = ring.position;
-            FVec3       u          = (std::abs(ringNormal.y) > 0.95f) ? FVec3::UnitX() : FVec3::UnitY();
-            FVec3       v          = Cross(ringNormal, u).Normalized();
-            u                          = Cross(v, ringNormal).Normalized();
+            constexpr int kSegments  = 16;
+            const FVec3   ringNormal = ring.normal;
+            const FVec4   ringColor  = ring.color;
+            const FVec3   ringOrigin = ring.position;
+            FVec3         u          = (std::abs(ringNormal.y) > 0.95f) ? FVec3::UnitX() : FVec3::UnitY();
+            FVec3         v          = Cross(ringNormal, u).Normalized();
+            u                        = Cross(v, ringNormal).Normalized();
 
-            float     alpha = (1.0f - t) * ringColor.w;
+            float alpha = (1.0f - t) * ringColor.w;
             FVec4 col(ringColor.x, ringColor.y, ringColor.z, alpha);
 
             FVec3 prevP = ringOrigin + u * currentRadius;
             for (int i = 1; i <= kSegments; ++i) {
-                float     theta = (static_cast<float>(i) / kSegments) * 2.0f * std::numbers::pi_v<float>;
+                float theta = (static_cast<float>(i) / kSegments) * 2.0f * std::numbers::pi_v<float>;
                 FVec3 p     = ringOrigin + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
                 scene.AddLine(prevP, p, col, col);
                 prevP = p;
             }
         }
-        ZHLN::Ranges::EraseIf(m_rings, [](const auto& r) -> auto { return r.age >= r.duration; });
+        std::erase_if(m_rings, [](const auto& r) -> auto { return r.age >= r.duration; });
 
         // 3. Advance Impact Particles (Generalized drag + gravity without planar floor assumption)
         for (auto& p: m_particles) {
@@ -306,13 +348,14 @@ class System {
             float speed = velocity.Length();
             if (speed > 0.05f) {
                 FVec3 streakTail = position - (velocity / speed) * (p.size * 1.5f);
-                float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.w;
+                float alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.w;
                 FVec4 col(p.color.x, p.color.y, p.color.z, alpha);
 
                 scene.AddLine(streakTail, position, col, col);
             }
         }
-        ZHLN::Ranges::EraseIf(m_particles, [](const auto& p) -> auto { return p.age >= p.maxLife; });
+        std::erase_if(m_particles, [](const auto& p) -> auto { return p.age >= p.maxLife; });
+        return {};
     }
 
     void Clear() noexcept {
@@ -342,9 +385,32 @@ class System {
         return pixels;
     }
 
+    struct Decal {
+        Entity entity;
+        float  remaining;
+        bool   usesDefault;
+    };
+    std::vector<Decal>     m_decals;
+    COM::Ref<COM::IEngine> m_engine;
+    uint64_t               m_generation = 0;
+    void                   Release() {
+        if (m_engine) {
+            for (const auto& decal: m_decals)
+                m_engine->Entities()->Despawn(decal.entity);
+            if (m_generation == m_engine->DeviceGeneration() && m_defaultHoleTex != TextureID::Invalid)
+                m_engine->Graphics()->UnloadTexture(m_defaultHoleTex);
+        }
+        Clear();
+        m_decals.clear();
+        m_surfaces.clear();
+        m_defaultHoleTex = TextureID::Invalid;
+        m_initialized    = false;
+        m_generation     = 0;
+        m_engine         = {};
+    }
     bool                                          m_initialized    = false;
-    TextureID                                 m_defaultHoleTex = TextureID::Invalid;
-    std::random_device                            m_randomDevice;
+    TextureID                                     m_defaultHoleTex = TextureID::Invalid;
+    std::mt19937                                  m_random {std::random_device {}()};
     std::unordered_map<uint32_t, SurfaceResponse> m_surfaces;
 
     std::vector<BulletTracer>   m_tracers;

@@ -4,6 +4,9 @@
 // Diagnostic document/fallback host. Application owns the engine reference,
 // process scope, GUI context/font atlas and explicit frame staging.
 #include "SceneDocument.hpp"
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+#include "TerrainDiagnostic.hpp"
+#endif
 #include <FallbackScene/FallbackScene.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -33,6 +36,7 @@ struct HostLaunchConfig {
     std::filesystem::path graphicsConfigPath = "config/graphics.lua";
     uint32_t              frames             = 0;
     bool                  rasterOnly         = false;
+    bool                  terrainDemo        = false;
 };
 
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
@@ -92,8 +96,11 @@ struct DiagnosticHost {
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
     std::unique_ptr<ZHLN::Discord::DiscordPresenceClient> presence;
 #endif
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+    ZHLN::Tools::TerrainDiagnostic terrainDemo;
+#endif
     float dt = 0;
-    void  Start(ZHLN::COM::IEngine& engine) {
+    auto  Start(ZHLN::COM::IEngine& engine) -> std::expected<void, ZHLN::ErrorCode> {
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
         presence = std::make_unique<ZHLN::Discord::DiscordPresenceClient>("1548152303939358720");
         if (const auto started = presence->Start(); !started) {
@@ -109,7 +116,16 @@ struct DiagnosticHost {
             presence->SetActivity(std::move(activity));
         }
 #endif
-        if (launch->scenePath.empty()) {
+        if (launch->terrainDemo) {
+            if (!launch->scenePath.empty())
+                return std::unexpected(ZHLN::COM::ComError::InvalidArgument);
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+            if (auto started = terrainDemo.Start(engine, !launch->rasterOnly); !started)
+                return started;
+#else
+            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+#endif
+        } else if (launch->scenePath.empty()) {
             fallback.BuildFallbackScene(engine, {.buildBLAS = !launch->rasterOnly});
         } else if (!ZHLN::Tools::LoadSceneDocument(engine, launch->scenePath, {.buildBLAS = !launch->rasterOnly})) {
             engine.ClearScene();
@@ -128,8 +144,9 @@ struct DiagnosticHost {
                 ZHLN::LogWarning("[Graphics] could not watch '{}'.", path.string());
         }
 #endif
+        return {};
     }
-    void Tick(ZHLN::COM::IEngine& engine, float delta) {
+    auto Tick(ZHLN::COM::IEngine& engine, float delta) -> std::expected<void, ZHLN::ErrorCode> {
         dt = delta;
         if (watcher)
             watcher->DispatchEvents();
@@ -137,14 +154,33 @@ struct DiagnosticHost {
             fallback.Update(engine, delta);
         if (launch->frames && engine.CurrentFrame() >= launch->frames)
             engine.RequestClose();
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+        if (auto updated = terrainDemo.Tick(engine, delta); !updated)
+            return updated;
+#endif
+        return {};
+    }
+    auto BeforeRender(ZHLN::COM::IEngine& engine, float delta) -> std::expected<void, ZHLN::ErrorCode> {
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+        return terrainDemo.BeforeRender(engine, delta);
+#else
+        return {};
+#endif
     }
     auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+        if (terrainDemo.active)
+            return terrainDemo.UI(engine, ui);
+#endif
         const auto result = fallback.DrawUI(engine, ui, dt);
         if (!result.HasValue())
             return std::unexpected(result.error);
         return {};
     }
-    void Stop(ZHLN::COM::IEngine&) {
+    void Stop(ZHLN::COM::IEngine& engine) {
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+        terrainDemo.Stop(engine);
+#endif
         // External workers/callbacks and the preset's retained engine reference
         // are retired while Application's process/task scope is still alive.
         watcher.reset();
@@ -189,6 +225,14 @@ int main(int argc, char* argv[]) {
                 const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), launch.frames);
                 if (error != std::errc {} || end != value.data() + value.size())
                     return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                return {};
+            }
+        },
+        ZHLN::CliFlag {
+            .key         = "--terrain-demo",
+            .description = "Run the COM snow terrain / heightfield / combat host demo",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                launch.terrainDemo = true;
                 return {};
             }
         },

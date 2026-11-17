@@ -200,7 +200,7 @@ endfunction()
 foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "host_ui;HostUI" "native_host_ui;NativeHostUI"
         "scene;Scene" "gltf_assets;GLTFAssets" "native_camera;NativeCamera" "native_freecam;NativeFreeCam"
-        "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
+        "terrain;Terrain" "vfx;VFX" "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
         "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
@@ -249,6 +249,15 @@ endif()
 # Jolt's headers must retain their Jolt/ prefix.
 install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
+zhln_toolchain_package(Terrain TARGETS zahlen_terrain DEPENDS Engine)
+if(TARGET zahlen_terrain)
+    install(FILES extensions/Terrain/TerrainHost.hpp extensions/Terrain/TerrainGeometry.hpp extensions/Terrain/TerrainComponents.hpp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Terrain COMPONENT ZahlenTerrain)
+endif()
+zhln_toolchain_package(VFX TARGETS zahlen_vfx DEPENDS Engine)
+if(TARGET zahlen_vfx)
+    install(FILES extensions/VFX/CombatFX.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VFX COMPONENT ZahlenVFX)
+endif()
 zhln_toolchain_package(Image TARGETS zahlen_image HEADERS extensions/Image)
 zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extensions/CommandLine)
 zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)

@@ -10,6 +10,7 @@
 // creation, not engine substrate -- core keeps CreateHeightFieldShape and the
 // generic mesh/meshlet plumbing.
 #pragma once
+// Native compatibility only (zahlen_native_terrain). COM hosts use TerrainHost.hpp.
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/Engine/PrefabFactory.hpp>

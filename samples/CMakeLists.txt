@@ -30,7 +30,7 @@ set(SAMPLE_SOURCES
 #                              includes <glTF/GLTFImporter.hpp> (zahlen_gltf)
 #                              to load the rig it animates, builds its
 #                              ground with <Terrain/TerrainFactory.hpp>
-#                              (zahlen_terrain), and drives its third-person
+#                              (zahlen_native_terrain), and drives its third-person
 #                              view through the extension camera rig
 #                              (<Camera/TargetCamera.hpp>, zahlen_native_camera), and
 #                              installs the character controller that drives
@@ -74,7 +74,7 @@ set(SAMPLE_SOURCES
 # Linking named domains instead of the compatibility aggregate is the point of
 # the decomposition: a sample waits only on the optional targets it uses, and a
 # sample with no optional targets gets no simdjson, sockets, or VFX toolkit.
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_native_terrain)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github zahlen_skeletal_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_native_freecam zahlen_skeletal_animation)

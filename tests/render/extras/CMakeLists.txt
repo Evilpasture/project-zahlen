@@ -1,11 +1,8 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Every suite in this directory is a VFX suite -- TestCombatFX imports
-# ZHLN.CombatFX, TestExplosion imports ZHLN.Explosions, TestLightning imports
-# ZHLN.Lightning -- so the loop links zahlen_vfx and the guard is on that target.
-# A future suite here that reaches into another domain needs its own link added
-# explicitly; the list below deliberately does not hand every suite every optional target.
+# CombatFX is a COM host header; Lightning/Explosions still use explicitly
+# native module adapters. Keep the dependencies distinct per suite.
 if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_vfx)
     return()
 endif()
@@ -40,6 +37,9 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         ZHLN_ZTEST_SOURCE_FILES "${_vfx_files}"
     )
 
+    if(NOT TARGET_NAME STREQUAL "TestCombatFX")
+        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_native_vfx)
+    endif()
     # No zahlen_vulkan -- same reasoning as tests/render/CMakeLists.txt.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine

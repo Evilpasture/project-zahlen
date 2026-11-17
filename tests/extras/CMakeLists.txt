@@ -239,7 +239,7 @@ zahlen_add_extras_group(Extras_Simulation
 target_link_libraries(Extras_Simulation PRIVATE
     zahlen_engine
     zahlen_skeletal_animation
-    zahlen_terrain
+    zahlen_native_terrain
     zahlen_alife
     zahlen_datamodel
 )
@@ -572,3 +572,17 @@ if(TARGET zahlen_fallback_scene)
     target_link_libraries(Extras_FallbackHost PRIVATE zahlen_fallback_scene zahlen_application)
     zahlen_register_extras_test(Extras_FallbackHost POOL gpu LABELS GPU Extras)
 endif()
+
+# Real COM combat policy scenarios, also available without the optional GPU
+# test catalog. No native VFX modules or registry fixtures are linked.
+zahlen_add_extras_group(Extras_CombatHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp ../render/extras/TestCombatFX.cpp)
+set_target_properties(Extras_CombatHost PROPERTIES CXX_SCAN_FOR_MODULES ON)
+target_link_libraries(Extras_CombatHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_CombatHost POOL gpu LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_TerrainHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestTerrainHost.cpp)
+target_link_libraries(Extras_TerrainHost PRIVATE zahlen_terrain zahlen_vfx zahlen_scene zahlen_fallback_scene zahlen_application zahlen_screenshot)
+target_include_directories(Extras_TerrainHost PRIVATE ${PROJECT_SOURCE_DIR}/utils/scene)
+zahlen_register_extras_test(Extras_TerrainHost POOL gpu LABELS "GPU;Extras;COM")

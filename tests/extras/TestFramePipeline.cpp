@@ -29,6 +29,84 @@ auto StagedEngine() {
 }
 struct FramePipelineSuite {
     struct Tests {
+        std::expected<void, ErrorCode> application_preserves_typed_start_failure_and_stops_only_entered_layers_in_reverse() {
+            std::vector<int> order;
+            struct First {
+                std::vector<int>* order;
+                void              Start(COM::IEngine&) {
+                    order->push_back(1);
+                }
+                void Stop(COM::IEngine& e) {
+                    ExpectEq(e.CurrentFrame(), uint64_t(0));
+                    order->push_back(5);
+                }
+            };
+            struct Fails {
+                std::vector<int>* order;
+                auto              Start(COM::IEngine&, HostUI&) -> std::expected<void, ErrorCode> {
+                    order->push_back(2);
+                    return std::unexpected(Test::StageFailure::Refused);
+                }
+                void Tick(COM::IEngine&, float) {
+                    order->push_back(99);
+                }
+                void Stop(COM::IEngine& e) {
+                    ExpectEq(e.CurrentFrame(), uint64_t(0));
+                    order->push_back(4);
+                }
+            };
+            struct Unvisited {
+                std::vector<int>* order;
+                void              Start(COM::IEngine&) {
+                    order->push_back(98);
+                }
+                void Stop(COM::IEngine&) {
+                    order->push_back(97);
+                }
+            };
+            auto result = App(EngineConfig {.width = 160, .height = 120, .validationMode = ValidationMode::Off, .headless = true})
+                              .AddLayer(First {&order})
+                              .AddLayer(Fails {&order})
+                              .AddLayer(Unvisited {&order})
+                              .Run();
+            ExpectTrue(!result.has_value());
+            if (!result)
+                ExpectTrue(result.error().Is(Test::StageFailure::Refused));
+            ExpectTrue(order == std::vector<int>({1, 2, 4, 5}));
+            return {};
+        }
+        std::expected<void, ErrorCode> application_tick_failure_stops_before_ui_simulation_and_later_ticks() {
+            int later = 0, stopped = 0;
+            struct Fails {
+                int* stopped;
+                auto Tick(COM::IEngine&, float) -> std::expected<void, ErrorCode> {
+                    return std::unexpected(Test::StageFailure::Refused);
+                }
+                void UI(COM::IEngine&) {
+                    ExpectTrue(false);
+                }
+                void Stop(COM::IEngine& e) {
+                    ExpectEq(e.CurrentFrame(), uint64_t(0));
+                    ++*stopped;
+                }
+            };
+            struct Later {
+                int* later;
+                void Tick(COM::IEngine&, float) {
+                    ++*later;
+                }
+            };
+            auto result = App(EngineConfig {.width = 160, .height = 120, .validationMode = ValidationMode::Off, .headless = true})
+                              .AddLayer(Fails {&stopped})
+                              .AddLayer(Later {&later})
+                              .Run();
+            ExpectTrue(!result.has_value());
+            if (!result)
+                ExpectTrue(result.error().Is(Test::StageFailure::Refused));
+            ExpectEq(later, 0);
+            ExpectEq(stopped, 1);
+            return {};
+        }
         std::expected<void, ErrorCode> copied_graphics_info_can_share_a_settings_query_and_survives_recreation() {
             auto created = StagedEngine();
             if (!ExpectTrue(created.has_value()))

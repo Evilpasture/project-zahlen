@@ -56,6 +56,10 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
+    "extensions/Terrain/TerrainGeometry.cpp", "extensions/Terrain/TerrainGeometry.hpp",
+    "extensions/Terrain/TerrainHost.cpp", "extensions/Terrain/TerrainHost.hpp",
+    "extensions/VFX/CombatFX.hpp", "extensions/VFX/CombatFXLifecycle.cpp",
+    "utils/scene/TerrainDiagnostic.hpp",
     "utils/scene/main.cpp", "gameplay/FallbackScene/FallbackScene.cpp", "gameplay/FallbackScene/FallbackScene.hpp",
     "extensions/FreeCam/FreeCam.cpp", "extensions/FreeCam/FreeCam.hpp",
     "extensions/Camera/TargetCamera.cpp", "extensions/Camera/TargetCamera.hpp",

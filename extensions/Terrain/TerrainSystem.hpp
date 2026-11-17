@@ -3,6 +3,7 @@
 
 // extensions/Terrain/TerrainSystem.hpp
 #pragma once
+// Native compatibility only (zahlen_native_terrain). COM hosts use TerrainHost.hpp.
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/Common.h>

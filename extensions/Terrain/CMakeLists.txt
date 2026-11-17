@@ -1,52 +1,12 @@
-# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
-# SPDX-License-Identifier: GPL-3.0-or-later
+# Capability-only host terrain; no module, global slot table or graph adapter.
+add_library(zahlen_terrain STATIC TerrainGeometry.cpp TerrainHost.cpp)
+set_target_properties(zahlen_terrain PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_terrain PUBLIC zahlen_engine PRIVATE zahlen_warnings)
+target_include_directories(zahlen_terrain PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
+zahlen_enable_reflection(zahlen_terrain)
 
-# extensions/Terrain -- procedural terrain content generation (zahlen_terrain).
-#
-# FBM/warp/ridged-noise heightmaps, slope-and-altitude tinting, heightfield
-# mesh baking and the TerrainComponent bookkeeping system: sample-world
-# content creation, not engine substrate. Core keeps the pieces this composes
-# (Physics::CreateHeightFieldShape and the mesh/meshlet/BLAS plumbing); this
-# target owns the generation.
-#
-# Public headers are reached as <Terrain/...>.
-
-set(TARGET_NAME zahlen_terrain)
-
-set(ZHLN_TERRAIN_SOURCES
-    TerrainFactory.cpp
-    TerrainSystem.cpp
-)
-
-add_library(${TARGET_NAME} STATIC ${ZHLN_TERRAIN_SOURCES})
-
-set_target_properties(${TARGET_NAME} PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE.
-    POSITION_INDEPENDENT_CODE ON
-)
-
-# Core is a public dependency: the spawners run on RenderContext, the ECS,
-# PhysicsContext's heightfield support and the SystemGraphs extension seam.
-# TerrainFactory.cpp partitions baked heightfield meshes through the public
-# <Zahlen/Render/Meshlet.hpp>; that header is declaration-only, and the BuildMeshlets
-# symbols arrive through the engine link (compiled once in src/render).
-target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
-)
-
-target_include_directories(${TARGET_NAME} PUBLIC
-    ${PROJECT_SOURCE_DIR}/extensions
-)
-
-# Reflection is a whole-program ABI contract across targets that share ECS
-# component registration and reflected type names with zahlen_engine.
-if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(${TARGET_NAME})
-endif()
-
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+# Explicit unported native callers retain their existing lifecycle and API.
+add_library(zahlen_native_terrain STATIC TerrainFactory.cpp TerrainSystem.cpp)
+set_target_properties(zahlen_native_terrain PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_native_terrain PUBLIC zahlen_terrain PRIVATE zahlen_warnings)
+zahlen_enable_reflection(zahlen_native_terrain)

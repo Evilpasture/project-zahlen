@@ -70,19 +70,26 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     for (const auto& install: _installers) {
         install(*engine.Get());
     }
+    std::optional<ErrorCode> frameError;
+    size_t                   enteredLayers = 0;
     for (const auto& layer: _layers) {
+        ++enteredLayers; // failed Start may own partial resources needing Stop
         if (layer.start != nullptr) {
-            layer.start(layer.state.get(), *engine.Get(), ui);
+            const auto started = layer.start(layer.state.get(), *engine.Get(), ui);
+            if (!started) {
+                frameError = started.error();
+                break;
+            }
         }
+        if (!engine->IsRunning())
+            break;
     }
-    if (_start) {
+    if (!frameError && engine->IsRunning() && _start)
         _start(*engine.Get());
-    }
 
     FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
-    std::optional<ErrorCode> frameError;
-    while (engine->IsRunning()) {
+    while (!frameError && engine->IsRunning()) {
         const auto frameStart = FramePacer::BeginFrame();
         ProcessScope::PollCrashes(engine.Get());
         engine->ProcessEvents(); // includes input and renderer resize synchronization
@@ -99,15 +106,18 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         const float                dt      = pacer.SelectDelta(rawDt, pacedDt);
         for (const auto& layer: _layers) {
             if (layer.tick != nullptr) {
-                layer.tick(layer.state.get(), *engine.Get(), dt);
+                const auto updated = layer.tick(layer.state.get(), *engine.Get(), dt);
+                if (!updated) {
+                    frameError = updated.error();
+                    break;
+                }
                 if (!engine->IsRunning()) {
                     break;
                 }
             }
         }
-        if (!engine->IsRunning()) {
+        if (frameError || !engine->IsRunning())
             break;
-        }
         for (const auto& layer: _layers) {
             if (layer.ui != nullptr) {
                 const auto composed = layer.ui(layer.state.get(), *engine.Get(), ui);
@@ -149,9 +159,9 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         }
         pacer.EndFrame(frameStart, pacedDt);
     }
-    // Every successfully initialized layer gets Stop while the Engine is still
-    // alive, even if events, a layer/update, or a failed frame ended the loop.
-    for (const auto& _layer: std::ranges::reverse_view(_layers)) {
+    // Stop entered layers, including a partially failed Start, while the
+    // engine and ProcessScope still live. Never touch an unvisited layer.
+    for (const auto& _layer: std::ranges::reverse_view(std::span(_layers).first(enteredLayers))) {
         if (_layer.stop != nullptr) {
             _layer.stop(_layer.state.get(), *engine.Get());
         }
