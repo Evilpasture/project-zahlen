@@ -586,3 +586,13 @@ zahlen_add_extras_group(Extras_TerrainHost
 target_link_libraries(Extras_TerrainHost PRIVATE zahlen_terrain zahlen_vfx zahlen_scene zahlen_fallback_scene zahlen_application zahlen_screenshot)
 target_include_directories(Extras_TerrainHost PRIVATE ${PROJECT_SOURCE_DIR}/utils/scene)
 zahlen_register_extras_test(Extras_TerrainHost POOL gpu LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_LightningHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLightningHost.cpp)
+target_link_libraries(Extras_LightningHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_LightningHost POOL gpu LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_ExplosionHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestExplosionHost.cpp)
+target_link_libraries(Extras_ExplosionHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_ExplosionHost POOL gpu LABELS "GPU;Extras;COM")

@@ -4,6 +4,8 @@
 #include <FallbackScene/FallbackScene.hpp>
 #include <Terrain/TerrainHost.hpp>
 #include <VFX/CombatFX.hpp>
+#include <VFX/ExplosionHost.hpp>
+#include <VFX/LightningHost.hpp>
 #include <Zahlen/HostUI.hpp>
 #include <cmath>
 namespace ZHLN::Tools {
@@ -11,14 +13,16 @@ namespace ZHLN::Tools {
 // falling rigid bodies, decals, tracers, sparks, rings and procedural audio.
 // No Engine facade, render graph registration, registry or engine service.
 struct TerrainDiagnostic {
-    Terrain::Host    terrain;
-    CombatFX::System combat;
-    bool             active     = false;
-    bool             paused     = false;
-    float            time       = 0;
-    float            nextImpact = 0;
-    float            dt         = 0;
-    auto             Start(COM::IEngine& engine, bool buildBLAS) -> std::expected<void, ErrorCode> {
+    LightningHost::Host lightning;
+    ExplosionHost::Host explosions;
+    Terrain::Host       terrain;
+    CombatFX::System    combat;
+    bool                active     = false;
+    bool                paused     = false;
+    float               time       = 0;
+    float               nextImpact = 0;
+    float               dt         = 0;
+    auto                Start(COM::IEngine& engine, bool buildBLAS) -> std::expected<void, ErrorCode> {
         auto description                  = FallbackScene::DefaultPreset::FallbackScene();
         description.name                  = "Host terrain and combat";
         description.camera                = {.position = {0, 18, 32}, .pitch = -22};
@@ -35,6 +39,9 @@ struct TerrainDiagnostic {
         }
         if (auto scene = Scene::Instantiate(engine, description, {.buildBLAS = buildBLAS}); !scene)
             return std::unexpected(scene.error());
+        lightning.Start(engine);
+        if (auto ready = explosions.Start(engine); !ready)
+            return ready;
         terrain.Start(engine);
         auto geometry = Terrain::Generate({.sampleCount = 64, .worldSize = 70, .maxHeight = 12, .type = Terrain::TerrainType::Snow});
         if (!geometry)
@@ -61,6 +68,16 @@ struct TerrainDiagnostic {
             const FVec3 point {x, terrain.SampleHeightAt(x, z) + .04f, z};
             if (auto impact = combat.SpawnImpact(engine, point, FVec3::UnitY(), 2); !impact)
                 return impact;
+            if (lightning.Size() == 0) {
+                auto bolt = lightning.Spawn(point + FVec3 {0, 35, 0}, point, {0, 18, 32});
+                if (!bolt)
+                    return std::unexpected(bolt.error());
+            }
+            if (explosions.Size() < 2) {
+                auto explosion = explosions.Spawn({.origin = point, .scale = .5f});
+                if (!explosion)
+                    return std::unexpected(explosion.error());
+            }
             combat.SpawnTracer({0, 12, 20}, point, 90, 2);
             combat.SpawnShockwaveRing(point, FVec3::UnitY(), 2, .5f);
         }
@@ -70,6 +87,10 @@ struct TerrainDiagnostic {
         if (!active)
             return {};
         if (auto ready = terrain.BeforeRender(engine, delta); !ready)
+            return ready;
+        if (auto ready = lightning.BeforeRender(engine, paused ? 0 : delta); !ready)
+            return ready;
+        if (auto ready = explosions.BeforeRender(engine, paused ? 0 : delta); !ready)
             return ready;
         return combat.BeforeRender(engine, paused ? 0 : delta);
     }
@@ -81,8 +102,8 @@ struct TerrainDiagnostic {
             "HostTerrainPanel",
             GUI::BoxConfig {.width = {.fixed = 300}, .color = {.05f, .07f, .1f, .9f}, .padding = 12, .gap = 8, .direction = GUI::Direction::Column}
         );
-        ui.Text("COM TERRAIN + COMBAT", 18, {.35f, .88f, 1, 1});
-        ui.Text("Snow terrain / heightfield / falling bodies\nHost-owned decals, sparks, tracers and rings", 14, {.9f, .9f, .9f, 1});
+        ui.Text("COM TERRAIN + VFX", 18, {.35f, .88f, 1, 1});
+        ui.Text("Snow terrain / heightfield / falling bodies\nHost lightning, explosions, debris and craters", 14, {.9f, .9f, .9f, 1});
         if (ui.Button(paused ? "Resume effects" : "Pause effects"))
             paused = !paused;
         if (ui.Button("Quit"))
@@ -95,6 +116,8 @@ struct TerrainDiagnostic {
     }
     void Stop(COM::IEngine& engine) {
         combat.Stop(engine);
+        explosions.Stop(engine);
+        lightning.Stop(engine);
         terrain.Stop(engine);
         active = false;
     }

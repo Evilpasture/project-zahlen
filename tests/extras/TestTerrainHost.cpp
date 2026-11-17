@@ -179,6 +179,9 @@ struct TerrainHostSuite {
                             ExpectTrue((*frame)->Valid());
                             ExpectTrue((*frame)->metrics.litPixels > 0);
                             ++*captures;
+                            ExpectTrue(demo.lightning.Size() > 0);
+                            ExpectTrue(demo.explosions.Size() > 0);
+                            ExpectTrue(demo.explosions.CraterCount() > 0);
                         }
                         if (engine.CurrentFrame() == 1) {
                             auto rebuilt = engine.RecreateGraphicsDevice();
@@ -192,7 +195,7 @@ struct TerrainHostSuite {
                     return demo.Tick(engine, dt);
                 }
                 auto BeforeRender(COM::IEngine& engine, float dt) {
-                    return demo.BeforeRender(engine, dt);
+                    return demo.BeforeRender(engine, engine.CurrentFrame() == 0 ? .25f : .05f);
                 }
                 auto UI(COM::IEngine& engine, HostUI& ui) {
                     return demo.UI(engine, ui);
@@ -200,6 +203,9 @@ struct TerrainHostSuite {
                 void Stop(COM::IEngine& engine) {
                     demo.Stop(engine);
                     ExpectEq(demo.terrain.Size(), size_t(0));
+                    ExpectEq(demo.lightning.Size(), size_t(0));
+                    ExpectEq(demo.explosions.Size(), size_t(0));
+                    ExpectEq(demo.explosions.CraterCount(), size_t(0));
                     *stopped = true;
                 }
             };
