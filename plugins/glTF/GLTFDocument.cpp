@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GLTFDocument.hpp"
 #include "TangentGenerator.hpp"
+#include <Image/Image.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -20,7 +21,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stb_image.h>
 #include <unordered_map>
 namespace ZHLN::GLTF {
 namespace {
@@ -232,10 +232,9 @@ struct CPUTextureJob {
     std::string         glbPath;
     bool                isSRGB              = true;
     uint32_t            maxTextureDimension = kGLTFDefaultMaxTextureDimension;
-    unsigned char*      decodedPixels       = nullptr;
+    std::vector<uint8_t> decodedPixels;
     int                 width               = 0;
     int                 height              = 0;
-    bool                wasRescaled         = false;
     COM::IAssetLibrary* assets              = nullptr;
 };
 
@@ -314,14 +313,11 @@ struct CPUPrimitiveJob {
     MeshletBuildResult meshlets;
 };
 
-auto DownsampleHalfSize(const unsigned char* src, uint32_t currentW, uint32_t currentH) -> unsigned char* {
+auto DownsampleHalfSize(const unsigned char* src, uint32_t currentW, uint32_t currentH) -> std::vector<uint8_t> {
     const uint32_t nextW = currentW / 2;
     const uint32_t nextH = currentH / 2;
 
-    auto* dst = static_cast<unsigned char*>(std::malloc(static_cast<size_t>(nextW) * nextH * 4));
-    if (dst == nullptr) {
-        return nullptr;
-    }
+    std::vector<uint8_t> dst(static_cast<size_t>(nextW) * nextH * 4);
 
     for (uint32_t y = 0; y < nextH; ++y) {
         for (uint32_t x = 0; x < nextW; ++x) {
@@ -354,16 +350,22 @@ auto DownsampleHalfSize(const unsigned char* src, uint32_t currentW, uint32_t cu
 }
 
 void DecodeAndRescaleTexture(CPUTextureJob& job) {
-    int            channels = 0;
-    unsigned char* pixels   = nullptr;
-
+    std::vector<uint8_t> storage;
+    const auto           decode = [&](std::span<const uint8_t> bytes) {
+        auto image = Image::DecodeRGBA8(bytes);
+        if (image) {
+            job.width  = static_cast<int>(image->width);
+            job.height = static_cast<int>(image->height);
+            storage    = std::move(image->pixels);
+        }
+    };
     if (job.image->buffer_view != nullptr) {
         const auto* view     = job.image->buffer_view;
         const bool  inBounds = view->data != nullptr || (view->buffer != nullptr && view->buffer->data != nullptr && view->offset <= view->buffer->size &&
                                                          view->size <= view->buffer->size - view->offset);
         if (inBounds && view->size <= static_cast<cgltf_size>(std::numeric_limits<int>::max())) {
             if (const auto* bufferData = cgltf_buffer_view_data(view); bufferData != nullptr) {
-                pixels = stbi_load_from_memory(bufferData, static_cast<int>(view->size), &job.width, &job.height, &channels, 4);
+                decode({bufferData, view->size});
             }
         }
     } else if (job.image->uri != nullptr) {
@@ -378,26 +380,25 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
             void*         decoded = nullptr;
             cgltf_options opts {};
             if (size && size <= INT_MAX && cgltf_load_buffer_base64(&opts, size, encoded.data(), &decoded) == cgltf_result_success) {
-                pixels = stbi_load_from_memory(static_cast<const unsigned char*>(decoded), static_cast<int>(size), &job.width, &job.height, &channels, 4);
+                decode({static_cast<const uint8_t*>(decoded), size});
                 std::free(decoded);
             }
         } else if (!job.glbPath.empty()) {
             auto path = (std::filesystem::path(job.glbPath).parent_path() / job.image->uri).lexically_normal().generic_string();
             if (const auto bytes = ReadSourceBytes(job.assets, path); bytes && bytes->size() <= INT_MAX) {
-                pixels = stbi_load_from_memory(bytes->data(), static_cast<int>(bytes->size()), &job.width, &job.height, &channels, 4);
+                decode(*bytes);
             }
         }
     }
 
-    if (pixels == nullptr) {
+    if (storage.empty())
         return;
-    }
 
     const auto w = static_cast<uint32_t>(job.width);
     const auto h = static_cast<uint32_t>(job.height);
 
     if (w <= job.maxTextureDimension && h <= job.maxTextureDimension) {
-        job.decodedPixels = pixels;
+        job.decodedPixels = std::move(storage);
         return;
     }
 
@@ -412,38 +413,17 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
     }
 
     if (targetW == 0 || targetH == 0 || scaleSteps == 0) {
-        job.decodedPixels = pixels;
+        job.decodedPixels = std::move(storage);
         return;
     }
 
-    unsigned char* currentSrc = pixels;
-    uint32_t       currentW   = w;
-    uint32_t       currentH   = h;
-
     for (uint32_t step = 0; step < scaleSteps; ++step) {
-        unsigned char* nextDst = DownsampleHalfSize(currentSrc, currentW, currentH);
-        if (nextDst == nullptr) {
-            break;
-        }
-
-        if (currentSrc != pixels) {
-            std::free(currentSrc);
-        }
-
-        currentSrc = nextDst;
-        currentW /= 2;
-        currentH /= 2;
+        storage = DownsampleHalfSize(storage.data(), static_cast<uint32_t>(job.width), static_cast<uint32_t>(job.height));
+        job.width /= 2;
+        job.height /= 2;
     }
 
-    if (currentSrc != pixels) {
-        stbi_image_free(pixels);
-        pixels          = currentSrc;
-        job.width       = static_cast<int>(currentW);
-        job.height      = static_cast<int>(currentH);
-        job.wasRescaled = true;
-    }
-
-    job.decodedPixels = pixels;
+    job.decodedPixels = std::move(storage);
 }
 
 // glTF morph weights: node.weights wins, otherwise mesh.weights, otherwise 0.
@@ -1306,13 +1286,8 @@ auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::s
     auto textures       = ProcessCPUTasks(bytesPath, images, jobs, options.emissiveFactorScale, options.maxTextureDimension, assets);
     for (auto& texture: textures) {
         TextureDocument image {.extent = {static_cast<uint32_t>(texture.width), static_cast<uint32_t>(texture.height)}, .isSRGB = texture.isSRGB};
-        if (texture.decodedPixels != nullptr) {
-            image.rgba.assign(texture.decodedPixels, texture.decodedPixels + size_t(texture.width) * texture.height * 4);
-            if (texture.wasRescaled)
-                std::free(texture.decodedPixels);
-            else
-                stbi_image_free(texture.decodedPixels);
-            texture.decodedPixels = nullptr;
+        if (!texture.decodedPixels.empty()) {
+            image.rgba = std::move(texture.decodedPixels);
         }
         document.textures.push_back(std::move(image));
     }

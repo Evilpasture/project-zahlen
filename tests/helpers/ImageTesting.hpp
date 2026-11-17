@@ -15,46 +15,23 @@
 // Deliberately dependency-free: no engine headers, no reflection, no device.
 // Callers own the pixels.
 //
-// stb_image_write is header-only, so exactly one TU per test binary must
-// define ZHLN_TEST_IMAGE_WRITE_IMPL before including this header; that TU owns
-// the implementation and every other TU links against it. Defining it twice in
-// one binary is a duplicate-symbol link error. (This is stb_image_WRITE; the
-// decode half, STB_IMAGE_IMPLEMENTATION, already lives in src/engine/stbi_impl.c
-// inside zahlen_engine and must not be defined in a test TU.)
+// Image encoding is supplied by the engine-independent Image capability.
 
 #pragma once
 
+#include <Image/Image.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <cstddef>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#if defined(ZHLN_TEST_IMAGE_WRITE_IMPL)
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#endif
-// Vendored stb uses sprintf in its HDR writer; the macOS SDK marks it
-// deprecated. Scope the deprecation noise to the vendored header.
-#if defined(_MSC_VER)
-    #pragma warning(push)
-    #pragma warning(disable : 4996)
-#else
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#include <stb_image_write.h>
-#if defined(_MSC_VER)
-    #pragma warning(pop)
-#else
-    #pragma GCC diagnostic pop
-#endif
 
 namespace ZHLN::Test::Image {
 
@@ -125,7 +102,7 @@ struct RgbImage {
         return false;
     }
     const std::string pathStr(path);
-    return stbi_write_png(pathStr.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
+    return ZHLN::Image::WritePNG(pathStr, img.rgb, img.width, img.height, 3).has_value();
 }
 
 // `--convert-ppm FILE...`: convert already-captured PPM frames to PNG without
@@ -863,12 +840,7 @@ struct BernoulliFit {
     bool   valid          = false;
 };
 
-// Not in a `detail` namespace, because configure/check_namespace_governance.py
-// refuses a plain one in a header that carries no template code and grants no
-// allowlist entry for it -- and this header's only translation unit of its own
-// is ImageWriteImpl.cpp, which exists to own the stb implementation and is not
-// compiled by every consumer. So the percentile helper sits in the open: it is
-// a test helper, and a caller who misuses it has only this comment to answer to.
+// Header-only test helper; intentionally not an internal namespace.
 [[nodiscard]] inline double Percentile(std::vector<double> v, double q) {
     if (v.empty()) {
         return 0.0;

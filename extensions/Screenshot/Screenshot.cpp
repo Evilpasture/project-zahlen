@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Screenshot.hpp"
+#include <Image/Image.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/Math.hpp>
@@ -14,32 +15,6 @@
 #include <fstream>
 #include <limits>
 #include <vector>
-
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-// stb's unused encoders and deprecated sprintf are outside our control.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996 4505)
-#else
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#endif
-#include <stb_image_write.h>
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#else
-#pragma GCC diagnostic pop
-#endif
-
-namespace {
-void WriteBytes(void* context, void* data, int size) {
-    auto& stream = *static_cast<std::ofstream*>(context);
-    stream.write(static_cast<const char*>(data), size);
-}
-}
 
 auto ZHLN::Screenshot::CaptureBuffer::Read(COM::IGraphicsDevice& graphics, Extent2D extent)
     -> std::expected<const CapturedFrame*, ErrorCode> {
@@ -91,11 +66,5 @@ auto ZHLN::Screenshot::WritePNG(std::string_view path, const ZHLN::CapturedFrame
         }
     }
 
-    std::ofstream out(std::filesystem::path {path}, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
-    const int width = static_cast<int>(frame.extent.width);
-    const int height = static_cast<int>(frame.extent.height);
-    const int encoded = stbi_write_png_to_func(WriteBytes, &out, width, height, 3, rgb.data(), width * 3);
-    out.close();
-    return encoded != 0 && !out.fail();
+    return ZHLN::Image::WritePNG(path, rgb, frame.extent.width, frame.extent.height, 3).has_value();
 }

@@ -73,9 +73,8 @@ target_link_libraries(zshader PRIVATE
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
 )
-# ImageCook.cpp is the only TU here that calls stbi_*, and the implementation it
-# calls is this library's: zahlen_stb_image owns the single definition.
-target_link_libraries(zshader PRIVATE zahlen_stb_image)
+# Engine-independent codec: this tool must precede the shader catalog/Core.
+target_link_libraries(zshader PRIVATE zahlen_image)
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")

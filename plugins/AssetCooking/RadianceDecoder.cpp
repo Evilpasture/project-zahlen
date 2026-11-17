@@ -4,11 +4,10 @@
 #include "RadianceDecoder.hpp"
 #include "CookedRadianceFormat.hpp"
 #include "EnvironmentPreparation.hpp"
+#include <Image/Image.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
-#include <stb_image.h>
-
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -419,28 +418,16 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     if (bytes.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
         return std::unexpected(RadianceAssetError::BadDimensions);
     }
-    const auto* data = reinterpret_cast<const stbi_uc*>(bytes.data());
-    const int   length = static_cast<int>(bytes.size());
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    if (!stbi_info_from_memory(data, length, &width, &height, &channels)) {
+    const std::span<const uint8_t> encoded(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+    const auto                     info = Image::Inspect(encoded);
+    if (!info)
         return std::unexpected(RadianceAssetError::LdrDecodeFailed);
-    }
-    if (width <= 0 || height <= 0 || width > static_cast<int>(kMaxRadianceExtent) || height > static_cast<int>(kMaxRadianceExtent) ||
-        static_cast<size_t>(width) * static_cast<size_t>(height) > kMaxRadianceFileBytes / (4u * sizeof(float))) {
+    const auto width = info->width, height = info->height;
+    if (width > kMaxRadianceExtent || height > kMaxRadianceExtent || uint64_t(width) * height > kMaxRadianceFileBytes / (4u * sizeof(float)))
         return std::unexpected(RadianceAssetError::BadDimensions);
-    }
-
-    int decodedWidth = 0;
-    int decodedHeight = 0;
-    int decodedChannels = 0;
-    auto pixels = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> {
-        stbi_load_from_memory(data, length, &decodedWidth, &decodedHeight, &decodedChannels, 3), &stbi_image_free
-    };
-    if (!pixels || decodedWidth != width || decodedHeight != height) {
+    const auto pixels = Image::DecodeRGBA8(encoded);
+    if (!pixels || pixels->width != width || pixels->height != height)
         return std::unexpected(RadianceAssetError::LdrDecodeFailed);
-    }
 
     // stb_image's float LDR path defaults to gamma 2.2, not the piecewise
     // sRGB transfer function. Decode bytes and linearize explicitly instead.
@@ -460,7 +447,7 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     map.rgba.resize(count * 4u);
     for (size_t i = 0; i < count; ++i) {
         for (size_t c = 0; c < 3; ++c) {
-            map.rgba[i * 4u + c] = srgbToLinear[pixels.get()[i * 3u + c]];
+            map.rgba[i * 4u + c] = srgbToLinear[pixels->pixels[i * 4u + c]];
         }
         map.rgba[i * 4u + 3u] = 1.0f;
     }

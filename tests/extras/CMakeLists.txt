@@ -544,8 +544,8 @@ zahlen_register_extras_test(Extras_GLTFAssets)
 zahlen_add_extras_group(Extras_GLTFNative
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp ../render/TestGLTFImport.cpp)
 target_link_libraries(Extras_GLTFNative PRIVATE zahlen_gltf zahlen_serialization zahlen_signal zahlen_command_line)
-target_include_directories(Extras_GLTFNative SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf ${PROJECT_SOURCE_DIR}/extern/stb)
-target_sources(Extras_GLTFNative PRIVATE ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
+target_include_directories(Extras_GLTFNative SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf )
+target_link_libraries(Extras_GLTFNative PRIVATE zahlen_image)
 target_compile_definitions(Extras_GLTFNative PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 zahlen_register_extras_test(Extras_GLTFNative)
 

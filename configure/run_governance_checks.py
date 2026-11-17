@@ -82,6 +82,7 @@ HISTORICAL_PYTHON_ORDER: tuple[str, ...] = (
     "check_error_ordinals.py",
     "check_handle_taxonomy.py",
     "check_capability_boundary.py",
+    "check_image_boundary.py",
 )
 # Longest-pole checks scheduled first to minimize parallel tail latency.
 SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
@@ -98,6 +99,7 @@ SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
     "check_pimpl_encapsulation.py",
     "check_handle_taxonomy.py",
     "check_capability_boundary.py",
+    "check_image_boundary.py",
 )
 PERL_CHECK = "check_include_provenance.pl"
 

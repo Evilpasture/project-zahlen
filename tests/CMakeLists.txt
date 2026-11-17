@@ -101,6 +101,7 @@ target_link_libraries(ztest_cpu PRIVATE
     Jolt
     zahlen_engine
     zahlen_asset_cooking
+    zahlen_image
 )
 
 # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
@@ -110,7 +111,7 @@ target_include_directories(ztest_cpu PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/plugins
     ${PROJECT_SOURCE_DIR}/extensions
-    ${PROJECT_SOURCE_DIR}/extern/stb
+
 )
 
 if(TARGET zahlen_character_controller)
@@ -181,3 +182,9 @@ if(ZHLN_BUILD_GPU_TESTS)
 endif()
 
 target_link_libraries(ztest_cpu PRIVATE zahlen_native_host_ui)
+
+# Codec regression is independent of Core, reflection, and the GPU.
+add_executable(TestImage image/TestImage.cpp)
+target_link_libraries(TestImage PRIVATE zahlen_image)
+set_target_properties(TestImage PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON)
+add_test(NAME ImageCodec COMMAND TestImage)

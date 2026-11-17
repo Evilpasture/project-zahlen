@@ -12,25 +12,22 @@
 // JSON is parsed via the existing plugins/json library (simdjson wrapper).
 // Explicit host-owned decode and upload; no installed loader or teardown hook.
 
-#include <Zahlen/COM/IAssetLibrary.hpp>
-#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
-
+#include <Image/Image.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#include <json/JSON.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <expected>
 #include <filesystem>
 #include <fstream>
-#include <memory>
+#include <json/JSON.hpp>
 #include <limits>
+#include <memory>
 #include <string>
-
-#include <stb_image.h>
 
 namespace fs = std::filesystem;
 
@@ -103,21 +100,10 @@ auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
         return std::unexpected(FontBMError::BadPage);
     }
 
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    unsigned char* pixels = stbi_load_from_memory(pngBytes->data(), static_cast<int>(pngBytes->size()), &width, &height, &channels, 4);
-    if (pixels == nullptr) {
+    const auto image = Image::DecodeRGBA8(*pngBytes);
+    if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight)
         return std::unexpected(FontBMError::BadPage);
-    }
-
-    if (width <= 0 || height <= 0 || static_cast<uint32_t>(width) != descExp->atlasWidth || static_cast<uint32_t>(height) != descExp->atlasHeight) {
-        stbi_image_free(pixels);
-        return std::unexpected(FontBMError::BadPage);
-    }
-    const std::span<const uint8_t> rgba(pixels, static_cast<size_t>(width) * height * 4);
-    auto bakedExp = AssembleBakedFont(*descExp, rgba);
-    stbi_image_free(pixels);
+    auto bakedExp = AssembleBakedFont(*descExp, image->pixels);
 
     if (!bakedExp.has_value()) {
         return std::unexpected(bakedExp.error());

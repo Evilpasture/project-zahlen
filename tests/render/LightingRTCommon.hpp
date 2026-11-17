@@ -19,32 +19,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-// stb_image_write's implementation comes from tests/helpers/ImageWriteImpl.cpp,
-// compiled once into the group binary. Do not define ZHLN_TEST_IMAGE_WRITE_IMPL
-// here -- a second definition in the same link is a duplicate-symbol error.
-#include "helpers/ImageTesting.hpp"
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <expected>
-#include <fstream>
-#include <memory>
-#include <string>
-#include <string_view>
-#include <vector>
+// PNG encoding is supplied by zahlen_image through ImageTesting.hpp.
 
 // ============================================================================
 // Test Error Types

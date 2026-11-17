@@ -11,9 +11,9 @@ set_target_properties(zahlen_gltf_assets PROPERTIES
     POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_gltf_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
 target_include_directories(zahlen_gltf_assets SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/cgltf ${PROJECT_SOURCE_DIR}/extern/stb)
+    ${PROJECT_SOURCE_DIR}/extern/cgltf )
 target_link_libraries(zahlen_gltf_assets PUBLIC zahlen_engine
-    PRIVATE zahlen_serialization zahlen_stb_image zahlen_warnings)
+    PRIVATE zahlen_serialization zahlen_image zahlen_warnings)
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_gltf_assets)
 endif()

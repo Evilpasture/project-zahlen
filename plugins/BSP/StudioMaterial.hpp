@@ -3,45 +3,20 @@
 #pragma once
 #include "VMTLighting.hpp"
 #include "VTFDecoder.hpp"
-#include <Zahlen/Render/Types.hpp>
+#include <Image/Image.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <cstring>
 #include <limits>
-#include <stb_image.h>
 namespace ZHLN::BSP::StudioMaterial {
 template <typename Upload>
 auto LoadTextureFromBytes(Upload& upload, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureID {
-    if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
-        auto vtfExp = DecodeVTF(bytes);
-        if (vtfExp.has_value()) {
-            if (sourceNormal) {
-                ConvertSourceNormalInPlace(*vtfExp);
-            }
-            auto texRes = upload(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
-            if (texRes != TextureID::Invalid) {
-                return texRes;
-            }
-        }
+    const auto image = Image::DecodeRGBA8({reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()});
+    if (image) {
+        const auto rgba = std::as_bytes(std::span(image->pixels));
+        return upload(name, rgba, Extent2D {image->width, image->height}, isSRGB);
     }
 
-    if (bytes.size() > static_cast<size_t>(std::numeric_limits<int>::max())) return TextureID::Invalid;
-    int            width    = 0;
-    int            height   = 0;
-    int            channels = 0;
-    unsigned char* pixels   = stbi_load_from_memory(
-        reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4
-    );
-    if (pixels && width > 0 && height > 0) {
-        const std::span<const std::byte> rgba(reinterpret_cast<const std::byte*>(pixels), static_cast<size_t>(width) * height * 4);
-        auto texRes = upload(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
-        stbi_image_free(pixels);
-        pixels = nullptr;
-        if (texRes != TextureID::Invalid) {
-            return texRes;
-        }
-    }
-
-    if (pixels) stbi_image_free(pixels);
     return TextureID::Invalid;
 }
 

@@ -874,19 +874,3 @@ endif()
 # They are not link-time or configure-time dependencies: a machine without the
 # -dev packages can still compile, and a machine without the .so simply cannot
 # take the TTY display fallback.
-
-# --- stb: one decode implementation, for target link lines -------------------
-#
-# src/engine/stbi_impl.c is the single TU that defines STB_IMAGE_IMPLEMENTATION,
-# and it is compiled into zahlen_engine. That used to be enough: the engine's
-# shared library exported every symbol it contained, so a target that included
-# stb_image.h and called stbi_load_from_memory resolved it through the engine.
-#
-# With the engine exporting only its annotated API, stbi_* is hidden, and a
-# consumer that includes the header -- the importers, the cooker, the screenshot
-# writer -- has to link the implementation it calls. They link this instead of
-# compiling the implementation a second time: one definition, one copy of the
-# image decoder's state, and no dependency on what the engine happens to export.
-add_library(zahlen_stb_image STATIC ${CMAKE_SOURCE_DIR}/src/engine/stbi_impl.c)
-target_include_directories(zahlen_stb_image SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/extern/stb)
-set_target_properties(zahlen_stb_image PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)

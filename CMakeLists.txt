@@ -298,6 +298,7 @@ if(ZHLN_KCACHE_CONFIG)
 endif()
 
 include(ThirdParty)
+add_subdirectory(extensions/Image)
 
 add_subdirectory(src/presentation)
 add_subdirectory(src/window)
@@ -513,8 +514,6 @@ if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Error.hpp>")
 endif()
 
-target_sources(zahlen_engine
-               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/stbi_impl.c)
 
 set(ZHLN_MODULE_FILES
     modules/zahlen-core.cppm
@@ -655,7 +654,7 @@ target_include_directories(
   zahlen_engine SYSTEM
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
           ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
-          ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb)
+)
 
 target_compile_options(
   zahlen_engine

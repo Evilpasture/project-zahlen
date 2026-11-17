@@ -9,20 +9,12 @@
 #
 #   * zahlen_serialization (plugins/json) for ReflectJSON::Document/ValueReader
 #     and <json/JSONSchema.hpp>; it carries the plugins include root.
-#   * zahlen_engine for the stb_image DECODE implementation
-#     (src/engine/stbi_impl.c) and the Zahlen/<...> headers.
+#   * zahlen_engine for public engine types; zahlen_image for codecs.
 #   * Jolt for JPH_DOUBLE_PRECISION's Vec types (FidelityCore.hpp uses none,
 #     but the shared compile flags stay uniform with the harness).
 #
 #   * FidelityCore.hpp is dependency-free: the metric, PPM reader and downscale.
-#   * ImageIO.cpp owns the one stb_image_write implementation in this binary
-#     (same TU boundary as utils/zcook/GLB.cpp); the decode half belongs to the
-#     engine, so STB_IMAGE_IMPLEMENTATION is NOT redefined here.
-#   * main.cpp is the CLI surface.
-#
-# The render half stays in samples/FidelityHarness; this tool never initialises
-# the GPU. A full run is samples/FidelityHarness (render) driven by
-# utils/fidelity (list/compare/report) under scripts/run_fidelity.sh + Ninja.
+#   * ImageIO.cpp adapts the private Image codec value API.
 
 add_executable(fidelity
     main.cpp
@@ -41,11 +33,11 @@ zahlen_add_runtime_dlls(fidelity)
 # is noise; Jolt was linked for a JPH_DOUBLE_PRECISION that nothing here uses.
 target_link_libraries(fidelity PRIVATE
     zahlen_serialization
-    zahlen_stb_image
+    zahlen_image
 )
 
 target_include_directories(fidelity SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/extern/stb
+
     ${CMAKE_SOURCE_DIR}/plugins
     ${CMAKE_SOURCE_DIR}/utils/fidelity
 )

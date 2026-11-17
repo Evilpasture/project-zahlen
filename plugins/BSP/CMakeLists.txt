@@ -30,8 +30,8 @@ add_library(zahlen_bsp_assets STATIC
 set_target_properties(zahlen_bsp_assets PROPERTIES CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_bsp_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
-target_include_directories(zahlen_bsp_assets PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
-target_link_libraries(zahlen_bsp_assets PUBLIC zahlen_engine zahlen_scene PRIVATE zahlen_stb_image zahlen_warnings)
+target_include_directories(zahlen_bsp_assets PRIVATE )
+target_link_libraries(zahlen_bsp_assets PUBLIC zahlen_engine zahlen_scene PRIVATE zahlen_image zahlen_warnings)
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_bsp_assets)
 endif()
@@ -61,7 +61,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/stb
+
 )
 
 # BSPRead.cpp includes <Zahlen/Core/Reflection/Structs.hpp>, whose layout
@@ -74,4 +74,4 @@ endif()
 # settings, factories), so it must be on the link line of whatever consumes
 # them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
 # libJolt.so on all 18 executables -- including the ones that never touch it.
-target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_stb_image zahlen_warnings)
+target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_image zahlen_warnings)

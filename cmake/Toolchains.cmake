@@ -199,7 +199,8 @@ endfunction()
 # advertised the short name.
 foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "host_ui;HostUI" "native_host_ui;NativeHostUI"
-        "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
+        "scene;Scene" "gltf_assets;GLTFAssets" "native_camera;NativeCamera" "native_freecam;NativeFreeCam"
+        "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
         "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
@@ -248,6 +249,7 @@ endif()
 # Jolt's headers must retain their Jolt/ prefix.
 install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
+zhln_toolchain_package(Image TARGETS zahlen_image HEADERS extensions/Image)
 zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extensions/CommandLine)
 zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)
 zhln_toolchain_package(HostUI TARGETS zahlen_host_ui DEPENDS Engine)
@@ -267,22 +269,23 @@ install(FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp
     app/include/Zahlen/Zahlen.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
     COMPONENT ZahlenApplication)
 zhln_toolchain_package(Netpbm TARGETS zahlen_netpbm DEPENDS Engine HEADERS plugins/netpbm)
-zhln_toolchain_package(Screenshot TARGETS zahlen_screenshot DEPENDS Engine HEADERS extensions/Screenshot)
+zhln_toolchain_package(Screenshot TARGETS zahlen_screenshot DEPENDS Engine Image HEADERS extensions/Screenshot)
 zhln_toolchain_package(UISchema TARGETS zahlen_ui_schema DEPENDS Engine HEADERS extensions/UI)
 # UISchema is a HEADER dependency of toml/UITOML.hpp, not a link in the
 # exported interface: the installed extensions/UI/*.hpp must exist for a
 # consumer to compile that header, so the package still declares it.
-zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine UISchema HEADERS plugins/json plugins/toml)
-zhln_toolchain_package(GLTF TARGETS zahlen_gltf DEPENDS Engine Serialization NativeHostUI HEADERS plugins/glTF)
-zhln_toolchain_package(FreeCam TARGETS zahlen_freecam DEPENDS Engine HEADERS extensions/FreeCam)
-zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine HEADERS extensions/Camera)
+zhln_toolchain_package(Scene TARGETS zahlen_scene DEPENDS Engine HEADERS plugins/Scene)
+zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine UISchema Scene HEADERS plugins/json plugins/toml)
+zhln_toolchain_package(GLTF TARGETS zahlen_gltf zahlen_gltf_assets DEPENDS Engine Serialization NativeHostUI Image HEADERS plugins/glTF)
+zhln_toolchain_package(FreeCam TARGETS zahlen_freecam zahlen_native_freecam DEPENDS Engine HEADERS extensions/FreeCam)
+zhln_toolchain_package(Camera TARGETS zahlen_camera zahlen_native_camera DEPENDS Engine HEADERS extensions/Camera)
 zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine HEADERS extensions/CharacterController)
 zhln_toolchain_package(SkeletalAnimation TARGETS zahlen_skeletal_animation DEPENDS Engine HEADERS extensions/Animation)
 zhln_toolchain_package(Animation TARGETS zahlen_animation DEPENDS Engine SkeletalAnimation CharacterController Camera FreeCam)
 # Serialization is a PRIVATE link of the plugin, which the export rewrites to
 # $<LINK_ONLY:...>; the exported interface still names Zahlen::Serialization, so
 # the package has to declare it or the consumer's find_package() fails on it.
-zhln_toolchain_package(Fonts TARGETS zahlen_fonts DEPENDS Engine Serialization HEADERS plugins/Fonts)
+zhln_toolchain_package(Fonts TARGETS zahlen_fonts DEPENDS Engine Serialization Image HEADERS plugins/Fonts)
 # A font package with no font in it leaves the consumer back on the compiled-in
 # 32 px raster, which is exactly the state this package exists to end: the plugin
 # owns the fontbm .fnt + atlas path, and these 50 KB are what it feeds. The

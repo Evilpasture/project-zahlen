@@ -46,7 +46,7 @@ set_property(GLOBAL APPEND PROPERTY ZHLN_ZTEST_MANIFEST_LINES
 # Wraps explicit test C++ translation units with a tiny generated epilogue TU
 # that includes the original source file by absolute path and instantiates
 # `ZHLN::Test::AutoCollectFile<AbsPath, RelPath>`. Entry-point and helper TUs
-# (`TestsMain.cpp`, `Run*Tests.cpp`, `ImageWriteImpl.cpp`) pass through
+# (`TestsMain.cpp`, `Run*Tests.cpp`) pass through
 # unchanged. Uses `file(CONFIGURE)` so wrapper mtimes stay untouched across
 # reconfigures and Ninja header/source `.d` dependency tracking remains exact.
 function(zahlen_wrap_ztest_sources OUT_SOURCES OUT_REL_FILES)
@@ -57,7 +57,6 @@ function(zahlen_wrap_ztest_sources OUT_SOURCES OUT_REL_FILES)
         get_filename_component(_fname "${_src}" NAME)
         get_filename_component(_ext "${_src}" LAST_EXT)
         if(_fname STREQUAL "TestsMain.cpp"
-           OR _fname STREQUAL "ImageWriteImpl.cpp"
            OR _fname MATCHES "^Run.*Tests\\.cpp$"
            OR NOT (_ext STREQUAL ".cpp" OR _ext STREQUAL ".cxx" OR _ext STREQUAL ".cc"))
             list(APPEND _wrapped "${_src}")

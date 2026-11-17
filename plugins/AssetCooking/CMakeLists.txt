@@ -16,8 +16,7 @@ set_target_properties(zahlen_asset_cooking PROPERTIES
 
 target_include_directories(zahlen_asset_cooking PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
 target_include_directories(zahlen_asset_cooking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(zahlen_asset_cooking SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
-target_link_libraries(zahlen_asset_cooking PRIVATE zahlen_stb_image)
+target_link_libraries(zahlen_asset_cooking PRIVATE zahlen_image)
 # zahlen_filesystem is not linked: it is PRIVATE to zahlen_engine, so its
 # objects are already in libzahlen_engine.so, and RadianceDecoder.cpp only takes
 # a const FS::VirtualFileSystem& -- an ZHLN_API type whose symbols the .so
@@ -29,6 +28,5 @@ target_link_libraries(zahlen_asset_cooking
     PRIVATE zahlen_warnings
 )
 
-# ErrorCode's diagnostic names use the reflection configuration. stb_image's
-# implementation is already compiled into zahlen_engine; do not duplicate it.
+# ErrorCode's diagnostic names use the reflection configuration.
 zahlen_enable_reflection(zahlen_asset_cooking)

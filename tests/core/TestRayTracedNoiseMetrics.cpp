@@ -23,12 +23,12 @@
 
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
+#include <Image/Image.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <expected>
-#include <stb_image.h>
 #include <vector>
 
 // The same tile the renderer binds, embedded so the discriminator is measured
@@ -76,12 +76,11 @@ constexpr int kSize = 128;
 // Thresholded real blue noise from the embedded tile's first channel.
 [[nodiscard]] std::vector<double> MakeBlueNoise(double amplitude, bool* ok) {
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
-    int                 w = 0, h = 0, c = 0;
-    unsigned char*      px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+    auto                image = ZHLN::Image::DecodeRGBA8(kBlueNoisePng);
+    const int           w     = image ? static_cast<int>(image->width) : 0;
+    const int           h     = image ? static_cast<int>(image->height) : 0;
+    const auto*         px    = image ? image->pixels.data() : nullptr;
     if (px == nullptr || w < kSize || h < kSize) {
-        if (px != nullptr) {
-            stbi_image_free(px);
-        }
         *ok = false;
         return field;
     }
@@ -91,7 +90,7 @@ constexpr int kSize = 128;
             field[static_cast<std::size_t>(y) * kSize + x] = v > 0.5 ? amplitude : 0.0;
         }
     }
-    stbi_image_free(px);
+
     *ok = true;
     return field;
 }
@@ -189,8 +188,10 @@ struct NoiseMetricTestSuite {
         // driving both the sun disk and the VNDF lobe would collapse 2D
         // sampling onto a line.
         std::expected<void, ZHLN::ErrorCode> blue_noise_channels_are_decorrelated() {
-            int            w = 0, h = 0, c = 0;
-            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            auto        image = ZHLN::Image::DecodeRGBA8(kBlueNoisePng);
+            const int   w     = image ? static_cast<int>(image->width) : 0;
+            const int   h     = image ? static_cast<int>(image->height) : 0;
+            const auto* px    = image ? image->pixels.data() : nullptr;
             if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGt(w, 0) && ZHLN::Test::ExpectGt(h, 0))) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
@@ -210,7 +211,6 @@ struct NoiseMetricTestSuite {
                     sxy += a * b;
                 }
             }
-            stbi_image_free(px);
 
             const double denom = std::sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
             const double r     = denom > 1e-9 ? (n * sxy - sx * sy) / denom : 0.0;
@@ -224,8 +224,10 @@ struct NoiseMetricTestSuite {
         // correlation means the tile has been low-passed (a filtered upload, a
         // regenerated mip), which defeats the purpose of sampling it.
         std::expected<void, ZHLN::ErrorCode> blue_noise_is_high_frequency() {
-            int            w = 0, h = 0, c = 0;
-            unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
+            auto        image = ZHLN::Image::DecodeRGBA8(kBlueNoisePng);
+            const int   w     = image ? static_cast<int>(image->width) : 0;
+            const int   h     = image ? static_cast<int>(image->height) : 0;
+            const auto* px    = image ? image->pixels.data() : nullptr;
             if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGe(w, 64) && ZHLN::Test::ExpectGe(h, 64))) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
@@ -237,7 +239,6 @@ struct NoiseMetricTestSuite {
                         static_cast<double>(px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + x) * 4u]);
                 }
             }
-            stbi_image_free(px);
 
             const double lobe = ZHLN::Test::Noise::AutocorrelationSideLobe(field.data(), w, h, 2);
             ZHLN::Println("    [INFO] full-tile lag<=2 side lobe: {:.4f} (must stay near zero)", lobe);

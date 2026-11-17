@@ -11,15 +11,8 @@
 // runs, and stb_image decodes the 1024x1024 tile directly to tightly packed
 // RGBA bytes.
 //
-// The implementation is zahlen_stb_image, which this target links -- the same
-// one the importers, the cooker and the screenshot writer use. Defining it here
-// as well would put a second copy of the decoder in the build and make this TU
-// and the library both own every stbi_* symbol.
-
-#include <stb_image.h>
-
 #include "ZShader.hpp"
-
+#include <Image/Image.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -38,21 +31,12 @@ void RunCookRgbaMode(std::string_view inPath, std::string_view outPath) {
         Fail("cannot decode {}: empty or oversized input ({} bytes)", inPath, encoded.size());
     }
 
-    int      width    = 0;
-    int      height   = 0;
-    int      channels = 0;
-    uint8_t* pixels   = stbi_load_from_memory(encoded.data(), static_cast<int>(encoded.size()), &width, &height, &channels, 4);
-    if (pixels == nullptr) {
-        const char* reason = stbi_failure_reason();
-        Fail("cannot decode {} as 8-bit RGBA: {}", inPath, reason != nullptr ? reason : "unknown decode error");
-    }
-
-    if (width <= 0 || height <= 0) {
-        stbi_image_free(pixels);
-        Fail("cannot decode {}: invalid dimensions {}x{}", inPath, width, height);
-    }
-
-    const size_t                byteCount = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+    auto image = Image::DecodeRGBA8(encoded);
+    if (!image)
+        Fail("cannot decode {} as 8-bit RGBA", inPath);
+    const auto                  width     = image->width;
+    const auto                  height    = image->height;
+    const auto                  byteCount = image->pixels.size();
     const std::filesystem::path outFsPath(outPath);
     if (outFsPath.has_parent_path()) {
         std::error_code ec;
@@ -63,11 +47,9 @@ void RunCookRgbaMode(std::string_view inPath, std::string_view outPath) {
     // source PNG and Ninja does not re-schedule the decode on subsequent runs.
     std::ofstream out(outFsPath, std::ios::binary | std::ios::trunc);
     if (!out) {
-        stbi_image_free(pixels);
         Fail("cannot open {} for writing", outPath);
     }
-    out.write(reinterpret_cast<const char*>(pixels), static_cast<std::streamsize>(byteCount));
-    stbi_image_free(pixels);
+    out.write(reinterpret_cast<const char*>(image->pixels.data()), static_cast<std::streamsize>(byteCount));
     if (!out) {
         Fail("cannot write {} ({} bytes)", outPath, byteCount);
     }

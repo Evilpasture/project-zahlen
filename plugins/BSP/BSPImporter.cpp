@@ -35,7 +35,6 @@
 #include <initializer_list>
 #include <memory>
 #include <span>
-#include <stb_image.h>
 #include <string>
 #include <vector>
 

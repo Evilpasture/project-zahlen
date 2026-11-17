@@ -31,7 +31,7 @@ target_include_directories(zahlen_gui
 
 target_include_directories(zahlen_gui SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/clay
-    ${PROJECT_SOURCE_DIR}/extern/stb
+
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 

@@ -31,7 +31,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <span>
-#include <stb_image.h>
 #include <utility>
 #include <vector>
 

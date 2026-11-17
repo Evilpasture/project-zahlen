@@ -39,6 +39,11 @@ int main() { return 0; }" _zahlen_stl_ok)
     if(NOT _zahlen_stl_ok)
         message(FATAL_ERROR "Zahlen toolchain requires libstdc++ with _GLIBCXX_USE_CXX11_ABI=@ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ and no debug containers")
     endif()
+endif()
+# Image has only standard-library value types. It must not demand reflection,
+# nor suppress a later Engine package's probe by being found first.
+get_property(_zahlen_reflection_checked GLOBAL PROPERTY Zahlen_REFLECTION_CHECKED)
+if(NOT "@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Image" AND NOT _zahlen_reflection_checked)
     # The headers in this package are compiled with -freflection in the
     # *consumer's* toolchain, so the consumer's compiler has to survive GCC PR
     # c++/125280 just as the one that built the package did. This used to be a
@@ -67,6 +72,7 @@ int main() { return 0; }" _zahlen_stl_ok)
                 "use a build from after it rather than looking for a higher version number.")
         endif()
     endif()
+    set_property(GLOBAL PROPERTY Zahlen_REFLECTION_CHECKED TRUE)
 endif()
 @ZHLN_TOOLCHAIN_DEPENDENCIES@
 include("${CMAKE_CURRENT_LIST_DIR}/Zahlen@ZHLN_TOOLCHAIN_PACKAGE@Targets.cmake")

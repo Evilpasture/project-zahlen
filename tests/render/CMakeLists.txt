@@ -14,16 +14,10 @@ link_libraries(zahlen_native_host_ui)
 # long-running suites (render performance, distance stability) in their own
 # group so a timeout there does not also lose the pipeline results.
 #
-# Every group compiles tests/helpers/ImageWriteImpl.cpp exactly once -- it owns
-# the stb_image_write implementation the shared PNG capture path links against.
-# Adding a second TU that defines ZHLN_TEST_IMAGE_WRITE_IMPL breaks the link.
-
-set(GPU_HELPER_IMPL ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
-
 function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     zahlen_wrap_ztest_sources(GROUP_SOURCES GROUP_REL_FILES ${ARGN})
 
-    add_executable(${TARGET_NAME} ${GROUP_SOURCES} ${GPU_HELPER_IMPL})
+    add_executable(${TARGET_NAME} ${GROUP_SOURCES})
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
@@ -40,14 +34,14 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     # binary an include root for src/ -- exactly the one that
     # configure/check_tests_public_api.py and the include list below keep out.
     target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_engine
+        zahlen_engine zahlen_image
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extern/stb
+
     )
 
     zahlen_enable_reflection(${TARGET_NAME})

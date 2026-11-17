@@ -83,9 +83,6 @@
 #include <utility>
 #include <vector>
 
-// Declarations only: the stb_image_write implementation is compiled once per
-// group binary from tests/helpers/ImageWriteImpl.cpp.
-#include <stb_image_write.h>
 
 // ============================================================================
 // Test Error Types

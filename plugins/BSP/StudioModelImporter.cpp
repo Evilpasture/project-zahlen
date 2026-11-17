@@ -17,7 +17,6 @@
 #include <Zahlen/Render/Render.hpp>
 #include <filesystem>
 #include <fstream>
-#include <stb_image.h>
 
 namespace ZHLN::BSP {
 namespace {
