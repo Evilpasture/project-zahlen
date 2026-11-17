@@ -7,30 +7,29 @@ module;
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
+#include <Camera/TargetCamera.hpp>
+#include <CharacterController/CharacterComponents.hpp>
+#include <FreeCam/NativeFreeCam.hpp>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Camera/TargetCamera.hpp>
-#include <CharacterController/CharacterComponents.hpp>
-#include <FreeCam/NativeFreeCam.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
 
 module ZHLN.Locomotion;
 

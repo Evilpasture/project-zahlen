@@ -8,13 +8,17 @@
 #include "EngineGlobals.hpp"
 #include "Hierarchy.hpp"
 #include "InputContext.hpp"
+#include "KernelSession.hpp"
 #include "Platform.hpp"
+#include "PrefabFactoryInternal.hpp"
 #include "RenderSystem.hpp"
 #include "SceneCleanupSystem.hpp"
 #include "SystemWiring.hpp"
 #include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/COM/FrameTypes.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
+#include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
@@ -28,20 +32,17 @@
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/InputActions.hpp>
 #include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/Frame.hpp>
 #include <Zahlen/Engine/FramePlan.hpp>
-#include "KernelSession.hpp"
 #include <Zahlen/Engine/PoseUploads.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
-#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/Engine/VisibilityList.hpp>
 #include <Zahlen/Engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -56,6 +57,7 @@
 #include <Zahlen/Window/Window.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -97,6 +99,13 @@ struct EngineImpl {
     // it once per frame and drains it with ConsumeFixedSteps; no mutable alpha
     // or accumulator is stored on the engine any more.
     Clock frameClock;
+
+    enum class FrameStage { Idle, Advancing, Ready, Rendering };
+    FrameStage   frameStage = FrameStage::Idle;
+    FramePlan    activeFramePlan;
+    FrameContext activeFrameContext;
+    float        activeFrameDt = 0;
+    size_t       frameBoundary = 0;
 
     // Created on the first frame that asks for a system context, because that is
     // the first moment the task system's worker count is known and is also
@@ -616,6 +625,10 @@ uint32_t COM::JointAllocator::AllocateJoints(Engine& engine, uint32_t count) noe
 }
 
 void Engine::ClearScene() {
+    // A replacement between stages invalidates this frame's visibility/history
+    // inputs. Consume its simulation once, without rendering the replacement.
+    if (FramePending())
+        (void) CancelFrame();
     ReleaseSceneContents();
     SeedBaselineScene(GetInternalRegistry());
 }
@@ -757,35 +770,84 @@ void Engine::ProvokeDeviceLost() {
     _impl->kernel->ProvokeDeviceLost();
 }
 
-auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
+namespace {
+void ExecuteFrameRange(Engine& engine, const FramePlan& plan, size_t begin, size_t end, float dt, FrameContext& ctx) {
+    const auto steps = plan.Steps();
+    for (size_t i = begin; i < end && !ctx.error; ++i) {
+        if (const auto run = steps[i].run)
+            run(engine, dt, ctx);
+    }
+}
+} // namespace
 
+auto Engine::FramePending() const noexcept -> bool {
+    return _impl->frameStage == EngineImpl::FrameStage::Ready;
+}
+
+auto Engine::AdvanceFrame(float dt) -> std::expected<void, ErrorCode> {
+    using Stage = EngineImpl::FrameStage;
+    if (_impl->frameStage != Stage::Idle)
+        return std::unexpected(COM::FramePipelineError::FrameInProgress);
+    if (!std::isfinite(dt) || dt < 0.0f)
+        return std::unexpected(COM::FramePipelineError::InvalidDeltaTime);
+    EnsureFramePlan();
+    // Freeze the composition across both halves. Installation affects a later
+    // frame; indices cannot drift while the host owns the staging interval.
+    _impl->activeFramePlan = _impl->framePlan;
+    const auto cleanup     = _impl->activeFramePlan.IndexOf("SceneCleanup");
+    if (!cleanup)
+        return std::unexpected(FrameError::StepFailed);
+    _impl->frameBoundary = *cleanup + 1;
+    _impl->frameStage    = Stage::Advancing;
+    _impl->activeFrameDt = dt;
     _impl->kernel->InputFor().StepHaptics(dt);
-
-    // The clock owns the fixed-step accumulator and is drained exactly once per
-    // frame, here, before any step of the plan can run. The physics step runs
-    // `fixedSteps` steps; the leftover fraction is the frame's interpolation
-    // alpha. Nothing writes an alpha into the engine between phases.
     _impl->frameClock.Advance(static_cast<double>(dt));
     const FixedStepBatch batch = _impl->frameClock.ConsumeFixedSteps(kFixedStepDt, kMaxFixedSteps);
-    FrameContext         ctx {
+    _impl->activeFrameContext  = FrameContext {
         .error      = std::nullopt,
         .fixedSteps = batch.steps,
         .alpha      = FrameAlpha {batch.alpha},
     };
-
-    // The plan is whatever the composition produced: core's own steps, plus one
-    // set of steps per module the application installed. The engine executes it
-    // and nothing else -- it holds no callbacks to replay and no ordering of its
-    // own beyond the core steps BuildCoreFramePlan places.
-    EnsureFramePlan();
-    _impl->framePlan.Execute(*this, dt, ctx);
-
-    _impl->frameCounter++;
-
+    auto& ctx = _impl->activeFrameContext;
+    ExecuteFrameRange(*this, _impl->activeFramePlan, 0, _impl->frameBoundary, dt, ctx);
     if (ctx.error) {
+        _impl->frameStage = Stage::Idle;
+        ++_impl->frameCounter;
         return std::unexpected(*ctx.error);
     }
+    _impl->frameStage = Stage::Ready;
     return {};
+}
+
+auto Engine::FinishFrame() -> std::expected<void, ErrorCode> {
+    using Stage = EngineImpl::FrameStage;
+    if (!FramePending())
+        return std::unexpected(COM::FramePipelineError::NoPendingFrame);
+    _impl->frameStage = Stage::Rendering;
+    auto& ctx         = _impl->activeFrameContext;
+    ExecuteFrameRange(*this, _impl->activeFramePlan, _impl->frameBoundary, _impl->activeFramePlan.Count(), _impl->activeFrameDt, ctx);
+    _impl->frameStage = Stage::Idle;
+    ++_impl->frameCounter;
+    if (ctx.error)
+        return std::unexpected(*ctx.error);
+    return {};
+}
+
+auto Engine::CancelFrame() -> std::expected<void, ErrorCode> {
+    using Stage = EngineImpl::FrameStage;
+    if (!FramePending())
+        return std::unexpected(COM::FramePipelineError::NoPendingFrame);
+    // Simulation is consumed, but no image will be presented. Preserve the
+    // last presented transform/camera history for the next rendered frame.
+    _impl->frameStage = Stage::Idle;
+    ++_impl->frameCounter;
+    return {};
+}
+
+auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
+    if (auto advanced = AdvanceFrame(dt); !advanced)
+        return advanced;
+    return FinishFrame();
 }
 
 auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {

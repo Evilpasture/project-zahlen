@@ -2,11 +2,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
+#include <Zahlen/Render/Info.hpp>
 #include <array>
 
 namespace ZHLN::COM {
+// Copied diagnostic strings; no borrowed std::string_view crosses COM.
+struct GraphicsDeviceInfo {
+    String64           rendererName;
+    String256          gpuName;
+    PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
+    PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
+    PacingPolicy       pacingPolicy         = PacingPolicy::LegacyVBlank;
+    bool               meshShadingSupported = false;
+    bool               meshShadingActive    = false;
+    bool               rayTracingSupported  = false;
+};
+static_assert(std::is_standard_layout_v<GraphicsDeviceInfo> && std::is_trivially_copyable_v<GraphicsDeviceInfo>);
+
 struct TextureCubeCreateInfo {
     Span<const std::byte> faces[6] {};
     uint32_t faceSize = 0;

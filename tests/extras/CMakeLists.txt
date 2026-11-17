@@ -561,7 +561,14 @@ endif()
 
 if(TARGET zahlen_freecam AND TARGET zahlen_camera)
     zahlen_add_extras_group(Extras_CameraHosts
-        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCameraHosts.cpp)
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCameraHosts.cpp TestFramePipeline.cpp)
     target_link_libraries(Extras_CameraHosts PRIVATE zahlen_freecam zahlen_camera zahlen_application)
     zahlen_register_extras_test(Extras_CameraHosts POOL gpu LABELS GPU Extras)
+endif()
+
+if(TARGET zahlen_fallback_scene)
+    zahlen_add_extras_group(Extras_FallbackHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestFallbackHost.cpp)
+    target_link_libraries(Extras_FallbackHost PRIVATE zahlen_fallback_scene zahlen_application)
+    zahlen_register_extras_test(Extras_FallbackHost POOL gpu LABELS GPU Extras)
 endif()

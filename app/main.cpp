@@ -167,16 +167,19 @@ int main(int argc, char* argv[]) {
     bool     captured = false;
     uint32_t completedFrames = 0;
     ZHLN::Screenshot::CaptureBuffer capture;
-    auto app = ZHLN::App();
+    auto                            app = ZHLN::App();
     app.WithConfig(launch).AddLayer(SandboxGame {.launch = launch});
 #if defined(ZHLN_HAS_HOST_FREECAM)
     app.AddLayer(ZHLN::FreeCam::Layer {});
 #endif
-    const auto result = app.Run(argc, argv, [&](ZHLN::COM::IEngine& engine, float) {
-            if (launch.captureFrame.empty()) return;
+    const auto result =
+        app.Run(argc, argv, [&](ZHLN::COM::IEngine& engine, float) {
+            if (launch.captureFrame.empty())
+                return;
             // This callback runs before Engine::Tick. Each prior invocation
             // that reaches here is followed by one completed engine frame.
-            if (completedFrames++ < launch.warmupFrames) return;
+            if (completedFrames++ < launch.warmupFrames)
+                return;
             const auto frame = capture.Read(*engine.Graphics(), engine.WindowExtent(engine.PrimaryWindow()));
             if (!frame || !(*frame)->Valid()) {
                 ZHLN::LogError("[Capture] Failed to capture a completed frame.");

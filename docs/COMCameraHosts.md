@@ -21,7 +21,8 @@ app.AddLayer(ZHLN::FreeCam::Layer {});
 ```
 
 `Step(IEngine&, dt)` is the same ordinary host operation called by each layer.
-Call it once after ProcessEvents and before Tick. It seeds only the main camera,
+Call it once between IFramePipeline::AdvanceFrame and FinishFrame. The
+Application layer uses BeforeRender for that ordering. It seeds only the main camera,
 including after ClearScene replaces it. Attach/Detach operate through IEntities;
 Detach records a consumer-owned opt-out so Step does not undo the choice.
 Explicit Attach clears that opt-out and preserves the existing sensitivity,
@@ -47,20 +48,19 @@ distance/FOV convergence, exponential target smoothing and teleport snapping
 are retained. A zero delta may initialize/snap authored orbit state but does
 not consume mouse-look motion. Negative/nonfinite deltas are ignored.
 
-## Scheduling limit — not yet phase-equivalent for physics follow
+## Same-frame target timing
 
-The host loop runs before the combined IEngine::Tick. Consequently an orbit
-layer reads the **last committed world-transform snapshot**, not transforms
-produced later inside that Tick's simulation/interpolation passes. A host that
-updates a target's Transform but leaves an older WorldTransform attached must
-publish its intended world pose or supply a separate pose-driving policy; the
-library cannot infer whether a local edit invalidates a hierarchy result.
+Application's BeforeRender seam runs after physics/interpolation, transform
+propagation and cleanup, and before camera projection/culling/presentation.
+The supplied layers use that seam, so a target's world pose is current for the
+frame being rendered. Bespoke hosts use the queryable IFramePipeline capability
+explicitly. See COMFramePipeline.md for protocol, cancellation and failure rules.
 
-Do not call this phase-equivalent acceptance for following physics/animation
-inside the same Tick. A deliberate simulation/render staging seam is still
-needed for those consumers. They remain on the native adapter until that seam
-and moving-target regressions are validated. There is no hidden engine callback
-or Registry escape to conceal this ordering issue.
+Apply itself does not advance anything: a direct call before AdvanceFrame still
+reads the previous committed WorldTransform. Local target edits belong before
+AdvanceFrame, not between the halves, because propagation is not silently
+replayed. Physics-follow timing and current local target edits are now covered
+by real engine tests, including the same-frame projected camera matrix.
 
 ## Explicit native compatibility
 

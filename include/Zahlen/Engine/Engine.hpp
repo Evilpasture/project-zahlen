@@ -325,6 +325,13 @@ class ZHLN_API Engine {
 
     void ReleaseSceneContents();
 
+    // COM::IFramePipeline is the explicit host staging capability. The native
+    // all-in-one Tick uses these same operations; no extension callbacks stored.
+    auto               AdvanceFrame(float dt) -> std::expected<void, ErrorCode>;
+    auto               FinishFrame() -> std::expected<void, ErrorCode>;
+    auto               CancelFrame() -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto FramePending() const noexcept -> bool;
+
     // Core's own frame steps, placed once. Not a scene-reset concern: the plan a
     // module composed into has to survive a scene rebuild, and rebuilding it per
     // scene is what used to accumulate duplicate steps.

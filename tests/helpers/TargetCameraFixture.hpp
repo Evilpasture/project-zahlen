@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Camera/NativeTargetCamera.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
 
 namespace ZHLN::Test::Headless {
 

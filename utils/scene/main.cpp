@@ -1,65 +1,58 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Scene/document loading, Lua graphics hot reload and optional Discord
-// presence live in this diagnostic host, not in the ordinary game binary.
-#include "NativeSceneDocument.hpp"
+// Diagnostic document/fallback host. Application owns the engine reference,
+// process scope, GUI context/font atlas and explicit frame staging.
+#include "SceneDocument.hpp"
 #include <FallbackScene/FallbackScene.hpp>
-#include <NativeHostUI/NativeHostUI.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Config.hpp>
-#include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/App.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/QualityPresets.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Info.hpp>
-#include <Zahlen/Render/Render.hpp>
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
 #include <lua/ReflectLua.hpp>
 #endif
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
-#include <Discord/EngineIntegration.hpp>
+#include <Discord/RichPresence.hpp>
 #endif
 #include <array>
+#include <charconv>
 #include <chrono>
-#include <cstddef>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
-#include <span>
+#include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
 
 namespace {
-
 struct HostLaunchConfig {
     std::filesystem::path scenePath;
     std::filesystem::path graphicsConfigPath = "config/graphics.lua";
-};
-
-HostLaunchConfig s_HostLaunchConfig;
-
-struct HostStateService {
-    ZHLN::FS::FileWatchID graphicsWatch = 0;
-    bool                      bootApplied   = false;
+    uint32_t              frames             = 0;
+    bool                  rasterOnly         = false;
 };
 
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
-void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::path& path) {
+void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesystem::path& path) {
     auto source = ZHLN::ReflectLua::ReadLuaFileText(path);
     if (!source) {
         return;
     }
     const std::string      chunkName = "@" + path.generic_string();
-    const ZHLN::RenderInfo hw        = engine.Graphics().Info();
+    const auto             info      = engine.Graphics()->Info();
+    const ZHLN::RenderInfo hw {
+        .rendererName         = std::string_view(info.rendererName),
+        .gpuName              = std::string_view(info.gpuName),
+        .deviceType           = info.deviceType,
+        .presentationMode     = info.presentationMode,
+        .pacingPolicy         = info.pacingPolicy,
+        .meshShadingSupported = info.meshShadingSupported,
+        .meshShadingActive    = info.meshShadingActive,
+        .rayTracingSupported  = info.rayTracingSupported
+    };
 
     const auto applyOverlay = [&](ZHLN::GraphicsSettings& dst) -> std::expected<void, ZHLN::ErrorCode> {
         auto callRes = ZHLN::ReflectLua::ApplyCallPatchString(dst, *source, chunkName, ZHLN::LuaBudget {}, hw);
@@ -69,7 +62,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::pa
         return callRes;
     };
 
-    const ZHLN::GraphicsSettings base    = engine.Graphics().Settings();
+    const ZHLN::GraphicsSettings base    = engine.Graphics()->Settings();
     ZHLN::GraphicsSettings       staging = base;
     if (auto res = applyOverlay(staging); !res) {
         ZHLN::LogWarning("[Graphics] '{}' rejected ({}); keeping live settings.", path.string(), res.error());
@@ -84,177 +77,141 @@ void ApplyGraphicsProfileFromLua(ZHLN::Engine& engine, const std::filesystem::pa
         }
     }
 
-    engine.Graphics().ApplySettings(staging);
+    if (const auto applied = engine.Graphics()->ApplySettings(staging); !applied.HasValue()) {
+        ZHLN::LogWarning("[Graphics] '{}' rejected by the device ({}).", path.string(), applied.error);
+        return;
+    }
     ZHLN::Log("[Graphics] applied declarative profile '{}' (preset={}).", path.string(), staging.qualityPreset);
 }
 #endif
 
-void BootHostStateStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /*ctx*/) {
-    auto svc = engine.Service<HostStateService>();
-    if (!svc || svc->bootApplied) {
-        return;
-    }
-    svc->bootApplied = true;
-
+struct DiagnosticHost {
+    HostLaunchConfig*                            launch;
+    ZHLN::FallbackScene::DefaultPreset           fallback;
+    std::unique_ptr<ZHLN::FS::FileSystemWatcher> watcher;
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
-    // --- 1. Start Discord Presence ---
-    const std::string discordAppId = "1548152303939358720";
-
-    if (auto started = ZHLN::Discord::StartPresence(engine, discordAppId); !started) {
-        ZHLN::LogWarning("[Discord] Failed to start presence: {}", started.error());
-    } else {
-        // --- 2. Configure initial Rich Presence activity ---
-        ZHLN::Discord::RichPresence presence;
-        presence.details        = "Testing Zahlen Engine";
-        presence.state          = "Exploring World";
-        presence.startTimestamp = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        presence.largeImage     = "logo"; // Name of the asset uploaded to Discord Dev Portal (or URL)
-        presence.largeText      = "Zahlen Engine v" ZHLN_VERSION_STR;
-
-        if (auto setRes = ZHLN::Discord::SetPresence(engine, std::move(presence)); !setRes) {
-            ZHLN::LogWarning("[Discord] Failed to set activity: {}", setRes.error());
+    std::unique_ptr<ZHLN::Discord::DiscordPresenceClient> presence;
+#endif
+    float dt = 0;
+    void  Start(ZHLN::COM::IEngine& engine) {
+#if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
+        presence = std::make_unique<ZHLN::Discord::DiscordPresenceClient>("1548152303939358720");
+        if (const auto started = presence->Start(); !started) {
+            ZHLN::LogWarning("[Discord] Failed to start presence: {}", started.error());
+            presence.reset();
         } else {
-            ZHLN::Log("[Discord] Rich presence initialized successfully.");
+            ZHLN::Discord::RichPresence activity;
+            activity.details        = "Testing Zahlen Engine";
+            activity.state          = "Exploring World";
+            activity.startTimestamp = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            activity.largeImage     = "logo";
+            activity.largeText      = "Zahlen Engine v" ZHLN_VERSION_STR;
+            presence->SetActivity(std::move(activity));
         }
-    }
 #endif
-
-    if (!s_HostLaunchConfig.scenePath.empty()) {
-        if (!ZHLN::Tools::LoadSceneDocument(engine, s_HostLaunchConfig.scenePath)) {
-            // A partially instantiated document must not survive as the next
-            // frame's scene; restore the engine's empty default scene.
+        if (launch->scenePath.empty()) {
+            fallback.BuildFallbackScene(engine, {.buildBLAS = !launch->rasterOnly});
+        } else if (!ZHLN::Tools::LoadSceneDocument(engine, launch->scenePath, {.buildBLAS = !launch->rasterOnly})) {
             engine.ClearScene();
-            ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", s_HostLaunchConfig.scenePath.string());
+            ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", launch->scenePath.string());
         }
-    }
-
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
-    if (!s_HostLaunchConfig.graphicsConfigPath.empty() && std::filesystem::exists(s_HostLaunchConfig.graphicsConfigPath)) {
-        const std::filesystem::path cfgPath = s_HostLaunchConfig.graphicsConfigPath;
-        ApplyGraphicsProfileFromLua(engine, cfgPath);
-        svc->graphicsWatch = engine.GetFileSystemWatcher().WatchFile(cfgPath, [&engine, cfgPath](const ZHLN::FS::FileWatchEvent& ev) {
-            if (ev.action != ZHLN::FS::FileWatchAction::Deleted) {
-                ApplyGraphicsProfileFromLua(engine, cfgPath);
-            }
-        });
-    }
-#endif
-}
-
-void TeardownHostState(ZHLN::Engine& engine) {
-    if (auto svc = engine.Service<HostStateService>(); svc && svc->graphicsWatch != 0) {
-        if (!engine.GetFileSystemWatcher().Unwatch(svc->graphicsWatch)) {
-            ZHLN::LogWarning("[Graphics] could not release file watch handle {}.", svc->graphicsWatch);
+        const auto path = launch->graphicsConfigPath;
+        if (!path.empty() && std::filesystem::exists(path)) {
+            ApplyGraphicsProfileFromLua(engine, path);
+            watcher          = std::make_unique<ZHLN::FS::FileSystemWatcher>();
+            const auto watch = watcher->WatchFile(path, [&engine, path](const ZHLN::FS::FileWatchEvent& event) {
+                if (event.action != ZHLN::FS::FileWatchAction::Deleted)
+                    ApplyGraphicsProfileFromLua(engine, path);
+            });
+            if (!watch)
+                ZHLN::LogWarning("[Graphics] could not watch '{}'.", path.string());
         }
-        svc->graphicsWatch = 0;
+#endif
     }
-}
-
-void InstallHostWithState(ZHLN::Engine& engine) {
-    // The fallback is only for the no-document diagnostic mode. A loaded
-    // document must not be replaced by a diagnostic popup in the same frame.
-    if (s_HostLaunchConfig.scenePath.empty()) {
-        ZHLN::FallbackScene::Install(engine);
+    void Tick(ZHLN::COM::IEngine& engine, float delta) {
+        dt = delta;
+        if (watcher)
+            watcher->DispatchEvents();
+        if (fallback.IsActive())
+            fallback.Update(engine, delta);
+        if (launch->frames && engine.CurrentFrame() >= launch->frames)
+            engine.RequestClose();
     }
-    engine.EmplaceService<HostStateService>();
-
-    static constexpr ZHLN::ModuleStep kSteps[] = {
-        {
-            .phase     = ZHLN::FramePhase::HotReload,
-            .name      = "HostStateBoot",
-            .run       = &BootHostStateStep,
-            .placement = ZHLN::StepPlacement::After,
-            .anchor    = "StateAndShaderReload",
-        },
-    };
-    const ZHLN::Module mod {
-        .name       = "HostState",
-        .frameSteps = kSteps,
-        .teardown   = &TeardownHostState,
-    };
-    if (auto res = engine.InstallModule(mod); !res) {
-        ZHLN::LogError("[HostState] module install failed: {}", ZHLN::ToString(res.error()));
+    auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
+        const auto result = fallback.DrawUI(engine, ui, dt);
+        if (!result.HasValue())
+            return std::unexpected(result.error);
+        return {};
     }
-}
-
+    void Stop(ZHLN::COM::IEngine&) {
+        // External workers/callbacks and the preset's retained engine reference
+        // are retired while Application's process/task scope is still alive.
+        watcher.reset();
+#if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
+        presence.reset();
+#endif
+        fallback.ClearFallback();
+    }
+};
 } // namespace
 
-auto main(int argc, char* argv[]) -> int {
-    ZHLN::EngineConfig config {.appName = "Zahlen Scene Host"};
-    static ZHLN::CrashState crashState;
-    s_HostLaunchConfig = {};
-
-    const std::array appHandlers = {
+int main(int argc, char* argv[]) {
+    HostLaunchConfig launch;
+    const std::array handlers = {
         ZHLN::CliFlag {
             .key         = "--scene",
             .placeholder = "<file.toml|file.lua>",
-            .description = "Instantiate a TOML or Lua scene recipe on boot",
-            .action      = [](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
-                if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
-                s_HostLaunchConfig.scenePath = std::filesystem::path(v);
+            .description = "Instantiate a prepared TOML or Lua scene recipe on boot",
+            .action      = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
+                if (value.empty())
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                launch.scenePath = value;
                 return {};
-            },
+            }
         },
         ZHLN::CliFlag {
             .key         = "--graphics-config",
             .placeholder = "<file.lua>",
             .description = "Lua graphics profile to watch (default: config/graphics.lua)",
-            .action      = [](std::string_view v) -> std::expected<void, ZHLN::CommandLineError> {
-                if (v.empty()) return std::unexpected(ZHLN::CommandLineError::MissingValue);
-                s_HostLaunchConfig.graphicsConfigPath = std::filesystem::path(v);
+            .action      = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
+                if (value.empty())
+                    return std::unexpected(ZHLN::CommandLineError::MissingValue);
+                launch.graphicsConfigPath = value;
                 return {};
-            },
+            }
+        },
+        ZHLN::CliFlag {
+            .key         = "--frames",
+            .placeholder = "<count>",
+            .description = "Close after this many completed frames (0: unlimited)",
+            .action      = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
+                const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), launch.frames);
+                if (error != std::errc {} || end != value.data() + value.size())
+                    return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                return {};
+            }
+        },
+        ZHLN::CliFlag {
+            .key         = "--raster-only",
+            .description = "Explicitly skip BLAS construction for scene geometry",
+            .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
+                launch.rasterOnly = true;
+                return {};
+            }
         },
     };
-    const auto parsed = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), config, appHandlers);
-    if (!parsed) {
-        ZHLN::LogError("[SceneHost] command line: {}", parsed.error());
-        return EXIT_FAILURE;
-    }
-    if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested) return EXIT_SUCCESS;
-    ZHLN::SetLogLevel(config.logLevel);
+    auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Zahlen Scene Host"});
+    app.WithCliOptions(handlers);
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
-    if (s_HostLaunchConfig.graphicsConfigPath != "config/graphics.lua") {
-        ZHLN::LogError("[SceneHost] --graphics-config requires the Lua extension");
-        return EXIT_FAILURE;
-    }
+    app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
+        if (launch.graphicsConfigPath != "config/graphics.lua") {
+            ZHLN::LogError("[SceneHost] --graphics-config requires the Lua extension");
+            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+        }
+        return {};
+    });
 #endif
-    ZHLN::SetupSignalHandler(crashState);
-    struct DiagnosticUI {
-        std::unique_ptr<ZHLN::NativeHostUI> ui;
-        float dt = 0.0f;
-        void Start(ZHLN::Engine& engine) {
-            if (s_HostLaunchConfig.scenePath.empty()) {
-                ui = std::make_unique<ZHLN::NativeHostUI>(engine);
-                ZHLN::FallbackScene::DefaultPreset::BuildFallbackScene(engine);
-            }
-        }
-        void Tick(ZHLN::Engine&, float delta) { dt = delta; }
-        void UI(ZHLN::Engine& engine) {
-            if (ui) ZHLN::FallbackScene::DefaultPreset::DrawUI(engine, *ui, dt);
-        }
-        void Stop(ZHLN::Engine&) { ui.reset(); }
-    };
-    ZHLN::ProcessScope process;
-    auto created = ZHLN::Engine::Create(config);
-    if (!created) return EXIT_FAILURE;
-    auto engine = std::move(*created);
-    InstallHostWithState(*engine);
-    DiagnosticUI ui;
-    ui.Start(*engine);
-    ZHLN::Clock clock;
-    ZHLN::FramePacer pacer(config.fpsLimit);
-    while (engine->IsRunning()) {
-        const auto start = ZHLN::FramePacer::BeginFrame();
-        ZHLN::ProcessScope::PollCrashes();
-        engine->ProcessEvents();
-        if (!engine->IsRunning()) break;
-        const auto dt = clock.Tick();
-        ui.Tick(*engine, dt);
-        ui.UI(*engine);
-        if (auto tick = engine->Tick(dt); !tick) { ui.Stop(*engine); return EXIT_FAILURE; }
-        pacer.EndFrame(start, engine->Graphics().PacedDeltaTime());
-    }
-    ui.Stop(*engine);
-    return EXIT_SUCCESS;
+    app.AddLayer(DiagnosticHost {.launch = &launch});
+    return app.Run(argc, argv) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

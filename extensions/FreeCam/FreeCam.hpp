@@ -43,7 +43,7 @@ bool Attach(COM::IEntities&, float speed = 12.0f, bool lookRequiresButton = true
 void Detach(COM::IEntities&);
 // Explicit Application::AddLayer composition. No automatic installation.
 struct Layer {
-    void Tick(COM::IEngine& engine, float dt) {
+    void BeforeRender(COM::IEngine& engine, float dt) {
         Step(engine, dt);
     }
 };

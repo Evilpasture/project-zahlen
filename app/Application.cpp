@@ -5,6 +5,7 @@
 // optional default-module install pass in DefaultModules.cpp.
 #include <Zahlen/App.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
@@ -57,6 +58,9 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         return std::unexpected(created.error()); // preserve the underlying init error
     }
     COM::Ref<COM::IEngine> engine = std::move(*created);
+    auto                   pipeline = engine.As<COM::IFramePipeline>();
+    if (!pipeline)
+        return std::unexpected(COM::ComError::UnsupportedExtension);
     HostUI ui(*engine.Get()); // destroyed before the retained engine and ProcessScope
     engine->FocusWindow(engine->PrimaryWindow());
 
@@ -119,9 +123,28 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
                 break;
             }
         }
-        if (auto tick = engine->Tick(dt); !tick.HasValue()) {
-            LogError("[Application] engine frame failed: {}", tick.error);
-            frameError = tick.error;
+        if (auto advanced = pipeline->AdvanceFrame(dt); !advanced.HasValue()) {
+            frameError = advanced.error;
+            break;
+        }
+        for (const auto& layer: _layers) {
+            if (layer.beforeRender != nullptr) {
+                const auto result = layer.beforeRender(layer.state.get(), *engine.Get(), dt);
+                if (!result) {
+                    frameError = result.error();
+                    break;
+                }
+            }
+            if (!engine->IsRunning())
+                break;
+        }
+        if (frameError || !engine->IsRunning()) {
+            (void) pipeline->CancelFrame();
+            break;
+        }
+        if (auto finished = pipeline->FinishFrame(); !finished.HasValue()) {
+            LogError("[Application] engine frame failed: {}", finished.error);
+            frameError = finished.error;
             break;
         }
         pacer.EndFrame(frameStart, pacedDt);

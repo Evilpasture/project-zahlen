@@ -499,6 +499,18 @@ void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
 }
 
 auto RenderContext::GetViewport() const noexcept -> ViewportRect {
+    // Camera projection precedes the first BeginFrame, which lazily allocates
+    // sceneColor. Use the actual target extent until those graph resources
+    // exist; otherwise the first camera frame silently keeps identity matrices.
+    const auto& extent = _impl->graphResources.sceneColor.extent;
+    if (extent.width == 0 || extent.height == 0) {
+        const auto fb = _impl->presentationTarget.GetFramebufferExtent();
+        if (_impl->viewportW <= 1 || _impl->viewportH <= 1)
+            return {.x = 0, .y = 0, .width = fb.width, .height = fb.height};
+        const auto x = std::min(_impl->viewportX, fb.width);
+        const auto y = std::min(_impl->viewportY, fb.height);
+        return {.x = x, .y = y, .width = std::min(_impl->viewportW, fb.width - x), .height = std::min(_impl->viewportH, fb.height - y)};
+    }
     const VkViewport vp = _impl->EffectiveViewport();
     return ViewportRect {
         .x      = static_cast<uint32_t>(vp.x),

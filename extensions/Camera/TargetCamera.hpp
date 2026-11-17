@@ -41,11 +41,12 @@ struct InputSnapshot {
 auto ReadInput(const COM::IActionContext&) -> InputSnapshot;
 // Each rig writes its own CameraComponent; free-cam tagged cameras are skipped.
 // Prefer WorldTransform, with a local Transform fallback. No simulation step,
-// command playback or matrix projection is hidden here. Call before Tick.
+// command playback or matrix projection is hidden here. Call between
+// IFramePipeline::AdvanceFrame and FinishFrame (or use the Application layer).
 void Apply(COM::IEntities&, const InputSnapshot&, float dt);
 void Step(COM::IEngine&, float dt);
 struct Layer {
-    void Tick(COM::IEngine& engine, float dt) {
+    void BeforeRender(COM::IEngine& engine, float dt) {
         Step(engine, dt);
     }
 };

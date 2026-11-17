@@ -4,15 +4,14 @@
 // Optional project-light client composition root. This intentionally has a
 // separate entrypoint from app/main.cpp, keeping the default `zahlen` binary
 // deterministic and free of client CLI/configuration code.
-#include <ProjectLightClient/ClientConfig.hpp>
-#include <ProjectLightClient/LightProtocol.hpp>
 #include <Camera/NativeTargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
-#include <Zahlen/HostRunner.hpp>
+#include <ProjectLightClient/ClientConfig.hpp>
+#include <ProjectLightClient/LightProtocol.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Error.hpp>
-
+#include <Zahlen/HostRunner.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>

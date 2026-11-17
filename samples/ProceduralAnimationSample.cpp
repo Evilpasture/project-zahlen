@@ -1,41 +1,41 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
+#include <Camera/NativeTargetCamera.hpp>
+#include <CharacterController/CharacterController.hpp>
+#include <Signal/CrashHandler.hpp>
+#include <Terrain/TerrainFactory.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/ConfigCli.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
-#include <Zahlen/Log.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Physics/Physics.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Camera/NativeTargetCamera.hpp>
-#include <CharacterController/CharacterController.hpp>
-#include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
 // Optional plugin, grouped like app/main.cpp's guarded include block: the fonts

@@ -17,12 +17,13 @@
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/COM/IState.hpp>
-#include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -34,20 +35,20 @@
 #include <Zahlen/Engine/AssetManager.hpp>
 #include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
 #include <Zahlen/Engine/Capabilities/EngineState.hpp>
 #include <Zahlen/Engine/Capabilities/Entities.hpp>
 #include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Capabilities/InputActions.hpp>
+#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
 #include <Zahlen/Engine/Capabilities/InputReader.hpp>
 #include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
 #include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Window/Window.hpp>
 #include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -56,22 +57,21 @@
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
-
+#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <algorithm>
-#include <cmath>
-#include <map>
-#include <set>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <memory>
 #include <limits>
+#include <map>
+#include <memory>
 #include <new>
 #include <optional>
+#include <set>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -81,6 +81,7 @@
 namespace ZHLN::COM {
 
 static_assert(AuditInterfaceABI<IEngine>());
+static_assert(AuditInterfaceABI<IFramePipeline>());
 static_assert(AuditInterfaceABI<IGraphicsDevice>());
 static_assert(AuditInterfaceABI<IEntities>());
 static_assert(AuditInterfaceABI<ISimulation>());
@@ -265,10 +266,20 @@ constexpr uint32_t kInvalidFamily = 0xFFFFFFFFu;
 
 } // namespace
 
-class EngineCOM final
-    : public Implements<EngineCOM, IEngine, IGraphicsDevice, IEntities, ISimulation, IAudioDevice, IAssetLibrary,
-                        IActionContext, IState, IDebugDraw> {
-public:
+class EngineCOM final:
+    public Implements<
+        EngineCOM,
+        IEngine,
+        IGraphicsDevice,
+        IEntities,
+        ISimulation,
+        IAudioDevice,
+        IAssetLibrary,
+        IActionContext,
+        IState,
+        IDebugDraw,
+        IFramePipeline> {
+  public:
     explicit EngineCOM(std::unique_ptr<Engine> engine) noexcept : m_engine(std::move(engine)) {}
 
     void TraceDiagnostics() const noexcept override { m_engine->TraceDiagnostics(); }
@@ -290,6 +301,28 @@ public:
         const auto outcome = m_engine->Tick(dt);
         if (!outcome) return outcome.error();
         return {};
+    }
+
+    [[nodiscard]] Result<void> AdvanceFrame(float dt) noexcept override {
+        const auto result = m_engine->AdvanceFrame(dt);
+        if (!result)
+            return result.error();
+        return {};
+    }
+    [[nodiscard]] Result<void> FinishFrame() noexcept override {
+        const auto result = m_engine->FinishFrame();
+        if (!result)
+            return result.error();
+        return {};
+    }
+    [[nodiscard]] Result<void> CancelFrame() noexcept override {
+        const auto result = m_engine->CancelFrame();
+        if (!result)
+            return result.error();
+        return {};
+    }
+    [[nodiscard]] bool FramePending() const noexcept override {
+        return m_engine->FramePending();
     }
 
     void ClearScene() noexcept override {
@@ -331,6 +364,8 @@ public:
     [[nodiscard]] uint64_t DeviceGeneration() const noexcept override { return m_engine->DeviceGeneration(); }
 
     [[nodiscard]] Result<void> RecreateGraphicsDevice() noexcept override {
+        if (m_engine->FramePending())
+            return FramePipelineError::FrameInProgress;
         const auto result = m_engine->HandleDeviceLost();
         if (!result) return result.error();
         return {};
@@ -669,23 +704,36 @@ public:
 
     [[nodiscard]] Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept override {
         const GraphicsSettings& current = Device().Settings();
-        return DispatchOutChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig,
-                                EnvironmentSettings>(settingsChain, [&]<typename NodeT>(NodeT& out) -> Result<void> {
-            if constexpr (std::is_same_v<NodeT, GraphicsSettings>) {
-                out = current;
-            } else if constexpr (std::is_same_v<NodeT, AAState>) {
-                out = current.antiAliasing;
-            } else if constexpr (std::is_same_v<NodeT, GISettings>) {
-                out = current.post;
-            } else if constexpr (std::is_same_v<NodeT, ShadowSettings>) {
-                out = current.shadows;
-            } else if constexpr (std::is_same_v<NodeT, RayTracingConfig>) {
-                out = current.rayTracing;
-            } else if constexpr (std::is_same_v<NodeT, EnvironmentSettings>) {
-                out = current.environment;
+        return DispatchOutChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig, EnvironmentSettings, GraphicsDeviceInfo>(
+            settingsChain, [&]<typename NodeT>(NodeT& out) -> Result<void> {
+                if constexpr (std::is_same_v<NodeT, GraphicsDeviceInfo>) {
+                    const auto info = Device().Info();
+                    out             = {
+                        .rendererName         = String64(info.rendererName),
+                        .gpuName              = String256(info.gpuName),
+                        .deviceType           = info.deviceType,
+                        .presentationMode     = info.presentationMode,
+                        .pacingPolicy         = info.pacingPolicy,
+                        .meshShadingSupported = info.meshShadingSupported,
+                        .meshShadingActive    = info.meshShadingActive,
+                        .rayTracingSupported  = info.rayTracingSupported
+                    };
+                } else if constexpr (std::is_same_v<NodeT, GraphicsSettings>) {
+                    out = current;
+                } else if constexpr (std::is_same_v<NodeT, AAState>) {
+                    out = current.antiAliasing;
+                } else if constexpr (std::is_same_v<NodeT, GISettings>) {
+                    out = current.post;
+                } else if constexpr (std::is_same_v<NodeT, ShadowSettings>) {
+                    out = current.shadows;
+                } else if constexpr (std::is_same_v<NodeT, RayTracingConfig>) {
+                    out = current.rayTracing;
+                } else if constexpr (std::is_same_v<NodeT, EnvironmentSettings>) {
+                    out = current.environment;
+                }
+                return {};
             }
-            return {};
-        });
+        );
     }
 
     [[nodiscard]] Result<BufferID> CreateBuffer(const ChainInNode* bufferChain) noexcept override {
@@ -2140,13 +2188,23 @@ public:
     }
 
 private:
-    friend class Implements<EngineCOM, IEngine, IGraphicsDevice, IEntities, ISimulation, IAudioDevice, IAssetLibrary,
-                            IActionContext, IState, IDebugDraw>;
+  friend class Implements<
+      EngineCOM,
+      IEngine,
+      IGraphicsDevice,
+      IEntities,
+      ISimulation,
+      IAudioDevice,
+      IAssetLibrary,
+      IActionContext,
+      IState,
+      IDebugDraw,
+      IFramePipeline>;
 
-    ~EngineCOM() {
-        for (const auto& [window, subscription]: m_dropSubscriptions)
-            m_engine->Host(window).SetFileDropHandler(nullptr, nullptr);
-    }
+  ~EngineCOM() {
+      for (const auto& [window, subscription]: m_dropSubscriptions)
+          m_engine->Host(window).SetFileDropHandler(nullptr, nullptr);
+  }
     [[nodiscard]] bool WindowExists(WindowID window) const noexcept {
         const auto ids = m_engine->WindowIDs();
         return std::ranges::find(ids, window) != ids.end();

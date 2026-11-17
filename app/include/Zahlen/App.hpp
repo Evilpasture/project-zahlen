@@ -27,24 +27,21 @@ namespace ZHLN {
 // Compose modules explicitly with Install().
 void InstallApplicationDefaults(COM::IEngine& engine);
 
-// A layer may implement any of Start, Tick, UI and Stop. Start runs after
+// A layer may implement Start, Tick, UI, BeforeRender and/or Stop. Start runs after
 // scene creation; Tick runs after event/input pumping; UI runs in the host
 // loop before update and Engine::Tick, never in a core frame step. Hooks run
-// in registration order; Stop runs in reverse order before Engine teardown. Layers can own move-only state.
+// in registration order; BeforeRender runs after simulation/transform cleanup and
+// before camera projection/culling/presentation. It may return a typed error;
+// failure or close cancels presentation before Stop. Stop runs in reverse order
+// before Engine teardown. Layers can own move-only state.
 template <typename T>
-concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
-    layer.Start(engine);
-} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) {
-    layer.Start(engine, ui);
-} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) {
-    layer.Tick(engine, dt);
-} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
-    layer.UI(engine);
-} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) {
-    layer.UI(engine, ui);
-} || requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) {
-    layer.Stop(engine);
-};
+concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Start(engine); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) { layer.Start(engine, ui); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) { layer.Tick(engine, dt); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.UI(engine); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) { layer.UI(engine, ui); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) { layer.BeforeRender(engine, dt); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Stop(engine); };
 
 // Application is a public entry point (app/ is its own library), so its
 // out-of-line members have to be part of the export set like any other API.
@@ -133,6 +130,15 @@ class ZHLN_API Application {
                 } else return static_cast<Stored*>(state)->UI(engine);
             };
         }
+        if constexpr (requires(Stored& l, COM::IEngine& engine, float dt) { l.BeforeRender(engine, dt); }) {
+            slot.beforeRender = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->BeforeRender(engine, dt))>) {
+                    static_cast<Stored*>(state)->BeforeRender(engine, dt);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->BeforeRender(engine, dt);
+            };
+        }
         if constexpr (requires(Stored& l, COM::IEngine& engine) { l.Stop(engine); }) {
             slot.stop = [](void* state, COM::IEngine& engine) { static_cast<Stored*>(state)->Stop(engine); };
         }
@@ -193,6 +199,7 @@ class ZHLN_API Application {
         void (*start)(void*, COM::IEngine&, HostUI&)       = nullptr;
         void (*tick)(void*, COM::IEngine&, float) = nullptr;
         std::expected<void, ErrorCode> (*ui)(void*, COM::IEngine&, HostUI&)          = nullptr;
+        std::expected<void, ErrorCode> (*beforeRender)(void*, COM::IEngine&, float)  = nullptr;
         void (*stop)(void*, COM::IEngine&)        = nullptr;
     };
 

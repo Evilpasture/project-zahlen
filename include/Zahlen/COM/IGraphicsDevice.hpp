@@ -32,6 +32,7 @@ struct IGraphicsDevice : IObject {
     // Supported nodes: GraphicsSettings, AAState, GISettings, ShadowSettings,
     // RayTracingConfig, EnvironmentSettings.
     [[nodiscard]] virtual Result<void> ApplySettings(const ChainInNode* settingsChain) noexcept = 0;
+    // Read-only queries additionally accept GraphicsDeviceInfo.
     [[nodiscard]] virtual Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept = 0;
 
     // Supported node: BufferCreateInfo.
@@ -69,6 +70,12 @@ struct IGraphicsDevice : IObject {
 
     [[nodiscard]] auto ApplySettings(const GraphicsSettings& settings) noexcept -> Result<void> {
         return ApplySettings(InChain(settings));
+    }
+
+    [[nodiscard]] auto Info() const noexcept -> GraphicsDeviceInfo {
+        GraphicsDeviceInfo info {};
+        (void) GetSettings(OutChain(info));
+        return info;
     }
 
     [[nodiscard]] auto Settings() const noexcept -> GraphicsSettings {

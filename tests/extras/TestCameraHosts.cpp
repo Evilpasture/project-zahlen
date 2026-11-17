@@ -148,24 +148,27 @@ struct CameraHostsSuite {
             return {};
         }
         std::expected<void, ErrorCode> application_layers_drive_before_core_tick_without_modules() {
+            struct Monitor {
+                bool* ran;
+                void  BeforeRender(COM::IEngine& engine, float) {
+                    auto&      entities = *engine.Entities();
+                    const auto camera   = entities.SingletonEntity<Components::MainCameraTagComponent>();
+                    ExpectTrue(camera.HasValue());
+                    if (camera.HasValue()) {
+                        ExpectTrue(entities.Get<FreeCam::FreeCamComponent>(camera.value) != nullptr);
+                        ExpectTrue(entities.Get<CameraRig::TargetCameraComponent>(camera.value) != nullptr);
+                    }
+                    *ran = true;
+                }
+            };
             bool       ran    = false;
             const auto result = App(EngineConfig {.appName = "Camera layers", .validationMode = ValidationMode::Off, .headless = true})
                                     .AddLayer(FreeCam::Layer {})
                                     .AddLayer(CameraRig::Layer {})
-                                    .Run([&](COM::IEngine& engine, float) {
-                                        auto&      entities = *engine.Entities();
-                                        const auto camera   = entities.SingletonEntity<Components::MainCameraTagComponent>();
-                                        ExpectTrue(camera.HasValue());
-                                        if (camera.HasValue()) {
-                                            ExpectTrue(entities.Get<FreeCam::FreeCamComponent>(camera.value) != nullptr);
-                                            ExpectTrue(entities.Get<CameraRig::TargetCameraComponent>(camera.value) != nullptr);
-                                        }
-                                        // Let two real empty-world frames project camera matrices
-                                        // and render, then close through the ordinary host loop.
-                                        if (engine.CurrentFrame() >= 2) {
-                                            ran = true;
+                                    .AddLayer(Monitor {&ran})
+                                    .Run([](COM::IEngine& engine, float) {
+                                        if (engine.CurrentFrame() >= 2)
                                             engine.RequestClose();
-                                        }
                                     });
             ExpectTrue(result.has_value());
             ExpectTrue(ran);
