@@ -32,7 +32,7 @@
 #include <BSP/BSPScene.hpp>
 #include <Benchmark/Viewer/NativeBenchmarkViewer.hpp>
 #include <Camera/NativeTargetCamera.hpp>
-#include <CharacterController/CharacterController.hpp>
+#include <CharacterController/NativeCharacterController.hpp>
 #include <FreeCam/NativeFreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>

@@ -13,6 +13,7 @@
 // Zahlen builds with -fno-exceptions, so the noexcept on every method here is
 // a statement of fact rather than a promise that needs a try/catch to keep.
 
+#include <Zahlen/Animation/IKControls.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
@@ -146,11 +147,10 @@ template <typename T>
         .alignment  = static_cast<uint32_t>(alignof(T)),
         .layoutHash = Reflect::LayoutHash<T>(),
         .familyID   = +[]() noexcept -> uint32_t { return ECS::ComponentFamily::GetTypeID<T>(); },
-        .ensure =
-            +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> void* {
+        .ensure     = +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> void* {
             const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
             if (void* existing = registry.GetRawByFamily(entity, id)) {
-                if constexpr (SceneResources::OwnsExternalResource<T>) {
+                if constexpr (SceneResources::OwnsExternalResource<T> || std::is_same_v<T, Components::AnimatorComponent>) {
                     SceneResources::Release(engine, *static_cast<T*>(existing));
                     *static_cast<T*>(existing) = T {};
                 }
@@ -158,22 +158,22 @@ template <typename T>
             }
             // Add() panics on a dead entity rather than returning; the caller
             // has already refused those, and this keeps that contract local.
-            if (!registry.IsAlive(entity)) return nullptr;
+            if (!registry.IsAlive(entity))
+                return nullptr;
             return &registry.Add<T>(entity);
         },
-        .remove =
-            +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> bool {
-            if constexpr (SceneResources::OwnsExternalResource<T>) {
+        .remove = +[](Engine& engine, ECS::Registry& registry, Entity entity) noexcept -> bool {
+            if constexpr (SceneResources::OwnsExternalResource<T> || std::is_same_v<T, Components::AnimatorComponent>) {
                 return SceneResources::Detach<T>(engine, registry, entity);
             } else {
                 const uint32_t id = ECS::ComponentFamily::GetTypeID<T>();
-                if (registry.GetRawByFamily(entity, id) == nullptr) return false;
+                if (registry.GetRawByFamily(entity, id) == nullptr)
+                    return false;
                 registry.Remove<T>(entity);
                 return true;
             }
         },
-        .fetch =
-            +[](const ECS::Registry& registry, Entity entity) noexcept -> void* {
+        .fetch = +[](const ECS::Registry& registry, Entity entity) noexcept -> void* {
             return registry.GetRawByFamily(entity, ECS::ComponentFamily::GetTypeID<T>());
         },
     };
@@ -205,6 +205,10 @@ constexpr std::array kPublishedComponents {
     Publish<Components::VolumetricFogComponent>(),
     Publish<Components::VolumetricVolumeComponent>(),
     Publish<Components::AnimatorComponent>(),
+    Publish<Components::AnimatorControlComponent>(),
+    Publish<Components::CharacterMotorComponent>(),
+    Publish<Components::CharacterMotorStateComponent>(),
+    Publish<IK::TwoBoneIKComponent>(),
     Publish<Components::PhysicsComponent>(),
     Publish<Components::ImpulseCommand>(),
     Publish<Components::RagdollComponent>(),

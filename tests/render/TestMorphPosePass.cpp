@@ -139,7 +139,7 @@ struct MorphPosePassSuite {
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Morph Pose Pass", .width = 640, .height = 480}
         );
         if (engine.Valid()) {
-            ZHLN::Animation::Install(*engine);
+            // Engine creation installs the skeletal runtime.
         }
         return engine;
     }

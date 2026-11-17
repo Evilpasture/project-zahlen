@@ -79,7 +79,7 @@ struct RenderAnimatedMeshTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(AnimatedMeshTestError::EngineInitFailed);
             }
-            ZHLN::Animation::Install(*engine);
+            // Engine creation installs the skeletal runtime.
 
             auto reg = engine->Entities();
 

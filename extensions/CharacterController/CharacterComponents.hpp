@@ -8,6 +8,16 @@
 
 namespace ZHLN::Character {
 
+struct SeatIntent {
+    float moveX     = 0.0f;
+    float moveZ     = 0.0f;
+    float lookYaw   = 0.0f;
+    float lookPitch = 0.0f;
+    float zoom      = 0.0f;
+    bool  jump      = false;
+    bool  sprint    = false;
+};
+
 // Character locomotion state: what the controller integrates every physics
 // substep. The constants (speed 7, sprint 1.65x, jump force 12, gravity 32
 // in the integrator) are this controller's tuning, not engine substrate --

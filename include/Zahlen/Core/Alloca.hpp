@@ -3,6 +3,7 @@
 // Intentionally use Unix header only.
 #include <alloca.h>
 #include <concepts>
+#include <cstdlib>
 
 namespace ZHLN {
 

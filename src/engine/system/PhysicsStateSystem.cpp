@@ -14,8 +14,16 @@
 #include <vector>
 
 namespace ZHLN::Tests {
-static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
-                                          const PhysicsContext& physics, float alpha) noexcept {
+static void VerifyRealVisualInterpolation(
+    ECS::Query<
+        const Components::PhysicsComponent,
+        Components::TransformComponent&,
+        const Components::CharacterMotorComponent,
+        const Components::CharacterMotorStateComponent,
+        const Components::RagdollComponent> query,
+    const PhysicsContext&                   physics,
+    float                                   alpha
+) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
@@ -69,8 +77,16 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
 
 namespace ZHLN {
 
-void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
-                                       ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept {
+void VisualInterpolationSystem::Update(
+    ECS::Query<
+        const Components::PhysicsComponent,
+        Components::TransformComponent&,
+        const Components::CharacterMotorComponent,
+        const Components::CharacterMotorStateComponent,
+        const Components::RagdollComponent> query,
+    ECS::Res<PhysicsContext>                physics,
+    FrameAlpha                              alpha
+) noexcept {
     auto entities = query.Entities<Components::PhysicsComponent>();
     auto phys     = query.Raw<Components::PhysicsComponent>();
 
@@ -108,11 +124,15 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
         const auto& snap = snapshots[j];
         trans->position = Lerp(snap.previousPosition, snap.currentPosition, clampedAlpha);
         trans->rotation = Slerp(Quat{snap.previousRotation}, Quat{snap.currentRotation}, clampedAlpha);
+        const auto motor      = query.Get<Components::CharacterMotorComponent>(e);
+        const auto motorState = query.Get<Components::CharacterMotorStateComponent>(e);
+        const auto ragdoll    = query.Get<Components::RagdollComponent>(e);
+        if (motor && motor->driveFacing && motorState && (!ragdoll || ragdoll->state == RagdollState::Inactive))
+            trans->rotation = Slerp(motorState->previousFacing, motorState->facing, clampedAlpha);
     }
 
     if constexpr (isDev) {
         ZHLN::Tests::VerifyRealVisualInterpolation(query, *physics, alpha.value);
     }
 }
-
 }

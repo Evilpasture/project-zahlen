@@ -22,6 +22,10 @@ set(RAW_ENGINE_SOURCES
     World.cpp
     VisibilityList.cpp
     Capabilities.cpp
+    system/CharacterMotorSystem.cpp
+    animation/AnimationContext.cpp
+    animation/AnimationSystem.cpp
+    animation/TwoBoneIK.cpp
     EngineCOM.cpp
     LogicWorldCOM.cpp
     SystemWiring.cpp

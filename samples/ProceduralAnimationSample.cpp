@@ -3,7 +3,7 @@
 
 #include <Animation/ProceduralMath.hpp>
 #include <Camera/NativeTargetCamera.hpp>
-#include <CharacterController/CharacterController.hpp>
+#include <CharacterController/NativeCharacterController.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/ConfigCli.hpp>

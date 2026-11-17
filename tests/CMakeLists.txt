@@ -69,7 +69,7 @@ set(ZHLN_CPU_TEST_SOURCES
     threading/TestTaskSystem.cpp
 )
 
-if(TARGET zahlen_character_controller)
+if(TARGET zahlen_native_character_controller)
     list(APPEND ZHLN_CPU_TEST_SOURCES physics/TestCharacterMovement.cpp)
 endif()
 
@@ -114,8 +114,8 @@ target_include_directories(ztest_cpu PRIVATE
 
 )
 
-if(TARGET zahlen_character_controller)
-    target_link_libraries(ztest_cpu PRIVATE zahlen_character_controller)
+if(TARGET zahlen_native_character_controller)
+    target_link_libraries(ztest_cpu PRIVATE zahlen_native_character_controller)
     target_include_directories(ztest_cpu PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
     target_compile_definitions(ztest_cpu PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
 endif()

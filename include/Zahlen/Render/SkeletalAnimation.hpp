@@ -2,28 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Animation/AnimationID.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
-#include <Zahlen/Core/String.hpp>
 #include <vector>
 
 namespace ZHLN {
-
-struct AnimationID {
-    uint32_t                  id        = InvalidID;
-    static constexpr uint32_t InvalidID = ~0u;
-
-    [[nodiscard]] static constexpr auto Null() noexcept -> AnimationID {
-        return {};
-    }
-
-    [[nodiscard]] constexpr auto IsValid() const noexcept -> bool {
-        return id != InvalidID;
-    }
-
-    constexpr auto operator==(const AnimationID&) const noexcept -> bool = default;
-};
 
 enum class AnimationPathType : uint8_t { Translation, Rotation, Scale, Weights };
 

@@ -8,7 +8,7 @@
 #include "RagdollManager.hpp"
 #include "ShapeCache.hpp"
 #include "Zahlen/Core/Profiler.hpp"
-#include <Zahlen/Core/Alloca.hpp>
+#include <Zahlen/Core/Array.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -167,7 +167,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
             return;
         }
 
-        auto* tasks = Alloca<TaskSystem::Task>(inNumJobs);
+        auto* tasks = static_cast<TaskSystem::Task*>(JPH_STACK_ALLOC(inNumJobs * sizeof(TaskSystem::Task)));
 
         for (uint i = 0; i < inNumJobs; ++i) {
             inJobs[i]->AddRef();

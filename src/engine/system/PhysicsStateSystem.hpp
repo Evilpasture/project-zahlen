@@ -12,8 +12,16 @@ class PhysicsContext;
 
 class ZHLN_API VisualInterpolationSystem {
   public:
-    static void Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
-                       ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept;
+    static void Update(
+        ECS::Query<
+            const Components::PhysicsComponent,
+            Components::TransformComponent&,
+            const Components::CharacterMotorComponent,
+            const Components::CharacterMotorStateComponent,
+            const Components::RagdollComponent> query,
+        ECS::Res<PhysicsContext>                physics,
+        FrameAlpha                              alpha
+    ) noexcept;
 };
 
 }

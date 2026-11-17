@@ -1,15 +1,16 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
+#include "../animation/AnimationLifecycle.hpp"
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Engine/SceneResources.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/Physics/Physics.hpp>
 #include <span>
 #include <utility>
@@ -75,6 +76,7 @@ void ReleaseOwnedResources(Engine& engine, ECS::Registry& registry, bool all) {
     ReleaseSelected<Components::AudioSourceComponent>(engine, ECS::Query<Components::AudioSourceComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::OwnedMeshComponent>(engine, ECS::Query<Components::OwnedMeshComponent&, const Components::PendingDestroy> {registry}, all);
     ReleaseSelected<Components::SkeletalMeshComponent>(engine, ECS::Query<Components::SkeletalMeshComponent&, const Components::PendingDestroy> {registry}, all);
+    Animation::ReleaseAnimations(engine, all);
     engine.RunSceneCleanupPasses(all);
 }
 

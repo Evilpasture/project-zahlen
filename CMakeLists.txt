@@ -848,7 +848,7 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
     target_link_libraries(zahlen_project_light_app PRIVATE
         zahlen_application
         zahlen_project_light_client
-        zahlen_character_controller
+        zahlen_native_character_controller
         zahlen_native_camera
         zahlen_warnings
     )

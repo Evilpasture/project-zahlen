@@ -22,6 +22,7 @@ ZHLN_API void Release(AudioContext& audio, Components::AudioSourceComponent& com
 ZHLN_API void Release(RenderContext& render, Components::OwnedMeshComponent& component);
 ZHLN_API void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component);
 
+ZHLN_API void Release(Engine& engine, Components::AnimatorComponent& component);
 ZHLN_API void Release(Engine& engine, Components::PhysicsComponent& component);
 ZHLN_API void Release(Engine& engine, Components::RagdollComponent& component);
 ZHLN_API void Release(Engine& engine, Components::AudioSourceComponent& component);

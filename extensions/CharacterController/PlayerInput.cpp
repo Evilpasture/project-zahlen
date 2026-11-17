@@ -3,13 +3,13 @@
 
 // extensions/CharacterController/PlayerInput.cpp
 #include "PlayerInput.hpp"
-
 #include "CharacterComponents.hpp"
-#include "Zahlen/Math/Camera.hpp"
+#include "CharacterController.hpp"
 #include "Zahlen/ECS/Components.hpp"
 #include "Zahlen/ECS/Entity.hpp"
-#include "Zahlen/Input/Input.hpp"
 #include "Zahlen/Engine/Capabilities/InputReader.hpp"
+#include "Zahlen/Input/Input.hpp"
+#include "Zahlen/Math/Camera.hpp"
 #include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <cmath>
@@ -31,73 +31,21 @@ auto ResolvePrimaryGamepad(const InputReader& input, PlayerSeat seat) noexcept -
 
 auto TranslateSeatIntent(const InputState& keyboardMouse, bool seatHasKeyboardMouse, const InputReader& input, GamepadSlot gamepadSlot) noexcept
     -> SeatIntent {
-    SeatIntent intent {};
     const bool padValid = gamepadSlot.IsValid();
-
-    if (seatHasKeyboardMouse) {
-        if (keyboardMouse.IsKeyDown(KeyCode::W)) {
-            intent.moveZ += 1.0f;
-        }
-        if (keyboardMouse.IsKeyDown(KeyCode::S)) {
-            intent.moveZ -= 1.0f;
-        }
-        if (keyboardMouse.IsKeyDown(KeyCode::A)) {
-            intent.moveX -= 1.0f;
-        }
-        if (keyboardMouse.IsKeyDown(KeyCode::D)) {
-            intent.moveX += 1.0f;
-        }
-    }
+    const InputSnapshot snapshot {
+        .keyboardMouse    = keyboardMouse,
+        .leftStick        = padValid ? input.GamepadLeftStick(gamepadSlot) : StickSample {},
+        .rightStick       = padValid ? input.GamepadRightStick(gamepadSlot) : StickSample {},
+        .keyboardAssigned = seatHasKeyboardMouse,
+        .gamepadAssigned  = padValid,
+        .gamepadJump      = padValid && input.GamepadButtonDown(gamepadSlot, GamepadButton::South),
+        .gamepadSprint    = padValid && (input.GamepadButtonDown(gamepadSlot, GamepadButton::LeftThumb) || input.GamepadLeftTrigger(gamepadSlot) >= 0.5f)
+    };
+    auto intent = TranslateSeatIntent(snapshot);
     if (padValid) {
-        const StickSample left = input.GamepadLeftStick(gamepadSlot);
-        intent.moveX += left.x;
-        intent.moveZ += left.y;
+        intent.zoom +=
+            (float(input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadUp)) - float(input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadDown))) * 0.25f;
     }
-
-    const float len = std::sqrt(intent.moveX * intent.moveX + intent.moveZ * intent.moveZ);
-    if (len > 1.0f) {
-        intent.moveX /= len;
-        intent.moveZ /= len;
-    }
-
-    if (seatHasKeyboardMouse && keyboardMouse.IsMouseButtonDown(MouseButton::Right)) {
-        constexpr float kMouseSensitivity = 0.15f;
-        intent.lookYaw += keyboardMouse.mouseDeltaX * kMouseSensitivity;
-        intent.lookPitch += keyboardMouse.mouseDeltaY * kMouseSensitivity;
-    }
-    if (padValid) {
-        constexpr float kStickDegreesPerTick = 2.5f;
-        const StickSample right              = input.GamepadRightStick(gamepadSlot);
-        intent.lookYaw += right.x * kStickDegreesPerTick;
-        intent.lookPitch -= right.y * kStickDegreesPerTick;
-    }
-
-    if (seatHasKeyboardMouse) {
-        const float wheel = keyboardMouse.mouseWheel;
-        if (std::abs(wheel) > 0.01f) {
-            intent.zoom += wheel * 0.5f;
-        }
-    }
-    if (padValid) {
-        if (input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadUp)) {
-            intent.zoom += 0.25f;
-        }
-        if (input.GamepadButtonDown(gamepadSlot, GamepadButton::DPadDown)) {
-            intent.zoom -= 0.25f;
-        }
-    }
-
-    const bool kbmJump   = seatHasKeyboardMouse && keyboardMouse.IsKeyDown(KeyCode::Space);
-    const bool kbmSprint = seatHasKeyboardMouse && keyboardMouse.IsKeyDown(KeyCode::LShift);
-    const bool padJump   = padValid && input.GamepadButtonDown(gamepadSlot, GamepadButton::South);
-    // The capability has no "trigger held" predicate, and it does not need one:
-    // the left trigger is an axis, and the router's trigger-button threshold was
-    // always 0.50, so this is the same comparison written where a caller can see
-    // what it means.
-    const bool padSprint =
-        padValid && (input.GamepadButtonDown(gamepadSlot, GamepadButton::LeftThumb) || input.GamepadLeftTrigger(gamepadSlot) >= 0.50f);
-    intent.jump   = kbmJump || padJump;
-    intent.sprint = kbmSprint || padSprint;
     return intent;
 }
 

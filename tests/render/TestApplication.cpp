@@ -35,7 +35,7 @@
 #include <Terrain/TerrainSystem.hpp>
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
-#include <CharacterController/CharacterController.hpp>
+#include <CharacterController/NativeCharacterController.hpp>
 #endif
 #if defined(ZHLN_HAS_CAMERA_MODULES)
 #include <Camera/NativeTargetCamera.hpp>
@@ -625,7 +625,7 @@ void test_animation_cleanup_callback_releases_only_pending_then_clears_all() {
     auto app = NativeApp(EngineConfig {.appName = "AnimationQueryCleanupTest", .validationMode = ValidationMode::Off, .headless = true});
     bool ran = false;
     app.OnStart([&](Engine& engine) {
-        Animation::Install(engine);
+        // Engine creation installs the skeletal runtime.
         auto animations = engine.Service<Animation::AnimationContext>();
         Expect(animations.has_value());
         if (!animations)

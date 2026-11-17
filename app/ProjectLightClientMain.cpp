@@ -5,7 +5,7 @@
 // separate entrypoint from app/main.cpp, keeping the default `zahlen` binary
 // deterministic and free of client CLI/configuration code.
 #include <Camera/NativeTargetCamera.hpp>
-#include <CharacterController/CharacterController.hpp>
+#include <CharacterController/NativeCharacterController.hpp>
 #include <ProjectLightClient/ClientConfig.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
 #include <Zahlen/ConfigCli.hpp>

@@ -1,40 +1,50 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-
-// extensions/CharacterController/CharacterController.hpp
-//
-// Overgrowth-style character locomotion: WASD intent, camera-relative
-// translation, jump/gravity integration, sprint, yaw slewing. Core keeps
-// PhysicsContext::CreateCharacter / CharacterVirtual and the raw
-// InputState; everything that interprets keys into character
-// movement lives here.
 #pragma once
-
 #include "CharacterComponents.hpp"
-#include "CharacterMovement.hpp"
-#include "PlayerInput.hpp"
-#include <Zahlen/Engine/GameModule.hpp>
-
-namespace ZHLN {
-
-class Engine;
-
-namespace Character {
-
-// Composition-root entry point: registers the components, installs the
-// physics-substep hooks, the free-cam speed query, and contributes the
-// two frame steps plus the orientation-interpolation graph node through
-// the engine's extension seams. Call once after Engine::Create; the seams
-// replay the contributions on every schedule/graph rebuild (scene resets).
-//
-// Install this BEFORE any layer whose systems read MovementComponent
-// (Interaction finds the player through it): its external-writes anchor
-// must be registered ahead of those readers for hazard analysis.
-// The module as a value: what the host installs, and what a host that wants to
-// report a placement failure installs itself instead of calling Install.
-auto Describe() -> Module;
-
-void Install(Engine& engine);
-
-} // namespace Character
-} // namespace ZHLN
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Input/Input.hpp>
+namespace ZHLN::COM {
+struct IEngine;
+struct IEntities;
+struct IActionContext;
+struct ISimulation;
+} // namespace ZHLN::COM
+namespace ZHLN::Character {
+// Host policy only. The engine owns fixed-step gravity, integration, character
+// velocity commits, grounded readback, and render interpolation. Do not combine
+// this driver and NativeCharacterController on the same entity/world.
+struct HostCharacterComponent {
+    float gravity      = 32.0f;
+    float turnSpeed    = 10.0f;
+    float pushStrength = 50.0f;
+    float pushRadius   = 0.75f;
+    bool  enabled      = true;
+};
+struct InputSnapshot {
+    InputState  keyboardMouse {};
+    StickSample leftStick {}, rightStick {};
+    bool        keyboardAssigned = true;
+    bool        gamepadAssigned  = false;
+    bool        gamepadJump      = false;
+    bool        gamepadSprint    = false;
+};
+// Pure arithmetic shared with the retained native input adapter.
+auto TranslateSeatIntent(const InputSnapshot&) noexcept -> SeatIntent;
+auto ReadInput(const COM::IActionContext&, PlayerSeat seat = kPrimarySeat) -> SeatIntent;
+// Attach requires an existing live entity. No physics body is created,
+// overwritten or retired here. These calls explicitly own the host/motor data.
+bool Attach(COM::IEntities&, Entity, const MovementComponent& = {}, const HostCharacterComponent& = {});
+void Detach(COM::IEntities&, Entity);
+// Feed an explicit snapshot (AI, replay, deterministic tests), or call Step to
+// read each entity's routed seat and the previous resolved main-camera yaw.
+void Apply(COM::IEntities&, Entity, const SeatIntent&, float cameraYawDegrees, float dt, bool freeze = false);
+void PushProps(COM::IEntities&, COM::ISimulation&, float dt);
+void Step(COM::IEngine&, float dt);
+struct Layer {
+    void Tick(COM::IEngine& engine, float dt) {
+        Step(engine, dt);
+    }
+    void Stop(COM::IEngine& engine);
+};
+} // namespace ZHLN::Character

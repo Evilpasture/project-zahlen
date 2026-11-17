@@ -35,8 +35,8 @@ set(SAMPLE_SOURCES
 #                              (<Camera/TargetCamera.hpp>, zahlen_native_camera), and
 #                              installs the character controller that drives
 #                              its WASD and physics steps
-#                              (<CharacterController/CharacterController.hpp>,
-#                              zahlen_character_controller).
+#                              (<CharacterController/NativeCharacterController.hpp>,
+#                              zahlen_native_character_controller).
 #   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
 #   RemoteGLBSample            fetches through ZHLN::Remote (zahlen_remote_asset
 #                              over extensions/net/HTTP) and imports with ZHLN.glTF
@@ -49,8 +49,8 @@ set(SAMPLE_SOURCES
 #                              interaction (zahlen_interaction); the player is a
 #                              procedural character driven by an imported GLB rig
 #                              through the character controller
-#                              (<CharacterController/CharacterController.hpp>,
-#                              zahlen_character_controller), which is why it also
+#                              (<CharacterController/NativeCharacterController.hpp>,
+#                              zahlen_native_character_controller), which is why it also
 #                              consumes ZHLN.Locomotion and ZHLN.ProceduralAnimation
 #                              (zahlen_animation) and loads that rig with
 #                              <glTF/GLTFImporter.hpp> (zahlen_gltf). V hands the

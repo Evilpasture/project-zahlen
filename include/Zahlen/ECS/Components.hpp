@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Animation/AnimationID.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -21,7 +22,6 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
-#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
@@ -207,6 +207,38 @@ struct Components {
         bool            isFinished           = false;
     };
     static_assert(std::is_trivially_copyable_v<AnimatorComponent>);
+
+    // COM-safe playback controls. AnimatorComponent is read-only runtime state.
+    // Attach to an animated prefab root. Seek is a consumed one-shot request.
+    struct AnimatorControlComponent {
+        int32_t trackIndex    = -1;
+        float   playbackSpeed = 1.0f;
+        float   blendDuration = 0.15f;
+        float   seekTime      = 0.0f;
+        bool    loop          = true;
+        bool    seekRequested = false;
+    };
+    // Host supplies world-space horizontal velocity and one-shot vertical jump
+    // speed. Input mapping, sprint, gait selection and facing remain host policy.
+    struct CharacterMotorComponent {
+        FVec3 desiredVelocity = {};
+        float acceleration    = 25.0f;
+        float deceleration    = 30.0f;
+        float gravity         = 32.0f;
+        float jumpSpeed       = 0.0f;
+        bool  jumpRequested   = false;
+        Quat  desiredFacing   = Quat::Identity();
+        bool  driveFacing     = false;
+    };
+    struct CharacterMotorStateComponent {
+        Quat  previousFacing = Quat::Identity();
+        Quat  facing         = Quat::Identity();
+        FVec3 velocity       = {};
+        bool  grounded       = false;
+    };
+    static_assert(std::is_trivially_copyable_v<AnimatorControlComponent>);
+    static_assert(std::is_trivially_copyable_v<CharacterMotorComponent>);
+    static_assert(std::is_trivially_copyable_v<CharacterMotorStateComponent>);
 
     struct AudioListenerComponent {
         bool         isPrimary = true;

@@ -10,4 +10,7 @@ template <typename T>
 inline constexpr bool OwnsExternalResource = std::is_same_v<T, Components::PhysicsComponent> || std::is_same_v<T, Components::RagdollComponent> ||
                                              std::is_same_v<T, Components::AudioSourceComponent> || std::is_same_v<T, Components::OwnedMeshComponent> ||
                                              std::is_same_v<T, Components::SkeletalMeshComponent>;
+template <typename T>
+inline constexpr bool ReadOnlyReflective =
+    OwnsExternalResource<T> || std::is_same_v<T, Components::AnimatorComponent> || std::is_same_v<T, Components::CharacterMotorStateComponent>;
 } // namespace ZHLN::SceneResources

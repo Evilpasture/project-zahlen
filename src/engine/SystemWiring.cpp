@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include "SystemWiring.hpp"
 #include "ArticulationSystem.hpp"
 #include "AudioSystem.hpp"
@@ -17,21 +14,27 @@
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
 #include "TransformSystem.hpp"
+#include "system/CharacterMotorSystem.hpp"
+#include <Zahlen/Animation/NativeAnimationSystem.hpp>
+#include <Zahlen/Animation/NativeIK.hpp>
 #include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/EntityCommandBuffer.hpp>
 #include <Zahlen/ECS/SystemGraph.hpp>
+#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Zahlen/Engine/Capabilities/Entities.hpp>
+#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/Frame.hpp>
+#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window/PlatformHost.hpp>
+#include <Zahlen/Window/Window.hpp>
 #include <string_view>
 
 namespace ZHLN {
@@ -48,10 +51,12 @@ void Physics(Engine& engine, float dt, FrameContext& ctx) {
         if (character.preStep != nullptr) {
             character.preStep(engine, kFixedStepDt);
         }
+        CharacterMotorSystem::PreStep(engine, kFixedStepDt);
         // A private buffer is played here, not at simulation-graph or main
         // buffer playback: hooks in the next substep must see consumed commands.
         engine.GetUpdateGraph().InvokeSequentialAndPlayback<&PhysicsSystem::CommitImpulses>(engine.MakeFrame(dt, ctx.alpha));
         engine.Physics().Step(kFixedStepDt);
+        CharacterMotorSystem::PostStep(engine);
         if (character.postStep != nullptr) {
             character.postStep(engine);
         }
@@ -144,6 +149,9 @@ void BuildSystemGraphs(Engine& engine) {
     // Every graph node derives its name, thunk and component hazards from its
     // callable's signature. The camera is modified in the earlier frame phase.
     updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
+    updateGraph.AddSystem<&Animation::AnimationSyncSystem::Update>();
+    updateGraph.AddSystem<&IK::TwoBoneIKSystem::Update>();
+    updateGraph.AddSystem<&Animation::AnimationStepSystem::Update>();
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();

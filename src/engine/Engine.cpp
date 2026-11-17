@@ -14,6 +14,8 @@
 #include "RenderSystem.hpp"
 #include "SceneCleanupSystem.hpp"
 #include "SystemWiring.hpp"
+#include <Zahlen/Animation/NativeAnimationSystem.hpp>
+#include <Zahlen/Animation/NativeIK.hpp>
 #include <Zahlen/Audio/Audio.hpp>
 #include <Zahlen/COM/FrameTypes.hpp>
 #include <Zahlen/Core/Arena.hpp>
@@ -291,6 +293,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     // wired here so an Engine returned by Create() is immediately ready to run.
     SeedBaselineScene(GetInternalRegistry());
     EnsureFramePlan();
+    EmplaceService<Animation::AnimationContext>();
+    GetInternalRegistry().RegisterComponent<IK::TwoBoneIKComponent>();
     InitializeSystemGraphs();
 
     return {};
@@ -606,6 +610,7 @@ void Engine::ProcessPendingDestroy() {
 
 void Engine::ReleaseSceneContents() {
     SceneCleanupSystem::ClearAll(*this, GetInternalRegistry());
+    _impl->poseUploads.Clear();
     // Queued destroys and any surviving bodies retain their own shapes.
     Physics().ClearMeshShapeCache();
     ClearVisibilityLists();
@@ -839,6 +844,7 @@ auto Engine::CancelFrame() -> std::expected<void, ErrorCode> {
         return std::unexpected(COM::FramePipelineError::NoPendingFrame);
     // Simulation is consumed, but no image will be presented. Preserve the
     // last presented transform/camera history for the next rendered frame.
+    _impl->poseUploads.Clear(); // consumed simulation must not retain unpublished palettes
     _impl->frameStage = Stage::Idle;
     ++_impl->frameCounter;
     return {};

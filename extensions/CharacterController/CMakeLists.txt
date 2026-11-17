@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # extensions/CharacterController -- overgrowth-style character locomotion
-# (zahlen_character_controller).
+# Native compatibility (zahlen_native_character_controller); capability host
+# (zahlen_character_controller) is declared separately below.
 #
 # WASD intent, camera-relative translation, jump/gravity integration, sprint
 # and yaw slewing over CharacterVirtual bodies: a game controller, not engine
@@ -11,7 +12,7 @@
 #
 # Public headers are reached as <CharacterController/...>.
 
-set(TARGET_NAME zahlen_character_controller)
+set(TARGET_NAME zahlen_native_character_controller)
 
 set(ZHLN_CHARACTER_SOURCES
     CharacterController.cpp
@@ -55,3 +56,13 @@ endif()
 # them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
 # libJolt.so on all 18 executables -- including the ones that never touch it.
 target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)
+
+# Capability-only host policy. Never links the native module/system adapter.
+add_library(zahlen_character_controller STATIC CharacterHost.cpp)
+set_target_properties(zahlen_character_controller PROPERTIES
+    CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(zahlen_character_controller PUBLIC zahlen_engine PRIVATE zahlen_warnings)
+target_include_directories(zahlen_character_controller PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
+zahlen_enable_reflection(zahlen_character_controller)
+# Native consumers may also use the shared POD and host policy API.
+target_link_libraries(zahlen_native_character_controller PUBLIC zahlen_character_controller)

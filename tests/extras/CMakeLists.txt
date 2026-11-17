@@ -623,3 +623,15 @@ if(TARGET zahlen_console)
     target_link_libraries(Extras_ConsoleHost PRIVATE zahlen_console zahlen_scene zahlen_screenshot zahlen_host_ui)
     zahlen_register_extras_test(Extras_ConsoleHost POOL gpu LABELS "GPU;Extras;COM")
 endif()
+
+# Engine-owned motor/playback controls: no native animation/controller dependency.
+zahlen_add_extras_group(Extras_RuntimeControls
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestRuntimeControls.cpp)
+target_link_libraries(Extras_RuntimeControls PRIVATE zahlen_gltf_assets zahlen_skeletal_animation zahlen_application)
+zahlen_register_extras_test(Extras_RuntimeControls POOL gpu LABELS GPU Extras)
+
+# Capability-only character host: no native controller, Jolt or graph adapter.
+zahlen_add_extras_group(Extras_CharacterHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCharacterHost.cpp)
+target_link_libraries(Extras_CharacterHost PRIVATE zahlen_character_controller zahlen_application)
+zahlen_register_extras_test(Extras_CharacterHost POOL gpu LABELS GPU Extras)

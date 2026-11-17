@@ -219,7 +219,7 @@ foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
         "editor;Editor" "terrain;Terrain" "vfx;VFX" "image;Image" "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
         "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
         "animation;Animation" "skeletal_animation;SkeletalAnimation"
-        "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
+        "native_character_controller;NativeCharacterController" "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam"
         "scripting;Scripting" "console;Console" "lua;Lua" "fonts;Fonts" "benchmark;Benchmark" "benchmark_viewer;BenchmarkViewer" "widgets;Widgets")
     list(GET pair 0 internal)
     list(GET pair 1 public)
@@ -325,7 +325,7 @@ zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine
 zhln_toolchain_package(GLTF TARGETS zahlen_gltf zahlen_gltf_assets DEPENDS Engine Serialization NativeHostUI Image HEADERS plugins/glTF)
 zhln_toolchain_package(FreeCam TARGETS zahlen_freecam zahlen_native_freecam DEPENDS Engine HEADERS extensions/FreeCam)
 zhln_toolchain_package(Camera TARGETS zahlen_camera zahlen_native_camera DEPENDS Engine HEADERS extensions/Camera)
-zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine HEADERS extensions/CharacterController)
+zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller zahlen_native_character_controller DEPENDS Engine HEADERS extensions/CharacterController)
 zhln_toolchain_package(SkeletalAnimation TARGETS zahlen_skeletal_animation DEPENDS Engine HEADERS extensions/Animation)
 zhln_toolchain_package(Animation TARGETS zahlen_animation DEPENDS Engine SkeletalAnimation CharacterController Camera FreeCam)
 # Serialization is a PRIVATE link of the plugin, which the export rewrites to

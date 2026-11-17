@@ -56,6 +56,8 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
+    "extensions/CharacterController/CharacterController.hpp", "extensions/CharacterController/CharacterHost.cpp",
+    "extensions/Animation/Animator.hpp", "extensions/Animation/AnimatorHost.cpp",
     "extensions/Console/ConsoleDebugger.cpp", "extensions/Console/ConsoleDebugger.hpp",
     "extensions/Scripting/ScriptECSBridge.cpp", "extensions/Scripting/ScriptECSBridge.hpp",
     "extensions/Scripting/ScriptComponentAccess.hpp", "extensions/Scripting/ScriptValueTypes.hpp",
@@ -87,7 +89,7 @@ COM_HOST_PORTS = frozenset({
     "plugins/glTF/GLTFDocument.cpp", "plugins/glTF/GLTFDocument.hpp",
     "plugins/glTF/GLTFAssets.cpp", "plugins/glTF/GLTFAssets.hpp", "plugins/glTF/GLTFOptions.hpp",
 })
-NATIVE_HOST_HEADER = re.compile(r"^(?:FreeCam/NativeFreeCam\.hpp|Camera/NativeTargetCamera\.hpp|NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/(?:ECS|Inspection)\.hpp|Physics/Jolt\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
+NATIVE_HOST_HEADER = re.compile(r"^(?:FreeCam/NativeFreeCam\.hpp|Camera/NativeTargetCamera\.hpp|CharacterController/(?:NativeCharacterController|CharacterMovement|PlayerInput)\.hpp|NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Animation/Native[^/]*\.hpp|Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/(?:ECS|Inspection)\.hpp|Physics/Jolt\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 
 # The internal cache header, and the paths allowed to include it.
 INTERNAL_HEADERS = {"Zahlen/Engine/AssetManager.hpp": "Engine::Assets() -> AssetLibrary"}

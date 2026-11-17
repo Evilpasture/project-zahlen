@@ -28,7 +28,7 @@ class ScriptComponentAccess {
                 return;
             Binding b {
                 +[](COM::IEntities& e, Entity entity) -> void* { return e.Get<T>(entity); },
-                +[](const void* p, std::string& out) { out += Reflect::ToDebugString(*static_cast<const T*>(p)); }, !SceneResources::OwnsExternalResource<T>
+                +[](const void* p, std::string& out) { out += Reflect::ToDebugString(*static_cast<const T*>(p)); }, !SceneResources::ReadOnlyReflective<T>
             };
             m_bindings[std::string(Reflect::TypeName<T>())] = b;
             m_bindings[std::string(canonical)]              = b;

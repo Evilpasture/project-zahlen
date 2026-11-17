@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/CharacterController/PlayerInput.hpp
+// Native ECS input adapter. COM hosts use CharacterController.hpp.
 #pragma once
 
 #include "CharacterComponents.hpp"
@@ -24,16 +24,6 @@ namespace Character {
 // router, so a test had to build one and inject into it to reach them. They are
 // arithmetic over a seat's inputs; they are now written as such, and the system
 // is the loop that feeds them.
-struct SeatIntent {
-    float moveX       = 0.0f;
-    float moveZ       = 0.0f;
-    float lookYaw     = 0.0f;
-    float lookPitch   = 0.0f;
-    float zoom        = 0.0f;
-    bool  jump        = false;
-    bool  sprint      = false;
-};
-
 // The rule. `keyboardMouse` is this seat's physical state (a value) and
 // `gamepadSlot` is the pad routing gave it, or an invalid slot for none.
 [[nodiscard]] auto TranslateSeatIntent(const InputState& keyboardMouse, bool seatHasKeyboardMouse, const InputReader& input,

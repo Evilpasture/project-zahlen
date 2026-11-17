@@ -1,12 +1,12 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/Animation -- skeletal animation domain + procedural animation rig.
+# extensions/Animation -- native compatibility + host procedural animation rig.
 #
 # Split into two targets so header-only / non-module consumers (samples, render
 # tests, scripting) get AnimationContext, AnimationSystem, and TwoBoneIK without
 # pulling in C++20 module BMIs or character-controller/camera dependencies:
-#   - zahlen_skeletal_animation: AnimationContext, AnimationSystem, TwoBoneIK
+#   - zahlen_skeletal_animation: native forwarding headers; runtime is in Engine
 #   - zahlen_animation:          ZHLN.Rig, ZHLN.Animator, ZHLN.Locomotion,
 #                                ZHLN.ProceduralAnimation + procedural solvers
 #
@@ -18,6 +18,7 @@
 set(SKELETAL_TARGET zahlen_skeletal_animation)
 
 add_library(${SKELETAL_TARGET} STATIC
+    AnimatorHost.cpp
     AnimationContext.cpp
     AnimationSystem.cpp
     TwoBoneIK.cpp
@@ -89,7 +90,7 @@ target_sources(${TARGET_NAME} PRIVATE ${ZHLN_ANIMATION_SOURCES})
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_skeletal_animation
     zahlen_engine
-    zahlen_character_controller
+    zahlen_native_character_controller
     zahlen_native_camera
     zahlen_native_freecam
 )
