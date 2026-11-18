@@ -53,24 +53,16 @@ struct RegistryNode {
     RegistryNode*        next;
 };
 
-#if defined(_WIN32)
-// The registry has to be one list per process, and on Windows the header cannot
-// arrange that by itself. The function-local static below is an STB_GNU_UNIQUE
-// symbol on ELF, so the dynamic linker gives the executable and every library the
-// same object; PE has no equivalent merge and MinGW emits a fresh static per
-// image. An Error built inside libzahlen_engine.dll -- which is what
-// Vk::Instance::Create() does, and what app/main.cpp:708 formats --
-// would then be read from the empty list in zahlen.exe and Message(), Category()
-// and Name() would answer "None" instead of the text the error was built with.
-// Declared here, defined once in the engine library (src/engine/Log.cpp), and
-// imported by every consumer, the list is shared again.
+// The error-category registry must be one list per process across libzahlen_engine
+// and every consumer image. An inline function-local static cannot arrange that
+// once libzahlen_engine seals its symbol table (hidden visibility + linker
+// version script localizes ELF STB_GNU_UNIQUE objects and Mach-O weak globals,
+// and PE never merges per-image statics at all): an Error constructed inside the
+// engine would push its category onto the engine's private list while the host
+// formatted it against an empty list and answered "None". Declared ZHLN_API
+// here, defined once in src/engine/Log.cpp, and imported by every consumer, all
+// platforms share the single process-wide list without leaking STB_GNU_UNIQUE.
 ZHLN_API auto GetRegistryHead() noexcept -> std::atomic<RegistryNode*>&;
-#else
-inline auto GetRegistryHead() noexcept -> std::atomic<RegistryNode*>& {
-    static std::atomic<RegistryNode*> head {nullptr};
-    return head;
-}
-#endif
 
 template <typename E>
     requires std::is_enum_v<E>

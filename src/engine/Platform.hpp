@@ -10,14 +10,12 @@ namespace ZHLN {
 class Window;
 }
 
-// Engine-internal (src/engine/Platform.hpp is on the engine's private include
-// path), but the hosts in app/ and utils/ call Init() to bring the platform up
-// before an Engine exists, so the definition is exported.
+// Engine-internal platform helpers. Platform::Init() is declared ZHLN_API in
+// <Zahlen/Core/Platform.hpp> (included above) so hosts in app/ and utils/ can
+// bring the platform up before creating an IEngine; everything below stays hidden.
 namespace ZHLN::Platform {
 
 void SetHighPriority();
-
-ZHLN_API void Init();
 
 void FocusWindow(Window& window);
 

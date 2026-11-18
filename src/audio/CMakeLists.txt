@@ -12,6 +12,7 @@ add_library(zahlen_miniaudio STATIC
 )
 set_target_properties(zahlen_miniaudio PROPERTIES
     C_VISIBILITY_PRESET hidden
+    OBJC_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
@@ -59,8 +60,9 @@ target_include_directories(zahlen_audio SYSTEM PUBLIC
 # through zahlen_engine, which links it PRIVATE, as it does for every other
 # engine subsystem.
 
+# zahlen_threading is an OBJECT library linked directly into zahlen_engine (same
+# rule as zahlen_ecs above); its headers come from ${PROJECT_SOURCE_DIR}/include.
 target_link_libraries(zahlen_audio PRIVATE
-    zahlen_threading
     zahlen_miniaudio
 )
 

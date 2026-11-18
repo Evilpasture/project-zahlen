@@ -226,9 +226,14 @@ those sources with their own compiler release, flags, and build type (`Debug`,
 `libzahlen_engine.so`.
 
 Jolt Physics, Vulkan/volk/VMA, Clay, miniaudio, meshoptimizer, SPIRV-Reflect,
-and mimalloc are completely sealed inside `libzahlen_engine.so` with hidden
-symbol visibility; no `libJolt*` library, header, or compile definition is
-installed or leaked to consumers.
+and vendored GLFW/zstd archives are completely sealed inside
+`libzahlen_engine.so` via hidden visibility presets, `-Wl,--exclude-libs,ALL`,
+and the linker export allowlist (`cmake/zahlen_engine.map`), audited by
+`configure/check_engine_exports.py`; no `libJolt*` library, header, compile
+definition, or third-party symbol is installed or leaked to consumers.
+`libzahlen_engine.so` does not embed or interpose a custom allocator (first-party
+in-tree host executables link `mimalloc` directly on non-Apple, non-sanitizer
+builds, while SDK consumers own their process allocator).
 
 Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
 (`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, an explicit sanitizer

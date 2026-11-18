@@ -150,7 +150,7 @@ class ZHLN_API Context {
 
   private:
     friend class Frame;
-    struct Impl;
+    struct [[gnu::visibility("hidden")]] Impl;
     std::unique_ptr<Impl> _impl;
 };
 
@@ -350,7 +350,7 @@ class ZHLN_API Frame {
 
   private:
     friend class Context;
-    explicit Frame(Context::Impl* impl) noexcept;
+    [[gnu::visibility("hidden")]] explicit Frame(Context::Impl* impl) noexcept;
 
     auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 

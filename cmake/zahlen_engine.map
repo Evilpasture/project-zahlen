@@ -1,0 +1,203 @@
+/*
+ * Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * ELF symbol-export allowlist for libzahlen_engine.so.
+ *
+ * Defense-in-depth alongside -fvisibility=hidden / -fvisibility-inlines-hidden
+ * and -Wl,--exclude-libs,ALL: only symbols listed under `global:` enter .dynsym;
+ * `local: *;` seals all internal engine/ECS/render/physics/audio symbols, private
+ * member helpers of ZHLN_API classes, C++ standard-library weak instantiations,
+ * and static third-party archives (Jolt, miniaudio, meshoptimizer, Clay, VMA,
+ * volk, SPIRV-Reflect, GLFW, zstd).
+ *
+ * Portability note: entries use Itanium C++ ABI mangled prefix patterns rather
+ * than `extern "C++"` demangled globs because GNU ld.bfd rejects wildcard `(*)`
+ * parameter lists inside `extern "C++"`. Each non-template function matches
+ * `_Z[N|NK|NO]<nested-name>[BE]*` so both plain (`E...`) and ABI-tagged
+ * (`B5cxx11E...`, libc++ inline-namespace, LP64/ILP32 size_t) encodings match
+ * identically across GCC, Clang, ld.bfd, ld.lld, and mold, while nested types
+ * (`<digit>...`), templates (`I...`), and longer names cannot match.
+ *
+ * Kept strictly in bidirectional sync with ZHLN_API declarations in
+ * include/Zahlen/ by configure/check_engine_exports.py (run at configure time
+ * and verified against the linked DSO via `nm -D` at post-build time).
+ */
+{
+  global:
+    /* === Tier 1: COM Factory Surface === */
+    _ZN4ZHLN3COM12CreateEngine[BE]*;                                /* @api ZHLN::COM::CreateEngine */
+    _ZN4ZHLN3COM15RenderGraphDump[BE]*;                             /* @api ZHLN::COM::RenderGraphDump */
+    _ZN4ZHLN3COM16CreateLogicWorld[BE]*;                            /* @api ZHLN::COM::CreateLogicWorld */
+
+    /* === Tier 2: Core / Runtime ZHLN_API Surface === */
+
+    /* include/Zahlen/Config.hpp */
+    _ZN4ZHLN16GetGitCommitHash[BE]*;                                /* @api ZHLN::GetGitCommitHash */
+
+    /* include/Zahlen/Core/ErrorCode.hpp (single process-wide error registry) */
+    _ZN4ZHLN15TemplatedDetail15GetRegistryHead[BE]*;                /* @api ZHLN::TemplatedDetail::GetRegistryHead */
+
+    /* include/Zahlen/Log.hpp */
+    _ZN4ZHLN11SetLogLevel[BE]*;                                     /* @api ZHLN::SetLogLevel */
+    _ZN4ZHLN11GetLogLevel[BE]*;                                     /* @api ZHLN::GetLogLevel */
+    _ZN4ZHLN14SetLogObserver[BE]*;                                  /* @api ZHLN::SetLogObserver */
+    _ZN4ZHLN14GetLogObserver[BE]*;                                  /* @api ZHLN::GetLogObserver */
+    _ZN4ZHLN15BeginLogCapture[BE]*;                                 /* @api ZHLN::BeginLogCapture */
+    _ZN4ZHLN13EndLogCapture[BE]*;                                   /* @api ZHLN::EndLogCapture */
+    _ZN4ZHLN16CancelLogCapture[BE]*;                                /* @api ZHLN::CancelLogCapture */
+    _ZN4ZHLN16InternalWriteLog[BE]*;                                /* @api ZHLN::InternalWriteLog */
+    _ZN4ZHLN13InternalPanic[BE]*;                                   /* @api ZHLN::InternalPanic */
+
+    /* include/Zahlen/Core/Diagnostics.hpp */
+    _ZN4ZHLN11Diagnostics24InitializeSymbolResolver[BE]*;           /* @api ZHLN::Diagnostics::InitializeSymbolResolver */
+    _ZN4ZHLN11Diagnostics17CaptureStackTrace[BE]*;                  /* @api ZHLN::Diagnostics::CaptureStackTrace */
+    _ZN4ZHLN11Diagnostics15DumpFaultRegion[BE]*;                    /* @api ZHLN::Diagnostics::DumpFaultRegion */
+    _ZN4ZHLN11Diagnostics20WriteDiagnosticError[BE]*;               /* @api ZHLN::Diagnostics::WriteDiagnosticError */
+    _ZN4ZHLN11Diagnostics24EmergencyRestoreTerminal[BE]*;           /* @api ZHLN::Diagnostics::EmergencyRestoreTerminal */
+
+    /* include/Zahlen/Core/Pages.hpp */
+    _ZN4ZHLN11GetPageSize[BE]*;                                     /* @api ZHLN::GetPageSize */
+    _ZN4ZHLN13AllocatePages[BE]*;                                   /* @api ZHLN::AllocatePages */
+    _ZN4ZHLN12ProtectPages[BE]*;                                    /* @api ZHLN::ProtectPages */
+    _ZN4ZHLN9FreePages[BE]*;                                        /* @api ZHLN::FreePages */
+    _ZN4ZHLN21AllocateGuardedRegion[BE]*;                           /* @api ZHLN::AllocateGuardedRegion */
+    _ZN4ZHLN17FreeGuardedRegion[BE]*;                               /* @api ZHLN::FreeGuardedRegion */
+    _ZN4ZHLN20OsPageMemoryResource[BE]*;                            /* @api ZHLN::OsPageMemoryResource */
+
+    /* include/Zahlen/Core/Platform.hpp */
+    _ZN4ZHLN6GetPID[BE]*;                                           /* @api ZHLN::GetPID */
+    _ZN4ZHLN10HaltThread[BE]*;                                      /* @api ZHLN::HaltThread */
+    _ZN4ZHLN8Platform4Init[BE]*;                                    /* @api ZHLN::Platform::Init */
+
+    /* include/Zahlen/Core/Profiler.hpp */
+    _ZN4ZHLN11CPUProfiler6Record[BE]*;                              /* @api ZHLN::CPUProfiler::Record */
+    _ZN4ZHLN11CPUProfiler14IterateMetrics[BE]*;                     /* @api ZHLN::CPUProfiler::IterateMetrics */
+    _ZN4ZHLN11ScopedTimerC[12]EPKc*;                                /* @api ZHLN::ScopedTimer::ScopedTimer */
+    _ZN4ZHLN11ScopedTimerD[012]Ev;                                  /* @api ZHLN::ScopedTimer::~ScopedTimer */
+
+    /* include/Zahlen/Threading/{Mutex,SharedMutex,ConditionalVariable,Thread,TaskSystem}.hpp */
+    _ZN4ZHLN5Mutex8LockSlow[BE]*;                                   /* @api ZHLN::Mutex::LockSlow */
+    _ZN4ZHLN5Mutex10UnlockSlow[BE]*;                                /* @api ZHLN::Mutex::UnlockSlow */
+    _ZN4ZHLN11SharedMutex8LockSlow[BE]*;                            /* @api ZHLN::SharedMutex::LockSlow */
+    _ZN4ZHLN11SharedMutex10UnlockSlow[BE]*;                         /* @api ZHLN::SharedMutex::UnlockSlow */
+    _ZN4ZHLN11SharedMutex14LockSharedSlow[BE]*;                     /* @api ZHLN::SharedMutex::LockSharedSlow */
+    _ZN4ZHLN11SharedMutex16UnlockSharedSlow[BE]*;                   /* @api ZHLN::SharedMutex::UnlockSharedSlow */
+    _ZN4ZHLN19ConditionalVariable4Wait[BE]*;                        /* @api ZHLN::ConditionalVariable::Wait */
+    _ZN4ZHLN19ConditionalVariable9NotifyOne[BE]*;                   /* @api ZHLN::ConditionalVariable::NotifyOne */
+    _ZN4ZHLN19ConditionalVariable9NotifyAll[BE]*;                   /* @api ZHLN::ConditionalVariable::NotifyAll */
+    _ZN4ZHLN5Fiber14InitMainThread[BE]*;                            /* @api ZHLN::Fiber::InitMainThread */
+    _ZN4ZHLN15GetCurrentFiber[BE]*;                                 /* @api ZHLN::GetCurrentFiber */
+    _ZN4ZHLN10YieldFiber[BE]*;                                      /* @api ZHLN::YieldFiber */
+    _ZN4ZHLN17GetCurrentFiberID[BE]*;                               /* @api ZHLN::GetCurrentFiberID */
+    _ZN4ZHLN10TaskSystem14GetWorkerIndex[BE]*;                      /* @api ZHLN::TaskSystem::GetWorkerIndex */
+    _ZN4ZHLN10TaskSystem14GetWorkerCount[BE]*;                      /* @api ZHLN::TaskSystem::GetWorkerCount */
+    _ZN4ZHLN10TaskSystem4Init[BE]*;                                 /* @api ZHLN::TaskSystem::Init */
+    _ZN4ZHLN10TaskSystem8Shutdown[BE]*;                             /* @api ZHLN::TaskSystem::Shutdown */
+    _ZN4ZHLN10TaskSystem8Dispatch[BE]*;                             /* @api ZHLN::TaskSystem::Dispatch */
+    _ZN4ZHLN10TaskSystem18DispatchBackground[BE]*;                  /* @api ZHLN::TaskSystem::DispatchBackground */
+    _ZN4ZHLN10TaskSystem4Wait[BE]*;                                 /* @api ZHLN::TaskSystem::Wait */
+
+    /* include/Zahlen/FileSystem/FileWatcher.hpp */
+    _ZN4ZHLN2FS17FileSystemWatcherC[12]Ev;                          /* @api ZHLN::FS::FileSystemWatcher::FileSystemWatcher */
+    _ZN4ZHLN2FS17FileSystemWatcherD[012]Ev;                         /* @api ZHLN::FS::FileSystemWatcher::~FileSystemWatcher */
+    _ZN4ZHLN2FS17FileSystemWatcher5Watch[BE]*;                      /* @api ZHLN::FS::FileSystemWatcher::Watch */
+    _ZN4ZHLN2FS17FileSystemWatcher9WatchFile[BE]*;                  /* @api ZHLN::FS::FileSystemWatcher::WatchFile */
+    _ZN4ZHLN2FS17FileSystemWatcher14WatchDirectory[BE]*;            /* @api ZHLN::FS::FileSystemWatcher::WatchDirectory */
+    _ZN4ZHLN2FS17FileSystemWatcher7Unwatch[BE]*;                    /* @api ZHLN::FS::FileSystemWatcher::Unwatch */
+    _ZN4ZHLN2FS17FileSystemWatcher14DispatchEvents[BE]*;            /* @api ZHLN::FS::FileSystemWatcher::DispatchEvents */
+
+    /* include/Zahlen/FileSystem/MappedFile.hpp */
+    _ZN4ZHLN2FS10MappedFileC[12]EOS1_;                              /* @api ZHLN::FS::MappedFile::MappedFile */
+    _ZN4ZHLN2FS10MappedFileD[012]Ev;                                /* @api ZHLN::FS::MappedFile::~MappedFile */
+    _ZN4ZHLN2FS10MappedFileaSEOS1_;                                 /* @api ZHLN::FS::MappedFile::operator= */
+    _ZN4ZHLN2FS10MappedFile4Open[BE]*;                              /* @api ZHLN::FS::MappedFile::Open */
+    _ZN4ZHLN2FS10MappedFile5Reset[BE]*;                             /* @api ZHLN::FS::MappedFile::Reset */
+
+    /* include/Zahlen/FileSystem/Paths.hpp */
+    _ZN4ZHLN2FS5Paths8CacheDir[BE]*;                                /* @api ZHLN::FS::Paths::CacheDir */
+    _ZN4ZHLN2FS5Paths12FindDataFile[BE]*;                           /* @api ZHLN::FS::Paths::FindDataFile */
+
+    /* include/Zahlen/FileSystem/VFS.hpp (private ExecuteLoad / *Locked stay local) */
+    _ZN4ZHLN2FS17VirtualFileSystemC[12]Ev;                          /* @api ZHLN::FS::VirtualFileSystem::VirtualFileSystem */
+    _ZN4ZHLN2FS17VirtualFileSystemD[012]Ev;                         /* @api ZHLN::FS::VirtualFileSystem::~VirtualFileSystem */
+    _ZN4ZHLN2FS17VirtualFileSystem8MountPak[BE]*;                   /* @api ZHLN::FS::VirtualFileSystem::MountPak */
+    _ZN4ZHLN2FS17VirtualFileSystem14MountDirectory[BE]*;            /* @api ZHLN::FS::VirtualFileSystem::MountDirectory */
+    _ZN4ZHLN2FS17VirtualFileSystem16UnmountDirectory[BE]*;          /* @api ZHLN::FS::VirtualFileSystem::UnmountDirectory */
+    _ZNK4ZHLN2FS17VirtualFileSystem21MountedDirectoryCount[BE]*;    /* @api ZHLN::FS::VirtualFileSystem::MountedDirectoryCount const */
+    _ZN4ZHLN2FS17VirtualFileSystem9LoadAsync[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::LoadAsync */
+    _ZN4ZHLN2FS17VirtualFileSystem8LoadSync[BE]*;                   /* @api ZHLN::FS::VirtualFileSystem::LoadSync */
+    _ZN4ZHLN2FS17VirtualFileSystem10FreeMemory[BE]*;                /* @api ZHLN::FS::VirtualFileSystem::FreeMemory */
+    _ZNK4ZHLN2FS17VirtualFileSystem6Exists[BE]*;                    /* @api ZHLN::FS::VirtualFileSystem::Exists const */
+    _ZNK4ZHLN2FS17VirtualFileSystem8ReadFile[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::ReadFile const */
+
+    /* include/Zahlen/GUI/FontLoader.hpp */
+    _ZN4ZHLN3GUI22InstallBakedFontLoader[BE]*;                      /* @api ZHLN::GUI::InstallBakedFontLoader */
+    _ZN4ZHLN3GUI24UninstallBakedFontLoader[BE]*;                    /* @api ZHLN::GUI::UninstallBakedFontLoader */
+    _ZN4ZHLN3GUI18HasBakedFontLoader[BE]*;                          /* @api ZHLN::GUI::HasBakedFontLoader */
+    _ZN4ZHLN3GUI22GetBakedFontLoaderUser[BE]*;                      /* @api ZHLN::GUI::GetBakedFontLoaderUser */
+    _ZN4ZHLN3GUI13LoadBakedFont[BE]*;                               /* @api ZHLN::GUI::LoadBakedFont */
+    _ZN4ZHLN3GUI19GetDefaultBakedFont[BE]*;                         /* @api ZHLN::GUI::GetDefaultBakedFont */
+    _ZN4ZHLN3GUI19SetDefaultBakedFont[BE]*;                         /* @api ZHLN::GUI::SetDefaultBakedFont */
+    _ZN4ZHLN3GUI14BuildFontAtlas[BE]*;                              /* @api ZHLN::GUI::BuildFontAtlas */
+    _ZN4ZHLN3GUI16DecodeCookedFont[BE]*;                            /* @api ZHLN::GUI::DecodeCookedFont */
+
+    /* include/Zahlen/GUI/GUI.hpp — MeasureTextBounds & Context */
+    _ZN4ZHLN3GUI17MeasureTextBounds[BE]*;                           /* @api ZHLN::GUI::MeasureTextBounds */
+    _ZN4ZHLN3GUI7ContextC[12]Ev;                                    /* @api ZHLN::GUI::Context::Context */
+    _ZN4ZHLN3GUI7ContextC[12]ERKNS_9FontAtlasE;                     /* @api ZHLN::GUI::Context::Context */
+    _ZN4ZHLN3GUI7ContextC[12]EOS1_;                                 /* @api ZHLN::GUI::Context::Context */
+    _ZN4ZHLN3GUI7ContextD[012]Ev;                                   /* @api ZHLN::GUI::Context::~Context */
+    _ZN4ZHLN3GUI7ContextaSEOS1_;                                    /* @api ZHLN::GUI::Context::operator= */
+    _ZN4ZHLN3GUI7Context12SetFontAtlas[BE]*;                        /* @api ZHLN::GUI::Context::SetFontAtlas */
+    _ZNK4ZHLN3GUI7Context12GetFontAtlas[BE]*;                       /* @api ZHLN::GUI::Context::GetFontAtlas const */
+    _ZN4ZHLN3GUI7Context12SetClipboard[BE]*;                        /* @api ZHLN::GUI::Context::SetClipboard */
+    _ZNK4ZHLN3GUI7Context16GetLastFrameRect[BE]*;                   /* @api ZHLN::GUI::Context::GetLastFrameRect const */
+    _ZNK4ZHLN3GUI7Context14GetScrollState[BE]*;                     /* @api ZHLN::GUI::Context::GetScrollState const */
+    _ZNK4ZHLN3GUI7Context13IsPointerOver[BE]*;                      /* @api ZHLN::GUI::Context::IsPointerOver const */
+    _ZNK4ZHLN3GUI7Context18IsTextInputFocused[BE]*;                 /* @api ZHLN::GUI::Context::IsTextInputFocused const */
+    _ZNK4ZHLN3GUI7Context17WantsCaptureMouse[BE]*;                  /* @api ZHLN::GUI::Context::WantsCaptureMouse const */
+    _ZNK4ZHLN3GUI7Context20WantsCaptureKeyboard[BE]*;               /* @api ZHLN::GUI::Context::WantsCaptureKeyboard const */
+    _ZNK4ZHLN3GUI7Context14HasActiveFrame[BE]*;                     /* @api ZHLN::GUI::Context::HasActiveFrame const */
+    _ZN4ZHLN3GUI7Context10BeginFrame[BE]*;                          /* @api ZHLN::GUI::Context::BeginFrame */
+
+    /* include/Zahlen/GUI/GUI.hpp — Frame (private Frame(Context::Impl*) stays local;
+     * TextInputImpl is called by the public inline TextInput<N> template) */
+    _ZN4ZHLN3GUI5FrameC[12]EOS1_;                                   /* @api ZHLN::GUI::Frame::Frame */
+    _ZN4ZHLN3GUI5FrameD[012]Ev;                                     /* @api ZHLN::GUI::Frame::~Frame */
+    _ZNO4ZHLN3GUI5Frame3End[BE]*;                                   /* @api ZHLN::GUI::Frame::End && */
+    _ZN4ZHLN3GUI5Frame6Cancel[BE]*;                                 /* @api ZHLN::GUI::Frame::Cancel */
+    _ZN4ZHLN3GUI5Frame8BeginBox[BE]*;                               /* @api ZHLN::GUI::Frame::BeginBox */
+    _ZN4ZHLN3GUI5Frame6EndBox[BE]*;                                 /* @api ZHLN::GUI::Frame::EndBox */
+    _ZN4ZHLN3GUI5Frame8BeginRow[BE]*;                               /* @api ZHLN::GUI::Frame::BeginRow */
+    _ZN4ZHLN3GUI5Frame6EndRow[BE]*;                                 /* @api ZHLN::GUI::Frame::EndRow */
+    _ZN4ZHLN3GUI5Frame11BeginColumn[BE]*;                           /* @api ZHLN::GUI::Frame::BeginColumn */
+    _ZN4ZHLN3GUI5Frame9EndColumn[BE]*;                              /* @api ZHLN::GUI::Frame::EndColumn */
+    _ZN4ZHLN3GUI5Frame15BeginScrollArea[BE]*;                       /* @api ZHLN::GUI::Frame::BeginScrollArea */
+    _ZN4ZHLN3GUI5Frame13EndScrollArea[BE]*;                         /* @api ZHLN::GUI::Frame::EndScrollArea */
+    _ZN4ZHLN3GUI5Frame4Text[BE]*;                                   /* @api ZHLN::GUI::Frame::Text */
+    _ZN4ZHLN3GUI5Frame6Button[BE]*;                                 /* @api ZHLN::GUI::Frame::Button */
+    _ZN4ZHLN3GUI5Frame8Checkbox[BE]*;                               /* @api ZHLN::GUI::Frame::Checkbox */
+    _ZN4ZHLN3GUI5Frame6Slider[BE]*;                                 /* @api ZHLN::GUI::Frame::Slider */
+    _ZN4ZHLN3GUI5Frame9TextInput[BE]*;                              /* @api ZHLN::GUI::Frame::TextInput */
+    _ZN4ZHLN3GUI5Frame13TextInputImpl[BE]*;                         /* @api ZHLN::GUI::Frame::TextInputImpl */
+    _ZN4ZHLN3GUI5Frame8Dropdown[BE]*;                               /* @api ZHLN::GUI::Frame::Dropdown */
+    _ZN4ZHLN3GUI5Frame21BeginCollapsingHeader[BE]*;                 /* @api ZHLN::GUI::Frame::BeginCollapsingHeader */
+    _ZN4ZHLN3GUI5Frame19EndCollapsingHeader[BE]*;                   /* @api ZHLN::GUI::Frame::EndCollapsingHeader */
+    _ZNK4ZHLN3GUI5Frame13IsItemHovered[BE]*;                        /* @api ZHLN::GUI::Frame::IsItemHovered const */
+    _ZNK4ZHLN3GUI5Frame12IsItemActive[BE]*;                         /* @api ZHLN::GUI::Frame::IsItemActive const */
+    _ZNK4ZHLN3GUI5Frame25IsPointerPressedThisFrame[BE]*;            /* @api ZHLN::GUI::Frame::IsPointerPressedThisFrame const */
+    _ZNK4ZHLN3GUI5Frame8Viewport[BE]*;                              /* @api ZHLN::GUI::Frame::Viewport const */
+    _ZNK4ZHLN3GUI5Frame9DeltaTime[BE]*;                             /* @api ZHLN::GUI::Frame::DeltaTime const */
+    _ZNK4ZHLN3GUI5Frame12GetFontAtlas[BE]*;                         /* @api ZHLN::GUI::Frame::GetFontAtlas const */
+    _ZNK4ZHLN3GUI5Frame16GetLastFrameRect[BE]*;                     /* @api ZHLN::GUI::Frame::GetLastFrameRect const */
+    _ZNK4ZHLN3GUI5Frame14GetScrollState[BE]*;                       /* @api ZHLN::GUI::Frame::GetScrollState const */
+    _ZNK4ZHLN3GUI5Frame13IsPointerOver[BE]*;                        /* @api ZHLN::GUI::Frame::IsPointerOver const */
+    _ZNK4ZHLN3GUI5Frame18IsTextInputFocused[BE]*;                   /* @api ZHLN::GUI::Frame::IsTextInputFocused const */
+
+    /* include/Zahlen/Render/Meshlet.hpp */
+    _ZN4ZHLN13BuildMeshlets[BE]*;                                   /* @api ZHLN::BuildMeshlets */
+
+  local:
+    *;
+};

@@ -138,16 +138,18 @@ set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_features(zahlen_render PUBLIC cxx_std_26)
 set_target_properties(zahlen_render PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
 target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
+# zahlen_threading is an OBJECT library linked directly into zahlen_engine;
+# naming it here would embed duplicate copies of its objects in libzahlen_render.a.
 target_link_libraries(zahlen_render
-    PRIVATE  zahlen_vulkan
+    PRIVATE zahlen_vulkan
     PRIVATE zahlen_presentation
-    PRIVATE zahlen_threading
 )
 
 target_include_directories(zahlen_render

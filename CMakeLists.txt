@@ -460,32 +460,29 @@ endif()
 
 add_subdirectory(src/render)
 
-# There is no linker version script here any more. What it existed to do --
-# keep the renderer's symbols from being preempted by a copy embedded in a
-# consumer executable -- is now a compile-time visibility preset on the
-# zahlen_vulkan target, which is where the explanation lives. The script was
-# ELF-only, matched symbols by hand-written glob (so it missed every mangled
-# C++ name that did not happen to start with `vma`), and silently overrode
-# source annotations -- a function could be declared ZHLN_API in a public
-# header and localized anyway, leaving the declaration unlinkable for the
-# consumers it was written for. Visibility is now stated where it can be read:
-# on the target in src/vulkan/CMakeLists.txt, or at the declaration itself.
-
-# The engine's shared library exports its annotated API and nothing else.
+# The engine shared library seals its dynamic symbol table in three layers:
 #
-# ZHLN_API is the whole export set: on Windows it is __declspec(dllexport), off
-# it is [[gnu::visibility("default")]]. The preset below makes that annotation
-# decide, on both toolchains, which is what keeps ZHLN_API honest -- a symbol a
-# consumer reaches has to be declared, not merely linked. zahlen_vulkan already
-# states the same thing the same way.
-#
-# This replaces -Wl,--export-all-symbols, which was here because objects that
-# are not part of the public API (Mutex::LockSlow, EntityCommandBuffer::Playback,
-# TaskSystem, Fiber) are reached from the engine's own consumers. Those
-# consumers are first-party and build against this target, so they link the
-# internal archive instead of importing the hidden symbols back out of the DLL.
+#   1. Compile-time hidden visibility (C/CXX/OBJC/OBJCXX + VISIBILITY_INLINES_HIDDEN)
+#      on zahlen_engine, every internal sub-library whose objects enter it, and
+#      every vendored static dependency (Jolt, miniaudio, meshoptimizer,
+#      SPIRV-Reflect, vendored GLFW).
+#   2. Archive sealing (-Wl,--exclude-libs,ALL on ELF and MinGW; sub-libraries
+#      that own ZHLN_API definitions -- zahlen_threading, zahlen_filesystem,
+#      zahlen_gui -- are OBJECT targets so their exports enter directly while
+#      every STATIC archive's symbols are forced hidden, including system .a
+#      dependencies and C++ stdlib weak helpers).
+#   3. Explicit linker export allowlist (cmake/zahlen_engine.map on ELF,
+#      __declspec(dllexport) on PE, hidden visibility + -unexported_symbol
+#      guards on Mach-O), granting only the COM factories and the intentional
+#      Core/Runtime ZHLN_API surface (and closing private members of ZHLN_API
+#      classes). configure/check_engine_exports.py enforces bidirectional parity
+#      between ZHLN_API declarations and cmake/zahlen_engine.map at configure
+#      time and audits the linked DSO with nm at post-build time, so the two
+#      can never drift out of sync.
 set_target_properties(zahlen_engine PROPERTIES C_VISIBILITY_PRESET hidden
                                                CXX_VISIBILITY_PRESET hidden
+                                               OBJC_VISIBILITY_PRESET hidden
+                                               OBJCXX_VISIBILITY_PRESET hidden
                                                VISIBILITY_INLINES_HIDDEN ON)
 
 set_target_properties(zahlen_engine PROPERTIES CXX_STANDARD 26
@@ -527,7 +524,6 @@ target_link_libraries(
           zahlen_gui
           meshoptimizer
           glfw
-          mimalloc-static
           ${ZSTD_LIBRARY}
           zahlen_warnings)
 
@@ -550,25 +546,63 @@ set(ZHLN_ENGINE_LIB_TARGETS
     zahlen_filesystem
     zahlen_ecs
     zahlen_audio
+    zahlen_miniaudio
     zahlen_gui)
 if(ZHLN_BUILD_RENDER)
     list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_vulkan)
     if(TARGET zahlen_shader_bytecode)
         list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_shader_bytecode)
     endif()
+    if(TARGET HostBlitSwapchain)
+        list(APPEND ZHLN_ENGINE_LIB_TARGETS HostBlitSwapchain)
+    endif()
 endif()
 foreach(ZHLN_ENGINE_LIB_TARGET IN LISTS ZHLN_ENGINE_LIB_TARGETS)
     target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
-    # Same reason as the definition above, for export rather than import: these
-    # archives' objects end up inside libzahlen_engine.so, so the export set is
-    # theirs to decide too. A preset on zahlen_engine alone would only cover the
-    # objects it compiles itself -- src/engine and src/core -- and leave Mutex,
-    # EntityCommandBuffer, TaskSystem and the whole renderer at default
-    # visibility, which is exactly the leak this is here to close.
-    set_target_properties(${ZHLN_ENGINE_LIB_TARGET} PROPERTIES C_VISIBILITY_PRESET hidden
+    # Every object and archive folded into libzahlen_engine shares its PIC and
+    # hidden-visibility contract so only explicitly annotated ZHLN_API symbols
+    # reach default visibility across C, C++, Objective-C, and Objective-C++.
+    set_target_properties(${ZHLN_ENGINE_LIB_TARGET} PROPERTIES POSITION_INDEPENDENT_CODE ON
+                                                              C_VISIBILITY_PRESET hidden
                                                               CXX_VISIBILITY_PRESET hidden
+                                                              OBJC_VISIBILITY_PRESET hidden
+                                                              OBJCXX_VISIBILITY_PRESET hidden
                                                               VISIBILITY_INLINES_HIDDEN ON)
 endforeach()
+
+# Seal symbols from PRIVATE static archives and restrict DSO exports to the
+# verified ZHLN_API surface (cmake/zahlen_engine.map).
+if(UNIX AND NOT APPLE)
+    set(ZHLN_ENGINE_VERSION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/zahlen_engine.map")
+    target_link_options(zahlen_engine PRIVATE
+        "LINKER:--exclude-libs,ALL"
+        "LINKER:--version-script=${ZHLN_ENGINE_VERSION_SCRIPT}"
+    )
+    set_property(TARGET zahlen_engine APPEND PROPERTY LINK_DEPENDS "${ZHLN_ENGINE_VERSION_SCRIPT}")
+elseif(MINGW)
+    target_link_options(zahlen_engine PRIVATE "LINKER:--exclude-libs,ALL")
+elseif(APPLE)
+    foreach(_zhln_apple_unexport IN ITEMS
+        "__ZN3JPH*" "__ZNK3JPH*" "__ZTVN3JPH*" "__ZTIN3JPH*" "__ZTSN3JPH*"
+        "_ma_*" "_mi_*" "__mi_*" "_meshopt_*" "_Clay_*"
+        "_vma*" "__ZN3Vma*" "__ZN13Vma*" "_volk*" "_spvReflect*"
+        "_glfw*" "__glfw*" "_ZSTD_*" "_FSE_*" "_HUF_*"
+        "__ZSt*" "__ZNSt*" "__ZNKSt*" "__ZTVNSt*" "__ZTINSt*" "__ZTSNSt*" "__ZGVNSt*")
+        target_link_options(zahlen_engine PRIVATE "LINKER:-unexported_symbol,${_zhln_apple_unexport}")
+    endforeach()
+    unset(_zhln_apple_unexport)
+endif()
+
+if(ZHLN_HAS_PYTHON AND UNIX AND NOT ZHLN_SYNTAX_ONLY)
+    add_custom_command(TARGET zahlen_engine POST_BUILD
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_engine_exports.py"
+                --dso "$<TARGET_FILE:zahlen_engine>"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Auditing dynamic symbol exports of $<TARGET_FILE_NAME:zahlen_engine>..."
+        VERBATIM
+    )
+endif()
 
 # Windows: the MinGW link surface the engine's own sources need.
 #

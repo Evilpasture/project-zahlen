@@ -20,8 +20,14 @@ set_target_properties(HostBlitSwapchain PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # zahlen_engine links this, and zahlen_engine is SHARED.
+    # zahlen_engine links this, and zahlen_engine is SHARED; keep every symbol
+    # intra-image so nothing leaks into libzahlen_engine.dylib.
     POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    OBJC_VISIBILITY_PRESET hidden
+    OBJCXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
 
 target_link_libraries(HostBlitSwapchain PRIVATE

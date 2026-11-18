@@ -159,16 +159,29 @@ if(ZHLN_BUILD_RENDER AND NOT ZHLN_HAS_VULKAN_HEADERS)
 endif()
 
 # --- mimalloc ---
-if(APPLE)
-    set(MI_OVERRIDE OFF CACHE BOOL "" FORCE) # Avoid macOS zone interposition bugs
+# Linked exclusively into first-party in-tree host executables on non-Apple,
+# non-sanitizer builds (see src/engine/CMakeLists.txt) rather than embedded into
+# libzahlen_engine.so: keeps the engine DSO free of mi_* and allocator-override
+# exports, avoids split-heap frees for external/dlopen consumers, and leaves
+# ASan/LSan/TSan/UBSan malloc interceptors unshadowed.
+set(ZHLN_ENABLE_MIMALLOC TRUE)
+if(APPLE OR USE_SANITIZERS)
+    set(ZHLN_ENABLE_MIMALLOC FALSE)
 else()
-    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)  # Stable on Linux and Windows
+    set(_zhln_sanitizer_flag_probe
+        "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS}")
+    if(_zhln_sanitizer_flag_probe MATCHES "(^|[ 	])-fsanitize=")
+        set(ZHLN_ENABLE_MIMALLOC FALSE)
+    endif()
+    unset(_zhln_sanitizer_flag_probe)
 endif()
-
-set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
-set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
-set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
+if(ZHLN_ENABLE_MIMALLOC)
+    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+    set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
+endif()
 
 # --- Apple SDK Blocks support for C sources ---
 # CoreAudio/AudioToolbox headers expose Blocks declarations. Miniaudio's
@@ -464,7 +477,16 @@ else()
             message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
         endif()
     endif()
-    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw EXCLUDE_FROM_ALL SYSTEM)
+    set_target_properties(glfw PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        OBJC_VISIBILITY_PRESET hidden
+    )
     target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
 
     # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
@@ -667,8 +689,10 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build EXCLUDE_FROM_ALL S
 
 set_target_properties(Jolt PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    CXX_VISIBILITY_PRESET hidden
     C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    OBJC_VISIBILITY_PRESET hidden
+    OBJCXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
 

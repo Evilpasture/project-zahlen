@@ -63,7 +63,7 @@ class ZHLN_API FileSystemWatcher {
     void DispatchEvents();
 
   private:
-    struct Impl;
+    struct [[gnu::visibility("hidden")]] Impl;
     std::unique_ptr<Impl> _impl;
 };
 

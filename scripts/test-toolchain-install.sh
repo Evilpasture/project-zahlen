@@ -124,11 +124,18 @@ esac
 for component in Engine CommandLine Signal COMApp HostUI HostRunner Application Netpbm Cooker; do
     test -f "$prefix/share/zahlen/manifests/zahlen-${component,,}.json"
 done
-# Single-.so boundary assertions: no libJolt, no Jolt headers, no prebuilt .a archives.
+# Single-.so boundary assertions: no libJolt, no Jolt headers, no prebuilt .a archives,
+# and zero leaked internal, third-party, stdlib, or allocator symbols in .dynsym.
 if [ -e "$prefix/include/Jolt" ] || compgen -G "$prefix/lib*/libJolt*" >/dev/null || compgen -G "$prefix/lib*/*.a" >/dev/null; then
     echo 'FAIL: installed prefix leaked Jolt or a prebuilt static archive' >&2
     exit 1
 fi
+engine_so_matches=("$prefix"/lib*/libzahlen_engine.so)
+if [ "${#engine_so_matches[@]}" -ne 1 ] || [ ! -f "${engine_so_matches[0]}" ]; then
+    echo "FAIL: expected exactly one installed libzahlen_engine.so under ${prefix}" >&2
+    exit 1
+fi
+python3 /workspace/configure/check_engine_exports.py --dso "${engine_so_matches[0]}"
 for component in Engine; do
     test -f "$prefix/share/zahlen/manifests/zahlen-${component,,}.json"
 done

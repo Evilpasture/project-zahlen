@@ -41,9 +41,10 @@ concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine)
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) { layer.BeforeRender(engine, dt); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Stop(engine); };
 
-// Application is a public entry point (app/ is its own library), so its
-// out-of-line members have to be part of the export set like any other API.
-class ZHLN_API Application {
+// Application is compiled into zahlen_application (a static/source consumer
+// library), not into libzahlen_engine, so it carries ZHLN_STATIC_API rather
+// than the engine DSO's ZHLN_API dllexport/dllimport annotation.
+class ZHLN_STATIC_API Application {
   public:
     explicit Application(EngineConfig config = {}): _config(std::move(config)) {}
 
