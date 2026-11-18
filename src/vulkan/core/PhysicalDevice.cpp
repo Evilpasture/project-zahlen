@@ -217,6 +217,27 @@ auto SelectPhysicalDevice(const VkInstance instance, const VkSurfaceKHR surface,
     return std::nullopt;
 }
 
+auto QueryAccelerationStructureScratchAlignment(const VkPhysicalDevice physical) noexcept -> VkDeviceSize {
+    constexpr VkDeviceSize kFallbackAlignment = 256;
+    if (physical == VK_NULL_HANDLE || !IsDeviceExtensionSupported(physical, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
+        vkGetPhysicalDeviceProperties2 == nullptr) {
+        return kFallbackAlignment;
+    }
+
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR accel_properties {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR,
+    };
+    VkPhysicalDeviceProperties2 properties {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &accel_properties,
+    };
+    vkGetPhysicalDeviceProperties2(physical, &properties);
+
+    return accel_properties.minAccelerationStructureScratchOffsetAlignment != 0
+               ? static_cast<VkDeviceSize>(accel_properties.minAccelerationStructureScratchOffsetAlignment)
+               : kFallbackAlignment;
+}
+
 auto QueryMeshShaderLimits(const VkPhysicalDevice physical) noexcept -> MeshShaderLimits {
     if (physical == VK_NULL_HANDLE || !IsDeviceExtensionSupported(physical, VK_EXT_MESH_SHADER_EXTENSION_NAME) || vkGetPhysicalDeviceProperties2 == nullptr) {
         return MeshShaderLimits {};

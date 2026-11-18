@@ -127,7 +127,8 @@ auto FetchToFile(std::string_view url, const fs::path& destination) -> std::expe
         }
         if (source.lexically_normal() == destination.lexically_normal())
             return {};
-        EnsureDirectories(destination.parent_path());
+        if (auto dir = EnsureDirectories(destination.parent_path()); !dir)
+            return std::unexpected(dir.error());
         fs::copy_file(Native(source), Native(destination), fs::copy_options::overwrite_existing, ec);
         if (ec)
             return std::unexpected(Fail {"cannot copy " + ToUtf8(source) + ": " + ec.message()});

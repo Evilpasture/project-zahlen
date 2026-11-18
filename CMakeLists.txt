@@ -865,7 +865,7 @@ endif()
 # ZHLN_GLIBC_BASELINE set -- the release lane sets it -- `--target glibc-floor`
 # holds them to the floor they ship with, before anything is packaged or signed.
 include(GlibcFloor)
-zhln_add_glibc_floor_check(zahlen_engine)
+zhln_add_glibc_floor_check(zahlen_engine zcook)
 
 if(TARGET zahlen_freecam)
     target_link_libraries(zahlen PRIVATE zahlen_freecam)

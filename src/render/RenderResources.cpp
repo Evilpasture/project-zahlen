@@ -817,8 +817,10 @@ auto RebuildSkinnedBLAS(
         scratchMesh.blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh.blas.Get())};
     }
 
-    auto scratchBufOpt =
-        Vk::Buffer::Create(allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
+    auto scratchBufOpt = Vk::Buffer::Create(
+        allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly,
+        ctx.AccelerationStructureScratchAlignment()
+    );
     if (!scratchBufOpt) {
         if (creatingBlas) {
             scratchMesh.blas = {};
@@ -990,8 +992,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     Vk::AccelerationStructure blas = std::move(*blasResult);
 
-    auto scratchRes =
-        Vk::Buffer::Create(impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
+    auto scratchRes = Vk::Buffer::Create(
+        impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly,
+        impl.ctx.AccelerationStructureScratchAlignment()
+    );
     if (!scratchRes) {
         return std::unexpected(scratchRes.error());
     }

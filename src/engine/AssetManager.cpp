@@ -52,7 +52,7 @@ auto AssetManager::GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Option
 
 auto AssetManager::BorrowCachedPrefab(uint64_t hash) const noexcept -> ModelPrefab* {
     ModelPrefab* found = nullptr;
-    _prefabCache.With(hash, [&](ModelPrefab& prefab) { found = &prefab; });
+    (void)_prefabCache.With(hash, [&](ModelPrefab& prefab) { found = &prefab; });
     return found;
 }
 
@@ -155,7 +155,7 @@ auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFont
 
 auto AssetManager::BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset* {
     GUI::BakedFontAsset* found = nullptr;
-    _fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
+    (void)_fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
     return found;
 }
 
@@ -229,7 +229,11 @@ auto AssetManager::ReadVirtualFile(std::string_view path) const -> std::optional
     AssetLoadRequest req {};
     req.assetID = HashAssetPath(path);
     auto& self = const_cast<AssetManager&>(*this);
-    if (!self.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
+    if (!self.LoadSync(req)) {
+        return std::nullopt;
+    }
+    if ((req.outData == nullptr) || (req.outSize == 0)) {
+        self.FreeMemory(req);
         return std::nullopt;
     }
     const auto*          bytes = static_cast<const uint8_t*>(req.outData);

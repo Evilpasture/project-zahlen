@@ -16,10 +16,26 @@
 #include <glTF/GLTFAssets.hpp>
 
 namespace {
-ZHLN::Animation::AnimationContext s_testAnimCtx {};
 using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
+// CI container and release checkouts clone without Git LFS (`tests/render/Uzi.glb`
+// stays a pointer file); fall back to the checked-in non-LFS skinned rig fixture.
+auto ReadSkinnedFixture(COM::IAssetLibrary* assets) {
+    auto doc = GLTF::Read(ZHLN_PROJECT_ROOT "/tests/render/Uzi.glb", {}, assets);
+    if (!doc) {
+        doc = GLTF::Read(ZHLN_PROJECT_ROOT "/resources/assets/ProceduralAnimationBaseRig.glb", {}, assets);
+    }
+    return doc;
+}
+auto FirstTimedTrack(const GLTF::Document& doc) -> int32_t {
+    for (size_t i = 0; i < doc.animations.size(); ++i) {
+        if (doc.animations[i].duration >= 0.25f) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return 0;
+}
 auto RuntimeEngine(bool animated = true) {
     (void)animated;
     return COM::CreateEngineRef(COM::InChain(
@@ -85,7 +101,7 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto engine   = std::move(*made);
-            auto document = GLTF::Read(ZHLN_PROJECT_ROOT "/tests/render/Uzi.glb", {}, engine->Assets());
+            auto document = ReadSkinnedFixture(engine->Assets());
             if (!ExpectTrue(document.has_value()))
                 return {};
             ExpectTrue(!document->animations.empty());
@@ -102,9 +118,11 @@ struct RuntimeControlsSuite {
                 camera->camera.yaw      = DegF {-90};
                 camera->camera.pitch    = DegF {0};
             }
-            ExpectTrue(Animator::Play(entities, root, 0));
+            Animation::AnimationContext animCtx {};
+            const int32_t track = FirstTimedTrack(*document);
+            ExpectTrue(Animator::Play(entities, root, track));
             for (int i = 0; i < 3; ++i) {
-                Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+                Animation::Step(*engine, animCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             }
             const auto* animator = entities.Get<Animation::AnimatorComponent>(root);
             if (ExpectTrue(animator != nullptr)) {
@@ -122,18 +140,18 @@ struct RuntimeControlsSuite {
             // Paused playback must not advance and explicit seeks are consumed.
             ExpectTrue(Animator::Speed(entities, root, 0));
             ExpectTrue(Animator::Seek(entities, root, 0.125f));
-            Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+            Animation::Step(*engine, animCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             animator = entities.Get<Animation::AnimatorComponent>(root);
             if (ExpectTrue(animator != nullptr))
                 ExpectTrue(std::abs(animator->currentTrackTime - 0.125f) < 0.0001f);
             engine->ClearScene();
-            Animation::Sync(*engine->Entities(), s_testAnimCtx);
+            Animation::Sync(*engine->Entities(), animCtx);
             ExpectTrue(!entities.IsAlive(root));
             // Reuse the retained cache after scene reset; the old generational
             // animation must not be reused by the newly created instance.
             const auto recreated = engine->Assets()->Instantiate(asset->hash, {.isAnimated = true});
             ExpectTrue(!recreated.empty());
-            Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+            Animation::Step(*engine, animCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             return {};
         }
         std::expected<void, ErrorCode> real_skinned_simulation_stage_evaluates_and_recreates_without_presentation() {
@@ -145,7 +163,7 @@ struct RuntimeControlsSuite {
             auto pipeline = engine.As<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
-            auto document = GLTF::Read(ZHLN_PROJECT_ROOT "/tests/render/Uzi.glb", {}, engine->Assets());
+            auto document = ReadSkinnedFixture(engine->Assets());
             if (!ExpectTrue(document.has_value()))
                 return {};
             ExpectTrue(!document->animations.empty());
@@ -157,10 +175,12 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(!parts.empty()))
                 return {};
             const auto root = parts.front();
-            ExpectTrue(Animator::Play(entities, root, 0));
+            Animation::AnimationContext animCtx {};
+            const int32_t track = FirstTimedTrack(*document);
+            ExpectTrue(Animator::Play(entities, root, track));
             const auto advance = [&] {
                 ExpectTrue(pipeline->AdvanceFrame(1.0f / 60).HasValue());
-                Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f);
+                Animation::Step(*engine, animCtx, 1.0f / 60.0f);
                 ExpectTrue(pipeline->CancelFrame().HasValue());
             };
             for (int i = 0; i < 12; ++i)
@@ -180,12 +200,12 @@ struct RuntimeControlsSuite {
             runtime = entities.Get<Animation::AnimatorComponent>(root);
             ExpectTrue(runtime && runtime->animationID == firstHandle);
             engine->ClearScene();
-            Animation::Sync(*engine->Entities(), s_testAnimCtx);
+            Animation::Sync(*engine->Entities(), animCtx);
             ExpectTrue(!entities.IsAlive(root));
             const auto recreated = engine->Assets()->Instantiate(asset->hash, {.isAnimated = true});
             if (!ExpectTrue(!recreated.empty()))
                 return {};
-            ExpectTrue(Animator::Play(entities, recreated.front(), 0));
+            ExpectTrue(Animator::Play(entities, recreated.front(), track));
             advance();
             runtime = entities.Get<Animation::AnimatorComponent>(recreated.front());
             ExpectTrue(runtime && runtime->animationID.IsValid() && runtime->animationID != firstHandle);
@@ -198,7 +218,7 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto       engine   = std::move(*made);
-            Animation::AnimationContext s_testAnimCtx {};
+            Animation::AnimationContext animCtx {};
             auto&      entities = *engine->Entities();
             const auto plain    = entities.CreateEntity();
             ExpectTrue(!Animator::Play(entities, plain, 0));
@@ -213,7 +233,7 @@ struct RuntimeControlsSuite {
             ExpectTrue(Animator::Play(entities, root, 1, 0.2f, false));
             ExpectTrue(Animator::Speed(entities, root, 0));
             ExpectTrue(Animator::Seek(entities, root, 0.25f));
-            Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+            Animation::Step(*engine, animCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             { auto s = Animator::Read(entities, root); ExpectTrue(s.has_value()); snapshot = *s; }
             ExpectEq(snapshot.trackIndex, 1);
             ExpectEq(snapshot.time, 0.25f);
@@ -228,7 +248,7 @@ struct RuntimeControlsSuite {
             ExpectTrue(entities.Get<Animation::AnimatorComponent>(root) != nullptr);
             ExpectTrue(entities.Get<Animation::AnimatorControlComponent>(root) == nullptr);
             engine->ClearScene();
-            Animation::Sync(*engine->Entities(), s_testAnimCtx);
+            Animation::Sync(*engine->Entities(), animCtx);
             ExpectTrue(!Animator::Read(entities, root).has_value());
             return {};
         }
@@ -242,11 +262,12 @@ struct RuntimeControlsSuite {
             ExpectTrue(!entities.IsEngineComponent(COM::IEntities::ComponentName<IK::TwoBoneIKComponent>()));
             IK::TwoBoneIKComponent ik;
             ExpectTrue(ik.AddChain(IK::TwoBoneIKChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
+            Animation::AnimationContext animCtx {};
             const auto root = entities.Spawn(
                 Animation::AnimatorComponent {},
                 Animation::AnimatorControlComponent {.trackIndex = 3, .playbackSpeed = 0.5f, .seekTime = 1.25f, .seekRequested = true}, ik
             );
-            Animation::Step(*engine, s_testAnimCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+            Animation::Step(*engine, animCtx, 1.0f / 60.0f); ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
             const auto* animator = entities.Get<Animation::AnimatorComponent>(root);
             const auto* control  = entities.Get<Animation::AnimatorControlComponent>(root);
             if (ExpectTrue(animator && control)) {

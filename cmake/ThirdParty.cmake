@@ -717,6 +717,12 @@ if(ZHLN_BUILD_RENDER)
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON
     )
+    if(USE_SANITIZERS)
+        # Upstream spirv_reflect.c calls memcpy(dst, NULL, 0) when a called
+        # SPIR-V helper accesses zero variables (spirv_reflect.c:3802), tripping
+        # glibc's nonnull attribute check under UBSan on a zero-length copy.
+        target_compile_options(spirv-reflect-static PRIVATE -fno-sanitize=nonnull-attribute)
+    endif()
 endif()
 
 # --- simdjson ---

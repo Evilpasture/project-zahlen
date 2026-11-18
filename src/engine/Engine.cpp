@@ -470,17 +470,9 @@ auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<Mo
     return EngineCore::Assets(engine).GetCachedPrefab(HashAssetPath(path));
 }
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
-    struct Notification {
-        Engine&            engine;
-        const ModelPrefab& prefab;
-        const SpawnParams& params;
-    } notification {engine, prefab, params};
     return InstantiatePrefabInternal(
         engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), EngineCore::Articulation(engine), prefab, params, outBuffer, maxCount,
-        +[](void* userdata, Entity root) {
-            auto& context = *static_cast<Notification*>(userdata);
-        },
-        &notification
+        nullptr, nullptr
     );
 }
 } // namespace PrefabFactory

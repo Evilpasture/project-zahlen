@@ -793,7 +793,8 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
                     "elevated shell; ask the publisher for a package without links."
                 });
             }
-            reader.Skip(padded);
+            if (auto skipped = reader.Skip(padded); !skipped)
+                return std::unexpected(skipped.error());
         } else if (kind == '1') {
             const fs::path source = destination / FromUtf8(rawLink);
             if (!IsWithin(destination, source)) {
@@ -808,7 +809,8 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
                 if (ec)
                     return std::unexpected(Fail {"cannot link '" + path + "': " + ec.message()});
             }
-            reader.Skip(padded);
+            if (auto skipped = reader.Skip(padded); !skipped)
+                return std::unexpected(skipped.error());
         }
         ++expectedIndex;
     }

@@ -27,11 +27,11 @@
 
 namespace ZHLN {
 
-RenderFrame::RenderFrame(Renderer& renderer, uint32_t inFlight) noexcept:
-    Slice(renderer.frames, inFlight), renderer(renderer), inFlight(inFlight), graphResources(renderer.graphResources), settings(renderer.settings),
-    state(renderer.frameState), viewProj(renderer.current_view_proj), unjitteredViewProj(renderer.unjittered_view_proj), view(renderer.view_matrix),
-    shadowProjView(renderer.shadowProjView), uniforms(renderer.currentUniforms), dt(renderer.currentDt), viewport(renderer.EffectiveViewport()),
-    meshShading(renderer.MeshShadingActive()), activeLineVertexCount(renderer.activeLineVertexCount) {
+RenderFrame::RenderFrame(Renderer& owner, uint32_t frameInFlight) noexcept:
+    Slice(owner.frames, frameInFlight), renderer(owner), inFlight(frameInFlight), graphResources(owner.graphResources), settings(owner.settings),
+    state(owner.frameState), viewProj(owner.current_view_proj), unjitteredViewProj(owner.unjittered_view_proj), view(owner.view_matrix),
+    shadowProjView(owner.shadowProjView), uniforms(owner.currentUniforms), dt(owner.currentDt), viewport(owner.EffectiveViewport()),
+    meshShading(owner.MeshShadingActive()), activeLineVertexCount(owner.activeLineVertexCount) {
 }
 
 auto RenderFrame::ActiveDepthTarget() noexcept -> Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt>& {
@@ -154,11 +154,17 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
         }
     }
 
+    auto postSkinStage  = Vk::BarrierStage::Vertex;
+    auto postSkinAccess = Vk::BarrierAccess::ShaderRead;
+    if (ctx.RayTracingSupported()) {
+        postSkinStage  = postSkinStage | Vk::BarrierStage::AccelerationStructureBuild;
+        postSkinAccess = postSkinAccess | Vk::BarrierAccess::AccelerationStructureRead;
+    }
     Vk::MemoryBarrier {
         Vk::BarrierStage::Compute,
         Vk::BarrierAccess::ShaderWrite,
-        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
-        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead,
+        postSkinStage,
+        postSkinAccess,
     }
         .Record(cmd);
 

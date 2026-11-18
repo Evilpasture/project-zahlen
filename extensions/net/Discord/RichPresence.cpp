@@ -461,7 +461,7 @@ auto DecodeRpcFrame(const std::span<const uint8_t> bytes) noexcept -> std::expec
 
 class DiscordPresenceClient::Impl {
   public:
-    explicit Impl(std::string applicationId): applicationId(std::move(applicationId)) {
+    explicit Impl(std::string appId): applicationId(std::move(appId)) {
     }
 
     ~Impl() noexcept {

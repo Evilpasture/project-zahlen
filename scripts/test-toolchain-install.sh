@@ -52,8 +52,9 @@ zpkg=/tmp/zpkg-bin/zpkg
 # The toolchain ships libraries, headers and the cooker -- never content. This
 # script therefore packages no data pack: the consumer below cooks its own with
 # the zcook from the store, which is the whole point of the boundary.
-components=(Engine CommandLine Image Signal COMApp HostUI HostRunner Application UISchema Scene Serialization GLTF
-    Screenshot Netpbm FreeCam Camera CharacterController AnimationControls Animation Cooker)
+components=(Engine CommandLine Image Signal COMApp HostUI HostRunner Application Netpbm Screenshot
+    UISchema Scene Serialization GLTF Fonts Lua Widgets Benchmark BenchmarkViewer Scripting
+    Console Editor Terrain VFX FreeCam Camera CharacterController AnimationControls Animation Cooker)
 for component in "${components[@]}"; do
     # Each artifact contains only this component plus its metadata. Only the
     # DESTDIR staging tree is what gets packaged: the /usr spelling is what the
@@ -131,13 +132,13 @@ fi
 for component in Engine; do
     test -f "$prefix/share/zahlen/manifests/zahlen-${component,,}.json"
 done
-for component in Camera Animation FreeCam CharacterController GLTF Serialization UISchema Screenshot; do
+for component in Camera Animation FreeCam CharacterController GLTF Serialization UISchema Screenshot Fonts Lua Widgets Benchmark BenchmarkViewer Scripting Console Editor Terrain VFX; do
     if [ -e "$prefix/share/zahlen/manifests/zahlen-${component,,}.json" ]; then
         echo "FAIL: ${component} was installed despite --only" >&2
         exit 1
     fi
 done
-for leaf in Camera Animation FreeCam CharacterController glTF json toml UI Screenshot; do
+for leaf in Camera Animation FreeCam CharacterController glTF json toml UI Screenshot Fonts lua Widget Benchmark Scripting Console editor Terrain VFX; do
     if [ -e "$prefix/include/${leaf}" ]; then
         echo "FAIL: headers for excluded component (${leaf}) are visible" >&2
         exit 1

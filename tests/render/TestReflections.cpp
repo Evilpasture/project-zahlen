@@ -43,6 +43,9 @@ struct ReflectionsTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
+            if (!engine->Graphics()->Info().rayTracingSupported) {
+                return {};
+            }
 
             DisableAA(*engine);
 
@@ -200,6 +203,9 @@ struct ReflectionsTestSuite {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
+            }
+            if (!engine->Graphics()->Info().rayTracingSupported) {
+                return {};
             }
 
             DisableAA(*engine);

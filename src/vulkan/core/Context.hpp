@@ -98,6 +98,9 @@ class Context {
     [[nodiscard]] auto RayTracingSupported() const noexcept -> bool {
         return _device.RayTracingEnabled();
     }
+    [[nodiscard]] auto AccelerationStructureScratchAlignment() const noexcept -> VkDeviceSize {
+        return QueryAccelerationStructureScratchAlignment(_physical.handle);
+    }
     [[nodiscard]] auto DeviceAddressBindingReportEnabled() const noexcept -> bool {
         return _addressBindingReportEnabled;
     }

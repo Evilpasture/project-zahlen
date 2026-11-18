@@ -80,6 +80,13 @@ if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
     add_dependencies(zshader slang-glslang)
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND USE_SANITIZERS)
+    # libslang dlopens companion modules (libslang-glslang-*.so for spirv-opt)
+    # by bare soname. Under ASan, libasan intercepts dlopen and becomes the
+    # caller ELF, so glibc ignores libslang's own DT_RUNPATH; DT_RPATH on the
+    # build-only zshader executable keeps the Slang lib dir visible to dlopen.
+    target_link_options(zshader PRIVATE "LINKER:--disable-new-dtags")
+endif()
 
 # The engine's headers, read-only: Zahlen/Core/Reflection for EnumToString and
 # Zahlen/Core/Ranges for the ranges the tool uses where the engine does.

@@ -81,6 +81,20 @@ if(USE_SANITIZERS)
     target_sources(zahlen_engine INTERFACE
         $<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>>
     )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        foreach(_zhln_san_hook IN ITEMS
+            __asan_default_options
+            __lsan_default_options
+            __lsan_default_suppressions
+            __ubsan_default_options
+            __ubsan_default_suppressions
+            __tsan_default_options)
+            target_link_options(zahlen_engine INTERFACE
+                "$<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:LINKER:--export-dynamic-symbol=${_zhln_san_hook}>>"
+            )
+        endforeach()
+        unset(_zhln_san_hook)
+    endif()
 endif()
 
 target_include_directories(zahlen_engine PRIVATE

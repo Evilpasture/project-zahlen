@@ -40,7 +40,7 @@ namespace ZHLN::ProjectLight {
 inline constexpr uint8_t FRAME_FLAG_COMPRESSED      = 1u;
 inline constexpr size_t  COMPRESSION_MIN_BYTES      = 1024u;
 inline constexpr size_t  MAX_SAFE_UDP_PAYLOAD_BYTES = 1200u;
-inline constexpr size_t  MAX_STREAM_FRAME_BYTES     = static_cast<const size_t>(128u * 1024u * 1024u);
+inline constexpr size_t  MAX_STREAM_FRAME_BYTES     = static_cast<size_t>(128u * 1024u * 1024u);
 inline constexpr float   VEC3_SCALE                 = 32767.0f;
 inline constexpr float   COLOR3_SCALE               = 255.0f;
 inline constexpr size_t  PROPERTY_CHANNEL_COUNT     = 104u;

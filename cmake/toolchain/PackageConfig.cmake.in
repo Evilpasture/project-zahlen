@@ -68,6 +68,19 @@ if("@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Engine"
     if(NOT "${_zahlen_engine_links}" MATCHES "zahlen_sanitizer_options\\.o")
         set_property(TARGET Zahlen::Engine APPEND PROPERTY INTERFACE_LINK_LIBRARIES
             "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${_zahlen_sanitizer_options_object}>")
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            foreach(_zahlen_san_hook IN ITEMS
+                __asan_default_options
+                __lsan_default_options
+                __lsan_default_suppressions
+                __ubsan_default_options
+                __ubsan_default_suppressions
+                __tsan_default_options)
+                set_property(TARGET Zahlen::Engine APPEND PROPERTY INTERFACE_LINK_OPTIONS
+                    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:LINKER:--export-dynamic-symbol=${_zahlen_san_hook}>")
+            endforeach()
+            unset(_zahlen_san_hook)
+        endif()
     endif()
     unset(_zahlen_engine_links)
     unset(_zahlen_sanitizer_options_object)
