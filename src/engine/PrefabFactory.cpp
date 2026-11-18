@@ -1,32 +1,29 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ArticulationContext.hpp"
+#include "PrefabFactoryInternal.hpp"
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <algorithm>
+#include <cstddef>
 #include <ecs/ECS.hpp>
 #include <engine/AssetManager.hpp>
 #include <engine/Engine.hpp>
 #include <engine/ModelPrefab.hpp>
 #include <engine/PrefabFactory.hpp>
-#include "PrefabFactoryInternal.hpp"
 #include <engine/SceneResources.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
+#include <optional>
 #include <physics/Physics.hpp>
 #include <render/Render.hpp>
-#include <Zahlen/Render/SkeletalAnimation.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <optional>
-// TODO(Evilpasture): REMOVE SYSTEM LEAK
-#include "ArticulationContext.hpp"
-#include <algorithm>
-#include <cstddef>
 #include <span>
 #include <utility>
 #include <vector>
@@ -133,13 +130,15 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
 
 namespace {
 
-[[nodiscard]] auto NativeModelMatrix(const Mat4x4& source) -> Mat4x4 { return source; }
+[[nodiscard]] auto NativeModelMatrix(const Mat4x4& source) -> Mat4x4 {
+    return source;
+}
 
 [[nodiscard]] auto SpawnLocalTransform(const SpawnParams& params) -> Components::TransformComponent {
     return {
         .position = {static_cast<float>(params.position.x), static_cast<float>(params.position.y), static_cast<float>(params.position.z)},
         .rotation = params.rotation,
-        .scale = params.scale
+        .scale    = params.scale
     };
 }
 
@@ -149,7 +148,7 @@ namespace {
 }
 
 auto SpawnPrefabRoot(ECS::Registry& reg, std::string_view vPath, const SpawnParams& p) -> Entity {
-    const auto root = reg.Create();
+    const auto root     = reg.Create();
     const auto localMat = SpawnMatrix(p);
     reg.Add(root, SpawnLocalTransform(p));
     reg.Add(root, Components::WorldTransformComponent {.world = localMat, .previous = localMat});
@@ -162,8 +161,8 @@ auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> Ma
     // descriptor's explicit no-node sentinel, not an index into an empty tree.
     if (nodeIndex < 0)
         return Mat4x4::Identity();
-    auto matrix = NativeModelMatrix(prefab.nodes[nodeIndex].localTransform);
-    int32_t    parentIdx = prefab.nodes[nodeIndex].parentIndex;
+    auto    matrix    = NativeModelMatrix(prefab.nodes[nodeIndex].localTransform);
+    int32_t parentIdx = prefab.nodes[nodeIndex].parentIndex;
 
     while (parentIdx >= 0) {
         matrix    = NativeModelMatrix(prefab.nodes[parentIdx].localTransform) * matrix;
@@ -173,11 +172,11 @@ auto GetNodeLogicalTransform(const ModelPrefab& prefab, int32_t nodeIndex) -> Ma
 }
 
 struct PreparedPart {
-    FVec3      translation {};
-    Quat           rotation = Quat::Identity();
-    FVec3      scale {};
-    float          maxScale = 1.0f;
-    const Physics::AnyShape* shape = nullptr;
+    FVec3                    translation {};
+    Quat                     rotation = Quat::Identity();
+    FVec3                    scale {};
+    float                    maxScale = 1.0f;
+    const Physics::AnyShape* shape    = nullptr;
 };
 
 auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform, bool createPhysics, bool useBoxColliders) -> std::vector<PreparedPart> {
@@ -188,9 +187,9 @@ auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform
             const auto& part = prefab.parts[i];
             auto&       prep = outPrepared[i];
 
-            const auto nodeWorld = GetNodeLogicalTransform(prefab, part.nodeIndex);
+            const auto nodeWorld  = GetNodeLogicalTransform(prefab, part.nodeIndex);
             const auto finalLocal = baseTransform * nodeWorld * NativeModelMatrix(part.localTransform);
-            const auto trs = DecomposeTransform(finalLocal);
+            const auto trs        = DecomposeTransform(finalLocal);
 
             prep.scale       = trs.scale;
             prep.rotation    = trs.rotation;
@@ -199,7 +198,9 @@ auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform
 
             if (createPhysics) {
                 const auto& shape = useBoxColliders ? part.boxCollider : part.meshCollider;
-                if (shape) prep.shape = &*shape;
+                if (shape) {
+                    prep.shape = &*shape;
+                }
             }
         }
     });
@@ -210,7 +211,7 @@ auto InstantiateMeshPart(
     RenderContext&                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
-    ArticulationContext&                    art,
+    ArticulationContext&                   art,
     const ModelPrefab&                     prefab,
     const ModelPart&                       part,
     const PreparedPart&                    prep,
@@ -239,8 +240,10 @@ auto InstantiateMeshPart(
         if (it != allocatedSkeletons.end()) {
             assignedJointOffset = it->second;
         } else {
-            assignedJointOffset                    = art.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
-            if (assignedJointOffset == UINT32_MAX) return Entity::Null();
+            assignedJointOffset = art.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
+            if (assignedJointOffset == UINT32_MAX) {
+                return Entity::Null();
+            }
             allocatedSkeletons[part.skeletonIndex] = assignedJointOffset;
         }
     }
@@ -266,8 +269,7 @@ auto InstantiateMeshPart(
             *prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
             params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
             (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
-            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate,
-            prep.scale
+            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate, prep.scale
         );
     }
     if (body != Physics::BodyID::Null()) {
@@ -280,7 +282,7 @@ auto InstantiateMeshPart(
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
     } else {
         const auto nodeLocal = GetNodeLogicalTransform(prefab, part.nodeIndex) * NativeModelMatrix(part.localTransform);
-        const auto localTRS = DecomposeTransform(nodeLocal);
+        const auto localTRS  = DecomposeTransform(nodeLocal);
         reg.Add(e, Components::TransformComponent {.position = localTRS.translation, .rotation = localTRS.rotation, .scale = localTRS.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
         reg.Add(e, Components::HierarchyComponent {.parent = rootEntity});
@@ -293,9 +295,8 @@ auto InstantiateMeshPart(
                .meshAsset     = meshAsset,
                .materialAsset = matAsset,
                .cullRadius    = part.boundingRadius,
-               .localCenter   = {
-                   (part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f
-               },
+               .localCenter =
+                   {(part.localMax[0] + part.localMin[0]) * 0.5f, (part.localMax[1] + part.localMin[1]) * 0.5f, (part.localMax[2] + part.localMin[2]) * 0.5f},
                .flags     = flags,
                .nodeIndex = part.nodeIndex
            }
@@ -325,9 +326,9 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
         return std::nullopt; // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
-    const float         invImportScale = 1.0f / emissiveFactorScale;
-    const auto& raw = part.defaultMaterial.emissiveFactor;
-    const float         ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
+    const float invImportScale = 1.0f / emissiveFactorScale;
+    const auto& raw            = part.defaultMaterial.emissiveFactor;
+    const float ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -335,7 +336,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
     }
 
     const auto localCenter = (part.localMax + part.localMin) * 0.5f;
-    float partExtent = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
+    float      partExtent  = (part.localMax[0] - part.localMin[0]) + (part.localMax[1] - part.localMin[1]) + (part.localMax[2] - part.localMin[2]);
 
     Entity glowEnt = reg.Create();
     reg.Add(glowEnt, Components::TransformComponent {.position = localCenter});
@@ -413,14 +414,12 @@ auto CreateBoxInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        Physics::AnyShape shape = Physics::Shape<Physics::Box> {
-            halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z
-        };
-        auto body = pc->CreateRigidBody(
+        Physics::AnyShape shape = Physics::Shape<Physics::Box> {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z};
+        auto              body  = pc->CreateRigidBody(
             shape, params.position, params.rotation.AsVec4(),
             params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
+            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -482,14 +481,13 @@ auto SpawnPrimitive(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        Physics::AnyShape bodyShape = physicsShape == Physics::ShapeType::Sphere ?
-            Physics::AnyShape(Physics::Shape<Physics::Sphere> {physP1}) :
-            Physics::AnyShape(Physics::Shape<Physics::Cylinder> {physP1, physP2});
-        auto body      = pc->CreateRigidBody(
+        Physics::AnyShape bodyShape = physicsShape == Physics::ShapeType::Sphere ? Physics::AnyShape(Physics::Shape<Physics::Sphere> {physP1}) :
+                                                                                   Physics::AnyShape(Physics::Shape<Physics::Cylinder> {physP1, physP2});
+        auto              body      = pc->CreateRigidBody(
             bodyShape, params.position, params.rotation.AsVec4(),
             params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory, params.physicsMask,
-            (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
+            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
@@ -603,8 +601,9 @@ auto CreatePlaneInternal(
 
     if (params.createPhysics && pc) {
         Physics::AnyShape shape = Physics::Shape<Physics::Plane> {};
-        auto body  = pc->CreateRigidBody(
-            shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory, params.physicsMask
+        auto              body  = pc->CreateRigidBody(
+            shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory,
+            params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
     }
@@ -631,13 +630,12 @@ auto InstantiatePrefabInternal(
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
         reg.Add(
-            rootEntity,
-            Components::PrefabInstanceComponent {
-                .prefabAsset    = HashAssetPath(std::string_view {prefab.virtualPath.c_str()}),
-                .animationCount = static_cast<uint32_t>(prefab.animations.size()),
-                .skeletonCount  = static_cast<uint32_t>(prefab.skeletons.size()),
-                .animated       = params.isAnimated,
-            }
+            rootEntity, Components::PrefabInstanceComponent {
+                            .prefabAsset    = HashAssetPath(std::string_view {prefab.virtualPath.c_str()}),
+                            .animationCount = static_cast<uint32_t>(prefab.animations.size()),
+                            .skeletonCount  = static_cast<uint32_t>(prefab.skeletons.size()),
+                            .animated       = params.isAnimated,
+                        }
         );
 
         if (onRoot)
@@ -661,7 +659,8 @@ auto InstantiatePrefabInternal(
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         Entity meshEnt = InstantiateMeshPart(gfx, reg, pc, art, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
 
-        if (meshEnt == Entity::Null()) continue;
+        if (meshEnt == Entity::Null())
+            continue;
         instantiatedParts[prefab.parts[i].name.c_str()] = meshEnt;
 
         if (outBuffer != nullptr && spawnedCount < maxCount) {
@@ -709,9 +708,9 @@ auto InstantiatePrefabInternal(
     if (!prefab.lights.empty()) {
         for (const auto& light: prefab.lights) {
             // Walk up the parent hierarchy to compute the model-space transform
-            auto nodeModelMat = Mat4x4::Identity();
-            int32_t    curr         = light.nodeIndex;
-            int        guard        = 0; // Prevent infinite loops on malformed DAGs
+            auto    nodeModelMat = Mat4x4::Identity();
+            int32_t curr         = light.nodeIndex;
+            int     guard        = 0; // Prevent infinite loops on malformed DAGs
 
             while (curr >= 0 && curr < static_cast<int32_t>(prefab.nodes.size()) && guard++ < 256) {
                 nodeModelMat = NativeModelMatrix(prefab.nodes[curr].localTransform) * nodeModelMat;
