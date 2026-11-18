@@ -31,15 +31,12 @@ auto GameConsole::GetEntryCount() const noexcept -> size_t {
     return _entries.size();
 }
 
-void GameConsole::GetEntry(size_t index, std::string_view& outText, float& outR, float& outG, float& outB, float& outA) const noexcept {
-    if (index < _entries.size()) {
-        const Entry& entry = _entries[index];
-        outText            = entry.text;
-        outR               = entry.color.r;
-        outG               = entry.color.g;
-        outB               = entry.color.b;
-        outA               = entry.color.a;
+auto GameConsole::GetEntry(size_t index) const noexcept -> std::optional<ConsoleEntry> {
+    if (index >= _entries.size()) {
+        return std::nullopt;
     }
+    const Entry& entry = _entries[index];
+    return ConsoleEntry {.text = entry.text, .color = entry.color};
 }
 
 auto GameConsole::GetHistoryCount() const noexcept -> size_t {

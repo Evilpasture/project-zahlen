@@ -16,7 +16,7 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstdint>
 #include <span>

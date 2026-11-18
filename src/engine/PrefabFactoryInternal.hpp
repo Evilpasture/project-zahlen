@@ -18,7 +18,6 @@ namespace ZHLN {
 class Engine;
 class ArticulationContext;
 class AssetManager;
-class GraphicsDevice;
 class PhysicsContext;
 class RenderContext;
 struct FontAtlas;
@@ -28,12 +27,12 @@ namespace ECS {
 class Registry;
 }
 namespace PrefabFactory {
-auto BuildTetrahedronMesh(GraphicsDevice gfx, bool buildBLAS) -> Mesh;
-auto BuildBoxMesh(GraphicsDevice gfx, FVec3 halfExtents, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildPlaneMesh(GraphicsDevice gfx, float extent, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildSphereMesh(GraphicsDevice gfx, float radius, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildCylinderMesh(GraphicsDevice gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildConeMesh(GraphicsDevice gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
+auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh;
+auto BuildBoxMesh(RenderContext& gfx, FVec3 halfExtents, FVec4 color, bool buildBLAS) -> Mesh;
+auto BuildPlaneMesh(RenderContext& gfx, float extent, FVec4 color, bool buildBLAS) -> Mesh;
+auto BuildSphereMesh(RenderContext& gfx, float radius, FVec4 color, bool buildBLAS) -> Mesh;
+auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
+auto BuildConeMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
 
 // The cache-parameterized forms: engine-internal, which is why they are not in
 // include/. A host reaches the same work through Engine (fonts) or through the
@@ -52,9 +51,9 @@ auto CreateCylinderConfigured(Engine& engine, float radius, float height, const 
 auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity;
 
 // Engine's device-recovery barrier and internal spawners.
-void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& registry);
+void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& registry);
 auto CreateBoxInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     ZHLN::FVec3                     halfExtents,
@@ -62,7 +61,7 @@ auto CreateBoxInternal(
     bool                            buildBLAS = true
 ) -> Entity;
 auto CreateSphereInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -70,7 +69,7 @@ auto CreateSphereInternal(
     bool                            buildBLAS = true
 ) -> Entity;
 auto CreateCylinderInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -79,7 +78,7 @@ auto CreateCylinderInternal(
     bool                            buildBLAS = true
 ) -> Entity;
 auto CreateConeInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -88,7 +87,7 @@ auto CreateConeInternal(
     bool                            buildBLAS = true
 ) -> Entity;
 auto CreatePlaneInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent,
@@ -97,7 +96,7 @@ auto CreatePlaneInternal(
     bool                            buildBLAS = true
 ) -> Entity;
 auto InstantiatePrefabInternal(
-    GraphicsDevice       gfx,
+    RenderContext&       gfx,
     ECS::Registry&       reg,
     PhysicsContext&      pc,
     ArticulationContext& art,

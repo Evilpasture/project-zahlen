@@ -6,13 +6,12 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -66,8 +65,8 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            const auto camComp = engine->Entities().GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const auto camComp = engine->Entities()->GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue((camComp != nullptr))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera cam = camComp->camera;
@@ -116,11 +115,11 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto reg = engine->Entities();
+            auto& reg = *engine->Entities();
 
             // 1. Sun light
             const ZHLN::Entity sunEnt = reg.Spawn();
-            reg.Attach(
+            reg.AttachMany(
                 sunEnt, ZHLN::Components::TransformComponent {.position = {0.0f, 10.0f, 0.0f}},
                 ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = {1.0f, 1.0f, 1.0f}, .intensity = 150.0f}
             );
@@ -129,16 +128,14 @@ struct ViewmodelTestSuite {
             ZHLN::Material vmMat;
             vmMat.baseColorFactor    = {0.0f, 1.0f, 0.5f, 1.0f};
 
-            const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.08f, 0.08f, 0.35f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat}
-            );
+            const ZHLN::Entity vmGun = engine->Assets()->SpawnBox({0.08f, 0.08f, 0.35f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat}).value;
 
             // Flag as Viewmodel
             reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             const auto mc = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
-            if (!ZHLN::Test::ExpectTrue(mc.has_value())) {
+            if (!ZHLN::Test::ExpectTrue((mc != nullptr))) {
                 return std::unexpected(ViewmodelTestError::ViewmodelComponentMissing);
             }
 
@@ -149,7 +146,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             return {};
@@ -164,14 +161,14 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto reg = engine->Entities();
+            auto& reg = *engine->Entities();
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
-            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Setup Camera looking along standard forward direction (-Z)
-            const auto camComp = engine->Entities().GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const auto camComp = engine->Entities()->GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue((camComp != nullptr))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             ZHLN::Camera cam = camComp->camera;
@@ -190,19 +187,15 @@ struct ViewmodelTestSuite {
             ZHLN::Material wallMat;
             wallMat.baseColorFactor    = {0.15f, 0.15f, 0.15f, 1.0f};
 
-            const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
-                *engine, {4.0f, 4.0f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat}
-            );
+            const ZHLN::Entity darkWall = engine->Assets()->SpawnBox({4.0f, 4.0f, 0.2f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat}).value;
             ZHLN::Test::ExpectTrue(reg.IsAlive(darkWall));
 
             // 3. Vibrant Cyan Viewmodel Object placed in front of camera (Z = +1.2m in world, 0.8m from camera)
             ZHLN::Material vmMat;
             vmMat.baseColorFactor    = {0.0f, 1.0f, 1.0f, 1.0f};
 
-            const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat}
-            );
+            const ZHLN::Entity vmObject = engine->Assets()->SpawnBox({0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat}).value;
             reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             // 4. Render 15 frames to stabilize G-buffer and Viewmodel pass
@@ -210,7 +203,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             // 5. Frame capture and pixel histogram analysis, in memory.

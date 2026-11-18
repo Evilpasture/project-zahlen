@@ -6,7 +6,6 @@
 
 #include <Zahlen/Math/Vec3.hpp>
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <ProjectLightClient/SceneMirror.hpp>
 #include <Socket/Socket.hpp>
@@ -14,7 +13,6 @@
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <array>
 #include <chrono>
@@ -29,9 +27,9 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN {
-class Engine;
-} // namespace ZHLN
+namespace ZHLN::COM {
+struct IEngine;
+} // namespace ZHLN::COM
 
 namespace ZHLN::ProjectLight {
 
@@ -223,11 +221,11 @@ class ClientSession {
 
     // Public packet hook is useful for deterministic, socket-free protocol tests.
     auto HandlePacket(const MsgPackValue& packet) -> bool;
-    void PollNetwork(Engine& engine);
-    void PrePhysicsTick(Engine& engine, float dt);
-    void PostPhysicsTick(Engine& engine, float dt);
-    void ResetSceneBindings(Engine& engine) noexcept;
-    void OnEngineTeardown(Engine& engine) noexcept;
+    void PollNetwork(COM::IEngine& engine);
+    void PrePhysicsTick(COM::IEngine& engine, float dt);
+    void PostPhysicsTick(COM::IEngine& engine, float dt);
+    void ResetSceneBindings(COM::IEngine& engine) noexcept;
+    void OnEngineTeardown(COM::IEngine& engine) noexcept;
 
   private:
     void               ApplySnapshotMap(const MsgPackValue& snapshot);
@@ -247,7 +245,7 @@ class ClientSession {
     // members above stay the owners, the mirror only visits them.
     [[nodiscard]] auto MirrorState() noexcept -> SceneMirrorState;
 
-    void SendRealtimeFrame(Engine& engine);
+    void SendRealtimeFrame(COM::IEngine& engine);
 
     [[nodiscard]] auto SendTcpPacket(const MsgPackValue& packet) -> bool;
     [[nodiscard]] auto SendRealtimePacket(const MsgPackValue& packet) -> bool;
@@ -311,13 +309,21 @@ class ClientSession {
     SceneMirror                                           m_mirror;
 };
 
-// The module as a value: the client's two frame steps, the scene-cleanup pass
-// that rebinds the session after a scene reset, and the engine-teardown hook
-// that detaches it. InstallClient binds the session these hooks look up and then
-// installs this description, so a host that wants the placement error itself
-// reads the log.
-auto DescribeClient() -> Module;
+// App::Application layer hosting a borrowed ClientSession over COM::IEngine.
+struct Layer {
+    ClientSession* session = nullptr;
 
-void InstallClient(Engine& engine, ClientSession& session);
+    void Tick(COM::IEngine& engine, float dt) {
+        if (session != nullptr) session->PrePhysicsTick(engine, dt);
+    }
+
+    void BeforeRender(COM::IEngine& engine, float dt) {
+        if (session != nullptr) session->PostPhysicsTick(engine, dt);
+    }
+
+    void Stop(COM::IEngine& engine) noexcept {
+        if (session != nullptr) session->OnEngineTeardown(engine);
+    }
+};
 
 } // namespace ZHLN::ProjectLight

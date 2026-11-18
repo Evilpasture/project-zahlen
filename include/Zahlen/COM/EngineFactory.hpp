@@ -20,6 +20,7 @@
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -78,5 +79,32 @@ static_assert(std::is_standard_layout_v<PhysicsConfig> && std::is_trivially_copy
     if (!created.HasValue()) return std::unexpected(created.error);
     return Ref<IEngine>::Adopt(created.value);
 }
+
+[[nodiscard]] inline auto CreateEngineRef(const EngineConfig& cfg) noexcept
+    -> std::expected<Ref<IEngine>, ErrorCode> {
+    const Result<IEngine*> created = CreateEngine(InChain(
+        EngineAppConfig {
+            .appName            = cfg.appName,
+            .logLevel           = cfg.logLevel,
+            .maxFramesPerSecond = cfg.fpsLimit,
+        },
+        EngineWindowConfig {
+            .width      = cfg.width,
+            .height     = cfg.height,
+            .fullscreen = cfg.fullscreen,
+            .vsync      = cfg.vsync,
+            .headless   = cfg.headless,
+        },
+        EngineRenderConfig {
+            .validationMode        = cfg.validationMode,
+            .enableMeshShading     = cfg.enableMeshShading,
+            .initialPipelineBinary = Span<const uint8_t>(cfg.initialPipelineBinaryData.data(), cfg.initialPipelineBinaryData.size()),
+        },
+        cfg.physics));
+    if (!created.HasValue()) return std::unexpected(created.error);
+    return Ref<IEngine>::Adopt(created.value);
+}
+
+[[nodiscard]] ZHLN_API auto RenderGraphDump(AAMode mode) noexcept -> StringView;
 
 } // namespace ZHLN::COM

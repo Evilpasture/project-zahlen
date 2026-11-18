@@ -17,20 +17,18 @@
 
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -38,7 +36,7 @@
 #include <cstdlib>
 #include <expected>
 #include <fstream>
-#include <glTF/GLTFImporter.hpp>
+#include <glTF/GLTFAssets.hpp>
 #include <iterator>
 #include <span>
 #include <string>
@@ -99,22 +97,18 @@ constexpr std::array kModelCandidates {
 // Frames whatever the prefab contains: scene radius from part offsets plus
 // their bounding spheres, camera on +Z at the fov fit distance. Khronos
 // models are origin-centered, so the target is the origin.
-void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::ModelPrefab& prefab, float fovDegrees) {
-    double radius = 0.0;
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        const auto& m = part.localTransform;
-        const float offset = ZHLN::FVec3 {m[0, 3], m[1, 3], m[2, 3]}.Length();
-        radius             = std::max(radius, static_cast<double>(offset + part.boundingRadius));
-    }
+void FitCameraToPrefab(ZHLN::Camera& camera, const ZHLN::COM::PrefabBoundsInfo& bounds, float fovDegrees) {
+    const ZHLN::FVec3 ext = (bounds.max - bounds.min) * 0.5f;
+    double radius = bounds.hasParts ? static_cast<double>(ext.Length() + ((bounds.min + bounds.max) * 0.5f).Length()) : 0.0;
     if (!(radius > 0.5)) {
         radius = 2.0; // degenerate bounds: fall back to a room-sized frame
     }
-    const double halfFov  = std::max(0.1, static_cast<double>(JPH::DegreesToRadians(fovDegrees)) * 0.5);
+    const double halfFov  = std::max(0.1, static_cast<double>(((3.14159265358979323846f / 180.0f) * fovDegrees)) * 0.5);
     double       distance = radius / std::tan(halfFov) * 1.25;
     distance              = std::clamp(distance, radius * 1.2 + 1.0, 80.0);
     camera.position = {0.0f, static_cast<float>(radius * 0.35), static_cast<float>(distance)};
     camera.yaw            = ZHLN::DegF{-90.0f};
-    camera.pitch          = ZHLN::DegF{static_cast<float>(-JPH::RadiansToDegrees(std::atan(radius * 0.35 / distance)))};
+    camera.pitch          = ZHLN::DegF{static_cast<float>(-((180.0f / 3.14159265358979323846f) * std::atan(radius * 0.35 / distance)))};
     camera.fov            = ZHLN::DegF{fovDegrees};
     camera.nearZ          = 0.05f;
     camera.farZ           = std::max(100.0f, static_cast<float>(distance * 4.0));
@@ -147,17 +141,23 @@ struct GLTFSampleAssetsTestSuite {
             if (!engine.Valid()) {
                 return std::unexpected(SampleAssetsError::EngineInitFailed);
             }
-            auto rc = engine->Graphics();
-            auto assets = engine->Assets();
+            auto& rc = *engine->Graphics();
+            auto& assets = *engine->Assets();
             ZHLN::Test::Headless::DisableAA(*engine);
 
             // Fidelity import units: authored linear emission, full texture
             // detail -- the same options the FidelityHarness renders with.
             constexpr ZHLN::GLTF::ImportOptions fidelity {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, bytes, modelPath, modelPath, fidelity);
-            if (!prefab || !ZHLN::Test::ExpectGt(prefab->parts.size(), size_t {0})) {
+            const auto doc = ZHLN::GLTF::Decode(bytes, modelPath, modelPath, fidelity, &assets);
+            if (!doc || !ZHLN::Test::ExpectGt(doc->parts.size(), size_t {0})) {
                 return std::unexpected(SampleAssetsError::ImportFailed);
             }
+            const auto uploaded = ZHLN::GLTF::Upload(assets, rc, *doc);
+            if (!uploaded) {
+                return std::unexpected(SampleAssetsError::ImportFailed);
+            }
+            ZHLN::COM::PrefabBoundsInfo bounds {};
+            (void) assets.GetPrefabBounds(uploaded->hash, ZHLN::COM::OutChain(bounds));
 
             // Empty-scene baseline first: the model-visibility check below is
             // a differential A/B, so exposure and sky changes cancel out.
@@ -167,15 +167,13 @@ struct GLTFSampleAssetsTestSuite {
                 return std::unexpected(SampleAssetsError::RenderDegenerate);
             }
 
-            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>(
-                    [&](auto& c) { FitCameraToPrefab(c.camera, *prefab, 50.0f); }))) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>(
+                    [&](auto& c) { FitCameraToPrefab(c.camera, bounds, 50.0f); }))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
-            std::vector<ZHLN::Entity> instances(1u + prefab->parts.size());
-            const uint32_t            spawned = ZHLN::PrefabFactory::InstantiatePrefab(
-                *engine, *prefab, ZHLN::PrefabFactory::SpawnParams {}, instances.data(), static_cast<uint32_t>(instances.size())
-            );
+            const std::vector<ZHLN::Entity> instances = assets.Instantiate(uploaded->hash, ZHLN::PrefabFactory::SpawnParams {});
+            const uint32_t                  spawned   = static_cast<uint32_t>(instances.size());
             if (!ZHLN::Test::ExpectGt(spawned, 0u)) {
                 return std::unexpected(SampleAssetsError::SpawnFailed);
             }
@@ -195,7 +193,7 @@ struct GLTFSampleAssetsTestSuite {
             const auto visibility = ZHLN::Test::Image::CompareFrames(empty, frame);
             ZHLN::Println(
                 "    [INFO] {}: {} parts, {} spawned, lit share {:.3f}, empty-vs-model frac32 {:.4f}.",
-                modelPath, prefab->parts.size(), spawned, litShare, visibility.frac32
+                modelPath, doc->parts.size(), spawned, litShare, visibility.frac32
             );
             if (!ZHLN::Test::ExpectGt(visibility.frac32, 0.001)) {
                 return std::unexpected(SampleAssetsError::ModelNotVisible);

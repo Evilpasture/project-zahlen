@@ -7,13 +7,13 @@ state and publishes no Animator or IK components.
 
 ## Explicit composition
 
-Native composition roots link `zahlen_skeletal_animation` and call
+Native composition roots link `zahlen_animation_controls` and call
 `Animation::Install(engine)` and, when required, `IK::Install(engine)`. Both are
 idempotent. IK installs its animation prerequisite. The optional runtime owns
 its context, graph systems, prefab-root seeding, component publication and scene
 cleanup through generic extension services and lifecycle hooks.
 
-COM consumers link `Zahlen::SkeletalAnimation`, include `<Animation/Runtime.hpp>`
+COM consumers link `Zahlen::AnimationControls`, include `<Animation/AnimationContext.hpp>`
 and explicitly use `Animation::CreateEngineRef(configChain)`. This extension
 factory installs the optional runtime before returning the ordinary COM engine;
 it does not add an animation interface or hidden native accessor to IEngine.

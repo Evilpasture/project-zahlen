@@ -1,4 +1,3 @@
-link_libraries(zahlen_native_host_ui)
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -8,10 +7,6 @@ if(NOT ZHLN_BUILD_SAMPLES)
     return()
 endif()
 
-# Sample translation units, named. The loop below derives each target name from
-# the file name, so this list *is* the sample set: adding a sample is adding a
-# line here, and the per-sample optional-target mapping further down is keyed by
-# the same names. Nothing in this tree is discovered by glob.
 set(SAMPLE_SOURCES
     BSPMurderDronesSample.cpp
     CDNMapSample.cpp
@@ -22,79 +17,22 @@ set(SAMPLE_SOURCES
     RemoteGLBSample.cpp
 )
 
-# Which optional-layer targets each sample consumes (imports, includes, or installs),
-# by sample name. A sample that appears in none of these lists links no optional targets.
-#
-#   ProceduralAnimationSample  imports ZHLN.Locomotion and
-#                              ZHLN.ProceduralAnimation (zahlen_animation),
-#                              includes <glTF/GLTFImporter.hpp> (zahlen_gltf)
-#                              to load the rig it animates, builds its
-#                              ground with <Terrain/TerrainFactory.hpp>
-#                              (zahlen_native_terrain), and drives its third-person
-#                              view through the extension camera rig
-#                              (<Camera/TargetCamera.hpp>, zahlen_native_camera), and
-#                              installs the character controller that drives
-#                              its WASD and physics steps
-#                              (<CharacterController/NativeCharacterController.hpp>,
-#                              zahlen_native_character_controller).
-#   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
-#   RemoteGLBSample            fetches through ZHLN::Remote (zahlen_remote_asset
-#                              over extensions/net/HTTP) and imports with ZHLN.glTF
-#                              (zahlen_gltf); its model-list crawl goes through
-#                              ZHLN::GitHub (zahlen_github, over extensions/net/HTTP
-#                              and plugins/json).
-#   CDNMapSample               ZHLN::CDN::CDNManager Load of one R2 .glb, then
-#                              zahlen_gltf import; core free-cam.
-#   BSPMurderDronesSample      Source .bsp ingestion (zahlen_bsp) with BSP entity
-#                              interaction (zahlen_interaction); the player is a
-#                              procedural character driven by an imported GLB rig
-#                              through the character controller
-#                              (<CharacterController/NativeCharacterController.hpp>,
-#                              zahlen_native_character_controller), which is why it also
-#                              consumes ZHLN.Locomotion and ZHLN.ProceduralAnimation
-#                              (zahlen_animation) and loads that rig with
-#                              <glTF/GLTFImporter.hpp> (zahlen_gltf). V hands the
-#                              view to the fly cam (<FreeCam/FreeCam.hpp>,
-#                              zahlen_native_freecam) and T to the third-person orbit rig
-#                              (<Camera/TargetCamera.hpp>, zahlen_native_camera) while the
-#                              character waits where it stood. F3 shows the logic
-#                              benchmark panel
-#                              (<Benchmark/Viewer/BenchmarkViewer.hpp>,
-#                              zahlen_benchmark_viewer) inside the sample's own
-#                              HUD frame: the crosshair and the panel are one
-#                              Clay frame drawn by one callback. The viewer links
-#                              the headless zahlen_benchmark, which is the other
-#                              half of that extension.
-#   FidelityHarness            headless glTF-Render-Fidelity runner: imports
-#                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
-#                              scenario JSONs with ZHLN::ReflectJSON
-#                              (zahlen_serialization -- plugins/json), and
-#                              supplies images through zahlen_asset_cooking.
-#
-# Linking named domains instead of the compatibility aggregate is the point of
-# the decomposition: a sample waits only on the optional targets it uses, and a
-# sample with no optional targets gets no simdjson, sockets, or VFX toolkit.
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_native_terrain)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_native_freecam zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_native_freecam)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_skeletal_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_interaction zahlen_animation zahlen_gltf zahlen_native_benchmark_viewer)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_locomotion zahlen_procedural_animation zahlen_gltf_assets zahlen_terrain zahlen_character_controller zahlen_camera zahlen_host_ui)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf_assets zahlen_animation zahlen_camera zahlen_host_ui)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf_assets zahlen_remote_asset zahlen_github zahlen_animation zahlen_host_ui)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf_assets zahlen_cdn zahlen_freecam zahlen_animation)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf_assets zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_screenshot zahlen_animation)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_interaction zahlen_bsp_assets zahlen_scene zahlen_animation zahlen_locomotion zahlen_procedural_animation zahlen_gltf_assets zahlen_character_controller zahlen_camera zahlen_freecam zahlen_benchmark_viewer zahlen_host_ui)
 
 set(ZHLN_MODULE_SAMPLES
     BSPMurderDronesSample
-    GlTFInspectorSample
     ProceduralAnimationSample
 )
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)
 
-    # A sample whose required optional targets were not built cannot compile -- its import
-    # would have no BMI to bind to -- so it is skipped rather than failed. The
-    # same rule that used to guard ProceduralAnimationSample by name now covers
-    # every sample with an optional-layer dependency.
     set(ZHLN_SAMPLE_MISSING_OPTIONAL_TARGETS "")
     foreach(ZHLN_SAMPLE_OPTIONAL_TARGET IN LISTS ZHLN_SAMPLE_OPTIONAL_TARGETS_${SAMPLE_NAME})
         if(NOT TARGET ${ZHLN_SAMPLE_OPTIONAL_TARGET})
@@ -106,7 +44,6 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         continue()
     endif()
 
-    # No WIN32 keyword: on Windows, these are console applications by default.
     add_executable(${SAMPLE_NAME} ${SAMPLE_SRC})
 
     set(ZHLN_SAMPLE_USES_MODULES OFF)
@@ -121,43 +58,16 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         CXX_SCAN_FOR_MODULES ${ZHLN_SAMPLE_USES_MODULES}
     )
 
-    # zahlen_engine comes with zahlen_host_runner (PUBLIC), and Jolt comes with
-    # zahlen_engine (PUBLIC); naming them here only repeated the same three
-    # paths on the link line. zahlen_signal stays: every sample's TestsMain-style
-    # crash reporting needs it directly.
-    # Jolt is direct: BSPMurderDronesSample.cpp resolves JPH symbols from its own
-    # object. Every other sample only includes Jolt's headers and reaches the
-    # definitions through zahlen_engine's DT_NEEDED entry, which is why they do
-    # not name it -- see the note above about repeated link paths.
     target_link_libraries(${SAMPLE_NAME} PRIVATE
-        zahlen_host_runner
+        zahlen_application
         zahlen_signal
         zahlen_warnings
     )
-    if(SAMPLE_NAME STREQUAL "BSPMurderDronesSample")
-        target_link_libraries(${SAMPLE_NAME} PRIVATE Jolt zahlen_native_scene)
-    endif()
 
-    # Link only the optional targets this sample uses (e.g. ZHLN.Locomotion and
-    # Character::Install). Each carries its public include root and any module
-    # interfaces, so the sample can resolve both <glTF/...> and imports above.
     foreach(ZHLN_SAMPLE_OPTIONAL_TARGET IN LISTS ZHLN_SAMPLE_OPTIONAL_TARGETS_${SAMPLE_NAME})
         target_link_libraries(${SAMPLE_NAME} PRIVATE ${ZHLN_SAMPLE_OPTIONAL_TARGET})
     endforeach()
 
-    target_compile_definitions(${SAMPLE_NAME} PRIVATE
-        JPH_DOUBLE_PRECISION
-    )
-
-    # The composition-root default font: every sample boots an Engine, and each
-    # one installs the baked-font loader with the vendored JetBrains Mono NF bake
-    # (see app/main.cpp and Fonts::VendoredDefaultFontSource) so its text renders
-    # with a real font instead of core's embedded 8x8 fallback.
-    #
-    # Not listed in ZHLN_SAMPLE_OPTIONAL_TARGETS_*: those are required domains, and a
-    # missing target there skips the sample. This link is optional by design --
-    # without the font domain, ZHLN_HAS_FONTS stays undefined and the sample
-    # keeps building and running on the embedded bake.
     if(TARGET zahlen_fonts)
         target_link_libraries(${SAMPLE_NAME} PRIVATE zahlen_fonts)
         target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)
@@ -182,8 +92,5 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         )
     endif()
 
-    # A sample links the engine's DLL and Jolt's, and is built into a directory
-    # beside neither of them. Same staging as the ASan runtime above, and for the
-    # same reason: a person runs this one.
     zahlen_add_runtime_dlls(${SAMPLE_NAME})
 endforeach()

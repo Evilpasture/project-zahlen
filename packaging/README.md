@@ -203,8 +203,8 @@ Link and compose what the application uses:
 ```cpp
 #include <Zahlen/App.hpp>
 #include <CharacterController/CharacterController.hpp>
-// Also find_package(ZahlenCharacterController) and link its target.
-// application.Install([](ZHLN::Engine& e) { ZHLN::Character::Install(e); });
+// Also find_package(ZahlenCharacterController) and link Zahlen::CharacterController.
+// Compose ZHLN::Character::CharacterHost over ZHLN::COM::IEngine& in your layer.
 ```
 
 `WithDefaultModules` remains source-compatible but the base default pass is
@@ -213,25 +213,30 @@ cameras, animation or authoring tools must explicitly install those systems.
 
 ## ABI and profiles
 
-Each config checks the compiler family, architecture, dual ABI,
-debug-container mode, Release configuration and an explicit sanitizer profile,
-and compiles `cmake/probes/pr125280-static-member.cpp` in the consumer's own
-toolchain. It does **not** pin a compiler version, a patch release or a
-`__GLIBCXX__` header date. A version floor was tried and removed: GCC PR
-c++/125280 rejects the static-member construct Jolt and these headers rely on,
-and its fix was cherry-picked onto `releases/gcc-16`, which reports 16.1.1 on
-both sides of the commit — so `VERSION_LESS 16.1.1` admits the broken compiler
-and tells the user nothing. Compiling the construct separates them; GCC point
-releases otherwise keep the libstdc++ ABI, and an older runtime is rejected by
-the linker/loader with the precise missing `GLIBCXX_x.y.z` symbol. A shared fingerprint includes the engine revision,
-compiler flags, Jolt public ABI definitions/options and the annotation setting;
-mixing fingerprints is rejected even when package versions match, and so is
-mixing packages from two toolchain ids.
+`ZahlenEngine` ships a **single** shared library (`libzahlen_engine.so`) and the
+stripped public COM/Core headers; `ZahlenCooker` ships `bin/zcook`. Every
+optional extension and plugin (`Application`, `HostRunner`, `HostUI`, `COMApp`,
+`CommandLine`, `Signal`, `Image`, `GLTF`, `Scene`, `Serialization`, `Fonts`,
+`UISchema`, `Screenshot`, `Netpbm`, `FreeCam`, `Camera`, `CharacterController`,
+`AnimationControls`, `Animation`, `Terrain`, `VFX`, `Widgets`, `Console`,
+`Editor`, `Benchmark`, `BenchmarkViewer`, `Scripting`, `Lua`) ships as a
+relocatable **source/header package** under `share/zahlen/src/<pkg>` — zero
+prebuilt `.a` archives and zero compiler-specific module BMIs. Consumers compile
+those sources with their own compiler release, flags, and build type (`Debug`,
+`RelWithDebInfo`, or `Release`) directly against the single Release
+`libzahlen_engine.so`.
 
-Jolt is bundled in Engine with its own public usage requirements, not resolved
-against an arbitrary system Jolt. A toolchain is tied to the engine revision and
-compiler family that built it; it is not a compiler distribution or a promise of
-ABI stability across revisions.
+Jolt Physics, Vulkan/volk/VMA, Clay, miniaudio, meshoptimizer, SPIRV-Reflect,
+and mimalloc are completely sealed inside `libzahlen_engine.so` with hidden
+symbol visibility; no `libJolt*` library, header, or compile definition is
+installed or leaked to consumers.
+
+Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
+(`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, an explicit sanitizer
+profile, and compiles `cmake/probes/pr125280-static-member.cpp` under
+`-std=c++26 -freflection`. It does **not** pin a compiler patch version, git
+commit hash, `__GLIBCXX__` release date, or consumer `CMAKE_BUILD_TYPE`; COM
+input chains verify struct layouts at runtime via `LayoutHash`.
 
 Sanitized consumers pass `-DZahlen_SANITIZER_PROFILE=asan-ubsan`; ASan/UBSan
 compile and link requirements propagate and there is no automatic switch from a
@@ -288,7 +293,7 @@ re-executes itself as an unprivileged user before doing any of it:
    source files and prefab scene; no engine application source is copied.
 7. Build the standalone consumer against the store only, with no `LD_LIBRARY_PATH`
    and no reference to the engine checkout in the generated build files. Its
-   `main.cpp` calls the public `PrefabFactory::CreateBox` API.
+   `main.cpp` calls the public `COM::IAssetLibrary::SpawnBox` API.
 8. Put the pack the consumer cooked where the engine looks for it, require the
    render log to report that it was mounted, force Lavapipe, run eight warm-up
    ticks, then one measured tick and capture.

@@ -52,8 +52,8 @@ zpkg=/tmp/zpkg-bin/zpkg
 # The toolchain ships libraries, headers and the cooker -- never content. This
 # script therefore packages no data pack: the consumer below cooks its own with
 # the zcook from the store, which is the whole point of the boundary.
-components=(Engine CommandLine Signal HostRunner Application UISchema Serialization GLTF
-    Screenshot Netpbm FreeCam Camera CharacterController SkeletalAnimation Animation Cooker)
+components=(Engine CommandLine Image Signal COMApp HostUI HostRunner Application UISchema Scene Serialization GLTF
+    Screenshot Netpbm FreeCam Camera CharacterController AnimationControls Animation Cooker)
 for component in "${components[@]}"; do
     # Each artifact contains only this component plus its metadata. Only the
     # DESTDIR staging tree is what gets packaged: the /usr spelling is what the
@@ -104,7 +104,7 @@ sign_file "$out/SHA256SUMS"
 sign_file "$out/index.json"
 
 "$zpkg" install "$out" \
-    --only Engine,CommandLine,Signal,HostRunner,Application,Netpbm,Cooker \
+    --only Engine,CommandLine,Signal,COMApp,HostUI,HostRunner,Application,Netpbm,Cooker \
     --require-checksums --require-signatures
 
 prefix=$("$zpkg" prefix)
@@ -120,7 +120,15 @@ esac
 "$zpkg" list | tee "$out/zpkg-list.txt"
 "$zpkg" info "$id" | tee "$out/zpkg-info.txt"
 
-for component in Engine CommandLine Signal HostRunner Application Netpbm Cooker; do
+for component in Engine CommandLine Signal COMApp HostUI HostRunner Application Netpbm Cooker; do
+    test -f "$prefix/share/zahlen/manifests/zahlen-${component,,}.json"
+done
+# Single-.so boundary assertions: no libJolt, no Jolt headers, no prebuilt .a archives.
+if [ -e "$prefix/include/Jolt" ] || compgen -G "$prefix/lib*/libJolt*" >/dev/null || compgen -G "$prefix/lib*/*.a" >/dev/null; then
+    echo 'FAIL: installed prefix leaked Jolt or a prebuilt static archive' >&2
+    exit 1
+fi
+for component in Engine; do
     test -f "$prefix/share/zahlen/manifests/zahlen-${component,,}.json"
 done
 for component in Camera Animation FreeCam CharacterController GLTF Serialization UISchema Screenshot; do

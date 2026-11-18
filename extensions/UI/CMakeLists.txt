@@ -35,7 +35,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 # Core is a public dependency: the schema walks GUI::Context's public API,
-# pushes through ECS::EventBus and uses Jolt storage vectors in NodeBox.
+# pushes through GUI::ActionQueue and uses Jolt storage vectors in NodeBox.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )

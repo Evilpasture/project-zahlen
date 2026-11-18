@@ -78,6 +78,11 @@ struct Span {
     constexpr Span(Range&& range) noexcept: Span(std::span<T>(std::forward<Range>(range))) {
     }
 
+    [[nodiscard]] constexpr bool empty() const noexcept { return size == 0; }
+    [[nodiscard]] constexpr T& operator[](size_t index) const noexcept { return data[index]; }
+    [[nodiscard]] constexpr T* begin() const noexcept { return data; }
+    [[nodiscard]] constexpr T* end() const noexcept { return data + size; }
+
     [[nodiscard]] constexpr operator std::span<T>() const noexcept {
         return {data, size};
     }
@@ -119,6 +124,15 @@ struct Option {
         return engaged;
     }
 
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
+        return engaged;
+    }
+
+    [[nodiscard]] constexpr T* operator->() noexcept { return &value; }
+    [[nodiscard]] constexpr const T* operator->() const noexcept { return &value; }
+    [[nodiscard]] constexpr T& operator*() noexcept { return value; }
+    [[nodiscard]] constexpr const T& operator*() const noexcept { return value; }
+
     [[nodiscard]] constexpr T ValueOr(T fallback) const noexcept {
         return engaged ? value : fallback;
     }
@@ -155,6 +169,15 @@ struct Result {
         return ok;
     }
 
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
+        return ok;
+    }
+
+    [[nodiscard]] constexpr T* operator->() noexcept { return &value; }
+    [[nodiscard]] constexpr const T* operator->() const noexcept { return &value; }
+    [[nodiscard]] constexpr T& operator*() noexcept { return value; }
+    [[nodiscard]] constexpr const T& operator*() const noexcept { return value; }
+
     [[nodiscard]] constexpr operator std::expected<T, ErrorCode>() const {
         if (ok) return value;
         return std::unexpected(error);
@@ -178,6 +201,10 @@ struct Result<void> {
     }
 
     [[nodiscard]] constexpr bool HasValue() const noexcept {
+        return ok;
+    }
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
         return ok;
     }
 

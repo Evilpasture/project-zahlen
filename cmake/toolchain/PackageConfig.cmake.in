@@ -1,16 +1,9 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
-if(CMAKE_CONFIGURATION_TYPES OR (CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
-    message(FATAL_ERROR "This Zahlen toolchain has a Release Jolt ABI; use a single-config Release consumer")
-endif()
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build configuration" FORCE)
-endif()
-# A package is not a compiler distribution. GCC point releases keep the
-# libstdc++ ABI, so demanding the exact patch version that happened to build a
-# release was arbitrary. The real gates are the compiler family, the CPU, the
-# behavioural probe below, the dual-ABI/debug switches, and the ELF symbol
-# versions the linker and loader enforce.
+# Cross-distro COM boundary: libzahlen_engine.so exposes only COM vtables,
+# reflected POD value types (verified at runtime by ChainInNode LayoutHash), and
+# narrow Core/GUI/FileSystem helpers. Optional extensions ship as source and
+# compile directly with the consumer's own toolchain and build type.
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@" OR
    NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "@CMAKE_SYSTEM_PROCESSOR@")
     message(FATAL_ERROR "Zahlen toolchain requires @CMAKE_CXX_COMPILER_ID@ on @CMAKE_SYSTEM_PROCESSOR@")
@@ -27,10 +20,8 @@ set_property(GLOBAL PROPERTY Zahlen_TOOLCHAIN_ABI "@ZHLN_TOOLCHAIN_ABI@")
 if(NOT _zahlen_abi)
     include(CheckCXXSourceCompiles)
     unset(_zahlen_stl_ok CACHE)
-    # __GLIBCXX__ is a header release date, not an ABI contract. libstdc++ is
-    # backward compatible, and an older runtime fails at link/load with the
-    # precise missing GLIBCXX_x.y.z symbol, which is a better error than a date
-    # comparison. The two settings that really change the ABI stay exact.
+    # libstdc++ maintains forward symbol-version compatibility; only the dual
+    # std::string ABI switch and _GLIBCXX_DEBUG break layout compatibility.
     check_cxx_source_compiles("#include <string>
 #if !defined(__GLIBCXX__) || _GLIBCXX_USE_CXX11_ABI != @ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ || defined(_GLIBCXX_DEBUG)
 #error incompatible Zahlen standard library ABI
@@ -40,25 +31,14 @@ int main() { return 0; }" _zahlen_stl_ok)
         message(FATAL_ERROR "Zahlen toolchain requires libstdc++ with _GLIBCXX_USE_CXX11_ABI=@ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI@ and no debug containers")
     endif()
 endif()
-# Image has only standard-library value types. It must not demand reflection,
-# nor suppress a later Engine package's probe by being found first.
+# Image and COMApp have no direct reflection requirement of their own; defer the
+# PR c++/125280 compiler probe until Engine or a reflection consumer loads.
 get_property(_zahlen_reflection_checked GLOBAL PROPERTY Zahlen_REFLECTION_CHECKED)
 if(NOT "@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Image" AND NOT _zahlen_reflection_checked)
-    # The headers in this package are compiled with -freflection in the
-    # *consumer's* toolchain, so the consumer's compiler has to survive GCC PR
-    # c++/125280 just as the one that built the package did. This used to be a
-    # `VERSION_LESS` against a minimum GCC, which cannot work: the fix was
-    # cherry-picked onto releases/gcc-16, which reports 16.1.1 on both sides of
-    # it. Compiling the construct is the only question that distinguishes them,
-    # and it costs one try_compile per consumer configure, in the same block as
-    # the libstdc++ check so neither runs per find_dependency().
     if(NOT "@ZHLN_TOOLCHAIN_REFLECTION_FLAGS@" STREQUAL "")
         unset(_zahlen_pr125280_ok CACHE)
         set(_zahlen_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
-        set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} @ZHLN_TOOLCHAIN_REFLECTION_FLAGS@")
-        # The source is substituted into this file at package-generation time.
-        # Bracket arguments keep its quotes, backslashes and semicolons literal;
-        # a quoted argument would be broken by quotes in the C++ source/comments.
+        set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -std=c++26 @ZHLN_TOOLCHAIN_REFLECTION_FLAGS@")
         check_cxx_source_compiles([==[@ZHLN_PR125280_PROBE_SOURCE@]==] _zahlen_pr125280_ok)
         set(CMAKE_REQUIRED_FLAGS "${_zahlen_saved_required_flags}")
         unset(_zahlen_saved_required_flags)
@@ -66,23 +46,14 @@ if(NOT "@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Image" AND NOT _zahlen_reflection_ch
             message(FATAL_ERROR
                 "This compiler (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}) hits GCC PR c++/125280: "
                 "it rejects a static data member whose type is a class template instantiated while the owning "
-                "class is still incomplete, which Zahlen's headers and JoltPhysics both rely on under "
-                "@ZHLN_TOOLCHAIN_REFLECTION_FLAGS@. Fixed in r17-498 and cherry-picked to releases/gcc-16 as "
-                "r16-8903 on 2026-05-13; the branch reports the same version on both sides of that commit, so "
-                "use a build from after it rather than looking for a higher version number.")
+                "class is still incomplete under @ZHLN_TOOLCHAIN_REFLECTION_FLAGS@. Fixed in r17-498 and "
+                "cherry-picked to releases/gcc-16 as r16-8903 on 2026-05-13; upgrade to a build after that commit.")
         endif()
     endif()
     set_property(GLOBAL PROPERTY Zahlen_REFLECTION_CHECKED TRUE)
 endif()
 @ZHLN_TOOLCHAIN_DEPENDENCIES@
 include("${CMAKE_CURRENT_LIST_DIR}/Zahlen@ZHLN_TOOLCHAIN_PACKAGE@Targets.cmake")
-# An asan-ubsan toolchain must put its option hooks in the consumer's executable, not
-# in libzahlen_engine.so: glibc resolves the sanitizer's own weak stubs from the
-# executable first, so a hook that only exists in a shared library is never
-# called, and every consumer silently loses the suppressions. The object is
-# referenced through this file's own location, so it survives prefix relocation.
-# Fail here, at configure time, rather than after a full build: without it the
-# run ends with driver-internal leaks reported against the consumer.
 if("@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Engine"
    AND "@ZHLN_TOOLCHAIN_PROFILE@" STREQUAL "asan-ubsan"
    AND TARGET Zahlen::Engine)
@@ -93,9 +64,6 @@ if("@ZHLN_TOOLCHAIN_PACKAGE@" STREQUAL "Engine"
             "Zahlen asan-ubsan toolchain is missing ${_zahlen_sanitizer_options_object}: "
             "consumer executables would run without the sanitizer option hooks")
     endif()
-    # find_dependency() re-runs this file for every package that reaches Engine,
-    # so the attach has to be idempotent: linking the same object twice is a
-    # duplicate definition, not a no-op.
     get_property(_zahlen_engine_links TARGET Zahlen::Engine PROPERTY INTERFACE_LINK_LIBRARIES)
     if(NOT "${_zahlen_engine_links}" MATCHES "zahlen_sanitizer_options\\.o")
         set_property(TARGET Zahlen::Engine APPEND PROPERTY INTERFACE_LINK_LIBRARIES

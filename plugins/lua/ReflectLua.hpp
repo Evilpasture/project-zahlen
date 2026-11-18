@@ -167,7 +167,7 @@ class ZHLN_STATIC_API Value {
 
     // Table operations. A Lua table `{ 10, 20, 30 }` is a pure sequence when all
     // keys are contiguous integers `1..N`; mixed tables report `IsSequence() == false`.
-    [[nodiscard]] auto IsSequence(size_t& outLength) const noexcept -> bool;
+    [[nodiscard]] auto SequenceLength() const noexcept -> std::optional<size_t>;
     [[nodiscard]] auto GetTableStringKeys() const -> std::expected<std::vector<std::string>, ErrorCode>;
 
     // Calls `visit(childValue)` with the looked-up key or 1-based array element pushed on the stack,
@@ -315,10 +315,11 @@ namespace TemplatedDetail {
             dst[str->size()] = '\0';
             return {};
         } else if constexpr (std::is_bounded_array_v<std::remove_reference_t<T>>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             using RawArr          = std::remove_reference_t<T>;
             using ElemT           = std::remove_extent_t<RawArr>;
             constexpr size_t kCap = std::extent_v<RawArr>;
@@ -461,10 +462,11 @@ namespace TemplatedDetail {
             dst = std::move(out);
             return {};
         } else if constexpr (FixedStdArray<Decayed>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             constexpr size_t kCap = std::tuple_size<Decayed>::value;
             if (seqLen > kCap) {
                 ZHLN::Log("[Lua] array of {} elements exceeds array[{}] at '{}'", seqLen, kCap, reader.Path());
@@ -485,10 +487,11 @@ namespace TemplatedDetail {
             }
             return {};
         } else if constexpr (std::ranges::range<Decayed>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             Decayed container;
             if constexpr (requires { container.reserve(seqLen); }) {
                 container.reserve(seqLen);
@@ -525,10 +528,11 @@ namespace TemplatedDetail {
         if (!table.IsTable()) return std::unexpected(LuaError::TypeMismatch);
 
         T staging = target;
-        size_t seqLen = 0;
-        if (!table.IsSequence(seqLen)) {
+        const auto seqLenOpt = table.SequenceLength();
+            if (!seqLenOpt) {
             if (auto res = PatchObject(staging, table); !res) return std::unexpected(res.error());
         } else {
+            const size_t seqLen = *seqLenOpt;
             constexpr size_t kArity = ZHLN::Reflect::FieldCount<T>();
             if (seqLen > kArity) {
                 ZHLN::Log("[Lua] array of {} elements exceeds {}[{}] at '{}'", seqLen, ZHLN::Reflect::TypeName<T>(), kArity, table.Path());

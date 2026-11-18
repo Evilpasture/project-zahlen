@@ -3,8 +3,6 @@
 
 #include "TangentGenerator.hpp"
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
 #include <algorithm>
 #include <cmath>
 

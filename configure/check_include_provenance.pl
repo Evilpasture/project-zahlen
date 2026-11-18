@@ -50,7 +50,7 @@ use File::Basename qw(basename dirname);
 
 my $ROOT = dirname(dirname(abs_path($0)));
 
-my @SOURCE_ROOTS = qw(include src plugins extensions gameplay modules utils scripts tests samples app);
+my @SOURCE_ROOTS = qw(include src plugins extensions gameplay utils scripts tests samples app);
 my %SOURCE_SUFFIXES = map { $_ => 1 }
     qw(.h .hh .hpp .hxx .inl .ipp .c .cc .cpp .cxx .ixx .cppm);
 my %HEADER_SUFFIXES = map { $_ => 1 } qw(.h .hh .hpp .hxx .inl .ipp);
@@ -167,7 +167,7 @@ my %FIRST_PARTY = (
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
     LogLevel         => ['include/Zahlen/Core/LogLevel.hpp'],
-    FrameError       => ['include/Zahlen/Engine/FramePlan.hpp'],
+    FrameError       => ['src/engine/FramePlan.hpp'],
     IObject          => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceID      => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceIdOf    => ['include/Zahlen/Core/COM/IObject.hpp'],
@@ -246,7 +246,7 @@ my %STANDARD = (
 
 # A file that re-exports instead of using: it is not compiled on its own and
 # its own include list is not the thing under test.
-my %SKIP_PATHS = map { $_ => 1 } ('modules/zahlen.cppm');
+my %SKIP_PATHS = ();
 
 # Trees whose headers are umbrella-dependent on purpose: src/vulkan's leaf
 # headers carry a #error demanding the umbrella, include nothing themselves,

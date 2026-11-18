@@ -5,13 +5,13 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 class PhysicsContext;
 namespace ECS { class EntityCommandBuffer; }
 
-class ZHLN_API PhysicsSystem {
+class PhysicsSystem {
   public:
     using ImpulseQuery = ECS::Query<const Components::ImpulseCommand, const Components::PhysicsComponent>;
 

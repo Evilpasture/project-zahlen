@@ -5,11 +5,7 @@
 #pragma once
 
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Real.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/ECS/Entity.hpp>
 #include <cstdint>
 

@@ -27,9 +27,9 @@ namespace {
 auto JoinedLogs(const ZHLN::GameConsole& console) -> std::string {
     std::string out;
     for (size_t i = 0; i < console.GetEntryCount(); ++i) {
-        std::string_view text;
-        float            r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
-        console.GetEntry(i, text, r, g, b, a);
+        const auto entry = console.GetEntry(i);
+        if (!entry) continue;
+        const std::string_view text = entry->text;
         if (!out.empty()) {
             out += '\n';
         }

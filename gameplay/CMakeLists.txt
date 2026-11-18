@@ -6,5 +6,4 @@
 add_subdirectory(ALife)
 add_subdirectory(FallbackScene)
 add_subdirectory(Interaction)
-add_subdirectory(RagdollAuthoring)
 add_subdirectory(ProjectLight)

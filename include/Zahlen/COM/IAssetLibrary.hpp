@@ -14,6 +14,7 @@
 
 #include <Zahlen/COM/COMTypes.hpp>
 #include <Zahlen/COM/AssetTypes.hpp>
+#include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
@@ -78,6 +79,9 @@ struct IAssetLibrary : IObject {
     [[nodiscard]] virtual Option<PrefabInfo> DescribePrefab(uint64_t hash) const noexcept = 0;
 
     [[nodiscard]] virtual Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* bounds) const noexcept = 0;
+    // Exports cached prefab nodes, part bounds, skeletons and animation clips
+    // into PrefabRigCounts and/or PrefabRigData output chain nodes.
+    [[nodiscard]] virtual Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept = 0;
 
     // Copies the prefab's virtual path into `buffer` and null-terminates it
     // when there is room. Returns the length the path actually needs, which
@@ -189,6 +193,17 @@ struct IAssetLibrary : IObject {
                                  const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
         return SpawnPrimitive(
             InChain(ConeMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+    }
+
+    [[nodiscard]] auto CacheEnvironmentImage(StringView key, const EnvironmentImage& img) noexcept -> Result<void> {
+        return CacheEnvironmentImage(InChain(EnvironmentImageCacheInfo {
+            .key          = key,
+            .extent       = {.width = img.width, .height = img.height},
+            .rgba         = Span<const float>(img.rgba.data(), img.rgba.size()),
+            .lightingRgba = Span<const float>(img.lightingRgba.data(), img.lightingRgba.size()),
+            .sun          = img.sun ? Option<EnvironmentSun>(*img.sun) : Option<EnvironmentSun>{},
+            .contentHash  = img.contentHash,
+        }));
     }
 
 protected:

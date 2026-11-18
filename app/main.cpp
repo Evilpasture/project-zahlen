@@ -56,11 +56,11 @@ struct SandboxGame {
         gfx.environment.ambientExposure = 3.0f;
         gfx.environment.skyZenith       = {0.08f, 0.18f, 0.34f, 1.0f};
         gfx.environment.skyHorizon      = {0.40f, 0.55f, 0.72f, 1.0f};
-        engine.Graphics()->ApplySettings(gfx);
+        (void)engine.Graphics()->ApplySettings(gfx);
 
         // Everything here is scene-owned: Engine's normal teardown reclaims
         // both the generated GPU meshes and their Jolt bodies.
-        engine.Assets()->SpawnPlane( 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
+        (void)engine.Assets()->SpawnPlane( 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
 
         // --cubes controls the initial physics population. --seed optionally
         // jitters the grid with a fixed integer LCG (the default stays aligned).
@@ -74,7 +74,7 @@ struct SandboxGame {
             const float x      = (static_cast<float>(i % 8) - 2.0f) * 1.65f + (seed ? jitter() : 0.0f);
             const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
             const float stripe = static_cast<float>(i % 5);
-            engine.Assets()->SpawnBox( {0.55f, 0.55f, 0.55f},
+            (void)engine.Assets()->SpawnBox( {0.55f, 0.55f, 0.55f},
                 {.position        = {x, 2.5f + stripe * 0.35f, z},
                  .createPhysics   = true,
                  .isStaticPhysics = false,
@@ -82,7 +82,7 @@ struct SandboxGame {
             );
         }
 
-        reg.Spawn(
+        (void)reg.Spawn(
             ZHLN::Components::SunTagComponent {}, ZHLN::Components::LightComponent {
                                                       .type        = ZHLN::LightType::Sun,
                                                       .color       = FVec3{1.0f, 0.95f, 0.85f},
@@ -148,7 +148,7 @@ struct SandboxGame {
             }
         }
         if (engine.Audio()->Initialized()) {
-            engine.Audio()->PostEvent(
+            (void)engine.Audio()->PostEvent(
                 ZHLN::AudioEvent {
                     .type     = ZHLN::AudioEventType::ProceduralBeep,
                     .volume   = 0.22f,

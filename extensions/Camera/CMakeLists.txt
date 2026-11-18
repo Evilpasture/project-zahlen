@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Target-camera policy, explicitly driven by a COM host.
-# The Native* target below is a separate, transitional module adapter.
 
 set(TARGET_NAME zahlen_camera)
 
@@ -37,9 +36,3 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
-
-# Transitional native callers only; never linked by the COM implementation.
-add_library(zahlen_native_camera STATIC NativeTargetCamera.cpp)
-set_target_properties(zahlen_native_camera PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(zahlen_native_camera PUBLIC zahlen_camera PRIVATE zahlen_warnings)
-zahlen_enable_reflection(zahlen_native_camera)

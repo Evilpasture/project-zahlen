@@ -3,45 +3,38 @@
 
 // samples/CDNMapSample.cpp
 //
-// Fetch one .glb through ZHLN::CDN::CDNManager, import it, keep core's free-cam.
-//
-//   ./build/samples/CDNMapSample
-//
-// WASD + mouse: the default-scene free-cam. Escape / window close to quit.
+// Fetch one .glb through ZHLN::CDN::CDNManager, upload through GLTFAssets, fly with FreeCam.
 
+#include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/Animator.hpp>
 #include <CDN/CDN.hpp>
-#include <FreeCam/NativeFreeCam.hpp>
+#include <FreeCam/FreeCam.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 #include <Signal/CrashHandler.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <glTF/GLTFImporter.hpp>
-
-#if defined(ZHLN_HAS_FONTS)
-#include <Fonts/Fonts.hpp>
-#endif
+#include <glTF/GLTFAssets.hpp>
+#include <glTF/GLTFDocument.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -59,43 +52,10 @@ inline constexpr std::string_view kBaseURL = "https://pub-59179c82c36c49338ceec8
 inline constexpr std::string_view kAsset   = "MD_Map_Lights.glb";
 inline constexpr uint32_t         kTimeout = 180;
 
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
-    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return ZHLN::Mat4x4::Identity();
-    }
-    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
-    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
-    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
-        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
-    }
-    return transform;
-}
-
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax) {
-    outMin = FVec3(1e9f, 1e9f, 1e9f);
-    outMax = FVec3(-1e9f, -1e9f, -1e9f);
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const FVec3  localCenter = (localMin + localMax) * 0.5f;
-        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const FVec3  center      = ZHLN::TransformPoint(model, localCenter);
-        const FVec3  extent      = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
-                                       (model.Column(2).XYZ() * halfExtent.z).Abs();
-        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
-        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
-    }
-    if (prefab.parts.empty()) {
-        outMin = FVec3(-1.0f, -1.0f, -1.0f);
-        outMax = FVec3(1.0f, 1.0f, 1.0f);
-    }
-}
-
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+    ZHLN::Platform::Init();
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 4096, .maxBodyPairs = 8192, .maxContactConstraints = 8192},
         .appName = "Zahlen :: CDN Map",
@@ -103,7 +63,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
+        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
@@ -111,34 +71,20 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     ZHLN::SetLogLevel(engineConfig.logLevel);
-
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::Engine::Create(engineConfig);
+    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
+    auto engine = std::move(*engineRes);
     if (!engineConfig.headless) {
-        engine->Host().Focus();
+        engine->FocusWindow(engine->PrimaryWindow());
     }
-
-    ZHLN::FreeCam::Install(*engine);
-    ZHLN::Animation::Install(*engine);
-
-#if defined(ZHLN_HAS_FONTS)
-    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
-    } else {
-        ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
-    }
-#endif
-
-    ZHLN::GLTF::InstallDeviceLostHandler(*engine);
 
     ZHLN::CDN::CDNConfig config {
         .baseURL        = kBaseURL,
@@ -146,62 +92,66 @@ auto main(int argc, char* argv[]) -> int {
     };
     auto cdn = ZHLN::CDN::CDNManager::Create(config);
     if (!cdn) {
-        ZHLN::LogError("[CDNMap] CDNManager::Create failed: {}", cdn.error());
+        ZHLN::LogError("[CDNMap] CDNManager::Create failed: {}", ZHLN::Error(cdn.error()).Message());
         return EXIT_FAILURE;
     }
 
     ZHLN::Log("[CDNMap] Fetching {}/{}", kBaseURL, kAsset);
     auto bytes = cdn->Load(kAsset, ZHLN::Remote::Validators::IsGLB);
     if (!bytes) {
-        ZHLN::LogError("[CDNMap] Load failed: {}", bytes.error());
+        ZHLN::LogError("[CDNMap] Load failed: {}", ZHLN::Error(bytes.error()).Message());
         return EXIT_FAILURE;
     }
     ZHLN::Log("[CDNMap] {} KiB", bytes->size() / 1024U);
 
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(*engine, std::span<const uint8_t>(*bytes), kAsset);
-    if (!prefab) {
-        ZHLN::LogError("[CDNMap] glTF import failed for '{}'", kAsset);
+    auto doc = ZHLN::GLTF::Decode(std::span<const uint8_t>(*bytes), kAsset, {}, {}, engine->Assets());
+    if (!doc) {
+        ZHLN::LogError("[CDNMap] glTF decode failed for '{}': {}", kAsset, ZHLN::Error(doc.error()).Message());
+        return EXIT_FAILURE;
+    }
+    auto asset = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *doc);
+    if (!asset) {
+        ZHLN::LogError("[CDNMap] glTF upload failed for '{}': {}", kAsset, ZHLN::Error(asset.error()).Message());
         return EXIT_FAILURE;
     }
 
-    const uint32_t            capacity = 1U + (static_cast<uint32_t>(prefab->parts.size()) * 2U);
+    const uint32_t            capacity = 1U + (static_cast<uint32_t>(doc->parts.size()) * 2U) + static_cast<uint32_t>(doc->lights.size());
     std::vector<ZHLN::Entity> instances(capacity);
-    const uint32_t            written = ZHLN::PrefabFactory::InstantiatePrefab(
-        *engine, *prefab,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position      = {0.0, 0.0, 0.0},
-            .createPhysics = false,
-            .isAnimated    = !prefab->animations.empty(),
-        },
-        instances.data(), capacity
-    );
-    instances.resize(std::min(written, capacity));
-    ZHLN::Log("[CDNMap] Spawned {} instance(s), {} part(s).", written, prefab->parts.size());
+    const ZHLN::PrefabFactory::SpawnParams   spawnParams {
+        .position      = {0.0, 0.0, 0.0},
+        .createPhysics = false,
+        .isAnimated    = !doc->animations.empty(),
+    };
+    instances = engine->Assets()->Instantiate(asset->hash, spawnParams);
+    const auto written = static_cast<uint32_t>(instances.size());
+    instances.resize(std::min<size_t>(written, capacity));
+    if (!doc->animations.empty() && !instances.empty()) {
+        (void)engine->Entities()->Attach(instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
+    }
+    ZHLN::Log("[CDNMap] Spawned {} instance(s), {} part(s).", written, doc->parts.size());
 
-    FVec3 boundsMin;
-    FVec3 boundsMax;
-    ComputeBounds(*prefab, boundsMin, boundsMax);
+    FVec3 boundsMin {-1.0f, -1.0f, -1.0f};
+    FVec3 boundsMax {1.0f, 1.0f, 1.0f};
+    { ZHLN::COM::PrefabBoundsInfo b{}; if (engine->Assets()->GetPrefabBounds(asset->hash, ZHLN::COM::OutChain(b)).HasValue() && b.hasParts) { boundsMin = b.min; boundsMax = b.max; } }
     const FVec3 center    = (boundsMin + boundsMax) * 0.5f;
-    const float     radius    = std::max((boundsMax - boundsMin).Length() * 0.5f, 1.0f);
-    const float     moveSpeed = std::clamp(radius * 0.35f, 8.0f, 400.0f);
-    ZHLN::FreeCam::Attach(*engine, moveSpeed);
+    const float radius    = std::max((boundsMax - boundsMin).Length() * 0.5f, 1.0f);
+    const float moveSpeed = std::clamp(radius * 0.35f, 8.0f, 400.0f);
+    ZHLN::FreeCam::Attach(*engine->Entities(), moveSpeed);
     ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
 
     {
-        auto entities = engine->Entities();
-        // Default exposure is 1.0; a sun of 60 (the studio number at exposure 0.08)
-        // clips the whole framebuffer to white. Grade for an outdoor map.
-        engine->Graphics().PatchSettings([radius](auto& gfx) {
-            gfx.post.exposure               = 0.12f;
-            gfx.post.tonemapper             = 1;
-            gfx.environment.ambientExposure = 2.0f;
-            gfx.shadows.width               = std::clamp(radius * 8.0f, 32.0f, 4000.0f);
-            gfx.shadows.resolution          = 2048;
-        });
+        auto& entities = *engine->Entities();
+        ZHLN::GraphicsSettings gfx      = engine->Graphics()->Settings();
+        gfx.post.exposure               = 0.12f;
+        gfx.post.tonemapper             = 1;
+        gfx.environment.ambientExposure = 2.0f;
+        gfx.shadows.width               = std::clamp(radius * 8.0f, 32.0f, 4000.0f);
+        gfx.shadows.resolution          = 2048;
+        (void)engine->Graphics()->ApplySettings(gfx);
 
-        const FVec3  sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
-        const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
-        entities.Spawn(
+        const FVec3        sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
+        const ZHLN::Mat4x4 world  = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
+        (void)entities.Spawn(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
             ZHLN::Components::TransformComponent {.position = sunPos, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
@@ -213,13 +163,13 @@ auto main(int argc, char* argv[]) -> int {
             }
         );
 
-        const ZHLN::Entity camera = entities.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = entities.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
         if (camera != ZHLN::Entity::Null()) {
             const FVec3 eye   = center + FVec3(radius * 0.9f, std::max(radius * 0.35f, 8.0f), radius * 0.9f);
             const FVec3 dir   = (center - eye).Normalized();
-            const float     yaw   = ZHLN::RadF {std::atan2(dir.z, dir.x)}.ToDegrees().value;
-            const float     pitch = ZHLN::RadF {std::asin(std::clamp(dir.y, -0.99f, 0.99f))}.ToDegrees().value;
-            entities.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) -> auto {
+            const float yaw   = ZHLN::RadF {std::atan2(dir.z, dir.x)}.ToDegrees().value;
+            const float pitch = ZHLN::RadF {std::asin(std::clamp(dir.y, -0.99f, 0.99f))}.ToDegrees().value;
+            entities.Patch<ZHLN::Components::CameraComponent>(camera, [&](auto& cc) {
                 cc.camera.position = eye;
                 cc.camera.yaw      = ZHLN::DegF{yaw};
                 cc.camera.pitch    = ZHLN::DegF{pitch};
@@ -229,16 +179,38 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
+    ZHLN::Animation::AnimationContext animCtx {};
+    uint64_t lastGeneration = engine->DeviceGeneration();
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
-        ZHLN::CheckForCrashes(crashState, engine.get());
+        ZHLN::CheckForCrashes(crashState, engine.Get());
         engine->ProcessEvents();
+        if (engine->Actions()->KeyPressed(ZHLN::KeyCode::Escape, ZHLN::kPrimarySeat)) {
+            engine->RequestClose();
+            break;
+        }
+        if (engine->DeviceGeneration() != lastGeneration) {
+            if (ZHLN::GLTF::RebuildGPUResources(*engine, *doc, *asset)) {
+                lastGeneration = engine->DeviceGeneration();
+            }
+        }
         const float dt = clock.Tick();
+        ZHLN::Animation::Step(*engine, animCtx, dt);
+        ZHLN::FreeCam::Step(*engine, dt);
 
         const auto result = engine->Tick(dt);
-        if (!result) {
-            ZHLN::LogError("[CDNMap] frame failed: {}", result.error());
-            return EXIT_FAILURE;
+        if (!result.HasValue()) {
+            ZHLN::LogError("[CDNMap] frame failed: {}", ZHLN::Error(result.error).Message());
+            break;
+        }
+    }
+
+    for (ZHLN::Entity e : instances) {
+        if (engine->Entities()->IsAlive(e)) (void)engine->Entities()->Despawn(e);
+    }
+    if (asset->ownsResources) {
+        for (ZHLN::TextureID tex : asset->textures) {
+            if (tex != ZHLN::TextureID::Invalid) engine->Graphics()->UnloadTexture(tex);
         }
     }
     return EXIT_SUCCESS;

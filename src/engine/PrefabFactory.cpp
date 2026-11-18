@@ -5,24 +5,21 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <ecs/ECS.hpp>
+#include <engine/AssetManager.hpp>
+#include <engine/Engine.hpp>
+#include <engine/ModelPrefab.hpp>
+#include <engine/PrefabFactory.hpp>
 #include "PrefabFactoryInternal.hpp"
-#include <Zahlen/Engine/SceneResources.hpp>
+#include <engine/SceneResources.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <physics/Physics.hpp>
+#include <render/Render.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <optional>
@@ -58,7 +55,8 @@ auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::Ba
             }
         }
     }
-    if (GUI::LoadBakedFont(owned)) {
+    if (auto loaded = GUI::LoadBakedFont()) {
+        owned = std::move(*loaded);
         return owned;
     }
     return GUI::GetDefaultBakedFont();
@@ -209,7 +207,7 @@ auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform
 }
 
 auto InstantiateMeshPart(
-    GraphicsDevice                         gfx,
+    RenderContext&                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
     ArticulationContext&                    art,
@@ -229,10 +227,10 @@ auto InstantiateMeshPart(
     Material activeMat = params.materialOverride.pipeline != PipelineID::Invalid ? params.materialOverride : part.defaultMaterial;
 
     if (part.mesh.posBuffer != BufferID::Invalid) {
-        gfx.RegisterMesh(meshAsset, part.mesh);
+        gfx.RegisterGPUMesh(meshAsset, part.mesh);
     }
     if (activeMat.pipeline != PipelineID::Invalid) {
-        gfx.RegisterMaterial(matAsset, activeMat);
+        gfx.RegisterGPUMaterial(matAsset, activeMat);
     }
 
     uint32_t assignedJointOffset = 0;
@@ -362,7 +360,7 @@ auto SpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEn
 } // namespace
 
 auto CreateBoxInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     ZHLN::FVec3                     halfExtents,
@@ -391,8 +389,8 @@ auto CreateBoxInternal(
     AssetID    meshAsset = HashAssetID("prefab_box_mesh_" + std::to_string(e.index));
     MaterialID matAsset  = HashAssetID("prefab_box_mat_" + std::to_string(e.index));
 
-    gfx.RegisterMesh(meshAsset, mesh);
-    gfx.RegisterMaterial(matAsset, mat);
+    gfx.RegisterGPUMesh(meshAsset, mesh);
+    gfx.RegisterGPUMaterial(matAsset, mat);
 
     const auto worldMat = SpawnMatrix(params);
 
@@ -433,7 +431,7 @@ auto CreateBoxInternal(
 namespace {
 
 auto SpawnPrimitive(
-    GraphicsDevice                        gfx,
+    RenderContext&                        gfx,
     ECS::Registry&                        reg,
     ZHLN::Optional<PhysicsContext&>       pc,
     std::string_view                      shapeName,
@@ -467,8 +465,8 @@ auto SpawnPrimitive(
     AssetID    meshAsset = HashAssetID("prefab_" + std::string(shapeName) + "_mesh_" + std::to_string(e.index));
     MaterialID matAsset  = HashAssetID("prefab_" + std::string(shapeName) + "_mat_" + std::to_string(e.index));
 
-    gfx.RegisterMesh(meshAsset, mesh);
-    gfx.RegisterMaterial(matAsset, mat);
+    gfx.RegisterGPUMesh(meshAsset, mesh);
+    gfx.RegisterGPUMaterial(matAsset, mat);
 
     const auto worldMat = SpawnMatrix(params);
 
@@ -500,7 +498,7 @@ auto SpawnPrimitive(
 
 } // namespace
 
-auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params, bool buildBLAS)
+auto CreateSphereInternal(RenderContext& gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params, bool buildBLAS)
     -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
@@ -514,7 +512,7 @@ auto CreateSphereInternal(GraphicsDevice gfx, ECS::Registry& reg, ZHLN::Optional
 }
 
 auto CreateCylinderInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -535,7 +533,7 @@ auto CreateCylinderInternal(
 }
 
 auto CreateConeInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           radius,
@@ -556,7 +554,7 @@ auto CreateConeInternal(
 }
 
 auto CreatePlaneInternal(
-    GraphicsDevice                  gfx,
+    RenderContext&                  gfx,
     ECS::Registry&                  reg,
     ZHLN::Optional<PhysicsContext&> pc,
     float                           extent,
@@ -581,8 +579,8 @@ auto CreatePlaneInternal(
     AssetID    meshAsset = HashAssetID("prefab_plane_mesh_" + std::to_string(e.index));
     MaterialID matAsset  = HashAssetID("prefab_plane_mat_" + std::to_string(e.index));
 
-    gfx.RegisterMesh(meshAsset, mesh);
-    gfx.RegisterMaterial(matAsset, mat);
+    gfx.RegisterGPUMesh(meshAsset, mesh);
+    gfx.RegisterGPUMaterial(matAsset, mat);
 
     const auto worldMat = SpawnMatrix(params);
 
@@ -615,7 +613,7 @@ auto CreatePlaneInternal(
 }
 
 auto InstantiatePrefabInternal(
-    GraphicsDevice       gfx,
+    RenderContext&       gfx,
     ECS::Registry&       reg,
     PhysicsContext&      pc,
     ArticulationContext& art,
@@ -632,6 +630,15 @@ auto InstantiatePrefabInternal(
 
     if (!params.createPhysics) {
         rootEntity = SpawnPrefabRoot(reg, prefab.virtualPath.c_str(), params);
+        reg.Add(
+            rootEntity,
+            Components::PrefabInstanceComponent {
+                .prefabAsset    = HashAssetPath(std::string_view {prefab.virtualPath.c_str()}),
+                .animationCount = static_cast<uint32_t>(prefab.animations.size()),
+                .skeletonCount  = static_cast<uint32_t>(prefab.skeletons.size()),
+                .animated       = params.isAnimated,
+            }
+        );
 
         if (onRoot)
             onRoot(rootUserdata, rootEntity);
@@ -756,10 +763,10 @@ auto InstantiatePrefabInternal(
     return spawnedCount;
 }
 
-void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
+void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
-    gfx.ClearCaches();
+    gfx.ClearGPUCaches();
 
     // The scene owns its procedural mesh buffers. Its recipes survive device
     // loss, but its old IDs do not; rebuild these with the new context.
@@ -789,14 +796,14 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
                 continue;
         }
         if (owned.meshAsset != InvalidAssetID && owned.mesh.posBuffer != BufferID::Invalid) {
-            gfx.RegisterMesh(owned.meshAsset, owned.mesh);
+            gfx.RegisterGPUMesh(owned.meshAsset, owned.mesh);
         }
 
         // Default procedural materials also lived in the lost renderer.
         // Recreate a drawable baseline from the scene's color/PBR settings;
         // data-driven materials are restored by their own asset systems.
         const auto meshComp = reg.Get<Components::MeshComponent>(entities[i]);
-        if (meshComp && !gfx.Material(meshComp->materialAsset).has_value()) {
+        if (meshComp && !gfx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
             if (auto created = gfx.CreateMaterial(
                     owned.color.w < 1.0f ? MaterialDesc::Transparent({owned.color.x, owned.color.y, owned.color.z, owned.color.w}) :
                                            MaterialDesc::Basic({owned.color.x, owned.color.y, owned.color.z, owned.color.w})
@@ -807,7 +814,7 @@ void RebuildVulkanResources(GraphicsDevice gfx, ECS::Registry& reg) {
                     mat.roughnessFactor = pbr->roughness;
                     mat.metallicFactor  = pbr->metallic;
                 }
-                gfx.RegisterMaterial(meshComp->materialAsset, mat);
+                gfx.RegisterGPUMaterial(meshComp->materialAsset, mat);
             }
         }
     }

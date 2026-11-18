@@ -44,7 +44,7 @@ namespace ECS {
 class EventBus;
 }
 
-// Engine-internal. Not ZHLN_API and not in include/: these are the engine's own
+// Engine-internal. Not and not in include/: these are the engine's own
 // objects, and the engine is what hands out the capabilities built on them.
 class KernelSession {
   public:
@@ -74,6 +74,21 @@ class KernelSession {
     // must still find it. `WindowFor` answers nullptr for that case.
     [[nodiscard]] auto WindowIDs() const noexcept -> std::span<const WindowID>;
     [[nodiscard]] auto WindowFor(WindowID id) const noexcept -> Window*;
+
+    [[nodiscard]] auto WindowRunning(WindowID id = WindowID::Primary) const noexcept -> bool;
+    [[nodiscard]] auto WindowExtent(WindowID id = WindowID::Primary) const noexcept -> Extent2D;
+    [[nodiscard]] auto WindowPresent(WindowID id = WindowID::Primary) const noexcept -> bool;
+    [[nodiscard]] auto WindowCustomCursor(WindowID id = WindowID::Primary) const noexcept -> bool;
+    [[nodiscard]] auto WindowCursorMode(WindowID id = WindowID::Primary) const noexcept -> CursorMode;
+    [[nodiscard]] auto WindowMouseCaptured(WindowID id = WindowID::Primary) const noexcept -> bool;
+    [[nodiscard]] auto WindowFocused(WindowID id = WindowID::Primary) const noexcept -> bool;
+    void               SetWindowCursorMode(WindowID id, CursorMode mode) noexcept;
+    void               CaptureWindowMouse(WindowID id, bool captured) noexcept;
+    void               FocusWindow(WindowID id = WindowID::Primary) noexcept;
+    void               CloseWindow(WindowID id = WindowID::Primary) const noexcept;
+    void               SetWindowFileDropHandler(WindowID id, void (*handler)(void*, const FileDrop*, uint32_t), void* userdata) noexcept;
+    [[nodiscard]] auto Clipboard() const -> std::string;
+    void               SetClipboard(std::string_view text);
 
 
     [[nodiscard]] auto AcquireTarget(WindowID window = WindowID::Primary) noexcept -> FrameOutcome<FrameTarget>;

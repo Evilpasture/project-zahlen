@@ -7,13 +7,13 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <ecs/ECS.hpp>
 
 #include <vector>
 
 namespace ZHLN {
 
-ZHLN_API void AudioSystem(
+void AudioSystem(
     ECS::Query<
         const Components::AudioListenerComponent,
         const Components::WorldTransformComponent,
@@ -21,7 +21,7 @@ ZHLN_API void AudioSystem(
         Components::AudioSourceComponent&
     >                                             query,
     ZHLN::Optional<AudioContext&>                 audio,
-    ECS::Res<AssetLibrary>                        assets,
+    ECS::Res<AssetManager>                        assets,
     ECS::Query<const Components::CameraComponent> cameraQuery,
     FrameDt                                       dt
 ) {

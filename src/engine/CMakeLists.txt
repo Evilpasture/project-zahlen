@@ -21,7 +21,6 @@ set(RAW_ENGINE_SOURCES
     KernelSession.cpp
     World.cpp
     VisibilityList.cpp
-    Capabilities.cpp
     system/CharacterMotorSystem.cpp
     EngineCOM.cpp
     LogicWorldCOM.cpp
@@ -85,6 +84,7 @@ if(USE_SANITIZERS)
 endif()
 
 target_include_directories(zahlen_engine PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system
 )

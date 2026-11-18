@@ -10,7 +10,6 @@
 #   * zahlen_serialization (plugins/json) for ReflectJSON::Document/ValueReader
 #     and <json/JSONSchema.hpp>; it carries the plugins include root.
 #   * zahlen_engine for public engine types; zahlen_image for codecs.
-#   * Jolt for JPH_DOUBLE_PRECISION's Vec types (FidelityCore.hpp uses none,
 #     but the shared compile flags stay uniform with the harness).
 #
 #   * FidelityCore.hpp is dependency-free: the metric, PPM reader and downscale.
@@ -30,7 +29,7 @@ zahlen_set_bin_output(fidelity)
 zahlen_add_runtime_dlls(fidelity)
 
 # zahlen_serialization carries zahlen_engine PUBLIC, so naming the engine again
-# is noise; Jolt was linked for a JPH_DOUBLE_PRECISION that nothing here uses.
+# is noise.
 target_link_libraries(fidelity PRIVATE
     zahlen_serialization
     zahlen_image

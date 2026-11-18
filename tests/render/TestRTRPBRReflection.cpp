@@ -18,21 +18,18 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -173,16 +170,16 @@ struct RTRPBRReflectionTestSuite {
         });
     }
 
-    static void DisableAAAndFreeCam(ZHLN::Engine& engine) {
-        auto reg = engine.Entities();
+    static void DisableAAAndFreeCam(ZHLN::COM::IEngine& engine) {
+        auto& reg = *engine.Entities();
         for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+            (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
         }
-        engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+        (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
     }
 
-    static void SetReflectionFlags(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
-        engine.Graphics().PatchSettings([enableSSR, enableRTR](auto& gfx) {
+    static void SetReflectionFlags(ZHLN::COM::IEngine& engine, int enableSSR, int enableRTR) {
+        (void)engine.Graphics()->PatchSettings([enableSSR, enableRTR](auto& gfx) {
             gfx.environment.fullBright       = 0;
             gfx.environment.ambientExposure  = 6.0f;
             gfx.post.vignetteIntensity       = 0.0f;
@@ -196,12 +193,12 @@ struct RTRPBRReflectionTestSuite {
         });
     }
 
-    static void PlaceSunAndCamera(ZHLN::Engine& engine) {
-        auto reg = engine.Entities();
+    static void PlaceSunAndCamera(ZHLN::COM::IEngine& engine) {
+        auto& reg = *engine.Entities();
         const ZHLN::Entity sunEnt = reg.Spawn();
         // Intensity 0: LightingSystem falls back to a 180-nit default sun if
         // no Sun exists, which floods dielectric albedo and hides F0 tint.
-        reg.Attach(
+        reg.AttachMany(
             sunEnt,
             ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})},
             ZHLN::Components::LightComponent {
@@ -209,7 +206,7 @@ struct RTRPBRReflectionTestSuite {
             }
         );
 
-        const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
             auto& cam = c.camera;
             cam.position = {0.0f, 5.5f, 11.0f};
             cam.yaw      = ZHLN::DegF{-90.0f};
@@ -221,27 +218,23 @@ struct RTRPBRReflectionTestSuite {
         }
     }
 
-    static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, ZHLN::FVec4 base, ZHLN::FVec4 emissive = ZHLN::FVec4 {0.0f, 0.0f, 0.0f, 1.0f})
+    static auto MakeMat(ZHLN::COM::IEngine& engine, float metallic, float roughness, ZHLN::FVec4 base, ZHLN::FVec4 emissive = ZHLN::FVec4 {0.0f, 0.0f, 0.0f, 1.0f})
         -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
-        return engine.Graphics().CreateMaterial(
+        return engine.Graphics()->CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
         );
     }
 
-    static ZHLN::Entity SpawnMirror(ZHLN::Engine& engine, const ZHLN::Material& mat) {
-        return ZHLN::PrefabFactory::CreatePlane(
-            engine, 16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = mat}
-        );
+    static ZHLN::Entity SpawnMirror(ZHLN::COM::IEngine& engine, const ZHLN::Material& mat) {
+        return engine.Assets()->SpawnPlane(16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = mat}).value;
     }
 
-    static ZHLN::Entity SpawnEmitter(ZHLN::Engine& engine, const ZHLN::Material& mat, float x = 0.0f) {
-        return ZHLN::PrefabFactory::CreateBox(
-            engine, {2.4f, 1.1f, 0.12f}, ZHLN::PrefabFactory::SpawnParams {.position = {x, 3.2, -1.2}, .createPhysics = false, .materialOverride = mat}
-        );
+    static ZHLN::Entity SpawnEmitter(ZHLN::COM::IEngine& engine, const ZHLN::Material& mat, float x = 0.0f) {
+        return engine.Assets()->SpawnBox({2.4f, 1.1f, 0.12f}, ZHLN::PrefabFactory::SpawnParams {.position = {x, 3.2, -1.2}, .createPhysics = false, .materialOverride = mat}).value;
     }
 
-    static bool TickFrames(ZHLN::Engine& engine, uint32_t frames, uint32_t lostBefore) {
+    static bool TickFrames(ZHLN::COM::IEngine& engine, uint32_t frames, uint32_t lostBefore) {
         constexpr float dt = 1.0f / 60.0f;
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
@@ -249,12 +242,12 @@ struct RTRPBRReflectionTestSuite {
             if (ZHLN::Test::DeviceLostCount() != lostBefore) {
                 return false;
             }
-            ZHLN::Test::ExpectTrue(status.has_value());
+            ZHLN::Test::ExpectTrue(status.HasValue());
         }
         return true;
     }
 
-    static auto Capture(ZHLN::Engine& engine, std::string_view path) -> RgbImage {
+    static auto Capture(ZHLN::COM::IEngine& engine, std::string_view path) -> RgbImage {
         return ZHLN::Test::Headless::Capture(engine, path);
     }
 
@@ -281,7 +274,7 @@ struct RTRPBRReflectionTestSuite {
         if (!s.engine) {
             return std::unexpected(RTRPBRError::EngineInitFailed);
         }
-        if (!s.engine->Graphics().Info().rayTracingSupported) {
+        if (!s.engine->Graphics()->Info().rayTracingSupported) {
             ZHLN::Println("    [SKIP] Device has no raytracing; RTR PBR colour checks are not applicable.");
             s.engine = {};
             return s;
@@ -353,18 +346,14 @@ struct RTRPBRReflectionTestSuite {
             if (!imgC) {
                 return std::unexpected(imgC.error());
             }
-            ZHLN::DespawnEntity(*s.engine, chrome);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(chrome);
             const ZHLN::Entity gold = SpawnMirror(*s.engine, *goldRes);
             auto               imgG = CaptureRTR(s, "headless_rtr_pbr_f0_gold.ppm");
             if (!imgG) {
                 return std::unexpected(imgG.error());
             }
             (void) gold;
-            ZHLN::DespawnEntity(*s.engine, gold);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(gold);
             SpawnMirror(*s.engine, *dielRes);
             auto imgD = CaptureRTR(s, "headless_rtr_pbr_f0_diel.ppm");
             if (!imgD) {
@@ -429,18 +418,14 @@ struct RTRPBRReflectionTestSuite {
             if (!imgS) {
                 return std::unexpected(imgS.error());
             }
-            ZHLN::DespawnEntity(*s.engine, eSmooth);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(eSmooth);
             const ZHLN::Entity eMid = SpawnMirror(*s.engine, *mid);
             auto               imgM = CaptureRTR(s, "headless_rtr_pbr_rough_m.ppm");
             if (!imgM) {
                 return std::unexpected(imgM.error());
             }
             (void) eMid;
-            ZHLN::DespawnEntity(*s.engine, eMid);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(eMid);
             SpawnMirror(*s.engine, *rough);
             auto imgR = CaptureRTR(s, "headless_rtr_pbr_rough_r.ppm");
             if (!imgR) {
@@ -545,7 +530,7 @@ struct RTRPBRReflectionTestSuite {
 
             auto reg = s.engine->Entities();
             auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::ErrorCode> {
-                if (!reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
+                if (!reg->Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
                         pbr.metallic  = metallic;
                         pbr.roughness = roughness;
                     })) {
@@ -634,18 +619,14 @@ struct RTRPBRReflectionTestSuite {
             if (!imgSil) {
                 return std::unexpected(imgSil.error());
             }
-            ZHLN::DespawnEntity(*s.engine, eSil);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(eSil);
             const ZHLN::Entity eAu   = SpawnMirror(*s.engine, *gold);
             auto               imgAu = CaptureRTR(s, "headless_rtr_pbr_gold.ppm");
             if (!imgAu) {
                 return std::unexpected(imgAu.error());
             }
             (void) eAu;
-            ZHLN::DespawnEntity(*s.engine, eAu);
-            s.engine->ProcessPendingDestroy();
-
+            s.engine->Entities()->Despawn(eAu);
             SpawnMirror(*s.engine, *copper);
             auto imgCu = CaptureRTR(s, "headless_rtr_pbr_copper.ppm");
             if (!imgCu) {

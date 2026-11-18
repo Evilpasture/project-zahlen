@@ -11,7 +11,7 @@
 #include "render/features/ShadowAtlas.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
+#include <render/RenderContext.hpp>
 #include <cstdint>
 #include <expected>
 

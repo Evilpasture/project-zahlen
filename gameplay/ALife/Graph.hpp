@@ -6,9 +6,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <cstddef>
 #include <memory_resource>
 #include <span>

@@ -20,7 +20,9 @@ module;
 
 #include <Socket/Socket.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
@@ -220,7 +222,7 @@ struct NetworkClient::Impl {
     // One message in, one batch out: the type it applied, or the miss that
     // stopped it. The caller merges these into the poll's ledger, so a message
     // that fails no longer decides for every message behind it.
-    auto ApplyMessage(Engine& engine, const MessageEnvelope& envelope, Channel channel) -> MessageBatch {
+    auto ApplyMessage(COM::IEntities& entities, const MessageEnvelope& envelope, Channel channel) -> MessageBatch {
         MessageBatch applied;
         const auto   record = [&applied, &envelope, channel](const std::expected<void, ErrorCode>& outcome) {
             if (outcome) {
@@ -231,10 +233,10 @@ struct NetworkClient::Impl {
         };
         switch (envelope.type) {
             case MessageType::InitialSnapshot:
-                record(replicator->ApplyInitialObjects(engine, envelope.payload));
+                record(replicator->ApplyInitialObjects(entities, envelope.payload));
                 break;
             case MessageType::PhysicsBatch:
-                record(replicator->ApplyPhysicsBatch(engine, envelope.payload));
+                record(replicator->ApplyPhysicsBatch(entities, envelope.payload));
                 break;
             case MessageType::ClientHello:
             case MessageType::ServerWelcome:
@@ -250,7 +252,7 @@ struct NetworkClient::Impl {
     // failure -- the socket is closed, nothing after it can be trusted -- so the
     // error comes back as the return value. What each individual message did is
     // the ledger's business.
-    auto PumpTcp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
+    auto PumpTcp(COM::IEntities& entities, MessageBatch& ledger) -> ErrorCode {
         uint8_t chunk[RECV_CHUNK_BYTES];
         while (true) {
             const RecvResult received = RecvSome(tcpSocket, std::span<uint8_t>(chunk));
@@ -302,12 +304,12 @@ struct NetworkClient::Impl {
                 );
                 continue;
             }
-            ledger.Merge(ApplyMessage(engine, *envelope, Channel::Tcp));
+            ledger.Merge(ApplyMessage(entities, *envelope, Channel::Tcp));
         }
         return {};
     }
 
-    auto PumpUdp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
+    auto PumpUdp(COM::IEntities& entities, MessageBatch& ledger) -> ErrorCode {
         if (!udpSocket.IsOpen()) {
             return {};
         }
@@ -340,7 +342,7 @@ struct NetworkClient::Impl {
             // quietly promoted to a message the stream is meant to carry.
             if (envelope->type == MessageType::PhysicsBatch) {
                 isRealtimeReady = true;
-                ledger.Merge(ApplyMessage(engine, *envelope, Channel::Udp));
+                ledger.Merge(ApplyMessage(entities, *envelope, Channel::Udp));
             }
         }
         return {};
@@ -461,7 +463,7 @@ void NetworkClient::Disconnect() noexcept {
     _impl->CloseSockets();
 }
 
-auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode> {
+auto NetworkClient::PollEvents(COM::IEntities& entities) noexcept -> std::expected<void, ErrorCode> {
     if (!_impl->isConnected || !_impl->tcpSocket.IsOpen()) {
         return {};
     }
@@ -471,8 +473,8 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
     // promises; what changed is that the failures behind the first are no longer
     // thrown away with it.
     MessageBatch    applied;
-    const ErrorCode tcpFailure = _impl->PumpTcp(engine, applied);
-    const ErrorCode udpFailure = _impl->PumpUdp(engine, applied);
+    const ErrorCode tcpFailure = _impl->PumpTcp(entities, applied);
+    const ErrorCode udpFailure = _impl->PumpUdp(entities, applied);
 
     applied.ForEachError([](const MessageMiss& miss) {
         const char* carrier = miss.channel == Channel::Udp ? "datagram" : "stream frame";
@@ -493,6 +495,14 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
         return std::unexpected(first->error);
     }
     return {};
+}
+
+auto NetworkClient::PollEvents(COM::IEngine& engine) noexcept -> std::expected<void, ErrorCode> {
+    auto* entities = engine.Entities();
+    if (!entities) {
+        return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
+    }
+    return PollEvents(*entities);
 }
 
 void NetworkClient::SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept {

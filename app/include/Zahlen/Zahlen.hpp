@@ -12,11 +12,8 @@
 // per-subsystem includes and has no engine-wide header of its own
 // (ARCHITECTURE.md §1.3).
 //
-// Jolt is deliberately not here. A unit that names a JPH:: type includes
-// <Zahlen/Physics/Jolt.hpp> itself, so the JPH_* ABI macros spread only as far
-// as the code that actually speaks Jolt.
+// Public umbrella header for COM application hosts; Jolt stays private to the engine.
 
-// --- foundation -------------------------------------------------------------
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Error.hpp>

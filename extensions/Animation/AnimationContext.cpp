@@ -3,9 +3,10 @@
 
 #include <Animation/AnimationContext.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PoseUploads.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <unordered_map>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -301,7 +302,7 @@ struct InstanceState {
     bool                                        suppressPaletteUpload = false;
 };
 
-void ResolveBaseFK(const ModelPrefab& prefab, std::span<const Mat4x4> local, std::span<Mat4x4> model, std::span<NodeEvalScratch> scratch) noexcept {
+void ResolveBaseFK(const PrefabRig& prefab, std::span<const Mat4x4> local, std::span<Mat4x4> model, std::span<NodeEvalScratch> scratch) noexcept {
     const size_t nodeCount = local.size();
     for (size_t n = 0; n < nodeCount; ++n) {
         scratch[n].fkState        = 0;
@@ -340,7 +341,7 @@ void ResolveBaseFK(const ModelPrefab& prefab, std::span<const Mat4x4> local, std
 }
 
 void ApplyIKAndPropagateDescendantFK(
-    const ModelPrefab&         prefab,
+    const PrefabRig&         prefab,
     std::span<const IKChain>   chains,
     std::span<Mat4x4>          local,
     std::span<Mat4x4>          model,
@@ -476,9 +477,10 @@ struct AnimationContext::Impl {
     std::vector<InstanceState> instances;
     PosePool                   poses;
 
-    std::vector<const ModelPrefab*> stepPrefabs;
+    std::vector<const PrefabRig*> stepPrefabs;
     std::vector<Mat4x4>             paletteScratch;
-    std::vector<Mat4x4>             kinematicScratch;
+    std::vector<Mat4x4>                    kinematicScratch;
+    std::unordered_map<AssetID, PrefabRig> rigCache;
 
     [[nodiscard]] auto ResolveDense(AnimationID handle) const noexcept -> ZHLN::Optional<uint32_t> {
         if (!handle.IsValid()) {
@@ -687,7 +689,42 @@ void AnimationContext::SuppressPaletteUpload(AnimationID handle) noexcept {
     }
 }
 
-void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueue& poseUploads) {
+void AnimationContext::CacheRig(AssetID id, PrefabRig rig) {
+    rig.hash            = id;
+    _impl->rigCache[id] = std::move(rig);
+}
+
+void AnimationContext::InvalidateRigs() noexcept {
+    _impl->rigCache.clear();
+}
+
+auto AnimationContext::ResolveRig(const COM::IAssetLibrary* assets, AssetID id) -> const PrefabRig* {
+    if (id == InvalidAssetID) return nullptr;
+    auto it = _impl->rigCache.find(id);
+    if (it != _impl->rigCache.end()) {
+        if (assets == nullptr) return &it->second;
+        COM::PrefabRigCounts counts {};
+        if (!assets->ReadPrefabRig(id, COM::OutChain(counts)).HasValue()) {
+            _impl->rigCache.erase(it);
+            return nullptr;
+        }
+        if (counts.revision == it->second.revision) {
+            return &it->second;
+        }
+    }
+    if (assets == nullptr) return nullptr;
+    auto loaded = LoadPrefabRig(*assets, id);
+    if (!loaded.has_value()) return nullptr;
+    auto [inserted, _] = _impl->rigCache.insert_or_assign(id, std::move(*loaded));
+    return &inserted->second;
+}
+
+void AnimationContext::Step(
+    float                     dt,
+    const COM::IAssetLibrary* assets,
+    COM::IGraphicsDevice*     graphics,
+    COM::ISimulation*         simulation,
+    PoseUploadCallback        sink) {
     const size_t activeCount = _impl->instances.size();
     if (activeCount == 0) {
         return;
@@ -700,11 +737,11 @@ void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueu
     for (size_t i = 0; i < activeCount; ++i) {
         InstanceState& inst   = _impl->instances[i];
         inst.uploadSliceCount = 0;
-        const auto prefabOpt  = assets.CachedPrefab(inst.prefabAsset);
-        if (!prefabOpt) {
+        const PrefabRig* prefabPtr = ResolveRig(assets, inst.prefabAsset);
+        if (prefabPtr == nullptr) {
             continue;
         }
-        const ModelPrefab& prefab = *prefabOpt;
+        const PrefabRig& prefab = *prefabPtr;
         _impl->stepPrefabs[i]     = &prefab;
         const auto requiredNodes  = static_cast<uint32_t>(prefab.nodes.size());
 
@@ -748,7 +785,7 @@ void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueu
     TaskSystem::ParallelFor(static_cast<uint32_t>(activeCount), 1, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
             InstanceState&     inst   = _impl->instances[i];
-            const ModelPrefab* prefab = _impl->stepPrefabs[i];
+            const PrefabRig* prefab = _impl->stepPrefabs[i];
             if (prefab == nullptr) {
                 continue;
             }
@@ -767,7 +804,7 @@ void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueu
 
             if (!restingClip && nodeCount > 0) {
                 for (uint32_t n = 0; n < nodeCount; ++n) {
-                    const auto bindTRS = DecomposeTransform(PrefabMatrixToNative(prefab->nodes[n].localTransform));
+                    const auto bindTRS = DecomposeTransform(prefab->nodes[n].localTransform);
                     scratch[n].prev    = SampledTRS {.translation = bindTRS.translation, .rotation = bindTRS.rotation, .scale = bindTRS.scale};
                     scratch[n].curr    = scratch[n].prev;
                     morphs[n]          = MorphSample {};
@@ -890,11 +927,21 @@ void AnimationContext::Step(float dt, const AssetLibrary& assets, PoseUploadQueu
         InstanceState& inst = _impl->instances[i];
         for (uint32_t s = 0; s < inst.uploadSliceCount; ++s) {
             const UploadSlice& slice = inst.uploadSlices[s];
-            poseUploads.Push(slice.jointOffset, std::span<const Mat4x4> {_impl->paletteScratch.data() + slice.paletteOffset, slice.jointCount});
+            const std::span<const Mat4x4> paletteSpan {_impl->paletteScratch.data() + slice.paletteOffset, slice.jointCount};
+            if (graphics != nullptr) {
+                graphics->UpdateJointMatrices(slice.jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
+            }
+            if (sink.uploadPalette != nullptr) {
+                sink.uploadPalette(sink.user, slice.jointOffset, paletteSpan);
+            }
             if (slice.hasRagdoll) {
-                poseUploads.PushKinematic(
-                    slice.jointOffset, std::span<const Mat4x4> {_impl->kinematicScratch.data() + slice.kinematicOffset, slice.jointCount}
-                );
+                const std::span<const Mat4x4> kinSpan {_impl->kinematicScratch.data() + slice.kinematicOffset, slice.jointCount};
+                if (simulation != nullptr) {
+                    simulation->QueueKinematicPose(slice.jointOffset, COM::Span<const Mat4x4> {kinSpan.data(), kinSpan.size()});
+                }
+                if (sink.uploadKinematic != nullptr) {
+                    sink.uploadKinematic(sink.user, slice.jointOffset, kinSpan);
+                }
             }
         }
         inst.suppressPaletteUpload = false;
@@ -953,6 +1000,88 @@ auto AnimationContext::ModelPose(AnimationID handle) const noexcept -> std::span
     }
     const InstanceState& inst = _impl->instances[*denseOpt];
     return _impl->poses.Model(inst.poseOffset, inst.nodeCount);
+}
+
+} // namespace ZHLN::Animation
+
+namespace ZHLN::Animation {
+
+std::optional<PrefabRig> LoadPrefabRig(const COM::IAssetLibrary& assets, AssetID hash) {
+    if (hash == InvalidAssetID) return std::nullopt;
+    COM::PrefabRigCounts counts {};
+    if (!assets.ReadPrefabRig(hash, COM::OutChain(counts)).HasValue()) {
+        return std::nullopt;
+    }
+
+    PrefabRig rig;
+    rig.hash        = hash;
+    rig.revision    = counts.revision;
+    rig.virtualPath = assets.PrefabVirtualPath(hash);
+
+    rig.nodes.resize(counts.nodeCount);
+    rig.parts.resize(counts.partCount);
+    std::vector<COM::PrefabSkeletonInfo>  skelInfos(counts.skeletonCount);
+    std::vector<COM::PrefabJointInfo>     jointInfos(counts.jointCount);
+    std::vector<COM::PrefabAnimationInfo> animInfos(counts.animationCount);
+    std::vector<COM::PrefabChannelInfo>   chanInfos(counts.channelCount);
+    std::vector<float>                    keyTimes(counts.keyTimeCount);
+    std::vector<float>                    keyValues(counts.keyValueCount);
+
+    COM::PrefabRigData data {
+        .nodes      = rig.nodes,
+        .parts      = rig.parts,
+        .skeletons  = skelInfos,
+        .joints     = jointInfos,
+        .animations = animInfos,
+        .channels   = chanInfos,
+        .keyTimes   = keyTimes,
+        .keyValues  = keyValues,
+    };
+    if (!assets.ReadPrefabRig(hash, COM::OutChain(data)).HasValue()) {
+        return std::nullopt;
+    }
+
+    rig.skeletons.reserve(skelInfos.size());
+    for (const auto& s : skelInfos) {
+        Skeleton skel;
+        skel.name = std::string_view(s.name);
+        skel.joints.reserve(s.joints.count);
+        for (uint32_t i = 0; i < s.joints.count; ++i) {
+            const auto& j = jointInfos[s.joints.first + i];
+            skel.joints.push_back(Joint {
+                .name              = j.name,
+                .parentIndex       = j.parentIndex,
+                .nodeIndex         = j.nodeIndex,
+                .inverseBindMatrix = j.inverseBindMatrix,
+            });
+        }
+        rig.skeletons.push_back(std::move(skel));
+    }
+
+    rig.animations.reserve(animInfos.size());
+    for (const auto& a : animInfos) {
+        AnimationClip clip;
+        clip.name     = std::string_view(a.name);
+        clip.duration = a.duration;
+        clip.channels.reserve(a.channels.count);
+        for (uint32_t i = 0; i < a.channels.count; ++i) {
+            const auto&      c = chanInfos[a.channels.first + i];
+            AnimationChannel ch;
+            ch.targetNodeIndex = c.targetNodeIndex;
+            ch.path            = c.path;
+            ch.interpolation   = c.interpolation;
+            ch.keyTimes.assign(
+                keyTimes.begin() + static_cast<ptrdiff_t>(c.keyTimes.first),
+                keyTimes.begin() + static_cast<ptrdiff_t>(c.keyTimes.first + c.keyTimes.count));
+            ch.keyValues.assign(
+                keyValues.begin() + static_cast<ptrdiff_t>(c.keyValues.first),
+                keyValues.begin() + static_cast<ptrdiff_t>(c.keyValues.first + c.keyValues.count));
+            clip.channels.push_back(std::move(ch));
+        }
+        rig.animations.push_back(std::move(clip));
+    }
+
+    return rig;
 }
 
 } // namespace ZHLN::Animation

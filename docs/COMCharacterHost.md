@@ -53,9 +53,9 @@ frame. This is not a second character integrator.
 
 ## Animator controls
 
-Include `<Animation/Animator.hpp>` and link `zahlen_skeletal_animation` /
-`Zahlen::SkeletalAnimation`. The playback evaluator belongs to the optional SkeletalAnimation runtime.
-Compose it explicitly via `<Animation/Runtime.hpp>` and
+Include `<Animation/Animator.hpp>` and link `zahlen_animation_controls` /
+`Zahlen::AnimationControls`. The playback evaluator belongs to the optional AnimationControls runtime.
+Compose it explicitly via `<Animation/AnimationContext.hpp>` and
 `Animation::CreateEngineRef`, or native `Animation::Install`/`IK::Install`;
 this archive's new helpers only author published POD controls:
 
@@ -70,14 +70,11 @@ this archive's new helpers only author published POD controls:
 Clip/gait selection stays in the host. These helpers do not acquire an
 AnimationContext or export native animation containers across COM.
 
-## Native compatibility remains explicit
+## COM-only surface
 
-Old native controller callers now include
-`<CharacterController/NativeCharacterController.hpp>` and link
-`zahlen_native_character_controller` / `Zahlen::NativeCharacterController`.
-The sample, ProjectLight, Interaction and native-test composition roots were
-updated accordingly. The new COM host never links this adapter; the native
-adapter may link the host's shared input arithmetic. Do not install both
+The transitional `NativeCharacterController` adapter has been removed; samples,
+ProjectLight, Interaction, and tests all use `CharacterHost` (`Zahlen::CharacterController`)
+exclusively through COM. Do not install duplicate controllers
 movement drivers in the same world. A native typed Movement family is refused
 by the COM dynamic-component path instead of becoming duplicate unread state.
 
@@ -96,7 +93,7 @@ articulation output contracts and remains separate work.
   published typed playback/IK storage and Animator helper validation.
 - Seventeen existing native character/input tests pass, including ledges,
   slopes, acceleration, interpolation, jump/landing and dynamic-body pushing.
-- An installed C++26 GNU consumer finds CharacterController/SkeletalAnimation,
+- An installed C++26 GNU consumer finds CharacterController/AnimationControls,
   checks the host's exported dependencies exclude Native/Jolt adapters, drives
   an actual character through the staged engine pipeline, and validates
   Animator controls and cleanup without source-tree include paths.
@@ -120,7 +117,7 @@ extension now owns the evaluator, IK nodes and cleanup. Native Install calls
 are explicit and idempotent.
 CancelFrame and scene clear discard unpublished palette uploads.
 
-The installed GNU C++26 Engine/CharacterController/SkeletalAnimation consumer
+The installed GNU C++26 Engine/CharacterController/AnimationControls consumer
 was rebuilt and ran successfully. VM Clang 22.1.8 rejects `-freflection`; no
 Clang integration success is claimed. An additional native procedural test
 translation unit was stopped after over 15 minutes of compilation; no test-run

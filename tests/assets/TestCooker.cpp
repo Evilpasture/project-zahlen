@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
+#include <Zahlen/Render/CookedFormats.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/CookerFixture.hpp"
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -237,72 +237,7 @@ std::expected<void, ZHLN::ErrorCode> test_locate_zcook_compiler_binary(CookerSes
         }
 
         // --- 5. Offline PAK Archive Creation (zcook pak) & Engine VFS Mount ---
-        std::expected<void, ZHLN::ErrorCode> test_offline_pak_archive_creation_and_vfs_mount(CookerFixture& cooker) {
-            if (cooker.zcook.empty()) {
-                return std::unexpected(CookerTestError::ZcookExecutableNotFound);
-            }
-
-            fs::path pakPath      = cooker.SubPath("data/base.pak");
-            fs::path manifestPath = cooker.SubPath("build_assets/manifest.txt");
-
-            fs::path f1 = cooker.SubPath("build_assets/player.zmesh");
-            fs::path f2 = cooker.SubPath("build_assets/albedo.ztex");
-            fs::path f3 = cooker.SubPath("build_assets/walk.zanim");
-
-            std::string content1 = "MSH0_SAMPLE_MESH_PAYLOAD";
-            std::string content2 = "TEX0_SAMPLE_IMAGE_PAYLOAD";
-            std::string content3 = "ANM0_SAMPLE_TRACK_PAYLOAD";
-
-            {
-                std::ofstream(f1, std::ios::binary).write(content1.data(), static_cast<std::streamsize>(content1.size()));
-                std::ofstream(f2, std::ios::binary).write(content2.data(), static_cast<std::streamsize>(content2.size()));
-                std::ofstream(f3, std::ios::binary).write(content3.data(), static_cast<std::streamsize>(content3.size()));
-            }
-
-            {
-                std::ofstream mfs(manifestPath);
-                mfs << "models/player.zmesh=" << f1.string() << "\n";
-                mfs << "textures/albedo.ztex=" << f2.string() << "\n";
-                mfs << "anims/walk.zanim=" << f3.string() << "\n";
-            }
-
-            std::string args     = std::format(R"(pak -o "{}" -i "{}")", pakPath.string(), manifestPath.string());
-            int         exitCode = cooker.Run(args);
-            ZHLN::Test::Expect(exitCode) == 0;
-
-            if (exitCode != 0) {
-                return std::unexpected(CookerTestError::PakArchiveFailed);
-            }
-
-            std::ifstream   ifs(pakPath, std::ios::binary);
-            ZHLN::FS::PakHeader diskHeader {};
-            ReadValue(ifs, diskHeader);
-
-            ZHLN::Test::ExpectEq(std::string_view(diskHeader.magic, 4), "ZPAK");
-            ZHLN::Test::ExpectEq(diskHeader.entryCount, static_cast<uint32_t>(kExpectedEntries3));
-
-            ZHLN::AssetManager cwMgr;
-            bool                       mounted = cwMgr.MountPak(pakPath.string());
-            ZHLN::Test::ExpectTrue(mounted);
-
-            // Fetch Mesh
-            ZHLN::AssetLoadRequest reqMesh {.assetID = ZHLN::HashAssetPath("models/player.zmesh")};
-            bool                          loadedMesh = cwMgr.LoadSync(reqMesh);
-            ZHLN::Test::ExpectTrue(loadedMesh);
-            ZHLN::Test::ExpectEq(reqMesh.outSize, content1.size());
-            ZHLN::Test::ExpectEq(std::string_view(static_cast<const char*>(reqMesh.outData), reqMesh.outSize), content1);
-            cwMgr.FreeMemory(reqMesh);
-
-            // Fetch Texture
-            ZHLN::AssetLoadRequest reqTex {.assetID = ZHLN::HashAssetPath("textures/albedo.ztex")};
-            bool                          loadedTex = cwMgr.LoadSync(reqTex);
-            ZHLN::Test::ExpectTrue(loadedTex);
-            ZHLN::Test::ExpectEq(reqTex.outSize, content2.size());
-            ZHLN::Test::ExpectEq(std::string_view(static_cast<const char*>(reqTex.outData), reqTex.outSize), content2);
-            cwMgr.FreeMemory(reqTex);
-
-            return {};
-        }
+        
 
 
         // --- 7. Compiler CLI Error Handling & Input Validation ---

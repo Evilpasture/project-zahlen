@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsSystem.hpp"
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <physics/Physics.hpp>
 
 namespace ZHLN {
 

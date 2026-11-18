@@ -81,6 +81,10 @@ public:
         return m_ptr;
     }
 
+    [[nodiscard]] T& operator*() const noexcept {
+        return *m_ptr;
+    }
+
     [[nodiscard]] T* Get() const noexcept {
         return m_ptr;
     }

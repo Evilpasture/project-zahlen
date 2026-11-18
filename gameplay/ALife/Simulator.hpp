@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <Zahlen/COM/IEntities.hpp>
+
 #include <Zahlen/Math/Vec3.hpp>
 #include "Factions.hpp"
 #include "Graph.hpp"
@@ -38,14 +40,14 @@ class ZHLN_STATIC_API Simulator {
     // Movement and interaction callbacks may run concurrently. They must not
     // structurally mutate the queried storage, and shared callback state and
     // cross-entity writes require their own synchronization.
-    void Update(SpatialGrid::WriteQuery query, float dt, DVec3 observer_pos);
+    void Update(COM::IEntities& entities, float dt, DVec3 observer_pos);
 
     void SetRelation(uint32_t a, uint32_t b, float value);
     void BroadcastEvent(const Event& event);
-    void ResolveOfflineInteraction(SpatialGrid::WriteQuery query, Entity e1, Entity e2);
+    void ResolveOfflineInteraction(COM::IEntities& entities, Entity e1, Entity e2);
 
-    auto Save(const char* filename) const -> bool;
-    auto Load(ECS::Registry& reg, const char* filename) -> bool;
+    auto Save(const COM::IEntities& entities, const char* filename) const -> bool;
+    auto Load(COM::IEntities& entities, const char* filename) -> bool;
 
     // Callbacks
     std::function<void(Simulator&, Entity, Entity)> on_interaction;

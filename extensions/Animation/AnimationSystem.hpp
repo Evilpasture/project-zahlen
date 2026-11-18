@@ -4,52 +4,48 @@
 #pragma once
 #include <Animation/AnimationContext.hpp>
 #include <Animation/Components.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemAccess.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
+#include <Zahlen/Common.h>
+#include <Zahlen/ECS/Entity.hpp>
 
-namespace ZHLN {
+namespace ZHLN::COM {
+struct IEngine;
+struct IEntities;
+struct IAssetLibrary;
+struct IGraphicsDevice;
+struct ISimulation;
+} // namespace ZHLN::COM
 
-class AssetLibrary;
-class Engine;
-class PoseUploadQueue;
+namespace ZHLN::Animation {
 
-namespace Animation {
+ZHLN_STATIC_API void Sync(COM::IEntities& entities, AnimationContext& anim);
 
-struct ZHLN_API AnimationSyncSystem {
-    static void Update(
-        ECS::Query<
-            Animation::AnimatorComponent&,
-            Animation::AnimatorControlComponent&,
-            const Components::SkeletalMeshComponent,
-            const Components::HierarchyComponent,
-            const Components::RagdollComponent> query,
-        ECS::ResMut<AnimationContext>           anim
-    );
+ZHLN_STATIC_API void PublishResults(
+    COM::IEntities&         entities,
+    const AnimationContext& anim,
+    bool (*skipRigidNodes)(const COM::IEntities&, Entity) = nullptr);
+
+ZHLN_STATIC_API void Step(
+    COM::IEntities&           entities,
+    AnimationContext&         anim,
+    float                     dt,
+    const COM::IAssetLibrary* assets     = nullptr,
+    COM::IGraphicsDevice*     graphics   = nullptr,
+    COM::ISimulation*         simulation = nullptr,
+    PoseUploadCallback        sink       = {});
+
+ZHLN_STATIC_API void Step(COM::IEngine& engine, AnimationContext& anim, float dt);
+
+struct Layer {
+    AnimationContext context;
+
+    void Tick(COM::IEngine& engine, float dt) {
+        Step(engine, context, dt);
+    }
+
+    void Stop(COM::IEngine&) noexcept {
+        context.Clear();
+        context.InvalidateRigs();
+    }
 };
 
-struct ZHLN_API AnimationStepSystem {
-    static void Update(
-        ECS::Query<
-            Animation::AnimatorComponent&,
-            const Components::HierarchyComponent,
-            const Components::MeshComponent,
-            const Components::SkeletalMeshComponent,
-            Components::MorphTargetComponent&,
-            Components::TransformComponent&> query,
-        ECS::ResMut<AnimationContext>        anim,
-        ECS::Res<AssetLibrary>               assets,
-        ECS::ResMut<PoseUploadQueue>         poseUploads,
-        FrameDt                              frameDt
-    );
-};
-
-// Optional extension: the application explicitly installs the runtime.
-[[nodiscard]] ZHLN_API auto Describe() noexcept -> Module;
-ZHLN_API void               Install(Engine& engine);
-
-} // namespace Animation
-} // namespace ZHLN
+} // namespace ZHLN::Animation

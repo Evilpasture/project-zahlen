@@ -12,8 +12,6 @@
 #include <DataModel/DataModel.hpp>
 #include <LuaBindings/DataModelBindings.hpp>
 #include <lua/ReflectLua.hpp>
-
-#include <Jolt/Math/Vec3.h>
 #include <cmath>
 #include <expected>
 #include <string>

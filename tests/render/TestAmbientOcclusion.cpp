@@ -24,11 +24,11 @@
 // The shared error enum, frame I/O and engine fixture live in
 // LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
 namespace {
@@ -44,7 +44,7 @@ namespace {
 // The capture API reads the current frame back without advancing the
 // engine, so each capture is preceded by one tick -- the same rhythm the
 // other headless suites use when sampling consecutive frames.
-[[nodiscard]] RgbImage CaptureAveraged(ZHLN::Engine& engine, uint32_t frames, std::string_view rawPath) {
+[[nodiscard]] RgbImage CaptureAveraged(ZHLN::COM::IEngine& engine, uint32_t frames, std::string_view rawPath) {
     std::vector<double> acc;
     RgbImage            avg;
     for (uint32_t f = 0; f < frames; ++f) {
@@ -182,11 +182,11 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // darkening is measurable. SSR/RTR stay off so the deltas measure AO
 // alone, and the sample budget is raised so the GTAO branch (steps =
 // giSamples/6) gets more than its minimum.
-void BuildAoScene(ZHLN::Engine& engine) {
-    auto reg = engine.Entities();
-    auto rc = engine.Graphics();
+void BuildAoScene(ZHLN::COM::IEngine& engine) {
+    auto& reg = *engine.Entities();
+    auto& rc = *engine.Graphics();
 
-    engine.Graphics().PatchSettings([](auto& gfx) {
+    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0;
         gfx.environment.ambientExposure  = 50.0f;
         gfx.post.enableSSR               = 0;
@@ -199,9 +199,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
         gfx.post.giIntensity             = 1.2f;
     });
 
-    ZHLN::PrefabFactory::CreatePlane(
-        engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
-    );
+    engine.Assets()->SpawnPlane(120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}).value;
 
     auto makeMat = [&](float gray) {
         return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {gray, gray, gray, 1.0f}});
@@ -213,18 +211,12 @@ void BuildAoScene(ZHLN::Engine& engine) {
         return; // the caller's capture checks surface this as a blank frame
     }
 
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *matA}
-    );
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *matB}
-    );
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}
-    );
+    engine.Assets()->SpawnBox({0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *matA}).value;
+    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *matB}).value;
+    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}).value;
 
     const ZHLN::Entity sunEnt = reg.Spawn();
-    reg.Attach(
+    reg.AttachMany(
         sunEnt,
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})},
         ZHLN::Components::LightComponent {
@@ -232,7 +224,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
         }
     );
 
-    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
         auto& cam = c.camera;
         cam.position = {0.0f, 2.5f, 8.0f};
         cam.yaw           = ZHLN::DegF{-90.0f};
@@ -244,12 +236,12 @@ void BuildAoScene(ZHLN::Engine& engine) {
     }
 }
 
-void SetGiMode(ZHLN::Engine& engine, int mode) {
-    engine.Graphics().PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
+void SetGiMode(ZHLN::COM::IEngine& engine, int mode) {
+    (void)engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
 }
 
-void SetAoRadius(ZHLN::Engine& engine, float radius) {
-    engine.Graphics().PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
+void SetAoRadius(ZHLN::COM::IEngine& engine, float radius) {
+    (void)engine.Graphics()->PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
 }
 
 } // namespace
@@ -308,7 +300,7 @@ struct AmbientOcclusionTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "all_ao_modes_produce_their_signature",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
 
                     for (size_t i = 0; i < runs.size(); ++i) {
@@ -457,7 +449,7 @@ struct AmbientOcclusionTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 2, "gtao_radius_responds_to_settings",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
 
                     SetAoRadius(eng, 0.3f);

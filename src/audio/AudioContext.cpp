@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Core/Platform.hpp>
 
@@ -9,11 +8,10 @@
 #define MA_NO_JACK
 #endif
 
-#include <Zahlen/Audio/Audio.hpp>
+#include <audio/Audio.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>

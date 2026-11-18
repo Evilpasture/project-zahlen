@@ -11,7 +11,7 @@ if(NOT ZLIB_FOUND)
     return()
 endif()
 
-if(NOT TARGET zahlen_native_character_controller OR NOT TARGET zahlen_camera)
+if(NOT TARGET zahlen_character_controller OR NOT TARGET zahlen_camera)
     message(STATUS "Skipping zahlen_project_light_client: the CharacterController and Camera extensions are required")
     return()
 endif()
@@ -36,7 +36,7 @@ target_include_directories(zahlen_project_light_client PUBLIC
 
 target_link_libraries(zahlen_project_light_client
     PUBLIC zahlen_engine zahlen_socket
-    PRIVATE Jolt zahlen_native_character_controller zahlen_camera ZLIB::ZLIB
+    PRIVATE zahlen_character_controller zahlen_camera ZLIB::ZLIB
 )
 
 if(COMMAND zahlen_enable_reflection)

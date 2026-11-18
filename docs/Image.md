@@ -68,7 +68,6 @@ first must not suppress a later Engine package's reflection probe.
 
 Enabling all exports also exposed missing exports from prior COM migrations:
 Scene is exported as its own package, the GLTF package carries GLTFAssets, and
-Camera/FreeCam packages carry their distinct NativeCamera/NativeFreeCam
-compatibility archives. This fixes generation rather than hiding required
-static dependencies behind build-only interfaces. COM camera targets still do
-not link their native adapters.
+all optional COM extension/plugin packages ship as relocatable source/header
+packages compiled by the consumer's toolchain against `Zahlen::Engine`, with
+zero prebuilt `.a` archives and zero native compatibility targets.

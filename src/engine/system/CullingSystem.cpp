@@ -4,16 +4,16 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <render/SceneData.hpp>
 #include "CullingSystem.hpp"
-#include <Zahlen/Engine/VisibilityList.hpp>
+#include <engine/VisibilityList.hpp>
 #include "LightingSystem.hpp"
-#include "Zahlen/Render/Render.hpp"
+#include <render/Render.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
 void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Entity> visible, const Frustum& frustum, const CullingStats& stats) noexcept {
@@ -303,7 +303,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     }
 }
 
-void CullingSystem::DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene) {
+void CullingSystem::DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, SceneData& scene) {
     if (!stats.FreezeFrustum) {
         return;
     }

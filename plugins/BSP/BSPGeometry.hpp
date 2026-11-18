@@ -304,7 +304,7 @@ struct ImportedMapData {
     std::vector<BspPointLight>   lights;
 
     // Native decoded VRAD pages. Geometry parts refer to their pages through
-    // MaterialStreams::lightmapPage; BSPImporter uploads them once and binds
+    // MaterialStreams::lightmapPage; BSPAssets uploads them once and binds
     // the resulting dedicated baked-irradiance material input.
     VradLightmapAtlas lightmaps;
 

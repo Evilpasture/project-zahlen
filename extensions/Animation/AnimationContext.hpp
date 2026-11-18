@@ -1,15 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Animation/AnimationContext.hpp
-//
-// Monolithic skeletal animation domain object, peer in shape to PhysicsContext,
-// AudioContext, and RenderContext: generational handles in, dense parallel pose
-// evaluation inside, value/span/Optional queries out. It knows nothing about
-// ECS::Registry or Entity; stateless ECS systems translate components to and
-// from this interface.
 #pragma once
-#include "AnimationID.hpp"
+#include <Animation/AnimationID.hpp>
+#include <Animation/PrefabRig.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Optional.hpp>
@@ -24,9 +18,14 @@
 #include <span>
 
 namespace ZHLN {
-
-class AssetLibrary;
-class PoseUploadQueue;
+namespace COM {
+struct IAssetLibrary;
+struct IDebugDraw;
+struct IEngine;
+struct IEntities;
+struct IGraphicsDevice;
+struct ISimulation;
+} // namespace COM
 
 namespace Animation {
 
@@ -67,7 +66,13 @@ struct IKChain {
     bool    orientEndEffector = true;
 };
 
-class ZHLN_API AnimationContext {
+struct PoseUploadCallback {
+    void* user = nullptr;
+    void (*uploadPalette)(void* user, uint32_t jointOffset, std::span<const Mat4x4> joints)   = nullptr;
+    void (*uploadKinematic)(void* user, uint32_t jointOffset, std::span<const Mat4x4> joints) = nullptr;
+};
+
+class ZHLN_STATIC_API AnimationContext {
   public:
     AnimationContext();
     ~AnimationContext() noexcept;
@@ -90,7 +95,16 @@ class ZHLN_API AnimationContext {
     void SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept;
     void SuppressPaletteUpload(AnimationID handle) noexcept;
 
-    void Step(float dt, const AssetLibrary& assets, PoseUploadQueue& poseUploads);
+    void                           CacheRig(AssetID id, PrefabRig rig);
+    void                           InvalidateRigs() noexcept;
+    [[nodiscard]] auto             ResolveRig(const COM::IAssetLibrary* assets, AssetID id) -> const PrefabRig*;
+
+    void Step(
+        float                     dt,
+        const COM::IAssetLibrary* assets     = nullptr,
+        COM::IGraphicsDevice*     graphics   = nullptr,
+        COM::ISimulation*         simulation = nullptr,
+        PoseUploadCallback        sink       = {});
 
     [[nodiscard]] auto Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState>;
     [[nodiscard]] auto Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample>;

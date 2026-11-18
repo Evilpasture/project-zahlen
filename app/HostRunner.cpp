@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "engine/Platform.hpp"
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -9,7 +8,7 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IState.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Render/RenderGraphDump.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -89,7 +88,7 @@ auto ParseEngineConfig(std::span<char* const> args, EngineConfig& config, std::s
                               } else {
                                   return std::unexpected(CommandLineError::InvalidValue);
                               }
-                              std::println("{}", GetRenderGraphDump(selected));
+                              std::println("{}", std::string_view(COM::RenderGraphDump(selected)));
                               graphRequested = true;
                               return {};
                           },

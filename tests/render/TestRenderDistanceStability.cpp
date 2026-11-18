@@ -47,25 +47,21 @@
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 
 // clang-format off
-#include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Core/Factory.h>
-#include <Jolt/RegisterTypes.h>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <algorithm>
@@ -336,11 +332,11 @@ struct RingLayout {
 // Engine Harness
 // ============================================================================
 
-void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) {
+void TickFrames(ZHLN::COM::IEngine& engine, uint32_t frames, float dt = 1.0f / 60.0f) {
     for (uint32_t i = 0; i < frames; ++i) {
         engine.ProcessEvents();
         const auto status = engine.Tick(dt);
-        ZHLN::Test::ExpectTrue(status.has_value());
+        ZHLN::Test::ExpectTrue(status.HasValue());
     }
 }
 
@@ -348,15 +344,15 @@ void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) 
 // camera's AA state into the RenderContext every tick, so a SetAAState call
 // alone gets overwritten. Both remaining AA modes are spatial filters that
 // would perturb the frame-to-frame comparison at high-contrast edges.
-void DisableAA(ZHLN::Engine& engine) {
-    engine.Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
-    engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+void DisableAA(ZHLN::COM::IEngine& engine) {
+    (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+    (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
 // Captures through Engine::GetRenderContext() so the call always uses the
 // CURRENT context, never a reference that may dangle after a hot-rebuild.
 // The pixels come back in memory; PPM + PNG are written only as diagnostics.
-[[nodiscard]] RgbImage Capture(ZHLN::Engine& engine, std::string_view path) {
+[[nodiscard]] RgbImage Capture(ZHLN::COM::IEngine& engine, std::string_view path) {
     RgbImage img = ZHLN::Test::Headless::Capture(engine, path);
     if (img.Valid()) {
         (void) ZHLN::Test::Image::SavePNG(ZHLN::Test::Image::PngPathOf(path), img);
@@ -373,7 +369,7 @@ enum class StableRunResult : uint8_t { Ok, AssertionsFailed, PersistentDeviceLos
 constexpr uint32_t kMaxDeviceLostRecoveries = 2; // 3 attempts total
 
 template <typename SceneFn>
-[[nodiscard]] StableRunResult RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
+[[nodiscard]] StableRunResult RunStableScene(ZHLN::COM::IEngine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {
     auto&        ctx         = ZHLN::Test::GetThreadLocalContext();
     const size_t failureMark = ctx.failures.size();
 
@@ -462,7 +458,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
+    static auto CreateTestEngine() -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
         // Exclusive engine: only one Vulkan instance may be live at a
         // time (see engines_are_serial_and_the_slot_is_released), so the
         // pool must not be holding one when this builds its own.
@@ -483,7 +479,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
         };
 
-        auto engineRes = ZHLN::Engine::Create(cfg);
+        auto engineRes = ZHLN::COM::CreateEngineRef(cfg);
         if (!engineRes) {
             return {};
         }
@@ -500,7 +496,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();
-        if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+        if (!ZHLN::Test::ExpectTrue(static_cast<bool>(engine))) {
             return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
         }
 
@@ -510,8 +506,8 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
         // failures during the camera sweep (including after device recovery).
         std::array<ZHLN::Entity, kRingCount> ringEntities {};
         {
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
             // Deterministic frame-to-frame comparison needs the per-frame
             // noise sources off (rotating AO/GI pattern). SSR
@@ -519,7 +515,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             // opt-in and covered by its own suites.
             DisableAA(*engine);
 
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
                 gfx.post.exposure                = 0.015f;
                 gfx.environment.ambientExposure  = 10.0f;
@@ -529,24 +525,20 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             });
 
             // Ground plane gives the shadow catch + distance reference.
-            ZHLN::PrefabFactory::CreatePlane(
-                *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
-            );
+            engine->Assets()->SpawnPlane(220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}).value;
 
             // Far-field ramp probe: large red surface crossing the cascade
             // seam at a grazing sun angle (see the constants block). Width
             // scaled so its window avoids every ring window; matte roughness
             // so the glossy floor streak cannot pollute its region.
-            ZHLN::PrefabFactory::CreatePlane(
-                *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
+            engine->Assets()->SpawnPlane(140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position      = {0.0, 0.05, 250.0},
                     .rotation      = ZHLN::Quat::FromEulerDegrees({{-24.0f, 0.0f, 0.0f}}),
                     .scale         = {0.34f, 1.0f, 1.0f},
                     .createPhysics = false,
                     .roughness     = 0.65f
-                }
-            );
+                }).value;
 
             // One material per ring: alternating dielectric / metallic branches
             // of the PBR model, all hue-distinct after shading.
@@ -582,18 +574,16 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                         .baseColor = {kMaterials[i].baseColor[0], kMaterials[i].baseColor[1], kMaterials[i].baseColor[2], 1.0f}
                     }
                 );
-                if (!ZHLN::Test::ExpectTrue(mat.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(mat.HasValue())) {
                     return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
                 }
 
-                ringEntities[i] = ZHLN::PrefabFactory::CreateBox(
-                    *engine, {rings[i].size, rings[i].size, rings[i].size},
+                ringEntities[i] = engine->Assets()->SpawnBox({rings[i].size, rings[i].size, rings[i].size},
                     ZHLN::PrefabFactory::SpawnParams {
                         .position         = {static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)},
                         .createPhysics    = false,
                         .materialOverride = *mat
-                    }
-                );
+                    }).value;
             }
 
             // Sun (cascade shadows) + two point lights anchored at mid/far depth
@@ -602,7 +592,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             // looks along +Z, so the +Z faces of the rings are the visible
             // ones and they must be the sunlit ones. (Direction is the
             // "toward the sun" vector; LightingSystem consumes it directly.)
-            reg.Spawn(
+            (void)reg.Spawn(
                 ZHLN::Components::TransformComponent {
                     .position = ZHLN::FVec3{0.0f, 60.0f, -40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, 0.0f, 180.0f}})
                 },
@@ -615,7 +605,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             );
 
             auto addPointLight = [&](const ZHLN::FVec3& pos, const ZHLN::FVec3& color, float intensity, float range) {
-                reg.Spawn(
+                (void)reg.Spawn(
                     ZHLN::Components::TransformComponent {.position = pos},
                     ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = range}
                 );
@@ -639,12 +629,12 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
 
         const auto stable = RunStableScene(
             *engine, 20, "pbr_distance_stability",
-            [&](ZHLN::Engine& eng) -> bool {
+            [&](ZHLN::COM::IEngine& eng) -> bool {
                 const auto rings = BuildRingLayout();
                 const float tanH = HorizontalHalfTan();
                 // A device-loss retry can start from the middle of a sweep.
                 // Re-establish the camera pose used to calibrate the coverage.
-                eng.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                eng.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, kEyeHeight, 0.0f};
                 });
 
@@ -887,13 +877,13 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 constexpr float    kSweepAmplitude = 30.0f;
                 constexpr uint32_t kSweepSample   = 8;
 
-                if (!ZHLN::Test::ExpectTrue(eng.Entities().GetSingleton<ZHLN::Components::CameraComponent>().has_value())) {
+                if (!ZHLN::Test::ExpectTrue((eng.Entities()->GetSingleton<ZHLN::Components::CameraComponent>() != nullptr))) {
                     return false;
                 }
                 bool popped = false;
                 for (uint32_t f = 0; f < kSweepFrames; ++f) {
                     const float camX = kSweepAmplitude * std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(f) / static_cast<float>(kSweepFrames));
-                    eng.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([camX](auto& c) {
+                    eng.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([camX](auto& c) {
                         c.camera.position = {camX, kEyeHeight, 0.0f};
                     });
                     TickFrames(eng, 1);
@@ -951,12 +941,11 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                             // display-space color. Record the CPU submission
                             // decision and actual pixels where the box should
                             // project before attributing this to a culler.
-                            const auto& mainVisible    = eng.GetVisibleEntities();
-                            const auto& shadowVisible  = eng.GetVisibleShadowEntities();
-                            const auto  reg            = eng.Entities();
+                            const auto  cullingStats   = eng.State()->CullingStats();
+                            const auto& reg = *eng.Entities();
                             const auto  meshComp       = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
-                            const bool  meshRegistered = meshComp && eng.Graphics().Mesh(meshComp->meshAsset).has_value();
-                            const bool  matRegistered  = meshComp && eng.Graphics().Material(meshComp->materialAsset).has_value();
+                            const bool  meshRegistered = meshComp && eng.Graphics()->GetMesh(meshComp->meshAsset).HasValue();
+                            const bool  matRegistered  = meshComp && eng.Graphics()->GetMaterial(meshComp->materialAsset).HasValue();
                             const int cx = std::clamp((windows[i].first + windows[i].second) / 2, 0, frame.width - 1);
                             const int cy = frame.height / 2;
                             const auto sample = [&](int x, int y) -> std::array<int, 3> {
@@ -983,9 +972,9 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                             }
                             ZHLN::Println(
                                 "    [INFO] ring {}: CPU main {}, shadow {}; GPU mesh {}, material {}; mesh shading {}; projected center ({},{}): RGB ({},{},{}), above ({},{},{}); patch mean ({},{},{}), cyan-leaning {}/{}, max chroma {}",
-                                i, std::ranges::find(mainVisible, ringEntities[i]) != mainVisible.end(),
-                                std::ranges::find(shadowVisible, ringEntities[i]) != shadowVisible.end(),
-                                meshRegistered, matRegistered, eng.Graphics().Info().meshShadingActive,
+                                i, cullingStats.TotalObjects - cullingStats.CulledObjects,
+                                cullingStats.RenderedTriangles,
+                                meshRegistered, matRegistered, eng.Graphics()->Info().meshShadingActive,
                                 cx, cy, center[0], center[1], center[2], above[0], above[1], above[2],
                                 sum[0] / n, sum[1] / n, sum[2] / n, cyanLeaning, n, maxChroma
                             );
@@ -1008,7 +997,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                 // leaves the camera about 2.35 m from home. Return to the baseline
                 // position before measuring post-sweep parity: Phase D measures
                 // from the registry's baseline camera pose.
-                eng.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                eng.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, kEyeHeight, 0.0f};
                 });
 

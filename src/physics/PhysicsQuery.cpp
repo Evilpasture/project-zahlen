@@ -16,12 +16,37 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
+#include <Jolt/Geometry/AABox.h>
 #include <cmath>
 #include <optional>
 #include <vector>
 
 namespace ZHLN {
+
+namespace {
+
+[[nodiscard]] auto CalculateFrustumAABB(const JPH::Mat44& viewProj) noexcept -> JPH::AABox {
+    const JPH::Mat44 invVP = viewProj.Inversed();
+    JPH::AABox       bounds;
+    for (float z : {0.0f, 1.0f}) {
+        for (float y : {-1.0f, 1.0f}) {
+            for (float x : {-1.0f, 1.0f}) {
+                const JPH::Vec4 worldPos = invVP * JPH::Vec4(x, y, z, 1.0f);
+                const float     w        = worldPos.GetW();
+                if (std::abs(w) < 1e-6f) {
+                    continue;
+                }
+                bounds.Encapsulate(JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w));
+            }
+        }
+    }
+    bounds.ExpandBy(JPH::Vec3::sReplicate(2.0f));
+    return bounds;
+}
+
+} // namespace
+
 
 namespace {
 
@@ -441,7 +466,7 @@ auto PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
         return results;
     }
 
-    const JPH::AABox frustumAABB = Math::CalculateFrustumAABB(viewProj);
+    const JPH::AABox frustumAABB = CalculateFrustumAABB(viewProj);
 
     struct CullCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;

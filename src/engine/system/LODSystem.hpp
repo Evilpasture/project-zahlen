@@ -4,10 +4,10 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
-class ZHLN_API LODSystem {
+class LODSystem {
   public:
     using LODQuery = ECS::Query<
         Components::LODComponent&, Components::MeshComponent&, const Components::CameraComponent,

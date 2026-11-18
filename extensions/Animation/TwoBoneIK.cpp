@@ -2,45 +2,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Animation/AnimationContext.hpp>
-#include <Animation/AnimationSystem.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/PublishedComponents.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <array>
+#include <span>
 
 namespace ZHLN::IK {
-namespace {
-void RegisterComponents(ECS::Registry& registry) {
-    registry.RegisterComponent<TwoBoneIKComponent>();
-}
-void AddSystems(ECS::SimGraph& update, ECS::RenderGraph&) {
-    if (!update.AddSystemBefore<&TwoBoneIKSystem::Update>("AnimationStepSystem"))
-        update.AddSystem<&TwoBoneIKSystem::Update>();
-}
-} // namespace
 
-void TwoBoneIKSystem::Update(
-    ECS::Query<const Animation::AnimatorComponent, const TwoBoneIKComponent, const Components::TransformComponent> query,
-    ECS::ResMut<Animation::AnimationContext>                                                                       anim
-) {
-    for (const Entity entity: query.Entities<TwoBoneIKComponent>()) {
-        const auto animComp = query.Get<Animation::AnimatorComponent>(entity);
-        const auto ikComp   = query.Get<TwoBoneIKComponent>(entity);
-        if (!animComp || !ikComp || !animComp->animationID.IsValid()) {
-            continue;
-        }
+void ApplyTwoBoneIK(const COM::IEntities& entities, Animation::AnimationContext& anim) {
+    for (const Entity entity : entities.EntitiesWith<TwoBoneIKComponent>()) {
+        const auto* animComp = entities.Get<Animation::AnimatorComponent>(entity);
+        const auto* ikComp   = entities.Get<TwoBoneIKComponent>(entity);
+        if (animComp == nullptr || ikComp == nullptr || !animComp->animationID.IsValid()) continue;
 
         auto invEntityLocal = Mat4x4::Identity();
         auto invEntityRot   = Quat::Identity();
-        if (const auto entityTr = query.Get<Components::TransformComponent>(entity)) {
+        if (const auto* entityTr = entities.Get<Components::TransformComponent>(entity)) {
             invEntityLocal = Inverse(ComposeTransform(entityTr->position, entityTr->rotation, entityTr->scale));
             invEntityRot   = entityTr->rotation.Normalized().Conjugated();
         }
@@ -48,15 +27,13 @@ void TwoBoneIKSystem::Update(
         std::array<Animation::IKChain, kMaxTwoBoneIKChains> translated {};
         size_t                                              count = 0;
 
-        for (const TwoBoneIKChain& src: ikComp->ActiveChains()) {
-            if (count >= translated.size()) {
-                break;
-            }
+        for (const TwoBoneIKChain& src : ikComp->ActiveChains()) {
+            if (count >= translated.size()) break;
             FVec3 targetPosModel = src.targetPosition;
             auto  targetRotModel = src.targetRotation;
 
             if (src.targetEntity != Entity::Null()) {
-                if (const auto targetTr = query.Get<Components::TransformComponent>(src.targetEntity)) {
+                if (const auto* targetTr = entities.Get<Components::TransformComponent>(src.targetEntity)) {
                     const auto targetInModel = invEntityLocal * ComposeTransform(targetTr->position, targetTr->rotation, targetTr->scale);
                     targetPosModel           = (targetInModel * FVec4 {src.targetOffset.x, src.targetOffset.y, src.targetOffset.z, 1.0f}).XYZ();
                     targetRotModel           = (invEntityRot * targetTr->rotation).Normalized();
@@ -75,23 +52,8 @@ void TwoBoneIKSystem::Update(
             };
         }
 
-        anim->SetIKChains(animComp->animationID, std::span<const Animation::IKChain> {translated.data(), count});
+        anim.SetIKChains(animComp->animationID, std::span<const Animation::IKChain> {translated.data(), count});
     }
 }
 
-auto Describe() noexcept -> Module {
-    return Module {.name = "TwoBoneIK", .registerComponents = &RegisterComponents, .addGraphSystems = &AddSystems};
-}
-void Install(Engine& engine) {
-    Animation::Install(engine);
-    auto publication = engine.Service<PublishedComponents>();
-    if (!publication)
-        return;
-    auto&          published = publication->entries;
-    constexpr auto ik        = PublishModuleComponent<TwoBoneIKComponent>();
-    if (std::ranges::none_of(published, [&](const auto& entry) { return entry.name == ik.name; }))
-        published.push_back(ik);
-    if (auto result = engine.InstallModule(Describe()); !result)
-        LogError("[TwoBoneIK] install failed: {}", ToString(result.error()));
-}
 } // namespace ZHLN::IK

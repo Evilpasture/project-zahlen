@@ -48,14 +48,16 @@ auto ExerciseGPURecovery(RecoveryExercise mode) -> std::expected<void, ZHLN::Err
     auto   entities = assets.Instantiate(asset->hash, {.isAnimated = true});
     Entity root = Entity::Null(), part = Entity::Null();
     for (const auto e: entities) {
-        if (ecs.Get<Animation::AnimatorComponent>(e))
+        if (const auto* inst = ecs.Get<Components::PrefabInstanceComponent>(e); inst != nullptr && inst->animated)
             root = e;
         if (ecs.Get<Components::MorphTargetComponent>(e))
             part = e;
     }
     if (!ExpectTrue(root != Entity::Null() && part != Entity::Null()))
         return {};
-    auto* animator                 = ecs.Get<Animation::AnimatorComponent>(root);
+    auto* animator                 = ecs.Attach(root, Animation::AnimatorComponent {.prefabAsset = asset->hash});
+    if (!ExpectTrue(animator != nullptr))
+        return {};
     animator->currentTrackTime     = .375f;
     animator->currentPlaybackSpeed = 1.25f;
     auto* morph                    = ecs.Get<Components::MorphTargetComponent>(part);

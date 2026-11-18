@@ -3,8 +3,8 @@
 
 #include "Hierarchy.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <ecs/ECS.hpp>
+#include <engine/Engine.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <vector>

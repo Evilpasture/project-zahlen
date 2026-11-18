@@ -469,13 +469,12 @@ auto Value::GetString() const noexcept -> std::expected<std::string_view, ErrorC
     return std::string_view(ptr, len);
 }
 
-auto Value::IsSequence(size_t& outLength) const noexcept -> bool {
-    outLength = 0;
+auto Value::SequenceLength() const noexcept -> std::optional<size_t> {
     if (!IsTable()) {
-        return false;
+        return std::nullopt;
     }
     if (!lua_checkstack(_state, 4)) {
-        return false;
+        return std::nullopt;
     }
 
     size_t count  = 0;
@@ -488,12 +487,12 @@ auto Value::IsSequence(size_t& outLength) const noexcept -> bool {
 
         if (lua_type(_state, -1) != LUA_TNUMBER) {
             lua_pop(_state, 1);
-            return false;
+            return std::nullopt;
         }
         const double k = lua_tonumber(_state, -1);
         if (!std::isfinite(k) || k < 1.0 || std::floor(k) != k) {
             lua_pop(_state, 1);
-            return false;
+            return std::nullopt;
         }
         const auto idx = static_cast<size_t>(k);
         ++count;
@@ -501,10 +500,9 @@ auto Value::IsSequence(size_t& outLength) const noexcept -> bool {
     }
 
     if (count != maxKey) {
-        return false;
+        return std::nullopt;
     }
-    outLength = count;
-    return true;
+    return count;
 }
 
 auto Value::GetTableStringKeys() const -> std::expected<std::vector<std::string>, ErrorCode> {

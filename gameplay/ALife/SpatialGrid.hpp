@@ -3,16 +3,15 @@
 
 #pragma once
 
-#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Common.h>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <cstdint>
 #include <vector>
+
+namespace ZHLN::COM {
+struct IEntities;
+}
 
 namespace ZHLN::ALife {
 
@@ -20,31 +19,18 @@ struct ALifeComponent;
 
 class ZHLN_STATIC_API SpatialGrid {
   public:
-    using WriteQuery = ECS::Query<ALifeComponent&>;
-    using ReadQuery = ECS::Query<const ALifeComponent>;
-
     SpatialGrid(uint32_t w, uint32_t h, float cell_size);
 
-    void Clear() noexcept;
-    void UpdateEntity(WriteQuery query, Entity handle, DVec3 old_pos);
-    // Unlink before destroying the component: its next link lives there.
-    void RemoveEntity(WriteQuery query, Entity handle);
-    [[nodiscard]] auto Query(ReadQuery query, DVec3 pos, float radius, std::vector<Entity> reusable = {}) const -> std::vector<Entity>;
-
+    void               Clear() noexcept;
+    void               UpdateEntity(COM::IEntities& entities, Entity handle, DVec3 old_pos);
+    void               RemoveEntity(COM::IEntities& entities, Entity handle);
+    [[nodiscard]] auto Query(const COM::IEntities& entities, DVec3 pos, float radius, std::vector<Entity> reusable = {}) const -> std::vector<Entity>;
     [[nodiscard]] auto GetCellIndex(DVec3 pos) const noexcept -> int32_t;
 
     std::vector<Entity> _cellHeads;
     uint32_t            _width;
     uint32_t            _height;
     float               _cellSize;
-
-  private:
-    template <typename View>
-    void UpdateEntityImpl(View& view, Entity handle, DVec3 old_pos);
-    template <typename View>
-    void RemoveEntityImpl(View& view, Entity handle);
-    template <typename View>
-    [[nodiscard]] auto QueryImpl(const View& view, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity>;
 };
 
 } // namespace ZHLN::ALife

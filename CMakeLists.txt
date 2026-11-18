@@ -71,7 +71,7 @@ if(ZHLN_LINK_WHAT_YOU_USE)
     set(CMAKE_LINK_WHAT_YOU_USE ON)
 endif()
 if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
-    # Jolt is shipped with Engine, with the exact ABI used by this build.
+    # Jolt is compiled privately inside libzahlen_engine.so and never exposed publicly.
     set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 endif()
 
@@ -361,8 +361,8 @@ string(FIND "${_zhln_pr125280_source}" "]==]" _zhln_probe_delimiter)
 if(NOT _zhln_probe_delimiter EQUAL -1)
     message(FATAL_ERROR "PR 125280 probe contains the CMake bracket delimiter ]==]")
 endif()
-set(ZHLN_PR125280_PROBE_SOURCE "${_zhln_pr125280_source}" CACHE INTERNAL
-    "GCC PR c++/125280 reproduction, substituted into installed package configs")
+unset(ZHLN_PR125280_PROBE_SOURCE CACHE)
+set(ZHLN_PR125280_PROBE_SOURCE "${_zhln_pr125280_source}")
 
 # --- the reported flag set, assembled now that every contributor has run -----
 #
@@ -496,7 +496,7 @@ target_compile_definitions(
   zahlen_engine
   PRIVATE ZHLN_ENGINE_BUILD
           JPH_DOUBLE_PRECISION
-          JPH_SHARED_LIBRARY)
+          JPH_DEBUG_RENDERER)
 
 set_source_files_properties(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/EngineGlobals.cpp
@@ -514,40 +514,6 @@ if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Error.hpp>")
 endif()
 
-
-set(ZHLN_MODULE_FILES
-    modules/zahlen-core.cppm
-    modules/zahlen-threading.cppm
-    modules/zahlen-math.cppm
-    modules/zahlen-ecs.cppm
-    modules/zahlen-physics.cppm
-    modules/zahlen-render.cppm
-    modules/zahlen-audio.cppm
-    modules/zahlen-engine.cppm
-    modules/zahlen.cppm)
-
-set_source_files_properties(${ZHLN_MODULE_FILES}
-                            PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-
-add_library(zahlen_module STATIC)
-set_target_properties(
-  zahlen_module
-  PROPERTIES CXX_STANDARD 26
-             CXX_STANDARD_REQUIRED ON
-             CXX_EXTENSIONS OFF
-             CXX_SCAN_FOR_MODULES ON
-             POSITION_INDEPENDENT_CODE ON)
-target_sources(
-  zahlen_module
-  PUBLIC FILE_SET
-         CXX_MODULES
-         TYPE
-         CXX_MODULES
-         BASE_DIRS
-         ${CMAKE_CURRENT_SOURCE_DIR}/modules
-         FILES
-         ${ZHLN_MODULE_FILES})
-target_link_libraries(zahlen_module PUBLIC zahlen_engine PRIVATE zahlen_warnings)
 
 target_link_libraries(
   zahlen_engine
@@ -633,16 +599,9 @@ if(APPLE AND ZHLN_BUILD_RENDER)
     target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
 
-# Jolt's headers travel with every public engine header, but its archive must not:
-# Jolt is SHARED, so libzahlen_engine.so records a DT_NEEDED entry and every
-# consumer resolves JPH::* through the engine. Naming Jolt PUBLIC here would
-# append libJolt.so to the link line of all 18 executables -- *after* the library
-# that already defines those symbols -- which is both dead weight and what mold
-# reports as "Unused direct dependencies: libJolt.so". Keep the archive for the
-# engine's own link, publish the interface to everyone else.
-target_link_libraries(zahlen_engine
-    PRIVATE Jolt
-    PUBLIC  $<BUILD_INTERFACE:zahlen_jolt_headers>)
+# Jolt is built as a private hidden-visibility PIC static archive folded into
+# libzahlen_engine.so; zero JPH::* symbols or Jolt headers cross the COM boundary.
+target_link_libraries(zahlen_engine PRIVATE Jolt)
 
 target_include_directories(
   zahlen_engine SYSTEM
@@ -675,7 +634,6 @@ add_subdirectory(extensions/Screenshot)
 
 add_executable(zahlen app/main.cpp)
 
-target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
 # The engine's DLL is written next to it; Jolt's is not, and PE has no rpath to
 # find it with. This is the binary a person runs, so the DLLs go beside it.
@@ -698,14 +656,13 @@ if(ZHLN_BUILD_EXTRAS)
     # its own copy of that arithmetic. zahlen_widgets arrives with
     # add_subdirectory(extensions) further down: a link item resolves to its
     # target by generate time, whatever the order here.
-    # zahlen_widgets is PUBLIC zahlen_engine (which publishes Jolt's usage
+    # zahlen_widgets is PUBLIC zahlen_engine (which publishes core COM usage
     # requirements through zahlen_jolt_headers) but does not
     # publish its own include root, so extensions/ is named here. The document
     # format and the schema are linked further down, next to the code that uses
     # them (ZHLN_HAS_UI_TOML).
     target_link_libraries(zahlen_ui_editor PRIVATE zahlen_widgets)
     target_include_directories(zahlen_ui_editor PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 
     zahlen_add_runtime_dlls(zahlen_ui_editor)
     set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
@@ -745,7 +702,6 @@ endif()
 zahlen_enable_reflection(zahlen_window)
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
-zahlen_enable_reflection(zahlen_module)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
@@ -842,14 +798,13 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
         OUTPUT_NAME "project-light-client"
     )
     zahlen_set_bin_output(zahlen_project_light_app)
-    target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
-    # zahlen_application is PUBLIC zahlen_engine, which publishes Jolt's usage
+    # zahlen_application is PUBLIC zahlen_engine, which publishes core COM usage
     # requirements through zahlen_jolt_headers.
     target_link_libraries(zahlen_project_light_app PRIVATE
         zahlen_application
         zahlen_project_light_client
-        zahlen_native_character_controller
-        zahlen_native_camera
+        zahlen_character_controller
+        zahlen_camera
         zahlen_warnings
     )
     add_dependencies(zahlen_project_light_app link_resources)
@@ -905,12 +860,12 @@ if(ZHLN_INSTALL_TOOLCHAIN_PACKAGES)
     include(Toolchains)
 endif()
 
-# zahlen_engine and Jolt are the two shared objects the Engine package installs
+# libzahlen_engine.so is the single shared object the Engine package installs
 # (cmake/Toolchains.cmake: zhln_toolchain_package(Engine TARGETS ...)). With
 # ZHLN_GLIBC_BASELINE set -- the release lane sets it -- `--target glibc-floor`
 # holds them to the floor they ship with, before anything is packaged or signed.
 include(GlibcFloor)
-zhln_add_glibc_floor_check(zahlen_engine Jolt)
+zhln_add_glibc_floor_check(zahlen_engine)
 
 if(TARGET zahlen_freecam)
     target_link_libraries(zahlen PRIVATE zahlen_freecam)

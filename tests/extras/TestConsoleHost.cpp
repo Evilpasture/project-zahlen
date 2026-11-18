@@ -18,9 +18,10 @@ using Test::ExpectTrue;
 auto Logs(const GameConsole& console) {
     std::string result;
     for (size_t i = 0; i < console.GetEntryCount(); ++i) {
-        std::string_view text;
-        float            r, g, b, a;
-        console.GetEntry(i, text, r, g, b, a);
+        const auto entry = console.GetEntry(i);
+        if (!entry) continue;
+        const std::string_view text = entry->text;
+        [[maybe_unused]] const float r = entry->color.r, g = entry->color.g, b = entry->color.b, a = entry->color.a;
         result += text;
         result += '\n';
     }

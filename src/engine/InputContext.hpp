@@ -17,7 +17,7 @@
 //                        InputActions, which are the only shapes the router is
 //                        ever seen in from outside.
 //
-// No ZHLN_API appears anywhere below. Nothing here is exported, so nothing here
+// No appears anywhere below. Nothing here is exported, so nothing here
 // can be named by a consumer that links libzahlen_engine.
 
 #pragma once
@@ -267,6 +267,15 @@ class InputContext {
     // --- Action Map Priority Stack -------------------------------------------
 
     auto CreateActionMap(std::string_view name, int32_t priority = 0) -> InputActionMap&;
+    auto ConfigureActionMap(const ActionMapConfig& config) noexcept -> bool;
+    auto ConfigureAction(const ActionConfig& config) noexcept -> ActionID;
+    auto BindAction(std::string_view mapName, ActionID action, const InputBinding& binding) noexcept -> bool;
+    auto RebindAction(std::string_view mapName, ActionID action, size_t slotIndex, const InputBinding& binding) noexcept -> bool;
+    auto ClearActionBindings(std::string_view mapName, ActionID action) noexcept -> bool;
+    auto RemoveActionBinding(std::string_view mapName, ActionID action, size_t slotIndex) noexcept -> bool;
+    [[nodiscard]] auto HasActionMap(std::string_view mapName) const noexcept -> bool;
+    [[nodiscard]] auto IsActionMapEnabled(std::string_view mapName) const noexcept -> bool;
+    [[nodiscard]] auto ConsumePhysicalInput(PlayerSeat seat = kPrimarySeat) noexcept -> InputState;
     auto RemoveActionMap(std::string_view name) -> bool;
     [[nodiscard]] auto FindActionMap(std::string_view name) noexcept -> Optional<InputActionMap&>;
     [[nodiscard]] auto FindActionMap(std::string_view name) const noexcept -> Optional<const InputActionMap&>;

@@ -12,8 +12,8 @@
 #include <span>
 #include <string_view>
 
-namespace ZHLN {
-class AssetLibrary;
+namespace ZHLN::COM {
+struct IAssetLibrary;
 }
 
 namespace ZHLN::FS {
@@ -42,6 +42,6 @@ enum class RadianceAssetError : uint8_t {
 // Convenience for applications that source images from a mounted VFS asset or
 // a direct filesystem path. Loading never happens inside RenderSystem.
 [[nodiscard]] auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode>;
-[[nodiscard]] auto ReadEnvironmentImage(AssetLibrary assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode>;
+[[nodiscard]] auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode>;
 
 } // namespace ZHLN::AssetCooking

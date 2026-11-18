@@ -18,6 +18,7 @@
 #include <Zahlen/Core/COM/IObject.hpp>
 
 #include <cstddef>
+#include <span>
 #include <cstdint>
 
 namespace ZHLN::COM {
@@ -220,6 +221,71 @@ struct IGraphicsDevice : IObject {
     [[nodiscard]] virtual Result<uint64_t> CaptureFrame(ChainOutNode* info, Span<uint8_t> pixels) noexcept = 0;
 
     [[nodiscard]] virtual Option<float> PacedDeltaTime() const noexcept = 0;
+
+    [[nodiscard]] auto GetMesh(AssetID id) const noexcept -> Option<ZHLN::Mesh> {
+        ZHLN::Mesh out {};
+        if (!GetMesh(id, OutChain(out)).HasValue()) return std::nullopt;
+        return out;
+    }
+    [[nodiscard]] auto GetMaterial(MaterialID id) const noexcept -> Option<ZHLN::Material> {
+        ZHLN::Material out {};
+        if (!GetMaterial(id, OutChain(out)).HasValue()) return std::nullopt;
+        return out;
+    }
+
+    template <typename Fn>
+    auto PatchSettings(Fn&& fn) noexcept -> Result<void> {
+        GraphicsSettings current = Settings();
+        fn(current);
+        return ApplySettings(current);
+    }
+
+    auto SetAntiAliasing(AAMode mode) noexcept -> Result<void> {
+        return ApplySettings(InChain(AAState {.mode = mode}));
+    }
+    auto SetAntiAliasing(const AAState& aa) noexcept -> Result<void> {
+        return PatchSettings([&](GraphicsSettings& s) { s.antiAliasing = aa; });
+    }
+
+    [[nodiscard]] auto CreateProceduralTexture(StringView name, Span<const std::byte> rgba, Extent2D extent,
+                                               bool isSRGB = true) noexcept -> Result<TextureID> {
+        return CreateTexture(name, rgba, extent, isSRGB);
+    }
+    [[nodiscard]] auto CreateProceduralTexture(Span<const std::byte> rgba, Extent2D extent,
+                                               bool isSRGB = true) noexcept -> Result<TextureID> {
+        return CreateTexture(StringView {}, rgba, extent, isSRGB);
+    }
+    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const uint32_t> rgba, Extent2D extent,
+                                     bool isSRGB = true) noexcept -> Result<TextureID> {
+        const auto bytes = std::as_bytes(rgba);
+        return CreateTexture(StringView(name.data(), name.size()),
+                             Span<const std::byte>(bytes.data(), bytes.size()), extent, isSRGB);
+    }
+
+    [[nodiscard]] auto SetViewport(ZHLN::ViewportRect rect) noexcept -> Result<void> {
+        return ApplySettings(InChain(ViewportInfo {.viewport = rect}));
+    }
+    [[nodiscard]] auto CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> rgba,
+                                               bool isSRGB = true) noexcept -> TextureID {
+        const auto bytes   = std::as_bytes(rgba);
+        const auto created = CreateTexture(StringView(name.data(), name.size()),
+                                           Span<const std::byte>(bytes.data(), bytes.size()), extent, isSRGB);
+        return created.HasValue() ? created.value : TextureID::Invalid;
+    }
+    [[nodiscard]] auto CreateTexture(std::span<const uint8_t> rgba, Extent2D extent,
+                                     bool isSRGB = true) noexcept -> Result<TextureID> {
+        const auto bytes = std::as_bytes(rgba);
+        return CreateTexture(StringView {}, Span<const std::byte>(bytes.data(), bytes.size()), extent, isSRGB);
+    }
+    [[nodiscard]] auto CreateTexture(std::span<const uint32_t> rgba, Extent2D extent,
+                                     bool isSRGB = true) noexcept -> Result<TextureID> {
+        const auto bytes = std::as_bytes(rgba);
+        return CreateTexture(StringView {}, Span<const std::byte>(bytes.data(), bytes.size()), extent, isSRGB);
+    }
+    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent,
+                                     bool isSRGB = true) noexcept -> Result<TextureID> {
+        return CreateTexture(StringView {}, Span<const std::byte>(rgba.data(), rgba.size()), extent, isSRGB);
+    }
 
 protected:
     ~IGraphicsDevice() = default;

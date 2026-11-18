@@ -4,8 +4,8 @@
 #pragma once
 
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <ecs/SystemParameters.hpp>
+#include <engine/AssetManager.hpp>
 
 namespace ZHLN {
 namespace ECS {
@@ -23,7 +23,7 @@ class EnvironmentSunSystem {
         const Components::SunTagComponent,
         const Components::PendingDestroy>;
 
-    static void Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetLibrary> assets);
+    static void Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets);
 };
 
 } // namespace ZHLN

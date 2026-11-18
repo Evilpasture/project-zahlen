@@ -3,268 +3,167 @@
 
 module;
 
-// clang-format off
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Transform.hpp>
+#include <Animation/PrefabRig.hpp>
+#include <Zahlen/COM/IDebugDraw.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <CharacterController/CharacterComponents.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Camera/TargetCamera.hpp>
-#include <CharacterController/CharacterComponents.hpp>
-#include <FreeCam/FreeCam.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Physics/PhysicsValues.hpp>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
+#include <string_view>
 
 export module ZHLN.Locomotion;
 
 export namespace ZHLN::Locomotion {
 
-inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
-
-struct CharacterBoundsEstimate {
-    ZHLN::FVec3 min   = {};
-    ZHLN::FVec3 max   = {};
-    bool         valid = false;
-
-    [[nodiscard]] auto Size() const noexcept -> FVec3 {
-        if (!valid) {
-            return FVec3::Zero();
-        }
-        const FVec3 low  = min;
-        const FVec3 high = max;
-        return high - low;
-    }
+struct CharacterSetup {
+    float                    targetHeight            = 1.80f;
+    float                    colliderRadiusScale     = 0.24f;
+    float                    colliderMaxRadius       = 0.42f;
+    float                    colliderBottomMargin    = 0.0f;
+    float                    colliderMinRadius       = 0.16f;
+    float                    colliderMinHeight       = 0.45f;
+    float                    headClearance           = 0.03f;
+    float                    walkSpeed               = 3.4f;
+    float                    sprintSpeed             = 6.1f;
+    float                    jumpVelocity            = 5.2f;
+    float                    cameraDistance          = 4.2f;
+    float                    cameraHeightOffset      = 0.90f;
+    float                    cameraShoulderOffset    = 0.0f;
+    float                    cameraLookSensitivity   = 0.12f;
+    float                    cameraPositionSmoothing = 14.0f;
+    bool                     cameraAlignYawToTarget  = true;
+    Physics::DualShapeConfig colliderShape {};
 };
 
-struct DualShapeFitOptions {
-    float horizontalPadding   = 1.08f;
-    float verticalPadding     = 1.06f;
-    float lateralCoverage     = 0.68f;
-    float lifterToBumperRatio = 0.78f;
-    float lifterToHeightRatio = 0.24f;
-    float minimumBumperAspect = 1.15f;
-    float minimumBumperRadius = 0.10f;
+struct CharacterSpawnResult {
+    Entity                   entity        = Entity::Null();
+    FVec3                    scale         = FVec3::One();
+    FVec3                    boundsSize    = FVec3::Zero();
+    float                    height        = 0.0f;
+    float                    groundOffset  = 0.0f;
+    Physics::DualShapeConfig colliderShape {};
+    bool                     valid         = false;
 };
 
-// No Detail wrapper here: this file is a single `export namespace` block, so a
-// nested `namespace Detail` would be exported along with everything inside it.
-// It would hide nothing and only add a name claiming the opposite.
-[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> Mat4x4 {
-    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return Mat4x4::Identity();
-    }
-    auto transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform);
-    auto parent = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
-    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = PrefabMatrixToNative(prefab.nodes[static_cast<size_t>(parent)].localTransform) * transform;
-        parent = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
+struct PrefabBounds {
+    FVec3 min   = FVec3::Zero();
+    FVec3 max   = FVec3::Zero();
+    bool  valid = false;
+
+    [[nodiscard]] auto GetSize() const noexcept -> FVec3 { return valid ? max - min : FVec3::Zero(); }
+    [[nodiscard]] auto GetCenter() const noexcept -> FVec3 { return valid ? (min + max) * 0.5f : FVec3::Zero(); }
+};
+
+[[nodiscard]] auto GetNodeModelTransform(const Animation::PrefabRig& prefab, int32_t nodeIndex) noexcept -> Mat4x4 {
+    if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= prefab.nodes.size()) return Mat4x4::Identity();
+    auto transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
+    for (int32_t parent = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex, guard = 0;
+         parent >= 0 && static_cast<size_t>(parent) < prefab.nodes.size() && guard < 256; ++guard) {
+        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
+        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
     }
     return transform;
 }
 
-/** Estimates the imported visual envelope from every transformed mesh AABB. */
-[[nodiscard]] auto
-    EstimateCharacterBounds(const ModelPrefab& prefab, FVec3 modelScale = FVec3::Splat(1.0f)) noexcept -> CharacterBoundsEstimate {
-    CharacterBoundsEstimate estimate;
-    const auto scaleTransform = CreateScale(modelScale);
-
-    auto expand = [&](FVec3 point) {
-        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) {
-            return;
-        }
-        if (!estimate.valid) {
-            estimate.min   = point;
-            estimate.max   = point;
-            estimate.valid = true;
-            return;
-        }
-        estimate.min = {std::min(estimate.min.x, point.x), std::min(estimate.min.y, point.y), std::min(estimate.min.z, point.z)};
-        estimate.max = {std::max(estimate.max.x, point.x), std::max(estimate.max.y, point.y), std::max(estimate.max.z, point.z)};
+[[nodiscard]] auto MeasurePrefabBounds(const Animation::PrefabRig& prefab, FVec3 scale = FVec3::One()) noexcept -> PrefabBounds {
+    PrefabBounds bounds {
+        .min   = FVec3::Splat(std::numeric_limits<float>::max()),
+        .max   = FVec3::Splat(std::numeric_limits<float>::lowest()),
+        .valid = false,
     };
-
-    for (const ModelPart& part: prefab.parts) {
-        if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-            continue;
-        }
-        const auto transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * PrefabMatrixToNative(part.localTransform);
-        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        for (uint32_t corner = 0; corner < 8; ++corner) {
-            const FVec3 localPoint(
-                (corner & 1u) != 0u ? localMax.x : localMin.x, (corner & 2u) != 0u ? localMax.y : localMin.y,
-                (corner & 4u) != 0u ? localMax.z : localMin.z
-            );
-            expand((transform * FVec4 {localPoint.x, localPoint.y, localPoint.z, 1.0f}).XYZ());
-        }
-    }
-    return estimate;
-}
-
-/** Fits the Overgrowth-style lifter and bumper to a visual envelope. */
-[[nodiscard]] auto
-    FitDualShapeToBounds(const CharacterBoundsEstimate& bounds, const Physics::DualShapeConfig& fallback = {}, const DualShapeFitOptions& options = {}) noexcept
-    -> Physics::DualShapeConfig {
-    if (!bounds.valid) {
-        return fallback;
-    }
-
-    const FVec3 size = bounds.Size();
-    if (size.x <= 0.0f || size.y <= 0.0f || size.z <= 0.0f) {
-        return fallback;
-    }
-
-    const float maxAbsX = std::max(std::abs(bounds.min.x), std::abs(bounds.max.x));
-    const float maxAbsZ = std::max(std::abs(bounds.min.z), std::abs(bounds.max.z));
-    // The potential X envelope includes arms, weapons, and other appendages.
-    // A CharacterVirtual bumper represents the torso, so retain all depth but
-    // use a configurable fraction of lateral reach rather than swallowing the
-    // complete animation silhouette.
-    const float horizontalExtent = std::max(maxAbsX * std::clamp(options.lateralCoverage, 0.1f, 1.0f), maxAbsZ);
-    const float targetTop        = std::max(bounds.max.y, size.y) * std::max(options.verticalPadding, 1.0f);
-    if (!std::isfinite(horizontalExtent) || !std::isfinite(targetTop) || horizontalExtent <= 0.0f || targetTop <= 0.0f) {
-        return fallback;
-    }
-
-    Physics::DualShapeConfig result;
-    result.bumperRadiusXZ     = std::max(horizontalExtent * std::max(options.horizontalPadding, 1.0f), std::max(options.minimumBumperRadius, 0.01f));
-    const float maximumLifter = result.bumperRadiusXZ * 0.95f;
-    result.lifterRadius       = std::clamp(
-        std::min(
-            result.bumperRadiusXZ * std::clamp(options.lifterToBumperRatio, 0.1f, 0.95f), targetTop * std::clamp(options.lifterToHeightRatio, 0.05f, 0.45f)
-        ),
-        std::max(options.minimumBumperRadius * 0.5f, 0.01f), maximumLifter
-    );
-
-    const float cutRatio       = std::clamp(result.lifterRadius / result.bumperRadiusXZ, 0.0f, 0.999f);
-    const float cutScale       = std::sqrt(std::max(0.0f, 1.0f - cutRatio * cutRatio));
-    const float fittedRadiusY  = (targetTop - result.lifterRadius) / std::max(1.0f + cutScale, 0.001f);
-    const float minimumAspectY = result.bumperRadiusXZ * std::max(options.minimumBumperAspect, 1.01f);
-    result.bumperRadiusY       = std::max(minimumAspectY, fittedRadiusY);
-    return result;
-}
-
-[[nodiscard]] auto EstimateDualShapeConfig(
-    const ModelPrefab&              prefab,
-    FVec3                    modelScale = FVec3::Splat(1.0f),
-    const Physics::DualShapeConfig& fallback   = {},
-    const DualShapeFitOptions&      options    = {}
-) noexcept -> Physics::DualShapeConfig {
-    return FitDualShapeToBounds(EstimateCharacterBounds(prefab, modelScale), fallback, options);
-}
-
-struct EllipsoidDesc {
-    float radiusXZ = 0.50f;
-    float radiusY  = 0.70f;
-    int   latRings = 10;
-    int   lonRings = 10;
-    int   segments = 36;
-};
-
-auto DrawWireframeEllipsoid(DebugDraw scene, const FVec3& center, const EllipsoidDesc& desc, const FVec4& color) noexcept -> void {
-    // 1. Latitudinal Parallel Rings
-    for (int lat = 1; lat < desc.latRings; ++lat) {
-        const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
-        const auto ringY      = center.y + (std::sin(phi) * desc.radiusY);
-        const auto ringRadius = desc.radiusXZ * std::cos(phi);
-
-        for (int i = 0; i < desc.segments; ++i) {
-            const auto t0 = (static_cast<float>(i) / static_cast<float>(desc.segments)) * kTwoPi;
-            const auto t1 = (static_cast<float>(i + 1) / static_cast<float>(desc.segments)) * kTwoPi;
-
-            const FVec3 p0(center.x + (std::cos(t0) * ringRadius), ringY, center.z + (std::sin(t0) * ringRadius));
-            const FVec3 p1(center.x + (std::cos(t1) * ringRadius), ringY, center.z + (std::sin(t1) * ringRadius));
-
-            scene.AddLine(p0, p1, color);
+    const auto scaleTransform = ComposeTransform(FVec3::Zero(), Quat::Identity(), scale);
+    auto includePoint = [&](FVec3 point) {
+        bounds.min.x = std::min(bounds.min.x, point.x);
+        bounds.min.y = std::min(bounds.min.y, point.y);
+        bounds.min.z = std::min(bounds.min.z, point.z);
+        bounds.max.x = std::max(bounds.max.x, point.x);
+        bounds.max.y = std::max(bounds.max.y, point.y);
+        bounds.max.z = std::max(bounds.max.z, point.z);
+        bounds.valid = true;
+    };
+    for (const auto& part : prefab.parts) {
+        if (part.nodeIndex < 0 || static_cast<size_t>(part.nodeIndex) >= prefab.nodes.size()) continue;
+        const auto transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        for (int corner = 0; corner < 8; ++corner) {
+            const auto localCorner = FVec4 {
+                (corner & 1) ? part.localMax.x : part.localMin.x,
+                (corner & 2) ? part.localMax.y : part.localMin.y,
+                (corner & 4) ? part.localMax.z : part.localMin.z,
+                1.0f,
+            };
+            includePoint((transform * localCorner).XYZ());
         }
     }
+    return bounds;
+}
 
-    // 2. Longitudinal Meridian Ellipses
-    for (int lon = 0; lon < desc.lonRings; ++lon) {
-        const auto lonAngle = (static_cast<float>(lon) / static_cast<float>(desc.lonRings)) * std::numbers::pi_v<float>;
-        const auto cosLon   = std::cos(lonAngle);
-        const auto sinLon   = std::sin(lonAngle);
+[[nodiscard]] auto FitDualShapeToBounds(const PrefabBounds& bounds, const CharacterSetup& setup = {}) noexcept -> Physics::DualShapeConfig {
+    if (!bounds.valid) return setup.colliderShape;
+    const FVec3 size             = bounds.GetSize();
+    const float horizontalExtent = std::max(size.x, size.z) * 0.5f;
+    const float height           = std::max(size.y + setup.headClearance, setup.colliderMinHeight);
+    float lifterRadius = std::clamp(
+        std::min(horizontalExtent * 0.88f, height * setup.colliderRadiusScale), setup.colliderMinRadius, setup.colliderMaxRadius);
+    lifterRadius = std::min(lifterRadius, height * 0.34f);
+    const float bumperRadiusXZ = std::clamp(
+        std::max(horizontalExtent * 0.96f, lifterRadius * 1.18f), lifterRadius + 0.02f, setup.colliderMaxRadius * 1.25f);
+    const float ratio         = std::clamp(lifterRadius / bumperRadiusXZ, 0.0f, 0.98f);
+    const float blendFactor   = 1.0f + std::sqrt(std::max(0.0f, 1.0f - (ratio * ratio)));
+    const float desiredTop    = std::max(height - setup.colliderBottomMargin, lifterRadius * 2.1f);
+    const float bumperRadiusY = std::max((desiredTop - lifterRadius) / blendFactor, lifterRadius * 0.65f);
+    return Physics::DualShapeConfig {.lifterRadius = lifterRadius, .bumperRadiusXZ = bumperRadiusXZ, .bumperRadiusY = bumperRadiusY};
+}
 
-        for (int i = 0; i < desc.segments; ++i) {
-            const auto t0 = (static_cast<float>(i) / static_cast<float>(desc.segments)) * kTwoPi;
-            const auto t1 = (static_cast<float>(i + 1) / static_cast<float>(desc.segments)) * kTwoPi;
-
-            const auto r0 = desc.radiusXZ * std::cos(t0);
-            const auto y0 = center.y + (desc.radiusY * std::sin(t0));
-            const auto r1 = desc.radiusXZ * std::cos(t1);
-            const auto y1 = center.y + (desc.radiusY * std::sin(t1));
-
-            const FVec3 p0(center.x + (r0 * cosLon), y0, center.z + (r0 * sinLon));
-            const FVec3 p1(center.x + (r1 * cosLon), y1, center.z + (r1 * sinLon));
-
-            scene.AddLine(p0, p1, color);
+void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const Physics::DualShapeConfig& config) {
+    constexpr int   segments    = 28;
+    constexpr FVec4 lifterColor = {0.15f, 0.90f, 1.00f, 1.0f};
+    constexpr FVec4 bumperColor = {1.00f, 0.72f, 0.15f, 1.0f};
+    auto drawEllipse = [&](FVec3 center, FVec3 axisA, FVec3 axisB, FVec4 color) {
+        for (int i = 0; i < segments; ++i) {
+            const float a0 = (2.0f * std::numbers::pi_v<float> * static_cast<float>(i)) / static_cast<float>(segments);
+            const float a1 = (2.0f * std::numbers::pi_v<float> * static_cast<float>(i + 1)) / static_cast<float>(segments);
+            debug.AddLine(center + axisA * std::cos(a0) + axisB * std::sin(a0),
+                          center + axisA * std::cos(a1) + axisB * std::sin(a1), color);
         }
-    }
+    };
+    const FVec3 lifterCenter = footPosition + FVec3 {0.0f, config.GetLifterOffsetY(), 0.0f};
+    drawEllipse(lifterCenter, {config.lifterRadius, 0.0f, 0.0f}, {0.0f, config.lifterRadius, 0.0f}, lifterColor);
+    drawEllipse(lifterCenter, {0.0f, config.lifterRadius, 0.0f}, {0.0f, 0.0f, config.lifterRadius}, lifterColor);
+    drawEllipse(lifterCenter, {config.lifterRadius, 0.0f, 0.0f}, {0.0f, 0.0f, config.lifterRadius}, lifterColor);
+    const FVec3 bumperCenter = footPosition + FVec3 {0.0f, config.GetBumperOffsetY(), 0.0f};
+    drawEllipse(bumperCenter, {config.bumperRadiusXZ, 0.0f, 0.0f}, {0.0f, config.bumperRadiusY, 0.0f}, bumperColor);
+    drawEllipse(bumperCenter, {0.0f, config.bumperRadiusY, 0.0f}, {0.0f, 0.0f, config.bumperRadiusXZ}, bumperColor);
+    drawEllipse(bumperCenter, {config.bumperRadiusXZ, 0.0f, 0.0f}, {0.0f, 0.0f, config.bumperRadiusXZ}, bumperColor);
 }
 
-auto DrawWireframeSphere(
-    DebugDraw        scene,
-    const FVec3& center,
-    float            radius,
-    const FVec4& color,
-    int              latRings = 10,
-    int              lonRings = 10,
-    int              segments = 36
-) noexcept -> void {
-    DrawWireframeEllipsoid(scene, center, {.radiusXZ = radius, .radiusY = radius, .latRings = latRings, .lonRings = lonRings, .segments = segments}, color);
-}
+[[nodiscard]] auto SpawnCharacter(
+    COM::IEngine&         engine,
+    AssetID               prefabHash,
+    std::string_view      modelVirtualPath,
+    FVec3                 spawnFootPosition,
+    DegF                  initialYaw,
+    const CharacterSetup& setup = {}) -> CharacterSpawnResult;
 
-struct DebugPalette {
-    ZHLN::FVec4 colorBumper        = {0.10f, 1.00f, 0.20f, 1.0f}; // Vibrant Green
-    ZHLN::FVec4 colorLifter        = {1.00f, 1.00f, 1.00f, 1.0f}; // Pure White
-    ZHLN::FVec4 colorVelocityDebug = {1.00f, 0.90f, 0.10f, 1.0f}; // Yellow
-};
+[[nodiscard]] auto SpawnCharacter(
+    COM::IEngine&         engine,
+    std::string_view      modelVirtualPath,
+    FVec3                 spawnFootPosition,
+    DegF                  initialYaw,
+    const CharacterSetup& setup = {}) -> CharacterSpawnResult;
 
-/**
- * @brief Spawns a CharacterVirtual player entity using the exact Dual-Shape compound hull.
- */
-auto SpawnCharacter(
-    Engine&                         engine,
-    const FVec3&                spawnPosition = {0.0f, 2.0f, 0.0f},
-    const Physics::DualShapeConfig& config        = {},
-    float                           speed         = 14.5f,
-    float                           jumpForce     = 14.8f
-) -> Entity;
-
-/**
- * @brief Renders the visual dual-shape rig 1:1 anchored to the smoothed character transform.
- */
-auto RenderDebugRig(DebugDraw scene, FVec3 pos, FVec3 velocity,
-                    const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
-    const FVec3 finalLifterCenter = pos + FVec3{0.0f, config.GetLifterOffsetY(), 0.0f};
-    const FVec3 finalBumperCenter = pos + FVec3{0.0f, config.GetBumperOffsetY(), 0.0f};
-
-    // 1. Draw Upper Bumper Oval (Green)
-    DrawWireframeEllipsoid(scene, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
-
-    // 2. Draw Lower Lifter Sphere (White). Its bottom is the character
-    // origin, which rests on the supporting surface after settling.
-    DrawWireframeSphere(scene, finalLifterCenter, config.lifterRadius, palette.colorLifter);
-
-    // 3. Draw Velocity Vector
-    if (velocity.LengthSquared() > 0.01f) {
-        scene.AddLine(finalBumperCenter, finalBumperCenter + (velocity * 0.25f), palette.colorVelocityDebug);
-    }
-}
+void DestroyCharacter(COM::IEngine& engine, Entity characterEntity);
+void SwitchToFollowCamera(COM::IEngine& engine, Entity characterEntity, const CharacterSetup& setup = {});
+void RecenterFollowCamera(COM::IEngine& engine, Entity characterEntity);
 
 } // namespace ZHLN::Locomotion

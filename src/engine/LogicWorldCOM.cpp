@@ -4,10 +4,9 @@
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/World.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <ecs/ECS.hpp>
+#include <engine/World.hpp>
+#include <physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -42,10 +41,37 @@ consteval auto PublishLogic() -> LogicComponent {
         +[](ECS::Registry& r, Entity e) noexcept { r.Remove<T>(e); }
     };
 }
-constexpr std::array kLogicComponents {PublishLogic<Components::TransformComponent>(), PublishLogic<Components::WorldTransformComponent>(),
-                                       PublishLogic<Components::HierarchyComponent>(), PublishLogic<Components::NameComponent>(),
-                                       PublishLogic<Components::PBRComponent>(),       PublishLogic<Components::PhysicsComponent>(),
-                                       PublishLogic<Components::PendingDestroy>()};
+constexpr std::array kLogicComponents {
+    PublishLogic<Components::PendingDestroy>(),
+    PublishLogic<Components::TransformComponent>(),
+    PublishLogic<Components::WorldTransformComponent>(),
+    PublishLogic<Components::HierarchyComponent>(),
+    PublishLogic<Components::NameComponent>(),
+    PublishLogic<Components::PrefabInstanceComponent>(),
+    PublishLogic<Components::SceneSourceComponent>(),
+    PublishLogic<Components::PBRComponent>(),
+    PublishLogic<Components::AmbientCubeComponent>(),
+    PublishLogic<Components::MeshComponent>(),
+    PublishLogic<Components::SkeletalMeshComponent>(),
+    PublishLogic<Components::MorphTargetComponent>(),
+    PublishLogic<Components::LODComponent>(),
+    PublishLogic<Components::CameraComponent>(),
+    PublishLogic<Components::MainCameraTagComponent>(),
+    PublishLogic<Components::LightComponent>(),
+    PublishLogic<Components::SceneLightTagComponent>(),
+    PublishLogic<Components::SunTagComponent>(),
+    PublishLogic<Components::CharacterMotorComponent>(),
+    PublishLogic<Components::CharacterMotorStateComponent>(),
+    PublishLogic<Components::PhysicsComponent>(),
+    PublishLogic<Components::ImpulseCommand>(),
+    PublishLogic<Components::RagdollComponent>(),
+    PublishLogic<Components::RagdollHitReactionCommand>(),
+    PublishLogic<Components::RagdollImpulseCommand>(),
+    PublishLogic<Components::AudioListenerComponent>(),
+    PublishLogic<Components::AudioSourceComponent>(),
+    PublishLogic<Components::PlayerTagComponent>(),
+    PublishLogic<Components::PlayerSeatComponent>(),
+};
 auto                 FindLogic(StringView name) noexcept -> const LogicComponent* {
     if (!name.data && name.size)
         return nullptr;
@@ -219,7 +245,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
     [[nodiscard]] uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies, uint32_t capacity) const noexcept override {
-        const std::vector<Physics::BodyID> found = Sim().BodiesInSphere(center, radius);
+        const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
         if (bodies != nullptr && capacity > 0) {
             std::copy_n(found.begin(), std::min(total, capacity), bodies);
@@ -280,6 +306,13 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
         Sim().RegisterMaterial(materialID, friction, restitution);
     }
 
+    [[nodiscard]] float CharacterGroundOffset(Physics::BodyID body) const noexcept override {
+        return Sim().GetCharacterGroundOffset(body);
+    }
+    void SetCharacterPosition(Physics::BodyID body, DVec3 position) noexcept override {
+        Sim().SetCharacterPosition(body, position);
+    }
+    void QueueKinematicPose(uint32_t, Span<const Mat4x4>) noexcept override {}
     void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept override {
         Sim().SetCharacterVelocity(body, velocity);
     }
@@ -409,15 +442,37 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     }
 
     [[nodiscard]] Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
-        Physics::CharacterCreateDesc desc {};
+        Physics::CharacterCreateDesc            desc {};
+        std::optional<Physics::DualShapeConfig> dual {};
         if (descChain != nullptr) {
-            const Result<void> chainRes =
-                DispatchInChain<Physics::CharacterCreateDesc>(descChain, [&](const Physics::CharacterCreateDesc& inDesc) -> Result<void> {
-                    desc = inDesc;
+            const Result<void> chainRes = DispatchInChain<Physics::CharacterCreateDesc, Physics::DualShapeConfig>(
+                descChain, [&]<typename Node>(const Node& node) -> Result<void> {
+                    if constexpr (std::is_same_v<Node, Physics::CharacterCreateDesc>) {
+                        desc = node;
+                    } else {
+                        dual = node;
+                    }
                     return {};
-                });
+                }
+            );
             if (!chainRes.HasValue())
                 return chainRes.error;
+        }
+        if (dual.has_value()) {
+            if (dual->lifterRadius <= 0.0F || dual->bumperRadiusXZ <= 0.0F || dual->bumperRadiusY <= 0.0F) {
+                return ComError::InvalidArgument;
+            }
+            const Physics::CharacterParams params {
+                .shape                    = Physics::CreateDualShape(*dual),
+                .maxSlopeAngle            = desc.maxSlopeRadians,
+                .maxStrength              = desc.maxStrength,
+                .characterPadding         = desc.characterPadding,
+                .penetrationRecoverySpeed = desc.penetrationRecoverySpeed,
+                .supportingVolume         = JPH::Plane(JPH::Vec3::sAxisY(), -dual->GetLifterOffsetY()),
+                .category                 = desc.category,
+                .mask                     = desc.mask,
+            };
+            return Sim().CreateCharacter(desc.position, params);
         }
         if (desc.useCustomCapsule && (desc.capsuleRadius <= 0.0F || desc.capsuleHalfHeight <= 0.0F)) {
             return ComError::InvalidArgument;
@@ -426,7 +481,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     }
 
     [[nodiscard]] Physics::DebugDrawData DebugGeometry(bool shapes, bool constraints, bool wireframe) noexcept override {
-        return Sim().DebugDrawData(shapes, constraints, wireframe);
+        return Sim().GetDebugDrawData(shapes, constraints, wireframe);
     }
 
   private:
@@ -435,8 +490,8 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     auto Registry() const noexcept -> ECS::Registry& {
         return m_world->GetRegistry();
     }
-    auto Sim() const noexcept -> ZHLN::Simulation {
-        return ZHLN::Simulation(m_world->GetPhysics());
+    auto Sim() const noexcept -> PhysicsContext& {
+        return m_world->GetPhysics();
     }
     void ReleasePhysics(Entity e) noexcept {
         if (auto p = Registry().Get<Components::PhysicsComponent>(e)) {

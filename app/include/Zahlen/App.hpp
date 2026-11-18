@@ -25,7 +25,7 @@ namespace ZHLN {
 
 // Compatibility hook; the base Application installs no optional modules.
 // Compose modules explicitly with Install().
-void InstallApplicationDefaults(COM::IEngine& engine);
+inline void InstallApplicationDefaults(COM::IEngine&) noexcept {}
 
 // A layer may implement Start, Tick, UI, BeforeRender and/or Stop. Start runs after
 // scene creation; Tick runs after event/input pumping; UI runs in the host

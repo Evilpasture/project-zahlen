@@ -40,6 +40,7 @@ target_include_directories(zahlen_physics
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -51,9 +52,6 @@ target_compile_definitions(zahlen_physics PRIVATE
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
 
-target_compile_definitions(zahlen_physics PUBLIC
-    JPH_DEBUG_RENDERER
-)
 
 target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 

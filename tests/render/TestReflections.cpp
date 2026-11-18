@@ -10,11 +10,11 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
 // ============================================================================
@@ -47,10 +47,10 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 6.0f;
                     gfx.post.enableSSR               = 1;
@@ -58,27 +58,23 @@ struct ReflectionsTestSuite {
                 });
 
                 auto mirrorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(mirrorMatRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(mirrorMatRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mirrorMatRes}
-                );
+                engine->Assets()->SpawnPlane(120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mirrorMatRes}).value;
 
                 auto emissiveMatRes = rc.CreateMaterial(
                     ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}}
                 );
-                if (!ZHLN::Test::ExpectTrue(emissiveMatRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(emissiveMatRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}
-                );
+                engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
@@ -91,7 +87,7 @@ struct ReflectionsTestSuite {
                     }
                 );
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 5.0f, 14.0f};
                     cam.yaw      = ZHLN::DegF{-90.0f};
@@ -124,7 +120,7 @@ struct ReflectionsTestSuite {
             // against the noise floor instead of absolute counts.)
             const auto stable = RunStableScene(
                 *engine, 10, "raytraced_reflection_coverage_and_artifacts",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     reflectionMissing = false;
 
@@ -142,10 +138,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_rtr_off.ppm");
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -209,10 +205,10 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 6.0f;
                     gfx.post.enableSSR               = 1;
@@ -222,7 +218,7 @@ struct ReflectionsTestSuite {
 
                 // Sun illumination to support scene depth and HDR tone mapping
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})
@@ -237,14 +233,12 @@ struct ReflectionsTestSuite {
 
                 // Polished metallic mirror floor
                 auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.9f, 0.9f, 0.95f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(mirrorMat.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(mirrorMat.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 120.0f, {0.9f, 0.9f, 0.95f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}
-                );
+                engine->Assets()->SpawnPlane(120.0f, {0.9f, 0.9f, 0.95f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}).value;
 
                 // 4 Distinct High-Luminance Emissive Geometric Emitters at Y = 3.0, Z = 0.0:
                 //   Emitter 1: X = -4.5 (Pure Red)
@@ -264,24 +258,16 @@ struct ReflectionsTestSuite {
                     ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.9f, 0.05f, 1.0f}, .emissive = {5.0f, 4.5f, 0.0f, 1.0f}}
                 );
 
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {-4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveRed}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {-1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveGrn}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveBlu}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}
-                );
+                engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveRed}).value;
+                engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveGrn}).value;
+                engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveBlu}).value;
+                engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}).value;
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 5.0f, 14.0f};
                     cam.yaw      = ZHLN::DegF{-90.0f};
@@ -300,7 +286,7 @@ struct ReflectionsTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "multi_emissive_sources_and_surface_reflection_interaction",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     // Two RTR-on frames (noise baseline) plus one RTR-off
                     // frame: the A/B proves a reflection lands in each strip,
@@ -316,10 +302,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_rtr_off.ppm");
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -495,10 +481,10 @@ struct ReflectionsTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 6.0f;
@@ -508,18 +494,14 @@ struct ReflectionsTestSuite {
                 });
 
                 auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}
-                );
+                engine->Assets()->SpawnPlane(80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}).value;
 
                 auto monolithMat = rc.CreateMaterial(
                     ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.2f, .baseColor = {0.0f, 1.0f, 1.0f, 1.0f}, .emissive = {0.0f, 20.0f, 20.0f, 1.0f}}
                 );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.8f, 2.5f, 0.8f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 2.5, 0.0}, .createPhysics = false, .materialOverride = *monolithMat}
-                );
+                engine->Assets()->SpawnBox({0.8f, 2.5f, 0.8f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 2.5, 0.0}, .createPhysics = false, .materialOverride = *monolithMat}).value;
 
                 auto goldMat      = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
                 auto roughPlastic = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.8f, 0.2f, 0.2f, 1.0f}});
@@ -530,12 +512,10 @@ struct ReflectionsTestSuite {
                             continue;
                         float px = static_cast<float>(x) * 3.5f;
                         float pz = static_cast<float>(z) * 3.5f;
-                        ZHLN::PrefabFactory::CreateBox(
-                            *engine, {0.5f, 0.5f, 0.5f},
+                        engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                             ZHLN::PrefabFactory::SpawnParams {
                                 .position = {px, 0.5, pz}, .createPhysics = false, .materialOverride = ((x + z) % 2 == 0) ? *goldMat : *roughPlastic
-                            }
-                        );
+                            }).value;
                     }
                 }
 
@@ -550,7 +530,7 @@ struct ReflectionsTestSuite {
                     ZHLN::FVec3 lightCol{std::sin(angle) * 0.5f + 0.5f, std::cos(angle * 0.5f) * 0.5f + 0.5f, std::sin(angle * 1.5f + 1.0f) * 0.5f + 0.5f};
 
                     const ZHLN::Entity lt = reg.Spawn();
-                    reg.Attach(
+                    reg.AttachMany(
                         lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{lx, ly, lz}},
                         ZHLN::Components::LightComponent {
                             .type      = ZHLN::LightType::Point,
@@ -561,7 +541,7 @@ struct ReflectionsTestSuite {
                     );
                 }
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 8.0f, -18.0f};
                     cam.yaw      = ZHLN::DegF{90.0f};
@@ -580,7 +560,7 @@ struct ReflectionsTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 10, "dense_multi_light_emissive_materials_cross_interaction",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_dense_interaction.ppm");
                     if (!ZHLN::Test::ExpectTrue(frame.Valid())) {

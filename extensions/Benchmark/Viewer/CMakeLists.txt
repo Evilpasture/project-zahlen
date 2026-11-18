@@ -86,9 +86,3 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
-
-# Native compatibility is intentionally separate and not installed with COM panels.
-add_library(zahlen_native_benchmark_viewer STATIC NativeBenchmarkViewer.cpp)
-set_target_properties(zahlen_native_benchmark_viewer PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(zahlen_native_benchmark_viewer PUBLIC zahlen_benchmark_viewer PRIVATE zahlen_native_host_ui zahlen_widgets zahlen_warnings)
-zahlen_enable_reflection(zahlen_native_benchmark_viewer)

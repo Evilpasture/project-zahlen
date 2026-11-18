@@ -4,33 +4,29 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include "RenderSystem.hpp"
+#include "../KernelSession.hpp"
+#include <engine/AssetManager.hpp>
+#include <render/SceneData.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/World.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
+#include <engine/PrefabFactory.hpp>
+#include <engine/World.hpp>
+#include <engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
+#include <window/PlatformHost.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Engine/PoseUploads.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <engine/PoseUploads.hpp>
+#include <render/Render.hpp>
+#include <window/Window.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/SystemParameters.hpp>
+#include <physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -59,7 +55,7 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-[[nodiscard]] auto EnsureSkinnedScratch(GraphicsDevice rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
+[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
     if (skeleton.skinnedScratch != BufferID::Invalid && skeleton.scratchVertexCount != vertexCount) {
         rc.DestroyBuffer(skeleton.skinnedScratch);
         skeleton.skinnedScratch     = BufferID::Invalid;
@@ -87,7 +83,7 @@ using SceneSunQuery = ECS::Query<const Components::LightComponent, const Compone
 
 using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
 
-[[nodiscard]] auto SyncEnvironmentMap(EnvironmentQuery query, GraphicsDevice rc, AssetLibrary assets) -> std::expected<void, ErrorCode> {
+[[nodiscard]] auto SyncEnvironmentMap(EnvironmentQuery query, RenderContext& rc, const AssetManager& assets) -> std::expected<void, ErrorCode> {
     const auto env = query.GetSingleton<Components::EnvironmentMapComponent>();
     if (!env || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
@@ -118,7 +114,7 @@ constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 // the API. Persistent particle buffers are private to the RenderContext.
 using ParticleSubmitQuery = ECS::Query<const Components::CameraComponent, const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
 
-void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
+void SubmitParticleEmitters(ParticleSubmitQuery query, SceneData& scene) {
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
     // render path reports NoMainCamera on its own.
@@ -139,7 +135,7 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
         if (emitter->attachToCamera) {
             desc.spawnOrigin = cam.position;
         }
-        scene.SubmitParticles(
+        scene.particleEmitters.push_back(
             {.emitterId = entity.Pack(), .maxParticles = emitter->maxParticles, .desc = desc, .texture = emitter->textureAsset, .additive = emitter->additive}
         );
     }
@@ -149,7 +145,7 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
         if (!emitter || !emitter->active) {
             continue;
         }
-        scene.SubmitMeshParticles(
+        scene.meshParticleEmitters.push_back(
             {.emitterId    = entity.Pack(),
              .maxParticles = emitter->maxParticles,
              .desc         = emitter->params,
@@ -160,7 +156,7 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, DebugDraw scene) {
 }
 
 // The palettes the simulation pushed this frame, applied in order.
-void UploadPosePalettes(GraphicsDevice rc, PoseUploadQueue& poseUploads) {
+void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
     poseUploads.Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
@@ -169,7 +165,7 @@ using MeshSubmitQuery = ECS::Query<
     const Components::MorphTargetComponent, const Components::WorldTransformComponent, const Components::PBRComponent,
     const Components::CSGComponent, const Components::AmbientCubeComponent>;
 
-void SubmitVisibleMeshes(MeshSubmitQuery query, GraphicsDevice rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
+void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
 
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
@@ -186,17 +182,17 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, GraphicsDevice rc, std::span<con
             continue;
         }
 
-        auto gpuMeshOpt = rc.Mesh(meshComp->meshAsset);
+        auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
         if (!gpuMeshOpt.has_value()) {
             // Explicit cache clears discard lookups, not scene-owned buffers.
             // Rebind the owner's view instead of allocating another mesh.
             if (const auto owned = query.Get<Components::OwnedMeshComponent>(e);
                 owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferID::Invalid) {
-                rc.RegisterMesh(meshComp->meshAsset, owned->mesh);
+                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
                 gpuMeshOpt = owned->mesh;
             }
         }
-        auto gpuMatOpt = rc.Material(meshComp->materialAsset);
+        auto gpuMatOpt = rc.GetGPUMaterial(meshComp->materialAsset);
         if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
             continue;
         }
@@ -272,8 +268,8 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, GraphicsDevice rc, std::span<con
             for (const auto& mod: csg->modifiers) {
                 if (query.IsAlive(mod.operandEntity)) {
                     if (auto cutMesh = query.Get<Components::MeshComponent>(mod.operandEntity)) {
-                        auto cutGpuMeshOpt = rc.Mesh(cutMesh->meshAsset);
-                        auto cutGpuMatOpt  = rc.Material(cutMesh->materialAsset);
+                        auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
+                        auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
                             auto       cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
                             auto       cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
@@ -353,7 +349,7 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
     return extra;
 }
 
-[[nodiscard]] auto MakeViewFor(ViewCameraQuery query, GraphicsDevice rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
+[[nodiscard]] auto MakeViewFor(ViewCameraQuery query, const RenderContext& rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
     -> std::optional<SceneView> {
     auto cComp = query.Get<Components::CameraComponent>(cameraEnt);
 
@@ -369,7 +365,7 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
     } else {
         return std::nullopt;
     }
-    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.ViewportAspect();
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.GetViewportAspect();
     const auto view = cam.GetViewMatrix();
     const auto proj = cam.GetProjectionMatrix(aspect);
     auto viewProj = proj * view;
@@ -419,7 +415,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
     Mat4x4& outShadowProjView, float dt
 ) {
-    auto rc = engine.Graphics();
+    auto& rc = engine.Render();
     defer clearUI([&] { rc.ClearSubmittedUI(); });
     const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
@@ -444,12 +440,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     auto cameraEntities = query.Entities<Components::MainCameraTagComponent>();
 
     // The graphics owner is authoritative; nothing scrapes the registry for it.
-    const GraphicsSettings gfx             = engine.Graphics().Settings();
-    const int              physicsDrawMode = engine.State().PhysicsDrawMode();
+    const GraphicsSettings gfx             = rc.GetSettings();
+    const int              physicsDrawMode = engine.PhysicsDrawMode();
 
-    auto scene = engine.Debug();
-    scene.SetFrameDelta(dt);
-    SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), scene);
+    sceneData.dt = dt;
+    SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), sceneData);
     RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), physicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
@@ -537,7 +532,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     frame.skyHorizon = gfx.environment.skyHorizon;
     frame.skyGround  = gfx.environment.skyGround;
 
-    scene.SetFrameDelta(dt);
+    sceneData.dt = dt;
 
     UploadPosePalettes(rc, poseUploads);
 
@@ -549,7 +544,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return std::unexpected(sim_res.error());
     }
 
-    const ViewportRect viewport = rc.Viewport();
+    const ViewportRect viewport = rc.GetViewport();
     const auto target = engine.AcquireTarget();
     if (!target) {
         return std::unexpected(target.error());
@@ -585,7 +580,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         (*draw)(engine, Engine::WindowRenderView {
                              .id         = WindowID::Primary,
                              .target     = attachment,
-                             .size       = engine.Host().Extent(),
+                             .size       = engine.Session().WindowExtent(),
                              .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
                          },
                 gpuFrame);
@@ -603,7 +598,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         if ((!draw || !static_cast<bool>(*draw)) && !hasUI) {
             continue;
         }
-        const Extent2D size = engine.Host(id).Extent();
+        const Extent2D size = engine.Session().WindowExtent(id);
         if (size.width == 0 || size.height == 0) {
             continue;
         }
@@ -640,7 +635,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
 }
 
 void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats, RenderDebugQuery query, int physicsDrawMode) {
-    auto scene = engine.Debug();
+    auto& scene = engine.Scene();
 
     CullingSystem::DrawDebugFrustum(cullingStats, query, scene);
 
@@ -648,7 +643,7 @@ void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats,
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
         bool isWireframe = (physicsDrawMode == 1);
-        auto debugData   = engine.Physics().DebugDrawData(true, true, isWireframe);
+        auto debugData   = engine.Physics().GetDebugDrawData(true, true, isWireframe);
 
         if (isWireframe) {
             auto UnpackColorVec4 = [](uint32_t packed) {

@@ -1,20 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Animation/IK.hpp
-//
-// Analytic two-bone IK: a declarative animation modifier backed by
-// AnimationContext. TwoBoneIKComponent is pure trivially-copyable state;
-// TwoBoneIKSystem forwards chains into AnimationContext prior to Step().
 #pragma once
 #include <Animation/Components.hpp>
 #include <Animation/IKControls.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/SystemAccess.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Transform.hpp>
@@ -28,24 +19,15 @@
 #include <type_traits>
 
 namespace ZHLN {
-class Engine;
-
+namespace COM {
+struct IEntities;
+}
 namespace Animation {
 class AnimationContext;
 }
-
 namespace IK {
 
-struct ZHLN_API TwoBoneIKSystem {
-    static void Update(
-        ECS::Query<const Animation::AnimatorComponent, const TwoBoneIKComponent, const Components::TransformComponent> query,
-        ECS::ResMut<Animation::AnimationContext>                                                                       anim
-    );
-};
-
-// Optional extension: the application explicitly installs the runtime.
-[[nodiscard]] ZHLN_API auto Describe() noexcept -> Module;
-ZHLN_API void               Install(Engine& engine);
+ZHLN_STATIC_API void ApplyTwoBoneIK(const COM::IEntities& entities, Animation::AnimationContext& anim);
 
 struct TwoBoneIKSolverInput {
     FVec3 upperPosition;

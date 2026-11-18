@@ -11,21 +11,19 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Defer.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/Vertex.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -63,7 +61,7 @@ struct CaptureResult {
 
 // Indices and meshlets both use these CCW (+Z) faces. Each entity below uses
 // this *same* mesh. No parity-dependent copies of its indices or pipelines.
-[[nodiscard]] auto MakePanel(ZHLN::GraphicsDevice rc) -> ZHLN::Mesh {
+[[nodiscard]] auto MakePanel(ZHLN::COM::IGraphicsDevice& rc) -> ZHLN::Mesh {
     const std::array<ZHLN::VertexPosition, 4> positions {{
         {{-0.45f, 0.45f, 0.0f}},
         {{-0.45f, -0.45f, 0.0f}},
@@ -79,20 +77,13 @@ struct CaptureResult {
                        .color = ZHLN::Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f)};
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
-    const ZHLN::MeshletStreams        ml = rc.UploadMeshlets(ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}));
-
-    return {
-        .posBuffer           = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
-        .tangentFrameBuffer  = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
-        .surfaceBuffer       = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
-        .indexBuffer         = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span<const uint32_t> {indices}),
-        .vertexCount         = static_cast<uint32_t>(positions.size()),
-        .indexCount          = static_cast<uint32_t>(indices.size()),
-        .meshletBuffer       = ml.meshlets,
-        .meshletVertexBuffer = ml.vertices,
-        .meshletTriBuffer    = ml.triangles,
-        .meshletCount        = ml.count,
-    };
+    const auto built = rc.UploadMesh(ZHLN::COM::MeshStreamsDesc {
+        .positions     = ZHLN::COM::Span<const ZHLN::VertexPosition>(positions.data(), positions.size()),
+        .tangentFrames = ZHLN::COM::Span<const ZHLN::VertexTangentFrame>(frames.data(), frames.size()),
+        .surfaces      = ZHLN::COM::Span<const ZHLN::VertexSurface>(surfaces.data(), surfaces.size()),
+        .indices32     = ZHLN::COM::Span<const uint32_t>(indices.data(), indices.size()),
+    });
+    return built ? *built : ZHLN::Mesh {};
 }
 
 [[nodiscard]] auto Complete(const ZHLN::Mesh& mesh) noexcept -> bool {
@@ -116,13 +107,13 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     });
     if (!engine.Valid()) return std::unexpected(NegativeScaleError::EngineInitFailed);
 
-    auto rc = engine->Graphics();
-    auto reg = engine->Entities();
+    auto& rc = *engine->Graphics();
+    auto& reg = *engine->Entities();
     const auto info = rc.Info();
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
     ZHLN::Test::Headless::DisableAA(*engine);
-    engine->Graphics().PatchSettings([](auto& gfx) {
+    (void)engine->Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0; // Must exercise front/back normal orientation.
         gfx.post.mode                    = 0;
         gfx.post.enableSSR               = 0;
@@ -148,8 +139,8 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
 
-    const ZHLN::Entity sun = reg.Create();
-    reg.Attach(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
+    const ZHLN::Entity sun = reg.CreateEntity();
+    reg.AttachMany(sun, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 8.0f}},
                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1, 1, 1},
                                                  .intensity = 220.0f, .direction = ZHLN::FVec3{0, 0, 1}});
 
@@ -160,7 +151,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         .unlit = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.05f, 0.9f, 0.05f, 1.0f}
     });
     if (!oneSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    rc.RegisterMaterial(oneSidedID, *oneSided);
+    (void)rc.RegisterMaterial(oneSidedID, *oneSided);
     bool hasDoubleSided = false;
     ZHLN::defer _([&] {
         engine->ClearScene(); // Releases the sole owner of the mesh before unregistering the materials.
@@ -171,15 +162,15 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         .doubleSided = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}
     });
     if (!doubleSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    rc.RegisterMaterial(doubleSidedID, *doubleSided);
+    (void)rc.RegisterMaterial(doubleSidedID, *doubleSided);
     hasDoubleSided = true;
 
     ZHLN::Mesh mesh = MakePanel(rc);
     if (!Complete(mesh)) {
-        rc.DestroyMesh(mesh);
+        (void)rc.DestroyMesh(mesh);
         return std::unexpected(NegativeScaleError::ResourceCreationFailed);
     }
-    rc.RegisterMesh(meshID, mesh);
+    (void)rc.RegisterMesh(meshID, mesh);
 
     for (size_t i = 0; i < kCenters.size(); ++i) {
         // Panel 2 reverses its surface direction with a *proper* rotation;
@@ -199,7 +190,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
             }
         );
         if (i == 0) { // Other instances only borrow the registered mesh.
-            engine->Entities().Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
+            (void)engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
         }
     }
 

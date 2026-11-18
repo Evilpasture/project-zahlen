@@ -7,34 +7,49 @@
 #include <cmath>
 namespace ZHLN::Animator {
 namespace {
-bool Usable(COM::IEntities& entities, Entity entity) {
-    return entities.IsAlive(entity) && !entities.Get<Components::PendingDestroy>(entity) && entities.Get<Animation::AnimatorComponent>(entity);
+auto EnsureAnimator(COM::IEntities& entities, Entity entity) -> const Animation::AnimatorComponent* {
+    if (!entities.IsAlive(entity) || entities.Get<Components::PendingDestroy>(entity))
+        return nullptr;
+    if (const auto* existing = entities.Get<Animation::AnimatorComponent>(entity))
+        return existing;
+    const auto* inst = entities.Get<Components::PrefabInstanceComponent>(entity);
+    if (inst == nullptr || !inst->animated || inst->prefabAsset == InvalidAssetID)
+        return nullptr;
+    if (inst->animationCount == 0 && inst->skeletonCount == 0)
+        return nullptr;
+    return entities.Attach(
+        entity, Animation::AnimatorComponent {
+                    .prefabAsset     = inst->prefabAsset,
+                    .currentTrackIdx = inst->animationCount > 0 ? 0 : -1,
+                }
+    );
 }
 } // namespace
 bool Attach(COM::IEntities& entities, Entity entity) {
-    if (!Usable(entities, entity))
+    const auto* state = EnsureAnimator(entities, entity);
+    if (state == nullptr)
         return false;
     if (entities.Get<Animation::AnimatorControlComponent>(entity))
         return true;
     // Copy controls, never the extension's generational runtime handle.
-    const auto*                               state = entities.Get<Animation::AnimatorComponent>(entity);
     const Animation::AnimatorControlComponent control {
         .trackIndex = state->currentTrackIdx, .playbackSpeed = state->currentPlaybackSpeed, .blendDuration = state->blendDuration, .loop = state->currentLoop
     };
     return entities.Attach(entity, control) != nullptr;
 }
-bool Read(COM::IEntities& entities, Entity entity, PlaybackSnapshot& out) {
-    if (!Usable(entities, entity))
-        return false;
+auto Read(COM::IEntities& entities, Entity entity) noexcept -> std::optional<PlaybackSnapshot> {
+    if (!entities.IsAlive(entity))
+        return std::nullopt;
     const auto* state = entities.Get<Animation::AnimatorComponent>(entity);
-    out               = {
+    if (state == nullptr)
+        return std::nullopt;
+    return PlaybackSnapshot {
         .trackIndex = state->currentTrackIdx,
         .time       = state->currentTrackTime,
         .speed      = state->currentPlaybackSpeed,
         .loop       = state->currentLoop,
         .finished   = state->isFinished
     };
-    return true;
 }
 bool Play(COM::IEntities& entities, Entity entity, int32_t track, float blendDuration, bool loop) {
     if (track < -1 || !std::isfinite(blendDuration) || blendDuration < 0 || !Attach(entities, entity))
@@ -62,7 +77,7 @@ bool Speed(COM::IEntities& entities, Entity entity, float multiplier) {
     return true;
 }
 bool SetIK(COM::IEntities& entities, Entity entity, const IK::TwoBoneIKComponent& ik) {
-    if (!Usable(entities, entity) || ik.chainCount > ik.chains.size())
+    if (EnsureAnimator(entities, entity) == nullptr || ik.chainCount > ik.chains.size())
         return false;
     for (const auto& chain: ik.ActiveChains()) {
         if (chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0 || !std::isfinite(chain.weight) || chain.weight < 0 ||

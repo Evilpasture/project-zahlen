@@ -31,8 +31,3 @@ struct AnimatorControlComponent {
 static_assert(std::is_trivially_copyable_v<AnimatorControlComponent>);
 } // namespace ZHLN::Animation
 
-#include <Zahlen/ECS/ComponentPolicy.hpp>
-namespace ZHLN::SceneResources {
-template <>
-inline constexpr bool ReadOnlyReflective<Animation::AnimatorComponent> = true;
-}

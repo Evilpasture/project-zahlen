@@ -24,14 +24,12 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 // clang-format off
-#include <Jolt/Jolt.h>
 // clang-format on
-#include "SceneTestEntities.hpp"
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Scene/Scene.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/ILogicWorld.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <array>
@@ -591,7 +589,9 @@ onClickAction = "editor.save_scene"
          * rather than crashing or being invented.
          */
         std::expected<void, ZHLN::ErrorCode> extract_reads_a_world_back_into_a_description() {
-            ZHLN::ECS::Registry registry;
+            auto worldRes = ZHLN::COM::CreateLogicWorldRef();
+            ZHLN::Test::ExpectTrue(worldRes.has_value());
+            auto& registry = *(*worldRes)->Entities();
 
             // The environment is the graphics owner's, so it is handed to Extract
             // rather than seeded into the world.
@@ -614,7 +614,7 @@ onClickAction = "editor.save_scene"
 
             // A dynamic box: everything the live components can answer for
             // itself, plus the provenance record for what they cannot.
-            registry.Create(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
                     .position = FVec3{1.0f, 2.0f, 3.0f},
@@ -630,21 +630,21 @@ onClickAction = "editor.save_scene"
 
             // A static plane: PhysicsComponent::isStatic is what the spawners
             // leave behind for a body that cannot move.
-            registry.Create(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
             );
 
-            registry.Create(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedCrate"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Prefab, .source = ZHLN::String256 {"models/crate.glb"}}
             );
 
             // Not scene content: no provenance, so Extract leaves it out rather
             // than guessing that it is a box.
-            registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
+            registry.Spawn(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
 
-            registry.Create(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
                     .position = FVec3{4.0f, 5.0f, 6.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}})
@@ -663,7 +663,7 @@ onClickAction = "editor.save_scene"
 
             // The "Glow_*" light an emissive prefab brings with it: untagged, so
             // it is not written. Re-instantiating the prefab spawns it again.
-            registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
+            registry.Spawn(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
 
             ZHLN::Camera camera;
             camera.position = {0.0f, 3.8f, 7.5f};
@@ -681,7 +681,7 @@ onClickAction = "editor.save_scene"
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
-                camera, gfx, SceneTestEntities {registry},
+                camera, gfx, registry,
                 ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
                                                  const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
                                                  const auto  hit   = table.find(id);

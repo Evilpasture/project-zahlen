@@ -4,17 +4,17 @@
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
 #include "tty/TTYBackend.hpp"
-#include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <audio/Audio.hpp>
+#include <engine/AssetManager.hpp>
 #include "KernelSession.hpp"
 #include "InputContext.hpp"
 #include <unordered_map>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <render/Render.hpp>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -382,6 +382,66 @@ auto KernelSession::WindowFor(WindowID id) const noexcept -> Window* {
         }
     }
     return nullptr;
+}
+
+auto KernelSession::WindowRunning(WindowID id) const noexcept -> bool {
+    if (id == WindowID::Primary) return IsRunning();
+    const auto* window = WindowFor(id);
+    return window != nullptr && window->IsRunning();
+}
+auto KernelSession::WindowExtent(WindowID id) const noexcept -> Extent2D {
+    if (id == WindowID::Primary) return GetPlatformHost().GetSize();
+    const auto* window = WindowFor(id);
+    return window != nullptr ? window->GetSize() : Extent2D {};
+}
+auto KernelSession::WindowPresent(WindowID id) const noexcept -> bool {
+    return WindowFor(id) != nullptr;
+}
+auto KernelSession::WindowCustomCursor(WindowID id) const noexcept -> bool {
+    if (id == WindowID::Primary) return GetPlatformHost().UsesCustomCursor();
+    const auto* window = WindowFor(id);
+    return window != nullptr && window->UsesCustomCursor();
+}
+auto KernelSession::WindowCursorMode(WindowID id) const noexcept -> CursorMode {
+    if (id == WindowID::Primary) return GetPlatformHost().GetCursorMode();
+    const auto* window = WindowFor(id);
+    return window != nullptr ? window->GetCursorMode() : CursorMode::System;
+}
+auto KernelSession::WindowMouseCaptured(WindowID id) const noexcept -> bool {
+    if (id == WindowID::Primary) return GetPlatformHost().IsMouseCaptured();
+    const auto* window = WindowFor(id);
+    return window != nullptr && window->IsMouseCaptured();
+}
+auto KernelSession::WindowFocused(WindowID id) const noexcept -> bool {
+    if (id == WindowID::Primary) return GetPlatformHost().IsFocused();
+    const auto* window = WindowFor(id);
+    return window != nullptr && window->IsFocused();
+}
+void KernelSession::SetWindowCursorMode(WindowID id, CursorMode mode) noexcept {
+    if (id == WindowID::Primary) { GetPlatformHost().SetCursorMode(mode); return; }
+    if (auto* window = WindowFor(id)) window->SetCursorMode(mode);
+}
+void KernelSession::CaptureWindowMouse(WindowID id, bool captured) noexcept {
+    if (id == WindowID::Primary) { GetPlatformHost().CaptureMouse(captured); return; }
+    if (auto* window = WindowFor(id)) window->CaptureMouse(captured);
+}
+void KernelSession::FocusWindow(WindowID id) noexcept {
+    if (id == WindowID::Primary) { GetPlatformHost().Focus(); return; }
+    if (auto* window = WindowFor(id)) window->Focus();
+}
+void KernelSession::CloseWindow(WindowID id) const noexcept {
+    if (id == WindowID::Primary) { const_cast<KernelSession*>(this)->GetPlatformHost().Close(); return; }
+    if (auto* window = WindowFor(id)) window->Close();
+}
+void KernelSession::SetWindowFileDropHandler(WindowID id, void (*handler)(void*, const FileDrop*, uint32_t), void* userdata) noexcept {
+    if (id == WindowID::Primary) { GetPlatformHost().SetFileDropHandler(handler, userdata); return; }
+    if (auto* window = WindowFor(id)) window->SetFileDropHandler(handler, userdata);
+}
+auto KernelSession::Clipboard() const -> std::string {
+    return GetPlatformHost().GetClipboardText();
+}
+void KernelSession::SetClipboard(std::string_view text) {
+    GetPlatformHost().SetClipboardText(text);
 }
 
 auto KernelSession::AcquireTarget(WindowID id) noexcept -> FrameOutcome<FrameTarget> {

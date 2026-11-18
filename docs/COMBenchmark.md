@@ -71,9 +71,8 @@ flags remain host policy. Example:
 zahlen-benchmark-viewer --headless --frames 5 --validation-mode Off
 ```
 
-The explicit `NativeBenchmarkViewer` / zahlen_native_benchmark_viewer target
-keeps the existing native BSP sample building; **it is unported compatibility,
-not a migrated consumer**. It is not part of the installed COM package.
+All benchmark hosts and samples consume `zahlen_benchmark_viewer` exclusively
+through COM; the transitional native benchmark viewer target has been removed.
 
 ## Verification and packaging
 

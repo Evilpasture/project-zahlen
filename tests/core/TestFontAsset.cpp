@@ -10,7 +10,6 @@
 // bytes that do not describe one.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/GUI/Font.hpp>
 #include <Zahlen/GUI/FontLoader.hpp>
 #include <cstddef>
@@ -60,18 +59,17 @@ auto BuildCookedBlob(uint32_t magic = ZHLN::CookedFontMagic, uint32_t version = 
     return blob;
 }
 
-auto SyntheticLoader(void* user, ZHLN::GUI::BakedFontAsset& out) -> bool {
-    const bool* engage = static_cast<const bool*>(user);
-    if (!*engage) {
-        return false;
+auto SyntheticLoader(void* user) -> std::optional<ZHLN::GUI::BakedFontAsset> {
+    if (user == nullptr || !*static_cast<const bool*>(user)) {
+        return std::nullopt;
     }
-    out.atlasWidth     = 2;
-    out.atlasHeight    = 2;
-    out.firstCodepoint = 32;
+    ZHLN::GUI::BakedFontAsset out;
+    out.atlasWidth  = 8;
+    out.atlasHeight = 8;
+    out.coverage.assign(64, 0xFF);
     out.glyphs.resize(1);
     out.glyphs[0].xadvance = 7.0f;
-    out.coverage.assign(4, 255);
-    return true;
+    return out;
 }
 
 } // namespace
@@ -173,24 +171,24 @@ struct FontAssetTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> loader_hook_overrides_and_declines() {
-            ZHLN::GUI::BakedFontAsset out {};
-
             // No loader installed: resolution falls through to the default
             // bake slot / embedded default.
             ZHLN::GUI::UninstallBakedFontLoader();
             ZHLN::Test::ExpectFalse(ZHLN::GUI::HasBakedFontLoader());
-            ZHLN::Test::ExpectFalse(ZHLN::GUI::LoadBakedFont(out));
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::LoadBakedFont().has_value());
 
             bool engage = true;
             ZHLN::GUI::InstallBakedFontLoader(&SyntheticLoader, &engage);
             ZHLN::Test::ExpectTrue(ZHLN::GUI::HasBakedFontLoader());
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::LoadBakedFont(out));
-            ZHLN::Test::ExpectEq(out.glyphs.size(), 1u);
-            ZHLN::Test::ExpectEq(out.glyphs[0].xadvance, 7.0f);
+            const auto loaded = ZHLN::GUI::LoadBakedFont();
+            if (ZHLN::Test::ExpectTrue(loaded.has_value())) {
+                ZHLN::Test::ExpectEq(loaded->glyphs.size(), 1u);
+                ZHLN::Test::ExpectEq(loaded->glyphs[0].xadvance, 7.0f);
+            }
 
             // A declining loader leaves core's fallbacks in charge.
             engage = false;
-            ZHLN::Test::ExpectFalse(ZHLN::GUI::LoadBakedFont(out));
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::LoadBakedFont().has_value());
 
             ZHLN::GUI::UninstallBakedFontLoader();
             ZHLN::Test::ExpectFalse(ZHLN::GUI::HasBakedFontLoader());

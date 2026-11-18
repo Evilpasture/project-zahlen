@@ -4,7 +4,7 @@
 #include "Platform.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <window/Window.hpp>
 #include <chrono>
 #include <thread>
 

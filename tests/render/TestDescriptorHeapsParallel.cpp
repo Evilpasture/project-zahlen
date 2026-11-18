@@ -13,17 +13,16 @@
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -90,11 +89,11 @@ struct DescriptorHeapsParallelSuite {
                 return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
-            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 6.0f, 13.0f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -138,12 +137,10 @@ struct DescriptorHeapsParallelSuite {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
                     const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f};
-                    ZHLN::PrefabFactory::CreateBox(
-                        *engine, {halfExtent, halfExtent, halfExtent},
+                    engine->Assets()->SpawnBox({halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {
                             .position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
-                        }
-                    );
+                        }).value;
                 }
             }
 
@@ -151,7 +148,7 @@ struct DescriptorHeapsParallelSuite {
             for (uint32_t frame = 0; frame < 8; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             const std::string ppmPath = "headless_dheap_parallel.ppm";

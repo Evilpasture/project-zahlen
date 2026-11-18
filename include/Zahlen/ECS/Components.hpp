@@ -172,7 +172,17 @@ struct Components {
         Entity parent = Entity::Null();
     };
 
-    struct SceneSourceComponent {
+    // Identifies the cached prefab instantiated on a root entity. Optional host
+// layers (e.g. Animation::Layer) observe this published POD without coupling
+// the engine to any extension runtime.
+struct PrefabInstanceComponent {
+    AssetID  prefabAsset    = InvalidAssetID;
+    uint32_t animationCount = 0;
+    uint32_t skeletonCount  = 0;
+    bool     animated       = false;
+};
+
+struct SceneSourceComponent {
         Scene::ShapeKind shape = Scene::ShapeKind::Box;
         ZHLN::String256  source;
         ZHLN::FVec3     halfExtents           = {0.5f, 0.5f, 0.5f};

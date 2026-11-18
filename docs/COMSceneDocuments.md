@@ -105,13 +105,11 @@ settings/camera commit is not a general transaction across arbitrary decorators.
 - A prefab part's valid no-node sentinel (`nodeIndex == -1`) uses identity rather
   than indexing an empty node vector during instantiation.
 
-## Native compatibility is explicit, not counted as a COM port
+## COM-only surface
 
-`zahlen_native_scene` / `<Scene/NativeScene.hpp>` retain existing Engine callers
-outside Core. The adapter exposes no Registry overload; extraction uses the
-existing native Entities facade. `zahlen_native_scene_documents` similarly
-keeps the existing native scene host/editor building against the shared parser.
-Neither native target is a dependency of zahlen_scene or zahlen_scene_documents.
+The transitional `zahlen_native_scene` and `zahlen_native_scene_documents`
+adapters have been removed; all scene hosts, editors, and document loaders
+consume `zahlen_scene` and `zahlen_scene_documents` exclusively over COM.
 
 BSP DescribeScene moved into zahlen_bsp_assets and consumes the host document;
 a COM host no longer needs the legacy importer archive just to describe a map.

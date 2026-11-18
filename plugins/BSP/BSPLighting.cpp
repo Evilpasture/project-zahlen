@@ -76,12 +76,15 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 
 // Source parses "0" and "" the same way for floats, so a present-but-zero
 // override has to stay distinguishable from an absent one.
-[[nodiscard]] auto KeyFloatPresent(const BSPEntity& entity, std::string_view key, float& out) noexcept -> bool {
-    if (const auto value = entity.FindFloat(key)) {
-        out = *value;
-        return true;
+[[nodiscard]] auto KeyFloatPresent(const BSPEntity& entity, std::string_view key) noexcept -> std::optional<float> {
+    const auto v = entity.Find(key);
+    if (v.empty()) {
+        return std::nullopt;
     }
-    return false;
+    float out = 0.0f;
+    const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
+    (void)ptr;
+    return ec == std::errc {} ? std::optional<float> {out} : std::nullopt;
 }
 
 // The luminance the renderer itself uses for light-importance sorting, so the
@@ -230,16 +233,16 @@ auto ParseSourceAttenuation(const BSPEntity& entity) noexcept -> SourceAttenuati
     atten.quadratic = KeyFloat(entity, "_quadratic_attn", 1.0f);
 
     float value = 0.0f;
-    if (KeyFloatPresent(entity, "_fifty_percent_distance", value)) {
+    if (((value = KeyFloatPresent(entity, "_fifty_percent_distance").value_or(value)), KeyFloatPresent(entity, "_fifty_percent_distance").has_value())) {
         atten.fiftyPercentDistance = value;
     }
     // `_distance` and the legacy `_falloff` are the zero-percent distance under
     // two other names; the newest spelling wins.
-    if (KeyFloatPresent(entity, "_zero_percent_distance", value)) {
+    if (((value = KeyFloatPresent(entity, "_zero_percent_distance").value_or(value)), KeyFloatPresent(entity, "_zero_percent_distance").has_value())) {
         atten.zeroPercentDistance = value;
-    } else if (KeyFloatPresent(entity, "_distance", value)) {
+    } else if (((value = KeyFloatPresent(entity, "_distance").value_or(value)), KeyFloatPresent(entity, "_distance").has_value())) {
         atten.zeroPercentDistance = value;
-    } else if (KeyFloatPresent(entity, "_falloff", value)) {
+    } else if (((value = KeyFloatPresent(entity, "_falloff").value_or(value)), KeyFloatPresent(entity, "_falloff").has_value())) {
         atten.zeroPercentDistance = value;
     }
 

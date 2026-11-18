@@ -63,8 +63,8 @@ mkdir -p "${pkgs}" "${tools}"
 # One package per install component. The list is the set of components that
 # carry an installed export; a component that does not exist is a hard error,
 # because a silently missing package is a release that cannot install.
-components=(Engine CommandLine Signal HostRunner Application UISchema Serialization GLTF
-    Screenshot Netpbm FreeCam Camera CharacterController SkeletalAnimation Animation Cooker Fonts)
+components=(Engine CommandLine Image Signal COMApp HostUI HostRunner Application UISchema Scene Serialization GLTF
+    Screenshot Netpbm FreeCam Camera CharacterController AnimationControls Animation Cooker Fonts)
 
 # ---------------------------------------------------------------------------
 # Debug information does not ship in the packages.

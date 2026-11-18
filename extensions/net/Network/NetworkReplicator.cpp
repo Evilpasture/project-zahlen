@@ -3,29 +3,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // ============================================================================
-// ClientReplicator — applies ZHLN.Wire-decoded server state to the local ECS.
-// No third-party serialization: every payload goes through the annotated
-// reflection codecs exported by ZHLN.Network, and every failure is an
-// std::expected with a fully formatted, annotated diagnostic.
+// ClientReplicator — applies ZHLN.Wire-decoded server state over COM::IEntities.
+// No engine-internal ECS or physics dependencies cross this layer.
 // ============================================================================
 
 module;
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <expected>
@@ -35,11 +28,7 @@ module ZHLN.Network;
 
 namespace ZHLN::Net {
 
-// ============================================================================
-// ClientReplicator — method bodies (class declared in the module interface)
-// ============================================================================
-
-auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept
+auto ClientReplicator::ApplyInitialObjects(COM::IEntities& entities, std::span<const uint8_t> payload) noexcept
     -> std::expected<void, ErrorCode> {
     auto message = DecodeInitialSnapshot(payload);
     if (!message) {
@@ -47,26 +36,23 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto entities = engine.Entities();
-
-    for (const ObjectSnapshot& object: message->objects) {
-        const Entity e = GetOrCreateEntity(entities, object.uid);
-
+    for (const ObjectSnapshot& object : message->objects) {
+        const Entity e        = GetOrCreateEntity(entities, object.uid);
         const FVec3  position = object.position;
         const FVec3  scale    = object.size;
-        const auto worldMat = ComposeTransform(position, Quat::Identity(), scale);
+        const auto   worldMat = ComposeTransform(position, Quat::Identity(), scale);
 
-        entities.Attach(
-            e, Components::NameComponent {.name = String64("ReplicatedObject")}, Components::TransformComponent {.position = position, .scale = scale},
-            Components::WorldTransformComponent {.world = worldMat, .previous = worldMat},
-            NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false},
-            NetworkInterpolationComponent {.targetPosition = position, .targetRotation = {0.0f, 0.0f, 0.0f, 1.0f}}
-        );
+        (void)entities.Attach(e, Components::NameComponent {.name = String64("ReplicatedObject")});
+        (void)entities.Attach(e, Components::TransformComponent {.position = position, .scale = scale});
+        (void)entities.Attach(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+        (void)entities.Attach(e, NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false});
+        (void)entities.Attach(
+            e, NetworkInterpolationComponent {.targetPosition = position, .targetRotation = Quat::Identity()});
     }
     return {};
 }
 
-auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept
+auto ClientReplicator::ApplyPhysicsBatch(COM::IEntities& entities, std::span<const uint8_t> payload) noexcept
     -> std::expected<void, ErrorCode> {
     auto message = DecodePhysicsBatch(payload);
     if (!message) {
@@ -74,11 +60,9 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
         return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
-    auto entities = engine.Entities();
-
-    for (const PhysicsBodyState& body: message->bodies) {
+    for (const PhysicsBodyState& body : message->bodies) {
         if (const auto e = uidToEntityMap.Find(body.uid)) {
-            entities.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
+            (void)entities.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
                 interp.targetPosition = body.position;
                 interp.targetRotation = body.rotation;
                 interp.linearVelocity = body.velocity;
@@ -88,47 +72,40 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
     return {};
 }
 
-auto ClientReplicator::GetOrCreateEntity(Entities& entities, uint64_t uid) -> Entity {
+auto ClientReplicator::GetOrCreateEntity(COM::IEntities& entities, uint64_t uid) -> Entity {
     if (const auto found = uidToEntityMap.Find(uid)) {
         if (entities.IsAlive(*found)) {
             return *found;
         }
     }
-    const Entity newEntity = entities.Create();
+    const Entity newEntity = entities.CreateEntity();
     uidToEntityMap.Insert(uid, newEntity);
     return newEntity;
 }
 
-// ============================================================================
-// ECS Subsystem Registration
-// ============================================================================
+void Step(COM::IEntities& entities, float dt) noexcept {
+    ZHLN::ScopedTimer timer("Network: Interpolation");
 
-void NetworkInterpolationSystem(
-    ECS::Query<const NetworkInterpolationComponent, const NetworkIdentityComponent, Components::TransformComponent&> query,
-    FrameDt dt
-) {
-    ZHLN::ScopedTimer timer("ECS System: Network Interpolation");
-
-    for (Entity e: query.Entities<NetworkInterpolationComponent>()) {
-        const auto ident = query.Get<NetworkIdentityComponent>(e);
-        if (ident && ident->isLocalOwner) {
+    const float clampedDt = std::max(0.0f, dt);
+    for (const Entity e : entities.EntitiesWith<NetworkInterpolationComponent>()) {
+        if (const auto* ident = entities.Get<NetworkIdentityComponent>(e); ident != nullptr && ident->isLocalOwner) {
             continue;
         }
-        const auto interp = query.Get<NetworkInterpolationComponent>(e);
-        auto       trans  = query.Get<Components::TransformComponent>(e);
-        if (!trans || !interp) {
+        const auto* interp = entities.Get<NetworkInterpolationComponent>(e);
+        auto*       trans  = entities.Get<Components::TransformComponent>(e);
+        if (trans == nullptr || interp == nullptr) {
             continue;
         }
-        const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
+        const float t   = std::min(1.0f, interp->interpolationSpeed * clampedDt);
         trans->position = Lerp(trans->position, interp->targetPosition, t);
         trans->rotation = Slerp(trans->rotation, interp->targetRotation, t);
     }
 }
 
-void RegisterNetworkSubsystem(Engine& engine) {
-    auto& graph = engine.GetUpdateGraph();
-
-    graph.AddSystem<&NetworkInterpolationSystem>();
+void Step(COM::IEngine& engine, float dt) noexcept {
+    if (auto* entities = engine.Entities()) {
+        Step(*entities, dt);
+    }
 }
 
 } // namespace ZHLN::Net

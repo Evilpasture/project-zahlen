@@ -4,7 +4,7 @@
 #include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include "InputContext.hpp"
-#include <Zahlen/ECS/EventBus.hpp>
+#include <ecs/EventBus.hpp>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -2005,6 +2005,93 @@ auto InputContext::DeserializeBindings(std::string_view text) -> std::expected<v
     }
 
     return {};
+}
+
+auto InputContext::ConfigureActionMap(const ActionMapConfig& config) noexcept -> bool {
+    const std::string_view mapName {config.name.c_str(), config.name.size()};
+    if (mapName.empty()) {
+        return false;
+    }
+    InputActionMap& map = CreateActionMap(mapName, config.priority);
+    map.SetEnabled(config.enabled);
+    map.SetSeatMask(config.seatMask);
+    map.SetBlocksLowerPriority(config.blocksLowerPriority);
+    map.SetConsumePhysicalInputs(config.consumePhysicalInputs);
+    return true;
+}
+
+auto InputContext::ConfigureAction(const ActionConfig& config) noexcept -> ActionID {
+    const std::string_view mapName {config.mapName.c_str(), config.mapName.size()};
+    const std::string_view actionName {config.actionName.c_str(), config.actionName.size()};
+    if (mapName.empty() || actionName.empty()) {
+        return ActionID {};
+    }
+    if (config.bindingCount > 0U && config.bindings == nullptr) {
+        return ActionID {};
+    }
+    auto map = FindActionMap(mapName);
+    if (!map) {
+        return ActionID {};
+    }
+    InputAction& action = map->AddAction(actionName, config.kind);
+    action.SetClampUnitCircle(config.clampUnitCircle);
+    action.SetActuationThreshold(config.actuationThreshold);
+    if (config.replaceBindings) {
+        action.ReplaceBindings(std::span<const InputBinding> {config.bindings, config.bindingCount});
+    } else {
+        for (uint32_t i = 0; i < config.bindingCount; ++i) {
+            action.AppendBinding(config.bindings[i]);
+        }
+    }
+    return action.Id();
+}
+
+auto InputContext::BindAction(std::string_view mapName, ActionID action, const InputBinding& binding) noexcept -> bool {
+    auto map = FindActionMap(mapName);
+    if (!map) return false;
+    auto target = map->FindAction(action);
+    if (!target) return false;
+    target->AppendBinding(binding);
+    return true;
+}
+
+auto InputContext::RebindAction(std::string_view mapName, ActionID action, size_t slotIndex, const InputBinding& binding) noexcept -> bool {
+    auto map = FindActionMap(mapName);
+    if (!map) return false;
+    auto target = map->FindAction(action);
+    return static_cast<bool>(target) && target->Rebind(slotIndex, binding);
+}
+
+auto InputContext::ClearActionBindings(std::string_view mapName, ActionID action) noexcept -> bool {
+    auto map = FindActionMap(mapName);
+    if (!map) return false;
+    auto target = map->FindAction(action);
+    if (!target) return false;
+    target->ClearBindings();
+    return true;
+}
+
+auto InputContext::RemoveActionBinding(std::string_view mapName, ActionID action, size_t slotIndex) noexcept -> bool {
+    auto map = FindActionMap(mapName);
+    if (!map) return false;
+    auto target = map->FindAction(action);
+    return static_cast<bool>(target) && target->RemoveBinding(slotIndex);
+}
+
+auto InputContext::HasActionMap(std::string_view mapName) const noexcept -> bool {
+    return static_cast<bool>(FindActionMap(mapName));
+}
+
+auto InputContext::IsActionMapEnabled(std::string_view mapName) const noexcept -> bool {
+    const auto found = FindActionMap(mapName);
+    return static_cast<bool>(found) && found->Enabled();
+}
+
+auto InputContext::ConsumePhysicalInput(PlayerSeat seat) noexcept -> InputState {
+    auto& state = MutableSeatKeyboardMouse(seat);
+    auto snapshot = state;
+    state.ClearQueuedInput();
+    return snapshot;
 }
 
 } // namespace ZHLN

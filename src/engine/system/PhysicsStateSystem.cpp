@@ -5,12 +5,12 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <engine/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <algorithm>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <ecs/ECS.hpp>
+#include <physics/Physics.hpp>
 #include <vector>
 
 namespace ZHLN::Tests {

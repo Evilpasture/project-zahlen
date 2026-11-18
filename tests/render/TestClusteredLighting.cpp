@@ -10,15 +10,14 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IState.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
-#include <Zahlen/Engine/World.hpp>
 
 // ============================================================================
 // Test Suite
@@ -50,10 +49,10 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 10.0f;
@@ -61,34 +60,26 @@ struct ClusteredLightingTestSuite {
                     gfx.rayTracing.enableReflections = false;
                 });
 
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}
-                );
+                engine->Assets()->SpawnPlane(120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}).value;
 
                 auto grayMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.65f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}});
                 auto redMatRes  = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}});
                 auto blueMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.1f, 0.2f, 0.9f, 1.0f}});
 
-                if (!(ZHLN::Test::ExpectTrue(grayMatRes.has_value()) && ZHLN::Test::ExpectTrue(redMatRes.has_value()) &&
-                      ZHLN::Test::ExpectTrue(blueMatRes.has_value()))) {
+                if (!(ZHLN::Test::ExpectTrue(grayMatRes.HasValue()) && ZHLN::Test::ExpectTrue(redMatRes.HasValue()) &&
+                      ZHLN::Test::ExpectTrue(blueMatRes.HasValue()))) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.8f, 0.8f, 0.8f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *grayMatRes}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.7f, 0.7f, 0.7f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *redMatRes}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.7f, 0.7f, 0.7f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *blueMatRes}
-                );
+                engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *grayMatRes}).value;
+                engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
+                engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *blueMatRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})
@@ -103,7 +94,7 @@ struct ClusteredLightingTestSuite {
 
                 auto addPointLight = [&](const ZHLN::FVec3& pos, const ZHLN::FVec3& color, float intensity) {
                     const ZHLN::Entity e = reg.Spawn();
-                    reg.Attach(
+                    reg.AttachMany(
                         e, ZHLN::Components::TransformComponent {.position = pos},
                         ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = 30.0f}
                     );
@@ -111,7 +102,7 @@ struct ClusteredLightingTestSuite {
                 addPointLight(ZHLN::FVec3{-4.0f, 3.0f, 2.0f}, ZHLN::FVec3{1.0f, 0.55f, 0.3f}, 800.0f);
                 addPointLight(ZHLN::FVec3{4.0f, 3.0f, -3.0f}, ZHLN::FVec3{0.3f, 0.5f, 1.0f}, 800.0f);
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 2.5f, 8.0f};
                     cam.yaw      = ZHLN::DegF{-90.0f};
@@ -130,7 +121,7 @@ struct ClusteredLightingTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 14, "lit_scene_static_frame_stability",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage  repeatA    = Capture(eng, "headless_lighting_rt_static_r0.ppm");
                     const RgbImage  repeatB    = Capture(eng, "headless_lighting_rt_static_r1.ppm");
@@ -164,8 +155,8 @@ struct ClusteredLightingTestSuite {
                         prev = frame;
                     }
 
-                    ZHLN::Test::ExpectFalse(eng.GetVisibleEntities().empty());
-                    ZHLN::Test::ExpectGt(eng.State().CullingStats().TotalTriangles, 0);
+                    ZHLN::Test::ExpectGt(eng.State()->CullingStats().TotalObjects, eng.State()->CullingStats().CulledObjects);
+                    ZHLN::Test::ExpectGt(eng.State()->CullingStats().TotalTriangles, 0);
 
                     const bool frameProduced   = ZHLN::Test::ExpectGt(Mean(lumaSeries), 1.0);
                     const bool geometryVisible = ZHLN::Test::ExpectGt(Mean(litSeries), 500.0);
@@ -241,10 +232,10 @@ struct ClusteredLightingTestSuite {
 
             ZHLN::Entity redLight = ZHLN::Entity::Null();
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 2.0f;
                     gfx.post.enableSSR               = 1;
@@ -253,21 +244,17 @@ struct ClusteredLightingTestSuite {
                 });
 
                 auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.7f, 0.7f, 0.7f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
-                );
+                engine->Assets()->SpawnPlane(120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}).value;
+                engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{30.0f, 0.0f, 0.0f}})
@@ -281,14 +268,14 @@ struct ClusteredLightingTestSuite {
                 );
 
                 redLight = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     redLight, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{-6.4f, 2.4f, 5.5f}},
                     ZHLN::Components::LightComponent {
                         .type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.06f, 0.03f}, .intensity = 1600.0f, .range = 40.0f
                     }
                 );
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 2.6f, -4.0f};
                     cam.yaw      = ZHLN::DegF{90.0f};
@@ -313,10 +300,10 @@ struct ClusteredLightingTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "point_light_cluster_culling_sweep",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     lightCullingPop = false;
-                    auto reg = eng.Entities();
+                    auto& reg = *eng.Entities();
                     ZHLN::Test::ExpectTrue(reg.IsAlive(redLight));
 
                     std::vector<double>   redCounts;
@@ -362,7 +349,7 @@ struct ClusteredLightingTestSuite {
                     std::vector<double>                 stableLit;
                     std::vector<uint64_t>               stableFrameIdx;
                     for (uint32_t r = 0; r < kStableFrames; ++r) {
-                        stableFrameIdx.push_back(eng.GetCurrentFrame());
+                        stableFrameIdx.push_back(eng.CurrentFrame());
                         stableFrames[r]  = Capture(eng, "headless_lighting_rt_cull_stable_" + std::to_string(r) + ".ppm");
                         if (!ZHLN::Test::ExpectTrue(stableFrames[r].Valid())) {
                             captureFailed = true;
@@ -477,10 +464,10 @@ struct ClusteredLightingTestSuite {
             const ZHLN::FVec3 lightPos{6.4f, 2.4f, 5.0f};
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 2.0f;
@@ -490,20 +477,16 @@ struct ClusteredLightingTestSuite {
                 });
 
                 auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(diffuseMatRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
-                );
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {0.7f, 0.7f, 0.7f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}
-                );
+                engine->Assets()->SpawnPlane(120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}).value;
+                engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.7, 5.0}, .createPhysics = false, .materialOverride = *diffuseMatRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{30.0f, 0.0f, 0.0f}})
@@ -516,13 +499,13 @@ struct ClusteredLightingTestSuite {
                     }
                 );
                 const ZHLN::Entity redLight = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     redLight, ZHLN::Components::TransformComponent {.position = lightPos},
                     ZHLN::Components::LightComponent {
                         .type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.06f, 0.03f}, .intensity = 1600.0f, .range = 40.0f
                     }
                 );
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 2.6f, -4.0f};
                     cam.yaw      = ZHLN::DegF{90.0f};
@@ -541,7 +524,7 @@ struct ClusteredLightingTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "point_light_static_reference_no_history",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     constexpr uint32_t                  kStableFrames = 8;
                     std::array<RgbImage, kStableFrames> frames {};
@@ -610,10 +593,10 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 1.0f;
@@ -624,7 +607,7 @@ struct ClusteredLightingTestSuite {
 
                 // Explicit 0-intensity Sun to suppress the default 180-nit white sun injection
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 40.0f, 30.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{45.0f, 0.0f, 0.0f}})
@@ -639,20 +622,16 @@ struct ClusteredLightingTestSuite {
 
                 // Neutral diffuse gray floor
                 auto neutralMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(neutralMat.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(neutralMat.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *neutralMat}
-                );
+                engine->Assets()->SpawnPlane(80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *neutralMat}).value;
 
                 // Central pedestal at quadrant boundary to test additive color mixing
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {1.0f, 0.6f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.6, 0.0}, .createPhysics = false, .materialOverride = *neutralMat}
-                );
+                engine->Assets()->SpawnBox({1.0f, 0.6f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.6, 0.0}, .createPhysics = false, .materialOverride = *neutralMat}).value;
 
                 // 64 Point Lights partitioned into 4 chromatic quadrants (perspective-aligned for yaw=+90 look along +Z):
                 //   World X > 0, Z > 0 -> Screen Top-Left:     Pure Red   (1.0, 0.02, 0.02)
@@ -678,7 +657,7 @@ struct ClusteredLightingTestSuite {
                         }
 
                         const ZHLN::Entity lt = reg.Spawn();
-                        reg.Attach(
+                        reg.AttachMany(
                             lt, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{posX, posY, posZ}},
                             ZHLN::Components::LightComponent {
                                 .type      = ZHLN::LightType::Point,
@@ -690,7 +669,7 @@ struct ClusteredLightingTestSuite {
                     }
                 }
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 22.0f, -24.0f};
                     cam.yaw      = ZHLN::DegF{90.0f};
@@ -709,7 +688,7 @@ struct ClusteredLightingTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "multi_light_cluster_accumulation_and_chromatic_interaction",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
                     const RgbImage frame      = Capture(eng, "headless_lighting_multi_cluster.ppm");
                     if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
@@ -869,10 +848,10 @@ struct ClusteredLightingTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 8.0f;
@@ -892,17 +871,15 @@ struct ClusteredLightingTestSuite {
 
                 // Bright floor to make black tile obvious
                 auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.85f, 0.85f, 0.85f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(matRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(matRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *matRes}
-                );
+                engine->Assets()->SpawnPlane(80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *matRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{0.0f, 30.0f, 20.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{35.0f, 0.0f, 0.0f}})
@@ -918,13 +895,13 @@ struct ClusteredLightingTestSuite {
                 // Add a few point lights to force cluster culling to write tiles
                 for (int i = 0; i < 4; ++i) {
                     const ZHLN::Entity e = reg.Spawn();
-                    reg.Attach(
+                    reg.AttachMany(
                         e, ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{-6.0f + i * 4.0f, 2.5f, 2.0f}},
                         ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = ZHLN::FVec3{1.0f, 0.8f, 0.6f}, .intensity = 600.0f, .range = 20.0f}
                     );
                 }
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {0.0f, 4.0f, -8.0f};
                     cam.yaw      = ZHLN::DegF{90.0f};
@@ -941,7 +918,7 @@ struct ClusteredLightingTestSuite {
 
             const auto result = RunStableScene(
                 *engine, 8, "clustered_lighting_no_flat_black_tile",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
 
                     // A black tile is only a lighting defect if geometry
@@ -949,10 +926,10 @@ struct ClusteredLightingTestSuite {
                     // scene in full-bright mode for a coverage mask; otherwise
                     // empty sky in a corner (notably tile 0,0) looks exactly
                     // like the old false-positive "black cluster tile".
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
                     TickFrames(eng, 2);
                     const RgbImage coverage = Capture(eng, "cluster_no_black_tile_coverage.ppm");
-                    eng.Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 0; });
+                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 0; });
                     if (!ZHLN::Test::ExpectTrue(coverage.Valid())) {
                         captureFailed = true;
                         return false;

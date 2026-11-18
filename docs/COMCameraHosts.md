@@ -62,14 +62,11 @@ AdvanceFrame, not between the halves, because propagation is not silently
 replayed. Physics-follow timing and current local target edits are now covered
 by real engine tests, including the same-frame projected camera matrix.
 
-## Explicit native compatibility
+## COM-only surface
 
-The old module implementation remains in `NativeFreeCam.*` /
-`NativeTargetCamera.*`, linked only through `zahlen_native_freecam` and
-`zahlen_native_camera`. Existing native world-editor/sample/animation consumers
-now name these headers and targets explicitly. Their old frame-phase placement
-is retained. Component-only readers can include the primary headers and do not
-need a native dependency. Neither COM library links back to a native adapter.
+The transitional `NativeFreeCam` and `NativeTargetCamera` adapters have been
+removed; every editor, sample, and gameplay consumer drives `FreeCam` and
+`TargetCamera` exclusively through COM capabilities.
 
 This is a host-camera consumer slice, **not completion of the native editor,
 sample, animation, CharacterMotor, Terrain, VFX, Console or Benchmark ports**.

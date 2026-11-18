@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+
+#include <optional>
 #include "Components.hpp"
 #include <Animation/IKControls.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -19,7 +21,7 @@ struct PlaybackSnapshot {
 };
 // Requires a live animated prefab root; never creates/copies a runtime handle.
 bool Attach(COM::IEntities&, Entity);
-bool Read(COM::IEntities&, Entity, PlaybackSnapshot&);
+[[nodiscard]] auto Read(COM::IEntities& entities, Entity entity) noexcept -> std::optional<PlaybackSnapshot>;
 bool Play(COM::IEntities&, Entity, int32_t track, float blendDuration = 0.15f, bool loop = true);
 bool Seek(COM::IEntities&, Entity, float seconds);
 bool Speed(COM::IEntities&, Entity, float multiplier);

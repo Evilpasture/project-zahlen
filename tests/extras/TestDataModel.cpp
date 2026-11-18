@@ -10,7 +10,6 @@
 #include <Zahlen/Math/Vec3.hpp>
 
 #include <DataModel/DataModel.hpp>
-#include <Jolt/Math/Vec3.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>

@@ -145,9 +145,10 @@ struct DiagnosticHost {
             ZHLN::ConsoleDebugger::Execute(engine, console, command);
         }
         for (size_t i = 0; i < console.GetEntryCount(); ++i) {
-            std::string_view line;
-            float            r, g, b, a;
-            console.GetEntry(i, line, r, g, b, a);
+            const auto entry = console.GetEntry(i);
+            if (!entry) continue;
+            const std::string_view line = entry->text;
+            [[maybe_unused]] const float r = entry->color.r, g = entry->color.g, b = entry->color.b, a = entry->color.a;
             ZHLN::Log("[Console] {}", line);
         }
 #else

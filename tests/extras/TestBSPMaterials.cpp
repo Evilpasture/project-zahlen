@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <BSP/BSPGeometry.hpp>
-#include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/SourceVFS.hpp>
 #include <BSP/VMTParser.hpp>
+#include <BSP/VMTLighting.hpp>
 #include <BSP/VTFDecoder.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>

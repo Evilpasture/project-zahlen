@@ -85,7 +85,7 @@ auto HostUI::Submit(UIDrawData data, WindowID window) -> COM::Result<void> {
         .wantsCaptureMouse = data.wantsCaptureMouse, .wantsCaptureKeyboard = data.wantsCaptureKeyboard});
     if (!result.HasValue()) return result;
     const auto size = _engine.WindowExtent(window);
-    if (_engine.GetCursorMode(window) == CursorMode::Custom && size.width && size.height) {
+    if (_engine.GetCursorMode(window) == CursorMode::Custom && !_engine.IsMouseCaptured(window) && size.width && size.height) {
         COM::HostInputInfo state;
         const auto read = _engine.ReadHostInput(window, COM::OutChain(state), false);
         if (!read.HasValue()) return read;

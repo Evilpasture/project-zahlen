@@ -13,10 +13,7 @@
 #include <Zahlen/Math/Quat.hpp>
 
 // clang-format off
-#include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Description.hpp>
 
 #include <algorithm>

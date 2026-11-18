@@ -8,10 +8,10 @@
 #include "Zahlen/ECS/Entity.hpp"
 #include "Zahlen/Log.hpp"
 #include "Zahlen/Render/GpuEnums.hpp"
-#include "Zahlen/Render/Render.hpp"
+#include <render/Render.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <ecs/ECS.hpp>
 #include <algorithm>
 #include <limits>
 #include <span>

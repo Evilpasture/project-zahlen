@@ -6,7 +6,7 @@
 # baseline the release claims. The floor is not a property of the compiler
 # alone: it is the versioned symbols the link actually references, and a single
 # call can move it. On Arch this tree picked up GLIBC_2.43 from sqrtf/atan2f in
-# libzahlen_engine.so and libJolt.so -- three relocations -- which silently put
+# libzahlen_engine.so -- three relocations -- which silently put
 # the baseline above Ubuntu 24.04 and every older distro.
 #
 #   usage: scripts/check-glibc-floor.sh <max, e.g. 2.35> <file|dir|tarball>...

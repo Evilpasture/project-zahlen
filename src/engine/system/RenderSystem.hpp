@@ -4,9 +4,9 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 #include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <render/Render.hpp>
 #include <expected>
 
 namespace ZHLN {
@@ -18,7 +18,7 @@ namespace ECS {
 class Registry;
 }
 
-class ZHLN_API RenderSystem {
+class RenderSystem {
   public:
     // The presentation step is an ordered engine/frame-plan barrier, not a
     // graph node. This describes its direct component access; helper queries

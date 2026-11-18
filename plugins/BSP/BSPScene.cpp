@@ -139,13 +139,13 @@ auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOp
 // normalization the atlas gets -- a prop and the wall behind it therefore stay
 // on one radiance scale. See ImportOptions::propAmbientCubeScale.
 static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::SceneEntity& entity) {
-    std::array<std::array<float, 3>, 6> cube {};
-    if (!SampleLeafAmbientCube(map, sourcePos, cube)) {
+    const auto cubeOpt = SampleLeafAmbientCube(map, sourcePos);
+    if (!cubeOpt) {
         return;
     }
     for (size_t f = 0; f < 6; ++f) {
         entity.ambientCube[f] = {
-            cube[f][0] * options.propAmbientCubeScale, cube[f][1] * options.propAmbientCubeScale, cube[f][2] * options.propAmbientCubeScale, 1.0f
+            (*cubeOpt)[f][0] * options.propAmbientCubeScale, (*cubeOpt)[f][1] * options.propAmbientCubeScale, (*cubeOpt)[f][2] * options.propAmbientCubeScale, 1.0f
         };
     }
     entity.hasAmbientCube = true;

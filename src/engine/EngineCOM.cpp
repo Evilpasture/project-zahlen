@@ -1,5 +1,14 @@
 #include "COMJointAllocator.hpp"
+#include "InputContext.hpp"
+#include "KernelSession.hpp"
 #include "PrefabFactoryInternal.hpp"
+#include <audio/Audio.hpp>
+#include <engine/AssetManager.hpp>
+#include <engine/SceneResources.hpp>
+#include <engine/World.hpp>
+#include <physics/Physics.hpp>
+#include <render/RenderContext.hpp>
+#include <render/SceneData.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -31,25 +40,15 @@
 #include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <Zahlen/Core/Reflection/LayoutHash.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Capabilities/InputActions.hpp>
-#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/NativeEngineFactory.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/PublishedComponents.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
+#include <ecs/ECS.hpp>
+#include <engine/AssetManager.hpp>
+#include <engine/Engine.hpp>
+#include <engine/ModelPrefab.hpp>
+#include <engine/PublishedComponents.hpp>
+#include <engine/PoseUploads.hpp>
+#include <render/RenderGraphDump.hpp>
+#include <engine/PrefabFactory.hpp>
+#include <engine/SceneResources.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
 #include <Zahlen/Math/Math3D.hpp>
@@ -59,9 +58,9 @@
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <render/RenderContext.hpp>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -175,6 +174,7 @@ constexpr std::array kPublishedComponents {
     Publish<Components::WorldTransformComponent>(),
     Publish<Components::HierarchyComponent>(),
     Publish<Components::NameComponent>(),
+    Publish<Components::PrefabInstanceComponent>(),
     Publish<Components::SceneSourceComponent>(),
     Publish<Components::PBRComponent>(),
     Publish<Components::AmbientCubeComponent>(),
@@ -187,6 +187,7 @@ constexpr std::array kPublishedComponents {
     Publish<Components::MainCameraTagComponent>(),
     Publish<Components::LightComponent>(),
     Publish<Components::SceneLightTagComponent>(),
+    Publish<Components::EnvironmentSunTagComponent>(),
     Publish<Components::SunTagComponent>(),
     Publish<Components::EnvironmentMapComponent>(),
     Publish<Components::DecalComponent>(),
@@ -212,10 +213,6 @@ constexpr std::array kPublishedComponents {
     for (const auto& entry : kPublishedComponents) {
         if (entry.name == wanted) return &entry;
     }
-    if (auto extra = engine.Service<PublishedComponents>())
-        for (const auto& entry: extra->entries)
-            if (entry.name == wanted)
-                return &entry;
     return nullptr;
 }
 
@@ -289,7 +286,7 @@ class EngineCOM final:
     }
 
     void RequestClose() noexcept override {
-        m_engine->Host().Close();
+        Session().CloseWindow();
     }
 
     [[nodiscard]] Result<void> Tick(float dt) noexcept override {
@@ -412,25 +409,25 @@ class EngineCOM final:
     }
     void RemoveWindow(WindowID window) noexcept override {
         if (window == WindowID::Primary) return;
-        m_engine->Host(window).SetFileDropHandler(nullptr, nullptr);
+        Session().SetWindowFileDropHandler(window, nullptr, nullptr);
         m_dropSubscriptions.erase(window);
         m_engine->RemoveWindow(window);
     }
-    [[nodiscard]] bool IsWindowRunning(WindowID window) const noexcept override { return m_engine->Host(window).Running(); }
-    void CloseWindow(WindowID window) noexcept override { m_engine->Host(window).Close(); }
-    void FocusWindow(WindowID window) noexcept override { m_engine->Host(window).Focus(); }
-    void SetCursorMode(WindowID window, CursorMode mode) noexcept override { m_engine->Host(window).SetCursorMode(mode); }
-    [[nodiscard]] CursorMode GetCursorMode(WindowID window) const noexcept override { return m_engine->Host(window).Cursor(); }
-    void CaptureMouse(WindowID window, bool captured) noexcept override { m_engine->Host(window).CaptureMouse(captured); }
-    [[nodiscard]] bool IsMouseCaptured(WindowID window) const noexcept override { return m_engine->Host(window).MouseCaptured(); }
+    [[nodiscard]] bool IsWindowRunning(WindowID window) const noexcept override { return Session().WindowRunning(window); }
+    void CloseWindow(WindowID window) noexcept override { Session().CloseWindow(window); }
+    void FocusWindow(WindowID window) noexcept override { Session().FocusWindow(window); }
+    void SetCursorMode(WindowID window, CursorMode mode) noexcept override { Session().SetWindowCursorMode(window, mode); }
+    [[nodiscard]] CursorMode GetCursorMode(WindowID window) const noexcept override { return Session().WindowCursorMode(window); }
+    void CaptureMouse(WindowID window, bool captured) noexcept override { Session().CaptureWindowMouse(window, captured); }
+    [[nodiscard]] bool IsMouseCaptured(WindowID window) const noexcept override { return Session().WindowMouseCaptured(window); }
     [[nodiscard]] Result<void> SetClipboardText(StringView text) noexcept override {
         if (!Valid(text)) return ComError::NullArgument;
-        m_engine->Host().SetClipboard(Text(text));
+        Session().SetClipboard(Text(text));
         return {};
     }
     [[nodiscard]] Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept override {
         if (buffer == nullptr && capacity != 0) return ComError::NullArgument;
-        const auto text = m_engine->Host().Clipboard();
+        const auto text = Session().Clipboard();
         if (text.size() > UINT32_MAX) return ComError::InvalidArgument;
         if (buffer && capacity >= text.size() && !text.empty()) std::memcpy(buffer, text.data(), text.size());
         return static_cast<uint32_t>(text.size());
@@ -439,13 +436,13 @@ class EngineCOM final:
         if (!WindowExists(window)) return ComError::InvalidArgument;
         // Detach before releasing the stable userdata object. A callback may
         // replace/remove itself; the trampoline copies call state first.
-        m_engine->Host(window).SetFileDropHandler(nullptr, nullptr);
+        Session().SetWindowFileDropHandler(window, nullptr, nullptr);
         m_dropSubscriptions.erase(window);
         if (!callback) return {};
         auto subscription = std::make_unique<DropSubscription>(DropSubscription {window, callback, userdata});
         auto* stable = subscription.get();
         m_dropSubscriptions.emplace(window, std::move(subscription));
-        m_engine->Host(window).SetFileDropHandler(+[](void* opaque, const FileDrop* files, uint32_t count) {
+        Session().SetWindowFileDropHandler(window, +[](void* opaque, const FileDrop* files, uint32_t count) {
             const auto call = *static_cast<const DropSubscription*>(opaque);
             std::vector<FileDropView> views;
             views.reserve(count);
@@ -458,7 +455,7 @@ class EngineCOM final:
         return {};
     }
     [[nodiscard]] Option<float> PacedDeltaTime() const noexcept override {
-        const auto value = Device().PacedDeltaTime();
+        const auto value = Device().GetPacedDeltaTime();
         return value ? Option<float>(*value) : Option<float> {};
     }
     [[nodiscard]] Result<void> ReadHostInput(WindowID window, ChainOutNode* output, bool consume) noexcept override {
@@ -466,7 +463,7 @@ class EngineCOM final:
         if (!WindowExists(window)) return ComError::InvalidArgument;
         const auto checked = DispatchOutChain<HostInputInfo>(output, [](HostInputInfo&) -> Result<void> { return {}; });
         if (!checked.HasValue()) return checked;
-        const auto state = consume ? m_engine->Input(window).ConsumePhysicalInput() : std::as_const(*m_engine).Input(window).Snapshot();
+        const auto state = consume ? Session().InputFor(window).ConsumePhysicalInput() : Session().InputFor(window).SeatKeyboardMouse();
         HostInputInfo info;
         info.mouseX = state.mouseX; info.mouseY = state.mouseY; info.mouseWheel = state.mouseWheel;
         info.modifiers = state.Modifiers();
@@ -489,7 +486,7 @@ class EngineCOM final:
             if (batch.vertexStart > ui.positions.size || batch.vertexCount > ui.positions.size - batch.vertexStart || batch.vertexCount % 3 != 0)
                 return ComError::InvalidArgument;
         }
-        m_engine->Input(window).SetUICapture(ui.wantsCaptureKeyboard, ui.wantsCaptureMouse);
+        Session().InputFor(window).SyncCaptureFlags(ui.wantsCaptureKeyboard, ui.wantsCaptureMouse);
         Device().SubmitUI(window, UIDrawData {.batches = ui.batches, .positions = ui.positions, .surfaces = ui.surfaces,
             .wantsCaptureMouse = ui.wantsCaptureMouse, .wantsCaptureKeyboard = ui.wantsCaptureKeyboard}, ui.append);
         return {};
@@ -572,11 +569,11 @@ class EngineCOM final:
 
     // ------------------------------------------------------------- IDebugDraw
     void AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd) noexcept override {
-        m_engine->Debug().AddLine(start, end, colorStart, colorEnd);
+        m_engine->Scene().AddLine(start, end, colorStart, colorEnd);
     }
     [[nodiscard]] Result<void> AddBillboards(TextureID texture, Span<const BillboardQuad> quads, bool additive) noexcept override {
         if (quads.size != 0 && quads.data == nullptr) return ComError::NullArgument;
-        if (quads.size != 0) m_engine->Debug().AddBillboards(texture, std::span<const BillboardQuad>(quads), additive);
+        if (quads.size != 0) m_engine->Scene().AddBillboards(texture, std::span<const BillboardQuad>(quads), additive);
         return {};
     }
     [[nodiscard]] Result<void> AddDebugTriangles(Span<const VertexPosition> positions,
@@ -584,7 +581,7 @@ class EngineCOM final:
         if ((positions.size != 0 && positions.data == nullptr) ||
             (surfaces.size != 0 && surfaces.data == nullptr)) return ComError::NullArgument;
         if (positions.size != surfaces.size || positions.size % 3 != 0) return ComError::InvalidArgument;
-        if (positions.size != 0) m_engine->Debug().AddDebugTriangles(std::span<const VertexPosition>(positions),
+        if (positions.size != 0) m_engine->Scene().AddDebugTriangles(std::span<const VertexPosition>(positions),
                                                                    std::span<const VertexSurface>(surfaces));
         return {};
     }
@@ -597,7 +594,7 @@ class EngineCOM final:
         });
         if (!valid.HasValue()) return valid;
         if (!submission || submission->emitterId == 0 || submission->maxParticles == 0) return ComError::InvalidArgument;
-        m_engine->Debug().SubmitParticles(*submission);
+        m_engine->Scene().particleEmitters.push_back(*submission);
         return {};
     }
     [[nodiscard]] Result<void> SubmitMeshParticles(const ChainInNode* chain) noexcept override {
@@ -609,10 +606,10 @@ class EngineCOM final:
         });
         if (!valid.HasValue()) return valid;
         if (!submission || submission->emitterId == 0 || submission->maxParticles == 0) return ComError::InvalidArgument;
-        m_engine->Debug().SubmitMeshParticles(*submission);
+        m_engine->Scene().meshParticleEmitters.push_back(*submission);
         return {};
     }
-    void Clear() noexcept override { m_engine->Debug().Clear(); }
+    void Clear() noexcept override { m_engine->Scene().Clear(); }
 
     // ----------------------------------------------------------------- windows
     [[nodiscard]] WindowID PrimaryWindow() const noexcept override {
@@ -624,51 +621,51 @@ class EngineCOM final:
         if (outWindows) std::copy_n(windows.begin(), std::min<size_t>(capacity, windows.size()), outWindows);
         return static_cast<uint32_t>(windows.size());
     }
-    [[nodiscard]] Extent2D WindowExtent(WindowID window) const noexcept override { return m_engine->Host(window).Extent(); }
-    [[nodiscard]] bool IsWindowFocused(WindowID window) const noexcept override { return m_engine->Host(window).Focused(); }
+    [[nodiscard]] Extent2D WindowExtent(WindowID window) const noexcept override { return Session().WindowExtent(window); }
+    [[nodiscard]] bool IsWindowFocused(WindowID window) const noexcept override { return Session().WindowFocused(window); }
 
     // ----------------------------------------------------------------- IState
     [[nodiscard]] ZHLN::CullingStats CullingStats() const noexcept override {
-        return m_engine->State().CullingStats();
+        return m_engine->CullingStatsSnapshot();
     }
 
     void ResetCullingStats() noexcept override {
-        m_engine->State().ResetCullingStats();
+        m_engine->ResetCullingStats();
     }
 
     void SetCullingEnabled(bool enabled) noexcept override {
-        m_engine->State().SetCullingEnabled(enabled);
+        m_engine->SetCullingEnabled(enabled);
     }
 
     void SetFreezeFrustum(bool freeze) noexcept override {
-        m_engine->State().SetFreezeFrustum(freeze);
+        m_engine->SetFreezeFrustum(freeze);
     }
 
     [[nodiscard]] int PhysicsDrawMode() const noexcept override {
-        return m_engine->State().PhysicsDrawMode();
+        return m_engine->PhysicsDrawMode();
     }
 
     void SetPhysicsDrawMode(int mode) noexcept override {
-        m_engine->State().SetPhysicsDrawMode(mode);
+        m_engine->SetPhysicsDrawMode(mode);
     }
 
     // -------------------------------------------------------- IGraphicsDevice
     void SetResolution(Extent2D resolution) noexcept override {
-        m_engine->Graphics().SetResolution(resolution);
+        Device().SetResolution(resolution);
     }
 
     [[nodiscard]] ViewportRect Viewport() const noexcept override {
-        return Device().Viewport();
+        return Device().GetViewport();
     }
 
     [[nodiscard]] uint32_t FrameIndex() const noexcept override {
-        return Device().FrameIndex();
+        return Device().GetFrameIndex();
     }
 
     [[nodiscard]] Result<void> ApplySettings(const ChainInNode* settingsChain) noexcept override {
         if (settingsChain == nullptr) return ComError::NullArgument;
 
-        GraphicsSettings merged   = Device().Settings();
+        GraphicsSettings merged   = Device().GetSettings();
         bool             modified = false;
         std::optional<ViewportRect> viewport;
 
@@ -700,18 +697,18 @@ class EngineCOM final:
         if (!modified && !viewport)
             return ComError::InvalidArgument;
         if (modified)
-            m_engine->Graphics().ApplySettings(merged);
+            Device().ApplySettings(merged);
         if (viewport)
-            m_engine->Graphics().SetViewport(*viewport);
+            Device().SetViewport(*viewport);
         return {};
     }
 
     [[nodiscard]] Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept override {
-        const GraphicsSettings& current = Device().Settings();
+        const GraphicsSettings& current = Device().GetSettings();
         return DispatchOutChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig, EnvironmentSettings, GraphicsDeviceInfo>(
             settingsChain, [&]<typename NodeT>(NodeT& out) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, GraphicsDeviceInfo>) {
-                    const auto info = Device().Info();
+                    const auto info = Device().GetInfo();
                     out             = {
                         .rendererName         = String64(info.rendererName),
                         .gpuName              = String256(info.gpuName),
@@ -757,15 +754,15 @@ class EngineCOM final:
         desc.data   = std::span<const std::byte>(createInfo->data);
         desc.size   = createInfo->size != 0 ? createInfo->size : createInfo->data.size;
         desc.stride = createInfo->stride;
-        return m_engine->Graphics().CreateBuffer(desc);
+        return Device().CreateBuffer(desc);
     }
 
     void DestroyBuffer(BufferID handle) noexcept override {
-        m_engine->Graphics().DestroyBuffer(handle);
+        Device().DestroyBuffer(handle);
     }
 
     [[nodiscard]] Result<void> UpdateBuffer(BufferID handle, Span<const std::byte> data) noexcept override {
-        const auto outcome = m_engine->Graphics().UpdateBuffer(handle, std::span<const std::byte>(data));
+        const auto outcome = Device().UpdateBuffer(handle, std::span<const std::byte>(data));
         if (!outcome) return outcome.error();
         return {};
     }
@@ -788,17 +785,17 @@ class EngineCOM final:
         const std::string_view           texName(info->name);
         const std::span<const std::byte> bytes(info->pixels);
         if (info->isHDR) {
-            auto hdrRes = m_engine->Graphics().CreateTextureHDR(texName, bytes, info->extent, info->generateMips);
+            auto hdrRes = Device().CreateTextureHDR(texName, bytes, info->extent, info->generateMips);
             if (!hdrRes) return hdrRes.error();
             return *hdrRes;
         }
-        auto texRes = m_engine->Graphics().CreateTexture(texName, bytes, info->extent, info->isSRGB, info->generateMips);
+        auto texRes = Device().CreateTexture(texName, bytes, info->extent, info->isSRGB, info->generateMips);
         if (!texRes) return texRes.error();
         return *texRes;
     }
 
     void UnloadTexture(TextureID handle) noexcept override {
-        m_engine->Graphics().UnloadTexture(handle);
+        Device().UnloadTexture(handle);
     }
 
     [[nodiscard]] Result<void> CreateMaterial(const ChainInNode* descChain, ChainOutNode* outMaterialChain) noexcept override {
@@ -837,7 +834,7 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (sourceCount != 1U || !desc.has_value()) return ComError::InvalidArgument;
 
-        auto matRes = m_engine->Graphics().CreateMaterial(*desc);
+        auto matRes = Device().CreateMaterial(*desc);
         if (!matRes) return matRes.error();
 
         return DispatchOutChain<ZHLN::Material>(outMaterialChain, [&](ZHLN::Material& outMat) -> Result<void> {
@@ -858,14 +855,14 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (!mat.has_value()) return ComError::InvalidArgument;
 
-        m_engine->Graphics().RegisterMaterial(id, *mat);
+        Device().RegisterGPUMaterial(id, *mat);
         return {};
     }
 
     [[nodiscard]] Result<void> GetMaterial(MaterialID id, ChainOutNode* outMaterialChain) const noexcept override {
         if (outMaterialChain == nullptr) return ComError::NullArgument;
 
-        const std::optional<ZHLN::Material> found = Device().Material(id);
+        const std::optional<ZHLN::Material> found = Device().GetGPUMaterial(id);
         if (!found.has_value()) return ComError::AssetNotCached;
         return DispatchOutChain<ZHLN::Material>(outMaterialChain, [&](ZHLN::Material& outMat) -> Result<void> {
             outMat = *found;
@@ -874,7 +871,7 @@ class EngineCOM final:
     }
 
     void UnregisterMaterial(MaterialID id) noexcept override {
-        m_engine->Graphics().UnregisterMaterial(id);
+        Device().UnregisterGPUMaterial(id);
     }
 
     [[nodiscard]] Result<void> CreateMesh(const ChainInNode* buildChain, ChainOutNode* outMeshChain) noexcept override {
@@ -919,7 +916,7 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (geometryNodeCount != 1U) return ComError::InvalidArgument;
 
-        GraphicsDevice gfx = m_engine->Graphics();
+        RenderContext& gfx = Device();
         ZHLN::Mesh     createdMesh {};
 
         if (rawStreams.has_value()) {
@@ -1031,14 +1028,14 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (!mesh.has_value()) return ComError::InvalidArgument;
 
-        m_engine->Graphics().RegisterMesh(id, *mesh);
+        Device().RegisterGPUMesh(id, *mesh);
         return {};
     }
 
     [[nodiscard]] Result<void> GetMesh(AssetID id, ChainOutNode* outMeshChain) const noexcept override {
         if (outMeshChain == nullptr) return ComError::NullArgument;
 
-        const std::optional<ZHLN::Mesh> found = Device().Mesh(id);
+        const std::optional<ZHLN::Mesh> found = Device().GetGPUMesh(id);
         if (!found.has_value()) return ComError::AssetNotCached;
         return DispatchOutChain<ZHLN::Mesh>(outMeshChain, [&](ZHLN::Mesh& outMesh) -> Result<void> {
             outMesh = *found;
@@ -1047,7 +1044,7 @@ class EngineCOM final:
     }
 
     void UnregisterMesh(AssetID id) noexcept override {
-        m_engine->Graphics().UnregisterMesh(id);
+        Device().UnregisterGPUMesh(id);
     }
 
     [[nodiscard]] Result<void> DestroyMesh(const ChainInNode* meshChain) noexcept override {
@@ -1062,7 +1059,7 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (!mesh.has_value()) return ComError::InvalidArgument;
 
-        m_engine->Graphics().DestroyMesh(*mesh);
+        Device().DestroyMesh(*mesh);
         return {};
     }
 
@@ -1078,7 +1075,7 @@ class EngineCOM final:
         if (!chainRes.HasValue()) return chainRes;
         if (!mesh.has_value()) return ComError::InvalidArgument;
 
-        auto blasRes = m_engine->Graphics().BuildMeshBLAS(*mesh);
+        auto blasRes = Device().BuildMeshBLAS(*mesh);
         if (!blasRes) return blasRes.error();
 
         return DispatchOutChain<ZHLN::Mesh>(outMeshChain, [&](ZHLN::Mesh& outMesh) -> Result<void> {
@@ -1089,26 +1086,26 @@ class EngineCOM final:
 
     // -------------------------------------------------------------- IEntities
     [[nodiscard]] Entity CreateEntity() noexcept override {
-        return m_engine->Entities().Create();
+        return m_engine->Registry().Create();
     }
 
     void Despawn(Entity entity) noexcept override {
-        m_engine->Entities().Despawn(entity);
+        DespawnEntity(*m_engine, entity);
     }
 
     [[nodiscard]] bool IsAlive(Entity entity) const noexcept override {
-        return m_engine->GetInternalRegistry().IsAlive(entity);
+        return m_engine->Registry().IsAlive(entity);
     }
 
     [[nodiscard]] void* AttachRaw(Entity entity, StringView typeName, uint32_t size, uint32_t alignment) noexcept override {
-        auto&          registry = m_engine->GetInternalRegistry();
+        auto&          registry = m_engine->Registry();
         const uint32_t family   = FamilyFor(registry, typeName, size, alignment);
         if (family == kInvalidFamily) return nullptr;
         return registry.AddDynamic(entity, family);
     }
 
     bool DetachRaw(Entity entity, StringView typeName) noexcept override {
-        auto&          registry = m_engine->GetInternalRegistry();
+        auto&          registry = m_engine->Registry();
         const uint32_t family   = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return false;
         return registry.RemoveDynamic(entity, family);
@@ -1117,7 +1114,7 @@ class EngineCOM final:
     [[nodiscard]] void* GetRaw(Entity entity, StringView typeName) const noexcept override {
         const uint32_t family = ECS::Registry::GetFamilyIDFromName(std::string_view(typeName));
         if (family == kInvalidFamily) return nullptr;
-        return m_engine->GetInternalRegistry().GetDynamicRaw(entity, family);
+        return m_engine->Registry().GetDynamicRaw(entity, family);
     }
 
     [[nodiscard]] bool IsEngineComponent(StringView typeName) const noexcept override {
@@ -1133,7 +1130,7 @@ class EngineCOM final:
         if (published->size != size || published->alignment != alignment || published->layoutHash != layoutHash) {
             return nullptr;
         }
-        auto& registry = m_engine->GetInternalRegistry();
+        auto& registry = m_engine->Registry();
         if (!registry.IsAlive(entity)) return nullptr;
         return published->ensure(*m_engine, registry, entity);
     }
@@ -1141,7 +1138,7 @@ class EngineCOM final:
     bool DetachEngineRaw(Entity entity, StringView typeName) noexcept override {
         const PublishedComponent* published = FindPublished(*m_engine, typeName);
         if (published == nullptr) return false;
-        auto& registry = m_engine->GetInternalRegistry();
+        auto& registry = m_engine->Registry();
         if (!registry.IsAlive(entity)) return false;
         return published->remove(*m_engine, registry, entity);
     }
@@ -1149,12 +1146,12 @@ class EngineCOM final:
     [[nodiscard]] void* GetEngineRaw(Entity entity, StringView typeName) const noexcept override {
         const PublishedComponent* published = FindPublished(*m_engine, typeName);
         if (published == nullptr) return nullptr;
-        return published->fetch(m_engine->GetInternalRegistry(), entity);
+        return published->fetch(m_engine->Registry(), entity);
     }
 
     [[nodiscard]] uint32_t EntitiesWithRaw(StringView typeName, Entity* outEntities,
                                            uint32_t capacity) const noexcept override {
-        const auto& registry = m_engine->GetInternalRegistry();
+        const auto& registry = m_engine->Registry();
         uint32_t    family   = kInvalidFamily;
         if (const PublishedComponent* published = FindPublished(*m_engine, typeName)) {
             family = published->familyID();
@@ -1181,7 +1178,7 @@ class EngineCOM final:
     // library; what crosses is scalars into the caller's own storage.
     [[nodiscard]] uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies,
                                           uint32_t capacity) const noexcept override {
-        const std::vector<Physics::BodyID> found = Sim().BodiesInSphere(center, radius);
+        const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
         if (bodies != nullptr && capacity > 0) {
             std::copy_n(found.begin(), std::min(total, capacity), bodies);
@@ -1205,6 +1202,10 @@ class EngineCOM final:
         const std::optional<FVec3> found = Sim().BodyLinearVelocity(body);
         if (!found.has_value()) return std::nullopt;
         return *found;
+    }
+
+    [[nodiscard]] float CharacterGroundOffset(Physics::BodyID body) const noexcept override {
+        return Sim().GetCharacterGroundOffset(body);
     }
 
     [[nodiscard]] FVec3 CharacterVelocity(Physics::BodyID body) const noexcept override {
@@ -1239,6 +1240,10 @@ class EngineCOM final:
         Sim().RegisterMaterial(materialID, friction, restitution);
     }
 
+    void SetCharacterPosition(Physics::BodyID body, DVec3 position) noexcept override {
+        Sim().SetCharacterPosition(body, position);
+    }
+
     void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept override {
         Sim().SetCharacterVelocity(body, velocity);
     }
@@ -1249,6 +1254,11 @@ class EngineCOM final:
 
     void DestroyBodies(Span<const Physics::BodyID> bodies) noexcept override {
         Sim().DestroyBodies(std::span<const Physics::BodyID>(bodies));
+    }
+
+    void QueueKinematicPose(uint32_t jointOffset, Span<const Mat4x4> modelJoints) noexcept override {
+        if (modelJoints.data == nullptr || modelJoints.size == 0) return;
+        m_engine->PushKinematicPose(jointOffset, std::span<const Mat4x4> {modelJoints.data, modelJoints.size});
     }
 
     void DestroyRagdolls(Span<const Physics::RagdollID> ragdolls) noexcept override {
@@ -1314,7 +1324,7 @@ class EngineCOM final:
                                     auto geom = ValidateAndBuildMeshGeometry(node.vertices, node.vertexCount,
                                                                              node.indices, node.indexCount);
                                     if (!geom.has_value()) return ComError::InvalidArgument;
-                                    (void)m_engine->Assets().CacheCollisionMesh(node.asset, std::move(*geom));
+                                    (void)Library().CacheCollisionMesh(node.asset, std::move(*geom));
                                     pinnedMesh = Library().FindCollisionMesh(node.asset);
                                 }
                                 if (!pinnedMesh) return ComError::AssetNotCached;
@@ -1371,14 +1381,32 @@ class EngineCOM final:
     }
 
     [[nodiscard]] Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
-        Physics::CharacterCreateDesc desc {};
+        Physics::CharacterCreateDesc           desc {};
+        std::optional<Physics::DualShapeConfig> dual {};
         if (descChain != nullptr) {
-            const Result<void> chainRes = DispatchInChain<Physics::CharacterCreateDesc>(
-                descChain, [&](const Physics::CharacterCreateDesc& inDesc) -> Result<void> {
-                    desc = inDesc;
+            const Result<void> chainRes = DispatchInChain<Physics::CharacterCreateDesc, Physics::DualShapeConfig>(
+                descChain, [&]<typename Node>(const Node& node) -> Result<void> {
+                    if constexpr (std::is_same_v<Node, Physics::CharacterCreateDesc>) desc = node;
+                    else dual = node;
                     return {};
                 });
             if (!chainRes.HasValue()) return chainRes.error;
+        }
+        if (dual.has_value()) {
+            if (dual->lifterRadius <= 0.0F || dual->bumperRadiusXZ <= 0.0F || dual->bumperRadiusY <= 0.0F) {
+                return ComError::InvalidArgument;
+            }
+            const Physics::CharacterParams params {
+                .shape                    = Physics::CreateDualShape(*dual),
+                .maxSlopeAngle            = desc.maxSlopeRadians,
+                .maxStrength              = desc.maxStrength,
+                .characterPadding         = desc.characterPadding,
+                .penetrationRecoverySpeed = desc.penetrationRecoverySpeed,
+                .supportingVolume         = JPH::Plane(JPH::Vec3::sAxisY(), -dual->GetLifterOffsetY()),
+                .category                 = desc.category,
+                .mask                     = desc.mask,
+            };
+            return Sim().CreateCharacter(desc.position, params);
         }
         if (desc.useCustomCapsule && (desc.capsuleRadius <= 0.0F || desc.capsuleHalfHeight <= 0.0F)) {
             return ComError::InvalidArgument;
@@ -1387,12 +1415,12 @@ class EngineCOM final:
     }
 
     [[nodiscard]] Physics::DebugDrawData DebugGeometry(bool shapes, bool constraints, bool wireframe) noexcept override {
-        return Sim().DebugDrawData(shapes, constraints, wireframe);
+        return Sim().GetDebugDrawData(shapes, constraints, wireframe);
     }
 
     // ------------------------------------------------------------ IAudioDevice
     [[nodiscard]] bool Initialized() const noexcept override {
-        return Sound().Initialized();
+        return Sound().IsInitialized();
     }
 
     [[nodiscard]] Result<void> PostEvent(const ChainInNode* eventChain) noexcept override {
@@ -1506,6 +1534,114 @@ class EngineCOM final:
             value = bounds;
             return {};
         });
+    }
+
+    [[nodiscard]] Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept override {
+        if (out == nullptr) return ComError::NullArgument;
+        const ModelPrefab* prefabPtr = Library().BorrowCachedPrefab(hash);
+        if (prefabPtr == nullptr) return ComError::AssetNotCached;
+        const ModelPrefab& prefab = *prefabPtr;
+
+        size_t totalJoints    = 0;
+        size_t totalChannels  = 0;
+        size_t totalKeyTimes  = 0;
+        size_t totalKeyValues = 0;
+        for (const auto& skel : prefab.skeletons) totalJoints += skel.joints.size();
+        for (const auto& anim : prefab.animations) {
+            totalChannels += anim.channels.size();
+            for (const auto& ch : anim.channels) {
+                totalKeyTimes  += ch.keyTimes.size();
+                totalKeyValues += ch.keyValues.size();
+            }
+        }
+
+        return DispatchOutChain<PrefabRigCounts, PrefabRigData>(
+            out, [&]<typename Node>(Node& node) -> Result<void> {
+                if constexpr (std::is_same_v<Node, PrefabRigCounts>) {
+                    node = PrefabRigCounts {
+                        .revision       = prefab.gpuRevision,
+                        .nodeCount      = static_cast<uint32_t>(prefab.nodes.size()),
+                        .partCount      = static_cast<uint32_t>(prefab.parts.size()),
+                        .skeletonCount  = static_cast<uint32_t>(prefab.skeletons.size()),
+                        .jointCount     = static_cast<uint32_t>(totalJoints),
+                        .animationCount = static_cast<uint32_t>(prefab.animations.size()),
+                        .channelCount   = static_cast<uint32_t>(totalChannels),
+                        .keyTimeCount   = static_cast<uint32_t>(totalKeyTimes),
+                        .keyValueCount  = static_cast<uint32_t>(totalKeyValues),
+                    };
+                    return {};
+                } else {
+                    PrefabRigData& data = node;
+                    if (data.nodes.size < prefab.nodes.size() || data.parts.size < prefab.parts.size() ||
+                        data.skeletons.size < prefab.skeletons.size() || data.joints.size < totalJoints ||
+                        data.animations.size < prefab.animations.size() || data.channels.size < totalChannels ||
+                        data.keyTimes.size < totalKeyTimes || data.keyValues.size < totalKeyValues) {
+                        return ComError::InvalidArgument;
+                    }
+                    for (size_t i = 0; i < prefab.nodes.size(); ++i) {
+                        const auto& n      = prefab.nodes[i];
+                        data.nodes.data[i] = PrefabNodeInfo {
+                            .name           = String64(std::string_view(n.name)),
+                            .parentIndex    = n.parentIndex,
+                            .localTransform = PrefabMatrixToNative(n.localTransform),
+                            .hasMesh        = n.hasMesh,
+                        };
+                    }
+                    for (size_t i = 0; i < prefab.parts.size(); ++i) {
+                        const auto& p      = prefab.parts[i];
+                        data.parts.data[i] = PrefabPartBoundsInfo {
+                            .nodeIndex      = p.nodeIndex,
+                            .isSkinned      = p.isSkinned,
+                            .localTransform = PrefabMatrixToNative(p.localTransform),
+                            .localMin       = p.localMin,
+                            .localMax       = p.localMax,
+                        };
+                    }
+                    uint32_t jointCursor = 0;
+                    for (size_t i = 0; i < prefab.skeletons.size(); ++i) {
+                        const auto&    s     = prefab.skeletons[i];
+                        const uint32_t first = jointCursor;
+                        for (const auto& j : s.joints) {
+                            data.joints.data[jointCursor++] = PrefabJointInfo {
+                                .name              = String64(std::string_view(j.name)),
+                                .parentIndex       = j.parentIndex,
+                                .nodeIndex         = j.nodeIndex,
+                                .inverseBindMatrix = j.inverseBindMatrix,
+                            };
+                        }
+                        data.skeletons.data[i] = PrefabSkeletonInfo {
+                            .name   = String64(std::string_view(s.name)),
+                            .joints = {.first = first, .count = static_cast<uint32_t>(s.joints.size())},
+                        };
+                    }
+                    uint32_t chCursor   = 0;
+                    uint32_t timeCursor = 0;
+                    uint32_t valCursor  = 0;
+                    for (size_t i = 0; i < prefab.animations.size(); ++i) {
+                        const auto&    a       = prefab.animations[i];
+                        const uint32_t chFirst = chCursor;
+                        for (const auto& ch : a.channels) {
+                            const uint32_t tFirst = timeCursor;
+                            for (float t : ch.keyTimes) data.keyTimes.data[timeCursor++] = t;
+                            const uint32_t vFirst = valCursor;
+                            for (float v : ch.keyValues) data.keyValues.data[valCursor++] = v;
+                            data.channels.data[chCursor++] = PrefabChannelInfo {
+                                .targetNodeIndex = ch.targetNodeIndex,
+                                .path            = ch.path,
+                                .interpolation   = ch.interpolation,
+                                .keyTimes        = {.first = tFirst, .count = static_cast<uint32_t>(ch.keyTimes.size())},
+                                .keyValues       = {.first = vFirst, .count = static_cast<uint32_t>(ch.keyValues.size())},
+                            };
+                        }
+                        data.animations.data[i] = PrefabAnimationInfo {
+                            .name     = String64(std::string_view(a.name)),
+                            .duration = a.duration,
+                            .channels = {.first = chFirst, .count = static_cast<uint32_t>(a.channels.size())},
+                        };
+                    }
+                    return {};
+                }
+            });
     }
 
     [[nodiscard]] uint32_t PrefabVirtualPath(uint64_t hash, char* buffer, uint32_t capacity) const noexcept override {
@@ -1716,7 +1852,7 @@ class EngineCOM final:
             desc.parts.size > UINT32_MAX || desc.animations.size > UINT32_MAX || desc.lights.size > UINT32_MAX)
             return ComError::InvalidArgument;
         const auto hash = PrefabHash(desc.virtualPath);
-        if (Library().CachedPrefab(hash)) return ComError::InvalidArgument;
+        if (Library().GetCachedPrefab(hash)) return ComError::InvalidArgument;
         const auto index = [](int32_t value, size_t count) { return value == -1 || (value >= 0 && size_t(value) < count); };
         const auto slice = [](AssetSlice value, size_t size) { return value.first <= size && value.count <= size - value.first; };
         for (size_t i = 0; i < desc.nodes.size; ++i) {
@@ -1835,7 +1971,7 @@ class EngineCOM final:
         if (m_nextPrefabGPURevision == 0) return ComError::InvalidArgument;
         prefab->gpuRevision = m_nextPrefabGPURevision++;
         prefab->gpuDeviceGeneration = DeviceGeneration();
-        Library().UseGraphicsDevice(Device());
+        Library().UseRenderContext(Device());
         Library().CachePrefab(hash, std::move(prefab));
         return hash;
     }
@@ -1845,8 +1981,8 @@ class EngineCOM final:
         if (!info.HasValue()) return info.error;
         const auto& desc = info.value;
         if (!Valid(desc.parts)) return ComError::NullArgument;
-        auto library = Library();
-        auto prefab = library.CachedPrefab(desc.hash);
+        AssetManager& library = Library();
+        auto prefab = library.GetCachedPrefab(desc.hash);
         if (!prefab) return ComError::AssetNotCached;
         if (desc.deviceGeneration != DeviceGeneration() || desc.expectedRevision != prefab->gpuRevision ||
             desc.parts.size != prefab->parts.size() || m_nextPrefabGPURevision == 0)
@@ -1882,19 +2018,19 @@ class EngineCOM final:
                 !replacements.emplace(part.meshAsset, &part).second || !replacementMaterialKeys.insert(part.materialAsset).second)
                 return ComError::InvalidArgument;
         }
-        auto gfx = Device();
-        Library().UseGraphicsDevice(gfx);
+        RenderContext& gfx = Device();
+        Library().UseRenderContext(gfx);
         // Every subsequent operation is non-failing. Retire all aliases before
         // buffers (parts may share a primitive), then publish the complete set.
         for (const auto& old: prefab->parts) {
-            gfx.UnregisterMesh(old.meshAsset);
+            gfx.UnregisterGPUMesh(old.meshAsset);
             // The cache owns its default material even before first spawn;
             // an alias may not have been registered yet.
-            gfx.RegisterMaterial(old.materialAsset, old.defaultMaterial);
-            gfx.UnregisterMaterial(old.materialAsset);
+            gfx.RegisterGPUMaterial(old.materialAsset, old.defaultMaterial);
+            gfx.UnregisterGPUMaterial(old.materialAsset);
         }
         for (const auto& old: prefab->parts) gfx.DestroyMesh(old.mesh);
-        auto& registry = m_engine->GetInternalRegistry();
+        auto& registry = m_engine->Registry();
         for (const auto entity: registry.GetEntitiesWith<Components::MeshComponent>()) {
             const auto mesh = registry.Get<Components::MeshComponent>(entity);
             const auto replacement = replacements.find(mesh->meshAsset);
@@ -1916,8 +2052,8 @@ class EngineCOM final:
             const auto& part = desc.parts.data[i]; auto& target = prefab->parts[i];
             target.mesh = part.mesh; target.defaultMaterial = part.material;
             target.morphOffset = part.morphOffset;
-            gfx.RegisterMesh(part.meshAsset, part.mesh);
-            gfx.RegisterMaterial(part.materialAsset, part.material);
+            gfx.RegisterGPUMesh(part.meshAsset, part.mesh);
+            gfx.RegisterGPUMaterial(part.materialAsset, part.material);
         }
         prefab->gpuResourcesReady = true;
         prefab->gpuDeviceGeneration = desc.deviceGeneration;
@@ -2096,27 +2232,27 @@ class EngineCOM final:
     // down is asking about the device, not about who currently owns the keyboard.
     // InputReader answers exactly that way, so the two surfaces agree.
     [[nodiscard]] bool KeyDown(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Reader().KeyDown(key, seat);
+        return Reader().SeatKeyboardMouse(seat).IsKeyDown(key);
     }
 
     [[nodiscard]] bool KeyPressed(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Reader().KeyPressed(key, seat);
+        return Reader().SeatKeyboardMouse(seat).IsKeyPressed(key);
     }
 
     [[nodiscard]] bool KeyReleased(KeyCode key, PlayerSeat seat) const noexcept override {
-        return Reader().KeyReleased(key, seat);
+        return Reader().SeatKeyboardMouse(seat).IsKeyReleased(key);
     }
 
     [[nodiscard]] Axis2DValue MousePosition(PlayerSeat seat) const noexcept override {
-        return Reader().MousePosition(seat);
+        return Axis2DValue {.x = Reader().SeatKeyboardMouse(seat).mouseX, .y = Reader().SeatKeyboardMouse(seat).mouseY};
     }
 
     [[nodiscard]] Axis2DValue MouseDelta(PlayerSeat seat) const noexcept override {
-        return Reader().MouseDelta(seat);
+        return Axis2DValue {.x = Reader().SeatKeyboardMouse(seat).mouseDeltaX, .y = Reader().SeatKeyboardMouse(seat).mouseDeltaY};
     }
 
     [[nodiscard]] float MouseWheel(PlayerSeat seat) const noexcept override {
-        return Reader().MouseWheel(seat);
+        return Reader().SeatKeyboardMouse(seat).mouseWheel;
     }
 
     [[nodiscard]] InputDeviceKind LastActiveDevice(PlayerSeat seat) const noexcept override {
@@ -2128,15 +2264,15 @@ class EngineCOM final:
     }
 
     [[nodiscard]] bool GamepadConnected(GamepadSlot slot) const noexcept override {
-        return Reader().GamepadConnected(slot);
+        return (static_cast<bool>(Reader().Gamepad(slot)) && Reader().Gamepad(slot)->connected);
     }
 
     [[nodiscard]] bool GamepadButtonDown(GamepadSlot slot, GamepadButton button) const noexcept override {
-        return Reader().GamepadButtonDown(slot, button);
+        return (static_cast<bool>(Reader().Gamepad(slot)) && Reader().Gamepad(slot)->IsButtonDown(button));
     }
 
     [[nodiscard]] float GamepadAxisValue(GamepadSlot slot, GamepadAxis axis) const noexcept override {
-        return Reader().GamepadAxisValue(slot, axis);
+        return (static_cast<bool>(Reader().Gamepad(slot)) ? Reader().Gamepad(slot)->Axis(axis) : 0.0f);
     }
 
     [[nodiscard]] PlayerSeat GamepadSeat(GamepadSlot slot) const noexcept override {
@@ -2147,25 +2283,25 @@ class EngineCOM final:
         return Inputs().AssignGamepadToSeat(slot, seat);
     }
 
-    [[nodiscard]] bool MouseButtonDown(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().MouseButtonDown(button, seat); }
-    [[nodiscard]] bool MouseButtonPressed(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().MouseButtonPressed(button, seat); }
-    [[nodiscard]] bool MouseButtonReleased(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().MouseButtonReleased(button, seat); }
-    [[nodiscard]] KeyModifiers Modifiers(PlayerSeat seat) const noexcept override { return Reader().Modifiers(seat); }
-    [[nodiscard]] bool HasModifiers(KeyModifiers required, bool exact, PlayerSeat seat) const noexcept override { return Reader().HasModifiers(required, exact, seat); }
-    [[nodiscard]] bool GamepadButtonPressed(GamepadSlot slot, GamepadButton button) const noexcept override { return Reader().GamepadButtonPressed(slot, button); }
-    [[nodiscard]] bool GamepadButtonReleased(GamepadSlot slot, GamepadButton button) const noexcept override { return Reader().GamepadButtonReleased(slot, button); }
-    [[nodiscard]] StickSample GamepadLeftStick(GamepadSlot slot) const noexcept override { return Reader().GamepadLeftStick(slot); }
-    [[nodiscard]] StickSample GamepadRightStick(GamepadSlot slot) const noexcept override { return Reader().GamepadRightStick(slot); }
-    [[nodiscard]] float GamepadLeftTrigger(GamepadSlot slot) const noexcept override { return Reader().GamepadLeftTrigger(slot); }
-    [[nodiscard]] float GamepadRightTrigger(GamepadSlot slot) const noexcept override { return Reader().GamepadRightTrigger(slot); }
+    [[nodiscard]] bool MouseButtonDown(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().SeatKeyboardMouse(seat).IsMouseButtonDown(button); }
+    [[nodiscard]] bool MouseButtonPressed(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().SeatKeyboardMouse(seat).IsMouseButtonPressed(button); }
+    [[nodiscard]] bool MouseButtonReleased(MouseButton button, PlayerSeat seat) const noexcept override { return Reader().SeatKeyboardMouse(seat).IsMouseButtonReleased(button); }
+    [[nodiscard]] KeyModifiers Modifiers(PlayerSeat seat) const noexcept override { return Reader().SeatKeyboardMouse(seat).Modifiers(); }
+    [[nodiscard]] bool HasModifiers(KeyModifiers required, bool exact, PlayerSeat seat) const noexcept override { return Reader().SeatKeyboardMouse(seat).HasModifiers(required, exact); }
+    [[nodiscard]] bool GamepadButtonPressed(GamepadSlot slot, GamepadButton button) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) && Reader().Gamepad(slot)->IsButtonPressed(button)); }
+    [[nodiscard]] bool GamepadButtonReleased(GamepadSlot slot, GamepadButton button) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) && Reader().Gamepad(slot)->IsButtonReleased(button)); }
+    [[nodiscard]] StickSample GamepadLeftStick(GamepadSlot slot) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) ? Reader().Gamepad(slot)->LeftStick() : StickSample {}); }
+    [[nodiscard]] StickSample GamepadRightStick(GamepadSlot slot) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) ? Reader().Gamepad(slot)->RightStick() : StickSample {}); }
+    [[nodiscard]] float GamepadLeftTrigger(GamepadSlot slot) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) ? Reader().Gamepad(slot)->LeftTrigger() : 0.0f); }
+    [[nodiscard]] float GamepadRightTrigger(GamepadSlot slot) const noexcept override { return (static_cast<bool>(Reader().Gamepad(slot)) ? Reader().Gamepad(slot)->RightTrigger() : 0.0f); }
     bool SetGamepadRumble(GamepadSlot slot, const GamepadRumble& rumble) noexcept override {
-        return m_engine->Haptics().SetGamepadRumble(slot, rumble);
+        return Inputs().SetGamepadRumble(slot, rumble);
     }
     uint32_t RumbleSeat(PlayerSeat seat, const GamepadRumble& rumble) noexcept override {
-        return m_engine->Haptics().RumbleSeat(seat, rumble);
+        return Inputs().RumbleSeat(seat, rumble);
     }
-    void StopRumble(GamepadSlot slot) noexcept override { m_engine->Haptics().StopRumble(slot); }
-    void StopAllRumble() noexcept override { m_engine->Haptics().StopAllRumble(); }
+    void StopRumble(GamepadSlot slot) noexcept override { Inputs().StopRumble(slot); }
+    void StopAllRumble() noexcept override { Inputs().StopAllRumble(); }
     void BeginBindingCapture(PlayerSeat seat, bool captureAxes, KeyCode cancelKey) noexcept override {
         Inputs().BeginBindingCapture(seat, captureAxes, cancelKey);
     }
@@ -2207,7 +2343,7 @@ private:
 
   ~EngineCOM() {
       for (const auto& [window, subscription]: m_dropSubscriptions)
-          m_engine->Host(window).SetFileDropHandler(nullptr, nullptr);
+          Session().SetWindowFileDropHandler(window, nullptr, nullptr);
   }
     [[nodiscard]] bool WindowExists(WindowID window) const noexcept {
         const auto ids = m_engine->WindowIDs();
@@ -2227,32 +2363,32 @@ private:
     // Each is named away from its interface accessor on purpose: Simulation(),
     // Audio(), Assets() and Actions() are already taken by IEngine above, and
     // a member name would hide the engine type of the same spelling.
-    [[nodiscard]] auto Device() const noexcept -> GraphicsDevice {
-        return const_cast<Engine&>(*m_engine).Graphics();
+    [[nodiscard]] auto Session() const noexcept -> KernelSession& {
+        return m_engine->Session();
     }
 
-    [[nodiscard]] auto Sim() const noexcept -> ZHLN::Simulation {
-        return const_cast<Engine&>(*m_engine).Physics();
+    [[nodiscard]] auto Device() const noexcept -> RenderContext& {
+        return m_engine->Render();
     }
 
-    [[nodiscard]] auto Sound() const noexcept -> ZHLN::AudioEngine {
-        return const_cast<Engine&>(*m_engine).Audio();
+    [[nodiscard]] auto Sim() const noexcept -> PhysicsContext& {
+        return m_engine->Physics();
     }
 
-    [[nodiscard]] auto Library() const noexcept -> ZHLN::AssetLibrary {
-        return const_cast<Engine&>(*m_engine).Assets();
+    [[nodiscard]] auto Sound() const noexcept -> AudioContext& {
+        return m_engine->Audio();
     }
 
-    // The two input capabilities, reached the way an application reaches them.
-    // The facades are two pointers wide; this is a load, not an allocation.
-    [[nodiscard]] auto Reader() const noexcept -> ZHLN::InputReader {
+    [[nodiscard]] auto Library() const noexcept -> AssetManager& {
+        return m_engine->Assets();
+    }
+
+    [[nodiscard]] auto Reader() const noexcept -> const InputContext& {
         return std::as_const(*m_engine).Input();
     }
 
-    // Named Inputs() rather than Actions(): IEngine::Actions() is the COM
-    // accessor, and a member of the same name would hide it inside this class.
-    [[nodiscard]] auto Inputs() const noexcept -> ZHLN::InputActions {
-        return const_cast<Engine&>(*m_engine).Input();
+    [[nodiscard]] auto Inputs() const noexcept -> InputContext& {
+        return m_engine->Input();
     }
 
     struct DeviceLostEntry {
@@ -2271,7 +2407,7 @@ private:
 
 // --- Factory ----------------------------------------------------------------
 
-auto CreateConfiguredEngine(const ChainInNode* configChain, NativeEngineInitializer initialize) noexcept -> Result<IEngine*> {
+auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     EngineConfig config {};
     uint32_t     maxFramesPerSecond = 0;
 
@@ -2308,18 +2444,17 @@ auto CreateConfiguredEngine(const ChainInNode* configChain, NativeEngineInitiali
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
-    (*created)->EmplaceService<EngineConfig>((*created)->State().Configuration());
-
-    if (initialize)
-        initialize(**created);
+    (*created)->EmplaceService<EngineConfig>((*created)->Configuration());
 
     auto* instance = new (std::nothrow) EngineCOM(std::move(*created));
     if (instance == nullptr) return ErrorCode(ComError::AllocationFailed);
     return static_cast<IEngine*>(instance);
 }
 
-auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
-    return CreateConfiguredEngine(configChain, nullptr);
+
+auto RenderGraphDump(AAMode mode) noexcept -> StringView {
+    const std::string_view dump = ZHLN::GetRenderGraphDump(mode);
+    return StringView(dump.data(), dump.size());
 }
 
 } // namespace ZHLN::COM

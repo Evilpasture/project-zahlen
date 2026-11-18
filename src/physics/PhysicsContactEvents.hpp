@@ -5,7 +5,7 @@
 
 #include "PhysicsWorld.hpp"
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <atomic>
 #include <cmath>

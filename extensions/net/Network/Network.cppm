@@ -39,7 +39,8 @@ module;
 // be looking at the same header text. Narrow this include only once that crash
 // is understood: it is not a free weight saving.
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -595,11 +596,11 @@ class ClientReplicator {
   public:
     HashMap<uint64_t, Entity> uidToEntityMap;
 
-    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
-    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+    auto ApplyInitialObjects(COM::IEntities& entities, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+    auto ApplyPhysicsBatch(COM::IEntities& entities, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
 
   private:
-    auto GetOrCreateEntity(Entities& entities, uint64_t uid) -> Entity;
+    auto GetOrCreateEntity(COM::IEntities& entities, uint64_t uid) -> Entity;
 };
 
 } // namespace ZHLN::Net
@@ -619,7 +620,8 @@ class ZHLN_STATIC_API NetworkClient {
     [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept -> std::expected<void, ErrorCode>;
     void               Disconnect() noexcept;
 
-    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PollEvents(COM::IEntities& entities) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PollEvents(COM::IEngine& engine) noexcept -> std::expected<void, ErrorCode>;
     void               SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept;
 
     [[nodiscard]] bool IsConnected() const noexcept;
@@ -630,6 +632,12 @@ class ZHLN_STATIC_API NetworkClient {
     std::unique_ptr<Impl> _impl;
 };
 
-void RegisterNetworkSubsystem(Engine& engine);
+ZHLN_STATIC_API void Step(COM::IEntities& entities, float dt) noexcept;
+ZHLN_STATIC_API void Step(COM::IEngine& engine, float dt) noexcept;
+
+struct Layer {
+    void Tick(COM::IEngine& engine, float dt) noexcept { Step(engine, dt); }
+    void Stop(COM::IEngine&) noexcept {}
+};
 
 } // namespace ZHLN::Net

@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SpatialGrid.hpp"
-#include <Zahlen/Math/Vec3.hpp>
 #include "ALifeComponents.hpp"
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <algorithm>
 #include <cmath>
-#include <utility>
 
 namespace ZHLN::ALife {
 
@@ -20,41 +18,23 @@ void SpatialGrid::Clear() noexcept {
 }
 
 auto SpatialGrid::GetCellIndex(DVec3 pos) const noexcept -> int32_t {
-    if (pos.x < 0.0 || pos.z < 0.0) {
-        return -1;
-    }
-
+    if (pos.x < 0.0 || pos.z < 0.0) return -1;
     const auto cell_size = static_cast<double>(_cellSize);
-    auto       gx        = static_cast<int32_t>(pos.x / cell_size);
-    auto       gz        = static_cast<int32_t>(pos.z / cell_size);
-
-    if (gx >= static_cast<int32_t>(_width) || gz >= static_cast<int32_t>(_height)) {
-        return -1;
-    }
+    const auto gx        = static_cast<int32_t>(pos.x / cell_size);
+    const auto gz        = static_cast<int32_t>(pos.z / cell_size);
+    if (gx >= static_cast<int32_t>(_width) || gz >= static_cast<int32_t>(_height)) return -1;
     return (gz * static_cast<int32_t>(_width)) + gx;
 }
 
-template <typename View>
-void SpatialGrid::UpdateEntityImpl(View& view, Entity handle, DVec3 old_pos) {
-    auto comp = view.template Get<ALifeComponent>(handle);
-    if (!comp) {
-        return;
-    }
-
-    // Cache the entity handle inside the component if not already done
-    if (comp->self_entity == Entity::Null()) {
-        comp->self_entity = handle;
-    }
+void SpatialGrid::UpdateEntity(COM::IEntities& entities, Entity handle, DVec3 old_pos) {
+    auto* comp = entities.Get<ALifeComponent>(handle);
+    if (comp == nullptr) return;
+    if (comp->self_entity == Entity::Null()) comp->self_entity = handle;
 
     const int32_t old_idx = GetCellIndex(old_pos);
     const int32_t new_idx = GetCellIndex(comp->position);
+    if (old_idx == new_idx) return;
 
-    if (old_idx == new_idx) {
-        return;
-    }
-
-    // Unlink using the full generational handle. Index-only lookups used to
-    // fabricate generation 0, which SparseSet::Get correctly rejects.
     if (old_idx != -1) {
         Entity* curr = &_cellHeads[old_idx];
         while (*curr != Entity::Null()) {
@@ -62,10 +42,8 @@ void SpatialGrid::UpdateEntityImpl(View& view, Entity handle, DVec3 old_pos) {
                 *curr = comp->next_in_grid;
                 break;
             }
-            auto curr_comp = view.template Get<ALifeComponent>(*curr);
-            if (!curr_comp) {
-                break;
-            }
+            auto* curr_comp = entities.Get<ALifeComponent>(*curr);
+            if (curr_comp == nullptr) break;
             curr = &curr_comp->next_in_grid;
         }
     }
@@ -77,79 +55,51 @@ void SpatialGrid::UpdateEntityImpl(View& view, Entity handle, DVec3 old_pos) {
     }
 }
 
-template <typename View>
-void SpatialGrid::RemoveEntityImpl(View& view, Entity handle) {
-    auto comp = view.template Get<ALifeComponent>(handle);
-    if (!comp) {
-        return;
-    }
+void SpatialGrid::RemoveEntity(COM::IEntities& entities, Entity handle) {
+    auto* comp = entities.Get<ALifeComponent>(handle);
+    if (comp == nullptr) return;
 
     const int32_t idx = GetCellIndex(comp->position);
     if (idx != -1) {
         Entity* curr = &_cellHeads[idx];
         while (*curr != Entity::Null()) {
             if (*curr == handle) {
-                *curr = comp->next_in_grid;
+                *curr              = comp->next_in_grid;
                 comp->next_in_grid = Entity::Null();
                 break;
             }
-            auto curr_comp = view.template Get<ALifeComponent>(*curr);
-            if (!curr_comp) {
-                break;
-            }
+            auto* curr_comp = entities.Get<ALifeComponent>(*curr);
+            if (curr_comp == nullptr) break;
             curr = &curr_comp->next_in_grid;
         }
     }
 }
 
-template <typename View>
-auto SpatialGrid::QueryImpl(const View& view, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
+auto SpatialGrid::Query(const COM::IEntities& entities, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
     reusable.clear();
-
     const auto cell_size = static_cast<double>(_cellSize);
     const auto rad       = static_cast<double>(radius);
-
-    auto min_x = static_cast<int32_t>(std::floor((pos.x - rad) / cell_size));
-    auto max_x = static_cast<int32_t>(std::floor((pos.x + rad) / cell_size));
-    auto min_z = static_cast<int32_t>(std::floor((pos.z - rad) / cell_size));
-    auto max_z = static_cast<int32_t>(std::floor((pos.z + rad) / cell_size));
-
-    const float radius_sq = radius * radius;
+    const auto min_x     = static_cast<int32_t>(std::floor((pos.x - rad) / cell_size));
+    const auto max_x     = static_cast<int32_t>(std::floor((pos.x + rad) / cell_size));
+    const auto min_z     = static_cast<int32_t>(std::floor((pos.z - rad) / cell_size));
+    const auto max_z     = static_cast<int32_t>(std::floor((pos.z + rad) / cell_size));
+    const double radius_sq = rad * rad;
 
     for (int32_t z = min_z; z <= max_z; ++z) {
         for (int32_t x = min_x; x <= max_x; ++x) {
-            // Grid boundary clipping
-            if (x < 0 || x >= static_cast<int32_t>(_width) || z < 0 || z >= static_cast<int32_t>(_height)) {
-                continue;
-            }
-
+            if (x < 0 || x >= static_cast<int32_t>(_width) || z < 0 || z >= static_cast<int32_t>(_height)) continue;
             Entity current = _cellHeads[(z * static_cast<int32_t>(_width)) + x];
             while (current != Entity::Null()) {
-                const auto comp = view.template Get<ALifeComponent>(current);
-                if (!comp) {
-                    break; // A destroyed component cannot supply the next link.
-                }
-
-                const float dist_sq = (comp->position - pos).LengthSquared();
-                if (dist_sq <= radius_sq) {
+                const auto* comp = entities.Get<ALifeComponent>(current);
+                if (comp == nullptr) break;
+                if ((comp->position - pos).LengthSquared() <= radius_sq) {
                     reusable.push_back(current);
                 }
-
                 current = comp->next_in_grid;
             }
         }
     }
     return reusable;
-}
-
-void SpatialGrid::UpdateEntity(WriteQuery query, Entity handle, DVec3 old_pos) {
-    UpdateEntityImpl(query, handle, old_pos);
-}
-void SpatialGrid::RemoveEntity(WriteQuery query, Entity handle) {
-    RemoveEntityImpl(query, handle);
-}
-auto SpatialGrid::Query(ReadQuery query, DVec3 pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
-    return QueryImpl(query, pos, radius, std::move(reusable));
 }
 
 } // namespace ZHLN::ALife

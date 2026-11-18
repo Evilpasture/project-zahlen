@@ -5,8 +5,8 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <render/Render.hpp>
+#include <ecs/ECS.hpp>
 
 namespace ZHLN {
 

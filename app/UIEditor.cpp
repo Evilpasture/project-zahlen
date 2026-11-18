@@ -35,7 +35,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Widget/TextFit.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
 #include <Zahlen/GUI/GUI.hpp>
 #include <UI/UITree.hpp>
 #if defined(ZHLN_HAS_FONTS)
@@ -161,7 +160,7 @@ enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 
 struct Session {
     GUI::UINode                   tree;
-    ZHLN::ECS::EventBus           events;
+    GUI::ActionQueue              events;
     GUI::ActionRegistry           actions;
     GUI::PropertyStore            properties;
     std::string                   selectedId;
@@ -208,7 +207,7 @@ struct Session {
 };
 
 void BindHostActions(Session& session) {
-    session.actions.SetEventBus(session.events);
+    session.actions.SetQueue(session.events);
     session.actions.Bind("editor.save_scene", GUI::UiActionEvent {.id = "editor.save_scene"});
     session.properties.SetFloat("camera.speed", 4.5f);
     session.properties.SetBool("post.enableSSR", false);

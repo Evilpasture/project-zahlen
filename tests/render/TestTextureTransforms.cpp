@@ -9,20 +9,18 @@
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Defer.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Render/Vertex.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -45,13 +43,6 @@ namespace {
 
 // CTAD gives std::span<T, 4> for std::array<T, 4>; all typed buffer helpers
 // must accept it (including a const element type), not only dynamic spans.
-static_assert(requires(ZHLN::RenderContext& rc, ZHLN::BufferID handle,
-                       std::array<ZHLN::VertexPosition, 4>& vertices,
-                       const std::array<ZHLN::VertexPosition, 4>& immutable) {
-    rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {vertices});
-    rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {immutable});
-    rc.UpdateBuffer(handle, std::span {vertices});
-});
 
 constexpr std::array<float, 3> kPanelX {-1.2f, 0.0f, 1.2f};
 constexpr float                kCameraDistance = 4.0f;
@@ -101,7 +92,7 @@ constexpr std::array kSampleUV {
     return rgba;
 }
 
-[[nodiscard]] auto MakePanel(ZHLN::GraphicsDevice rc, uint32_t column) -> ZHLN::Mesh {
+[[nodiscard]] auto MakePanel(ZHLN::COM::IGraphicsDevice& rc, uint32_t column) -> ZHLN::Mesh {
     std::array<ZHLN::VertexPosition, 4> positions {{
         {{-0.45f, 0.45f, 0.0f}}, {{-0.45f, -0.45f, 0.0f}},
         {{0.45f, -0.45f, 0.0f}}, {{0.45f, 0.45f, 0.0f}}
@@ -118,14 +109,13 @@ constexpr std::array kSampleUV {
                        .uv1 = ZHLN::Math::PackUV(uv1[0], uv1[1])};
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
-    return {
-        .posBuffer          = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
-        .tangentFrameBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
-        .surfaceBuffer      = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
-        .indexBuffer        = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span<const uint32_t> {indices}),
-        .vertexCount        = 4,
-        .indexCount         = 6,
-    };
+    const auto built = rc.UploadMesh(ZHLN::COM::MeshStreamsDesc {
+        .positions     = ZHLN::COM::Span<const ZHLN::VertexPosition>(positions.data(), positions.size()),
+        .tangentFrames = ZHLN::COM::Span<const ZHLN::VertexTangentFrame>(frames.data(), frames.size()),
+        .surfaces      = ZHLN::COM::Span<const ZHLN::VertexSurface>(surfaces.data(), surfaces.size()),
+        .indices32     = ZHLN::COM::Span<const uint32_t>(indices.data(), indices.size()),
+    });
+    return built ? *built : ZHLN::Mesh {};
 }
 
 [[nodiscard]] auto PixelAt(const ZHLN::Test::Image::RgbImage& image, float x, float y) -> std::array<int, 3> {
@@ -151,11 +141,11 @@ struct TextureTransformsTestSuite {
         std::expected<void, ZHLN::ErrorCode> rotated_uv0_and_uv1_match_the_sample_atlas() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos UV transforms", 480, 320);
             if (!engine.Valid()) return std::unexpected(TextureTransformError::EngineInitFailed);
-            auto rc = engine->Graphics();
-            auto reg = engine->Entities();
+            auto& rc = *engine->Graphics();
+            auto& reg = *engine->Entities();
             ZHLN::Test::Headless::DisableAA(*engine);
 
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright = 1;
                 gfx.post.vignetteIntensity = 0.0f;
                 gfx.post.glowIntensity     = 0.0f;
@@ -200,17 +190,17 @@ struct TextureTransformsTestSuite {
                 const auto material = rc.CreateMaterial(desc);
                 if (!material) return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 const auto materialID = ZHLN::HashAssetID(materialKeys[column]);
-                rc.RegisterMaterial(materialID, *material);
+                (void)rc.RegisterMaterial(materialID, *material);
                 registeredMaterials[registeredCount++] = materialID;
 
                 ZHLN::Mesh mesh = MakePanel(rc, column);
                 if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferID::Invalid ||
                     mesh.surfaceBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
-                    rc.DestroyMesh(mesh);
+                    (void)rc.DestroyMesh(mesh);
                     return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
-                rc.RegisterMesh(meshID, mesh);
+                (void)rc.RegisterMesh(meshID, mesh);
                 const ZHLN::FVec3 offset{kPanelX[column], 0.0f, 0.0f};
                 const auto world = ZHLN::CreateTranslation(offset);
                 const ZHLN::Entity e = reg.Spawn(
@@ -218,7 +208,7 @@ struct TextureTransformsTestSuite {
                     ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
                     ZHLN::Components::MeshComponent {.meshAsset = meshID, .materialAsset = materialID, .cullRadius = 1.0f}
                 );
-                engine->Entities().Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
+                (void)engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
             }
 
             ZHLN::Test::Headless::TickFrames(*engine, 5);

@@ -51,7 +51,7 @@ function(zahlen_apply_syntax_only)
             get_target_property(_src_dir ${_tgt} SOURCE_DIR)
 
             # Build-time shader reflection tool must compile and link for real.
-            if(_tgt STREQUAL "zshader" OR _src_dir STREQUAL _zshader_dir)
+            if(_tgt STREQUAL "zshader" OR _tgt STREQUAL "zahlen_image" OR _src_dir STREQUAL _zshader_dir)
                 continue()
             endif()
 

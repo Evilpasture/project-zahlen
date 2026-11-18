@@ -36,7 +36,7 @@
 #include <utility>
 #include <vector>
 
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 
 // Performance baselines live in tests/extras/profile/PerfBaseline.hpp, because
 // storing them is a JSON document and JSON is an extra. This header stays

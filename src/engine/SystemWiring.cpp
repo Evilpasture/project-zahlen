@@ -15,24 +15,23 @@
 #include "RenderSystem.hpp"
 #include "TransformSystem.hpp"
 #include "system/CharacterMotorSystem.hpp"
-#include <Zahlen/Audio/Audio.hpp>
+#include <audio/Audio.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <ecs/SystemGraph.hpp>
+#include <physics/Physics.hpp>
+#include <render/SceneData.hpp>
+#include <engine/Engine.hpp>
+#include <engine/Frame.hpp>
+#include <engine/FramePlan.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <render/Render.hpp>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 #include <string_view>
 
 namespace ZHLN {
@@ -90,7 +89,7 @@ void LOD(Engine&, float, FrameContext&) {
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext& ctx) {
-    engine.Debug().Clear();
+    engine.Scene().Clear();
     engine.ResetWorkerScratch();
     const Frame frame = engine.MakeFrame(dt, ctx.alpha);
     engine.GetRenderGraph().Execute(frame);

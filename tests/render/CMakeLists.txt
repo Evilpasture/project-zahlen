@@ -1,4 +1,3 @@
-link_libraries(zahlen_native_host_ui)
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -34,12 +33,14 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     # binary an include root for src/ -- exactly the one that
     # configure/check_tests_public_api.py and the include list below keep out.
     target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_engine zahlen_image
+        zahlen_engine zahlen_image zahlen_screenshot zahlen_host_ui
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/app/include
+        ${PROJECT_SOURCE_DIR}/extensions
         ${PROJECT_SOURCE_DIR}/tests
 
     )
@@ -114,7 +115,7 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
 # TestDecal pins its framing through the extension camera rig
 # (extensions/Camera); the component and the rig's frame step live in that
 # domain, so the group links it and publishes the extras include root.
-target_link_libraries(GPU_Lighting PRIVATE zahlen_native_camera zahlen_asset_cooking)
+target_link_libraries(GPU_Lighting PRIVATE zahlen_camera zahlen_asset_cooking)
 target_include_directories(GPU_Lighting PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # Pipeline, resource and culling mechanics, plus PBR robustness at distance.
@@ -132,7 +133,6 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestCameraLookAt.cpp
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
-    TestGLTFImport.cpp
     TestGLTFSampleAssets.cpp
     TestNegativeScale.cpp
     TestTextureTransforms.cpp
@@ -146,7 +146,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # one back. Both call ZHLN::GLTF::* in plugins/glTF directly -- core's loader is
 # only a lookup in the prefab cache the importer fills -- so this group links
 # zahlen_gltf. That one link also supplies the cgltf symbols for the reference
-# parse, and its header path below (zahlen_gltf compiles the one
+# parse, and its header path below (zahlen_gltf_assets compiles the one
 # plugins/glTF/cgltf_impl.c in the tree).
 #
 # zahlen_serialization is linked alongside it rather than inherited:
@@ -160,9 +160,8 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_native_camera zahlen_skeletal_animation)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf_assets zahlen_serialization zahlen_camera zahlen_animation)
 target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
-target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 # Sample-asset conformance without committed binaries: an optional shallow
@@ -198,42 +197,6 @@ endif()
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_SAMPLE_ASSETS_DIR="${_zhln_sample_assets_default}")
 unset(_zhln_sample_assets_default)
 
-# App/Engine::Run own their TaskSystem::Scope. Do not wrap this standalone
-# frontend test in the Headless::SessionScope used by the other GPU groups.
-zahlen_add_gpu_test_group(GPU_Application 120
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
-    TestApplication.cpp
-)
-target_link_libraries(GPU_Application PRIVATE zahlen_application)
-if(TARGET zahlen_native_scene)
-    target_link_libraries(GPU_Application PRIVATE zahlen_native_scene)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_SCENE=1)
-endif()
-if(TARGET zahlen_native_editor)
-    target_link_libraries(GPU_Application PRIVATE zahlen_native_editor)
-    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_EDITOR=1)
-endif()
-if(TARGET zahlen_skeletal_animation)
-    target_link_libraries(GPU_Application PRIVATE zahlen_skeletal_animation)
-    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_ANIMATION=1)
-endif()
-if(TARGET zahlen_native_terrain)
-    target_link_libraries(GPU_Application PRIVATE zahlen_native_terrain)
-    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_TERRAIN=1)
-endif()
-if(TARGET zahlen_native_character_controller)
-    target_link_libraries(GPU_Application PRIVATE zahlen_native_character_controller)
-    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
-endif()
-if(TARGET zahlen_native_camera AND TARGET zahlen_native_freecam)
-    target_link_libraries(GPU_Application PRIVATE zahlen_native_camera zahlen_native_freecam)
-    target_include_directories(GPU_Application PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(GPU_Application PRIVATE ZHLN_HAS_CAMERA_MODULES=1)
-endif()
 
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
@@ -253,11 +216,7 @@ zahlen_add_gpu_test_group(GPU_Performance 900
 # baselines, and those live in tests/extras/profile/PerfBaseline.hpp on top of
 # plugins/json -- so this group links zahlen_serialization, the one extras
 # domain it touches.
-# TestRenderPerformance.cpp calls JPH::RegisterDefaultAllocator() from its own
-# object, so Jolt belongs on this link line for the same reason ztest_cpu
-# names it: the suite references JPH symbols directly rather than through
-# zahlen_engine.
-target_link_libraries(GPU_Performance PRIVATE Jolt zahlen_serialization)
+target_link_libraries(GPU_Performance PRIVATE zahlen_serialization)
 target_include_directories(GPU_Performance PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # --- Extras VFX & Render Tests ---

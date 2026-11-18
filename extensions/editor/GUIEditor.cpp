@@ -17,11 +17,13 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <cstdint>
 #include <editor/GUIEditor.hpp>
 #include <span>
@@ -291,59 +293,62 @@ auto CameraForward(const Camera& camera) noexcept -> FVec3 {
 
 // Unprojects the mouse exactly like the host's picking ray: same NDC
 // convention, same inverse view-projection.
-auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, FVec3& origin, FVec3& dir) noexcept -> bool {
+struct EditorRay {
+    FVec3 origin {};
+    FVec3 dir {};
+};
+
+[[nodiscard]] auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp) noexcept -> std::optional<EditorRay> {
     const float w = static_cast<float>(vp.width);
     const float h = static_cast<float>(vp.height);
     if (w <= 0.0f || h <= 0.0f) {
-        return false;
+        return std::nullopt;
     }
-    // Vulkan Y-down clip space with the viewport's row 0 at the top: the top
-    // pixel of the scene rectangle is NDC y == -1. The scene is rasterized by
-    // a fixed-function viewport into [vp.x, vp.y, vp.width, vp.height], so the
-    // window-space mouse must be made rectangle-relative first -- exactly the
-    // transform the viewport does in reverse.
-    const float ndcX   = (2.0f * (mx - static_cast<float>(vp.x))) / w - 1.0f;
-    const float ndcY   = (2.0f * (my - static_cast<float>(vp.y))) / h - 1.0f;
-    const float aspect = w / h;
 
-    const auto invVP = Inverse(camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix());
-    const FVec4  nearW = invVP * FVec4{ndcX, ndcY, 0.0f, 1.0f};
-    const FVec4  farW  = invVP * FVec4{ndcX, ndcY, 1.0f, 1.0f};
-    if (nearW.w <= 0.0f || farW.w <= 0.0f) {
-        return false;
+    const float ndcX = ((mx - static_cast<float>(vp.x)) / w) * 2.0f - 1.0f;
+    const float ndcY = ((my - static_cast<float>(vp.y)) / h) * 2.0f - 1.0f;
+
+    const Mat4x4 invVP = (camera.GetProjectionMatrix(w / h) * camera.GetViewMatrix()).Inversed();
+    // Reverse-Z: near is z = 1, far is z = 0.
+    const FVec4 nearH = invVP * FVec4 {ndcX, ndcY, 1.0f, 1.0f};
+    const FVec4 farH  = invVP * FVec4 {ndcX, ndcY, 0.0f, 1.0f};
+    if (std::fabs(nearH.w) < 1e-6f || std::fabs(farH.w) < 1e-6f) {
+        return std::nullopt;
     }
-    origin = {nearW.x / nearW.w, nearW.y / nearW.w, nearW.z / nearW.w};
-    const FVec3 farP = {farW.x / farW.w, farW.y / farW.w, farW.z / farW.w};
-    dir                  = (farP - origin).Normalized();
-    return true;
+    const FVec3 nearP  = FVec3 {nearH.x, nearH.y, nearH.z} / nearH.w;
+    const FVec3 farP   = FVec3 {farH.x, farH.y, farH.z} / farH.w;
+    const FVec3 d      = farP - nearP;
+    const float lenSq  = d.LengthSquared();
+    if (lenSq < 1e-12f) {
+        return std::nullopt;
+    }
+    return EditorRay {.origin = nearP, .dir = d / std::sqrt(lenSq)};
 }
 
-auto RayPlane(const FVec3& origin, const FVec3& dir, const FVec3& normal, const FVec3& planePoint, FVec3& hit) noexcept -> bool {
+[[nodiscard]] auto RayPlane(const FVec3& origin, const FVec3& dir, const FVec3& normal, const FVec3& planePoint) noexcept -> std::optional<FVec3> {
     const float d = Dot(dir, normal);
     if (std::fabs(d) < 1e-6f) {
-        return false;
+        return std::nullopt;
     }
     const float t = Dot(planePoint - origin, normal) / d;
-    hit           = origin + dir * t;
-    return true;
+    return origin + dir * t;
 }
 
-auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& world, float& sx, float& sy) noexcept -> bool {
+[[nodiscard]] auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& world) noexcept -> std::optional<FVec2> {
     const float w = static_cast<float>(r.width);
     const float h = static_cast<float>(r.height);
     if (w <= 0.0f || h <= 0.0f) {
-        return false;
+        return std::nullopt;
     }
-    const float      aspect = w / h;
-    const auto vp = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
-    const FVec4  clip   = vp * FVec4{world.x, world.y, world.z, 1.0f};
-    if (clip.w <= 0.0f) {
-        return false;
+    const FVec4 clip = (camera.GetProjectionMatrix(w / h) * camera.GetViewMatrix()) * FVec4 {world.x, world.y, world.z, 1.0f};
+    if (clip.w <= 1e-6f) {
+        return std::nullopt;
     }
     // NDC -> window pixels inside the scene rectangle (see MouseRay).
-    sx = (clip.x / clip.w + 1.0f) * 0.5f * w + static_cast<float>(r.x);
-    sy = (clip.y / clip.w + 1.0f) * 0.5f * h + static_cast<float>(r.y);
-    return true;
+    return FVec2 {
+        (clip.x / clip.w + 1.0f) * 0.5f * w + static_cast<float>(r.x),
+        (clip.y / clip.w + 1.0f) * 0.5f * h + static_cast<float>(r.y),
+    };
 }
 
 auto AxisVector(EditorState::TransformAxis axis) noexcept -> FVec3 {
@@ -411,17 +416,12 @@ void UpdateTransformMode(
                 state.transformStartScale    = t->scale;
 
                 state.transformPlaneNormal = CameraForward(camera);
-                FVec3 origin {}, dir {};
-                if (!MouseRay(camera, mx, my, viewport, origin, dir) ||
-                    !RayPlane(origin, dir, state.transformPlaneNormal, t->position, state.transformAnchor)) {
-                    state.transformAnchor = t->position;
-                }
+                const auto ray    = MouseRay(camera, mx, my, viewport);
+                const auto anchor = ray ? RayPlane(ray->origin, ray->dir, state.transformPlaneNormal, t->position) : std::nullopt;
+                state.transformAnchor = anchor.value_or(t->position);
 
-                float ox = 0.0f, oy = 0.0f;
-                if (!WorldToScreen(camera, viewport, t->position, ox, oy)) {
-                    ox = mx;
-                    oy = my;
-                }
+                const auto screen = WorldToScreen(camera, viewport, t->position).value_or(FVec2 {mx, my});
+                const float ox = screen.x, oy = screen.y;
                 state.transformStartAngle = std::atan2(my - oy, mx - ox);
                 state.transformStartDist  = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
             }
@@ -452,10 +452,9 @@ void UpdateTransformMode(
 
             switch (state.transformMode) {
                 case EditorState::TransformMode::Move: {
-                    FVec3 origin {}, dir {}, hit {};
-                    if (MouseRay(camera, mx, my, viewport, origin, dir) &&
-                        RayPlane(origin, dir, state.transformPlaneNormal, state.transformStartPosition, hit)) {
-                        FVec3 delta = hit - state.transformAnchor;
+                    const auto ray = MouseRay(camera, mx, my, viewport);
+                    if (const auto hit = ray ? RayPlane(ray->origin, ray->dir, state.transformPlaneNormal, state.transformStartPosition) : std::nullopt) {
+                        FVec3 delta = *hit - state.transformAnchor;
                         if (state.transformAxis != EditorState::TransformAxis::None) {
                             const FVec3 axis = AxisVector(state.transformAxis);
                             delta                = axis * Dot(delta, axis);
@@ -466,8 +465,8 @@ void UpdateTransformMode(
                     break;
                 }
                 case EditorState::TransformMode::Rotate: {
-                    float ox = 0.0f, oy = 0.0f;
-                    if (WorldToScreen(camera, viewport, state.transformStartPosition, ox, oy)) {
+                    if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
+                        const float ox = screen->x, oy = screen->y;
                         // Screen pixels are y-down; the viewer thinks y-up, so
                         // the seen angle negates the pixel dy. Dragging counter-
                         // clockwise as seen must turn counter-clockwise: the
@@ -486,8 +485,8 @@ void UpdateTransformMode(
                     break;
                 }
                 case EditorState::TransformMode::Scale: {
-                    float ox = 0.0f, oy = 0.0f;
-                    if (WorldToScreen(camera, viewport, state.transformStartPosition, ox, oy)) {
+                    if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
+                        const float ox = screen->x, oy = screen->y;
                         // Screen-space distance ratio, like Blender's uniform
                         // scale: pull away from the object and it grows.
                         const float     dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);

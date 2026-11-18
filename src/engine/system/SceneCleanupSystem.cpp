@@ -4,13 +4,12 @@
 #include "SceneCleanupSystem.hpp"
 #include "../Hierarchy.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <ecs/SystemParameters.hpp>
+#include <engine/Engine.hpp>
+#include <engine/SceneResources.hpp>
+#include <physics/Physics.hpp>
 #include <span>
 #include <utility>
 #include <vector>
@@ -35,7 +34,7 @@ void ReleaseSelected(Engine& engine, ECS::Query<T&, const Components::PendingDes
 using PhysicsCleanupQuery = ECS::Query<Components::PhysicsComponent&, Components::RagdollComponent&, const Components::PendingDestroy>;
 
 void ReleasePhysics(Engine& engine, PhysicsCleanupQuery query, bool all) {
-    auto physics = engine.Physics();
+    auto& physics = engine.Physics();
 
     // Queue all body releases under one physics shadow lock while components
     // remain readable; ragdoll instances are released in a second bulk call.

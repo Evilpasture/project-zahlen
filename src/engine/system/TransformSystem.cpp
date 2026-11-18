@@ -6,8 +6,8 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
 #include <algorithm>
 #include <bit>
 #include <cstddef>

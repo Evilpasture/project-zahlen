@@ -2,84 +2,228 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 module;
-// clang-format off
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
+
+#include <Animation/Components.hpp>
+#include <Animation/PrefabRig.hpp>
 #include <Camera/TargetCamera.hpp>
-#include <CharacterController/CharacterComponents.hpp>
-#include <FreeCam/NativeFreeCam.hpp>
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
+#include <CharacterController/CharacterController.hpp>
+#include <FreeCam/FreeCam.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Physics/PhysicsValues.hpp>
 #include <algorithm>
 #include <cmath>
-#include <numbers>
+#include <vector>
 
 module ZHLN.Locomotion;
 
 namespace ZHLN::Locomotion {
-auto SpawnCharacter(Engine& engine, const FVec3& spawnPosition, const Physics::DualShapeConfig& config, float speed, float jumpForce) -> Entity {
-    auto entities = engine.Entities();
-    auto pc = engine.Physics();
 
-    // Create physics first, then publish the complete gameplay entity in one
-    // atomic ECS insertion. No system can observe a partially assembled player.
-    // The two-part hull is authored here (a gameplay decision) and passed to
-    // the generic core API; the supporting volume keeps the whole lower
-    // lifter sphere in contact with the ground.
-    const Physics::CharacterParams characterParams {
-        .shape            = Physics::CreateDualShape(config),
-        .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
+namespace {
+
+[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const Physics::DualShapeConfig& config) -> Physics::BodyID {
+    const Physics::CharacterCreateDesc desc {
+        .position                 = footPosition.Cast<double>(),
+        .maxSlopeRadians     = DegF {50.0f}.ToRadians().value,
+        .maxStrength              = 120.0f,
+        .characterPadding         = 0.02f,
+        .penetrationRecoverySpeed = 1.0f,
     };
-    const Physics::BodyID charPhys = pc.CreateCharacter({static_cast<double>(spawnPosition.x), static_cast<double>(spawnPosition.y), static_cast<double>(spawnPosition.z)}, characterParams);
-    const auto world = ComposeTransform(spawnPosition, Quat::Identity(), FVec3::One());
-    const Entity              player   = entities.Spawn(
-        Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
-        Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
-        Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
-        Components::PhysicsComponent {.physicsID = charPhys, .isStatic = false}
-    );
-    // Configure third-person follow camera and strip FreeCam. The rig
-    // component lives in extensions/Camera: this is gameplay camera policy the
-    // spawner authors explicitly (a host that wants no follow camera removes
-    // the component afterwards; nothing in core re-creates one it was given).
-    FreeCam::Detach(engine);
-    for (Entity camEnt: entities.EntitiesWith<Components::MainCameraTagComponent>()) {
-        entities.Attach(
-            camEnt,
-            CameraRig::TargetCameraComponent {
-                .target            = player,
-                .distance          = 5.50f,
-                .targetDistance    = 5.50f,
-                .yaw               = 90.0f,
-                .pitch             = -14.0f,
-                .targetOffset      = FVec3{0.0f, 0.80f, 0.0f},
-                .stiffness         = 24.0f,
-                .vignetteIntensity = 1.10f,
-                .vignettePower     = 1.50f,
-                .fov               = 52.0f,
-                .targetFov         = 52.0f
-            },
-            Character::InputComponent {}
-        );
+    const auto res = sim.CreateCharacter(COM::InChain(desc, config));
+    return res.HasValue() ? res.value : Physics::BodyID {};
+}
+
+[[nodiscard]] auto FindActiveCamera(const COM::IEntities& entities) -> Entity {
+    const auto cameras = entities.EntitiesWith<Components::MainCameraTagComponent>();
+    return cameras.size() > 0 ? cameras[0] : Entity::Null();
+}
+
+void DespawnHierarchy(COM::IEntities& entities, Entity root) {
+    std::vector<Entity> stack {root};
+    std::vector<Entity> order;
+    while (!stack.empty()) {
+        const Entity current = stack.back();
+        stack.pop_back();
+        order.push_back(current);
+        for (const Entity child : entities.EntitiesWith<Components::HierarchyComponent>()) {
+            if (const auto* hier = entities.Get<Components::HierarchyComponent>(child);
+                hier != nullptr && hier->parent == current) {
+                stack.push_back(child);
+            }
+        }
+    }
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+        if (entities.IsAlive(*it)) entities.Despawn(*it);
+    }
+}
+
+} // namespace
+
+auto SpawnCharacter(
+    COM::IEngine&         engine,
+    AssetID               prefabHash,
+    std::string_view      modelVirtualPath,
+    FVec3                 spawnFootPosition,
+    DegF                  initialYaw,
+    const CharacterSetup& setup) -> CharacterSpawnResult {
+    auto* entities = engine.Entities();
+    auto* assets   = engine.Assets();
+    auto* sim      = engine.Simulation();
+    if (entities == nullptr || assets == nullptr || sim == nullptr) return {};
+
+    if (prefabHash == InvalidAssetID) {
+        prefabHash = assets->PrefabHash(COM::StringView {modelVirtualPath.data(), modelVirtualPath.size()});
+    }
+    const auto rigOpt = Animation::LoadPrefabRig(*assets, prefabHash);
+    if (!rigOpt.has_value()) {
+        ZHLN::LogError("[Locomotion] Cannot spawn character: prefab '{}' is not cached.", modelVirtualPath);
+        return {};
+    }
+    const Animation::PrefabRig& prefab = *rigOpt;
+
+    const PrefabBounds unscaledBounds = MeasurePrefabBounds(prefab);
+    const float        unscaledHeight = unscaledBounds.GetSize().y;
+    const float        uniformScale   = (unscaledBounds.valid && unscaledHeight > 1.0e-4f && setup.targetHeight > 0.0f)
+                                            ? setup.targetHeight / unscaledHeight
+                                            : 1.0f;
+    const FVec3        scale          = FVec3::Splat(uniformScale);
+    const PrefabBounds scaledBounds   = MeasurePrefabBounds(prefab, scale);
+    const float        groundOffset   = scaledBounds.valid ? std::max(0.0f, -scaledBounds.min.y) : 0.0f;
+    const FVec3        entityPosition = spawnFootPosition + FVec3 {0.0f, groundOffset, 0.0f};
+    const auto         rotation       = Quat::FromAxisAngle(FVec3::UnitY(), initialYaw.ToRadians());
+
+    const PrefabFactory::SpawnParams spawnParams {
+        .position      = entityPosition.Cast<double>(),
+        .rotation      = rotation,
+        .scale         = scale,
+        .createPhysics = false,
+        .isAnimated    = true,
+    };
+    const auto spawned = assets->Instantiate(prefabHash, spawnParams);
+    if (spawned.empty() || spawned.front() == Entity::Null()) {
+        ZHLN::LogError("[Locomotion] Failed to spawn character entity for '{}'.", modelVirtualPath);
+        return {};
+    }
+    const Entity entity = spawned.front();
+
+    const Physics::DualShapeConfig shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
+    const Physics::BodyID          physicsID      = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
+    const float                    sprintMult     = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
+    (void)entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});
+    (void)Character::Attach(
+        *entities,
+        entity,
+        Character::MovementComponent {
+            .orientation      = rotation,
+            .prevOrientation  = rotation,
+            .speed            = setup.walkSpeed,
+            .sprintMultiplier = sprintMult,
+            .jumpForce        = setup.jumpVelocity,
+        },
+        Character::HostCharacterComponent {});
+
+    if ((!prefab.animations.empty() || !prefab.skeletons.empty()) && !entities->Has<Animation::AnimatorComponent>(entity)) {
+        (void)entities->Attach(entity, Animation::AnimatorComponent {
+            .prefabAsset     = prefabHash,
+            .currentTrackIdx = prefab.animations.empty() ? -1 : 0,
+        });
     }
 
-    return player;
+    return CharacterSpawnResult {
+        .entity        = entity,
+        .scale         = scale,
+        .boundsSize    = scaledBounds.GetSize(),
+        .height        = scaledBounds.valid ? scaledBounds.GetSize().y : setup.targetHeight,
+        .groundOffset  = groundOffset,
+        .colliderShape = shapeConfig,
+        .valid         = true,
+    };
 }
+
+auto SpawnCharacter(
+    COM::IEngine&         engine,
+    std::string_view      modelVirtualPath,
+    FVec3                 spawnFootPosition,
+    DegF                  initialYaw,
+    const CharacterSetup& setup) -> CharacterSpawnResult {
+    auto* assets = engine.Assets();
+    if (assets == nullptr) return {};
+    const auto hashRes = assets->FindPrefab(COM::StringView {modelVirtualPath.data(), modelVirtualPath.size()});
+    if (!hashRes.HasValue()) {
+        ZHLN::LogError("[Locomotion] Prefab '{}' is not cached (import it first).", modelVirtualPath);
+        return {};
+    }
+    return SpawnCharacter(engine, hashRes.value, modelVirtualPath, spawnFootPosition, initialYaw, setup);
 }
+
+void DestroyCharacter(COM::IEngine& engine, Entity characterEntity) {
+    auto* entities = engine.Entities();
+    if (entities == nullptr || !entities->IsAlive(characterEntity)) return;
+
+    const Entity activeCam = FindActiveCamera(*entities);
+    if (const auto* rig = entities->Get<CameraRig::TargetCameraComponent>(activeCam);
+        rig != nullptr && rig->target == characterEntity) {
+        (void)entities->Detach<CameraRig::TargetCameraComponent>(activeCam);
+    }
+    if (const auto* physicsComp = entities->Get<Components::PhysicsComponent>(characterEntity);
+        physicsComp != nullptr && physicsComp->physicsID != Physics::BodyID::Null()) {
+        if (auto* sim = engine.Simulation()) {
+            const Physics::BodyID id = physicsComp->physicsID;
+            sim->DestroyBodies(COM::Span<const Physics::BodyID> {&id, 1});
+        }
+    }
+    DespawnHierarchy(*entities, characterEntity);
+}
+
+void SwitchToFollowCamera(COM::IEngine& engine, Entity characterEntity, const CharacterSetup& setup) {
+    auto* entities = engine.Entities();
+    if (entities == nullptr) return;
+    FreeCam::Detach(*entities);
+
+    const Entity activeCam = FindActiveCamera(*entities);
+    const auto*  camComp   = entities->Get<Components::CameraComponent>(activeCam);
+    if (camComp == nullptr) return;
+
+    CameraRig::TargetCameraComponent rig {
+        .target         = characterEntity,
+        .distance       = setup.cameraDistance,
+        .targetDistance = setup.cameraDistance,
+        .yaw            = camComp->camera.yaw.value,
+        .pitch          = std::clamp(camComp->camera.pitch.value, -25.0f, 15.0f),
+        .targetOffset   = {setup.cameraShoulderOffset, setup.cameraHeightOffset, 0.0f},
+        .stiffness      = setup.cameraPositionSmoothing,
+    };
+
+    if (const auto* transform = entities->Get<Components::TransformComponent>(characterEntity)) {
+        const FVec3 forward = transform->rotation * FVec3::UnitZ();
+        if (std::hypot(forward.x, forward.z) > 1.0e-4f) {
+            rig.yaw   = Atan2(forward.z, forward.x).ToDegrees().value;
+            rig.pitch = -12.0f;
+        }
+        rig.smoothTargetPos     = transform->position + FVec3 {0.0f, rig.targetOffset.y, 0.0f};
+        rig.hasInitSmoothTarget = 1u;
+    }
+    (void)entities->Attach(activeCam, rig);
+}
+
+void RecenterFollowCamera(COM::IEngine& engine, Entity characterEntity) {
+    auto* entities = engine.Entities();
+    if (entities == nullptr) return;
+    const Entity activeCam = FindActiveCamera(*entities);
+    auto*        rig       = entities->Get<CameraRig::TargetCameraComponent>(activeCam);
+    const auto*  transform = entities->Get<Components::TransformComponent>(characterEntity);
+    if (rig == nullptr || rig->target != characterEntity || transform == nullptr) return;
+    const FVec3 forward = transform->rotation * FVec3::UnitZ();
+    if (std::hypot(forward.x, forward.z) > 1.0e-4f) {
+        rig->yaw = Atan2(forward.z, forward.x).ToDegrees().value;
+    }
+}
+
+} // namespace ZHLN::Locomotion

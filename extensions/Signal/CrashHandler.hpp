@@ -162,7 +162,7 @@ class CrashDiagnostics {
         if (context == DumpContext::DeferredMainThread) {
             if constexpr (!std::is_void_v<DiagnosticTarget>) {
                 if (target != nullptr) {
-                    target->TraceDiagnostics();
+                    if constexpr (requires { target->TraceDiagnostics(); }) { target->TraceDiagnostics(); }
                 }
             }
             RunObservers(state, ev);

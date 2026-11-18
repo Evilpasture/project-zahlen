@@ -22,7 +22,7 @@
 // hand-built strings mechanical.
 //
 // The model is a utils/ private: the runtime importer
-// (plugins/glTF/GLTFImporter.cpp) decodes with cgltf and never sees these
+// (plugins/glTF/GLTFDocument.cpp) decodes with cgltf and never sees these
 // types. Tests that synthesize their own documents intentionally keep their
 // own fixture structs (tests/render/TestGLTFImport.cpp) so the importer's
 // contract is asserted independently of the emitter's implementation.

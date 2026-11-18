@@ -32,8 +32,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Physics/MathConversions.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/MathConversions.hpp>
+#include <physics/Physics.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -619,6 +619,24 @@ auto PhysicsContext::CreateMeshBody(
         return Physics::BodyID::Null();
     }
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
+}
+
+auto PhysicsContext::CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID {
+    Physics::CharacterParams params {};
+    if (desc.useCustomCapsule && desc.capsuleRadius > 0.0F && desc.capsuleHalfHeight > 0.0F) {
+        params.shape = GetOrCreateShape(Physics::ShapeType::Capsule, desc.capsuleRadius, desc.capsuleHalfHeight);
+    }
+    params.maxSlopeAngle            = desc.maxSlopeRadians;
+    params.maxStrength              = desc.maxStrength;
+    params.characterPadding         = desc.characterPadding;
+    params.penetrationRecoverySpeed = desc.penetrationRecoverySpeed;
+    params.category                 = desc.category;
+    params.mask                     = desc.mask;
+    return CreateCharacter(desc.position, params);
+}
+
+auto PhysicsContext::CharacterVelocity(Physics::BodyID handle) const -> ZHLN::FVec3 {
+    return Physics::FromJoltVector(GetCharacterVelocity(handle));
 }
 
 auto PhysicsContext::CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params) -> Physics::BodyID {

@@ -6,7 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -18,7 +18,7 @@ namespace ECS {
 class EntityCommandBuffer;
 }
 
-class ZHLN_API TransformSystem {
+class TransformSystem {
   public:
     // Per-system cache for detecting local-transform and parent changes. The
     // transform components are intentionally still public/mutable, so the

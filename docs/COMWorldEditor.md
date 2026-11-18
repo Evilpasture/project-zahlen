@@ -15,9 +15,7 @@ the engine-independent Quat vocabulary rather than Jolt types.
 it is intentionally separate from the independently installable panel library.
 The executable links this session, application/process support, the COM scene
 and FreeCam consumers, and document parsing. No native editor/scene/freecam/UI
-target is linked into it. The old panel adapter remains explicitly unported as
-`zahlen_native_editor`, `editor/NativeGUIEditor.hpp`, namespace `NativeEditor`.
-The native compatibility render test names that adapter directly.
+target is linked into it; the transitional native GUI editor adapter has been removed.
 
 ## Frame and document behavior
 

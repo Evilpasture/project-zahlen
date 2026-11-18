@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "TestsFramework.hpp"
+#include <Zahlen/ECS/Components.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <array>
@@ -150,7 +151,7 @@ struct COMScriptLifetimeSuite {
             ExpectTrue(bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string("renamed")}).has_value());
             ExpectEq(std::string_view(entities.Get<ConsolePOD>(e)->label), std::string_view("renamed"));
             ExpectTrue(!bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string(100, 'x')}));
-            (void) entities.Attach(e, Components::PhysicsComponent {});
+            (void) entities.Attach(e, ZHLN::Components::PhysicsComponent {});
             ExpectTrue(!bridge.SetProperty(e, "PhysicsComponent", "isStatic", ScriptVal {true}));
             ExpectTrue(bridge.GetProperty(e, "PhysicsComponent", "isStatic").has_value());
             return {};

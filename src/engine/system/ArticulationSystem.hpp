@@ -3,9 +3,9 @@
 #pragma once
 
 #include "ArticulationContext.hpp"
-#include <Zahlen/Engine/EngineServices.hpp>
+#include <engine/EngineServices.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 namespace ECS { class EntityCommandBuffer; }

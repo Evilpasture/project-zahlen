@@ -31,11 +31,7 @@
 // bracket forest, and `position = [0.0, 8.0, 0.0]` diffs one line at a time.
 
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/Float2.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
 #include <Zahlen/Math/Vec2.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -49,12 +45,6 @@ namespace ZHLN::ReflectTOML {
 // Declared here rather than in toml/TOML.hpp to keep that header free of any
 // dependency on Jolt, and rather than in Scene/Scene.hpp to keep the core
 // scene model free of any dependency on the document format.
-template <>
-struct TOMLVector<JPH::Float2> : std::true_type {};
-template <>
-struct TOMLVector<JPH::Float3> : std::true_type {};
-template <>
-struct TOMLVector<JPH::Float4> : std::true_type {};
 // The engine's value types stand in for those storage classes on the boundary, so
 // they keep the same array form. Without these three lines a GUI document would
 // quietly change shape -- `color = [r, g, b, a]` becoming a table of x/y/z/w --

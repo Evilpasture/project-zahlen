@@ -158,7 +158,6 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_http`, `zahlen_remote_asset`, `zahlen_github` | `extensions/net/{HTTP,RemoteAsset,GitHub}/` | Optional HTTP transfer, remote-asset cache, and GitHub tree adapter |
 | `zahlen_cdn` | `extensions/net/CDN/` | Base-URL asset `Fetch` (cache, else download) and `Load` (cache, else raw bytes) over the remote-asset cache |
 | `zahlen_animation`, `zahlen_camera`, `zahlen_character_controller`, `zahlen_terrain`, `zahlen_ui_schema`, `zahlen_vfx` | `extensions/` | Reusable animation, camera, controller, terrain, UI, and VFX capabilities |
-| `zahlen_ragdoll_authoring` | `gameplay/RagdollAuthoring/` | Domain-specific humanoid ragdoll authoring |
 | `zahlen_scripting`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent reflection property inspector, developer console, and editor |
 | `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
@@ -204,12 +203,10 @@ A few examples illustrate the intended seam:
   owns the STL document and capability-only Instantiate/Extract. `zahlen_scene`
   uses IEntities/IAssetLibrary/IGraphicsDevice/ISimulation; hosts prepare prefab
   sources explicitly. Core keeps only POD component values in ECS/SceneValues.hpp.
-  `zahlen_native_scene` is an explicit transitional adapter for unported native
-  hosts, never a dependency of the COM library. TOML/Lua document adapters remain
+  TOML/Lua document adapters remain
   consumers; no Core source includes or invokes a Scene document.
-* **Model import is a plugin.** `plugins/glTF/GLTFImporter.cpp` reads a model
-  using cgltf, stb_image, and `plugins/json`, then writes a plain
-  `ZHLN::ModelPrefab` to the Core prefab cache. Core reads the cached structure
+* **Model import is a plugin.** `plugins/glTF/GLTFAssets.cpp` reads a model
+  using cgltf, stb_image, and `plugins/json`, then registers cooked geometry/materials/rigs through `COM::IAssetLibrary` and `COM::IGraphicsDevice`. Core reads the cached structure
   and instantiates it; it never calls the importer or depends on glTF parsing.
 * **Fonts follow the same pattern.** Hosts explicitly read a bake through
   `plugins/Fonts/` and upload it through capabilities into their host-owned
@@ -382,7 +379,7 @@ Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across b
 * **Camera Orientation**: Default forward vector looks down **$-Z$** (at `yaw = -90.0f` and `pitch = 0.0f`).
 
 ### Matrix Layout & Multiplication Order
-* **Storage Layout**: **Column-Major** in both C++ (`JPH::Mat44`) and Slang (compiled with `-matrix-layout-column-major`).
+* **Storage Layout**: **Column-Major** in both C++ (`ZHLN::Mat4x4`) and Slang (compiled with `-matrix-layout-column-major`).
 * **Multiplication Order**: **Column Vectors** ($M \cdot v$). Shaders and host code execute `mul(matrix, vector)` / `m * v`.
 
 ### Winding Order & Culling
@@ -462,7 +459,7 @@ Register a free function, static member, or stateless callable with one line:
 ```cpp
 void MoveUp(ECS::Query<Components::TransformComponent&> transforms, FrameDt dt) {
     transforms.ForEach([&](Entity, Components::TransformComponent& transform) {
-        transform.position += JPH::Vec3(0.0f, dt.value, 0.0f);
+        transform.position += ZHLN::FVec3{0.0f, dt.value, 0.0f};
     });
 }
 
@@ -585,7 +582,7 @@ replacement is chosen by semantics rather than by a blanket naming rule.
 | capability | shape | why |
 | :--- | :--- | :--- |
 | frame schedule | `Steps() const noexcept -> std::span<const FrameStep>` | diagnostics and profilers can read the composed order, but only `InstallModule(const Module&)` mutates it, all-or-nothing against core's anchor names. `Clear()` / `Append()` on a public `FramePlan&` silently bypassed anchor validation. |
-| entity lifecycle | `Entities() -> Entities` (`Zahlen/Engine/Capabilities/Entities.hpp`) | not a `Registry` pass-through. `Despawn` marks `PendingDestroy` so `SceneCleanup` releases Jolt bodies, miniaudio voices and GPU buffers; `Attach` / `Detach` route replacements through `SceneResources::Release`. `Get` / `GetSingleton` are read-only `Optional<const T&>`. |
+| entity lifecycle | `Entities() -> Entities` (`Zahlen/COM/IEntities.hpp`) | not a `Registry` pass-through. `Despawn` marks `PendingDestroy` so `SceneCleanup` releases Jolt bodies, miniaudio voices and GPU buffers; `Attach` / `Detach` route replacements through `SceneResources::Release`. `Get` / `GetSingleton` are read-only `Optional<const T&>`. |
 | in-frame mutations | `Commands() -> ECS::EntityCommandBuffer&` | systems declare `ECS::EntityCommandBuffer&` in their signature and `SystemGraph` resolves it from `carrier.ecb`; external frame steps record into the same ECB. Playback is `MainECBPlayback`, immediately followed by `SceneCleanup`. Synchronous creation/destruction inside `Tick` is prohibited. |
 | skinning / articulation | no public accessor | simulation-to-render pose uploads and the articulation solver are engine-internal. |
 
@@ -898,7 +895,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | :--- | :--- | :--- | :--- |
 | **World Coordinate System** | Right-Handed, $+Y$ Up | Right-Handed, $+Y$ Up | **Direct 1:1 Mapping** |
 | **Forward Vector** | $-Z$ | $-Z$ | **Direct 1:1 Mapping** |
-| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`JPH::Mat44` / Slang) | **Direct 1:1 Mapping** |
+| **Matrix Storage Layout** | Column-Major (`Matrix4`) | Column-Major (`ZHLN::Mat4x4` / Slang) | **Direct 1:1 Mapping** |
 | **Matrix Vector Multiplication** | $M \cdot v$ (`v.applyMatrix4(m)`) | $M \cdot v$ (`m * v` / `mul(m, v)`) | **Direct 1:1 Mapping** |
 | **Winding Order** | Counter-Clockwise (CCW) | Counter-Clockwise (CCW) | **Direct 1:1 Mapping** |
 | **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |

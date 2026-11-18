@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -41,14 +42,14 @@ inline constexpr std::string_view kDefaultFontAssetPath = "fonts/default.zfont";
 inline constexpr AssetID kDefaultFontAssetID = HashAssetID(kDefaultFontAssetPath);
 
 
-using BakedFontLoader = auto (*)(void* user, BakedFontAsset& out) -> bool;
+using BakedFontLoader = auto (*)(void* user) -> std::optional<BakedFontAsset>;
 
 ZHLN_API void               InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
 ZHLN_API void               UninstallBakedFontLoader() noexcept;
 [[nodiscard]] ZHLN_API auto HasBakedFontLoader() noexcept -> bool;
 [[nodiscard]] ZHLN_API auto GetBakedFontLoaderUser() noexcept -> void*;
 
-[[nodiscard]] ZHLN_API auto LoadBakedFont(BakedFontAsset& out) -> bool;
+[[nodiscard]] ZHLN_API auto LoadBakedFont() -> std::optional<BakedFontAsset>;
 
 [[nodiscard]] ZHLN_API auto GetDefaultBakedFont() -> const BakedFontAsset&;
 

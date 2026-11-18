@@ -10,14 +10,12 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
+#include <Animation/AnimationContext.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +24,17 @@ module;
 #include <span>
 #include <string_view>
 #include <type_traits>
+
+// Forward-declared rather than including COM/*.hpp: GCC 16 cannot yet stream
+// C++26 <meta> reflection clusters through a compiled module interface (.gcm).
+namespace ZHLN::COM {
+struct IAssetLibrary;
+struct IDebugDraw;
+struct IEngine;
+struct IEntities;
+struct IGraphicsDevice;
+struct ISimulation;
+} // namespace ZHLN::COM
 
 export module ZHLN.ProceduralAnimation;
 
@@ -560,7 +569,7 @@ void   ApplyIKReachTilt(
 ) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, Mat4x4* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
-    const PhysicsContext&          physics,
+    const COM::ISimulation*        physics,
     FVec3                   rootPosition,
     Quat                   rootRotation,
     ProceduralLocomotionComponent& gait,
@@ -664,33 +673,52 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, Mat4x4* nodeTra
 } // namespace Animation
 
 /** Finds an authored animation by case-insensitive exact name, then substring. */
-int32_t FindAnimationTrack(const ModelPrefab& prefab, std::string_view name) noexcept;
+int32_t FindAnimationTrack(const Animation::PrefabRig& prefab, std::string_view name) noexcept;
 
 /**
  * Builds a map for an imported glTF rig. Matching is case/separator insensitive
  * and accepts common Blender, Mixamo, and TestRig aliases.
  */
-bool BuildBoneMap(const ModelPrefab& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept;
+bool BuildBoneMap(const Animation::PrefabRig& prefab, const Skeleton& skeleton, RigBoneMap& outMap) noexcept;
 
 /** Builds the same hierarchy procedurally for the self-contained sample. */
 void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept;
 
-/** Draws the most recently evaluated pose, including contact normals and hair. */
-void DrawProceduralDebugRig(
-    RenderContext&                       renderContext,
-    FVec3                         rootPosition,
-    Quat                         rootRotation,
-    const RigBoneMap&                    boneMap,
-    const ProceduralLocomotionComponent* gait = nullptr
-) noexcept;
-
 namespace ProceduralAnimation {
 
-/** Registers ECS types and inserts the optional evaluator before articulation. */
-void Register(Engine& engine);
-/** Add the typed evaluator to a custom simulation graph. The caller owns
- * scheduling and must Compile the graph before execution. */
-void AddEvaluator(ECS::SimGraph& graph);
+void Evaluate(
+    COM::IEntities&               entities,
+    Animation::AnimationContext&  anim,
+    float                         dt,
+    const COM::ISimulation*       physics  = nullptr,
+    const COM::IAssetLibrary*     assets   = nullptr,
+    COM::IGraphicsDevice*         graphics = nullptr,
+    Animation::PoseUploadCallback sink     = {}) noexcept;
+
+void Step(
+    COM::IEntities&               entities,
+    Animation::AnimationContext&  anim,
+    float                         dt,
+    const COM::ISimulation*       physics  = nullptr,
+    const COM::IAssetLibrary*     assets   = nullptr,
+    COM::IGraphicsDevice*         graphics = nullptr,
+    Animation::PoseUploadCallback sink     = {});
+
+void Step(COM::IEngine& engine, Animation::AnimationContext& anim, float dt);
+
+struct Layer {
+    Animation::AnimationContext context;
+
+    void Tick(COM::IEngine& engine, float dt) {
+        ProceduralAnimation::Step(engine, context, dt);
+    }
+
+    void Stop(COM::IEngine&) noexcept {
+        context.Clear();
+        context.InvalidateRigs();
+    }
+};
+
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;
@@ -702,30 +730,20 @@ size_t ApplyChildOfConstraints(
     bool        applyChest           = true,
     bool        applyNeck            = true,
     bool        applyHead            = true,
-    bool        applyFootAttachments = true
-) noexcept;
+    bool        applyFootAttachments = true) noexcept;
 size_t BuildSkinningPalette(const Skeleton& skeleton, const RigBoneMap& boneMap, std::span<Mat4x4> output) noexcept;
 size_t MaskFirstPersonPalette(
-    const Skeleton&       skeleton,
-    const RigBoneMap&     boneMap,
+    const Skeleton&   skeleton,
+    const RigBoneMap& boneMap,
     std::span<Mat4x4> palette,
-    bool                  hideHead = true,
-    bool                  hideHair = true
-) noexcept;
+    bool              hideHead = true,
+    bool              hideHair = true) noexcept;
 void   DrawDebugRig(
-    SceneData&                           scene,
-    FVec3                         rootPosition,
-    Quat                         rootRotation,
-    const RigBoneMap&                    boneMap,
-    const ProceduralLocomotionComponent* gait = nullptr
-) noexcept;
-void   DrawDebugRig(
-    DebugDraw                            debug,
+    COM::IDebugDraw&                     debug,
     FVec3                                rootPosition,
     Quat                                 rootRotation,
     const RigBoneMap&                    boneMap,
-    const ProceduralLocomotionComponent* gait = nullptr
-) noexcept;
+    const ProceduralLocomotionComponent* gait = nullptr) noexcept;
 
 } // namespace ProceduralAnimation
 

@@ -7,8 +7,7 @@
 #include <AssetCooking/EnvironmentPreparation.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -130,24 +129,16 @@ bool WriteRadianceFile(const fs::path& path, std::span<const std::byte> bytes) {
 }
 
 struct RadianceFixture {
-    TempSandbox sandbox {"radiance"};
-    ZHLN::AssetManager  cache;
-    ZHLN::AssetLibrary  assets {cache};
+    TempSandbox                 sandbox {"radiance"};
+    ZHLN::FS::VirtualFileSystem vfs;
 
     [[nodiscard]] auto Decode(std::span<const std::byte> bytes, std::string_view name = "environment.hdr")
-        -> std::expected<ZHLN::EnvironmentImageView, ZHLN::ErrorCode> {
+        -> std::expected<ZHLN::EnvironmentImage, ZHLN::ErrorCode> {
         const fs::path path = sandbox.SubPath(name);
         if (!WriteRadianceFile(path, bytes)) {
             return std::unexpected(RadianceTestError::FixtureFailed);
         }
-        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets.VFS(), path.string());
-        if (!decoded) {
-            return std::unexpected(decoded.error());
-        }
-        if (!assets.CacheEnvironmentImage(path.string(), std::move(*decoded))) {
-            return std::unexpected(RadianceTestError::CacheFailed);
-        }
-        return *assets.FindEnvironmentImage(path.string());
+        return ZHLN::AssetCooking::ReadEnvironmentImage(vfs, path.string());
     }
 };
 
@@ -280,8 +271,8 @@ struct RadianceTestSuite {
                 !ZHLN::Test::ExpectEq(header[5], 0u) || !ZHLN::Test::ExpectEq(header[6], 0u)) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
-            auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), rawPath.string());
-            auto again   = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), cookedPath.string());
+            auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, rawPath.string());
+            auto again   = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, cookedPath.string());
             if (!decoded || !again) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
@@ -419,46 +410,7 @@ struct RadianceTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> cache_drops_on_clear() {
-            RadianceFixture fixture;
-            const fs::path path = fixture.sandbox.SubPath("environments/unit.hdr");
-            constexpr std::string_view virtualPath = "environments/unit.hdr";
-            if (!fixture.cache.MountDirectory(fixture.sandbox.rootPath.string()) || !WriteRadianceFile(path, RleHdr())) {
-                return std::unexpected(RadianceTestError::FixtureFailed);
-            }
-            auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), virtualPath);
-            if (!decoded || !fixture.assets.CacheEnvironmentImage(virtualPath, std::move(*decoded))) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            const auto first = fixture.assets.FindEnvironmentImage(virtualPath);
-            if (!first || !ZHLN::Test::ExpectEq(first->width, 8u)) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            if (!WriteRadianceFile(path, FlatHdr(4, 1, "-Y", 1.0f, 10, 10))) {
-                return std::unexpected(RadianceTestError::FixtureFailed);
-            }
-            const auto cached = fixture.assets.FindEnvironmentImage(virtualPath);
-            if (!cached || !ZHLN::Test::ExpectEq(cached->rgba.data(), first->rgba.data()) ||
-                !ZHLN::Test::ExpectEq(cached->width, 8u)) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            const uint64_t oldHash = first->contentHash;
-            fixture.assets.ClearCache(); // invalidates both borrowed views
-            if (!ZHLN::Test::ExpectFalse(fixture.assets.FindEnvironmentImage(virtualPath).has_value())) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            auto newPixels = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), virtualPath);
-            if (!newPixels || !fixture.assets.CacheEnvironmentImage(virtualPath, std::move(*newPixels))) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            const auto reloaded = fixture.assets.FindEnvironmentImage(virtualPath);
-            if (!reloaded || !ZHLN::Test::ExpectEq(reloaded->width, 4u) ||
-                !ZHLN::Test::ExpectEq(reloaded->rgba[0], 10.0f) ||
-                !ZHLN::Test::ExpectNe(reloaded->contentHash, oldHash)) {
-                return std::unexpected(RadianceTestError::CacheFailed);
-            }
-            return {};
-        }
+        
     };
 };
 

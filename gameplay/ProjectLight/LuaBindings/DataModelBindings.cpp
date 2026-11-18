@@ -222,7 +222,7 @@ void PushInstance(lua_State* state, const InstancePtr& instance) {
 }
 
 template <typename T>
-void PushInstance(lua_State* state, const JPH::Ref<T>& instance) {
+void PushInstance(lua_State* state, const Ref<T>& instance) {
     PushInstance(state, StaticRefCast<Instance>(instance));
 }
 

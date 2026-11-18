@@ -62,8 +62,15 @@ consteval void FoldType(uint64_t& hash, std::size_t baseOffset) {
     if constexpr (std::is_bounded_array_v<Bare>) {
         using Element               = std::remove_extent_t<Bare>;
         constexpr std::size_t count = std::extent_v<Bare>;
-        for (std::size_t index = 0; index < count; ++index) {
-            FoldType<Element>(hash, baseOffset + (index * sizeof(Element)));
+        if constexpr (count <= 64) {
+            for (std::size_t index = 0; index < count; ++index) {
+                FoldType<Element>(hash, baseOffset + (index * sizeof(Element)));
+            }
+        } else {
+            FoldType<Element>(hash, baseOffset);
+            FoldType<Element>(hash, baseOffset + ((count - 1) * sizeof(Element)));
+            hash = MixValue(hash, count);
+            hash = MixValue(hash, sizeof(Element));
         }
     } else if constexpr (std::is_class_v<Bare> && std::is_standard_layout_v<Bare>) {
         constexpr auto members =

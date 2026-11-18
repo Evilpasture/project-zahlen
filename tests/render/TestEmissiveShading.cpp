@@ -18,21 +18,19 @@
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -86,7 +84,7 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // emitter the way the importer does keeps the test measuring a neon material
 // rather than the accounting error that used to inflate one.
 // Native color vectors can be passed directly to the material APIs.
-const ZHLN::FVec4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const ZHLN::FVec4 kEmissiveGreen {0.0f, 1.0f * 5.0f, 0.0f, 1.0f};
 // Hue is asserted here, not at import scale: 6x is sibling-proven chromatic
 // (the multi-emissive direct boxes read their hues at 6x under worse wash),
 // while 100x through the default Khronos Neutral tonemap desaturates to
@@ -106,7 +104,7 @@ const ZHLN::FVec4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // thing casting it. That dimness was the actual regression behind "the neon
 // look is gone"; the fix is the unit conversion at import, and this constant
 // tracks it so the test measures what an imported asset really does.
-const ZHLN::FVec4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const ZHLN::FVec4 kNeonGreen {0.0f, 0.8f * 5.0f, 0.0f, 1.0f};
 // The halo frames run the bloom composite here, not at the engine default
 // 0.0 (which multiplies the whole Kawase chain by zero at composite --
 // blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
@@ -129,11 +127,11 @@ constexpr float kHaloBloomStrength = 0.003f;
 // Returns false when material creation fails, which is a setup failure rather
 // than a rendering result.
 [[nodiscard]] bool BuildUnlitBoxScene(
-    ZHLN::Engine& engine, const ZHLN::FVec4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
+    ZHLN::COM::IEngine& engine, const ZHLN::FVec4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
 ) {
-    auto renderCtx = engine.Graphics();
+    auto& renderCtx = *engine.Graphics();
 
-    engine.Graphics().PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
+    (void)engine.Graphics()->PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
         if (glowIntensity.has_value()) {
             gfx.post.glowIntensity = *glowIntensity;
         }
@@ -153,15 +151,13 @@ constexpr float kHaloBloomStrength = 0.003f;
 
     const auto material =
         renderCtx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = kBoxBaseColor, .emissive = emissiveFactor});
-    if (!material.has_value()) {
+    if (!material.HasValue()) {
         return false;
     }
 
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}
-    );
+    engine.Assets()->SpawnBox({1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}).value;
 
-    const bool camOk = engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
         auto& camera = c.camera;
         camera.position = {0.0f, 0.0f, 6.0f};
         camera.yaw      = ZHLN::DegF{-90.0f};

@@ -65,9 +65,11 @@ auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry) -> s
     std::vector<T> out(count);
     ByteReader     in(file.subspan(static_cast<size_t>(entry.fileofs), static_cast<size_t>(entry.filelen)));
     for (T& element: out) {
-        if (!ReadStruct(in, element)) {
+        const auto elementOpt = ReadStruct<T>(in);
+        if (!elementOpt) {
             return std::unexpected(BSPError::ShortRead);
         }
+        element = *elementOpt;
     }
     return out;
 }
@@ -235,8 +237,9 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     const auto gameLumpSpan = file.subspan(static_cast<size_t>(gameLumpEntry.fileofs), static_cast<size_t>(gameLumpEntry.filelen));
     ByteReader reader(gameLumpSpan);
 
-    int32_t lumpCount = 0;
-    if (!reader.Read(lumpCount) || lumpCount < 0) {
+    const auto lumpCountOpt = reader.Read<int32_t>();
+    const int32_t lumpCount = lumpCountOpt.value_or(-1);
+    if (!lumpCountOpt || lumpCount < 0) {
         return std::unexpected(BSPError::MalformedLump);
     }
 
@@ -244,10 +247,11 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     const DGameLump* sprpLump = nullptr;
 
     for (int32_t i = 0; i < lumpCount; ++i) {
-        DGameLump gl {};
-        if (!reader.Read(gl)) {
+        const auto glOpt = reader.Read<DGameLump>();
+        if (!glOpt) {
             return std::unexpected(BSPError::ShortRead);
         }
+        const DGameLump& gl = *glOpt;
         map.gameLumps.push_back(gl);
         if (gl.id == kGameLumpStaticProps || gl.id == kGameLumpStaticPropsAlt) {
             sprpLump = &map.gameLumps.back();
@@ -276,24 +280,26 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     ByteReader propReader(sprpSpan);
 
     // 1. Model Dictionary
-    int32_t dictEntries = 0;
-    if (!propReader.Read(dictEntries) || dictEntries < 0) {
+    const auto dictEntriesOpt = propReader.Read<int32_t>();
+    const int32_t dictEntries = dictEntriesOpt.value_or(-1);
+    if (!dictEntriesOpt || dictEntries < 0) {
         return {};
     }
     std::vector<std::string> modelDict;
     modelDict.reserve(static_cast<size_t>(dictEntries));
     for (int32_t i = 0; i < dictEntries; ++i) {
-        char nameBuf[128] {};
-        if (!propReader.Read(nameBuf)) {
+        auto nameBufOpt = propReader.Read<std::array<char, 128>>();
+        if (!nameBufOpt) {
             return {};
         }
-        nameBuf[127] = '\0';
-        modelDict.emplace_back(nameBuf);
+        (*nameBufOpt)[127] = '\0';
+        modelDict.emplace_back(nameBufOpt->data());
     }
 
     // 2. Leaf Array
-    int32_t leafEntries = 0;
-    if (!propReader.Read(leafEntries) || leafEntries < 0) {
+    const auto leafEntriesOpt = propReader.Read<int32_t>();
+    const int32_t leafEntries = leafEntriesOpt.value_or(-1);
+    if (!leafEntriesOpt || leafEntries < 0) {
         return {};
     }
     if (!propReader.Skip(static_cast<size_t>(leafEntries) * sizeof(uint16_t))) {
@@ -301,8 +307,9 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     }
 
     // 3. Static Props
-    int32_t propCount = 0;
-    if (!propReader.Read(propCount) || propCount < 0) {
+    const auto propCountOpt = propReader.Read<int32_t>();
+    const int32_t propCount = propCountOpt.value_or(-1);
+    if (!propCountOpt || propCount < 0) {
         return {};
     }
 
@@ -342,17 +349,17 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
         float angles[3] {};
         float lightingOrigin[3] {};
 
-        if (!propReader.Read(origin) ||
-            !propReader.Read(angles) ||
-            !propReader.Read(prop.propType) ||
-            !propReader.Read(prop.firstLeaf) ||
-            !propReader.Read(prop.leafCount) ||
-            !propReader.Read(prop.solid) ||
-            !propReader.Read(prop.flags) ||
-            !propReader.Read(prop.skin) ||
-            !propReader.Read(prop.fadeMinDist) ||
-            !propReader.Read(prop.fadeMaxDist) ||
-            !propReader.Read(lightingOrigin)) {
+        if (!propReader.ReadBytes(&origin, sizeof(origin)) ||
+            !propReader.ReadBytes(&angles, sizeof(angles)) ||
+            !propReader.ReadBytes(&prop.propType, sizeof(prop.propType)) ||
+            !propReader.ReadBytes(&prop.firstLeaf, sizeof(prop.firstLeaf)) ||
+            !propReader.ReadBytes(&prop.leafCount, sizeof(prop.leafCount)) ||
+            !propReader.ReadBytes(&prop.solid, sizeof(prop.solid)) ||
+            !propReader.ReadBytes(&prop.flags, sizeof(prop.flags)) ||
+            !propReader.ReadBytes(&prop.skin, sizeof(prop.skin)) ||
+            !propReader.ReadBytes(&prop.fadeMinDist, sizeof(prop.fadeMinDist)) ||
+            !propReader.ReadBytes(&prop.fadeMaxDist, sizeof(prop.fadeMaxDist)) ||
+            !propReader.ReadBytes(&lightingOrigin, sizeof(lightingOrigin))) {
             return std::unexpected(BSPError::ShortRead);
         }
 
@@ -432,10 +439,11 @@ auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
 
 auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCode> {
     ByteReader file(bytes);
-    BspHeader  header {};
-    if (!ReadStruct(file, header)) {
+    const auto headerOpt = ReadStruct<BspHeader>(file);
+    if (!headerOpt) {
         return std::unexpected(BSPError::FileTooSmall);
     }
+    const BspHeader& header = *headerOpt;
     if (header.ident != kBspIdent) {
         return std::unexpected(BSPError::InvalidIdent);
     }
@@ -591,9 +599,11 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
         map.leafs.resize(count);
         for (DLeaf& leaf: map.leafs) {
-            if (!ReadStruct(in, leaf) || !in.Skip(stride - sizeof(DLeaf))) {
+            const auto leafOpt = ReadStruct<DLeaf>(in);
+            if (!leafOpt || !in.Skip(stride - sizeof(DLeaf))) {
                 return std::unexpected(BSPError::ShortRead);
             }
+            leaf = *leafOpt;
         }
     }
 

@@ -107,7 +107,7 @@ class Tokenizer {
     size_t           _cursor = 0;
 };
 
-void ParseColorValues(std::string_view val, JPH::Float4& outColor) {
+void ParseColorValues(std::string_view val, FVec4& outColor) {
     if (val.empty()) {
         return;
     }
@@ -266,13 +266,13 @@ auto DeriveVmtFields(VMTMaterial& mat) noexcept -> void {
             mat.alphaCutoff = 0.5f;
         }
     }
-    mat.baseColor = JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f};
+    mat.baseColor = FVec4 {1.0f, 1.0f, 1.0f, 1.0f};
     if (const auto it = mat.parameters.find("$color"); it != mat.parameters.end()) {
         ParseColorValues(it->second, mat.baseColor);
     } else if (const auto it2 = mat.parameters.find("$color2"); it2 != mat.parameters.end()) {
         ParseColorValues(it2->second, mat.baseColor);
     }
-    mat.envMapTint = JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f};
+    mat.envMapTint = FVec4 {1.0f, 1.0f, 1.0f, 1.0f};
     if (const auto it = mat.parameters.find("$envmaptint"); it != mat.parameters.end()) {
         ParseColorValues(it->second, mat.envMapTint);
     }

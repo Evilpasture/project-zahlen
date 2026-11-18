@@ -8,19 +8,11 @@ set_target_properties(zahlen_scene_documents PROPERTIES CXX_STANDARD 26
 target_link_libraries(zahlen_scene_documents PUBLIC zahlen_scene zahlen_serialization
     PRIVATE zahlen_warnings)
 target_include_directories(zahlen_scene_documents PUBLIC ${PROJECT_SOURCE_DIR}/utils/scene)
-target_compile_definitions(zahlen_scene_documents PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_scene_documents)
 if(TARGET zahlen_lua)
     target_link_libraries(zahlen_scene_documents PRIVATE zahlen_lua)
     target_compile_definitions(zahlen_scene_documents PRIVATE ZHLN_SCENE_DOC_HAS_LUA=1)
 endif()
-
-# Transitional native tools share the parser, not a Core dependency on documents.
-add_library(zahlen_native_scene_documents STATIC NativeSceneDocument.cpp)
-set_target_properties(zahlen_native_scene_documents PROPERTIES CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(zahlen_native_scene_documents PUBLIC zahlen_scene_documents zahlen_native_scene PRIVATE zahlen_warnings)
-zahlen_enable_reflection(zahlen_native_scene_documents)
 
 # Unlike the game executable, this opt-in host tests document loading,
 # fallback and graphics-file watching (plus Discord when that target exists).
@@ -30,7 +22,6 @@ if(TARGET zahlen_fallback_scene)
         CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-scene-host")
     target_link_libraries(zahlen_scene_host PRIVATE zahlen_application
         zahlen_scene_documents zahlen_fallback_scene zahlen_warnings)
-    target_compile_definitions(zahlen_scene_host PRIVATE JPH_DOUBLE_PRECISION)
     if(TARGET zahlen_console)
         target_link_libraries(zahlen_scene_host PRIVATE zahlen_console)
         target_compile_definitions(zahlen_scene_host PRIVATE ZHLN_SCENE_HOST_HAS_CONSOLE=1)

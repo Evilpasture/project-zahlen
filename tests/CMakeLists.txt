@@ -1,20 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Tests exercise public behaviour only. They must not include engine internals
-# from src/ (systems, render/Vulkan guts, cooker headers, ...). Configure-time
-# enforcement lives in configure/check_tests_public_api.py.
-#
-# Layout: explicit file list (no file(GLOB), preserving exact Ninja incremental
-# rebuilds) compiled into an internal CPU worker binary (`ztest_cpu`). Each TU
-# is wrapped via `zahlen_wrap_ztest_sources(...)` so `test_*` functions inside
-# `namespace ZHLN::Test` and primary-TU suite structs self-register with zero
-# boilerplate, and `ztest` collects and shards execution per source file across
-# `-j N` worker processes.
-
-# Public include roots for the optional outer layers. Kept as a list because
-# plugin formats, engine extensions, network I/O, and gameplay each have their
-# own include root after the source-tree split.
 set(ZHLN_OPTIONAL_INCLUDE_ROOTS
     ${PROJECT_SOURCE_DIR}/plugins
     ${PROJECT_SOURCE_DIR}/extensions
@@ -39,14 +25,12 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestContainers.cpp
     core/TestDefer.cpp
     core/TestEnumFlags.cpp
-    core/TestEngineGraphLifecycle.cpp
     core/TestError.cpp
     core/TestFileSystem.cpp
     core/TestFileSystemWatcher.cpp
     core/TestFontAsset.cpp
     core/TestGUIContext.cpp
     core/TestGraphicsSettings.cpp
-    core/TestInput.cpp
     core/TestInputLive.cpp
     core/TestMath.cpp
     core/TestNamespaceFixture.cpp
@@ -59,19 +43,11 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestTestFramework.cpp
     core/TestTextEdit.cpp
     core/TestWaitIdle.cpp
-    ecs/TestECS.cpp
-    ecs/TestEventBus.cpp
-    ecs/TestSystemGraph.cpp
     physics/TestPhysics.cpp
-    physics/TestPhysicsNoTaskSystem.cpp
     threading/TestChannel.cpp
     threading/TestSyncPrim.cpp
     threading/TestTaskSystem.cpp
 )
-
-if(TARGET zahlen_native_character_controller)
-    list(APPEND ZHLN_CPU_TEST_SOURCES physics/TestCharacterMovement.cpp)
-endif()
 
 zahlen_wrap_ztest_sources(ZHLN_CPU_WRAPPED_SOURCES ZHLN_CPU_REL_FILES
     ${ZHLN_CPU_TEST_SOURCES}
@@ -89,36 +65,20 @@ set_target_properties(ztest_cpu PROPERTIES
     ZHLN_ZTEST_SOURCE_FILES "${ZHLN_CPU_REL_FILES}"
 )
 
-# zahlen_command_line and zahlen_signal are added by
-# zahlen_register_ztest_target() (cmake/ZTest.cmake) for every worker; naming
-# them again here put each archive on the link line twice.
-# Jolt is named here because the suites reference JPH symbols from their own
-# objects -- tests/physics/TestPhysics.cpp drives JPH::Factory::sInstance and
-# JPH::RegisterTypesInternal directly. It used to arrive on the command line
-# only because zahlen_engine published it PUBLIC, which is the same duplication
-# LWYU flags on the 18 executables that do NOT use it.
 target_link_libraries(ztest_cpu PRIVATE
-    Jolt
     zahlen_engine
     zahlen_asset_cooking
     zahlen_image
+    zahlen_host_ui
 )
 
-# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(ztest_cpu PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/app/include
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/plugins
     ${PROJECT_SOURCE_DIR}/extensions
-
 )
-
-if(TARGET zahlen_native_character_controller)
-    target_link_libraries(ztest_cpu PRIVATE zahlen_native_character_controller)
-    target_include_directories(ztest_cpu PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
-    target_compile_definitions(ztest_cpu PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
-endif()
 
 zahlen_enable_reflection(ztest_cpu)
 add_dependencies(ztest_cpu zcook)
@@ -134,20 +94,6 @@ if(USE_SANITIZERS)
         -fno-sanitize=vptr
     )
     target_compile_definitions(ztest_cpu PRIVATE __ASAN_ENABLED__)
-
-    if(WIN32)
-        get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
-        find_file(ASAN_DLL
-            NAMES "clang_rt.asan_dynamic-x86_64.dll"
-            PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
-        )
-        if(ASAN_DLL)
-            add_custom_command(TARGET ztest_cpu POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ASAN_DLL}" "$<TARGET_FILE_DIR:ztest_cpu>"
-                COMMENT "Copying ASan Runtime DLL for ztest_cpu..."
-            )
-        endif()
-    endif()
 endif()
 
 set(CPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
@@ -163,9 +109,6 @@ zahlen_register_ztest_target(ztest_cpu
 
 zahlen_add_runtime_dlls(ztest_cpu)
 
-# Was `ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras`. The option alone is the
-# right test: zahlen_extras no longer exists (root CMakeLists), and this block
-# is the only thing that ever read it.
 if(ZHLN_BUILD_EXTRAS)
     add_subdirectory(extras)
 endif()
@@ -181,9 +124,6 @@ if(ZHLN_BUILD_GPU_TESTS)
     endif()
 endif()
 
-target_link_libraries(ztest_cpu PRIVATE zahlen_native_host_ui)
-
-# Codec regression is independent of Core, reflection, and the GPU.
 add_executable(TestImage image/TestImage.cpp)
 target_link_libraries(TestImage PRIVATE zahlen_image)
 set_target_properties(TestImage PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON)

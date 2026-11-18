@@ -10,7 +10,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
 #include <cstdint>
 #include <type_traits>
 #include <unordered_map>

@@ -143,11 +143,25 @@ struct IEntities : IObject {
         if (auto* value = Get<T>(entity)) { patch(*value); return true; }
         return false;
     }
+    template <ComComponent T, typename Fn>
+    auto PatchSingleton(Fn&& patch) noexcept -> bool {
+        if (auto* value = GetSingleton<T>()) { patch(*value); return true; }
+        return false;
+    }
+    template <ComComponent... T>
+    auto AttachMany(Entity entity, const T&... components) noexcept -> bool {
+        return ((Attach<T>(entity, components) != nullptr) && ...);
+    }
     template <ComComponent... T>
     [[nodiscard]] auto Spawn(const T&... components) noexcept -> Entity {
         const auto entity = CreateEntity();
         if (!((Attach<T>(entity, components) != nullptr) && ...)) { Despawn(entity); return Entity::Null(); }
         return entity;
+    }
+
+    template <ComComponent T>
+    [[nodiscard]] auto Has(Entity entity) const noexcept -> bool {
+        return Get<T>(entity) != nullptr;
     }
 
 protected:

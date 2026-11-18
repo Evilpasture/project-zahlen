@@ -21,8 +21,9 @@
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
 
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/ILogicWorld.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -31,9 +32,6 @@
 
 namespace {
 
-using ZHLN::ECS::BoxedName;
-using ZHLN::ECS::ComponentFamily;
-using ZHLN::ECS::Registry;
 using ZHLN::Entity;
 using ZHLN::FVec3;
 using ZHLN::Quat;
@@ -131,29 +129,14 @@ struct TestProjectLightReplicationSuite {
     struct Tests {
         // The module owns its components: DescribeClient names the registrar, and
         // the registrar is what maps each component's family to its name.
-        std::expected<void, ZHLN::ErrorCode> the_client_module_registers_its_own_components() {
-            const auto module = ZHLN::ProjectLight::DescribeClient();
-            ZHLN::Test::ExpectTrue(module.registerComponents != nullptr);
-            if (module.registerComponents == nullptr) return {};
-
-            Registry registry;
-            module.registerComponents(registry);
-
-            constexpr uint32_t kUnmappedFamily = 0xFFFFFFFFu;
-            ZHLN::Test::ExpectTrue(Registry::GetFamilyIDFromName(BoxedName<ProjectLightInstanceComponent>()) != kUnmappedFamily);
-            ZHLN::Test::ExpectTrue(Registry::GetFamilyIDFromName(BoxedName<ProjectLightNetworkOwnerComponent>()) != kUnmappedFamily);
-            ZHLN::Test::ExpectTrue(Registry::GetFamilyIDFromName(BoxedName<ProjectLightReplicaTag>()) != kUnmappedFamily);
-            ZHLN::Test::ExpectEq(Registry::GetFamilyIDFromName(BoxedName<ProjectLightInstanceComponent>()), ComponentFamily::GetTypeID<ProjectLightInstanceComponent>());
-            return {};
-        }
 
         // The components an entity carries are readable back off it, which is the
         // whole reason they exist: a system holding an entity can name the
         // instance without going through the client's mirror.
         std::expected<void, ZHLN::ErrorCode> instance_identity_round_trips_through_components() {
-            Registry registry;
-            const Entity entity = registry.Create();
-            registry.Add(
+            auto worldRes = ZHLN::COM::CreateLogicWorldRef(); auto& registry = *(*worldRes)->Entities();
+            const Entity entity = registry.CreateEntity();
+            (void)registry.AttachMany(
                 entity,
                 ProjectLightInstanceComponent {.uid = kTorsoUid},
                 ProjectLightNetworkOwnerComponent {.ownerUid = kLocalUserUid},
@@ -162,8 +145,8 @@ struct TestProjectLightReplicationSuite {
 
             auto instance = registry.Get<ProjectLightInstanceComponent>(entity);
             auto owner    = registry.Get<ProjectLightNetworkOwnerComponent>(entity);
-            ZHLN::Test::ExpectTrue(instance.has_value());
-            ZHLN::Test::ExpectTrue(owner.has_value());
+            ZHLN::Test::ExpectTrue((instance != nullptr));
+            ZHLN::Test::ExpectTrue((owner != nullptr));
             if (instance) ZHLN::Test::ExpectEq(instance->uid, InstanceId {kTorsoUid});
             if (owner) ZHLN::Test::ExpectEq(owner->ownerUid, kLocalUserUid);
 
@@ -180,9 +163,9 @@ struct TestProjectLightReplicationSuite {
             ZHLN::Test::ExpectEq(index.Count(), size_t {0});
             ZHLN::Test::ExpectEq(index.Find(kTorsoUid), Entity::Null());
 
-            Registry registry;
-            const Entity torso = registry.Create();
-            const Entity head  = registry.Create();
+            auto worldRes = ZHLN::COM::CreateLogicWorldRef(); auto& registry = *(*worldRes)->Entities();
+            const Entity torso = registry.CreateEntity();
+            const Entity head  = registry.CreateEntity();
             index.Bind(kTorsoUid, torso);
             index.Bind(kHeadUid, head);
             ZHLN::Test::ExpectEq(index.Count(), size_t {2});

@@ -1,4 +1,3 @@
-#include <NativeHostUI/NativeHostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -86,63 +85,62 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Transform.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Animation/AnimationContext.hpp>
 #include <Animation/AnimationSystem.hpp>
-#include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/QualityPresets.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
-#include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-
-// The outer-layer targets this sample is about. All are optional -- no libcurl, no
-// zahlen_http, zahlen_remote_asset or zahlen_github; no optional layers, no
-// zahlen_gltf -- and samples/CMakeLists.txt skips a sample whose optional targets were
-// not built, so none of the includes needs a guard here. The fetch machinery
-// itself (URL rewrites, the disk cache, the worker lifecycle) is
-// extensions/net/RemoteAsset, and the git trees crawl is extensions/net/GitHub; this file
-// keeps only the showroom policy around them -- which rows are interesting,
-// what a row is called, and the turntable the model spins on.
+#include <Animation/Animator.hpp>
 #include <GitHub/GitHub.hpp>
 #include <RemoteAsset/AsyncAssetFetcher.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 #include <RemoteAsset/URLResolver.hpp>
-#include <glTF/GLTFImporter.hpp>
-
-#if defined(ZHLN_HAS_FONTS)
+#include <Signal/CrashHandler.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/HostUI.hpp>
+#ifdef ZHLN_HAS_FONTS
 #include <Fonts/Fonts.hpp>
 #endif
+#include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/QualityPresets.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Render/Info.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <glTF/GLTFAssets.hpp>
+#include <glTF/GLTFDocument.hpp>
+
+
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -447,7 +445,8 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
 // ============================================================================
 
 struct Subject {
-    ZHLN::ModelPrefab*        prefab    = nullptr;
+    std::optional<ZHLN::GLTF::Document> document;
+    ZHLN::GLTF::Asset         asset {};
     std::vector<ZHLN::Entity> instances {};
     FVec3                 center    = FVec3::Zero();
     FVec3                 boundsMin = FVec3::Zero();
@@ -461,123 +460,73 @@ struct Subject {
 // A part's node transform, accumulated up the hierarchy -- the same product
 // PrefabFactory::InstantiatePrefab places the part with, and the same walk
 // ProceduralAnimationSample uses to estimate a character's bounds.
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> ZHLN::Mat4x4 {
-    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return ZHLN::Mat4x4::Identity();
-    }
-    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
-    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
-    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
-        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
-    }
-    return transform;
-}
-
-// The subject's world-space bounds. A part's localMin/localMax live in the part's
-// own space, so the node chain above them has to be applied first -- for the
-// Damaged Helmet that chain is a -90 degree turn about X that stands the model up,
-// and a union of untransformed boxes would be a different box. The world AABB of
-// an oriented box is its centre plus the absolute contributions of its three
-// transformed half axes, which is exact for a rotation and a uniform scale.
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, FVec3& outMin, FVec3& outMax) {
-    outMin = FVec3(1e9f, 1e9f, 1e9f);
-    outMax = FVec3(-1e9f, -1e9f, -1e9f);
-
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        const ZHLN::Mat4x4 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const FVec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const FVec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const FVec3  localCenter = (localMin + localMax) * 0.5f;
-        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
-
-        const FVec3 center = ZHLN::TransformPoint(model, localCenter);
-        const FVec3 extent = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
-                                 (model.Column(2).XYZ() * halfExtent.z).Abs();
-
-        outMin = {std::min(outMin.x, center.x - extent.x), std::min(outMin.y, center.y - extent.y), std::min(outMin.z, center.z - extent.z)};
-        outMax = {std::max(outMax.x, center.x + extent.x), std::max(outMax.y, center.y + extent.y), std::max(outMax.z, center.z + extent.z)};
-    }
-
-    if (prefab.parts.empty()) {
-        outMin = FVec3(-1.0f, -1.0f, -1.0f);
-        outMax = FVec3(1.0f, 1.0f, 1.0f);
-    }
-}
-
-void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
-    auto entities = engine.Entities();
+void ClearSubject(ZHLN::COM::IEngine& engine, Subject& subject) {
+    auto& entities = *engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
         if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
-            ZHLN::DespawnEntity(engine, entity);
+            (void)entities.Despawn(entity);
         }
     }
     subject.instances.clear();
+    if (subject.asset.ownsResources) {
+        for (ZHLN::TextureID tex : subject.asset.textures) {
+            if (tex != ZHLN::TextureID::Invalid) engine.Graphics()->UnloadTexture(tex);
+        }
+    }
+    subject.asset = {};
+    subject.document.reset();
     subject.loaded = false;
 }
 
-// Imports bytes and spawns them. The prefab is cached under the name the file has
-// on disk, so a second run and a device-lost rebuild both find the same entry (see
-// GLTF::RebuildCachedPrefabs). GLTF::InstantiatePrefabFromMemory makes these two
-// calls in one; they stay apart here because the prefab is what the bounds, the
-// triangle count and the texture count come from.
-//
-// The load happens before the clear: a pick that does not import -- a
-// Draco-compressed asset this importer cannot decode, a binary it cannot parse --
-// leaves the previous subject on screen instead of an empty turntable.
-auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine, bytes, virtualPath);
-    if (!prefab) {
+auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
+    auto doc = ZHLN::GLTF::Decode(bytes, virtualPath, {}, {}, engine.Assets());
+    if (!doc) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
+        return false;
+    }
+    auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
+    if (!asset) {
+        ZHLN::Log("[RemoteGLB] '{}' failed to upload; the previous subject stays on screen.", virtualPath);
         return false;
     }
     ClearSubject(engine, subject);
 
-    // A prefab emits one root, one entity per part and at most one emissive
-    // virtual light per part, so the output buffer is sized for that and then
-    // truncated to what was written.
-    const uint32_t capacity = 1U + (static_cast<uint32_t>(prefab->parts.size()) * 2U);
+    const uint32_t capacity = 1U + (static_cast<uint32_t>(doc->parts.size()) * 2U) + static_cast<uint32_t>(doc->lights.size());
     subject.instances.resize(capacity);
-    const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
-        engine, *prefab,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position      = {0.0, 0.0, 0.0},
-            .createPhysics = false,
-            .isAnimated    = !prefab->animations.empty(),
-        },
-        subject.instances.data(), capacity
-    );
-    subject.instances.resize(std::min(written, capacity));
+    const ZHLN::PrefabFactory::SpawnParams spawnParams {
+        .position      = {0.0, 0.0, 0.0},
+        .createPhysics = false,
+        .isAnimated    = !doc->animations.empty(),
+    };
+    subject.instances = engine.Assets()->Instantiate(asset->hash, spawnParams);
+    const auto written = static_cast<uint32_t>(subject.instances.size());
+    subject.instances.resize(std::min<size_t>(written, capacity));
+    if (!doc->animations.empty() && !subject.instances.empty()) {
+        (void)engine.Entities()->Attach(subject.instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
+    }
 
-    ComputeBounds(*prefab, subject.boundsMin, subject.boundsMax);
+    subject.boundsMin = FVec3(-1.0f, -1.0f, -1.0f);
+    subject.boundsMax = FVec3(1.0f, 1.0f, 1.0f);
+    { ZHLN::COM::PrefabBoundsInfo b{}; if (engine.Assets()->GetPrefabBounds(asset->hash, ZHLN::COM::OutChain(b)).HasValue() && b.hasParts) { subject.boundsMin = b.min; subject.boundsMax = b.max; } }
     subject.center = (subject.boundsMin + subject.boundsMax) * 0.5f;
     subject.radius = std::max((subject.boundsMax - subject.boundsMin).Length() * 0.5f, 0.01f);
 
-    // What the HUD reports: the triangles the parts draw, and the distinct texture
-    // handles they bind. Distinct, because a handle is one GPU image and several
-    // parts may share it -- the Damaged Helmet is a single part, but a multi-part
-    // asset would otherwise be counted once per part.
-    uint64_t                         triangles = 0;
-    std::vector<ZHLN::TextureID> uniqueTextures;
-    for (const ZHLN::ModelPart& part: prefab->parts) {
-        triangles += (part.mesh.indexCount > 0) ? part.mesh.indexCount / 3U : part.mesh.vertexCount / 3U;
-        const std::array slots {part.defaultMaterial.albedoMap, part.defaultMaterial.normalMap, part.defaultMaterial.pbrMap, part.defaultMaterial.emissiveMap};
-        for (const ZHLN::TextureID handle: slots) {
-            if (handle == ZHLN::TextureID::Invalid || std::ranges::find(uniqueTextures, handle) != uniqueTextures.end()) {
-                continue;
-            }
-            uniqueTextures.push_back(handle);
+    uint64_t triangles = 0;
+    for (const ZHLN::GLTF::PartDocument& part : doc->parts) {
+        if (part.primitive < doc->primitives.size()) {
+            const auto& prim = doc->primitives[part.primitive];
+            triangles += !prim.indices.empty() ? prim.indices.size() / 3U : prim.positions.size() / 3U;
         }
     }
     subject.triangles = static_cast<uint32_t>(triangles);
-    subject.textures  = static_cast<uint32_t>(uniqueTextures.size());
-
-    subject.prefab = &*prefab;
-    subject.loaded = true;
+    subject.textures  = static_cast<uint32_t>(doc->textures.size());
+    subject.document  = std::move(*doc);
+    subject.asset     = std::move(*asset);
+    subject.loaded    = true;
     ZHLN::Log(
         "[RemoteGLB] Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
-        virtualPath, prefab->parts.size(), prefab->nodes.size(), subject.triangles, subject.textures, subject.center.x, subject.center.y,
-        subject.center.z, subject.radius, written
+        virtualPath, subject.document->parts.size(), subject.document->nodes.size(), subject.triangles, subject.textures,
+        subject.center.x, subject.center.y, subject.center.z, subject.radius, written
     );
     return true;
 }
@@ -597,7 +546,7 @@ struct Studio {
 };
 
 [[nodiscard]] auto MakeLight(
-    ZHLN::Engine&    engine,
+    ZHLN::COM::IEngine& engine,
     std::string_view name,
     ZHLN::LightType  type,
     FVec3     position,
@@ -608,7 +557,7 @@ struct Studio {
     FVec3     direction
 ) -> ZHLN::Entity {
     const ZHLN::Mat4x4 world = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), FVec3::One());
-    return engine.Entities().Spawn(
+    return engine.Entities()->Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64(name)},
         ZHLN::Components::TransformComponent {.position = position, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
         ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
@@ -616,11 +565,11 @@ struct Studio {
     );
 }
 
-void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
-    auto entities = engine.Entities();
+void ClearStudio(ZHLN::COM::IEngine& engine, Studio& studio) {
+    auto& entities = *engine.Entities();
     for (const ZHLN::Entity entity: {studio.sun, studio.fill, studio.rim, studio.floor}) {
         if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
-            ZHLN::DespawnEntity(engine, entity);
+            (void)entities.Despawn(entity);
         }
     }
     studio.sun   = ZHLN::Entity::Null();
@@ -629,8 +578,8 @@ void ClearStudio(ZHLN::Engine& engine, Studio& studio) {
     studio.floor = ZHLN::Entity::Null();
 }
 
-void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
-    engine.Entities().Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
+void SetFloorVisible(ZHLN::COM::IEngine& engine, const Studio& studio) {
+    engine.Entities()->Patch<ZHLN::Components::MeshComponent>(studio.floor, [&studio](auto& mesh) -> auto {
         if (studio.floorOn) {
             mesh.flags &= ~ZHLN::DrawFlags::Hidden;
         } else {
@@ -642,8 +591,8 @@ void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
 // Hides the subject's mesh instances (shadow casters and reflections with it).
 // The floor-shimmer diagnostic: if the flicker follows the subject into
 // invisibility, it is the subject's shadow or reflection, not the floor.
-void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studio& studio) {
-    auto entities = engine.Entities();
+void SetSubjectVisible(ZHLN::COM::IEngine& engine, const Subject& subject, const Studio& studio) {
+    auto& entities = *engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
         entities.Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
             if (studio.subjectOn) {
@@ -658,9 +607,9 @@ void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studi
 // Key plus two fills plus a floor, laid out around the subject's bounds. The sun
 // needs no subject and could be built earlier; keeping the whole rig in one
 // function is what lets a device-lost recovery rebuild it in one call.
-void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
+void BuildStudio(ZHLN::COM::IEngine& engine, Studio& studio, const Subject& subject) {
     ClearStudio(engine, studio);
-    auto entities = engine.Entities();
+    auto& entities = *engine.Entities();
 
     const float     radius = subject.radius;
     const FVec3 center = subject.center;
@@ -690,17 +639,17 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     floorDesc.metallic  = 0.0f;
     floorDesc.roughness = kFloorRoughness;
     floorDesc.baseColor = {kFloorColor.x, kFloorColor.y, kFloorColor.z, kFloorColor.w};
-    const ZHLN::Material floorMaterial = engine.Graphics().CreateMaterial(floorDesc).value_or(ZHLN::Material {});
+    const auto floorMatRes = engine.Graphics()->CreateMaterial(floorDesc);
+    const ZHLN::Material floorMaterial = floorMatRes.HasValue() ? floorMatRes.value : ZHLN::Material {};
 
-    studio.floor = ZHLN::PrefabFactory::CreatePlane(
-        engine, radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
+    { const auto r = engine.Assets()->SpawnPlane(radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
             .position         = {center.x, subject.boundsMin.y, center.z},
             .createPhysics    = false,
             .materialOverride = floorMaterial,
         }
-    );
-    entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
+    ); studio.floor = r.HasValue() ? r.value : ZHLN::Entity::Null(); }
+    (void)entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
     SetFloorVisible(engine, studio);
 }
 
@@ -808,8 +757,8 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
 // Hands a GraphicsSettings to the device that owns them. The whole value goes
 // across in one call, so the renderer sees one transition rather than a field
 // at a time -- which is also the honest way to show what a preset is.
-void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    engine.Graphics().ApplySettings(gfx);
+void ApplyGraphicsSettings(ZHLN::COM::IEngine& engine, const ZHLN::GraphicsSettings& gfx) {
+    (void)engine.Graphics()->ApplySettings(gfx);
 }
 
 [[nodiscard]] constexpr auto FrameFarPlane(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
@@ -826,13 +775,11 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 // the orbit or the subject leaves it and stops casting. Written only when it moves
 // by more than 2%: a value that changed with every pixel of wheel travel would
 // be noise.
-void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
+void UpdateShadowExtent(ZHLN::COM::IEngine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
     const float wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
-    engine.Graphics().PatchSettings([wanted](auto& gfx) {
-        if (std::abs(gfx.shadows.width - wanted) > (wanted * 0.02f)) {
+    { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); if (std::abs(gfx.shadows.width - wanted) > (wanted * 0.02f)) {
             gfx.shadows.width = wanted;
-        }
-    });
+        } (void)engine.Graphics()->ApplySettings(gfx); }
 }
 
 // QualityLevel and AAMode log as integers, so the HUD spells them out.
@@ -892,12 +839,13 @@ void FrameSubject(OrbitCamera& orbit, const Subject& subject) {
     orbit.maxDistance    = std::max(subject.radius * 60.0f, 100.0f);
 }
 
-void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
-    const bool  lmb = input.IsMouseButtonDown(ZHLN::MouseButton::Left);
-    const bool  rmb = input.IsMouseButtonDown(ZHLN::MouseButton::Right);
-    const bool  mmb = input.IsMouseButtonDown(ZHLN::MouseButton::Middle);
-    const float dx  = input.mouseDeltaX;
-    const float dy  = input.mouseDeltaY;
+void UpdateOrbit(OrbitCamera& orbit, const ZHLN::COM::IActionContext& input, float dt) {
+    const bool  lmb   = input.MouseButtonDown(ZHLN::MouseButton::Left, ZHLN::kPrimarySeat);
+    const bool  rmb   = input.MouseButtonDown(ZHLN::MouseButton::Right, ZHLN::kPrimarySeat);
+    const bool  mmb   = input.MouseButtonDown(ZHLN::MouseButton::Middle, ZHLN::kPrimarySeat);
+    const auto  delta = input.MouseDelta(ZHLN::kPrimarySeat);
+    const float dx    = delta.x;
+    const float dy    = delta.y;
 
     if (lmb || mmb) {
         orbit.yaw += dx * kOrbitSpeed;
@@ -916,8 +864,9 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
         orbit.wantedTarget += ((right * -dx) + (up * dy)) * scale;
     }
 
-    if (input.mouseWheel != 0.0f) {
-        orbit.wantedDistance *= std::exp(-input.mouseWheel * kZoomSpeed);
+    const float wheel = input.MouseWheel(ZHLN::kPrimarySeat);
+    if (wheel != 0.0f) {
+        orbit.wantedDistance *= std::exp(-wheel * kZoomSpeed);
         orbit.wantedDistance = std::clamp(orbit.wantedDistance, orbit.minDistance, orbit.maxDistance);
     }
 
@@ -931,8 +880,8 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::InputState& input, float dt) {
     orbit.target   += (orbit.wantedTarget - orbit.target) * follow;
 }
 
-void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& subject) {
-    engine.Entities().PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
+void ApplyOrbit(ZHLN::COM::IEngine& engine, const OrbitCamera& orbit, const Subject& subject) {
+    if (const auto _cam = engine.Entities()->SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); _cam.HasValue()) engine.Entities()->Patch<ZHLN::Components::CameraComponent>(_cam.value, [&](auto& cameraComp) {
         ZHLN::Camera& camera = cameraComp.camera;
         camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
         camera.yaw           = ZHLN::DegF{orbit.yaw};
@@ -984,7 +933,8 @@ struct SampleState {
     int                   dropdownSelected = 0;
     bool                  catalogSeeded    = false;
     ZHLN::GUI::Context    gui {};
-    std::unique_ptr<ZHLN::NativeHostUI> hostUI;
+    std::unique_ptr<ZHLN::HostUI> hostUI;
+    bool rebuildDue = false;
 
     bool     rayTraced   = false;
     bool     reported    = false; // this download's outcome has been logged and imported
@@ -1093,9 +1043,9 @@ void SelectModel(SampleState& state, int index) {
 
 // Edge detection for the handful of keys the sample owns: the level is in the
 // input singleton, the previous frame's level is here.
-[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::InputState& input, ZHLN::KeyCode key) -> bool {
+[[nodiscard]] auto KeyPressed(SampleState& state, const ZHLN::COM::IActionContext& input, ZHLN::KeyCode key) -> bool {
     const size_t idx  = ZHLN::EnumIndex(key);
-    const bool   down = input.IsKeyDown(key);
+    const bool   down = input.KeyDown(key, ZHLN::kPrimarySeat);
     const bool   was  = state.keyWasDown[idx];
     state.keyWasDown[idx] = down;
     return down && !was;
@@ -1103,7 +1053,7 @@ void SelectModel(SampleState& state, int index) {
 
 // The studio is built around the subject's bounds, so it waits for the import;
 // until then the backdrop and the HUD are the whole scene.
-void RebuildLook(ZHLN::Engine& engine, SampleState& state) {
+void RebuildLook(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.settings = MakeStudioSettings(state.subject.radius, state.rayTraced);
     ApplyGraphicsSettings(engine, state.settings);
     BuildStudio(engine, state.studio, state.subject);
@@ -1116,7 +1066,7 @@ void RebuildLook(ZHLN::Engine& engine, SampleState& state) {
 // Reaps the workers that are done and, exactly once per download, imports
 // what arrived. All of it runs on the frame thread: the importer uploads GPU
 // resources and writes the registry.
-void PollFetch(ZHLN::Engine& engine, SampleState& state) {
+void PollFetch(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.fetcher->Poll();
 
     const auto status = state.fetcher->Status(state.activeRequest);
@@ -1161,16 +1111,13 @@ void PollFetch(ZHLN::Engine& engine, SampleState& state) {
     }
 }
 
-void HandleInput(ZHLN::Engine& engine, SampleState& state) {
+void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     // One value snapshot for the helpers below, which are pure functions over
     // InputState. Snapshot() hands out a copy, so nothing here aliases the
     // engine's router.
-    const ZHLN::InputState  inputState = std::as_const(engine).Input().Snapshot();
-    const ZHLN::InputState* input      = &inputState;
-
-    // The panel owns input inside its strip, the way the inspector's explorer
-    // does: a drag that starts on the HUD is not a drag around the subject.
-    const bool overPanel = (input->mouseX >= 0.0f) && (input->mouseX <= (kPanelWidth + kPanelMargin));
+    const ZHLN::COM::IActionContext* input = engine.Actions();
+    const ZHLN::Axis2DValue mousePos = input->MousePosition(ZHLN::kPrimarySeat);
+    const bool overPanel = (mousePos.x >= 0.0f) && (mousePos.x <= (kPanelWidth + kPanelMargin));
     if (!overPanel) {
         UpdateOrbit(state.orbit, *input, state.dt);
     }
@@ -1190,7 +1137,7 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     // that says whether the shimmer is the reflection or the sun shadow.
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
-        engine.Graphics().PatchSettings([&](auto& gfx) { gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; });
+        { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; (void)engine.Graphics()->ApplySettings(gfx); }
         ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
@@ -1295,13 +1242,13 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     return "idle";
 }
 
-void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
+void DrawHUD(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.gui.SetFontAtlas(state.hostUI->GetFontAtlas());
     ZHLN::GUI::Frame ui = state.gui.BeginFrame(state.hostUI->ConsumeInput(state.dt));
 
-    const ZHLN::RenderInfo info    = engine.Graphics().Info();
+    const ZHLN::COM::GraphicsDeviceInfo info = engine.Graphics()->Info();
     const std::string      subject = state.subject.loaded ?
-                                     std::format("{} part(s), {} triangle(s), {} texture(s), radius {:.3f} m", state.subject.prefab->parts.size(),
+                                     std::format("{} part(s), {} triangle(s), {} texture(s), radius {:.3f} m", state.subject.document->parts.size(),
                                                  state.subject.triangles, state.subject.textures, state.subject.radius) :
                                      std::string("no model yet");
     const std::string      catalog = CatalogLine(state);
@@ -1337,7 +1284,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
                 ui.Text(catalog, 11.0f, {0.50f, 0.57f, 0.67f, 1.0f});
             }
             ui.Text(
-                std::format("{}  |  {}  |  quality {}  |  {}  |  AO mode {}  |  {:.0f} fps", info.gpuName, info.rayTracingSupported ? "RT capable" : "no RT",
+                std::format("{}  |  {}  |  quality {}  |  {}  |  AO mode {}  |  {:.0f} fps", std::string_view(info.gpuName), info.rayTracingSupported ? "RT capable" : "no RT",
                             QualityName(ZHLN::DetectPreset(state.settings)), AAName(state.settings.antiAliasing.mode), state.settings.post.mode, state.fps),
                 11.0f, {0.50f, 0.57f, 0.67f, 1.0f}
             );
@@ -1354,7 +1301,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
         }
     );
 
-    state.hostUI->Submit(std::move(ui).End());
+    (void)state.hostUI->Submit(std::move(ui).End());
 }
 
 } // namespace
@@ -1367,7 +1314,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
+        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
@@ -1383,22 +1330,23 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::Engine::Create(engineConfig);
+    ZHLN::Platform::Init();
+    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
+    auto engine = std::move(*engineRes);
     if (!engineConfig.headless) {
-        engine->Host().Focus();
+        engine->FocusWindow(engine->PrimaryWindow());
     }
 
 #if defined(ZHLN_HAS_FONTS)
     // The composition root's default bake (see app/main.cpp): the vendored
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
-    if (auto fontID = ZHLN::Fonts::LoadBakedFont(nullptr, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     } else {
         ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
@@ -1408,8 +1356,8 @@ auto main(int argc, char* argv[]) -> int {
     // An imported model holds GPU resources core cannot recreate, so the importer
     // subscribes its own device-lost rebuild. Once, next to the first import (see
     // GLTF::InstallDeviceLostHandler).
-    ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    ZHLN::Animation::Install(*engine);
+    
+    ZHLN::Animation::AnimationContext animCtx {};
 
     SampleState state;
     state.rayTraced   = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");
@@ -1427,7 +1375,8 @@ auto main(int argc, char* argv[]) -> int {
     // The turntable owns the camera, so core's WASD free-cam has to come off the
     // camera entity or the two write the same transform every frame.
     {
-        const ZHLN::Entity camera = engine->Entities().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const auto cameraOpt = engine->Entities()->SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = cameraOpt.HasValue() ? cameraOpt.value : ZHLN::Entity{};
         if (camera != ZHLN::Entity::Null()) {
         }
     }
@@ -1435,15 +1384,8 @@ auto main(int argc, char* argv[]) -> int {
     // A new VkDevice leaves every primitive this sample built behind with the old
     // one. The model rebuilds itself through the importer's subscription; the
     // studio and the settings are this callback's job.
-    engine->AddDeviceLostCallback([&state](ZHLN::Engine& recovered) -> void {
-        ZHLN::Log("[RemoteGLB] Device recovered; rebuilding the studio.");
-        if (state.subject.loaded) {
-            RebuildLook(recovered, state);
-        } else {
-            state.settings = MakeStudioSettings(state.subject.radius, state.rayTraced);
-            ApplyGraphicsSettings(recovered, state.settings);
-        }
-    });
+    uint64_t lostToken = 0;
+    if (auto t = engine->AddDeviceLostCallback(+[](void* u) noexcept { static_cast<SampleState*>(u)->rebuildDue = true; }, &state); t.HasValue()) { lostToken = t.value; }
 
     // Settings first, so the backdrop and the grade are already right while the
     // download runs; the subject-relative fields are written again, with the
@@ -1468,7 +1410,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Remote::DiskCache         diskCache;
     ZHLN::Remote::AsyncAssetFetcher fetcher(diskCache, timeoutSeconds);
     state.fetcher = &fetcher;
-    engine->Assets().SetRemoteFetcher(&fetcher);
 
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
@@ -1485,15 +1426,19 @@ auto main(int argc, char* argv[]) -> int {
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
-    state.hostUI = std::make_unique<ZHLN::NativeHostUI>(*engine);
-    state.hostUI->SetCallback([&state](ZHLN::Engine& eng, ZHLN::WindowID) -> void { DrawHUD(eng, state); });
+    state.hostUI = std::make_unique<ZHLN::HostUI>(*engine);
+#if defined(ZHLN_HAS_FONTS)
+    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource())) {
+        state.hostUI->SetBakedFont(std::move(*fontAsset));
+    }
+#endif
 
     while (engine->IsRunning()) {
         state.dt  = clock.Tick();
         state.now = clock.WallTimeSinceStart();
         state.fps = (state.fps * 0.90f) + ((state.dt > 0.0f ? 1.0f / state.dt : 0.0f) * 0.10f);
 
-        ZHLN::CheckForCrashes(crashState, engine.get());
+        ZHLN::CheckForCrashes(crashState, engine.Get());
         engine->ProcessEvents();
         HandleInput(*engine, state);
         PollFetch(*engine, state);
@@ -1502,14 +1447,28 @@ auto main(int argc, char* argv[]) -> int {
         UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
 
-        state.hostUI->Update(state.dt);
+        if (state.rebuildDue) {
+            state.rebuildDue = false;
+            if (state.subject.loaded && state.subject.document) {
+                (void)ZHLN::GLTF::RebuildGPUResources(*engine, *state.subject.document, state.subject.asset);
+                RebuildLook(*engine, state);
+            } else {
+                state.settings = MakeStudioSettings(state.subject.radius, state.rayTraced);
+                ApplyGraphicsSettings(*engine, state.settings);
+            }
+        }
+        ZHLN::Animation::Step(*engine, animCtx, state.dt);
+        if (!engineConfig.headless && state.hostUI->BeginFrame().HasValue()) {
+            const auto ext = engine->WindowExtent(engine->PrimaryWindow());
+            if (ext.width > 0 && ext.height > 0) DrawHUD(*engine, state);
+        }
         const auto result = engine->Tick(state.dt);
-        if (!result) {
-            ZHLN::LogError("[RemoteGLB] frame failed: {}", result.error());
-            return EXIT_FAILURE;
+        if (!result.HasValue()) {
+            ZHLN::LogError("[RemoteGLB] frame failed: {}", ZHLN::Error(result.error).Message());
+            break;
         }
 
-        if (state.frameBudget != 0 && engine->GetCurrentFrame() >= state.frameBudget) {
+        if (state.frameBudget != 0 && engine->CurrentFrame() >= state.frameBudget) {
             ZHLN::Log("[RemoteGLB] Frame budget of {} reached; exiting.", state.frameBudget);
             break;
         }
@@ -1520,7 +1479,8 @@ auto main(int argc, char* argv[]) -> int {
     // below, asks them to retire and joins them. A transfer already inside
     // libcurl runs to its own timeout, which is the one thing that can delay
     // shutdown either way.
-    engine->Assets().SetRemoteFetcher(nullptr);
+    engine->RemoveDeviceLostCallback(lostToken);
+    ClearSubject(*engine, state.subject);
     state.catalog.worker.request_stop();
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();

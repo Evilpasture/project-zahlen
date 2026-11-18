@@ -98,14 +98,14 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_animation
-    zahlen_gltf
+    zahlen_animation zahlen_locomotion zahlen_procedural_animation
+    zahlen_gltf_assets
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extern/cgltf
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
@@ -193,13 +193,11 @@ zahlen_add_extras_group(Extras_Socket
     TestLocalStream.cpp
     TestDiscordRPC.cpp
 )
-# zahlen_discord_engine is PUBLIC zahlen_discord_rpc; TestDiscordRPC.cpp calls
 # Discord::Encode/DecodeRpcFrame, which the rpc target owns.
 target_link_libraries(Extras_Socket PRIVATE
     zahlen_engine
     zahlen_socket
     zahlen_discord_rpc
-    zahlen_discord_engine
     zahlen_serialization
 )
 zahlen_register_extras_test(Extras_Socket)
@@ -232,20 +230,17 @@ zahlen_add_extras_build_alias(Extras_UI TestBakedFontLoader)
 zahlen_add_extras_group(Extras_Simulation
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestTwoBoneIK.cpp
-    TestTerrainLifecycle.cpp
     TestALife.cpp
     TestDataModel.cpp
 )
 target_link_libraries(Extras_Simulation PRIVATE
     zahlen_engine
-    zahlen_skeletal_animation
-    zahlen_native_terrain
+    zahlen_animation
     zahlen_alife
     zahlen_datamodel
 )
 zahlen_register_extras_test(Extras_Simulation)
 zahlen_add_extras_build_alias(Extras_Simulation TestTwoBoneIK)
-zahlen_add_extras_build_alias(Extras_Simulation TestTerrainLifecycle)
 zahlen_add_extras_build_alias(Extras_Simulation TestALife)
 zahlen_add_extras_build_alias(Extras_Simulation TestDataModel)
 
@@ -261,7 +256,6 @@ target_link_libraries(Extras_Serialization PRIVATE
     zahlen_engine
     zahlen_serialization
     zahlen_lua
-    zahlen_ragdoll_authoring
 )
 add_dependencies(Extras_Serialization zcook)
 zahlen_register_extras_test(Extras_Serialization
@@ -326,7 +320,7 @@ zahlen_add_extras_group(Extras_BSP
     TestBSPStudioModel.cpp
     TestBSPLighting.cpp
 )
-# zahlen_interaction is PUBLIC zahlen_engine and PUBLIC zahlen_bsp, and the
+# zahlen_interaction is PUBLIC zahlen_engine and PUBLIC zahlen_bsp_assets, and the
 # character components these suites touch are PODs reached through
 # ZHLN_OPTIONAL_INCLUDE_ROOTS. No BSP or Character:: symbol is called directly.
 target_link_libraries(Extras_BSP PRIVATE
@@ -410,7 +404,6 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # suite references JPH symbols from its own object file rather than reaching
 # them through the engine's DT_NEEDED entry.
 target_link_libraries(${TARGET_NAME} PRIVATE
-    Jolt
     zahlen_engine
     zahlen_serialization
 )
@@ -540,15 +533,6 @@ target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal
 target_compile_definitions(Extras_GLTFAssets PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 zahlen_register_extras_test(Extras_GLTFAssets)
 
-# Exercise the existing real importer suite against the shared decoder even
-# when the broad GPU render groups are disabled in menuconfig.
-zahlen_add_extras_group(Extras_GLTFNative
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp ../render/TestGLTFImport.cpp)
-target_link_libraries(Extras_GLTFNative PRIVATE zahlen_gltf zahlen_serialization zahlen_signal zahlen_command_line)
-target_include_directories(Extras_GLTFNative SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf )
-target_link_libraries(Extras_GLTFNative PRIVATE zahlen_image)
-target_compile_definitions(Extras_GLTFNative PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-zahlen_register_extras_test(Extras_GLTFNative)
 
 # Scene orchestration is a consumer library; this executable links no native adapter.
 zahlen_add_extras_group(Extras_SceneAssets
@@ -627,7 +611,7 @@ endif()
 # Engine-owned motor/playback controls: no native animation/controller dependency.
 zahlen_add_extras_group(Extras_RuntimeControls
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestRuntimeControls.cpp)
-target_link_libraries(Extras_RuntimeControls PRIVATE zahlen_gltf_assets zahlen_skeletal_animation zahlen_application)
+target_link_libraries(Extras_RuntimeControls PRIVATE zahlen_gltf_assets zahlen_animation zahlen_application)
 zahlen_register_extras_test(Extras_RuntimeControls POOL gpu LABELS GPU Extras)
 
 # Capability-only character host: no native controller, Jolt or graph adapter.

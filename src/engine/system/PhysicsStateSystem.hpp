@@ -5,12 +5,12 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 class PhysicsContext;
 
-class ZHLN_API VisualInterpolationSystem {
+class VisualInterpolationSystem {
   public:
     static void Update(
         ECS::Query<

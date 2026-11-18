@@ -8,11 +8,11 @@
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
 // and engine fixture live in LightingRTCommon.hpp.
 
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "LightingRTCommon.hpp"
 
 // ============================================================================
@@ -42,7 +42,7 @@ struct RayTracedShadowsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            if (!engine->Graphics().Info().rayTracingSupported) {
+            if (!engine->Graphics()->Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] No raytracing support on this device; nothing to verify for RT shadows.");
                 return {};
             }
@@ -50,10 +50,10 @@ struct RayTracedShadowsTestSuite {
             DisableAA(*engine);
 
             {
-                auto reg = engine->Entities();
-                auto rc = engine->Graphics();
+                auto& reg = *engine->Entities();
+                auto& rc = *engine->Graphics();
 
-                engine->Graphics().PatchSettings([](auto& gfx) {
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 1.5f;
                     gfx.post.enableSSR               = 1;
@@ -61,16 +61,14 @@ struct RayTracedShadowsTestSuite {
                 });
 
                 auto floorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}});
-                if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {
+                if (!ZHLN::Test::ExpectTrue(floorMatRes.HasValue())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::PrefabFactory::CreatePlane(
-                    *engine, 400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}
-                );
+                engine->Assets()->SpawnPlane(400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}).value;
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
-                reg.Attach(
+                reg.AttachMany(
                     sunEnt,
                     ZHLN::Components::TransformComponent {
                         .position = ZHLN::FVec3{60.0f, 45.0f, 0.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 90.0f, 0.0f}})
@@ -83,7 +81,7 @@ struct RayTracedShadowsTestSuite {
                     }
                 );
 
-                const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
                     cam.position = {-10.0f, 6.0f, -8.0f};
                     cam.yaw      = ZHLN::DegF{0.0f};
@@ -102,14 +100,12 @@ struct RayTracedShadowsTestSuite {
 
             const auto stable = RunStableScene(
                 *engine, 8, "raytraced_shadow_occlusion_and_stability",
-                [&](ZHLN::Engine& eng) -> bool {
+                [&](ZHLN::COM::IEngine& eng) -> bool {
                     captureFailed = false;
-                    auto reg = eng.Entities();
+                    auto& reg = *eng.Entities();
 
-                    const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
-                        eng, {0.5f, 3.0f, 4.0f},
-                        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, -8.0}, .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}
-                    );
+                    const ZHLN::Entity occluder = eng.Assets()->SpawnBox({0.5f, 3.0f, 4.0f},
+                        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, -8.0}, .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}).value;
 
                     TickFrames(eng, 2);
 
@@ -123,11 +119,9 @@ struct RayTracedShadowsTestSuite {
                         return false;
                     }
 
-                    ZHLN::DespawnEntity(eng, occluder);
-                    eng.ProcessPendingDestroy();
-                    ZHLN::Test::ExpectFalse(reg.IsAlive(occluder));
-
+                    eng.Entities()->Despawn(occluder);
                     TickFrames(eng, 2);
+                    ZHLN::Test::ExpectFalse(reg.IsAlive(occluder));
                     const RgbImage shadowClear = Capture(eng, "headless_lighting_rt_shadow_clear.ppm");
                     if (!ZHLN::Test::ExpectTrue(shadowClear.Valid())) {
                         captureFailed = true;

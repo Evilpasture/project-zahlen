@@ -21,17 +21,16 @@
 
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <cmath>
@@ -119,8 +118,8 @@ struct BBox {
     return leaked;
 }
 
-void DisableJitterVignetteAndTargetDrive(ZHLN::Engine& engine) {
-    auto reg = engine.Entities();
+void DisableJitterVignetteAndTargetDrive(ZHLN::COM::IEngine& engine) {
+    auto& reg = *engine.Entities();
     for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives the main camera through the registry; the target-orbit lerp
         // would fight it. The rig component is an extras component
@@ -130,7 +129,7 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::Engine& engine) {
         reg.Detach<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
     }
     // AA off so the static scene is actually static.
-    engine.Graphics().PatchSettings([](auto& gfx) {
+    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.antiAliasing.mode            = ZHLN::AAMode::None;
         gfx.environment.fullBright       = 1;
         gfx.post.vignetteIntensity       = 0.0f;
@@ -159,15 +158,15 @@ struct ViewportSubregionTestSuite {
             if (!engine.Valid()) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright = 1;
                 gfx.environment.ambientExposure = 7.0f;
                 gfx.post.exposure = 3.0f;
                 gfx.antiAliasing.mode = ZHLN::AAMode::None;
             });
-            ZHLN::Test::ExpectFalse(engine->Graphics().Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            ZHLN::Test::ExpectFalse(engine->Graphics()->Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
             ZHLN::Test::Headless::ResetScene(*engine);
-            ZHLN::Test::ExpectTrue(engine->Graphics().Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            ZHLN::Test::ExpectTrue(engine->Graphics()->Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
             return {};
         }
 
@@ -177,15 +176,15 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
 
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
             // The engine is pooled across suites; whatever band this test
             // leaves set must not leak into the next suite's captures.
             struct ViewportRestore {
-                ZHLN::GraphicsDevice                rc;
-                ZHLN::RenderContext::ViewportRect   full;
-                ~ViewportRestore() { rc.SetViewport(full); }
+                ZHLN::COM::IGraphicsDevice& rc;
+                ZHLN::ViewportRect   full;
+                ~ViewportRestore() { (void)rc.SetViewport(full); }
             } restore {rc, rc.Viewport()};
 
             DisableJitterVignetteAndTargetDrive(*engine);
@@ -194,7 +193,7 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);
             }
 
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 0.0f, 4.0f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -208,10 +207,8 @@ struct ViewportSubregionTestSuite {
             if (!matRes) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
-            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
-                *engine, ZHLN::FVec3::Splat(0.5f),
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes}
-            );
+            const ZHLN::Entity box = engine->Assets()->SpawnBox(ZHLN::FVec3::Splat(0.5f),
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes}).value;
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 
             // The engine is pooled across suites; force one target recreate so
@@ -227,13 +224,14 @@ struct ViewportSubregionTestSuite {
             const Band     bandB {160, 640};
 
             auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<RgbImage, ZHLN::ErrorCode> {
-                rc.SetViewport(ZHLN::RenderContext::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
+                (void)rc.SetViewport(ZHLN::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
-                const auto captured = rc.CaptureFrame();
-                if (!captured) {
+                ZHLN::Screenshot::CaptureBuffer capBuf;
+                const auto captured = capBuf.Read(rc, ZHLN::Extent2D {.width = 960u, .height = H});
+                if (!captured.has_value() || *captured == nullptr) {
                     return std::unexpected(ViewportSubregionError::CaptureFailed);
                 }
-                const RgbImage image = ZHLN::Test::Headless::ToRgbImage(*captured);
+                const RgbImage image = ZHLN::Test::Headless::ToRgbImage(**captured);
                 if (!image.Valid()) {
                     return std::unexpected(ViewportSubregionError::RenderOutputBlank);
                 }

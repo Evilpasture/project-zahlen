@@ -1,27 +1,28 @@
+#include <glTF/GLTFAssets.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/AnimationContext.hpp>
+#include <Animation/AnimationSystem.hpp>
 #include <Animation/Components.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <glTF/GLTFImporter.hpp>
+#include <glTF/GLTFAssets.hpp>
 #include <span>
 #include <string>
 #include <utility>
@@ -82,11 +83,12 @@ struct RenderAnimatedMeshTestSuite {
             }
             // Engine creation installs the skeletal runtime.
 
-            auto reg = engine->Entities();
+            ZHLN::Test::SetTimeout(180);
+            auto& reg = *engine->Entities();
 
             // 2. Directional Sun Lighting
             const ZHLN::Entity sunEnt = reg.Spawn();
-            reg.Attach(
+            reg.AttachMany(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
                     .position = ZHLN::FVec3{0.0f, 15.0f, 0.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}})
@@ -95,30 +97,34 @@ struct RenderAnimatedMeshTestSuite {
             );
 
             // 3. Instantiate Prefab Directly From Embedded In-Memory Byte Stream
-            std::vector<ZHLN::Entity> spawnedParts(512);
-            const uint32_t            count = ZHLN::GLTF::InstantiatePrefabFromMemory(
-                *engine, kUziGlbData, "Uzi.glb",
-                {
-                    .position        = {0.0f, 0.0f, 0.0f},
+            auto decodedUzi = ZHLN::GLTF::Decode(kUziGlbData, "Uzi.glb", {}, {}, engine->Assets());
+            if (!decodedUzi) return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
+            auto uploadedUzi = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *decodedUzi);
+            if (!uploadedUzi) return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
+            std::vector<ZHLN::Entity> spawnedParts = engine->Assets()->Instantiate(
+                uploadedUzi->hash,
+                ZHLN::PrefabFactory::SpawnParams {
+                    .position        = ZHLN::DVec3 {0.0, 0.0, 0.0},
                     .createPhysics   = false,
                     .isStaticPhysics = true,
                     .isAnimated      = true,
-                },
-                spawnedParts.data(), 512
+                }
             );
-            spawnedParts.resize(count);
+            const uint32_t count = static_cast<uint32_t>(spawnedParts.size());
 
             if (count == 0 || spawnedParts.empty()) {
                 return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
             }
 
+            ZHLN::Animation::AnimationContext animCtx;
+            ZHLN::Animation::Sync(reg, animCtx);
             const ZHLN::Entity rootEntity = spawnedParts[0];
             const auto         animComp   = reg.Get<ZHLN::Animation::AnimatorComponent>(rootEntity);
             if (!animComp) {
                 return std::unexpected(AnimatedMeshTestError::NoAnimatorFound);
             }
 
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 2.5f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -133,6 +139,7 @@ struct RenderAnimatedMeshTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 engine->ProcessEvents();
+                ZHLN::Animation::Step(*engine, animCtx, dt);
                 const auto status = engine->Tick(dt);
                 if (!status) {
                     return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
@@ -157,12 +164,13 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::NoSkeletalMeshSpawned);
             }
             engine->ProcessEvents();
+            ZHLN::Animation::Step(*engine, animCtx, dt);
             if (!engine->Tick(dt)) {
                 return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
             }
             for (const auto& [entity, buffer]: skinnedScratch) {
                 const auto skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
-                ZHLN::Test::ExpectTrue(skin.has_value() && skin->skinnedScratch == buffer);
+                ZHLN::Test::ExpectTrue((skin != nullptr) && skin->skinnedScratch == buffer);
             }
 
             // 6. Frame capture and color histogram analysis, in memory.

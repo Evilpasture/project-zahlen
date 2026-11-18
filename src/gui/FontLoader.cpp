@@ -67,9 +67,9 @@ auto GetBakedFontLoaderUser() noexcept -> void* {
     return GetState().loaderUser;
 }
 
-auto LoadBakedFont(BakedFontAsset& out) -> bool {
-    auto& state = GetState();
-    return (state.loader != nullptr) && state.loader(state.loaderUser, out);
+auto LoadBakedFont() -> std::optional<BakedFontAsset> {
+    const auto& state = GetState();
+    return state.loader != nullptr ? state.loader(state.loaderUser) : std::nullopt;
 }
 
 

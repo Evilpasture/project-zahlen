@@ -50,9 +50,10 @@ struct LuaValueTrait<ZHLN::Matrix<T, Rows, Cols, Alignment>> {
     using Mat                         = ZHLN::Matrix<T, Rows, Cols, Alignment>;
 
     static auto Read(Value reader) -> std::expected<Mat, ErrorCode> {
-        size_t length = 0;
-        if (!reader.IsSequence(length))
+        const auto lengthOpt = reader.SequenceLength();
+        if (!lengthOpt)
             return std::unexpected(LuaError::TypeMismatch);
+        const size_t length = *lengthOpt;
         if (length != Rows * Cols)
             return std::unexpected(LuaError::OutOfRange);
         Mat value {};
@@ -75,8 +76,8 @@ struct LuaValueTrait<FVec3> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<FVec3, ErrorCode> {
-        size_t seqLen = 0;
-        if (reader.IsSequence(seqLen)) {
+        if (const auto seqLenOpt = reader.SequenceLength()) {
+            const size_t seqLen = *seqLenOpt;
             if (seqLen != 3u) {
                 return std::unexpected(LuaError::OutOfRange);
             }
@@ -109,8 +110,8 @@ struct LuaValueTrait<FVec4> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<FVec4, ErrorCode> {
-        size_t seqLen = 0;
-        if (reader.IsSequence(seqLen)) {
+        if (const auto seqLenOpt = reader.SequenceLength()) {
+            const size_t seqLen = *seqLenOpt;
             if (seqLen != 4u) {
                 return std::unexpected(LuaError::OutOfRange);
             }
@@ -145,8 +146,8 @@ struct LuaValueTrait<ZHLN::Quat> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<ZHLN::Quat, ErrorCode> {
-        size_t seqLen = 0;
-        if (reader.IsSequence(seqLen)) {
+        if (const auto seqLenOpt = reader.SequenceLength()) {
+            const size_t seqLen = *seqLenOpt;
             if (seqLen != 4u) {
                 return std::unexpected(LuaError::OutOfRange);
             }

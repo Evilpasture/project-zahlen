@@ -78,13 +78,10 @@ bytes to its Application-owned compositor; no global loader is installed.
 
 This is a host cut, not completion of the full migration roadmap:
 
-- glTF/BSP, scene orchestration, the world editor, native diagnostic scene host,
-  gameplay modules and tight-loop extensions still have native implementations.
-- Their old compositor was moved to the explicitly named
-  `extensions/NativeHostUI` target. It does not accept IEngine, does not unwrap
-  COM and is not linked by Application, HostUI, the default sandbox or UIEditor.
-  It is a temporary native dependency of the not-yet-ported targets, not a
-  second implementation behind the new Application API.
+- glTF/BSP, scene orchestration, the world editor, diagnostic scene host,
+  gameplay modules, samples, and animation/physics/VFX extensions have all been
+  migrated to COM, and the transitional `extensions/NativeHostUI` target has
+  been deleted.
 - Native scene and ProjectLight module diagnostics drive explicit standalone
   native loops until their Scene/Character/Camera/ProjectLight dependencies are
   ported. They do not route native Engine callbacks through Application.

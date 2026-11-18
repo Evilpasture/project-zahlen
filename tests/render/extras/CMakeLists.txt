@@ -16,8 +16,6 @@ endif()
 # GLIBC_TUNABLES pin -- is identical for every suite and is not worth repeating.
 set(EXTRAS_RENDER_TEST_SOURCES
     TestCombatFX.cpp
-    TestExplosion.cpp
-    TestLightning.cpp
 )
 
 foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
@@ -36,10 +34,6 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
         CXX_SCAN_FOR_MODULES ON
         ZHLN_ZTEST_SOURCE_FILES "${_vfx_files}"
     )
-
-    if(NOT TARGET_NAME STREQUAL "TestCombatFX")
-        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_native_vfx)
-    endif()
     # No zahlen_vulkan -- same reasoning as tests/render/CMakeLists.txt.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine

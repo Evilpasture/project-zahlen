@@ -597,10 +597,13 @@ int main(void) {
     endif()
 endif()
 
-# Force the debug renderer to compile globally, even in Release configurations
-add_compile_definitions(JPH_DEBUG_RENDERER)
-
-set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
+# Jolt is strictly an engine implementation detail: compile it as a private
+# -fPIC archive with hidden symbol visibility so libzahlen_engine.so is the
+# single shared library and exports zero JPH::* symbols or JPH_* defines.
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE ON CACHE BOOL "Enable Jolt debug renderer" FORCE)
+set(DEBUG_RENDERER_IN_DISTRIBUTION ON CACHE BOOL "Enable Jolt debug renderer" FORCE)
+set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "Build Jolt as static library" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "Do not install Jolt" FORCE)
 
 # --- Jolt Vulkan compute shader compiler ---
 # Jolt compiles its own compute shaders (Jolt/Shaders/*.hlsl -> *.spv) with dxc.
@@ -660,49 +663,14 @@ if(ZHLN_BUILD_RENDER)
     endif()
 endif()
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build EXCLUDE_FROM_ALL SYSTEM)
 
-# Force Jolt to export all symbols
-target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
 set_target_properties(Jolt PROPERTIES
-    CXX_VISIBILITY_PRESET default
-    C_VISIBILITY_PRESET default
-    VISIBILITY_INLINES_HIDDEN OFF
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    C_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
-
-# --- Jolt's usage requirements, without its archive ------------------------
-#
-# include/Zahlen/Engine/Engine.hpp, include/Zahlen/ECS/Components.hpp,
-# include/Zahlen/Audio/Audio.hpp and src/gui/GUI.hpp include <Jolt/Jolt.h>, so
-# consumers of those headers need Jolt's include directories and its ABI
-# defines (JPH_DOUBLE_PRECISION, JPH_OBJECT_LAYER_BITS, JPH_SHARED_LIBRARY, the
-# JPH_USE_* feature set). They do not need libJolt.so on their own link line:
-# Jolt is SHARED, so libzahlen_engine.so records it as a DT_NEEDED entry and
-# every consumer resolves JPH::* through the engine.
-#
-# Naming Jolt PUBLIC on the engine and the static subsystems is what produced
-# the noise. CMake propagates a static library's PUBLIC/PRIVATE dependencies
-# verbatim to the final link of every dependent, so Jolt ended up on the command
-# line of all 18 executables -- after libzahlen_engine.so, which already defines
-# the same symbols. mold reports that as "Unused direct dependencies:
-# libJolt.so", and it is also why -Wl,--no-as-needed was needed to stop the
-# as-needed culling from dropping it.
-#
-# The properties are copied explicitly rather than taken by INTERFACE-linking
-# Jolt, because an INTERFACE library's INTERFACE_LINK_LIBRARIES propagate as
-# link items too -- that reintroduces exactly the entry this removes. Property
-# copies evaluate at generate time, so Jolt's $<BUILD_INTERFACE:> include dirs
-# and configuration-conditioned defines arrive intact.
-add_library(zahlen_jolt_headers INTERFACE)
-target_include_directories(zahlen_jolt_headers SYSTEM INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_INCLUDE_DIRECTORIES>)
-target_compile_definitions(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_DEFINITIONS>)
-target_compile_options(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_OPTIONS>)
-target_compile_features(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_FEATURES>)
 
 if(ZHLN_BUILD_RENDER)
     # --- VulkanMemoryAllocator ---
@@ -716,7 +684,11 @@ set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
-set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(meshoptimizer PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
 
 if(ZHLN_BUILD_RENDER)
     # --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
@@ -741,6 +713,9 @@ if(ZHLN_BUILD_RENDER)
         C_STANDARD_REQUIRED ON
         C_EXTENSIONS OFF
         POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
 endif()
 

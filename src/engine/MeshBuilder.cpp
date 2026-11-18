@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PrefabFactoryInternal.hpp"
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <engine/PrefabFactory.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <render/Render.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -38,7 +37,7 @@ struct VertexStreams {
 
 } // namespace
 
-auto BuildTetrahedronMesh(GraphicsDevice gfx, bool buildBLAS) -> Mesh {
+auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh {
     std::vector<VertexPosition> positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
     std::vector<uint32_t>       indices   = {0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2};
     VertexStreams               streams;
@@ -78,7 +77,7 @@ auto BuildTetrahedronMesh(GraphicsDevice gfx, bool buildBLAS) -> Mesh {
     return finalMesh;
 }
 
-auto BuildPlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+auto BuildPlaneMesh(RenderContext& gfx, float extent, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
@@ -122,7 +121,7 @@ auto BuildPlaneMesh(GraphicsDevice gfx, float extent, ZHLN::FVec4 color, bool bu
     return finalMesh;
 }
 
-auto BuildBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+auto BuildBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     const float x = halfExtents.x;
     const float y = halfExtents.y;
     const float z = halfExtents.z;
@@ -219,7 +218,7 @@ auto BuildBoxMesh(GraphicsDevice gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color
     return finalMesh;
 }
 
-auto BuildSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+auto BuildSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -287,7 +286,7 @@ auto BuildSphereMesh(GraphicsDevice gfx, float radius, ZHLN::FVec4 color, bool b
     return finalMesh;
 }
 
-auto BuildCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
@@ -363,7 +362,7 @@ auto BuildCylinderMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVe
     return finalMesh;
 }
 
-auto BuildConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+auto BuildConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;
@@ -434,22 +433,22 @@ auto BuildConeMesh(GraphicsDevice gfx, float radius, float height, ZHLN::FVec4 c
     return finalMesh;
 }
 
-auto CreateTetrahedronMesh(GraphicsDevice gfx) -> Mesh {
+auto CreateTetrahedronMesh(RenderContext& gfx) -> Mesh {
     return BuildTetrahedronMesh(gfx, true);
 }
-auto CreateBoxMesh(GraphicsDevice gfx, FVec3 halfExtents, FVec4 color) -> Mesh {
+auto CreateBoxMesh(RenderContext& gfx, FVec3 halfExtents, FVec4 color) -> Mesh {
     return BuildBoxMesh(gfx, halfExtents, color, true);
 }
-auto CreatePlaneMesh(GraphicsDevice gfx, float extent, FVec4 color) -> Mesh {
+auto CreatePlaneMesh(RenderContext& gfx, float extent, FVec4 color) -> Mesh {
     return BuildPlaneMesh(gfx, extent, color, true);
 }
-auto CreateSphereMesh(GraphicsDevice gfx, float radius, FVec4 color) -> Mesh {
+auto CreateSphereMesh(RenderContext& gfx, float radius, FVec4 color) -> Mesh {
     return BuildSphereMesh(gfx, radius, color, true);
 }
-auto CreateCylinderMesh(GraphicsDevice gfx, float radius, float height, FVec4 color) -> Mesh {
+auto CreateCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color) -> Mesh {
     return BuildCylinderMesh(gfx, radius, height, color, true);
 }
-auto CreateConeMesh(GraphicsDevice gfx, float radius, float height, FVec4 color) -> Mesh {
+auto CreateConeMesh(RenderContext& gfx, float radius, float height, FVec4 color) -> Mesh {
     return BuildConeMesh(gfx, radius, height, color, true);
 }
 

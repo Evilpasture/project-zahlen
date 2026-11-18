@@ -1,11 +1,3 @@
-# Transitional native-extension UI helper, deliberately not a dependency of
-# the COM Application/HostUI targets. Removed as native plugins are migrated.
-add_library(zahlen_native_host_ui STATIC ${PROJECT_SOURCE_DIR}/extensions/NativeHostUI/NativeHostUI.cpp)
-target_include_directories(zahlen_native_host_ui PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
-target_link_libraries(zahlen_native_host_ui PUBLIC zahlen_engine PRIVATE zahlen_warnings)
-set_target_properties(zahlen_native_host_ui PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
-zahlen_enable_reflection(zahlen_native_host_ui)
-
 add_library(zahlen_host_ui STATIC HostUI.cpp)
 set_target_properties(zahlen_host_ui PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
 target_include_directories(zahlen_host_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -31,9 +23,7 @@ target_link_libraries(zahlen_host_runner
 # Only app-owned targets publish the host-facing headers under app/include/.
 target_include_directories(zahlen_host_runner
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${PROJECT_SOURCE_DIR}/src
 )
-target_compile_definitions(zahlen_host_runner PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_host_runner)
 
 # Application composition lives outside Core: ordinary games link just this
@@ -55,25 +45,14 @@ target_link_libraries(zahlen_application
 target_include_directories(zahlen_application
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
-        ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/plugins
         ${PROJECT_SOURCE_DIR}/extensions
         ${PROJECT_SOURCE_DIR}/gameplay
 )
-target_compile_definitions(zahlen_application PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(zahlen_application)
 
 # Application is deliberately independent of which extras this checkout built.
 # Compose gameplay explicitly with Application::Install in the consuming app.
-set(AUTOLOAD_INCLUDES "")
-set(AUTOLOAD_CALLS "")
-
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/DefaultModules.cpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/DefaultModules.cpp"
-    @ONLY
-)
-target_sources(zahlen_application PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/DefaultModules.cpp")
 
 # The UI-tree editor is an Application, not a KernelSession-only tool: it composes no
 # gameplay modules, but it runs on the same runner as every other app, so it

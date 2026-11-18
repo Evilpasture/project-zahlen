@@ -2,152 +2,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+
 #include <Zahlen/Core/Math.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Render/Vertex.hpp>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Geometry/AABox.h>
-#include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec4.h>
-#include <Zahlen/Render/Vertex.hpp>
+#if defined(__F16C__) || defined(__AVX2__)
+#include <immintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 namespace ZHLN::Math {
-
-inline auto CreateLookAt(ZHLN::FVec3 eye, ZHLN::FVec3 target, ZHLN::FVec3 up) {
-    return JPH::Mat44::sLookAt(JPH::Vec3(eye.x, eye.y, eye.z), JPH::Vec3(target.x, target.y, target.z), JPH::Vec3(up.x, up.y, up.z));
-}
-
-inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
-    float f = 1.0f / JPH::Tan(fovRadians * 0.5f);
-    return JPH::Mat44(
-        JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -f, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.0f, farZ / (nearZ - farZ), -1.0f),
-        JPH::Vec4(0.0f, 0.0f, (nearZ * farZ) / (nearZ - farZ), 0.0f)
-    );
-}
-
-inline auto CreateOrtho(float left, float right, float bottom, float top, float nearZ, float farZ) {
-    float r_l = right - left;
-    float t_b = top - bottom;
-    float f_n = farZ - nearZ;
-
-    return JPH::Mat44(
-        JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f),
-        JPH::Vec4(-(right + left) / r_l, (top + bottom) / t_b, -nearZ / f_n, 1.0f)
-    );
-}
-
-inline auto CreateTransform(ZHLN::FVec3 translation, ZHLN::FVec4 rotation, ZHLN::FVec3 scale) {
-    JPH::Mat44 m = JPH::Mat44::sRotationTranslation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w), JPH::Vec3(translation.x, translation.y, translation.z));
-    return m.PreScaled(JPH::Vec3(scale.x, scale.y, scale.z));
-}
-
-inline auto CreateTransform(ZHLN::FVec3 translation, ZHLN::FVec4 rotation) {
-    return JPH::Mat44::sRotationTranslation(JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w), JPH::Vec3(translation.x, translation.y, translation.z));
-}
-
-// Exact scalar equality for matrix-cache comparisons; this is not an epsilon test.
-[[nodiscard]] inline auto SameMatrix(const JPH::Mat44& left, const JPH::Mat44& right) noexcept -> bool {
-    for (int column = 0; column < 4; ++column) {
-        const JPH::Vec4 leftColumn  = left.GetColumn4(column);
-        const JPH::Vec4 rightColumn = right.GetColumn4(column);
-        if (leftColumn.GetX() != rightColumn.GetX() || leftColumn.GetY() != rightColumn.GetY() || leftColumn.GetZ() != rightColumn.GetZ() ||
-            leftColumn.GetW() != rightColumn.GetW()) {
-            return false;
-        }
-    }
-    return true;
-}
-
-struct TransformTRS {
-    JPH::Vec3 translation {0.0f, 0.0f, 0.0f};
-    JPH::Quat rotation = JPH::Quat::sIdentity();
-    JPH::Vec3 scale {1.0f, 1.0f, 1.0f};
-};
-
-inline constexpr float kDecomposeEpsilon = 1e-5f;
-
-[[nodiscard]] inline auto Decompose(const JPH::Mat44& m) noexcept -> TransformTRS {
-    TransformTRS trs;
-
-    trs.translation = m.GetTranslation();
-
-    const JPH::Vec3 col0 = m.GetColumn3(0);
-    const JPH::Vec3 col1 = m.GetColumn3(1);
-    const JPH::Vec3 col2 = m.GetColumn3(2);
-
-    float       sx = col0.Length();
-    const float sy = col1.Length();
-    const float sz = col2.Length();
-
-    if (m.GetDeterminant3x3() < 0.0f) {
-        sx = -sx;
-    }
-    trs.scale = JPH::Vec3(sx, sy, sz);
-
-    const JPH::Vec3 axis0 = (std::abs(sx) > kDecomposeEpsilon) ? (col0 / sx) : JPH::Vec3::sAxisX();
-    const JPH::Vec3 axis1 = (std::abs(sy) > kDecomposeEpsilon) ? (col1 / sy) : JPH::Vec3::sAxisY();
-    const JPH::Vec3 axis2 = (std::abs(sz) > kDecomposeEpsilon) ? (col2 / sz) : JPH::Vec3::sAxisZ();
-
-    const JPH::Mat44 basis {JPH::Vec4(axis0, 0.0f), JPH::Vec4(axis1, 0.0f), JPH::Vec4(axis2, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)};
-    trs.rotation = basis.GetQuaternion().Normalized();
-
-    return trs;
-}
-
-inline auto EulerToQuat(ZHLN::FVec3 radians) {
-    return JPH::Quat::sEulerAngles(JPH::Vec3(radians.x, radians.y, radians.z));
-}
-
-inline auto QuatToEuler(ZHLN::FVec4 quat) {
-    return JPH::Quat(quat.x, quat.y, quat.z, quat.w).GetEulerAngles();
-}
-
-inline auto EulerDegreesToQuat(ZHLN::FVec3 degrees) {
-    const JPH::Vec3 radians = JPH::Vec3(degrees.x, degrees.y, degrees.z) * (JPH::JPH_PI / 180.0f);
-    return JPH::Quat::sEulerAngles(radians);
-}
-
-inline auto QuatToEulerDegrees(ZHLN::FVec4 quat) {
-    return JPH::Quat(quat.x, quat.y, quat.z, quat.w).GetEulerAngles() * (180.0f / JPH::JPH_PI);
-}
-
-inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
-    JPH::Mat44 invVP = viewProj.Inversed();
-    JPH::AABox bounds;
-
-    for (float z: {0.0f, 1.0f}) {
-        for (float y: {-1.0f, 1.0f}) {
-            for (float x: {-1.0f, 1.0f}) {
-                JPH::Vec4 worldPos = invVP * JPH::Vec4(x, y, z, 1.0f);
-                float     w        = worldPos.GetW();
-                if (std::abs(w) < 1e-6f) {
-                    continue;
-                }
-                bounds.Encapsulate(JPH::Vec3(worldPos.GetX() / w, worldPos.GetY() / w, worldPos.GetZ() / w));
-            }
-        }
-    }
-    bounds.ExpandBy(JPH::Vec3::sReplicate(2.0f));
-    return bounds;
-}
-
-inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
-    float r = width;
-    float b = height;
-
-    return {
-        JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 2.0f / b, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, -1.0f, 0.0f, 1.0f)
-    };
-}
 
 constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed1010102 {
     uint32_t xs = static_cast<uint32_t>((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;

@@ -35,7 +35,6 @@
 
 #include <DataModel/DataModel.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -125,16 +124,5 @@ class ReplicationIndex {
   private:
     std::unordered_map<InstanceId, Entity> m_entities;
 };
-
-// A module registers the components it owns; this is the client's half of that
-// contract. The scene graph needs uids (a find-by-uid pass and a debug overlay
-// both walk the registry, not the mirror), and an unregistered family can be
-// written but never read back through Registry::Get.
-inline void RegisterReplicationComponents(ECS::Registry& registry) {
-    registry.RegisterComponent<ProjectLightInstanceComponent>();
-    registry.RegisterComponent<ProjectLightNetworkOwnerComponent>();
-    registry.RegisterComponent<ProjectLightReplicaTag>();
-    registry.RegisterComponent<ProjectLightRemovalPending>();
-}
 
 } // namespace ZHLN::ProjectLight

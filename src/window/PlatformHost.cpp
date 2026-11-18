@@ -6,8 +6,8 @@
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 #include <algorithm>
 #include <memory>
 #include <string>

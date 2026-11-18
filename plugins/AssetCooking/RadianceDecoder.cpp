@@ -6,7 +6,7 @@
 #include "EnvironmentPreparation.hpp"
 #include <Image/Image.hpp>
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <array>
 #include <charconv>
@@ -525,8 +525,27 @@ auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view pat
     return DecodeRadiance(*bytes);
 }
 
-auto ReadEnvironmentImage(AssetLibrary assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
-    return ReadEnvironmentImage(assets.VFS(), path);
+auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
+    if (path.empty()) {
+        return std::unexpected(RadianceAssetError::NotFound);
+    }
+    const COM::StringView key {path.data(), path.size()};
+    if (assets.VirtualFileExists(key)) {
+        const auto size = assets.ReadVirtualFile(key, {});
+        if (size.HasValue() && size.value > 0 && size.value <= kMaxRadianceFileBytes) {
+            std::vector<std::byte> bytes(static_cast<size_t>(size.value));
+            const auto read = assets.ReadVirtualFile(
+                key, COM::Span<uint8_t> {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
+            if (read.HasValue() && read.value == size.value) {
+                return DecodeRadiance(bytes);
+            }
+        }
+    }
+    auto bytes = ReadUnpackedBytes(path);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    return DecodeRadiance(*bytes);
 }
 
 } // namespace ZHLN::AssetCooking

@@ -14,18 +14,17 @@
 
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -111,13 +110,16 @@ struct DescriptorHeapsSuite {
 
     // Captures a frame and returns its tightly packed RGB pixels. The pixels never
     // touch a file: `path` names the .ppm mirrored for inspection, not a source.
-    [[nodiscard]] static auto CapturePixels(ZHLN::GraphicsDevice rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
+    [[nodiscard]] static auto CapturePixels(ZHLN::COM::IGraphicsDevice& rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
         -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
-        const auto captured = rc.CaptureFrame();
-        if (!captured) {
+        const auto vp = rc.Viewport();
+        const ZHLN::Extent2D ext {.width = vp.width ? vp.width : 640u, .height = vp.height ? vp.height : 480u};
+        ZHLN::Screenshot::CaptureBuffer buffer;
+        const auto captured = buffer.Read(rc, ext);
+        if (!captured || *captured == nullptr) {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
         }
-        const auto image = ZHLN::Test::Headless::ToRgbImage(*captured);
+        const auto image = ZHLN::Test::Headless::ToRgbImage(**captured);
         if (!image.Valid()) {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
         }
@@ -142,13 +144,13 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             // Fullbright: raw albedo stamping so texture color is the output.
-            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Camera centered on the 8x8 grid, looking down -Z.
-            if (!ZHLN::Test::ExpectTrue(engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            if (!ZHLN::Test::ExpectTrue(engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, 4.45f, 11.0f};
                     c.camera.yaw      = ZHLN::DegF{-90.0f};
                     c.camera.pitch    = ZHLN::DegF{0.0f};
@@ -180,7 +182,7 @@ struct DescriptorHeapsSuite {
                 texelBlock.fill(texel);
 
                 const std::string   texName = std::format("dheap_tex_{:02}", i);
-                ZHLN::TextureID tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, true);
+                ZHLN::TextureID tex     = rc.CreateProceduralTexture(texName, ZHLN::Extent2D{8, 8}, texelBlock, true);
                 if (tex == ZHLN::TextureID::Invalid) {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }
@@ -196,10 +198,8 @@ struct DescriptorHeapsSuite {
                 const uint32_t  row = i / kGridCols;
                 const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f};
 
-                ZHLN::PrefabFactory::CreateBox(
-                    *engine, {halfExtent, halfExtent, halfExtent},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat}
-                );
+                engine->Assets()->SpawnBox({halfExtent, halfExtent, halfExtent},
+                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat}).value;
             }
 
             // Render enough frames for culling + lighting to settle.
@@ -207,7 +207,7 @@ struct DescriptorHeapsSuite {
             for (uint32_t frame = 0; frame < 10; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             uint32_t width = 0, height = 0;
@@ -280,12 +280,12 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             std::array<uint32_t, 16 * 16> texels {};
             texels.fill(0xFF3366CCu);
 
-            const ZHLN::TextureID first = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
+            const ZHLN::TextureID first = rc.CreateProceduralTexture("dheap_slot_reuse", ZHLN::Extent2D{16, 16}, texels, false);
             if (first == ZHLN::TextureID::Invalid) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -293,7 +293,7 @@ struct DescriptorHeapsSuite {
             // slot, no new upload. Before the guard each of these consumed a
             // fresh globalTextures[] index and leaked the previous image.
             for (uint32_t attempt = 0; attempt < 10; ++attempt) {
-                const ZHLN::TextureID again = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
+                const ZHLN::TextureID again = rc.CreateProceduralTexture("dheap_slot_reuse", ZHLN::Extent2D{16, 16}, texels, false);
                 ZHLN::Test::ExpectTrue(again == first);
             }
 
@@ -301,7 +301,7 @@ struct DescriptorHeapsSuite {
             // the dedupe is by asset id and content, not a blanket refusal.
             std::array<uint32_t, 16 * 16> otherTexels {};
             otherTexels.fill(0xFF22AA55u);
-            const ZHLN::TextureID other = rc.CreateProceduralTexture("dheap_slot_reuse_other", {16, 16}, otherTexels, false);
+            const ZHLN::TextureID other = rc.CreateProceduralTexture("dheap_slot_reuse_other", ZHLN::Extent2D{16, 16}, otherTexels, false);
             ZHLN::Test::ExpectTrue(other != first);
             // The slot still samples: one frame with the reused texture on a
             // box has to render rather than trip a validation error.
@@ -319,7 +319,7 @@ struct DescriptorHeapsSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
 
             std::array<uint32_t, 16> texels {};
@@ -328,7 +328,7 @@ struct DescriptorHeapsSuite {
             // must erase the extent before choosing the non-template overload.
             const auto first  = rc.CreateTexture(std::span {texels}, {4, 4}, false);
             const auto second = rc.CreateTexture(std::as_bytes(std::span {texels}), {4, 4}, false);
-            if (!ZHLN::Test::ExpectTrue(first.has_value() && second.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(first.HasValue() && second.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             ZHLN::Test::ExpectNe(*first, ZHLN::TextureID::Invalid);
@@ -341,12 +341,10 @@ struct DescriptorHeapsSuite {
             ZHLN::Test::ExpectTrue(*second != ZHLN::SystemTextures::Black && *second != ZHLN::SystemTextures::White &&
                                    *second != ZHLN::SystemTextures::FlatNormal);
 
-            const auto callback = rc.CreateTextureProcedural({4, 4}, false, [](std::span<uint32_t> pixels) {
-                for (auto& pixel: pixels) {
-                    pixel = 0xFF3366CCu;
-                }
-            });
-            if (!ZHLN::Test::ExpectTrue(callback.has_value())) {
+            std::array<uint32_t, 16> cbPixels {};
+            cbPixels.fill(0xFF3366CCu);
+            const auto callback = rc.CreateTexture(std::span<const uint32_t> {cbPixels}, ZHLN::Extent2D {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(callback.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             ZHLN::Test::ExpectNe(*callback, *first);
@@ -354,22 +352,22 @@ struct DescriptorHeapsSuite {
                                    *callback != ZHLN::SystemTextures::FlatNormal);
 
             const auto named = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
-            const auto same  = rc.CreateTexture("dheap_named_upload", std::as_bytes(std::span {texels}), {4, 4}, false);
-            if (!ZHLN::Test::ExpectTrue(named.has_value() && same.has_value())) {
+            const auto same  = rc.CreateTexture("dheap_named_upload", ZHLN::COM::Span<const std::byte>(std::as_bytes(std::span {texels}).data(), std::as_bytes(std::span {texels}).size()), ZHLN::Extent2D {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(named.HasValue() && same.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             ZHLN::Test::ExpectEq(*named, *same);
             texels[0] = 0xFFAA11DDu;
             const auto updated = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
-            if (!ZHLN::Test::ExpectTrue(updated.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(updated.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             // Changed pixels keep the name's handle; which descriptor slot
             // the new image migrates to is internal, but the identity the
             // caller holds must not move.
             ZHLN::Test::ExpectEq(*updated, *named);
-            ZHLN::Test::ExpectEq(rc.CreateProceduralTexture("dheap_named_upload", {4, 4}, texels, false), *named);
-            ZHLN::Test::ExpectTrue(!rc.CreateTexture("dheap_named_upload", std::span {texels}, {5, 5}).has_value());
+            ZHLN::Test::ExpectEq(rc.CreateProceduralTexture("dheap_named_upload", ZHLN::Extent2D{4, 4}, texels, false), *named);
+            ZHLN::Test::ExpectTrue(!rc.CreateTexture("dheap_named_upload", std::span {texels}, {5, 5}).HasValue());
 
             std::array<std::array<std::byte, 4 * 4 * 4>, 6> faces {};
             std::array<std::span<const std::byte>, 6> faceSpans {};
@@ -377,8 +375,10 @@ struct DescriptorHeapsSuite {
                 faces[i].fill(std::byte {0xFF});
                 faceSpans[i] = std::span<const std::byte> {faces[i]};
             }
-            const auto cube = rc.CreateTextureCube(faceSpans, 4);
-            if (!ZHLN::Test::ExpectTrue(cube.has_value())) {
+            ZHLN::COM::TextureCubeCreateInfo cubeInfo {.faceSize = 4};
+            for (size_t i = 0; i < 6; ++i) cubeInfo.faces[i] = ZHLN::COM::Span<const std::byte>(faceSpans[i].data(), faceSpans[i].size());
+            const auto cube = rc.CreateTextureCube(ZHLN::COM::InChain(cubeInfo));
+            if (!ZHLN::Test::ExpectTrue(cube.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             ZHLN::Test::ExpectNe(*cube, *first);
@@ -387,8 +387,8 @@ struct DescriptorHeapsSuite {
 
             // Invalid input must not create a handle; unloading one handle
             // cannot invalidate another, and reused slots cannot reuse IDs.
-            ZHLN::Test::ExpectTrue(!rc.CreateTexture(std::span {texels}, {5, 5}).has_value());
-            ZHLN::Test::ExpectTrue(!rc.CreateTextureCube(faceSpans, 0).has_value());
+            ZHLN::Test::ExpectTrue(!rc.CreateTexture(std::span {texels}, {5, 5}).HasValue());
+            ZHLN::Test::ExpectTrue(!rc.CreateTextureCube(ZHLN::COM::InChain(ZHLN::COM::TextureCubeCreateInfo {.faces = {cubeInfo.faces[0], cubeInfo.faces[1], cubeInfo.faces[2], cubeInfo.faces[3], cubeInfo.faces[4], cubeInfo.faces[5]}, .faceSize = 0})).HasValue());
             rc.UnloadTexture(*first);
             rc.UnloadTexture(*cube);
             // Unloading is per-handle: the surviving texture keeps its
@@ -398,7 +398,7 @@ struct DescriptorHeapsSuite {
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             const auto newer = rc.CreateTexture(std::span {texels}, {4, 4}, false);
-            if (!ZHLN::Test::ExpectTrue(newer.has_value())) {
+            if (!ZHLN::Test::ExpectTrue(newer.HasValue())) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
             ZHLN::Test::ExpectNe(*newer, *first);
@@ -426,10 +426,10 @@ struct DescriptorHeapsSuite {
             // rig's frame step runs every tick.
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
-            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             if (!ZHLN::Test::ExpectTrue(reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, 1.5f, 6.0f};
@@ -450,7 +450,7 @@ struct DescriptorHeapsSuite {
                 // every time the pose changes, not once at setup.
                 auto camEnts = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                 if (!camEnts.empty()) {
-                    reg.Attach(
+                    reg.AttachMany(
                         camEnts[0],
                         ZHLN::CameraRig::TargetCameraComponent {
                             .target      = ZHLN::Entity::Null(),
@@ -468,25 +468,21 @@ struct DescriptorHeapsSuite {
             if (!redMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
-            );
+            engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
 
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}});
             if (!greenMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
-            );
+            engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 6; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             uint32_t wA = 0, hA = 0;
@@ -502,7 +498,7 @@ struct DescriptorHeapsSuite {
                 applyCameraPose(-20.0f);
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             uint32_t wB = 0, hB = 0;

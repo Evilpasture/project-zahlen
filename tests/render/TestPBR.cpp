@@ -5,22 +5,20 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <AssetCooking/EnvironmentPreparation.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -84,8 +82,8 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
             // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping.
             // Scene levels are load-bearing: sun 220 + exposure 12 overexpose
@@ -95,14 +93,14 @@ struct PBRTestSuite {
             // scene's proven-sane combo; the INFO means below confirm red
             // reads red -- if a future grade pushes faces back toward clip,
             // re-level here, never in the gates.
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright      = 0;
                 gfx.environment.ambientExposure = 2.0f;
             });
 
             // 1. Sun Directional Light aiming directly toward front surfaces (+Z direction from camera view)
             const ZHLN::Entity sunEnt = reg.Spawn();
-            reg.Attach(
+            reg.AttachMany(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
                     .position = ZHLN::FVec3{0.0f, 10.0f, 10.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{20.0f, 0.0f, 0.0f}})
@@ -116,7 +114,7 @@ struct PBRTestSuite {
             );
 
             // 2. Camera looking forward along -Z toward (0, 1.0, 0)
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 4.0f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -133,10 +131,8 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
-            const ZHLN::Entity goldCube = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *goldMatRes}
-            );
+            const ZHLN::Entity goldCube = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *goldMatRes}).value;
             ZHLN::Test::ExpectTrue(reg.IsAlive(goldCube));
 
             // 4. Construct PBR Plastic Red Dielectric Material (metallic = 0.0, roughness = 0.25)
@@ -145,10 +141,8 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
-            const ZHLN::Entity redCube = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
-            );
+            const ZHLN::Entity redCube = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
             ZHLN::Test::ExpectTrue(reg.IsAlive(redCube));
 
             // 5. Render 15 frames of PBR lighting evaluation
@@ -156,7 +150,7 @@ struct PBRTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             // 6. Capture and compare the two halves relatively. The old gate
@@ -228,27 +222,27 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
             for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-                engine->Graphics().PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
+                (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
             }
 
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 12.0f;
                 gfx.post.vignetteIntensity       = 0.0f;
                 gfx.post.enableSSR               = 0;
                 gfx.rayTracing.enableReflections = false;
             });
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.shadows.width   = 400.0f;
                 gfx.shadows.sunSize = 0.001f;
             });
 
             const ZHLN::Entity sunEnt = reg.Spawn();
-            reg.Attach(
+            reg.AttachMany(
                 sunEnt,
                 ZHLN::Components::TransformComponent {
                     .position = ZHLN::FVec3{0.0f, 10.0f, 10.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{0.0f, 0.0f, 0.0f}})
@@ -264,7 +258,7 @@ struct PBRTestSuite {
                 }
             );
 
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 4.0f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -288,15 +282,11 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
-            const ZHLN::Entity smoothBox = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *smoothMatRes}
-            );
+            const ZHLN::Entity smoothBox = engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *smoothMatRes}).value;
 
-            const ZHLN::Entity roughBox = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *roughMatRes}
-            );
+            const ZHLN::Entity roughBox = engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *roughMatRes}).value;
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(smoothBox));
             ZHLN::Test::ExpectTrue(reg.IsAlive(roughBox));
@@ -305,7 +295,7 @@ struct PBRTestSuite {
             for (uint32_t frame = 0; frame < 12; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             const std::string ppmPath = "headless_pbr_roughness.ppm";
@@ -422,10 +412,10 @@ struct PBRTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 1.0f;
@@ -441,7 +431,7 @@ struct PBRTestSuite {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
             });
             if (!material) return std::unexpected(PBRTestError::MaterialCreationFailed);
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 4.0f};
                 cam.yaw = ZHLN::DegF{-90.0f};
@@ -450,10 +440,8 @@ struct PBRTestSuite {
             if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {1.5f, 1.5f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material}
-            );
+            engine->Assets()->SpawnBox({1.5f, 1.5f, 0.2f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material}).value;
 
             // Flat HDR vs. the same sky with a single-pixel point-like
             // hotspot at N dot L ~= -0.53 on the +Z face. The 9-coefficient SH
@@ -477,7 +465,7 @@ struct PBRTestSuite {
             ZHLN::AssetCooking::PrepareEnvironmentImage(hotspot);
             if (!hotspot.sun || hotspot.lightingRgba.empty()) return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             const auto expectedSun = *hotspot.sun;
-            auto assets = engine->Assets();
+            auto& assets = *engine->Assets();
             if (!assets.CacheEnvironmentImage("pbr_flat_hdr", std::move(flat)) ||
                 !assets.CacheEnvironmentImage("pbr_compact_hdr", std::move(hotspot))) {
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
@@ -517,7 +505,7 @@ struct PBRTestSuite {
             }
             // The sun must be scene-owned now, not packed into ambient SH.
             const auto generated = reg.EntitiesWith<ZHLN::Components::EnvironmentSunTagComponent>();
-            const auto light     = generated.size() == 1 ? reg.Get<ZHLN::Components::LightComponent>(generated[0]) : ZHLN::Optional<const ZHLN::Components::LightComponent&> {};
+            const auto light     = generated.size() == 1 ? reg.Get<ZHLN::Components::LightComponent>(generated[0]) : nullptr;
             if (!light || light->type != ZHLN::LightType::Sun ||
                 std::abs(light->direction.x - expectedSun.direction[0]) > 0.01f ||
                 std::abs(light->color.x - 3.14159265f * expectedSun.irradiance[0]) > 0.02f) {
@@ -552,7 +540,7 @@ struct PBRTestSuite {
                     return std::unexpected(PBRTestError::CookedSunPolicyFailed);
             }
             reg.Despawn(authored); // data-only light, no external handles
-            engine->ProcessPendingDestroy();
+            engine;
             ZHLN::Test::Headless::TickFrames(*engine, 2, 1.0f / 60.0f);
             if (reg.EntitiesWith<ZHLN::Components::EnvironmentSunTagComponent>().size() != 1u)
                 return std::unexpected(PBRTestError::CookedSunPolicyFailed);
@@ -566,10 +554,10 @@ struct PBRTestSuite {
         std::expected<void, ZHLN::ErrorCode> pbr_cooked_hdr_sun_is_occluded_by_cascade_shadow() {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.ambientExposure  = 1.0f;
                 gfx.post.exposure                = 0.1f;
@@ -580,12 +568,12 @@ struct PBRTestSuite {
                 gfx.post.enableSSR               = 0;
                 gfx.rayTracing.enableReflections = false; // Exercise the CSM path, not ambient/RTR.
             });
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.shadows.width      = 16.0f;
                 gfx.shadows.resolution = 2048;
                 gfx.shadows.sunSize    = 0.001f;
             });
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 4.0f};
                 cam.yaw = ZHLN::DegF{-90.0f};
@@ -599,7 +587,7 @@ struct PBRTestSuite {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
             });
             if (!mat) return std::unexpected(PBRTestError::MaterialCreationFailed);
-            ZHLN::PrefabFactory::CreateBox(*engine, {3.0f, 3.0f, 0.07f}, {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mat});
+            engine->Assets()->SpawnBox({3.0f, 3.0f, 0.07f}, {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mat}).value;
 
             constexpr uint32_t w = 128, h = 64;
             ZHLN::EnvironmentImage env;
@@ -621,7 +609,7 @@ struct PBRTestSuite {
             ZHLN::AssetCooking::PrepareEnvironmentImage(env);
             if (!env.sun) return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             const auto sunDirection = env.sun->direction;
-            if (!engine->Assets().CacheEnvironmentImage("pbr_shadowed_hdr", std::move(env)))
+            if (!engine->Assets()->CacheEnvironmentImage("pbr_shadowed_hdr", std::move(env)))
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent environment;
             environment.source.assign("pbr_shadowed_hdr");
@@ -630,12 +618,10 @@ struct PBRTestSuite {
             const auto lit = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_unoccluded.ppm");
 
             const double distance = 1.5;
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.32f, 0.32f, 0.32f},
-                {.position         = {sunDirection[0] * distance, 1.0 + sunDirection[1] * distance, sunDirection[2] * distance},
+            engine->Assets()->SpawnBox({0.32f, 0.32f, 0.32f},
+                {.position = ZHLN::DVec3{sunDirection[0] * distance, 1.0 + sunDirection[1] * distance, sunDirection[2] * distance},
                  .createPhysics    = false,
-                 .materialOverride = *mat}
-            );
+                 .materialOverride = *mat}).value;
             ZHLN::Test::Headless::TickFrames(*engine, 6, 1.0f / 60.0f);
             const auto shadowed = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_occluded.ppm");
             if (!lit.Valid() || !shadowed.Valid() || lit.width != shadowed.width || lit.height != shadowed.height)
@@ -666,9 +652,9 @@ struct PBRTestSuite {
             auto engine = CreateTestEngine(640, 480);
             if (!engine) return std::unexpected(PBRTestError::EngineInitFailed);
             ZHLN::Test::Headless::DisableAA(*engine);
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
-            engine->Graphics().PatchSettings([](auto& gfx) {
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 2.0f;
@@ -693,7 +679,7 @@ struct PBRTestSuite {
             }
             ZHLN::AssetCooking::PrepareEnvironmentImage(env);
             if (env.sun ||
-                !engine->Assets().CacheEnvironmentImage("pbr_black_emissive_flat_ibl", std::move(env)))
+                !engine->Assets()->CacheEnvironmentImage("pbr_black_emissive_flat_ibl", std::move(env)))
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
             ZHLN::Components::EnvironmentMapComponent map;
             map.source.assign("pbr_black_emissive_flat_ibl");
@@ -719,8 +705,8 @@ struct PBRTestSuite {
                 })) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
-            ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control});
-            ZHLN::PrefabFactory::CreateBox(*engine, {1.0f, 1.0f, 1.0f}, {.position = {0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped});
+            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control}).value;
+            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped}).value;
             ZHLN::Test::Headless::TickFrames(*engine, 8);
             if (!reg.EntitiesWith<ZHLN::Components::LightComponent>().empty())
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
@@ -744,10 +730,10 @@ struct PBRTestSuite {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
-            engine->Graphics().PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Create explicit bright green material
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
@@ -756,7 +742,7 @@ struct PBRTestSuite {
             }
 
             // Green flat box placed in front of camera
-            const bool camOk = engine->Entities().PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
                 cam.position = {0.0f, 1.0f, 3.0f};
                 cam.yaw      = ZHLN::DegF{-90.0f};
@@ -766,10 +752,8 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
 
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {2.0f, 2.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
-            );
+            engine->Assets()->SpawnBox({2.0f, 2.0f, 0.1f},
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
 
             // Tick 5 frames
             constexpr float dt = 1.0f / 60.0f;

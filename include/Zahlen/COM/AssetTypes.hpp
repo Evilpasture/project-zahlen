@@ -133,8 +133,36 @@ struct PrefabGPUReplacementInfo {
     uint64_t expectedRevision = 0;
     Span<const PrefabPartGPUInfo> parts {};
 };
+struct PrefabPartBoundsInfo {
+    int32_t nodeIndex      = -1;
+    bool    isSkinned      = false;
+    Mat4x4  localTransform = Mat4x4::Identity();
+    FVec3   localMin       {};
+    FVec3   localMax       {};
+};
+struct PrefabRigCounts {
+    uint64_t revision       = 0;
+    uint32_t nodeCount      = 0;
+    uint32_t partCount      = 0;
+    uint32_t skeletonCount  = 0;
+    uint32_t jointCount     = 0;
+    uint32_t animationCount = 0;
+    uint32_t channelCount   = 0;
+    uint32_t keyTimeCount   = 0;
+    uint32_t keyValueCount  = 0;
+};
+struct PrefabRigData {
+    Span<PrefabNodeInfo>       nodes      {};
+    Span<PrefabPartBoundsInfo> parts      {};
+    Span<PrefabSkeletonInfo>   skeletons  {};
+    Span<PrefabJointInfo>      joints     {};
+    Span<PrefabAnimationInfo>  animations {};
+    Span<PrefabChannelInfo>    channels   {};
+    Span<float>                keyTimes   {};
+    Span<float>                keyValues  {};
+};
 template <typename T> inline constexpr bool AssetWireValue = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
-static_assert(AssetWireValue<PrefabBoundsInfo>);
+static_assert(AssetWireValue<PrefabBoundsInfo> && AssetWireValue<PrefabPartBoundsInfo> && AssetWireValue<PrefabRigCounts> && AssetWireValue<PrefabRigData>);
 static_assert(AssetWireValue<PrefabCSGModifierInfo>);
 static_assert(AssetWireValue<PrefabPartGPUInfo> && AssetWireValue<PrefabGPUReplacementInfo>);
 static_assert(AssetWireValue<CollisionMeshInfo> && AssetWireValue<EnvironmentImageCacheInfo>);

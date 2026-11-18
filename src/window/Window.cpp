@@ -6,7 +6,7 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <window/Window.hpp>
 #include <array>
 #include <cctype>
 #include <filesystem>

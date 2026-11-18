@@ -16,6 +16,7 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 
@@ -53,6 +54,7 @@ struct ISimulation : IObject {
     [[nodiscard]] virtual Option<FVec3>                      BodyLinearVelocity(Physics::BodyID body) const noexcept = 0;
 
     [[nodiscard]] virtual FVec3 CharacterVelocity(Physics::BodyID body) const noexcept = 0;
+    [[nodiscard]] virtual float CharacterGroundOffset(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual bool  IsCharacterOnGround(Physics::BodyID body) const noexcept = 0;
     [[nodiscard]] virtual bool  IsBodyDynamic(Physics::BodyID body) const noexcept = 0;
 
@@ -62,9 +64,12 @@ struct ISimulation : IObject {
     virtual void SetCollisionFilter(Physics::BodyID body, uint32_t category, uint32_t mask) noexcept = 0;
     virtual void RegisterPhysicsMaterial(uint32_t materialID, float friction, float restitution) noexcept = 0;
     virtual void SetCharacterVelocity(Physics::BodyID body, FVec3 velocity) noexcept = 0;
+    virtual void SetCharacterPosition(Physics::BodyID body, DVec3 position) noexcept = 0;
     virtual void DestroyBody(Physics::BodyID body) noexcept = 0;
     virtual void DestroyBodies(Span<const Physics::BodyID> bodies) noexcept = 0;
     virtual void DestroyRagdolls(Span<const Physics::RagdollID> ragdolls) noexcept = 0;
+    // Publishes model-space joint matrices for blended/kinematic ragdoll drive.
+    virtual void QueueKinematicPose(uint32_t jointOffset, Span<const Mat4x4> modelJoints) noexcept = 0;
     virtual void ClearMeshShapeCache() noexcept = 0;
 
     // Advances physics by one step. Note that IEngine::Tick already steps the

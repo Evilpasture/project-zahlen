@@ -21,14 +21,14 @@ class ScriptComponentAccess {
     explicit ScriptComponentAccess(COM::IEntities& entities): m_entities(&entities), m_scope(std::make_shared<COM::Ref<COM::IEntities>>(m_entities)) {
     }
     template <class T>
-    void Register(bool requirePublished = false) {
+    void Register(bool requirePublished = false, bool writable = !SceneResources::ReadOnlyReflective<T>) {
         if constexpr (COM::ComComponent<T>) {
             constexpr auto canonical = Reflect::CanonicalTypeName<T>();
             if (requirePublished && !m_entities->IsEngineComponent(canonical))
                 return;
             Binding b {
                 +[](COM::IEntities& e, Entity entity) -> void* { return e.Get<T>(entity); },
-                +[](const void* p, std::string& out) { out += Reflect::ToDebugString(*static_cast<const T*>(p)); }, !SceneResources::ReadOnlyReflective<T>
+                +[](const void* p, std::string& out) { out += Reflect::ToDebugString(*static_cast<const T*>(p)); }, writable
             };
             m_bindings[std::string(Reflect::TypeName<T>())] = b;
             m_bindings[std::string(canonical)]              = b;

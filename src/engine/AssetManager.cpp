@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
+#include <engine/AssetManager.hpp>
+#include <render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cmath>
 #include <cstddef>
@@ -223,6 +223,19 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
             .contentHash  = image.contentHash,
         };
     });
+}
+
+auto AssetManager::ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>> {
+    AssetLoadRequest req {};
+    req.assetID = HashAssetPath(path);
+    auto& self = const_cast<AssetManager&>(*this);
+    if (!self.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
+        return std::nullopt;
+    }
+    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
+    std::vector<uint8_t> out(bytes, bytes + req.outSize);
+    self.FreeMemory(req);
+    return out;
 }
 
 } // namespace ZHLN

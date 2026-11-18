@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <ecs/ECS.hpp>
 
 namespace ZHLN {
 

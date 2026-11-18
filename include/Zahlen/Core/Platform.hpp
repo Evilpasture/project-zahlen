@@ -172,4 +172,8 @@ inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept 
 #endif
 }
 
+namespace Platform {
+ZHLN_API void Init();
+} // namespace Platform
+
 } // namespace ZHLN

@@ -92,13 +92,8 @@ COM_HOST_PORTS = frozenset({
 NATIVE_HOST_HEADER = re.compile(r"^(?:FreeCam/NativeFreeCam\.hpp|Camera/NativeTargetCamera\.hpp|CharacterController/(?:NativeCharacterController|CharacterMovement|PlayerInput)\.hpp|NativeHostUI/|Scene/NativeScene\.hpp|NativeSceneDocument\.hpp|Zahlen/(?:Animation/Native[^/]*\.hpp|Engine/(?:Engine|ModelPrefab|PrefabFactory|FramePlan|GameModule|Scene)\.hpp|Engine/Capabilities/|ECS/(?:ECS|Inspection)\.hpp|Physics/Jolt\.hpp|Render/(?:Render|RenderContext)\.hpp|Window/(?:Window|PlatformHost)\.hpp))")
 
 # The internal cache header, and the paths allowed to include it.
-INTERNAL_HEADERS = {"Zahlen/Engine/AssetManager.hpp": "Engine::Assets() -> AssetLibrary"}
-ALLOWED_INTERNAL_HEADER_INCLUDERS = {
-    # Reproduces the cook path; it reads the cooked container formats and writes
-    # the cache the pipeline produces. Not a host program.
-    "utils/zcook/Cook.cpp",
-    "utils/zcook/FontBake.cpp",
-}
+INTERNAL_HEADERS = {"engine/AssetManager.hpp": "COM::IEngine::Assets() -> COM::IAssetLibrary"}
+ALLOWED_INTERNAL_HEADER_INCLUDERS: set[str] = set()
 
 # Removed accessors, and what replaces each.
 REMOVED_ACCESSORS = {
@@ -123,18 +118,10 @@ WITHHELD_PARAMETERS = {
 # supported way to run one system outside the frame before the call can be
 # rewritten. Listed so the set cannot grow: a new one fails this check, and a
 # fixed one should be deleted from here.
-PENDING_GRAPH_ACCESS = {
-    ("extensions/Camera/NativeTargetCamera.cpp", "GetRenderGraph"),
-    ("extensions/CharacterController/CharacterController.cpp", "GetUpdateGraph"),
-    ("extensions/FreeCam/NativeFreeCam.cpp", "GetRenderGraph"),
-    ("extensions/VFX/LightningUpdate.cpp", "GetUpdateGraph"),
-    ("extensions/net/Network/NetworkReplicator.cpp", "GetUpdateGraph"),
-    ("gameplay/Interaction/BSPInteraction.cpp", "GetUpdateGraph"),
-    ("samples/BSPMurderDronesSample.cpp", "GetUpdateGraph"),
-}
+PENDING_GRAPH_ACCESS: set[tuple[str, str]] = set()
 
 COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
-INCLUDE = re.compile(r'#\s*include\s*[<"]([^>"]+)[>"]')
+INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
 
 
 def strip_comments(text: str) -> str:
@@ -167,6 +154,11 @@ def check_source(path: Path) -> list[str]:
             violations.append(f"{relative}:{line_number}: migrated COM host includes native header <{header}>")
         if header in INTERNAL_HEADERS and relative not in ALLOWED_INTERNAL_HEADER_INCLUDERS:
             violations.append(f"{relative}:{line_number}: includes <{header}>; use {INTERNAL_HEADERS[header]} instead")
+        if re.match(r"^(?:engine|ecs|render|physics|audio|window|filesystem|presentation)/", header) or (header.startswith("vulkan/") and not header.startswith("vulkan/vulkan")):
+            if not (relative.startswith("utils/zshader/") and header.startswith("vulkan/")):
+                violations.append(f"{relative}:{line_number}: consumer includes engine-private header <{header}>; use <Zahlen/COM/...> instead")
+        if header.startswith("Jolt/"):
+            violations.append(f"{relative}:{line_number}: consumer includes private <{header}>; Jolt is sealed inside libzahlen_engine.so")
 
     text = strip_comments(raw)
 
@@ -212,7 +204,7 @@ def main() -> int:
     # Animation is optional. The dependency must never be reversed again by
     # putting evaluation, runtime components or installation into Engine.
     runtime_pattern = re.compile(r"(?:AnimationContext|AnimatorComponent|AnimatorControlComponent|TwoBoneIK|Animation::|IK::|[<\"](?:Zahlen/)?Animation/)")
-    for root in ("src/engine", "include/Zahlen/Engine", "include/Zahlen/ECS"):
+    for root in ("src/engine", "src/ecs", "include/Zahlen/Engine", "include/Zahlen/ECS"):
         for path in sorted((REPOSITORY_ROOT / root).rglob("*")):
             if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
                 continue

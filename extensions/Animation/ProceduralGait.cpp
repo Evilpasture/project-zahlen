@@ -11,9 +11,8 @@ module;
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
 // clang-format on
-#include <Zahlen/Engine/Engine.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -492,7 +491,7 @@ void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, Mat4x4* no
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
 void SolveLegGrounding(
-    const PhysicsContext&          physics,
+    const COM::ISimulation*        physics,
     FVec3                   rootPosition,
     Quat                   rootRotation,
     ProceduralLocomotionComponent& gait,
@@ -528,7 +527,7 @@ void SolveLegGrounding(
         FVec3 probeWorld   = (planted && lockValid && !enteringPlant) ? lockedWorld : desiredWorld;
         probeWorld.y = desiredWorld.y;
 
-        const auto hit = physics.Raycast((probeWorld + FVec3{0.0f, 0.75f, 0.0f}).Cast<double>(), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsID);
+        const auto hit = physics != nullptr ? physics->Raycast((probeWorld + FVec3{0.0f, 0.75f, 0.0f}).Cast<double>(), {0.0f, -1.0f, 0.0f}, 1.80f, ignoredPhysicsID) : Physics::RaycastResult {};
 
         FootContact contact {.position = desiredWorld, .normal = hit.hasHit ? SafeNormalized(hit.normal, FVec3::UnitY()) : FVec3::UnitY()};
         if (hit.hasHit) {

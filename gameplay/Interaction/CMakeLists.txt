@@ -38,8 +38,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # component definitions as well.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
-    zahlen_native_character_controller
-    zahlen_bsp
+    zahlen_character_controller
+    zahlen_bsp_assets
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

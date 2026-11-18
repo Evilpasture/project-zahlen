@@ -1,6 +1,5 @@
 #include "ArticulationContext.hpp"
 #include "COMJointAllocator.hpp"
-#include <Zahlen/Engine/PrefabObservers.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -15,47 +14,36 @@
 #include "RenderSystem.hpp"
 #include "SceneCleanupSystem.hpp"
 #include "SystemWiring.hpp"
-#include <Zahlen/Audio/Audio.hpp>
+#include <audio/Audio.hpp>
 #include <Zahlen/COM/FrameTypes.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Trace.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/DebugDraw.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/Capabilities/HostWindow.hpp>
-#include <Zahlen/Engine/Capabilities/InputActions.hpp>
-#include <Zahlen/Engine/Capabilities/InputHaptics.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <ecs/EventBus.hpp>
+#include <ecs/SystemGraph.hpp>
+#include <engine/AssetManager.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/PoseUploads.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/VisibilityList.hpp>
-#include <Zahlen/Engine/World.hpp>
+#include <engine/Engine.hpp>
+#include <engine/Frame.hpp>
+#include <engine/FramePlan.hpp>
+#include <engine/PoseUploads.hpp>
+#include <engine/PrefabFactory.hpp>
+#include <engine/VisibilityList.hpp>
+#include <engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <physics/Physics.hpp>
+#include <render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -222,8 +210,8 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         std::construct_at(_impl->renderServices.get(), RenderServices {
             .render        = _impl->kernel->GetRenderContext(),
             .scene         = _impl->sceneData,
-            .assets        = Assets(),
-            .input         = InputReader {&_impl->kernel->InputFor()},
+            .assets        = _impl->kernel->GetAssetManager(),
+            .input         = _impl->kernel->InputFor(),
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
             .debugSettings = _impl->world->GetDebugSettings(),
@@ -231,7 +219,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
             .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
         });
     }
-    PrefabFactory::RebuildVulkanResources(Graphics(), _impl->world->GetRegistry());
+    PrefabFactory::RebuildVulkanResources(Render(), _impl->world->GetRegistry());
 
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
@@ -354,7 +342,6 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-auto Engine::Host(WindowID window) noexcept -> HostWindow { return HostWindow {*_impl->kernel, window}; }
 auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen) -> WindowID {
     return _impl->kernel->AddWindow(title, width, height, fullscreen);
 }
@@ -367,53 +354,47 @@ auto Engine::WindowIDs() const noexcept -> std::span<const WindowID> { return _i
 auto Engine::AcquireTarget(WindowID window) noexcept -> FrameOutcome<FrameTarget> { return _impl->kernel->AcquireTarget(window); }
 auto Engine::GetAcquiredTarget(WindowID window) noexcept -> std::optional<FrameTarget> { return _impl->kernel->GetAcquiredTarget(window); }
 
-// --- Capability facades -------------------------------------------------------
-// Each facade is a value carrying a pointer to an engine-owned subsystem. The
-// engine keeps ownership; nothing here returns a mutable reference to a
-// subsystem, and the concrete types are not named in the public header.
+// --- Direct internal subsystem accessors -------------------------------------
 
-auto Engine::Graphics() noexcept -> GraphicsDevice {
-    return GraphicsDevice {_impl->kernel->GetRenderContext()};
-}
-auto Engine::Physics() noexcept -> Simulation {
-    return Simulation {_impl->world->GetPhysics()};
-}
-auto Engine::Debug() noexcept -> DebugDraw {
-    return DebugDraw {_impl->sceneData};
-}
-auto Engine::Assets() noexcept -> AssetLibrary {
-    return AssetLibrary {_impl->kernel->GetAssetManager()};
-}
-auto Engine::Audio() noexcept -> AudioEngine {
-    return AudioEngine {_impl->kernel->GetAudioContext()};
-}
-auto Engine::State() noexcept -> ZHLN::EngineState {
-    return ZHLN::EngineState {*this};
-}
-auto Engine::State() const noexcept -> ZHLN::EngineState {
-    return ZHLN::EngineState {const_cast<Engine&>(*this)};
-}
+auto Engine::Session() noexcept -> KernelSession& { return *_impl->kernel; }
+auto Engine::Session() const noexcept -> const KernelSession& { return *_impl->kernel; }
+auto Engine::GetWorld() noexcept -> World& { return *_impl->world; }
+auto Engine::GetWorld() const noexcept -> const World& { return *_impl->world; }
+auto Engine::Render() noexcept -> RenderContext& { return _impl->kernel->GetRenderContext(); }
+auto Engine::Render() const noexcept -> const RenderContext& { return _impl->kernel->GetRenderContext(); }
+auto Engine::Physics() noexcept -> PhysicsContext& { return _impl->world->GetPhysics(); }
+auto Engine::Physics() const noexcept -> const PhysicsContext& { return _impl->world->GetPhysics(); }
+auto Engine::Audio() noexcept -> AudioContext& { return _impl->kernel->GetAudioContext(); }
+auto Engine::Audio() const noexcept -> const AudioContext& { return _impl->kernel->GetAudioContext(); }
+auto Engine::Assets() noexcept -> AssetManager& { return _impl->kernel->GetAssetManager(); }
+auto Engine::Assets() const noexcept -> const AssetManager& { return _impl->kernel->GetAssetManager(); }
+auto Engine::Scene() noexcept -> SceneData& { return _impl->sceneData; }
+auto Engine::Scene() const noexcept -> const SceneData& { return _impl->sceneData; }
+auto Engine::Registry() noexcept -> ECS::Registry& { return _impl->world->GetRegistry(); }
+auto Engine::Registry() const noexcept -> const ECS::Registry& { return _impl->world->GetRegistry(); }
+auto Engine::Input(WindowID window) noexcept -> InputContext& { return _impl->kernel->InputFor(window); }
+auto Engine::Input(WindowID window) const noexcept -> const InputContext& { return _impl->kernel->InputFor(window); }
 
-auto EngineState::CullingStats() const noexcept -> ZHLN::CullingStats {
-    return _engine->_impl->world->GetCullingStats();
+auto Engine::CullingStatsSnapshot() const noexcept -> CullingStats {
+    return _impl->world->GetCullingStats();
 }
-void EngineState::ResetCullingStats() noexcept {
-    _engine->_impl->world->GetCullingStats() = {};
+void Engine::ResetCullingStats() noexcept {
+    _impl->world->GetCullingStats() = {};
 }
-void EngineState::SetCullingEnabled(bool enabled) noexcept {
-    _engine->_impl->world->GetCullingStats().EnableCulling = enabled;
+void Engine::SetCullingEnabled(bool enabled) noexcept {
+    _impl->world->GetCullingStats().EnableCulling = enabled;
 }
-void EngineState::SetFreezeFrustum(bool freeze) noexcept {
-    _engine->_impl->world->GetCullingStats().FreezeFrustum = freeze;
+void Engine::SetFreezeFrustum(bool freeze) noexcept {
+    _impl->world->GetCullingStats().FreezeFrustum = freeze;
 }
-auto EngineState::PhysicsDrawMode() const noexcept -> int {
-    return _engine->_impl->world->GetDebugSettings().physicsDrawMode;
+auto Engine::PhysicsDrawMode() const noexcept -> int {
+    return _impl->world->GetDebugSettings().physicsDrawMode;
 }
-void EngineState::SetPhysicsDrawMode(int mode) noexcept {
-    _engine->_impl->world->GetDebugSettings().physicsDrawMode = mode;
+void Engine::SetPhysicsDrawMode(int mode) noexcept {
+    _impl->world->GetDebugSettings().physicsDrawMode = mode;
 }
-auto EngineState::Configuration() const noexcept -> EngineConfig {
-    return _engine->_impl->kernel->GetConfig();
+auto Engine::Configuration() const noexcept -> const EngineConfig& {
+    return _impl->kernel->GetConfig();
 }
 
 struct EngineCore {
@@ -442,7 +423,7 @@ struct EngineCore {
                 if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                     ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                     ctx.error = lost_res.error();
-                    engine.Host().Close();
+                    engine.Session().CloseWindow();
                 }
             }
         }
@@ -454,34 +435,34 @@ auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<Asset
     return LoadFontAsset(EngineCore::Assets(engine), path);
 }
 auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBoxInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params);
+    return CreateBoxInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params);
 }
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphereInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params);
+    return CreateSphereInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params);
 }
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinderInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
+    return CreateCylinderInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
 }
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateConeInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
+    return CreateConeInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
 }
 auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
-    return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
+    return CreatePlaneInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
 }
 auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateBoxInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params, buildBLAS);
+    return CreateBoxInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params, buildBLAS);
 }
 auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreatePlaneInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params, buildBLAS);
+    return CreatePlaneInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params, buildBLAS);
 }
 auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateSphereInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params, buildBLAS);
+    return CreateSphereInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params, buildBLAS);
 }
 auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateCylinderInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+    return CreateCylinderInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
 }
 auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateConeInternal(engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+    return CreateConeInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     // A lookup, not a load: an importer has already cached the prefab by the
@@ -495,12 +476,9 @@ auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnPar
         const SpawnParams& params;
     } notification {engine, prefab, params};
     return InstantiatePrefabInternal(
-        engine.Graphics(), EngineCore::Registry(engine), EngineCore::Physics(engine), EngineCore::Articulation(engine), prefab, params, outBuffer, maxCount,
+        engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), EngineCore::Articulation(engine), prefab, params, outBuffer, maxCount,
         +[](void* userdata, Entity root) {
             auto& context = *static_cast<Notification*>(userdata);
-            if (auto observers = context.engine.Service<PrefabObservers>())
-                for (auto callback: observers->onRoot)
-                    callback(context.engine, context.prefab, context.params, root);
         },
         &notification
     );
@@ -520,9 +498,8 @@ void Engine::InitializeSystemGraphs() {
     _impl->simServices = std::make_unique<SimServices>(SimServices {
         .physics      = _impl->world->GetPhysics(),
         .audio        = _impl->kernel->GetAudioContext(),
-        .assets       = Assets(),
-        .input        = InputReader {&_impl->kernel->InputFor()},
-        .haptics      = InputHaptics {&_impl->kernel->InputFor()},
+        .assets       = _impl->kernel->GetAssetManager(),
+        .input        = _impl->kernel->InputFor(),
         .articulation = _impl->world->GetArticulationContext(),
         .events       = _impl->world->GetEventBus(),
         .extensions   = _impl->extensions,
@@ -532,8 +509,8 @@ void Engine::InitializeSystemGraphs() {
     _impl->renderServices = std::make_unique<RenderServices>(RenderServices {
         .render        = render,
         .scene         = _impl->sceneData,
-        .assets        = Assets(),
-        .input         = InputReader {&_impl->kernel->InputFor()},
+        .assets        = _impl->kernel->GetAssetManager(),
+        .input         = _impl->kernel->InputFor(),
         .extensions    = _impl->extensions,
         .cullingStats  = _impl->world->GetCullingStats(),
         .debugSettings = _impl->world->GetDebugSettings(),
@@ -565,17 +542,7 @@ void Engine::ResetWorkerScratch() noexcept {
     }
 }
 
-// The capability accessors the engine hands out. They are two pointers wide and
-// construct nothing: an InputReader is an address, not a subscription.
-auto Engine::Input(WindowID window) noexcept -> InputActions {
-    return InputActions {&_impl->kernel->InputFor(window)};
-}
-auto Engine::Input(WindowID window) const noexcept -> InputReader {
-    return InputReader {&_impl->kernel->InputFor(window)};
-}
-auto Engine::Haptics() noexcept -> InputHaptics {
-    return InputHaptics {&_impl->kernel->InputFor()};
-}
+
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
 }
@@ -587,14 +554,6 @@ auto Engine::GetInternalRegistry() const noexcept -> const ECS::Registry& {
     return _impl->world->GetRegistry();
 }
 
-auto Engine::Entities() noexcept -> ZHLN::Entities {
-    return ZHLN::Entities {*this};
-}
-
-auto Engine::Entities() const noexcept -> ZHLN::Entities {
-    // const overload because Entities is a lightweight value-type facade whose Get and GetSingleton methods are already const
-    return ZHLN::Entities {const_cast<Engine&>(*this)};
-}
 
 auto Engine::GetUpdateGraph() -> SimGraph& {
     return *_impl->updateGraph;
@@ -878,7 +837,7 @@ auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstal
     }
 
     auto engine = std::move(engine_res.value());
-    engine->Host().Focus();
+    engine->Session().FocusWindow();
 
     // The application's install pass: modules contribute components, declare
     // their frame steps, and mark the system graphs dirty for the first Tick.
@@ -911,7 +870,7 @@ auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstal
 
         // KernelSession/Engine already synchronized a resize during ProcessEvents.
         constexpr double           kFpsCapSlack = 1.05;
-        const std::optional<float> pacedDt      = engine->Graphics().PacedDeltaTime();
+        const std::optional<float> pacedDt      = engine->Render().GetPacedDeltaTime();
         const bool  displayPaced = pacedDt.has_value() && (maxFramesPerSecond == 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         const float tickDt       = displayPaced ? *pacedDt : rawDt;
         // Propagate the frame's real ErrorCode; Engine::Run has no richer
@@ -940,3 +899,7 @@ auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstal
 }
 
 } // namespace ZHLN
+
+void ZHLN::Engine::PushKinematicPose(uint32_t jointOffset, std::span<const Mat4x4> modelJoints) {
+    _impl->poseUploads.PushKinematic(jointOffset, modelJoints);
+}

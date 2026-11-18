@@ -2,19 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <cmath>
 #include <cstdint>
@@ -33,8 +32,8 @@ enum class CameraLookAtError : uint8_t {
 
 namespace {
 
-void DisableJitterAndVignette(ZHLN::Engine& engine) {
-    engine.Graphics().PatchSettings([](auto& gfx) {
+void DisableJitterAndVignette(ZHLN::COM::IEngine& engine) {
+    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.antiAliasing.mode            = ZHLN::AAMode::None;
         gfx.environment.fullBright       = 1;
         gfx.post.vignetteIntensity       = 0.0f;
@@ -73,8 +72,8 @@ struct CameraLookAtTestSuite {
             // scene rebuilds so the contributed frame step takes its place).
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto reg = engine->Entities();
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
             DisableJitterAndVignette(*engine);
 
             auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
@@ -84,14 +83,10 @@ struct CameraLookAtTestSuite {
             }
 
             // Default camera looks toward the origin. Put the subject well off that axis.
-            const ZHLN::Entity target = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
-            );
-            const ZHLN::Entity decoy = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
-            );
+            const ZHLN::Entity target = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
+            const ZHLN::Entity decoy = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
@@ -103,7 +98,7 @@ struct CameraLookAtTestSuite {
             // The rig component is authored explicitly (the frame step only
             // re-seeds the boot camera's defaults when the component is
             // missing, so this survives the first tick).
-            reg.Attach(
+            reg.AttachMany(
                 cameras[0],
                 ZHLN::CameraRig::TargetCameraComponent {
                     .target              = target,
@@ -121,11 +116,7 @@ struct CameraLookAtTestSuite {
             );
 
             constexpr float dt = 1.0f / 60.0f;
-            for (uint32_t frame = 0; frame < 8; ++frame) {
-                engine->ProcessEvents();
-                const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
-            }
+            ZHLN::Test::Headless::TickFrames(*engine, 8, dt);
 
             // In memory: the .ppm mirror is written for inspection only, so a
             // failing run still leaves a picture behind.

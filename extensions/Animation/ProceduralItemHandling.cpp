@@ -12,11 +12,8 @@ module;
 #include <Animation/ProceduralMath.hpp>
 // clang-format on
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Animation/IK.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -172,7 +169,7 @@ float UpdateGripWeight(GripPoint& grip, float dt) noexcept {
 // callers of the module's existing API.
 void UpdateItemDynamics(
     Physics::BodyID        ignoredPhysics,
-    const PhysicsContext&  physics,
+    const COM::ISimulation* physics,
     ItemHandlingComponent& handling,
     FVec3           rootPosition,
     Quat           rootRotation,
@@ -211,7 +208,7 @@ void UpdateItemDynamics(
         const Mat4x4 worldItem = rootWorld * handling.itemModelTransform;
         const FVec3  origin    = ProceduralMath::Translation(worldItem);
         const FVec3  forward   = SafeNormalized(ProceduralMath::Direction(worldItem, FVec3::UnitZ()), rootRotation * FVec3::UnitZ());
-        const auto hit = physics.Raycast(origin.Cast<double>(), forward, handling.avoidance.probeDistance, ignoredPhysics);
+        const auto hit = physics != nullptr ? physics->Raycast(origin.Cast<double>(), forward, handling.avoidance.probeDistance, ignoredPhysics) : Physics::RaycastResult {};
         if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
             const float pushback    = std::clamp(penetration * std::max(handling.avoidance.pushbackScale, 0.0f), 0.0f, handling.avoidance.probeDistance);

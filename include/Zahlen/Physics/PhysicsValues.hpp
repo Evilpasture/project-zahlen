@@ -14,6 +14,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <type_traits>
 
@@ -164,6 +165,28 @@ struct RigidBodyFilter {
     uint32_t    category         = 0xFFFFFFFFu;
     uint32_t    mask             = 0xFFFFFFFFu;
 };
+
+
+// Overgrowth-style dual-shape character collider (lower lifter sphere + upper
+// oval bumper). Pure POD; pass alongside CharacterCreateDesc via COM::InChain.
+struct DualShapeConfig {
+    float lifterRadius   = 0.40F;
+    float bumperRadiusXZ = 0.50F;
+    float bumperRadiusY  = 0.70F;
+
+    [[nodiscard]] constexpr auto GetLifterOffsetY() const noexcept -> float {
+        return lifterRadius;
+    }
+
+    [[nodiscard]] inline auto GetBumperOffsetY() const noexcept -> float {
+        const float ratio = lifterRadius / bumperRadiusXZ;
+        if (ratio >= 1.0F) {
+            return lifterRadius;
+        }
+        return lifterRadius + (bumperRadiusY * std::sqrt(1.0F - (ratio * ratio)));
+    }
+};
+static_assert(std::is_standard_layout_v<DualShapeConfig> && std::is_trivially_copyable_v<DualShapeConfig>);
 
 struct CharacterCreateDesc {
     ZHLN::DVec3 position {};

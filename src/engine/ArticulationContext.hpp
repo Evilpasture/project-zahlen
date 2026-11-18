@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <span>
@@ -31,7 +31,7 @@ struct alignas(64) JointStateBuffer {
 
 // World-owned articulation state. Scheduled systems borrow it as a resource;
 // no system instance owns simulation state.
-class ZHLN_API ArticulationContext {
+class ArticulationContext {
   public:
     ArticulationContext() = default;
     ArticulationContext(const ArticulationContext&) = delete;

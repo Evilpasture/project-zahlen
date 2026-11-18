@@ -9,14 +9,14 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/EngineServices.hpp>
+#include <engine/EngineServices.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 #include <array>
 
 namespace ZHLN {
 class RenderContext;
-class DebugDraw;
+struct SceneData;
 
 // The culling pass's working set: the planes it derived this frame, the
 // freeze-frame corners, and whether the last frame was frozen. This is the
@@ -34,7 +34,7 @@ struct CullingScratch {
     bool                     wasFrozen = false;
 };
 
-class ZHLN_API CullingSystem {
+class CullingSystem {
   public:
     using CullingQuery = ECS::Query<
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
@@ -51,7 +51,7 @@ class ZHLN_API CullingSystem {
     // this derives them from the same view-projection the pass froze instead of
     // reaching into another node's storage.
     using DebugFrustumQuery = ECS::Query<const Components::CameraComponent>;
-    static void DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, DebugDraw scene);
+    static void DrawDebugFrustum(const CullingStats& stats, DebugFrustumQuery query, SceneData& scene);
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
@@ -61,6 +61,6 @@ class ZHLN_API CullingSystem {
 // The eight world-space corners of a view-projection, in the order the debug
 // edges expect. Shared by the freeze path (which stores them) and the debug draw
 // (which draws them).
-[[nodiscard]] ZHLN_API std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept;
+[[nodiscard]] std::array<FVec3, 8> FrustumCornersFromViewProj(const Mat4x4& viewProj) noexcept;
 
 } // namespace ZHLN

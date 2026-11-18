@@ -5,14 +5,14 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
 #include <numbers>
 #include <string_view>
 
 namespace ZHLN {
 
-void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetLibrary> assets) {
+void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets) {
     using EnvironmentSunTagComponent = Components::EnvironmentSunTagComponent;
     using EnvironmentMapComponent = Components::EnvironmentMapComponent;
     using LightComponent = Components::LightComponent;

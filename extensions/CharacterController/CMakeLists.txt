@@ -1,68 +1,27 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/CharacterController -- overgrowth-style character locomotion
-# Native compatibility (zahlen_native_character_controller); capability host
-# (zahlen_character_controller) is declared separately below.
-#
-# WASD intent, camera-relative translation, jump/gravity integration, sprint
-# and yaw slewing over CharacterVirtual bodies: a game controller, not engine
-# substrate. Core keeps PhysicsContext::CreateCharacter and the raw
-# InputContext / InputState; this target owns the interpretation.
-#
+# extensions/CharacterController -- COM host character locomotion (zahlen_character_controller).
 # Public headers are reached as <CharacterController/...>.
 
-set(TARGET_NAME zahlen_native_character_controller)
+add_library(zahlen_character_controller STATIC CharacterHost.cpp)
 
-set(ZHLN_CHARACTER_SOURCES
-    CharacterController.cpp
-    CharacterMovement.cpp
-    PlayerInput.cpp
-)
-
-add_library(${TARGET_NAME} STATIC ${ZHLN_CHARACTER_SOURCES})
-
-set_target_properties(${TARGET_NAME} PROPERTIES
+set_target_properties(zahlen_character_controller PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE.
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Core is a public dependency: the controller runs on SystemContext, the ECS,
-# PhysicsContext's character API and the frame/graph extension seams.
-# No zahlen_freecam edge: PlayerInput.cpp reads FreeCam::FreeCamTagComponent,
-# an empty struct with no symbol and no public-header requirement (see
-# extensions/Camera/CMakeLists.txt for the same call).
-target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+target_link_libraries(zahlen_character_controller
+    PUBLIC zahlen_engine
+    PRIVATE zahlen_warnings
 )
 
-target_include_directories(${TARGET_NAME} PUBLIC
+target_include_directories(zahlen_character_controller PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# Enable reflection on this target so reflected component layouts and
-# system parameter inspection match zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(${TARGET_NAME})
+    zahlen_enable_reflection(zahlen_character_controller)
 endif()
-
-# Jolt is direct: this library's own objects reference JPH symbols (shapes,
-# settings, factories), so it must be on the link line of whatever consumes
-# them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
-# libJolt.so on all 18 executables -- including the ones that never touch it.
-target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)
-
-# Capability-only host policy. Never links the native module/system adapter.
-add_library(zahlen_character_controller STATIC CharacterHost.cpp)
-set_target_properties(zahlen_character_controller PROPERTIES
-    CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(zahlen_character_controller PUBLIC zahlen_engine PRIVATE zahlen_warnings)
-target_include_directories(zahlen_character_controller PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
-zahlen_enable_reflection(zahlen_character_controller)
-# Native consumers may also use the shared POD and host policy API.
-target_link_libraries(zahlen_native_character_controller PUBLIC zahlen_character_controller)

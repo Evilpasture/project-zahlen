@@ -1,39 +1,33 @@
 // gameplay/ProjectLight/ProjectLightClient/SceneMirror.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-//
-// The passes that turn mirrored records into a scene. Moved here from
-// ClientSession, which keeps the socket, the packet buffers and the session
-// state; nothing in this file opens a socket, reads a packet or owns a session
-// member. See SceneMirror.hpp for the split and the per-frame ordering.
 
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Quat.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/Entities.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <ProjectLightClient/SceneMirror.hpp>
 
 #include <Camera/TargetCamera.hpp>
-#include <CharacterController/CharacterComponents.hpp>
+#include <CharacterController/CharacterController.hpp>
 #include <Replication/ClassVocabulary.hpp>
-#include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Audio/AudioValues.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/Capabilities/InputReader.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Physics/MathConversions.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -157,7 +151,13 @@ auto LimbPoseAngle(std::string_view partName, HumanoidState state, float time, f
 // One pose, one writer per entity. That is the invariant to keep when adding a
 // pass: if it has a body it belongs to the engine, and if it does not it belongs
 // to the mirror.
-void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
+void DespawnEntity(COM::IEngine& engine, Entity entity) noexcept {
+    if (auto* entities = engine.Entities(); entities != nullptr && entity != Entity::Null() && entities->IsAlive(entity)) {
+        entities->Despawn(entity);
+    }
+}
+
+void WriteTransform(COM::IEngine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
     object.position = position;
     object.rotationQuat = rotation.Normalized();
     object.renderPosition = object.position;
@@ -166,23 +166,22 @@ void WriteTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVe
     object.transformDirty   = true;
     if (entity == Entity::Null())
         return;
-    engine.Entities().Patch<Components::TransformComponent>(entity, [&](auto& transform) {
-        transform.position = object.position;
-        transform.rotation = object.rotationQuat;
-    });
+    if (auto* transform = engine.Entities()->Get<Components::TransformComponent>(entity)) {
+        transform->position = object.position;
+        transform->rotation = object.rotationQuat;
+    }
 }
 
-void WriteInterpolatedTransform(Engine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
+void WriteInterpolatedTransform(COM::IEngine& engine, ReplicatedObject& object, Entity entity, FVec3 position, Quat rotation) {
     // Keep the authoritative network pose intact; only the render pose is
     // delayed/interpolated. Physics snapshots use object.position/rotationQuat.
     object.renderPosition = position;
     object.renderRotation = rotation.Normalized();
     object.transformDirty = true;
     if (entity == Entity::Null()) return;
-    if (engine.Entities().Patch<Components::TransformComponent>(entity, [&](auto& transform) {
-            transform.position = object.renderPosition;
-            transform.rotation = object.renderRotation;
-        })) {
+    if (auto* transform = engine.Entities()->Get<Components::TransformComponent>(entity)) {
+        transform->position   = object.renderPosition;
+        transform->rotation   = object.renderRotation;
         object.transformDirty = false;
     }
 }
@@ -197,8 +196,8 @@ auto ShouldCreatePhysics(const SceneMirrorState& state, const ReplicatedObject& 
     if (object.anchored) return object.canCollide;
     return !state.serverAuthority && state.localPlayerUid != 0 && object.networkOwnerUid == state.localPlayerUid;
 }
-void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto entities = engine.Entities();
+void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, ReplicatedObject& object) {
+    auto& entities = *engine.Entities();
     const FVec3 size = {std::clamp(std::abs(object.size.x), 0.001f, 100000.0f),
     std::clamp(std::abs(object.size.y), 0.001f, 100000.0f),
     std::clamp(std::abs(object.size.z), 0.001f, 100000.0f)};
@@ -206,7 +205,7 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
     const bool blendMaterial = object.transparency > 0.001f;
     Entity     entity        = state.index.Find(object.uid);
     const bool liveEntity    = entity != Entity::Null() && entities.IsAlive(entity)
-                            && !entities.Get<Components::PendingDestroy>(entity).has_value();
+                            && !entities.Has<Components::PendingDestroy>(entity);
     // A dead or half-destroyed entity is stale bookkeeping, not a scene object:
     // drop the binding so the mirror cannot hand out an entity the registry has
     // already retired.
@@ -239,38 +238,39 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         params.roughness        = object.roughness;
         params.metallic         = object.metallic;
 
-        auto material = engine.Graphics().CreateMaterial(blendMaterial ? ZHLN::MaterialDesc::Transparent() : ZHLN::MaterialDesc::Basic());
-        if (material) {
-            material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-            material->roughnessFactor = object.roughness;
-            material->metallicFactor  = object.metallic;
-            params.materialOverride   = *material;
+        auto material = engine.Graphics()->CreateMaterial(blendMaterial ? ZHLN::MaterialDesc::Transparent() : ZHLN::MaterialDesc::Basic());
+        if (material.HasValue()) {
+            material.value.baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
+            material.value.roughnessFactor = object.roughness;
+            material.value.metallicFactor  = object.metallic;
+            params.materialOverride        = material.value;
         } else {
-            Log("[ProjectLight] Could not create material for '{}': {}", object.name, material.error());
+            Log("[ProjectLight] Could not create material for '{}': {}", object.name, Error(material.error).Message());
         }
 
         const FVec3 halfExtents = FVec3::Splat(0.5f);
+        auto* assets = engine.Assets();
+        COM::Result<Entity> spawned = COM::ComError::InvalidArgument;
         switch (object.shape) {
             case PartShape::Sphere:
             case PartShape::Head:
-                entity = PrefabFactory::CreateSphere(engine, 0.5f, params);
+                spawned = assets->SpawnSphere(0.5f, params);
                 break;
             case PartShape::Cylinder:
-                entity = PrefabFactory::CreateCylinder(engine, 0.5f, 1.0f, params);
+                spawned = assets->SpawnCylinder(0.5f, 1.0f, params);
                 break;
             case PartShape::Cone:
-                entity = PrefabFactory::CreateCone(engine, 0.5f, 1.0f, params);
+                spawned = assets->SpawnCone(0.5f, 1.0f, params);
                 break;
             case PartShape::Cube:
             case PartShape::Wedge:
             case PartShape::CornerWedge:
             case PartShape::Capsule:
             default:
-                // Wedge, CornerWedge, Capsule and MeshPart asset substitution are
-                // intentionally represented by the nearest built-in primitive.
-                entity = PrefabFactory::CreateBox(engine, halfExtents, params);
+                spawned = assets->SpawnBox(halfExtents, params);
                 break;
         }
+        entity = spawned.HasValue() ? spawned.value : Entity::Null();
 
         if (entity == Entity::Null() || !entities.IsAlive(entity)) {
             object.materialId = InvalidMaterialID;
@@ -282,26 +282,23 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
         // answers "which instance am I" and "who owns me" on its own; the index
         // is the only place the reverse question is answered.
         state.index.Bind(object.uid, entity);
-        entities.Attach(
-            entity,
-            ProjectLightInstanceComponent {.uid = object.uid},
-            ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
-            ProjectLightReplicaTag {}
-        );
+        (void)entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
+        (void)entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
+        (void)entities.Attach(entity, ProjectLightReplicaTag {});
 
-        entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
-        entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
-            transform.position = object.renderPosition;
-            transform.rotation = object.renderRotation.Normalized();
-            transform.scale    = size;
-        });
-        entities.Patch<Components::WorldTransformComponent>(entity, [&](auto& world) {
+        if (auto* name = entities.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
+        if (auto* transform = entities.Get<Components::TransformComponent>(entity)) {
+            transform->position = object.renderPosition;
+            transform->rotation = object.renderRotation.Normalized();
+            transform->scale    = size;
+        }
+        if (auto* world = entities.Get<Components::WorldTransformComponent>(entity)) {
             const auto matrix = ComposeTransform(object.renderPosition, object.renderRotation.Normalized(), size);
-            world.world    = matrix;
-            world.previous = matrix;
-        });
-        if (auto mesh = entities.Get<Components::MeshComponent>(entity)) object.materialId = mesh->materialAsset;
-        object.hasPhysicsBody  = entities.Get<Components::PhysicsComponent>(entity).has_value();
+            world->world    = matrix;
+            world->previous = matrix;
+        }
+        if (const auto* mesh = entities.Get<Components::MeshComponent>(entity)) object.materialId = mesh->materialAsset;
+        object.hasPhysicsBody = entities.Has<Components::PhysicsComponent>(entity);
         object.spawnedSize     = size;
         object.spawnedShape    = object.shape;
         object.spawnedAnchored = object.anchored;
@@ -316,38 +313,38 @@ void SpawnOrUpdatePartEntity(Engine& engine, SceneMirrorState& state, Replicated
 
     // Ownership moves without a rebuild in the mirror's view (the rebuild above
     // covers the geometry case), so the component is refreshed on every pass.
-    entities.Patch<ProjectLightNetworkOwnerComponent>(entity, [&](auto& owner) {
-        owner.ownerUid = object.networkOwnerUid;
-    });
+    if (auto* owner = entities.Get<ProjectLightNetworkOwnerComponent>(entity)) {
+        owner->ownerUid = object.networkOwnerUid;
+    }
 
     if (object.transformDirty) {
-        entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
-            transform.position = object.renderPosition;
-            transform.rotation = object.renderRotation.Normalized();
-            transform.scale    = size;
-        });
+        if (auto* transform = entities.Get<Components::TransformComponent>(entity)) {
+            transform->position = object.renderPosition;
+            transform->rotation = object.renderRotation.Normalized();
+            transform->scale    = size;
+        }
         object.transformDirty = false;
     }
 
     if (object.visualDirty && object.materialId != InvalidMaterialID) {
-        if (auto material = engine.Graphics().Material(object.materialId)) {
-            material->baseColorFactor = {object.color.x, object.color.y, object.color.z, 1.0f - object.transparency};
-            material->emissiveFactor  = {object.color.x * object.emission, object.color.y * object.emission,
-                                         object.color.z * object.emission, 1.0f};
-            material->roughnessFactor = object.roughness;
-            material->metallicFactor  = object.metallic;
-            engine.Graphics().RegisterMaterial(object.materialId, *material);
+        if (auto material = engine.Graphics()->FindMaterial(object.materialId); material.HasValue()) {
+            material.value.baseColorFactor = {object.color.x, object.color.y, object.color.z, 1.0f - object.transparency};
+            material.value.emissiveFactor  = {object.color.x * object.emission, object.color.y * object.emission,
+                                              object.color.z * object.emission, 1.0f};
+            material.value.roughnessFactor = object.roughness;
+            material.value.metallicFactor  = object.metallic;
+            (void)engine.Graphics()->RegisterMaterial(object.materialId, material.value);
         }
-        entities.Patch<Components::PBRComponent>(entity, [&](auto& pbr) {
-            pbr.roughness = object.roughness;
-            pbr.metallic  = object.metallic;
-        });
-        entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
+        if (auto* pbr = entities.Get<Components::PBRComponent>(entity)) {
+            pbr->roughness = object.roughness;
+            pbr->metallic  = object.metallic;
+        }
+        if (auto* name = entities.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
         object.visualDirty = false;
     }
 }
-void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, ReplicatedObject& object) {
-    auto entities = engine.Entities();
+void SpawnOrUpdateLightEntity(COM::IEngine& engine, SceneMirrorState& state, ReplicatedObject& object) {
+    auto& entities = *engine.Entities();
     const bool directional = object.className == "DirectionalLight";
     const ReplicatedObject* lighting = directional ? FindObject(state, state.lightingUid) : nullptr;
     const ResolvedDirectionalLight resolved = directional
@@ -355,51 +352,51 @@ void SpawnOrUpdateLightEntity(Engine& engine, SceneMirrorState& state, Replicate
         : ResolvedDirectionalLight {.direction = object.direction, .color = object.color, .intensity = object.intensity};
     const float rendererIntensity = object.enabled ? resolved.intensity * (directional ? 180.0f : 1.0f) : 0.0f;
     Entity      entity            = state.index.Find(object.uid);
-    if (entity == Entity::Null() || !entities.IsAlive(entity) || entities.Get<Components::PendingDestroy>(entity).has_value()) {
-        entity = entities.Create();
+    if (entity == Entity::Null() || !entities.IsAlive(entity) || entities.Has<Components::PendingDestroy>(entity)) {
+        entity            = entities.CreateEntity();
         const auto matrix = ComposeTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
-        entities.Attach(
-            entity, ProjectLightInstanceComponent {.uid = object.uid}, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid},
-            ProjectLightReplicaTag {}, Components::NameComponent {.name = String64(object.name)},
-            Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)},
-            Components::WorldTransformComponent {.world = matrix, .previous = matrix},
-            Components::LightComponent {
-                .type      = directional ? LightType::Sun : LightType::Point,
-                .color     = resolved.color,
-                .intensity = rendererIntensity,
-                .radius    = object.sourceRadius,
-                .direction = resolved.direction,
-                .range     = object.range
-            },
-            Components::SceneLightTagComponent {}
-        );
+        (void)entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
+        (void)entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
+        (void)entities.Attach(entity, ProjectLightReplicaTag {});
+        (void)entities.Attach(entity, Components::NameComponent {.name = String64(object.name)});
+        (void)entities.Attach(entity, Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)});
+        (void)entities.Attach(entity, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
+        (void)entities.Attach(entity, Components::LightComponent {
+            .type      = directional ? LightType::Sun : LightType::Point,
+            .color     = resolved.color,
+            .intensity = rendererIntensity,
+            .radius    = object.sourceRadius,
+            .direction = resolved.direction,
+            .range     = object.range,
+        });
+        (void)entities.Attach(entity, Components::SceneLightTagComponent {});
         state.index.Bind(object.uid, entity);
         object.visualDirty = true;
     }
 
     if (directional && object.isMain && !entities.Get<Components::SunTagComponent>(entity)) {
-        entities.Attach(entity, Components::SunTagComponent {});
+        (void)entities.Attach(entity, Components::SunTagComponent {});
     } else if (directional && !object.isMain && entities.Get<Components::SunTagComponent>(entity)) {
-        entities.Detach<Components::SunTagComponent>(entity);
+        (void)entities.Detach<Components::SunTagComponent>(entity);
     }
 
-    entities.Patch<Components::NameComponent>(entity, [&](auto& name) { name.name = String64(object.name); });
-    entities.Patch<Components::TransformComponent>(entity, [&](auto& transform) {
-        transform.position = object.position;
-        transform.rotation = object.rotationQuat;
-    });
-    entities.Patch<Components::LightComponent>(entity, [&](auto& light) {
-        light.type      = directional ? LightType::Sun : LightType::Point;
-        light.color     = resolved.color;
-        light.intensity = rendererIntensity;
-        light.radius    = object.sourceRadius;
-        light.direction = resolved.direction;
-        light.range     = object.range;
-    });
+    if (auto* name = entities.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
+    if (auto* transform = entities.Get<Components::TransformComponent>(entity)) {
+        transform->position = object.position;
+        transform->rotation = object.rotationQuat;
+    }
+    if (auto* light = entities.Get<Components::LightComponent>(entity)) {
+        light->type      = directional ? LightType::Sun : LightType::Point;
+        light->color     = resolved.color;
+        light->intensity = rendererIntensity;
+        light->radius    = object.sourceRadius;
+        light->direction = resolved.direction;
+        light->range     = object.range;
+    }
     object.transformDirty = false;
     object.visualDirty = false;
 }
-void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
+void SyncEnvironment(COM::IEngine& engine, SceneMirrorState& state) {
     const ReplicatedObject* lighting = FindObject(state, state.lightingUid);
     if (lighting == nullptr) return;
 
@@ -432,7 +429,7 @@ void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
     // highlight-to-shade separation -- is still `exposure`, not this.
     constexpr float kProjectLightSkyScale = 20.0f;
 
-    GraphicsSettings gfx            = engine.Graphics().Settings();
+    GraphicsSettings gfx            = engine.Graphics()->Settings();
     gfx.environment.ambientExposure = ambientExposure;
     gfx.post.exposure               = kProjectLightExposure;
     if (lighting->proceduralSky) {
@@ -444,9 +441,9 @@ void SyncEnvironment(Engine& engine, SceneMirrorState& state) {
         gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
         gfx.environment.skyGround  = {0.0f, 0.0f, 0.0f, 1.0f};
     }
-    engine.Graphics().ApplySettings(gfx);
+    (void)engine.Graphics()->ApplySettings(gfx);
 }
-void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
+void UpdateRemoteCharacterParts(COM::IEngine& engine, SceneMirrorState& state, float dt) {
     (void)dt;
     const auto renderTime = std::chrono::steady_clock::now() - kNetworkSmoothDelay;
     for (const auto& [userId, history]: state.controllerStates) {
@@ -479,15 +476,15 @@ void UpdateRemoteCharacterParts(Engine& engine, SceneMirrorState& state, float d
         }
     }
 }
-void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
+void UpdateSoundVoices(COM::IEngine& engine, SceneMirrorState& state) {
     for (auto& [uid, object]: state.objects) {
         (void)uid;
         if (object.className != "Sound") continue;
-        auto audio = engine.Audio();
+        auto& audio = *engine.Audio();
         if (object.playing) {
             if (object.audioID == VoiceID::Invalid || !audio.IsVoiceValid(object.audioID)) {
                 if (object.soundId.empty()) continue;
-                object.audioID = audio.CreateVoice(object.soundId, true, object.loops, object.volume);
+                object.audioID = audio.CreateVoice(COM::StringView(object.soundId), true, object.loops, object.volume);
                 if (object.audioID == VoiceID::Invalid) {
                     continue; // asset may not be present in the local Zahlen installation
                 }
@@ -500,22 +497,22 @@ void UpdateSoundVoices(Engine& engine, SceneMirrorState& state) {
             if (parent != nullptr)
                 audio.SetVoicePosition(object.audioID, parent->position);
         } else if (object.audioID != VoiceID::Invalid) {
-            audio.StopVoice(object.audioID);
+            audio.StopVoice(object.audioID, 0.0f);
             object.audioID = VoiceID::Invalid;
         }
     }
 }
 } // namespace
 
-void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
-    auto entities = engine.Entities();
+void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& state) {
+    auto& entities = *engine.Entities();
 
     for (uint64_t uid: state.pendingRemovals) {
         auto found = state.objects.find(uid);
         if (found == state.objects.end()) continue;
         ReplicatedObject& object = found->second;
         if (object.audioID != VoiceID::Invalid) {
-            engine.Audio().StopVoice(object.audioID);
+            engine.Audio()->StopVoice(object.audioID, 0.0f);
             object.audioID = VoiceID::Invalid;
         }
         const Entity entity = state.index.Take(uid);
@@ -524,7 +521,7 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
             // before it dies: anything running later in the frame (and the
             // socket-free mirror test) can read the removal off the registry
             // instead of asking the session what it just did.
-            entities.Attach(entity, ProjectLightRemovalPending {});
+            (void)entities.Attach(entity, ProjectLightRemovalPending {});
             DespawnEntity(engine, entity);
         }
         state.controllerStates.erase(object.userId);
@@ -596,22 +593,22 @@ void SceneMirror::SyncSceneEntities(Engine& engine, SceneMirrorState& state) {
         state.summaryLogged = true;
     }
 }
-void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state) {
-    auto entities = engine.Entities();
+void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& state) {
+    auto& entities = *engine.Entities();
     auto bindCamera = [&](Entity target) -> void {
         if (target == Entity::Null()) return;
         for (Entity camera: entities.EntitiesWith<Components::MainCameraTagComponent>()) {
-            entities.Patch<CameraRig::TargetCameraComponent>(camera, [&](auto& rig) {
-                if (rig.target != target) {
-                    rig.target = target;
-                    rig.hasInitSmoothTarget = 0;
+            if (auto* rig = entities.Get<CameraRig::TargetCameraComponent>(camera)) {
+                if (rig->target != target) {
+                    rig->target              = target;
+                    rig->hasInitSmoothTarget = 0;
                 }
-            });
+            }
         }
     };
     auto destroyController = [&]() -> void {
         if (state.localControllerBody != Physics::BodyID::Null()) {
-            engine.Physics().DestroyBody(state.localControllerBody);
+            engine.Simulation()->DestroyBody(state.localControllerBody);
             state.localControllerBody = Physics::BodyID::Null();
         }
         if (state.localController != Entity::Null() && entities.IsAlive(state.localController)) {
@@ -637,10 +634,10 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
         && entities.IsAlive(state.localController) && state.localControllerBody != Physics::BodyID::Null()) {
         const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
         if (humanoid != nullptr) {
-            entities.Patch<Character::MovementComponent>(state.localController, [&](auto& move) {
-                move.speed = std::max(0.0f, humanoid->walkSpeed);
-                move.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
-            });
+            if (auto* move = entities.Get<Character::MovementComponent>(state.localController)) {
+                move->speed     = std::max(0.0f, humanoid->walkSpeed);
+                move->jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
+            }
         }
         bindCamera(state.localController);
         return;
@@ -650,59 +647,55 @@ void SceneMirror::UpdateLocalController(Engine& engine, SceneMirrorState& state)
     const ReplicatedObject* rootPart = FindObject(state, state.localRootPartUid);
     if (rootPart == nullptr) return;
 
-    auto physics = engine.Physics();
-    Physics::CharacterParams params;
-    const auto capsuleResult = JPH::CapsuleShapeSettings(2.0f, 0.5f).Create();
-    if (capsuleResult.IsValid()) params.shape = capsuleResult.Get();
-    params.maxSlopeAngle = (std::numbers::pi_v<float> / 4.0f);
-    state.localControllerBody = physics.CreateCharacter(rootPart->position.Cast<double>(), params);
+    auto& sim = *engine.Simulation();
+    Physics::CharacterCreateDesc charDesc {};
+    charDesc.position          = rootPart->position.Cast<double>();
+    charDesc.useCustomCapsule  = true;
+    charDesc.capsuleRadius     = 0.5f;
+    charDesc.capsuleHalfHeight = 2.0f;
+    charDesc.maxSlopeRadians   = std::numbers::pi_v<float> / 4.0f;
+    const auto charRes        = sim.CreateCharacter(COM::InChain(charDesc));
+    state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::BodyID::Null();
     if (state.localControllerBody == Physics::BodyID::Null()) {
         Log("[ProjectLight] Could not create the local player CharacterVirtual body.");
         return;
     }
 
-    entities.Register<Character::MovementComponent>("MovementComponent");
-    entities.Register<Character::InputComponent>("InputComponent");
-    const Entity controller = entities.Create();
-    const auto matrix = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
-    entities.Attach(
-        controller, Components::NameComponent {.name = String64("ProjectLightLocalController")},
-        Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)},
-        Components::WorldTransformComponent {.world = matrix, .previous = matrix},
-        Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false},
-        Character::MovementComponent {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat}, Character::InputComponent {}
-    );
-    state.localController = controller;
-    state.controllerForRootUid = state.localRootPartUid;
-
-    const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
-    if (humanoid != nullptr) {
-        entities.Patch<Character::MovementComponent>(controller, [&](auto& move) {
-            move.speed = std::max(0.0f, humanoid->walkSpeed);
-            move.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
-        });
+    const Entity controller = entities.CreateEntity();
+    const auto   matrix     = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
+    (void)entities.Attach(controller, Components::NameComponent {.name = String64("ProjectLightLocalController")});
+    (void)entities.Attach(controller, Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)});
+    (void)entities.Attach(controller, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
+    (void)entities.Attach(controller, Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false});
+    Character::MovementComponent moveComp {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat};
+    if (const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid); humanoid != nullptr) {
+        moveComp.speed     = std::max(0.0f, humanoid->walkSpeed);
+        moveComp.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
     }
+    (void)Character::Attach(entities, controller, moveComp, Character::HostCharacterComponent {});
+    state.localController      = controller;
+    state.controllerForRootUid = state.localRootPartUid;
 
     bindCamera(controller);
 }
-void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& state, float dt) {
+void SceneMirror::UpdateLocalCharacterParts(COM::IEngine& engine, SceneMirrorState& state, float dt) {
     if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyID::Null()) return;
-    auto entities = engine.Entities();
+    auto& entities = *engine.Entities();
     auto movement = entities.Get<Character::MovementComponent>(state.localController);
     if (!movement) return;
 
     // `bodyState` rather than `state`: in this file `state` is the session view.
-    auto physics = engine.Physics();
-    const auto bodyStateResult = physics.BodyState(state.localControllerBody);
-    if (!bodyStateResult || !bodyStateResult->valid) return;
-    const auto& bodyState = *bodyStateResult;
-    const FVec3 rootPosition = bodyState.currentPosition;
-    const Quat rootRotation = movement->orientation.Normalized();
-    const auto velocity = physics.CharacterVelocity(state.localControllerBody);
+    auto& sim = *engine.Simulation();
+    const auto bodyStateResult = sim.BodyState(state.localControllerBody);
+    if (!bodyStateResult.HasValue() || !bodyStateResult.value.valid) return;
+    const auto& bodyState    = bodyStateResult.value;
+    const FVec3 rootPosition = bodyState.currentPosition.Cast<float>();
+    const Quat  rootRotation = movement->orientation.Normalized();
+    const auto  velocity     = sim.CharacterVelocity(state.localControllerBody);
     (void)dt;
 
-    const auto input    = std::as_const(engine).Input();
-    const bool jumpDown = input.KeyDown(KeyCode::Space);
+    const auto* actions  = engine.Actions();
+    const bool  jumpDown = actions != nullptr && actions->KeyDown(KeyCode::Space, kPrimarySeat);
     if (jumpDown && !state.wasJumpDown && movement->isGrounded) state.jumpRemaining = 0.20f;
     state.wasJumpDown = jumpDown;
     state.jumpRemaining = std::max(0.0f, state.jumpRemaining - std::max(0.0f, dt));

@@ -5,7 +5,7 @@
 //
 // Exercises plugins/lua/ReflectLua.hpp + SceneLua.hpp:
 //   * Reflection-driven evaluation into scalars, FixedString<N>, std::array,
-//     std::vector, maps, Optional, enums, JPH::Float3/FVec3/FVec4/Quat,
+//     std::vector, maps, Optional, enums, ZHLN::FVec3/FVec3/FVec4/Quat,
 //     GraphicsSettings, and ZHLN::Scene::Scene.
 //   * Computed expressions (loops, math, helpers) and pure function reducers
 //     (EvaluateCallString).
@@ -15,7 +15,6 @@
 //     and deterministic instruction + memory budgets.
 
 #include "TestsFramework.hpp"
-#include <RagdollAuthoring/RagdollAuthoring.hpp>
 #include <Scene/Scene.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -23,7 +22,6 @@
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <cmath>
@@ -51,7 +49,7 @@ struct SampleSubConfig {
     float          gain    = 1.0f;
     bool           enabled = true;
     ZHLN::String64 tag     = ZHLN::String64("default");
-    JPH::Float3    offset  = {0.0f, 1.0f, 2.0f};
+    ZHLN::FVec3    offset  = {0.0f, 1.0f, 2.0f};
 };
 
 struct SampleAggregate {
@@ -449,16 +447,6 @@ struct ReflectLuaSuite {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }
 
-            const std::filesystem::path ragdollPath = findConfig("ragdoll_humanoid.lua");
-            if (ragdollPath.empty()) {
-                return std::unexpected(LuaSuiteFail::UnexpectedError);
-            }
-            auto recipe = ZHLN::RagdollAuthoring::LoadRecipeFromLuaFile(ragdollPath);
-            if (!recipe || recipe->rules.size() != 4 || recipe->rules[0].spec.shape != ZHLN::RagdollAuthoring::RagdollShapeKind::Capsule ||
-                !Near(recipe->rules[1].spec.maxMotorForce, 250.0f) ||
-                recipe->fallback.shape != ZHLN::RagdollAuthoring::RagdollShapeKind::Sphere) {
-                return std::unexpected(LuaSuiteFail::WrongValue);
-            }
 
             return {};
         }

@@ -14,7 +14,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/SceneData.hpp>
+#include <render/SceneData.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
