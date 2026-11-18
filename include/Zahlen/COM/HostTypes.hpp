@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Window/WindowInput.hpp>
 

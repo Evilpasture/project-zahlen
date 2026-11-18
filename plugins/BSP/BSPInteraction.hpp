@@ -68,12 +68,12 @@ struct EntityOutput {
 
 // Every key on @p entity that parses as an output, in lump order. A key is an
 // output when its name starts with "On" and its value is not empty.
-[[nodiscard]] auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput>;
+[[nodiscard]] auto ParseEntityOutputs(const Entity& entity) -> std::vector<EntityOutput>;
 
 // The entity's "movedir" as an engine-space direction. Source spells it as
 // pitch/yaw degrees and overloads the first component with two sentinels
 // instead of an angle: -1 is up, -2 is down. An absent key is +X forward.
-[[nodiscard]] auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3;
+[[nodiscard]] auto ParseMoveDirection(const Entity& entity, const ImportOptions& options) -> FVec3;
 
 // The numeric reading of a keyvalue or of an output's parameter field.
 // Absent or unparseable yields @p fallback, the field's own default: reading a
@@ -128,7 +128,7 @@ struct ButtonFlags {
 // set it to zero" are different answers, and only the consumer knows the
 // default (a door's 100 unit/s is a game rule, not a file format).
 struct EntityRecord {
-    Entity          entity = Entity::Null();
+    ZHLN::Entity          entity = ZHLN::Entity::Null();
     InteractiveKind kind   = InteractiveKind::None;
 
     std::string className;
@@ -170,7 +170,7 @@ struct EntityRecord {
 // Every interactive entity in @p map, decoded, with `entity` resolved against
 // the entities already in @p query. The registry is read, never written:
 // this describes what should happen, and the caller does it.
-[[nodiscard]] auto DescribeInteractiveEntities(const COM::IEntities& entities, const BSPMap& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
+[[nodiscard]] auto DescribeInteractiveEntities(const COM::IEntities& entities, const Map& map, const ImportOptions& options = {}) -> std::vector<EntityRecord>;
 
 // The entity the lump entry @p matchName / @p modelSource refers to, or
 // Entity::Null(). A model source ("*12") is matched against the scene's brush
@@ -178,6 +178,6 @@ struct EntityRecord {
 // lets many brush entities share one so an input can address the whole group,
 // and matching by name alone attaches every member of a named door bank to the
 // first entity that answers.
-[[nodiscard]] auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchName, std::string_view modelSource) -> Entity;
+[[nodiscard]] auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchName, std::string_view modelSource) -> ZHLN::Entity;
 
 } // namespace ZHLN::BSP

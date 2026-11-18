@@ -36,7 +36,7 @@ inline auto GetCategoryInstance() noexcept -> const ErrorCategory* {
     [[maybe_unused]] auto dummy = Reflect::EnumToString(E {});
 
     static constexpr ErrorCategory cat = {
-        .name      = Reflect::TypeName<E>(),
+        .name      = Reflect::ScopedTypeName<E>(),
         .to_string = [](uint32_t val) noexcept -> std::string_view {
             return Reflect::EnumToMessage(static_cast<E>(val));
         },
@@ -75,7 +75,7 @@ inline auto GetRegistryHead() noexcept -> std::atomic<RegistryNode*>& {
 template <typename E>
     requires std::is_enum_v<E>
 struct CategoryRegistration {
-    static inline RegistryNode node = {.hash = HashTypeName(ZHLN::Reflect::TypeName<E>()), .category = GetCategoryInstance<E>(), .next = nullptr};
+    static inline RegistryNode node = {.hash = HashTypeName(ZHLN::Reflect::ScopedTypeName<E>()), .category = GetCategoryInstance<E>(), .next = nullptr};
 
     static inline bool registered = []() -> auto {
         auto&         head     = GetRegistryHead();
@@ -124,7 +124,7 @@ struct ErrorCode {
 
     template <typename E>
         requires std::is_enum_v<E>
-    constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {
+    constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::ScopedTypeName<E>())), value(static_cast<uint32_t>(val)) {
         static_assert(
             !Reflect::EnumHasValue<E>(0),
             "Error enums must not contain a 0 enumerator: ErrorCode's value word uses 0 for 'no "
@@ -151,7 +151,7 @@ struct ErrorCode {
     template <typename E>
         requires std::is_enum_v<E>
     [[nodiscard]] constexpr bool Is() const noexcept {
-        return category == Hash32(Reflect::TypeName<E>());
+        return category == Hash32(Reflect::ScopedTypeName<E>());
     }
 
     template <typename E>

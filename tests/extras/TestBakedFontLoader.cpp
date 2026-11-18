@@ -59,7 +59,7 @@ namespace {
 struct BakedFontLoaderTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> parses_fontbm_json_descriptor() {
-            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(kDescriptorJson);
+            auto desc = ZHLN::Fonts::ParseBMDescriptor(kDescriptorJson);
             if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
                 return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
             }
@@ -78,19 +78,19 @@ struct BakedFontLoaderTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> rejects_binary_and_malformed() {
             const std::string binary = std::string("BMF\3", 4) + std::string(20, '\0');
-            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseFontBMDescriptor(binary).has_value());
+            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseBMDescriptor(binary).has_value());
 
             // No chars at all (JSON)
-            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseFontBMDescriptor(R"json({"common":{"lineHeight":8,"base":6,"scaleW":8,"scaleH":8},"pages":["x.png"],"chars":[]})json").has_value());
+            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseBMDescriptor(R"json({"common":{"lineHeight":8,"base":6,"scaleW":8,"scaleH":8},"pages":["x.png"],"chars":[]})json").has_value());
             // No page record (JSON)
-            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseFontBMDescriptor(R"json({"common":{"lineHeight":8,"base":6,"scaleW":8,"scaleH":8},"chars":[{"id":65,"x":0,"y":0,"width":1,"height":1,"xoffset":0,"yoffset":0,"xadvance":1}]})json").has_value());
+            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseBMDescriptor(R"json({"common":{"lineHeight":8,"base":6,"scaleW":8,"scaleH":8},"chars":[{"id":65,"x":0,"y":0,"width":1,"height":1,"xoffset":0,"yoffset":0,"xadvance":1}]})json").has_value());
             // Legacy text format is not supported anymore
-            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseFontBMDescriptor("info face=\"Fixture\" size=16\ncommon lineHeight=8 base=6 scaleW=8 scaleH=8\n").has_value());
+            ZHLN::Test::ExpectFalse(ZHLN::Fonts::ParseBMDescriptor("info face=\"Fixture\" size=16\ncommon lineHeight=8 base=6 scaleW=8 scaleH=8\n").has_value());
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> assembles_bake_with_baseline_shifted_offsets() {
-            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(kDescriptorJson);
+            auto desc = ZHLN::Fonts::ParseBMDescriptor(kDescriptorJson);
             if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
                 return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
             }
@@ -120,7 +120,7 @@ struct BakedFontLoaderTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> rejects_a_page_of_the_wrong_size() {
-            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(kDescriptorJson);
+            auto desc = ZHLN::Fonts::ParseBMDescriptor(kDescriptorJson);
             if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
                 return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
             }
@@ -143,7 +143,7 @@ struct BakedFontLoaderTestSuite {
             }
             descriptor.replace(sizeKey, std::string_view("\"size\":16").size(), "\"size\":-32");
 
-            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(descriptor);
+            auto desc = ZHLN::Fonts::ParseBMDescriptor(descriptor);
             if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
                 return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
             }

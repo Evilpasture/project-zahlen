@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "LightningHost.hpp"
+#include "Lightning.hpp"
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -9,13 +9,13 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
-namespace ZHLN::LightningHost {
+namespace ZHLN::Lightning {
 namespace {
 bool Finite(FVec3 p) {
     return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
 }
 } // namespace
-struct Host::Impl {
+struct System::Impl {
     struct Bolt {
         Entity          entity, flash, impact;
         ConfigInfo      config;
@@ -43,7 +43,7 @@ struct Host::Impl {
             mesh = built.value;
             if (!entities.Attach(bolt.entity, Components::OwnedMeshComponent {.meshAsset = bolt.meshID, .mesh = mesh})) {
                 (void) graphics.DestroyMesh(COM::InChain(mesh));
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
             }
         }
         // Publish after replacing ownership (replacement unregisters old ID).
@@ -71,7 +71,7 @@ struct Host::Impl {
         if (!result.HasValue())
             return std::unexpected(result.error);
         if (!entities.Attach(bolt.entity, bolt.state))
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if (auto* light = entities.Get<Components::LightComponent>(bolt.flash))
             light->intensity = bolt.state.flashLuminance * 8000000;
         if (auto* light = entities.Get<Components::LightComponent>(bolt.impact))
@@ -86,20 +86,20 @@ struct Host::Impl {
         engine->Graphics()->UnregisterMaterial(bolt.materialID);
     }
 };
-Host::Host(): _impl(std::make_unique<Impl>()) {
+System::System(): _impl(std::make_unique<Impl>()) {
 }
-Host::~Host() {
+System::~System() {
     Clear();
 }
-Host::Host(Host&&) noexcept = default;
-auto Host::operator=(Host&& other) noexcept -> Host& {
+System::System(System&&) noexcept = default;
+auto System::operator=(System&& other) noexcept -> System& {
     if (this != &other) {
         Clear();
         _impl = std::move(other._impl);
     }
     return *this;
 }
-void Host::Start(COM::IEngine& engine) {
+void System::Start(COM::IEngine& engine) {
     if (!_impl)
         _impl = std::make_unique<Impl>();
     if (_impl->engine.Get() == &engine)
@@ -107,21 +107,21 @@ void Host::Start(COM::IEngine& engine) {
     Clear();
     _impl->engine = COM::Ref<COM::IEngine>(&engine);
 }
-auto Host::Spawn(FVec3 cloud, FVec3 ground, FVec3 camera, const ConfigInfo& cfg) -> std::expected<Entity, ErrorCode> {
+auto System::Spawn(FVec3 cloud, FVec3 ground, FVec3 camera, const ConfigInfo& cfg) -> std::expected<Entity, ErrorCode> {
     if (!_impl || !_impl->engine || !Finite(cloud) || !Finite(ground) || !Finite(camera) || !std::isfinite(cfg.eta) || cfg.eta < 0 || cfg.eta > 8 ||
         !std::isfinite(cfg.peakCurrentKA) || cfg.peakCurrentKA < 0 || cfg.peakCurrentKA > 1000 || !std::isfinite(cfg.timeDilation) ||
         cfg.timeDilation < .001f || cfg.timeDilation > 1000 || !std::isfinite(cfg.ribbonWidth) || cfg.ribbonWidth <= 0 || cfg.ribbonWidth > 100 ||
         cfg.subdivisions < 0 || cfg.subdivisions > 8 || !std::isfinite(cfg.soundVolume) || cfg.soundVolume < 0 || cfg.soundVolume > 1000 ||
         !std::isfinite(cfg.emissiveIntensity) || cfg.emissiveIntensity < 0 || cfg.emissiveIntensity > 1e8f || (cloud - ground).LengthSquared() < 1e-4f ||
         !std::isfinite((cloud - ground).LengthSquared()))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     auto& entities = *_impl->engine->Entities();
     auto  ribbon   = GenerateRibbon(cloud, ground, camera, cfg, _impl->rng);
     if (ribbon.positions.empty())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     Entity entity = entities.Spawn(Components::NameComponent {.name = String64("HostLightning")}, Components::TransformComponent {});
     if (entity == Entity::Null())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     auto       identity = std::to_string(entity.index) + "_" + std::to_string(entity.generation);
     Impl::Bolt bolt {
         .entity     = entity,
@@ -147,20 +147,20 @@ auto Host::Spawn(FVec3 cloud, FVec3 ground, FVec3 camera, const ConfigInfo& cfg)
         return std::unexpected(error);
     };
     if (bolt.flash == Entity::Null() || bolt.impact == Entity::Null())
-        return fail(COM::ComError::InvalidArgument);
+        return fail(COM::Error::InvalidArgument);
     if (auto result = _impl->Refresh(bolt); !result)
         return fail(result.error());
     if (!entities.Attach(
             entity,
             Components::MeshComponent {.meshAsset = bolt.meshID, .materialAsset = bolt.materialID, .cullRadius = 20000, .flags = DrawFlags::ExcludeFromTLAS}
         ))
-        return fail(COM::ComError::InvalidArgument);
+        return fail(COM::Error::InvalidArgument);
     _impl->bolts.push_back(std::move(bolt));
     return entity;
 }
-auto Host::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+auto System::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
     if (!_impl || _impl->engine.Get() != &engine || !std::isfinite(dt) || dt < 0 || dt > 60)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     auto& entities = *engine.Entities();
     for (auto it = _impl->bolts.begin(); it != _impl->bolts.end();) {
         if (!entities.IsAlive(it->entity) || entities.Get<Components::PendingDestroy>(it->entity)) {
@@ -221,7 +221,7 @@ auto Host::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, E
     }
     return {};
 }
-void Host::Remove(Entity entity) {
+void System::Remove(Entity entity) {
     if (!_impl || !_impl->engine)
         return;
     std::erase_if(_impl->bolts, [&](auto& bolt) {
@@ -231,19 +231,19 @@ void Host::Remove(Entity entity) {
         return true;
     });
 }
-void Host::Clear() {
+void System::Clear() {
     if (!_impl || !_impl->engine)
         return;
     for (auto& bolt: _impl->bolts)
         _impl->Release(bolt);
     _impl->bolts.clear();
 }
-void Host::Stop(COM::IEngine&) {
+void System::Stop(COM::IEngine&) {
     Clear();
     if (_impl)
         _impl->engine = {};
 }
-auto Host::Size() const noexcept -> size_t {
+auto System::Size() const noexcept -> size_t {
     return _impl ? _impl->bolts.size() : 0;
 }
-} // namespace ZHLN::LightningHost
+} // namespace ZHLN::Lightning

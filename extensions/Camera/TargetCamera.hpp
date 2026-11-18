@@ -12,7 +12,7 @@ struct IEntities;
 struct IActionContext;
 } // namespace ZHLN::COM
 namespace ZHLN::CameraRig {
-struct TargetCameraComponent {
+struct TargetComponent {
     Entity    target         = Entity::Null();
     float     distance       = 4.5f;
     float     targetDistance = 4.5f;

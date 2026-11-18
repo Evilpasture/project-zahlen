@@ -25,7 +25,7 @@
 // ============================================================================
 // Reflection-driven TOML
 //
-//   const std::string text = ZHLN::ReflectTOML::SerializeTOML(scene);
+//   const std::string text = ZHLN::ReflectTOML::Serialize(scene);
 //   const auto         back = ZHLN::ReflectTOML::Parse<Scene>(text);
 //
 // Same contract as plugins/json/JSONSchema.hpp -- field names come from the
@@ -45,7 +45,7 @@
 //   * std::optional is omitted entirely when empty rather than written null,
 //     which is how TOML expresses absence.
 //   * A struct can opt out of table form and serialise as `[x, y, z]` by
-//     specialising ReflectTOML::TOMLVector -- see there. SceneTOML.hpp in
+//     specialising ReflectTOML::Vector -- see there. SceneTOML.hpp in
 //     this directory uses it so Jolt's FVec3/FVec4 read as coordinates in
 //     a scene document while staying Jolt types in the code.
 //
@@ -140,7 +140,7 @@ class Document {
 // Fields are read and written in declaration order through reflection, so a
 // specialisation is one line and supplies no accessors.
 template <typename T>
-struct TOMLVector : std::false_type {};
+struct Vector : std::false_type {};
 
 namespace TemplatedDetail {
 
@@ -161,9 +161,9 @@ namespace TemplatedDetail {
         typename T::mapped_type;
     };
 
-    // A struct that opted in to array form via TOMLVector.
+    // A struct that opted in to array form via Vector.
     template <typename T>
-    concept VectorLike = TOMLVector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
+    concept VectorLike = Vector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
     template <typename T>
     concept OptionalLike = requires { typename T::value_type; } && std::is_same_v<T, std::optional<typename T::value_type>>;
@@ -174,7 +174,7 @@ template <typename T>
 auto ParseObject(Value reader) -> std::expected<T, ErrorCode>;
 
 template <typename FieldType>
-auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
+auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, bool>) {
@@ -219,7 +219,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         return static_cast<Decayed>(*res);
     } else if constexpr (TemplatedDetail::OptionalLike<Decayed>) {
         // std::optional: a present key means an engaged value.
-        auto parsed = GetTOMLValue<typename Decayed::value_type>(reader);
+        auto parsed = GetValue<typename Decayed::value_type>(reader);
         if (!parsed) {
             return std::unexpected(parsed.error());
         }
@@ -235,7 +235,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!entry) {
                 return std::unexpected(entry.error());
             }
-            auto parsed = GetTOMLValue<typename Decayed::mapped_type>(*entry);
+            auto parsed = GetValue<typename Decayed::mapped_type>(*entry);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -260,7 +260,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!element) {
                 return std::unexpected(element.error());
             }
-            auto parsed = GetTOMLValue<typename Decayed::value_type>(*element);
+            auto parsed = GetValue<typename Decayed::value_type>(*element);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -278,7 +278,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!element) {
                 return std::unexpected(element.error());
             }
-            auto parsed = GetTOMLValue<typename Decayed::value_type>(*element);
+            auto parsed = GetValue<typename Decayed::value_type>(*element);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -310,7 +310,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
                 err = element.error();
                 return;
             }
-            auto parsed = GetTOMLValue<std::remove_cvref_t<decltype(component)>>(*element);
+            auto parsed = GetValue<std::remove_cvref_t<decltype(component)>>(*element);
             if (!parsed) {
                 err = parsed.error();
                 return;
@@ -365,7 +365,7 @@ auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
             return;
         }
 
-        auto value = GetTOMLValue<FieldType>(*keyReader);
+        auto value = GetValue<FieldType>(*keyReader);
         if (!value) {
             ZHLN::Log("[TOML] field '{}' of {} rejected the document value", fieldName, ZHLN::Reflect::TypeName<T>());
             err = value.error();
@@ -602,7 +602,7 @@ namespace TemplatedDetail {
         } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
             AppendTOMLInlineTable(out, value);
         } else {
-            static_assert(!sizeof(Decayed), "SerializeTOML: unsupported field type (see the supported set in toml/TOML.hpp)");
+            static_assert(!sizeof(Decayed), "Serialize: unsupported field type (see the supported set in toml/TOML.hpp)");
         }
     }
 
@@ -684,9 +684,9 @@ namespace TemplatedDetail {
 
 // Serialises a reflected struct as a TOML document.
 template <typename T>
-[[nodiscard]] auto SerializeTOML(const T& value) -> std::string {
+[[nodiscard]] auto Serialize(const T& value) -> std::string {
     static_assert(
-        ZHLN::Reflect::FieldCount<std::remove_cvref_t<T>>() > 0, "SerializeTOML: a TOML document is a table at the root, so it must be a reflected struct"
+        ZHLN::Reflect::FieldCount<std::remove_cvref_t<T>>() > 0, "Serialize: a TOML document is a table at the root, so it must be a reflected struct"
     );
 
     std::string out;

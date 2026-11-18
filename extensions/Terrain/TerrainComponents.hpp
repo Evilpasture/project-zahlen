@@ -17,13 +17,13 @@ namespace ZHLN::Terrain {
 enum class TerrainID : uint64_t { Invalid = 0 };
 static_assert(sizeof(TerrainID) == 8);
 
-enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
+enum class Type : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 
 // Heightmap + coloring owned by the terrain slot table (TerrainSystem).
 // The ECS component below references one of these by handle. Terrain's
 // cleanup pass retires slots before Engine::ClearScene; standalone scenes
 // must call TerrainSystem::ReleaseTerrainData before Registry::Clear.
-struct TerrainData {
+struct Data {
     uint32_t           sampleCount = 128;
     float              worldSize   = 280.0f;
     float              maxHeight   = 35.0f;
@@ -31,7 +31,7 @@ struct TerrainData {
     ZHLN::Array<float> colors;
 };
 
-struct TerrainComponent {
+struct Component {
     uint32_t      sampleCount   = 128;
     float         worldSize     = 280.0f;
     float         maxHeight     = 35.0f;

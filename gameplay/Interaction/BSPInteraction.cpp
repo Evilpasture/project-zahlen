@@ -377,7 +377,7 @@ uint32_t FireEntityOutputs(COM::IEntities& entities, Entity entity, std::string_
     return fired;
 }
 
-void InitializeBSPEntities(COM::IEntities& entities, const BSP::BSPMap& map, const Scene::Instance& /*instance*/,
+void InitializeBSPEntities(COM::IEntities& entities, const BSP::Map& map, const Scene::Instance& /*instance*/,
                            const BSP::ImportOptions& options) {
     const auto records = BSP::DescribeInteractiveEntities(entities, map, options);
     for (const BSP::EntityRecord& record : records) {
@@ -433,7 +433,7 @@ void InitializeBSPEntities(COM::IEntities& entities, const BSP::BSPMap& map, con
     }
 }
 
-void InitializeBSPEntities(COM::IEngine& engine, const BSP::BSPMap& map, const Scene::Instance& instance,
+void InitializeBSPEntities(COM::IEngine& engine, const BSP::Map& map, const Scene::Instance& instance,
                            const BSP::ImportOptions& options) {
     if (auto* entities = engine.Entities()) {
         InitializeBSPEntities(*entities, map, instance, options);

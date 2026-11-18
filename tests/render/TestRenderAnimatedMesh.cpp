@@ -5,7 +5,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Components.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -116,7 +116,7 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
             }
 
-            ZHLN::Animation::AnimationContext animCtx;
+            ZHLN::Animation::Context animCtx;
             ZHLN::Animation::Sync(reg, animCtx);
             const ZHLN::Entity rootEntity = spawnedParts[0];
             const auto         animComp   = reg.Get<ZHLN::Animation::AnimatorComponent>(rootEntity);

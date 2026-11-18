@@ -27,7 +27,7 @@ namespace ZHLN::COM {
 
 // Failures the COM protocol or surface itself produces, distinct from the
 // subsystem ErrorCode categories forwarded from the engine.
-enum class ComError : uint8_t {
+enum class Error : uint8_t {
     AllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"COM object allocation failed."> {}) = 1,
     AssetNotCached       ZHLN_ANNOTATION(ZHLN::Description<"Requested asset is not present in the engine cache."> {}) = 2,
     NullArgument         ZHLN_ANNOTATION(ZHLN::Description<"Required COM pointer or chain node payload is null."> {}) = 3,

@@ -1,6 +1,6 @@
 # Terrain and CombatFX capability hosts
 
-`zahlen_terrain` (`Terrain/TerrainHost.hpp`) owns independent CPU terrain
+`zahlen_terrain` (`Terrain/Terrain.hpp`) owns independent CPU terrain
  documents and publishes meshes, material bindings, entities and real physics
 heightfields through engine capabilities. `TerrainGeometry` contains the shared
 CPU algorithm; the transitional global-slot terrain adapter has been removed.
@@ -12,7 +12,7 @@ component unregisters the preceding asset ID.
 `zahlen_vfx` (`VFX/CombatFX.hpp`) is an ordinary COM host policy object. It owns
 impact decals, procedural fallback textures, particles, rings and tracers,
 uses audio capabilities, and isolates per-instance presets and state.
-`LightningHost` and `ExplosionHost` are likewise pure COM host services inside
+`Lightning` and `Explosion` are likewise pure COM host services inside
 `zahlen_vfx` (`Zahlen::VFX`); all transitional native VFX adapters are gone.
 
 Run `zahlen-scene-host --terrain-demo --raster-only --frames 180` for the actual

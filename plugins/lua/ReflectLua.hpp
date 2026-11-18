@@ -81,12 +81,12 @@ namespace ReflectLua {
 // Opt-in trait for aggregate coordinate/color structs (e.g. JPH::Float2/3/4)
 // so Lua authors can write either `{ 1.0, 2.0, 3.0 }` or `{ x = 1.0, y = 2.0, z = 3.0 }`.
 template <typename T>
-struct LuaVector : std::false_type {};
+struct Vector : std::false_type {};
 
 // Customization point for non-aggregate value types with private/SIMD storage
 // (e.g. FVec3, FVec4, Quat in SceneLua.hpp).
 template <typename T>
-struct LuaValueTrait {
+struct ValueTrait {
     static constexpr bool specialized = false;
 };
 
@@ -95,17 +95,17 @@ class Builder;
 
 // Sandboxed RAII LuaJIT VM used for state evaluation, pure reducer calls, or
 // isolated host adapters (such as ProjectLight's DataModelBindings).
-class ZHLN_STATIC_API LuaVm {
+class ZHLN_STATIC_API Vm {
   public:
-    LuaVm() noexcept;
-    ~LuaVm();
+    Vm() noexcept;
+    ~Vm();
 
-    LuaVm(const LuaVm&)                    = delete;
-    auto operator=(const LuaVm&) -> LuaVm& = delete;
-    LuaVm(LuaVm&& other) noexcept;
-    auto operator=(LuaVm&& other) noexcept -> LuaVm&;
+    Vm(const Vm&)                    = delete;
+    auto operator=(const Vm&) -> Vm& = delete;
+    Vm(Vm&& other) noexcept;
+    auto operator=(Vm&& other) noexcept -> Vm&;
 
-    [[nodiscard]] static auto Create(LuaBudget budget = {}) noexcept -> std::expected<LuaVm, ErrorCode>;
+    [[nodiscard]] static auto Create(LuaBudget budget = {}) noexcept -> std::expected<Vm, ErrorCode>;
 
     [[nodiscard]] auto IsValid() const noexcept -> bool;
     [[nodiscard]] auto Budget() const noexcept -> const LuaBudget&;
@@ -144,7 +144,7 @@ class ZHLN_STATIC_API LuaVm {
     std::unique_ptr<Impl> _impl;
 };
 
-// Non-owning view of a value on an active LuaVm stack frame.
+// Non-owning view of a value on an active Vm stack frame.
 // Keeps <lua.h> completely private to ReflectLua.cpp.
 class ZHLN_STATIC_API Value {
   public:
@@ -220,7 +220,7 @@ class ZHLN_STATIC_API Builder {
     lua_State* _state = nullptr;
 };
 
-[[nodiscard]] ZHLN_STATIC_API auto ReadLuaFileText(const std::filesystem::path& path) noexcept
+[[nodiscard]] ZHLN_STATIC_API auto ReadFileText(const std::filesystem::path& path) noexcept
     -> std::expected<std::string, ErrorCode>;
 
 namespace TemplatedDetail {
@@ -258,7 +258,7 @@ namespace TemplatedDetail {
                             std::is_same_v<T, ZHLN::Optional<typename T::value_type>>);
 
     template <typename T>
-    concept VectorLike = LuaVector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
+    concept VectorLike = Vector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
     inline auto EqualAsciiIgnoreCase(std::string_view a, std::string_view b) noexcept -> bool {
         if (a.size() != b.size()) {
@@ -340,8 +340,8 @@ namespace TemplatedDetail {
                 }
             }
             return {};
-        } else if constexpr (LuaValueTrait<Decayed>::specialized) {
-            auto parsed = LuaValueTrait<Decayed>::Read(reader);
+        } else if constexpr (ValueTrait<Decayed>::specialized) {
+            auto parsed = ValueTrait<Decayed>::Read(reader);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -634,8 +634,8 @@ namespace TemplatedDetail {
 
         if constexpr (FixedCharArray<T>) {
             builder.PushString(std::string_view(value));
-        } else if constexpr (LuaValueTrait<Decayed>::specialized) {
-            LuaValueTrait<Decayed>::Push(builder, value);
+        } else if constexpr (ValueTrait<Decayed>::specialized) {
+            ValueTrait<Decayed>::Push(builder, value);
         } else if constexpr (std::is_same_v<Decayed, bool>) {
             builder.PushBool(value);
         } else if constexpr (StringLike<Decayed>) {
@@ -700,7 +700,7 @@ namespace TemplatedDetail {
 template <typename T>
 [[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", LuaBudget budget = {})
     -> std::expected<void, ErrorCode> {
-    auto vm = LuaVm::Create(budget);
+    auto vm = Vm::Create(budget);
     if (!vm) {
         return std::unexpected(vm.error());
     }
@@ -718,7 +718,7 @@ template <typename T>
 template <typename T>
 [[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {})
     -> std::expected<void, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+    auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }
@@ -730,10 +730,10 @@ template <typename T>
 [[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {})
     -> std::expected<T, ErrorCode> {
     T out {};
-    if constexpr (TemplatedDetail::VectorLike<std::remove_cvref_t<T>> && LuaValueTrait<std::remove_cvref_t<T>>::specialized) {
+    if constexpr (TemplatedDetail::VectorLike<std::remove_cvref_t<T>> && ValueTrait<std::remove_cvref_t<T>>::specialized) {
         // A value conversion constructs a vector according to its trait;
         // unlike patching, it must not treat a short sequence as an update.
-        auto vm = LuaVm::Create(budget);
+        auto vm = Vm::Create(budget);
         if (!vm) return std::unexpected(vm.error());
         struct ValueCtx { T* target; } ctx {&out};
         auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
@@ -749,7 +749,7 @@ template <typename T>
 
 template <typename T>
 [[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {}) -> std::expected<T, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+    auto source = ReadFileText(path);
     if (!source) return std::unexpected(source.error());
     const std::string chunkName = "@" + path.generic_string();
     return EvaluateString<T>(*source, chunkName, budget);
@@ -765,7 +765,7 @@ template <typename T, typename... InArgs>
     LuaBudget        budget,
     const InArgs&... inputs
 ) -> std::expected<void, ErrorCode> {
-    auto vm = LuaVm::Create(budget);
+    auto vm = Vm::Create(budget);
     if (!vm) {
         return std::unexpected(vm.error());
     }
@@ -811,7 +811,7 @@ template <typename OutT, typename... InArgs>
 template <typename OutT, typename... InArgs>
 [[nodiscard]] auto EvaluateCallFile(const std::filesystem::path& path, LuaBudget budget, const InArgs&... inputs)
     -> std::expected<OutT, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+    auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }

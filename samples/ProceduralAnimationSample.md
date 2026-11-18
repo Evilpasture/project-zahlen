@@ -40,7 +40,7 @@ install their frame steps or physics hooks. Consumers using only procedural
 animation (without character movement) can register just that subsystem after
 scene initialization.
 
-`Register` installs the extension-owned ECS types (`AnimationContext`, skeletal
+`Register` installs the extension-owned ECS types (`Context`, skeletal
 animation systems, and procedural synthesis) and inserts its evaluator before the
 generic core `ArticulationSystem` phase. Core knows only about
 `PoseUploadQueue` (skinning palettes and kinematic pose transfers), not about

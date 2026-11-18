@@ -204,12 +204,11 @@ Link and compose what the application uses:
 #include <Zahlen/App.hpp>
 #include <CharacterController/CharacterController.hpp>
 // Also find_package(ZahlenCharacterController) and link Zahlen::CharacterController.
-// Compose ZHLN::Character::CharacterHost over ZHLN::COM::IEngine& in your layer.
+// Compose ZHLN::Character::Layer over ZHLN::COM::IEngine& via Application::AddLayer.
 ```
 
-`WithDefaultModules` remains source-compatible but the base default pass is
-empty. Existing games which relied on implicit fonts, terrain, interaction,
-cameras, animation or authoring tools must explicitly install those systems.
+Applications that rely on fonts, terrain, interaction, cameras, animation or
+authoring tools register those layers explicitly.
 
 ## ABI and profiles
 

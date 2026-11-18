@@ -1,9 +1,9 @@
 # Lightning and Explosion capability hosts
 
 The `zahlen_vfx` / installed `Zahlen::VFX` target now provides three ordinary
-host-owned COM policies: CombatFX, `LightningHost::Host`, and
-`ExplosionHost::Host`. New public entry points are `VFX/LightningHost.hpp` and
-`VFX/ExplosionHost.hpp`. They retain their engine reference and expose no
+host-owned COM policies: CombatFX, `Lightning::System`, and
+`Explosion::System`. New public entry points are `VFX/Lightning.hpp` and
+`VFX/Explosion.hpp`. They retain their engine reference and expose no
 native Engine, renderer context, registry, or service installation API.
 
 ## Lightning

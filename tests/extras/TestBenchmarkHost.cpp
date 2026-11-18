@@ -15,15 +15,15 @@ struct BenchmarkHostSuite {
         std::expected<void, ErrorCode> real_host_composes_panels_submits_frames_and_rebinds() {
             auto made = COM::CreateEngineRef(
                 COM::InChain(
-                    COM::EngineWindowConfig {.width = 960, .height = 640, .vsync = false, .headless = true},
-                    COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+                    COM::WindowConfig {.width = 960, .height = 640, .vsync = false, .headless = true},
+                    COM::RenderConfig {.validationMode = ValidationMode::Off}
                 )
             );
             if (!made)
                 return std::unexpected(made.error());
             auto                   engine = std::move(*made);
             HostUI                 host(*engine.Get());
-            Bench::BenchmarkViewer viewer;
+            Bench::Viewer viewer;
             viewer.Attach(*engine.Get(), 16);
             viewer.SetVisible(true);
             viewer.SetTelemetryVisible(true);

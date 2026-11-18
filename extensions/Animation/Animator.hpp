@@ -25,7 +25,7 @@ bool Attach(COM::IEntities&, Entity);
 bool Play(COM::IEntities&, Entity, int32_t track, float blendDuration = 0.15f, bool loop = true);
 bool Seek(COM::IEntities&, Entity, float seconds);
 bool Speed(COM::IEntities&, Entity, float multiplier);
-bool SetIK(COM::IEntities&, Entity, const IK::TwoBoneIKComponent&);
+bool SetIK(COM::IEntities&, Entity, const IK::TwoBoneComponent&);
 // Removes host controls/IK, not the Animator or prefab resources. Playback
 // continues with its last state unless Speed(0)/Play(-1) was requested first.
 void Detach(COM::IEntities&, Entity);

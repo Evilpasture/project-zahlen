@@ -16,9 +16,9 @@ using Test::ExpectTrue;
 auto CameraEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("Camera hosts"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("Camera hosts"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
@@ -29,7 +29,7 @@ struct CameraHostsSuite {
             cam.position = FVec3::Zero();
             cam.yaw      = DegF {0};
             cam.pitch    = DegF {0};
-            FreeCam::FreeCamComponent knobs {.speed = 4.0f};
+            FreeCam::Component knobs {.speed = 4.0f};
             FreeCam::InputSnapshot    input {.movement = {1, 1, 1}, .look = {20, 900}, .sprint = true};
             FreeCam::Drive(cam, knobs, input, 0.5f);
             ExpectTrue(std::abs(cam.position.Length() - 6.0f) < 1e-5f);
@@ -64,19 +64,19 @@ struct CameraHostsSuite {
             const auto main = entities.SingletonEntity<Components::MainCameraTagComponent>();
             if (!ExpectTrue(main.HasValue()))
                 return {};
-            ExpectTrue(entities.Get<FreeCam::FreeCamTagComponent>(main.value) != nullptr);
+            ExpectTrue(entities.Get<FreeCam::TagComponent>(main.value) != nullptr);
             FreeCam::Detach(entities);
             FreeCam::Step(*engine.Get(), 0.1f);
-            ExpectTrue(entities.Get<FreeCam::FreeCamTagComponent>(main.value) == nullptr);
+            ExpectTrue(entities.Get<FreeCam::TagComponent>(main.value) == nullptr);
             ExpectTrue(FreeCam::Attach(entities, 8.0f, false));
-            ExpectEq(entities.Get<FreeCam::FreeCamComponent>(main.value)->speed, 8.0f);
+            ExpectEq(entities.Get<FreeCam::Component>(main.value)->speed, 8.0f);
             FreeCam::Detach(entities);
             engine->ClearScene();
             FreeCam::Step(*engine.Get(), 0.0f);
             const auto reset = entities.SingletonEntity<Components::MainCameraTagComponent>();
             ExpectTrue(reset.HasValue());
             if (reset.HasValue())
-                ExpectTrue(entities.Get<FreeCam::FreeCamTagComponent>(reset.value) != nullptr);
+                ExpectTrue(entities.Get<FreeCam::TagComponent>(reset.value) != nullptr);
             engine      = {}; // renderer ownership permits one active engine at a time
             auto second = CameraEngine();
             if (!ExpectTrue(second.has_value()))
@@ -86,7 +86,7 @@ struct CameraHostsSuite {
             const auto independent = another->Entities()->SingletonEntity<Components::MainCameraTagComponent>();
             ExpectTrue(independent.HasValue());
             if (independent.HasValue())
-                ExpectTrue(another->Entities()->Get<FreeCam::FreeCamComponent>(independent.value) != nullptr);
+                ExpectTrue(another->Entities()->Get<FreeCam::Component>(independent.value) != nullptr);
             return {};
         }
         std::expected<void, ErrorCode> orbit_updates_each_camera_and_respects_freecam_ownership() {
@@ -96,7 +96,7 @@ struct CameraHostsSuite {
             auto       engine   = std::move(*created);
             auto&      entities = *engine->Entities();
             const auto target   = entities.Spawn(Components::TransformComponent {.position = {4, 3, 2}});
-            const auto rig      = CameraRig::TargetCameraComponent {
+            const auto rig      = CameraRig::TargetComponent {
                 .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0
             };
             const auto a       = entities.Spawn(Components::CameraComponent {}, rig);
@@ -106,7 +106,7 @@ struct CameraHostsSuite {
             CameraRig::Apply(entities, {}, 0.1f);
             ExpectTrue((entities.Get<Components::CameraComponent>(a)->camera.position - FVec3 {2, 3, 2}).LengthSquared() < 1e-6f);
             ExpectTrue((entities.Get<Components::CameraComponent>(b)->camera.position - FVec3 {2, 8, 2}).LengthSquared() < 1e-6f);
-            (void) entities.Attach(a, FreeCam::FreeCamTagComponent {});
+            (void) entities.Attach(a, FreeCam::TagComponent {});
             entities.Get<Components::TransformComponent>(target)->position = {6, 3, 2};
             CameraRig::Apply(entities, {}, 0.1f);
             ExpectEq(entities.Get<Components::CameraComponent>(a)->camera.position.x, 2.0f);
@@ -127,15 +127,15 @@ struct CameraHostsSuite {
             world.world[1, 3]                       = 3;
             world.world[2, 3]                       = 2;
             const auto                       target = entities.Spawn(Components::TransformComponent {.position = {100, 100, 100}}, world);
-            CameraRig::TargetCameraComponent rig {
+            CameraRig::TargetComponent rig {
                 .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 1
             };
             const auto camera = entities.Spawn(Components::CameraComponent {}, rig);
             CameraRig::Apply(entities, {}, 0.1f);
-            ExpectEq(entities.Get<CameraRig::TargetCameraComponent>(camera)->smoothTargetPos.x, 4.0f);
+            ExpectEq(entities.Get<CameraRig::TargetComponent>(camera)->smoothTargetPos.x, 4.0f);
             entities.Get<Components::WorldTransformComponent>(target)->world[0, 3] = 5;
             CameraRig::Apply(entities, {}, 0.1f);
-            auto* updated = entities.Get<CameraRig::TargetCameraComponent>(camera);
+            auto* updated = entities.Get<CameraRig::TargetComponent>(camera);
             ExpectTrue(updated->smoothTargetPos.x > 4 && updated->smoothTargetPos.x < 5);
             CameraRig::Apply(entities, {.look = {2, 10000}, .wheel = 10000, .lookButton = true}, 0.1f);
             ExpectEq(updated->targetDistance, 1.5f);
@@ -155,8 +155,8 @@ struct CameraHostsSuite {
                     const auto camera   = entities.SingletonEntity<Components::MainCameraTagComponent>();
                     ExpectTrue(camera.HasValue());
                     if (camera.HasValue()) {
-                        ExpectTrue(entities.Get<FreeCam::FreeCamComponent>(camera.value) != nullptr);
-                        ExpectTrue(entities.Get<CameraRig::TargetCameraComponent>(camera.value) != nullptr);
+                        ExpectTrue(entities.Get<FreeCam::Component>(camera.value) != nullptr);
+                        ExpectTrue(entities.Get<CameraRig::TargetComponent>(camera.value) != nullptr);
                     }
                     *ran = true;
                 }

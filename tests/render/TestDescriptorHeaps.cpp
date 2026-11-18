@@ -452,7 +452,7 @@ struct DescriptorHeapsSuite {
                 if (!camEnts.empty()) {
                     reg.AttachMany(
                         camEnts[0],
-                        ZHLN::CameraRig::TargetCameraComponent {
+                        ZHLN::CameraRig::TargetComponent {
                             .target      = ZHLN::Entity::Null(),
                             .yaw         = yaw,
                             .pitch       = 0.0f,

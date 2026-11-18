@@ -205,31 +205,31 @@ struct VirtualDtorInterface {
 static_assert(ZHLN::COM::AuditInterfaceABI<ITestMath>());
 static_assert(ZHLN::COM::AuditInterfaceABI<ITestExtended>());
 static_assert(ZHLN::COM::AuditInterfaceABI<ITestBuffer>());
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<ThrowingInterface>());
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<VirtualDtorInterface>());
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<StringValueParamInterface>());
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<StringRefParamInterface>());
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<LateViolationParamInterface>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<CompliantParamInterface>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<ThrowingInterface>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<VirtualDtorInterface>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<StringValueParamInterface>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<StringRefParamInterface>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<LateViolationParamInterface>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<CompliantParamInterface>());
 
 // The parameter rule itself: pointers are opaque, references are audited as
 // what they refer to, values must be fixed-layout.
-static_assert(ZHLN::COM::ComParameterCompliant<int32_t>());
-static_assert(ZHLN::COM::ComParameterCompliant<const TestTransform&>());
-static_assert(ZHLN::COM::ComParameterCompliant<TestTransform>());
-static_assert(ZHLN::COM::ComParameterCompliant<void*>());
-static_assert(ZHLN::COM::ComParameterCompliant<const ZHLN::COM::ChainInNode*>());
-static_assert(ZHLN::COM::ComParameterCompliant<ZHLN::COM::ChainOutNode*>());
-static_assert(ZHLN::COM::ComParameterCompliant<const std::string*>());
-static_assert(!ZHLN::COM::ComParameterCompliant<std::string>());
-static_assert(!ZHLN::COM::ComParameterCompliant<const std::string&>());
+static_assert(ZHLN::COM::ParameterCompliant<int32_t>());
+static_assert(ZHLN::COM::ParameterCompliant<const TestTransform&>());
+static_assert(ZHLN::COM::ParameterCompliant<TestTransform>());
+static_assert(ZHLN::COM::ParameterCompliant<void*>());
+static_assert(ZHLN::COM::ParameterCompliant<const ZHLN::COM::ChainInNode*>());
+static_assert(ZHLN::COM::ParameterCompliant<ZHLN::COM::ChainOutNode*>());
+static_assert(ZHLN::COM::ParameterCompliant<const std::string*>());
+static_assert(!ZHLN::COM::ParameterCompliant<std::string>());
+static_assert(!ZHLN::COM::ParameterCompliant<const std::string&>());
 
 // A reference return would ask the boundary to express a lifetime it cannot.
-static_assert(ZHLN::COM::ComReturnCompliant<void>());
-static_assert(ZHLN::COM::ComReturnCompliant<TestTransform>());
-static_assert(ZHLN::COM::ComReturnCompliant<ZHLN::COM::IObject*>());
-static_assert(!ZHLN::COM::ComReturnCompliant<TestTransform&>());
-static_assert(!ZHLN::COM::ComReturnCompliant<std::string>());
+static_assert(ZHLN::COM::ReturnCompliant<void>());
+static_assert(ZHLN::COM::ReturnCompliant<TestTransform>());
+static_assert(ZHLN::COM::ReturnCompliant<ZHLN::COM::IObject*>());
+static_assert(!ZHLN::COM::ReturnCompliant<TestTransform&>());
+static_assert(!ZHLN::COM::ReturnCompliant<std::string>());
 
 // Reflection reports parameters without the implicit object parameter.
 static_assert(ZHLN::Reflect::MethodSignature<void, true, int32_t, float>::ParameterCount == 2);
@@ -450,14 +450,14 @@ struct COMTestSuite {
             ZHLN::Test::ExpectEq(gotExposure, 2.25F);
             ZHLN::Test::ExpectTrue(gotHdr);
 
-            // Unknown extension node is rejected with ComError::UnsupportedExtension.
+            // Unknown extension node is rejected with Error::UnsupportedExtension.
             const ZHLN::COM::Result<void> unknownOutcome = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 ZHLN::COM::InChain(ChainNodeA {.width = 1, .height = 1}, ChainNodeUnknown {}),
                 [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(unknownOutcome.HasValue());
-            ZHLN::Test::ExpectTrue(unknownOutcome.error.Is(ZHLN::COM::ComError::UnsupportedExtension));
+            ZHLN::Test::ExpectTrue(unknownOutcome.error.Is(ZHLN::COM::Error::UnsupportedExtension));
 
-            // Duplicate node type in manual chain is rejected with ComError::DuplicateExtension.
+            // Duplicate node type in manual chain is rejected with Error::DuplicateExtension.
             ChainNodeA             dupPayload {.width = 1, .height = 1};
             ZHLN::COM::ChainInNode tailNode {
                 .sType      = ZHLN::COM::ChainTypeID<ChainNodeA>(),
@@ -472,36 +472,36 @@ struct COMTestSuite {
             const ZHLN::COM::Result<void> dupOutcome = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &headNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(dupOutcome.HasValue());
-            ZHLN::Test::ExpectTrue(dupOutcome.error.Is(ZHLN::COM::ComError::DuplicateExtension));
+            ZHLN::Test::ExpectTrue(dupOutcome.error.Is(ZHLN::COM::Error::DuplicateExtension));
 
-            // Tampered layoutHash or size is rejected with ComError::LayoutMismatch.
+            // Tampered layoutHash or size is rejected with Error::LayoutMismatch.
             ZHLN::COM::ChainInNode driftedNode = tailNode;
             driftedNode.layoutHash ^= 0x1ULL;
             const ZHLN::COM::Result<void> hashMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(hashMismatch.HasValue());
-            ZHLN::Test::ExpectTrue(hashMismatch.error.Is(ZHLN::COM::ComError::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(hashMismatch.error.Is(ZHLN::COM::Error::LayoutMismatch));
 
             driftedNode.layoutHash = tailNode.layoutHash;
             driftedNode.size       = sizeof(ChainNodeA) + 4U;
             const ZHLN::COM::Result<void> sizeMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(sizeMismatch.HasValue());
-            ZHLN::Test::ExpectTrue(sizeMismatch.error.Is(ZHLN::COM::ComError::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(sizeMismatch.error.Is(ZHLN::COM::Error::LayoutMismatch));
 
-            // Null payload pointer is rejected with ComError::NullArgument.
+            // Null payload pointer is rejected with Error::NullArgument.
             driftedNode.size = sizeof(ChainNodeA);
             driftedNode.data = nullptr;
             const ZHLN::COM::Result<void> nullData = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(nullData.HasValue());
-            ZHLN::Test::ExpectTrue(nullData.error.Is(ZHLN::COM::ComError::NullArgument));
+            ZHLN::Test::ExpectTrue(nullData.error.Is(ZHLN::COM::Error::NullArgument));
 
             // Output chain rejects null head and populates caller-owned nodes in place.
             const ZHLN::COM::Result<void> nullOutHead = ZHLN::COM::DispatchOutChain<ChainNodeA>(
                 nullptr, [&](ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(nullOutHead.HasValue());
-            ZHLN::Test::ExpectTrue(nullOutHead.error.Is(ZHLN::COM::ComError::NullArgument));
+            ZHLN::Test::ExpectTrue(nullOutHead.error.Is(ZHLN::COM::Error::NullArgument));
 
             ChainNodeA outA {};
             ChainNodeB outB {};

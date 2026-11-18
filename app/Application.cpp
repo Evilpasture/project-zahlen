@@ -48,11 +48,11 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     ProcessScope process;
 
     auto created = COM::CreateEngineRef(COM::InChain(
-        COM::EngineAppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
-        COM::EngineWindowConfig {.width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless},
-        COM::EngineRenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading,
+        COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+        COM::WindowConfig {.width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless},
+        COM::RenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading,
             .initialPipelineBinary = config.initialPipelineBinaryData},
-        config.physics, COM::EngineDiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}));
+        config.physics, COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}));
     if (!created) {
         LogError("[Application] engine creation failed: {}", created.error());
         return std::unexpected(created.error()); // preserve the underlying init error
@@ -60,13 +60,9 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     COM::Ref<COM::IEngine> engine = std::move(*created);
     auto                   pipeline = engine.As<COM::IFramePipeline>();
     if (!pipeline)
-        return std::unexpected(COM::ComError::UnsupportedExtension);
+        return std::unexpected(COM::Error::UnsupportedExtension);
     HostUI ui(*engine.Get()); // destroyed before the retained engine and ProcessScope
     engine->FocusWindow(engine->PrimaryWindow());
-
-    if (_defaultModules) {
-        InstallApplicationDefaults(*engine.Get());
-    }
     for (const auto& install: _installers) {
         install(*engine.Get());
     }

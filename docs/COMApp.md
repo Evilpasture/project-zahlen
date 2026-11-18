@@ -3,7 +3,7 @@
 `app/include/Zahlen/COM/App.hpp` provides a header-only `ZHLN::COM::App`. Link the
 engine shared library for `ZHLN::COM::CreateEngine(const ChainInNode*)`; do not
 link the in-tree application or host-runner libraries. Configuration slices
-(`EngineAppConfig`, `EngineWindowConfig`, `EngineRenderConfig`, `PhysicsConfig`)
+(`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`)
 are forwarded to `CreateEngineRef(COM::InChain(...))`. `Run` returns any factory
 or tick error as `ErrorCode`.
 
@@ -54,8 +54,8 @@ any subset of configuration slices via `ZHLN::COM::InChain(...)`:
 #include <Zahlen/COM/EngineFactory.hpp>
 
 auto engine = ZHLN::COM::CreateEngineRef(ZHLN::COM::InChain(
-    ZHLN::COM::EngineAppConfig{.appName = ZHLN::String64("CustomHost")},
-    ZHLN::COM::EngineWindowConfig{.width = 1920, .height = 1080, .vsync = true}
+    ZHLN::COM::AppConfig{.appName = ZHLN::String64("CustomHost")},
+    ZHLN::COM::WindowConfig{.width = 1920, .height = 1080, .vsync = true}
 ));
 ```
 

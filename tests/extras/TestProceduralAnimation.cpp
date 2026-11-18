@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -115,7 +115,7 @@ struct ProceduralAnimationTestSuite {
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& entities = *(*worldRes)->Entities();
             constexpr ZHLN::AssetID kRigAsset {909};
-            ZHLN::Animation::AnimationContext animCtx;
+            ZHLN::Animation::Context animCtx;
             animCtx.CacheRig(kRigAsset, rig);
 
             const auto actor = entities.Spawn(

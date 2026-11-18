@@ -17,7 +17,7 @@
 // alignment and recursive leaf LayoutHash, and honour SceneResources ownership
 // on replacement and detach.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <Zahlen/Core/Reflection/LayoutHash.hpp>
@@ -30,7 +30,7 @@
 namespace ZHLN::COM {
 
 template <typename T>
-concept ComComponent = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
+concept Component = std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>;
 
 struct IEntities : IObject {
     [[nodiscard]] virtual Entity CreateEntity() noexcept = 0;
@@ -68,7 +68,7 @@ struct IEntities : IObject {
 
     // Compiled in the consumer's TU; not part of the vtable. The audit ignores
     // templates, and these never cross the boundary as symbols.
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto Attach(Entity entity, const T& component) noexcept -> T* {
         if (IsEngineComponent(ComponentName<T>())) {
             // Already a constructed T in typed storage; assign, do not
@@ -85,7 +85,7 @@ struct IEntities : IObject {
         return new (storage) T(component);
     }
 
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto Get(Entity entity) const noexcept -> T* {
         if (IsEngineComponent(ComponentName<T>())) {
             return static_cast<T*>(GetEngineRaw(entity, ComponentName<T>()));
@@ -93,7 +93,7 @@ struct IEntities : IObject {
         return static_cast<T*>(GetRaw(entity, ComponentName<T>()));
     }
 
-    template <ComComponent T>
+    template <Component T>
     auto Detach(Entity entity) noexcept -> bool {
         if (IsEngineComponent(ComponentName<T>())) {
             return DetachEngineRaw(entity, ComponentName<T>());
@@ -110,7 +110,7 @@ struct IEntities : IObject {
         return found;
     }
 
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto EntitiesWith() const -> std::vector<Entity> {
         return EntitiesWith(ComponentName<T>());
     }
@@ -121,7 +121,7 @@ struct IEntities : IObject {
         return first;
     }
 
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto SingletonEntity() const noexcept -> Option<Entity> {
         return SingletonEntity(ComponentName<T>());
     }
@@ -133,33 +133,33 @@ struct IEntities : IObject {
         return Reflect::CanonicalTypeName<T>();
     }
 
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto GetSingleton() const noexcept -> T* {
         const auto entity = SingletonEntity<T>();
         return entity.HasValue() ? Get<T>(entity.value) : nullptr;
     }
-    template <ComComponent T, typename Fn>
+    template <Component T, typename Fn>
     auto Patch(Entity entity, Fn&& patch) noexcept -> bool {
         if (auto* value = Get<T>(entity)) { patch(*value); return true; }
         return false;
     }
-    template <ComComponent T, typename Fn>
+    template <Component T, typename Fn>
     auto PatchSingleton(Fn&& patch) noexcept -> bool {
         if (auto* value = GetSingleton<T>()) { patch(*value); return true; }
         return false;
     }
-    template <ComComponent... T>
+    template <Component... T>
     auto AttachMany(Entity entity, const T&... components) noexcept -> bool {
         return ((Attach<T>(entity, components) != nullptr) && ...);
     }
-    template <ComComponent... T>
+    template <Component... T>
     [[nodiscard]] auto Spawn(const T&... components) noexcept -> Entity {
         const auto entity = CreateEntity();
         if (!((Attach<T>(entity, components) != nullptr) && ...)) { Despawn(entity); return Entity::Null(); }
         return entity;
     }
 
-    template <ComComponent T>
+    template <Component T>
     [[nodiscard]] auto Has(Entity entity) const noexcept -> bool {
         return Get<T>(entity) != nullptr;
     }

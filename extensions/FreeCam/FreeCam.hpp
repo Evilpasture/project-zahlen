@@ -11,9 +11,9 @@ struct IEntities;
 struct IActionContext;
 } // namespace ZHLN::COM
 namespace ZHLN::FreeCam {
-struct FreeCamTagComponent {};
+struct TagComponent {};
 
-struct FreeCamComponent {
+struct Component {
     float speed            = 12.0f;
     float lookSensitivity  = 0.12f;
     float sprintMultiplier = 3.0f;
@@ -35,7 +35,7 @@ struct InputSnapshot {
     bool        sprint     = false;
 };
 auto ReadInput(const COM::IActionContext& input) -> InputSnapshot;
-void Drive(Camera& camera, const FreeCamComponent& knobs, const InputSnapshot& input, float dt);
+void Drive(Camera& camera, const Component& knobs, const InputSnapshot& input, float dt);
 // Apply only drives already attached cameras; Step also seeds the boot camera.
 void Apply(COM::IEntities&, const InputSnapshot&, float dt);
 void Step(COM::IEngine&, float dt);

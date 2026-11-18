@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -9,7 +9,7 @@
 #include <CharacterController/CharacterController.hpp>
 #include <Signal/CrashHandler.hpp>
 #include <Terrain/TerrainGeometry.hpp>
-#include <Terrain/TerrainHost.hpp>
+#include <Terrain/Terrain.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
@@ -85,7 +85,7 @@ struct FirstPersonViewState {
     float                                   eyeForwardOffset        = 0.08f;
     float                                   thirdPersonLookAtWeight = 0.85f;
     bool                                    lookAtWeightSaved       = false;
-    ZHLN::CameraRig::TargetCameraComponent  thirdPersonCamera {};
+    ZHLN::CameraRig::TargetComponent  thirdPersonCamera {};
     std::vector<HiddenHeadMesh>             headMeshes;
 };
 
@@ -240,7 +240,7 @@ void SetFirstPersonMode(ZHLN::COM::IEngine& engine, ZHLN::Entity player, FirstPe
     state.cameraEntity = cameraEntities[0];
 
     if (enabled) {
-        auto targetCamera = entities.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
+        auto targetCamera = entities.Get<ZHLN::CameraRig::TargetComponent>(state.cameraEntity);
         if (!targetCamera) {
             return;
         }
@@ -253,7 +253,7 @@ void SetFirstPersonMode(ZHLN::COM::IEngine& engine, ZHLN::Entity player, FirstPe
         state.thirdPersonSaved  = true;
         state.lookYawOffset     = 0.0f;
         state.lookPitchOffset   = 0.0f;
-        entities.Detach<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
+        entities.Detach<ZHLN::CameraRig::TargetComponent>(state.cameraEntity);
         entities.Patch<ZHLN::ProceduralLookAtComponent>(player, [&](auto& lookAt) {
             state.thirdPersonLookAtWeight = lookAt.weight;
             state.lookAtWeightSaved       = true;
@@ -264,9 +264,9 @@ void SetFirstPersonMode(ZHLN::COM::IEngine& engine, ZHLN::Entity player, FirstPe
             cc.camera.nearZ = 0.03f;
         });
     } else if (state.thirdPersonSaved) {
-        ZHLN::CameraRig::TargetCameraComponent restored = state.thirdPersonCamera;
+        ZHLN::CameraRig::TargetComponent restored = state.thirdPersonCamera;
         restored.hasInitSmoothTarget                     = 0;
-        if (!entities.Patch<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity, [&](auto& targetCamera) { targetCamera = restored; })) {
+        if (!entities.Patch<ZHLN::CameraRig::TargetComponent>(state.cameraEntity, [&](auto& targetCamera) { targetCamera = restored; })) {
             entities.AttachMany(state.cameraEntity, std::move(restored));
         }
         entities.PatchSingleton<ZHLN::Components::CameraComponent>([&](auto& cameraComp) {
@@ -321,7 +321,7 @@ void SetFirstPersonMode(ZHLN::COM::IEngine& engine, ZHLN::Entity player, FirstPe
     return end != value ? parsed : fallback;
 }
 
-auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::Host& terrain) -> void {
+auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::System& terrain) -> void {
     auto& entities = *engine.Entities();
 
     ZHLN::GraphicsSettings gfx      = engine.Graphics()->Settings();
@@ -331,7 +331,7 @@ auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::Host& terra
     gfx.environment.skyGround       = kSkyGround;
     (void)engine.Graphics()->ApplySettings(gfx);
 
-    if (auto geom = ZHLN::Terrain::Generate({.sampleCount = 128, .worldSize = 220.0f, .maxHeight = 12.0f, .type = ZHLN::Terrain::TerrainType::Default})) {
+    if (auto geom = ZHLN::Terrain::Generate({.sampleCount = 128, .worldSize = 220.0f, .maxHeight = 12.0f, .type = ZHLN::Terrain::Type::Default})) {
         (void)terrain.Create(std::move(*geom), {.position = {0.0f, 0.0f, 0.0f}, .roughness = 0.80f, .createPhysics = true});
     }
 
@@ -684,7 +684,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->FocusWindow(engine->PrimaryWindow());
     }
 
-    ZHLN::Terrain::Host terrain;
+    ZHLN::Terrain::System terrain;
     terrain.Start(*engine);
     BuildProceduralArena(*engine, terrain);
 

@@ -7,7 +7,7 @@
 // utils/zcook/GLBModel.hpp
 //
 // The reflected glTF 2.0 document model the GLB emitter serialises with
-// ZHLN::ReflectJSON::SerializeJSON. The struct declarations are the schema:
+// ZHLN::ReflectJSON::Serialize. The struct declarations are the schema:
 // field names are the glTF keys, so nothing here hand-builds a brace, a comma
 // or an escape -- see the emitter that fills them in GLB.cpp.
 //

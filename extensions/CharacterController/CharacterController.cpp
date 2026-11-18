@@ -88,7 +88,7 @@ auto ReadInput(const COM::IActionContext& input, PlayerSeat seat) -> SeatIntent 
     intent.zoom += padZoom;
     return intent;
 }
-bool Attach(COM::IEntities& entities, Entity entity, const MovementComponent& movement, const HostCharacterComponent& policy) {
+bool Attach(COM::IEntities& entities, Entity entity, const MovementComponent& movement, const ControllerComponent& policy) {
     if (!Usable(entities, entity))
         return false;
     // Fail closed on a native typed Movement family rather than creating a
@@ -102,7 +102,7 @@ bool Attach(COM::IEntities& entities, Entity entity, const MovementComponent& mo
     return true;
 }
 void Detach(COM::IEntities& entities, Entity entity) {
-    entities.Detach<HostCharacterComponent>(entity);
+    entities.Detach<ControllerComponent>(entity);
     entities.Detach<InputComponent>(entity);
     entities.Detach<MovementComponent>(entity);
     entities.Detach<Components::CharacterMotorComponent>(entity);
@@ -112,7 +112,7 @@ void Apply(COM::IEntities& entities, Entity entity, const SeatIntent& intent, fl
     if (!std::isfinite(dt) || dt <= 0 || !Usable(entities, entity))
         return;
     auto*       movement = entities.Get<MovementComponent>(entity);
-    const auto* policy   = entities.Get<HostCharacterComponent>(entity);
+    const auto* policy   = entities.Get<ControllerComponent>(entity);
     auto*       motor    = entities.Get<Components::CharacterMotorComponent>(entity);
     if (!movement || !policy || !motor)
         return;
@@ -183,10 +183,10 @@ void PushProps(COM::IEntities& entities, COM::ISimulation& physics, float dt) {
     // Native policy applied an impulse each fixed tick. Scale by elapsed host
     // time here so the same policy is not frame-rate dependent at 30/60/144 Hz.
     const float stepScale = dt * 60.0f;
-    for (const auto entity: entities.EntitiesWith<HostCharacterComponent>()) {
+    for (const auto entity: entities.EntitiesWith<ControllerComponent>()) {
         if (!Usable(entities, entity))
             continue;
-        const auto* policy = entities.Get<HostCharacterComponent>(entity);
+        const auto* policy = entities.Get<ControllerComponent>(entity);
         const auto* body   = entities.Get<Components::PhysicsComponent>(entity);
         if (!policy || !policy->enabled || !body || body->isStatic)
             continue;
@@ -228,8 +228,8 @@ void Step(COM::IEngine& engine, float dt) {
     if (!camera)
         return;
     const auto yaw    = camera->camera.yaw.value;
-    const bool freeze = entities.Get<FreeCam::FreeCamTagComponent>(main.value) != nullptr;
-    for (const auto entity: entities.EntitiesWith<HostCharacterComponent>()) {
+    const bool freeze = entities.Get<FreeCam::TagComponent>(main.value) != nullptr;
+    for (const auto entity: entities.EntitiesWith<ControllerComponent>()) {
         const auto* seated = entities.Get<Components::PlayerSeatComponent>(entity);
         const auto  seat   = seated ? seated->seat : kPrimarySeat;
         Apply(entities, entity, ReadInput(*engine.Actions(), seat), yaw, dt, freeze);
@@ -238,7 +238,7 @@ void Step(COM::IEngine& engine, float dt) {
 }
 void Layer::Stop(COM::IEngine& engine) {
     auto& entities = *engine.Entities();
-    for (const auto entity: entities.EntitiesWith<HostCharacterComponent>())
+    for (const auto entity: entities.EntitiesWith<ControllerComponent>())
         Detach(entities, entity);
 }
 } // namespace ZHLN::Character

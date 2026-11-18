@@ -58,6 +58,23 @@ static_assert(std::is_constructible_v<ZHLN::ErrorCode, CodecError>, "the enum co
 
 namespace {
 
+namespace ScopedDomainA {
+enum class Error : uint8_t {
+    Failed ZHLN_ANNOTATION(ZHLN::Description<"Domain A failure."> {}) = 1,
+};
+} // namespace ScopedDomainA
+
+namespace ScopedDomainB {
+enum class Error : uint8_t {
+    Failed ZHLN_ANNOTATION(ZHLN::Description<"Domain B failure."> {}) = 1,
+};
+} // namespace ScopedDomainB
+
+static_assert(ZHLN::ErrorCode(ScopedDomainA::Error::Failed) != ZHLN::ErrorCode(ScopedDomainB::Error::Failed));
+static_assert(ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is(ScopedDomainA::Error::Failed));
+static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is<ScopedDomainB::Error>());
+static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is(ScopedDomainB::Error::Failed));
+
 struct ErrorTestSuite {
     struct Tests {
         // --- 1. Basic Error Type & State ---
@@ -264,6 +281,20 @@ struct ErrorTestSuite {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             if (std::format("{}", err) != "The input bitstream is corrupted or incomplete.") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 11. Identically Named Enums in Distinct Namespaces Stay Distinct ---
+        std::expected<void, ZHLN::ErrorCode> scoped_error_enums_do_not_collide() {
+            const ZHLN::Error a {ScopedDomainA::Error::Failed};
+            const ZHLN::Error b {ScopedDomainB::Error::Failed};
+
+            if (a.Category() == b.Category()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (a.Message() != "Domain A failure." || b.Message() != "Domain B failure.") {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             return {};

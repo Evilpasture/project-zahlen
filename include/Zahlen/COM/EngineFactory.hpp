@@ -11,14 +11,14 @@
 // an extern "C" shim or a hand-written dispatch struct.
 //
 // Creation options cross as a non-intrusive reflected ChainInNode list
-// (COM::InChain(...)) over granular config slices (EngineAppConfig,
-// EngineWindowConfig, EngineRenderConfig, PhysicsConfig). An older consumer
+// (COM::InChain(...)) over granular config slices (AppConfig,
+// WindowConfig, RenderConfig, PhysicsConfig). An older consumer
 // passes only the slices it knows; new slices are added as separate structs
 // without shifting a vtable or reading past a caller-allocated struct, and
 // accidental layout edits to a shipped slice fail cleanly with
-// ComError::LayoutMismatch.
+// Error::LayoutMismatch.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Common.h>
@@ -34,15 +34,15 @@
 
 namespace ZHLN::COM {
 
-struct EngineAppConfig {
+struct AppConfig {
     String64 appName            {"Zahlen Engine"};
     LogLevel logLevel           = LogLevel::Moderate;
     uint32_t maxFramesPerSecond = 0;
 };
 
-struct EngineDiagnosticsInfo { StringView crashDumpPath {}; };
+struct DiagnosticsInfo { StringView crashDumpPath {}; };
 
-struct EngineWindowConfig {
+struct WindowConfig {
     uint32_t width      = 1280;
     uint32_t height     = 720;
     bool     fullscreen = false;
@@ -50,15 +50,15 @@ struct EngineWindowConfig {
     bool     headless   = false;
 };
 
-struct EngineRenderConfig {
+struct RenderConfig {
     ValidationMode      validationMode        = ValidationMode::On;
     bool                enableMeshShading     = true;
     Span<const uint8_t> initialPipelineBinary = {};
 };
 
-static_assert(std::is_standard_layout_v<EngineAppConfig> && std::is_trivially_copyable_v<EngineAppConfig>);
-static_assert(std::is_standard_layout_v<EngineWindowConfig> && std::is_trivially_copyable_v<EngineWindowConfig>);
-static_assert(std::is_standard_layout_v<EngineRenderConfig> && std::is_trivially_copyable_v<EngineRenderConfig>);
+static_assert(std::is_standard_layout_v<AppConfig> && std::is_trivially_copyable_v<AppConfig>);
+static_assert(std::is_standard_layout_v<WindowConfig> && std::is_trivially_copyable_v<WindowConfig>);
+static_assert(std::is_standard_layout_v<RenderConfig> && std::is_trivially_copyable_v<RenderConfig>);
 static_assert(std::is_standard_layout_v<PhysicsConfig> && std::is_trivially_copyable_v<PhysicsConfig>);
 
 // Returns a raw pointer rather than Ref<IEngine>: Result<T> carries T across
@@ -83,19 +83,19 @@ static_assert(std::is_standard_layout_v<PhysicsConfig> && std::is_trivially_copy
 [[nodiscard]] inline auto CreateEngineRef(const EngineConfig& cfg) noexcept
     -> std::expected<Ref<IEngine>, ErrorCode> {
     const Result<IEngine*> created = CreateEngine(InChain(
-        EngineAppConfig {
+        AppConfig {
             .appName            = cfg.appName,
             .logLevel           = cfg.logLevel,
             .maxFramesPerSecond = cfg.fpsLimit,
         },
-        EngineWindowConfig {
+        WindowConfig {
             .width      = cfg.width,
             .height     = cfg.height,
             .fullscreen = cfg.fullscreen,
             .vsync      = cfg.vsync,
             .headless   = cfg.headless,
         },
-        EngineRenderConfig {
+        RenderConfig {
             .validationMode        = cfg.validationMode,
             .enableMeshShading     = cfg.enableMeshShading,
             .initialPipelineBinary = Span<const uint8_t>(cfg.initialPipelineBinaryData.data(), cfg.initialPipelineBinaryData.size()),

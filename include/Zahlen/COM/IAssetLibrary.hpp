@@ -12,7 +12,7 @@
 // it. Spawn options and procedural primitive descriptors cross via reflected
 // ChainInNode lists.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/AssetTypes.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -140,7 +140,7 @@ struct IAssetLibrary : IObject {
 
     [[nodiscard]] auto FindPrefab(StringView virtualPath) const noexcept -> Result<uint64_t> {
         const uint64_t hash = PrefabHash(virtualPath);
-        if (!HasPrefab(hash)) return ComError::AssetNotCached;
+        if (!HasPrefab(hash)) return Error::AssetNotCached;
         return hash;
     }
 

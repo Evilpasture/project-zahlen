@@ -16,7 +16,7 @@ function(_zhln_configure_animation_target tgt)
     endif()
 endfunction()
 
-add_library(zahlen_animation_controls STATIC AnimatorHost.cpp)
+add_library(zahlen_animation_controls STATIC Animator.cpp)
 set_source_files_properties(Animator.cppm PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 target_sources(zahlen_animation_controls
     PUBLIC FILE_SET CXX_MODULES TYPE CXX_MODULES
@@ -27,7 +27,7 @@ target_link_libraries(zahlen_animation_controls PUBLIC zahlen_engine)
 _zhln_configure_animation_target(zahlen_animation_controls)
 
 add_library(zahlen_animation STATIC
-    AnimationContext.cpp
+    Context.cpp
     AnimationSystem.cpp
     TwoBoneIK.cpp
 )

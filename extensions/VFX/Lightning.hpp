@@ -6,7 +6,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <expected>
 #include <memory>
-namespace ZHLN::LightningHost {
+namespace ZHLN::Lightning {
 enum class Phase : uint8_t { SteppedLeader, ReturnStroke, Dissipating };
 // POD diagnostics; no owning GPU handles or registry access.
 struct BoltState {
@@ -14,14 +14,14 @@ struct BoltState {
     float    phaseTime = 0, currentKA = 0, flashLuminance = 0;
     uint32_t visibleVertices = 0, maxVertices = 0;
 };
-class Host {
+class System {
   public:
-    Host();
-    ~Host();
-    Host(Host&&) noexcept;
-    auto operator=(Host&&) noexcept -> Host&;
-    Host(const Host&)                    = delete;
-    auto operator=(const Host&) -> Host& = delete;
+    System();
+    ~System();
+    System(System&&) noexcept;
+    auto operator=(System&&) noexcept -> System&;
+    System(const System&)                    = delete;
+    auto operator=(const System&) -> System& = delete;
     void Start(COM::IEngine&);
     auto Spawn(FVec3 cloud, FVec3 ground, FVec3 camera, const ConfigInfo& = {}) -> std::expected<Entity, ErrorCode>;
     auto BeforeRender(COM::IEngine&, float) -> std::expected<void, ErrorCode>;
@@ -34,4 +34,4 @@ class Host {
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };
-} // namespace ZHLN::LightningHost
+} // namespace ZHLN::Lightning

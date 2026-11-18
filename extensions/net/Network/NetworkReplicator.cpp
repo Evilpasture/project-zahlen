@@ -33,7 +33,7 @@ auto ClientReplicator::ApplyInitialObjects(COM::IEntities& entities, std::span<c
     auto message = DecodeInitialSnapshot(payload);
     if (!message) {
         Log("Net: dropping initial snapshot — {}", message.error().Format());
-        return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
+        return std::unexpected(ErrorCode(Error::ReplicationFailed));
     }
 
     for (const ObjectSnapshot& object : message->objects) {
@@ -45,9 +45,9 @@ auto ClientReplicator::ApplyInitialObjects(COM::IEntities& entities, std::span<c
         (void)entities.Attach(e, Components::NameComponent {.name = String64("ReplicatedObject")});
         (void)entities.Attach(e, Components::TransformComponent {.position = position, .scale = scale});
         (void)entities.Attach(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-        (void)entities.Attach(e, NetworkIdentityComponent {.serverUID = object.uid, .isLocalOwner = false});
+        (void)entities.Attach(e, IdentityComponent {.serverUID = object.uid, .isLocalOwner = false});
         (void)entities.Attach(
-            e, NetworkInterpolationComponent {.targetPosition = position, .targetRotation = Quat::Identity()});
+            e, InterpolationComponent {.targetPosition = position, .targetRotation = Quat::Identity()});
     }
     return {};
 }
@@ -57,12 +57,12 @@ auto ClientReplicator::ApplyPhysicsBatch(COM::IEntities& entities, std::span<con
     auto message = DecodePhysicsBatch(payload);
     if (!message) {
         Log("Net: dropping physics batch — {}", message.error().Format());
-        return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
+        return std::unexpected(ErrorCode(Error::ReplicationFailed));
     }
 
     for (const PhysicsBodyState& body : message->bodies) {
         if (const auto e = uidToEntityMap.Find(body.uid)) {
-            (void)entities.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
+            (void)entities.Patch<InterpolationComponent>(*e, [&](InterpolationComponent& interp) {
                 interp.targetPosition = body.position;
                 interp.targetRotation = body.rotation;
                 interp.linearVelocity = body.velocity;
@@ -87,11 +87,11 @@ void Step(COM::IEntities& entities, float dt) noexcept {
     ZHLN::ScopedTimer timer("Network: Interpolation");
 
     const float clampedDt = std::max(0.0f, dt);
-    for (const Entity e : entities.EntitiesWith<NetworkInterpolationComponent>()) {
-        if (const auto* ident = entities.Get<NetworkIdentityComponent>(e); ident != nullptr && ident->isLocalOwner) {
+    for (const Entity e : entities.EntitiesWith<InterpolationComponent>()) {
+        if (const auto* ident = entities.Get<IdentityComponent>(e); ident != nullptr && ident->isLocalOwner) {
             continue;
         }
-        const auto* interp = entities.Get<NetworkInterpolationComponent>(e);
+        const auto* interp = entities.Get<InterpolationComponent>(e);
         auto*       trans  = entities.Get<Components::TransformComponent>(e);
         if (trans == nullptr || interp == nullptr) {
             continue;

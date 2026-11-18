@@ -45,7 +45,7 @@ void SolveTwoBoneIK(
     Quat&   outParentQuat,
     Quat&   outChildQuat
 ) noexcept {
-    auto ikOutput = ZHLN::IK::SolveTwoBoneIK(
+    auto ikOutput = ZHLN::IK::SolveTwoBone(
         {.upperPosition  = jointWorldPos,
          .targetPosition = targetWorld,
          .poleVector     = poleWorld,

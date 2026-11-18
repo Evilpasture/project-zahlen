@@ -21,7 +21,7 @@ auto ZHLN::Screenshot::CaptureBuffer::Read(COM::IGraphicsDevice& graphics, Exten
     _frame.extent = {};
     _frame.metrics = {};
     const uint64_t texels = uint64_t(extent.width) * extent.height;
-    if (!texels || texels > _frame.pixels.max_size() / 8) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!texels || texels > _frame.pixels.max_size() / 8) return std::unexpected(COM::Error::InvalidArgument);
     const size_t initial = static_cast<size_t>(texels * 8);
     // Keep high-water storage after a resize; never do a null size query.
     _frame.pixels.resize(std::max(initial, _frame.pixels.size()));
@@ -29,18 +29,18 @@ auto ZHLN::Screenshot::CaptureBuffer::Read(COM::IGraphicsDevice& graphics, Exten
     auto copied = graphics.CaptureFrame(COM::OutChain(info), _frame.pixels);
     if (!copied.HasValue()) return std::unexpected(copied.error);
     if (copied.value > _frame.pixels.size()) {
-        if (copied.value > _frame.pixels.max_size()) return std::unexpected(COM::ComError::InvalidArgument);
+        if (copied.value > _frame.pixels.max_size()) return std::unexpected(COM::Error::InvalidArgument);
         _frame.pixels.resize(static_cast<size_t>(copied.value));
         copied = graphics.CaptureFrame(COM::OutChain(info), _frame.pixels);
         if (!copied.HasValue()) return std::unexpected(copied.error);
     }
     if (copied.value > _frame.pixels.size() || copied.value != info.byteCount)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     _frame.pixels.resize(static_cast<size_t>(copied.value));
     _frame.extent = info.extent;
     _frame.format = info.format;
     _frame.metrics = info.metrics;
-    if (!_frame.Valid()) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!_frame.Valid()) return std::unexpected(COM::Error::InvalidArgument);
     return &_frame;
 }
 

@@ -85,11 +85,11 @@ auto ReadBytes(const LoaderInstance& self, std::string_view path) -> std::option
 auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     const auto fntBytes = ReadBytes(self, self.source.fntPath);
     if (!fntBytes) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
     const std::string_view text(reinterpret_cast<const char*>(fntBytes->data()), fntBytes->size());
-    auto descExp = ParseFontBMDescriptor(text);
+    auto descExp = ParseBMDescriptor(text);
     if (!descExp.has_value()) {
         return std::unexpected(descExp.error());
     }
@@ -97,12 +97,12 @@ auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
     const std::string pagePath = JoinVirtualDir(self.source.fntPath, descExp->pageFile);
     const auto        pngBytes = ReadBytes(self, pagePath);
     if (!pngBytes || pngBytes->size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        return std::unexpected(FontBMError::BadPage);
+        return std::unexpected(BMError::BadPage);
     }
 
     const auto image = Image::DecodeRGBA8(*pngBytes);
     if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight)
-        return std::unexpected(FontBMError::BadPage);
+        return std::unexpected(BMError::BadPage);
     auto bakedExp = AssembleBakedFont(*descExp, image->pixels);
 
     if (!bakedExp.has_value()) {
@@ -115,7 +115,7 @@ auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
 auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     const auto zfontBytes = ReadBytes(self, self.source.zfontPath);
     if (!zfontBytes) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
     auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes->data()), zfontBytes->size()));
     if (!bakedExp.has_value()) {
@@ -128,22 +128,22 @@ auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
 
 // --- Public parser entry (JSON only, reflection) -----------------------------
 
-auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
+auto ParseBMDescriptor(std::string_view text) -> std::expected<BMDescriptor, ErrorCode> {
     if (text.size() >= 3 && text.substr(0, 3) == "BMF") {
-        return std::unexpected(FontBMError::UnsupportedFormat);
+        return std::unexpected(BMError::UnsupportedFormat);
     }
 
     auto docExp = ReflectJSON::Parse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
     if (!docExp.has_value()) {
-        return std::unexpected(FontBMError::Malformed);
+        return std::unexpected(BMError::Malformed);
     }
     const auto& doc = *docExp;
 
     if (doc.pages.empty() || doc.chars.empty() || doc.common.scaleW == 0 || doc.common.scaleH == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
-    FontBMDescriptor desc;
+    BMDescriptor desc;
     // BMFont encodes `size` as a negative number when it means "pixel height of
     // the bake" -- which is what fontbm writes for `--font-size 32`, the flag
     // scripts/fontbm.sh passes: the descriptor says -32. Everything downstream
@@ -161,7 +161,7 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     desc.pageFile    = doc.pages.front().file;
     desc.chars.reserve(doc.chars.size());
     for (const auto& c : doc.chars) {
-        FontBMChar ch;
+        BMChar ch;
         ch.id       = c.id;
         ch.x        = c.x;
         ch.y        = c.y;
@@ -174,19 +174,19 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     }
 
     if (desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
     return desc;
 }
 
-auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rgba8)
+auto AssembleBakedFont(const BMDescriptor& desc, std::span<const uint8_t> rgba8)
     -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     const size_t texels = static_cast<size_t>(desc.atlasWidth) * desc.atlasHeight;
     if (rgba8.size() != texels * 4) {
-        return std::unexpected(FontBMError::BadPage);
+        return std::unexpected(BMError::BadPage);
     }
     if (desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
     bool anyAlpha = false;
@@ -205,7 +205,7 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
     }
     const uint64_t span = static_cast<uint64_t>(lastCodepoint) - firstCodepoint + 1;
     if (span > 4096) {
-        return std::unexpected(FontBMError::Malformed);
+        return std::unexpected(BMError::Malformed);
     }
 
     float gapAdvance = desc.fontSize * 0.5f;
@@ -237,7 +237,7 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
         const uint32_t w = static_cast<uint32_t>(ch.width);
         const uint32_t h = static_cast<uint32_t>(ch.height);
         if ((x0 + w > desc.atlasWidth) || (y0 + h > desc.atlasHeight)) {
-            return std::unexpected(FontBMError::BadPage);
+            return std::unexpected(BMError::BadPage);
         }
 
         for (uint32_t row = 0; row < h; ++row) {
@@ -301,7 +301,7 @@ auto LoadBakedFont(COM::IAssetLibrary* assets, const BakedFontSource& source) ->
 
 auto UploadFontAtlas(COM::IGraphicsDevice& graphics, const GUI::BakedFontAsset& asset) -> std::expected<FontAtlas, ErrorCode> {
     if (!asset.atlasWidth || !asset.atlasHeight || uint64_t(asset.atlasWidth) * asset.atlasHeight != asset.coverage.size())
-        return std::unexpected(FontBMError::BadPage);
+        return std::unexpected(BMError::BadPage);
     std::vector<uint32_t> rgba(asset.coverage.size());
     for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = (uint32_t(asset.coverage[i]) << 24) | 0x00ffffffu;
     const auto texture = graphics.CreateTexture("BakedFontAtlas", std::as_bytes(std::span(rgba)), {asset.atlasWidth, asset.atlasHeight}, false);

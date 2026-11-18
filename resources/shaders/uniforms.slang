@@ -109,7 +109,7 @@ public struct Light {
     public float outerConeCos;
     public uint twoSided;
     // Who owns this light's shading where a map compile baked it into the
-    // lightmaps (SceneLight::baked):
+    // lightmaps (Scene::Light::baked):
     //   0 - a live light; nothing is withheld,
     //   1 - an authored light entity: the bake owns its diffuse, its specular
     //       stays live because no lightmap stores one,

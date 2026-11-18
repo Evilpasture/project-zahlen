@@ -211,7 +211,7 @@ struct SourceAttenuation {
     bool  hardFalloff          = false;
 };
 
-[[nodiscard]] auto ParseSourceAttenuation(const BSPEntity& entity) noexcept -> SourceAttenuation;
+[[nodiscard]] auto ParseSourceAttenuation(const Entity& entity) noexcept -> SourceAttenuation;
 
 // Metres at which the attenuation window drops below kAttenuationCutoff, given
 // an already-calibrated engine intensity. Clamped to [kMinRangeMetres,
@@ -230,20 +230,20 @@ struct SourceLightValue {
     bool                 hasBrightness = true;
 };
 
-[[nodiscard]] auto ParseSourceLightValue(const BSPEntity& entity) noexcept -> SourceLightValue;
+[[nodiscard]] auto ParseSourceLightValue(const Entity& entity) noexcept -> SourceLightValue;
 
 // `rendercolor` + `renderamt` (+ `HDRColorScale`): the CS:GO / GMod spelling
 // point_spotlight, env_projectedtexture and the *_dynamic family use. Exported
 // because it is the only way to read those entities' colour, and because a test
 // has to be able to check the three spellings apart.
-[[nodiscard]] auto ParseRenderColorValue(const BSPEntity& entity) noexcept -> SourceLightValue;
+[[nodiscard]] auto ParseRenderColorValue(const Entity& entity) noexcept -> SourceLightValue;
 
 // Harvests every point/spot/sun light the entity lump describes. A light is
 // dropped (not emitted) when it is switched off, when it is black, or when it
 // is a beam cone whose "No Dynamic Light" spawnflag is set -- Source sets that
 // light's scale to exactly zero, so emitting it would double a fixture that
 // already has a `light`/`light_spot` beside it.
-[[nodiscard]] auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std::vector<BspPointLight>;
+[[nodiscard]] auto GatherEntityLights(const Map& map, const ImportOptions& options) -> std::vector<PointLight>;
 
 // ---------------------------------------------------------------------------
 // Ambient
@@ -251,11 +251,11 @@ struct SourceLightValue {
 
 // AmbientTerm lives in BSPGeometry.hpp (it is imported map data); the reading
 // rules are here.
-[[nodiscard]] auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm;
+[[nodiscard]] auto ReadEnvironmentAmbient(const Map& map) noexcept -> AmbientTerm;
 
 // The light_environment sun direction in Source space (pitch positive down),
 // or a zero vector when the map has none.
-[[nodiscard]] auto EnvironmentSunDirection(const BSPMap& map) noexcept -> FVec3;
+[[nodiscard]] auto EnvironmentSunDirection(const Map& map) noexcept -> FVec3;
 
 // ---------------------------------------------------------------------------
 // Emissive surfaces
@@ -291,14 +291,14 @@ struct EmissiveMaterialProbe {
 // kEmissiveClusterCellInches cell), damps the ones that share a fixture with
 // an entity light, ranks by strength * area and truncates to kEmissiveMaxLights.
 [[nodiscard]] auto FinalizeEmissiveSurfaces(
-    std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights
+    std::span<const EmissiveSurface> surfaces, std::span<const PointLight> entityLights, float unitScale, uint32_t maxLights
 ) -> std::vector<EmissiveSurface>;
 
 // The area-light proxy for one emissive surface: a point light pushed just off
 // the surface along its normal, with the intensity the
 // equivalent-Source-brightness model gives it. Range comes from the same
 // attenuation window the entity lights use.
-[[nodiscard]] auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> BspPointLight;
+[[nodiscard]] auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> PointLight;
 
 // ---------------------------------------------------------------------------
 // Diagnostics / guarantee
@@ -308,8 +308,8 @@ struct EmissiveMaterialProbe {
 // rules that fill it are here.
 
 [[nodiscard]] auto AuditLighting(
-    std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient,
-    const BSPMap& map
+    std::span<const PointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient,
+    const Map& map
 ) -> LightingDiagnostics;
 
 // The guarantee. A scene whose only light is a dim sun and whose ambient is
@@ -319,7 +319,7 @@ struct EmissiveMaterialProbe {
 // so the PBR/RTGI/DDGI pipeline always has something to trace. Returns true
 // when it had to intervene.
 [[nodiscard]] auto EnforceLightingFloor(
-    ImportedMapData& data, const BSPMap& map, const ImportOptions& options, LightingDiagnostics& diagnostics
+    ImportedMapData& data, const Map& map, const ImportOptions& options, LightingDiagnostics& diagnostics
 ) -> bool;
 
 } // namespace ZHLN::BSP

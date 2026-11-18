@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "TestsFramework.hpp"
-#include <VFX/LightningHost.hpp>
+#include <VFX/Lightning.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
@@ -16,9 +16,9 @@ using Test::ExpectTrue;
 auto LightningEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM lightning"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM lightning"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
@@ -26,8 +26,8 @@ struct LightningHostSuite {
     struct Tests {
         std::expected<void, ErrorCode> geometry_preserves_fractal_ribbons_with_deterministic_seed() {
             std::mt19937 a {123}, b {123};
-            auto         first  = LightningHost::GenerateRibbon({0, 40, 0}, {0, 0, 0}, {0, 10, 30}, {}, a);
-            auto         second = LightningHost::GenerateRibbon({0, 40, 0}, {0, 0, 0}, {0, 10, 30}, {}, b);
+            auto         first  = Lightning::GenerateRibbon({0, 40, 0}, {0, 0, 0}, {0, 10, 30}, {}, a);
+            auto         second = Lightning::GenerateRibbon({0, 40, 0}, {0, 0, 0}, {0, 10, 30}, {}, b);
             ExpectTrue(first.positions.size() >= 32 * 6);
             ExpectEq(first.positions.size() % 6, size_t(0));
             ExpectEq(first.positions.size(), first.frames.size());
@@ -37,7 +37,7 @@ struct LightningHostSuite {
             return {};
         }
         std::expected<void, ErrorCode> validates_inputs_and_preserves_independent_owners_and_moves() {
-            LightningHost::Host first, second;
+            Lightning::System first, second;
             ExpectTrue(!first.Spawn({0, 30, 0}, {}, {0, 10, 30}));
             auto made = LightningEngine();
             if (!ExpectTrue(made.has_value()))
@@ -52,7 +52,7 @@ struct LightningHostSuite {
             auto b = second.Spawn({2, 30, 0}, {2, 0, 0}, {0, 10, 30});
             if (!ExpectTrue(a.has_value() && b.has_value()))
                 return {};
-            LightningHost::Host moved = std::move(first);
+            Lightning::System moved = std::move(first);
             ExpectEq(first.Size(), size_t(0));
             second = std::move(moved);
             ExpectEq(second.Size(), size_t(1));
@@ -68,7 +68,7 @@ struct LightningHostSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto                engine = std::move(*made);
-            LightningHost::Host host;
+            Lightning::System host;
             host.Start(*engine.Get());
             auto bolt = host.Spawn({0, 30, 0}, {}, {0, 10, 30});
             if (!ExpectTrue(bolt.has_value()))
@@ -79,7 +79,7 @@ struct LightningHostSuite {
             auto  binding  = *entities.Get<Components::MeshComponent>(*bolt);
             auto  old      = *entities.Get<Components::OwnedMeshComponent>(*bolt);
             ExpectTrue(host.BeforeRender(*engine.Get(), .02f).has_value());
-            auto state = *entities.Get<LightningHost::BoltState>(*bolt);
+            auto state = *entities.Get<Lightning::BoltState>(*bolt);
             ExpectTrue(state.visibleVertices > 0);
             gfx.UnregisterMesh(binding.meshAsset);
             gfx.UnregisterMaterial(binding.materialAsset);
@@ -89,11 +89,11 @@ struct LightningHostSuite {
             ExpectTrue(host.BeforeRender(*engine.Get(), 0).has_value());
             ExpectTrue(gfx.FindMesh(binding.meshAsset).HasValue());
             ExpectTrue(gfx.FindMaterial(binding.materialAsset).HasValue());
-            ExpectEq(entities.Get<LightningHost::BoltState>(*bolt)->visibleVertices, state.visibleVertices);
+            ExpectEq(entities.Get<Lightning::BoltState>(*bolt)->visibleVertices, state.visibleVertices);
             ExpectEq(gfx.Settings().environment.ambientExposure, exposure);
             ExpectTrue(host.BeforeRender(*engine.Get(), .03f).has_value());
             ExpectTrue(host.BeforeRender(*engine.Get(), .05f).has_value());
-            auto* live = entities.Get<LightningHost::BoltState>(*bolt);
+            auto* live = entities.Get<Lightning::BoltState>(*bolt);
             ExpectTrue(live && live->flashLuminance > 0);
             auto material = gfx.FindMaterial(binding.materialAsset);
             ExpectTrue(material.HasValue());
@@ -106,7 +106,7 @@ struct LightningHostSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto                engine = std::move(*made);
-            LightningHost::Host host;
+            Lightning::System host;
             host.Start(*engine.Get());
             auto bolt = host.Spawn({0, 30, 0}, {}, {0, 10, 30});
             if (!ExpectTrue(bolt.has_value()))

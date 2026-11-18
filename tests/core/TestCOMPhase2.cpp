@@ -28,9 +28,9 @@ struct COMPhase2Suite {
             using Test::ExpectTrue;
             using Test::ExpectEq;
             auto created = CreateEngineRef(InChain(
-                EngineAppConfig {.appName = String64("Phase 2 boundary"), .logLevel = LogLevel::Quiet},
-                EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                EngineRenderConfig {.validationMode = ValidationMode::Off}));
+                AppConfig {.appName = String64("Phase 2 boundary"), .logLevel = LogLevel::Quiet},
+                WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                RenderConfig {.validationMode = ValidationMode::Off}));
             // Unlike the historical GPU-heavy boundary test, init failure is
             // a test failure, not a silently successful skipped assertion.
             if (!ExpectTrue(created.has_value())) return {};

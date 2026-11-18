@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "TestsFramework.hpp"
 #include <Screenshot/Screenshot.hpp>
-#include <Terrain/TerrainHost.hpp>
+#include <Terrain/Terrain.hpp>
 #include <TerrainDiagnostic.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
@@ -22,16 +22,16 @@ using Test::ExpectTrue;
 auto TerrainEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM terrain"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM terrain"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
 struct TerrainHostSuite {
     struct Tests {
         std::expected<void, ErrorCode> geometry_is_owned_validated_and_preserves_noise_tint_and_stream_layout() {
-            for (auto type: {Terrain::TerrainType::Default, Terrain::TerrainType::Snow, Terrain::TerrainType::Desert}) {
+            for (auto type: {Terrain::Type::Default, Terrain::Type::Snow, Terrain::Type::Desert}) {
                 auto first  = Terrain::Generate({.sampleCount = 8, .worldSize = 30, .maxHeight = 8, .type = type});
                 auto second = Terrain::Generate({.sampleCount = 8, .worldSize = 30, .maxHeight = 8, .type = type});
                 if (!ExpectTrue(first.has_value() && second.has_value()))
@@ -63,7 +63,7 @@ struct TerrainHostSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto          engine = std::move(*created);
-            Terrain::Host first, second;
+            Terrain::System first, second;
             auto          source = Terrain::FromHeights(2, 10, std::array<float, 4> {1, 3, 5, 7});
             if (!ExpectTrue(source.has_value()))
                 return {};
@@ -93,9 +93,9 @@ struct TerrainHostSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto          engine = std::move(*created);
-            Terrain::Host host;
+            Terrain::System host;
             host.Start(*engine.Get());
-            auto geometry = Terrain::Generate({.sampleCount = 8, .worldSize = 20, .maxHeight = 4, .type = Terrain::TerrainType::Snow});
+            auto geometry = Terrain::Generate({.sampleCount = 8, .worldSize = 20, .maxHeight = 4, .type = Terrain::Type::Snow});
             if (!ExpectTrue(geometry.has_value()))
                 return {};
             auto tile = host.Create(std::move(*geometry), {.createPhysics = false, .buildBLAS = false});
@@ -134,7 +134,7 @@ struct TerrainHostSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto          engine = std::move(*created);
-            Terrain::Host host;
+            Terrain::System host;
             host.Start(*engine.Get());
             std::array<float, 64> heights;
             heights.fill(2);

@@ -165,7 +165,7 @@ struct DecalTestSuite {
             if (!camEnts.empty()) {
                 reg.AttachMany(
                     camEnts[0],
-                    ZHLN::CameraRig::TargetCameraComponent {
+                    ZHLN::CameraRig::TargetComponent {
                         .target  = ZHLN::Entity::Null(),
                         .yaw     = -90.0f,
                         .pitch   = 0.0f,

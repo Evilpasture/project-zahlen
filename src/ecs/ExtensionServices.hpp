@@ -14,7 +14,7 @@
 namespace ZHLN::ECS {
 
 // Type-erased, owning container for optional domain services (e.g.
-// AnimationContext). Kept reflection-free so headers included inside C++20
+// Context). Kept reflection-free so headers included inside C++20
 // module global fragments never pull std::meta across module boundaries.
 // A service a graph node may not pull through the type-erased store.
 //

@@ -4,5 +4,5 @@
 #include <cstdint>
 namespace ZHLN { class Engine; namespace COM {
 // Internal narrow operations, never a World/registry escape hatch.
-struct JointAllocator { static uint32_t AllocateJoints(Engine&, uint32_t) noexcept; };
+struct JointAllocator { static uint32_t AllocateJoints(ZHLN::Engine&, uint32_t) noexcept; };
 }}

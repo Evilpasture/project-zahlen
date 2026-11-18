@@ -27,7 +27,7 @@
 namespace ZHLN::COM {
 
 template <typename T>
-concept ComAppLayer = requires(std::remove_cvref_t<T>& layer, IEngine& engine) {
+concept AppLayer = requires(std::remove_cvref_t<T>& layer, IEngine& engine) {
     layer.Start(engine);
 } || requires(std::remove_cvref_t<T>& layer, IEngine& engine, float dt) {
     layer.Tick(engine, dt);
@@ -57,7 +57,7 @@ class App {
 
     auto OnStart(std::function<void(IEngine&)> callback) -> App& { _onStart = std::move(callback); return *this; }
 
-    template <ComAppLayer Layer>
+    template <AppLayer Layer>
         requires std::constructible_from<std::remove_cvref_t<Layer>, Layer>
     auto AddLayer(Layer&& layer) -> App& {
         using Stored = std::remove_cvref_t<Layer>;
@@ -97,19 +97,19 @@ class App {
 
     template <typename UpdateFn>
     auto RunLoop(UpdateFn&& update) const -> std::expected<void, ErrorCode> {
-        const EngineAppConfig appCfg {
+        const AppConfig appCfg {
             .appName            = String64(_title),
             .logLevel           = _logLevel,
             .maxFramesPerSecond = _maxFps,
         };
-        const EngineWindowConfig winCfg {
+        const WindowConfig winCfg {
             .width      = _width,
             .height     = _height,
             .fullscreen = _fullscreen,
             .vsync      = _vsync,
             .headless   = _headless,
         };
-        const EngineRenderConfig renderCfg {
+        const RenderConfig renderCfg {
             .validationMode    = _validation ? ValidationMode::On : ValidationMode::Off,
             .enableMeshShading = _meshShading,
         };

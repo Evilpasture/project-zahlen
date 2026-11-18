@@ -12,7 +12,7 @@
 // so new body properties or shape families never shift the vtable or read past
 // caller-owned structs.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Math/Quat.hpp>

@@ -8,7 +8,7 @@
 // server of extensions/net/HTTP (HTTPServer.hpp) on 127.0.0.1, so no test depends
 // on a real CDN, a DNS record or a CI runner's egress rules. The base URL is the
 // server's own origin, which is how the suite exercises the same configuration
-// path a real deployment takes: a string handed in through CDNConfig.
+// path a real deployment takes: a string handed in through Config.
 //
 // Not covered here: libcurl error mapping (TestHTTP's ground). Async expiry
 // is covered through RequestAsset/Poll as well as the blocking Fetch/Load API.
@@ -73,7 +73,7 @@ auto AgeFile(const std::filesystem::path& file, std::chrono::seconds age) -> boo
     return !ec;
 }
 
-auto WaitFor(ZHLN::CDN::CDNManager& cdn, ZHLN::Remote::FetchID handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
+auto WaitFor(ZHLN::CDN::Manager& cdn, ZHLN::Remote::FetchID handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     do {
         if (auto result = cdn.Poll(handle)) {
@@ -86,16 +86,16 @@ auto WaitFor(ZHLN::CDN::CDNManager& cdn, ZHLN::Remote::FetchID handle) -> std::o
 }
 
 auto RevalidatingCDN(ZHLN::HTTP::LoopbackServer& server, std::string_view name, std::chrono::seconds interval = std::chrono::seconds::zero())
-    -> std::expected<ZHLN::CDN::CDNManager, ZHLN::ErrorCode> {
+    -> std::expected<ZHLN::CDN::Manager, ZHLN::ErrorCode> {
     const auto origin = server.Url("");
-    return ZHLN::CDN::CDNManager::Create({.baseURL = origin, .cacheDir = ScratchDir(name), .cachePolicy = {.revalidateAfter = interval}});
+    return ZHLN::CDN::Manager::Create({.baseURL = origin, .cacheDir = ScratchDir(name), .cachePolicy = {.revalidateAfter = interval}});
 }
 
 auto BodyText(std::span<const uint8_t> bytes) -> std::string_view {
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 
-auto ExpectBody(ZHLN::CDN::CDNManager& cdn, std::string_view path, std::string_view expected) -> bool {
+auto ExpectBody(ZHLN::CDN::Manager& cdn, std::string_view path, std::string_view expected) -> bool {
     auto bytes = cdn.Load(path, IsHello);
     return ZHLN::Test::ExpectTrue(bytes.has_value()) && ZHLN::Test::ExpectEq(BodyText(*bytes), expected);
 }
@@ -103,7 +103,7 @@ auto ExpectBody(ZHLN::CDN::CDNManager& cdn, std::string_view path, std::string_v
 struct CDNTestSuite {
     enum class CDNTestError : uint8_t {
         ServerUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The suite's loopback server did not come up, so there was nothing to fetch.">{}) = 1,
-        ManagerRefused    ZHLN_ANNOTATION(ZHLN::Description<"CDNManager::Create refused a config the test expected to be usable.">{}),
+        ManagerRefused    ZHLN_ANNOTATION(ZHLN::Description<"CDN::Manager::Create refused a config the test expected to be usable.">{}),
     };
 
     struct Tests {
@@ -111,16 +111,16 @@ struct CDNTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> the_errors_are_annotated_enumerators_that_format_like_wire() {
             // An enumerator converts to ErrorCode and back without losing its identity.
-            const ZHLN::ErrorCode code = ZHLN::CDN::CDNError::NotFound;
-            ZHLN::Test::ExpectTrue(code.Is(ZHLN::CDN::CDNError::NotFound));
-            ZHLN::Test::ExpectFalse(code.Is(ZHLN::CDN::CDNError::HTTPStatus));
+            const ZHLN::ErrorCode code = ZHLN::CDN::Error::NotFound;
+            ZHLN::Test::ExpectTrue(code.Is(ZHLN::CDN::Error::NotFound));
+            ZHLN::Test::ExpectFalse(code.Is(ZHLN::CDN::Error::HTTPStatus));
 
             // Message() is the annotated template, read back through reflection.
             ZHLN::Test::ExpectEq(std::string(ZHLN::Error(code).Message()), std::string("the CDN has no asset at '{}' (HTTP 404)."));
 
             // FormatEnumMessage fills the template with the failure site's context, as Wire does.
             ZHLN::Test::ExpectEq(
-                ZHLN::Reflect::FormatEnumMessage(ZHLN::CDN::CDNError::HTTPStatus, 503, std::string("models/helmet.glb")),
+                ZHLN::Reflect::FormatEnumMessage(ZHLN::CDN::Error::HTTPStatus, 503, std::string("models/helmet.glb")),
                 std::string("the CDN answered HTTP 503 for 'models/helmet.glb'.")
             );
             return {};
@@ -131,11 +131,11 @@ struct CDNTestSuite {
         std::expected<void, ZHLN::ErrorCode> a_base_url_must_be_an_absolute_http_url() {
             const char* const bad[] = {"", "ftp://example.com", "example.com/assets", "https://", "https:///path", "http://host with space"};
             for (const char* base: bad) {
-                const ZHLN::CDN::CDNConfig config {.baseURL = base};
-                auto                       made   = ZHLN::CDN::CDNManager::Create(config);
+                const ZHLN::CDN::Config config {.baseURL = base};
+                auto                       made   = ZHLN::CDN::Manager::Create(config);
                 ZHLN::Test::ExpectFalse(made.has_value());
                 if (!made.has_value()) {
-                    ZHLN::Test::ExpectTrue(made.error().Is(ZHLN::CDN::CDNError::InvalidConfig));
+                    ZHLN::Test::ExpectTrue(made.error().Is(ZHLN::CDN::Error::InvalidConfig));
                 }
             }
             return {};
@@ -150,13 +150,13 @@ struct CDNTestSuite {
 
             // The string the config views dies at the end of this scope. The
             // manager must not notice.
-            auto made = [&]() -> std::expected<ZHLN::CDN::CDNManager, ZHLN::ErrorCode> {
+            auto made = [&]() -> std::expected<ZHLN::CDN::Manager, ZHLN::ErrorCode> {
                 std::string transient = origin + "/";
-                const ZHLN::CDN::CDNConfig config {
+                const ZHLN::CDN::Config config {
                     .baseURL = transient,
                     .cacheDir = ScratchDir("copy"),
                 };
-                return ZHLN::CDN::CDNManager::Create(config);
+                return ZHLN::CDN::Manager::Create(config);
             }();
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
@@ -173,12 +173,12 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("paths")};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("paths")};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            const ZHLN::CDN::CDNManager& cdn = *made;
+            const ZHLN::CDN::Manager& cdn = *made;
 
             auto joined = cdn.GetURL("models/helmet.glb");
             ZHLN::Test::ExpectTrue(joined.has_value());
@@ -195,7 +195,7 @@ struct CDNTestSuite {
                 auto refused = cdn.GetURL(path);
                 ZHLN::Test::ExpectFalse(refused.has_value());
                 if (!refused.has_value()) {
-                    ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::CDNError::InvalidPath));
+                    ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::Error::InvalidPath));
                 }
             }
             return {};
@@ -209,12 +209,12 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("fetch"), .cachePolicy = {.revalidateAfter = std::chrono::minutes(5)}};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("fetch"), .cachePolicy = {.revalidateAfter = std::chrono::minutes(5)}};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            ZHLN::CDN::CDNManager& cdn = *made;
+            ZHLN::CDN::Manager& cdn = *made;
 
             const uint64_t before = server.Requests();
             auto           first  = cdn.Fetch("ok", IsHello);
@@ -244,12 +244,12 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("corrupt")};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("corrupt")};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            ZHLN::CDN::CDNManager& cdn      = *made;
+            ZHLN::CDN::Manager& cdn      = *made;
             const std::string      url      = cdn.GetURL("ok").value_or(std::string());
             const std::string      fileName = ZHLN::Remote::ResolveURL(url).cacheFileName;
 
@@ -275,17 +275,17 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("rejected")};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("rejected")};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            ZHLN::CDN::CDNManager& cdn = *made;
+            ZHLN::CDN::Manager& cdn = *made;
 
             auto refused = cdn.Fetch("ok", RejectAll);
             ZHLN::Test::ExpectFalse(refused.has_value());
             if (!refused.has_value()) {
-                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::CDNError::Rejected));
+                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::Error::Rejected));
             }
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("ok").value_or(std::string())).cacheFileName));
             return {};
@@ -299,12 +299,12 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("load"), .cachePolicy = {.revalidateAfter = std::chrono::minutes(5)}};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("load"), .cachePolicy = {.revalidateAfter = std::chrono::minutes(5)}};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            ZHLN::CDN::CDNManager& cdn      = *made;
+            ZHLN::CDN::Manager& cdn      = *made;
             const std::string      url      = cdn.GetURL("binary").value_or(std::string());
             const std::string      fileName = ZHLN::Remote::ResolveURL(url).cacheFileName;
 
@@ -338,7 +338,7 @@ struct CDNTestSuite {
             const auto dir = ScratchDir("startup-cleanup");
             std::ofstream(dir / "never-requested.bin", std::ios::binary) << "old";
             ZHLN::Test::ExpectTrue(AgeFile(dir / "never-requested.bin", std::chrono::hours(24 * 8)));
-            auto made = ZHLN::CDN::CDNManager::Create({.baseURL = "https://cdn.example.com", .cacheDir = dir});
+            auto made = ZHLN::CDN::Manager::Create({.baseURL = "https://cdn.example.com", .cacheDir = dir});
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
@@ -353,7 +353,7 @@ struct CDNTestSuite {
             }
             const std::string origin = server.Url("");
             const auto        dir    = ScratchDir("blocking-expiry");
-            auto              made   = ZHLN::CDN::CDNManager::Create({
+            auto              made   = ZHLN::CDN::Manager::Create({
                 .baseURL     = origin,
                 .cacheDir    = dir,
                 .cachePolicy = {.maxAge = std::chrono::seconds(60), .revalidateAfter = std::chrono::minutes(5)},
@@ -387,7 +387,7 @@ struct CDNTestSuite {
             }
             const std::string origin = server.Url("");
             const auto        dir    = ScratchDir("async-expiry");
-            auto              made   = ZHLN::CDN::CDNManager::Create({
+            auto              made   = ZHLN::CDN::Manager::Create({
                 .baseURL     = origin,
                 .cacheDir    = dir,
                 .cachePolicy = {.maxAge = std::chrono::seconds(60), .revalidateAfter = std::chrono::minutes(5)},
@@ -436,7 +436,7 @@ struct CDNTestSuite {
             }
             const std::string origin = server.Url("");
             const auto        dir    = ScratchDir("budget");
-            auto              made   = ZHLN::CDN::CDNManager::Create({
+            auto              made   = ZHLN::CDN::Manager::Create({
                 .baseURL     = origin,
                 .cacheDir    = dir,
                 .cachePolicy = {.maxBytes = 256},
@@ -453,7 +453,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("binary"); // Fetch specifically promises an on-disk file
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path) {
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::CDNError::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
             }
             const auto request = made->RequestAsset("binary");
             if (ZHLN::Test::ExpectTrue(request.has_value())) {
@@ -474,7 +474,7 @@ struct CDNTestSuite {
             const std::string origin = server.Url("");
             const auto        root   = ScratchDir("unusable-directory") / "not-a-directory";
             std::ofstream(root) << "not a cache";
-            auto made = ZHLN::CDN::CDNManager::Create({.baseURL = origin, .cacheDir = root});
+            auto made = ZHLN::CDN::Manager::Create({.baseURL = origin, .cacheDir = root});
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
@@ -483,7 +483,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("ok", IsHello);
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path) {
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::CDNError::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
             }
             return {};
         }
@@ -495,7 +495,7 @@ struct CDNTestSuite {
             }
             const std::string origin = server.Url("");
             const auto        dir    = ScratchDir("expired-notfound");
-            auto              made   = ZHLN::CDN::CDNManager::Create({
+            auto              made   = ZHLN::CDN::Manager::Create({
                 .baseURL     = origin,
                 .cacheDir    = dir,
                 .cachePolicy = {.maxAge = std::chrono::seconds(60), .revalidateAfter = std::chrono::minutes(5)},
@@ -510,7 +510,7 @@ struct CDNTestSuite {
             auto       loaded = made->Load("notfound", IsHello);
             ZHLN::Test::ExpectFalse(loaded.has_value());
             if (!loaded) {
-                ZHLN::Test::ExpectTrue(loaded.error().Is(ZHLN::CDN::CDNError::NotFound));
+                ZHLN::Test::ExpectTrue(loaded.error().Is(ZHLN::CDN::Error::NotFound));
             }
             ZHLN::Test::ExpectEq(server.Requests(), before + 1);
             ZHLN::Test::ExpectFalse(std::filesystem::exists(dir / key));
@@ -524,7 +524,7 @@ struct CDNTestSuite {
             }
             const std::string origin = server.Url("");
             const auto        dir    = ScratchDir("no-expiry");
-            auto              made   = ZHLN::CDN::CDNManager::Create({
+            auto              made   = ZHLN::CDN::Manager::Create({
                 .baseURL     = origin,
                 .cacheDir    = dir,
                 .cachePolicy = {.maxAge = std::chrono::seconds::zero(), .revalidateAfter = std::chrono::minutes(5)},
@@ -548,7 +548,7 @@ struct CDNTestSuite {
             ZHLN::HTTP::LoopbackServer server;
             server.SetResource("/asset", {.body = "hello", .etag = "\"v1\""});
             const auto origin = server.Url("");
-            auto       made   = ZHLN::CDN::CDNManager::Create({.baseURL = origin, .cacheDir = ScratchDir("dev-default")});
+            auto       made   = ZHLN::CDN::Manager::Create({.baseURL = origin, .cacheDir = ScratchDir("dev-default")});
             if (!ZHLN::Test::ExpectTrue(server.IsListening() && made.has_value()))
                 return std::unexpected(CDNTestError::ManagerRefused);
             ZHLN::Test::ExpectEq(made->Cache().Policy().revalidateAfter.count(), int64_t {ZHLN::isDev ? 0 : 300});
@@ -565,16 +565,16 @@ struct CDNTestSuite {
             server.SetResource("/asset", {.body = "hello", .etag = "W/\"opaque-v1\"", .omitValidatorsOn304 = true});
             const auto                 dir    = ScratchDir("persisted-etag");
             const auto                 origin = server.Url("");
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = dir, .cachePolicy = {.revalidateAfter = std::chrono::seconds::zero()}};
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = dir, .cachePolicy = {.revalidateAfter = std::chrono::seconds::zero()}};
             {
-                auto first = ZHLN::CDN::CDNManager::Create(config);
+                auto first = ZHLN::CDN::Manager::Create(config);
                 if (!ZHLN::Test::ExpectTrue(server.IsListening() && first.has_value()))
                     return std::unexpected(CDNTestError::ManagerRefused);
                 ExpectBody(*first, "asset", "hello");
             }
             const auto file     = dir / ZHLN::Remote::ResolveURL(server.Url("/asset")).cacheFileName;
             const auto written  = std::filesystem::last_write_time(file);
-            auto       reopened = ZHLN::CDN::CDNManager::Create(config);
+            auto       reopened = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(reopened.has_value()))
                 return std::unexpected(CDNTestError::ManagerRefused);
             auto path = reopened->Fetch("asset", IsHello);
@@ -748,7 +748,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("asset", IsHello);
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path)
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::CDNError::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
             return {};
         }
 
@@ -761,15 +761,15 @@ struct CDNTestSuite {
             ExpectBody(*made, "asset", "hello");
             server.SetResource("/asset", {.body = "bad", .etag = "\"v2\""});
             auto rejected = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!rejected && rejected.error().Is(ZHLN::CDN::CDNError::Rejected));
+            ZHLN::Test::ExpectTrue(!rejected && rejected.error().Is(ZHLN::CDN::Error::Rejected));
             server.SetResource("/asset", {.body = "error", .status = 500});
             auto failed = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!failed && failed.error().Is(ZHLN::CDN::CDNError::HTTPStatus));
+            ZHLN::Test::ExpectTrue(!failed && failed.error().Is(ZHLN::CDN::Error::HTTPStatus));
             server.SetResource("/asset", {.body = "world", .etag = "\"v2\""});
             ExpectBody(*made, "asset", "world");
             server.SetResource("/asset", {.status = 404});
             auto removed = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!removed && removed.error().Is(ZHLN::CDN::CDNError::NotFound));
+            ZHLN::Test::ExpectTrue(!removed && removed.error().Is(ZHLN::CDN::Error::NotFound));
             ZHLN::Test::ExpectFalse(made->Cache().Exists(ZHLN::Remote::ResolveURL(server.Url("/asset")).cacheFileName));
             return {};
         }
@@ -782,7 +782,7 @@ struct CDNTestSuite {
                 if (!ZHLN::Test::ExpectTrue(server.IsListening() && made.has_value()))
                     return std::unexpected(CDNTestError::ManagerRefused);
                 auto bytes = made->Load("asset", IsHello);
-                ZHLN::Test::ExpectTrue(!bytes && bytes.error().Is(ZHLN::CDN::CDNError::HTTPStatus));
+                ZHLN::Test::ExpectTrue(!bytes && bytes.error().Is(ZHLN::CDN::Error::HTTPStatus));
                 ZHLN::Test::ExpectEq(server.Requests(), uint64_t {1}); // bounded: no retry loop
                 ZHLN::Test::ExpectFalse(made->Cache().Exists(ZHLN::Remote::ResolveURL(server.Url("/asset")).cacheFileName));
             }
@@ -847,8 +847,8 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("redirect")};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("redirect")};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
@@ -866,23 +866,23 @@ struct CDNTestSuite {
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(CDNTestError::ServerUnavailable);
             }
-            const ZHLN::CDN::CDNConfig config {.baseURL = origin, .cacheDir = ScratchDir("status")};
-            auto                       made = ZHLN::CDN::CDNManager::Create(config);
+            const ZHLN::CDN::Config config {.baseURL = origin, .cacheDir = ScratchDir("status")};
+            auto                       made = ZHLN::CDN::Manager::Create(config);
             if (!ZHLN::Test::ExpectTrue(made.has_value())) {
                 return std::unexpected(CDNTestError::ManagerRefused);
             }
-            ZHLN::CDN::CDNManager& cdn = *made;
+            ZHLN::CDN::Manager& cdn = *made;
 
             auto missing = cdn.Fetch("notfound");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing.has_value()) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::CDN::CDNError::NotFound));
+                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::CDN::Error::NotFound));
             }
 
             auto broken = cdn.Load("servererror");
             ZHLN::Test::ExpectFalse(broken.has_value());
             if (!broken.has_value()) {
-                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::CDN::CDNError::HTTPStatus));
+                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::CDN::Error::HTTPStatus));
             }
 
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("notfound").value_or(std::string())).cacheFileName));

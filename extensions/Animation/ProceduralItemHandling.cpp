@@ -439,7 +439,7 @@ void SolveLimbIK(
     const FVec3 hintPole      = SafeNormalized(ProceduralMath::Direction(targetGripTransform, grip.poleHintOffset), authoredPole);
     const FVec3 pole          = SafeNormalized(authoredPole * 0.4f + hintPole * 0.6f, authoredPole);
 
-    const auto ik = IK::SolveTwoBoneIK({
+    const auto ik = IK::SolveTwoBone({
         .upperPosition  = upperPosition,
         .targetPosition = targetPosition,
         .poleVector     = pole,

@@ -56,18 +56,18 @@ SKIP_DIR_NAMES = frozenset({".git", "build", "target", "__pycache__", ".cache", 
 # explicit set grows as plugin/extension ports land; remaining native targets
 # are not silently counted as migrated.
 COM_HOST_PORTS = frozenset({
-    "extensions/CharacterController/CharacterController.hpp", "extensions/CharacterController/CharacterHost.cpp",
-    "extensions/Animation/Animator.hpp", "extensions/Animation/AnimatorHost.cpp",
+    "extensions/CharacterController/CharacterController.hpp", "extensions/CharacterController/CharacterController.cpp",
+    "extensions/Animation/Animator.hpp", "extensions/Animation/Animator.cpp",
     "extensions/Console/ConsoleDebugger.cpp", "extensions/Console/ConsoleDebugger.hpp",
     "extensions/Scripting/ScriptECSBridge.cpp", "extensions/Scripting/ScriptECSBridge.hpp",
     "extensions/Scripting/ScriptComponentAccess.hpp", "extensions/Scripting/ScriptValueTypes.hpp",
     "extensions/editor/GUIEditor.cpp", "extensions/editor/GUIEditor.hpp",
     "utils/editor/main.cpp", "utils/editor/EditorSession.cpp", "utils/editor/EditorSession.hpp",
-    "extensions/VFX/ExplosionHost.hpp", "extensions/VFX/ExplosionHost.cpp", "extensions/VFX/ExplosionPolicy.hpp",
-    "extensions/VFX/LightningHost.hpp", "extensions/VFX/LightningHost.cpp",
+    "extensions/VFX/Explosion.hpp", "extensions/VFX/Explosion.cpp", "extensions/VFX/ExplosionPolicy.hpp",
+    "extensions/VFX/Lightning.hpp", "extensions/VFX/Lightning.cpp",
     "extensions/VFX/LightningGeometry.hpp", "extensions/VFX/LightningGeometry.cpp",
     "extensions/Terrain/TerrainGeometry.cpp", "extensions/Terrain/TerrainGeometry.hpp",
-    "extensions/Terrain/TerrainHost.cpp", "extensions/Terrain/TerrainHost.hpp",
+    "extensions/Terrain/Terrain.cpp", "extensions/Terrain/Terrain.hpp",
     "extensions/VFX/CombatFX.hpp", "extensions/VFX/CombatFXLifecycle.cpp",
     "utils/scene/TerrainDiagnostic.hpp",
     "utils/scene/main.cpp", "gameplay/FallbackScene/FallbackScene.cpp", "gameplay/FallbackScene/FallbackScene.hpp",
@@ -203,7 +203,7 @@ def main() -> int:
 
     # Animation is optional. The dependency must never be reversed again by
     # putting evaluation, runtime components or installation into Engine.
-    runtime_pattern = re.compile(r"(?:AnimationContext|AnimatorComponent|AnimatorControlComponent|TwoBoneIK|Animation::|IK::|[<\"](?:Zahlen/)?Animation/)")
+    runtime_pattern = re.compile(r"(?:AnimationContext|AnimatorComponent|AnimatorControlComponent|TwoBone(?:IK|Chain|Component|Solver)|Animation::|IK::|[<\"](?:Zahlen/)?Animation/)")
     for root in ("src/engine", "src/ecs", "include/Zahlen/Engine", "include/Zahlen/ECS"):
         for path in sorted((REPOSITORY_ROOT / root).rglob("*")):
             if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
@@ -212,7 +212,7 @@ def main() -> int:
             if runtime_pattern.search(text):
                 violations.append(f"{path.relative_to(REPOSITORY_ROOT)}: optional animation runtime belongs in extensions/Animation, not Engine")
     engine_cmake = (REPOSITORY_ROOT / "src/engine/CMakeLists.txt").read_text()
-    if re.search(r"(?:animation/|AnimationContext\.cpp|AnimationSystem\.cpp|TwoBoneIK\.cpp|zahlen_skeletal_animation)", engine_cmake):
+    if re.search(r"(?:animation/|AnimationContext\.cpp|Animation/Context\.cpp|AnimationSystem\.cpp|TwoBoneIK\.cpp|zahlen_skeletal_animation)", engine_cmake):
         violations.append("src/engine/CMakeLists.txt: Engine must not compile/link the optional animation runtime")
 
     if violations:

@@ -60,7 +60,7 @@ struct FacePolygon {
     float area = 0.0F;
 };
 
-[[nodiscard]] auto TraceFacePolygon(const BSPMap& map, const DFace& face) -> FacePolygon {
+[[nodiscard]] auto TraceFacePolygon(const Map& map, const DFace& face) -> FacePolygon {
     FacePolygon out;
     if (face.numedges < 3 || face.firstedge < 0 || static_cast<size_t>(face.firstedge) + static_cast<size_t>(face.numedges) > map.surfEdges.size()) {
         return out;
@@ -123,7 +123,7 @@ struct FacePolygon {
 
 } // namespace
 
-auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vplBudget, float vplWeight) -> BakeField {
+auto BuildBakeField(const Map& map, const ImportOptions& options, uint32_t vplBudget, float vplWeight) -> BakeField {
     BakeField field;
 
     if (map.lighting.empty() || map.faces.empty()) {
@@ -299,7 +299,7 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     }
 
     struct Candidate {
-        BspPointLight light;
+        PointLight light;
         float         energy = 0.0F; // uncapped brightness, for ranking
         uint64_t      key    = 0;    // voxel key, deterministic tie-break
         uint64_t      quota  = 0;    // coarse spatial-quota cell
@@ -385,7 +385,7 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         return a < b;
     });
 
-    std::vector<BspPointLight> vpls;
+    std::vector<PointLight> vpls;
     vpls.reserve(std::min<size_t>(candidates.size(), vplBudget));
     for (uint32_t round = 0; round < kVplPerQuotaCell && vpls.size() < vplBudget; ++round) {
         for (uint64_t key: regionOrder) {

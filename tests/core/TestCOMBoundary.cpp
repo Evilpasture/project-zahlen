@@ -7,12 +7,12 @@
 // file includes only Zahlen/COM, Zahlen/Core/COM and pure value headers -- no
 // engine header, no PIMPL, no internal access -- and every engine call it
 // makes is a virtual dispatch through a vtable into libzahlen_engine.so.
-// EngineCOM's definition is not visible here, so nothing can be inlined or
+// Engine's definition is not visible here, so nothing can be inlined or
 // devirtualised away.
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Audio/AudioValues.hpp>
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
@@ -98,21 +98,21 @@ using COMIdentityTest::ClientTransform;
 enum class BoundaryTestError : uint8_t { QueryFailed = 1 };
 
 // The whole surface is reachable without any engine header.
-static_assert(ZHLN::COM::ComComponent<ClientTransform>);
+static_assert(ZHLN::COM::Component<ClientTransform>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::DVec3>>);
 static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::DVec3>>);
 static_assert(std::is_standard_layout_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
 static_assert(std::is_trivially_copyable_v<ZHLN::COM::Option<ZHLN::Physics::BodyStateSnapshot>>);
 
-// Every public COM interface satisfies ComInterfaceLayoutCompliant, and
+// Every public COM interface satisfies InterfaceLayoutCompliant, and
 // EngineFactory's config slices cross as non-intrusive ChainInNode lists.
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IEngine>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IGraphicsDevice>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IEntities>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::ISimulation>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IAudioDevice>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IAssetLibrary>());
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ZHLN::COM::IActionContext>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IEngine>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IGraphicsDevice>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IEntities>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::ISimulation>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IAudioDevice>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IAssetLibrary>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ZHLN::COM::IActionContext>());
 static_assert(std::is_abstract_v<ZHLN::COM::IEngine>);
 static_assert(std::is_abstract_v<ZHLN::COM::IGraphicsDevice>);
 static_assert(std::is_abstract_v<ZHLN::COM::IEntities>);
@@ -139,7 +139,7 @@ protected:
     ~ContainerOnTheWire() = default;
 };
 
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<ContainerOnTheWire>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<ContainerOnTheWire>());
 
 struct ContainerInTheHeader {
     [[nodiscard]] virtual auto Bodies(uint32_t* out, uint32_t capacity) const noexcept -> uint32_t = 0;
@@ -154,13 +154,13 @@ protected:
     ~ContainerInTheHeader() = default;
 };
 
-static_assert(ZHLN::COM::ComInterfaceLayoutCompliant<ContainerInTheHeader>());
+static_assert(ZHLN::COM::InterfaceLayoutCompliant<ContainerInTheHeader>());
 
 struct VirtualDestructor {
     virtual ~VirtualDestructor() = default;
 };
 
-static_assert(!ZHLN::COM::ComInterfaceLayoutCompliant<VirtualDestructor>());
+static_assert(!ZHLN::COM::InterfaceLayoutCompliant<VirtualDestructor>());
 
 } // namespace AuditProbe
 
@@ -388,7 +388,7 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
 
     const auto missing = assets.FindPrefab("zahlen://models/not-here.glb");
     ZHLN::Test::ExpectTrue(!missing.HasValue());
-    ZHLN::Test::ExpectTrue(missing.error == ZHLN::ErrorCode(ZHLN::COM::ComError::AssetNotCached));
+    ZHLN::Test::ExpectTrue(missing.error == ZHLN::ErrorCode(ZHLN::COM::Error::AssetNotCached));
 
     const ZHLN::COM::Option<ZHLN::COM::PrefabInfo> info = assets.DescribePrefab(hash);
     ZHLN::Test::ExpectTrue(!info.HasValue());
@@ -565,36 +565,36 @@ struct COMBoundarySuite {
             const auto unknownRes =
                 ZHLN::COM::CreateEngine(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
             ZHLN::Test::ExpectTrue(!unknownRes.HasValue());
-            ZHLN::Test::ExpectTrue(unknownRes.error.Is(ZHLN::COM::ComError::UnsupportedExtension));
+            ZHLN::Test::ExpectTrue(unknownRes.error.Is(ZHLN::COM::Error::UnsupportedExtension));
 
-            ZHLN::COM::EngineWindowConfig winPayload {.headless = true};
+            ZHLN::COM::WindowConfig winPayload {.headless = true};
             ZHLN::COM::ChainInNode        drifted {
-                .sType      = ZHLN::COM::ChainTypeID<ZHLN::COM::EngineWindowConfig>(),
-                .layoutHash = ZHLN::Reflect::LayoutHash<ZHLN::COM::EngineWindowConfig>() ^ 0x1ULL,
-                .size       = sizeof(ZHLN::COM::EngineWindowConfig),
+                .sType      = ZHLN::COM::ChainTypeID<ZHLN::COM::WindowConfig>(),
+                .layoutHash = ZHLN::Reflect::LayoutHash<ZHLN::COM::WindowConfig>() ^ 0x1ULL,
+                .size       = sizeof(ZHLN::COM::WindowConfig),
                 .reserved   = 0,
                 .data       = &winPayload,
                 .pNext      = nullptr,
             };
             const auto driftRes = ZHLN::COM::CreateEngine(&drifted);
             ZHLN::Test::ExpectTrue(!driftRes.HasValue());
-            ZHLN::Test::ExpectTrue(driftRes.error.Is(ZHLN::COM::ComError::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(driftRes.error.Is(ZHLN::COM::Error::LayoutMismatch));
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> the_com_boundary_works_end_to_end() {
             auto created = ZHLN::COM::CreateEngineRef(ZHLN::COM::InChain(
-                ZHLN::COM::EngineAppConfig {
+                ZHLN::COM::AppConfig {
                     .appName  = ZHLN::String64("COM boundary test"),
                     .logLevel = ZHLN::LogLevel::Quiet,
                 },
-                ZHLN::COM::EngineWindowConfig {
+                ZHLN::COM::WindowConfig {
                     .width    = 320,
                     .height   = 240,
                     .vsync    = false,
                     .headless = true,
                 },
-                ZHLN::COM::EngineRenderConfig {
+                ZHLN::COM::RenderConfig {
                     .validationMode = ZHLN::ValidationMode::Off,
                 }));
             if (!created.has_value()) {

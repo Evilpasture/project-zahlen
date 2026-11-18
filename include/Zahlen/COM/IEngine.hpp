@@ -9,7 +9,7 @@
 // interface, so Graphics() and Query<IGraphicsDevice>() reach the same
 // subobject of the same allocation and a capability costs nothing to obtain.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/HostTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 

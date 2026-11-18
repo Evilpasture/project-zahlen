@@ -36,9 +36,9 @@ struct CombatFXTestSuite {
     static auto CreateTestEngine() -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
         auto created = ZHLN::COM::CreateEngineRef(
             ZHLN::COM::InChain(
-                ZHLN::COM::EngineAppConfig {.appName = ZHLN::String64("Combat host"), .logLevel = ZHLN::LogLevel::Quiet},
-                ZHLN::COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                ZHLN::COM::EngineRenderConfig {.validationMode = ZHLN::ValidationMode::Off}
+                ZHLN::COM::AppConfig {.appName = ZHLN::String64("Combat host"), .logLevel = ZHLN::LogLevel::Quiet},
+                ZHLN::COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                ZHLN::COM::RenderConfig {.validationMode = ZHLN::ValidationMode::Off}
             )
         );
         return created ? std::move(*created) : ZHLN::COM::Ref<ZHLN::COM::IEngine> {};

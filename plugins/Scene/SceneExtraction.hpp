@@ -29,12 +29,12 @@ namespace {
     };
 }
 
-[[nodiscard]] auto ToDescriptionCamera(const Camera& camera) noexcept -> SceneCamera {
-    return SceneCamera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw.value, .pitch = camera.pitch.value, .fov = camera.fov.value};
+[[nodiscard]] auto ToDescriptionCamera(const ZHLN::Camera& camera) noexcept -> Camera {
+    return Camera {.position = ToDescriptionFloat3(camera.position), .yaw = camera.yaw.value, .pitch = camera.pitch.value, .fov = camera.fov.value};
 }
 
-[[nodiscard]] auto ExtractEnvironment(const GraphicsSettings& gfx) -> SceneEnvironment {
-    SceneEnvironment environment;
+[[nodiscard]] auto ExtractEnvironment(const GraphicsSettings& gfx) -> Environment {
+    Environment environment;
     CopySharedFields(environment, gfx.post);
     CopySharedFields(environment, gfx.environment);
     environment.enableRTR = gfx.rayTracing.enableReflections;
@@ -44,19 +44,19 @@ namespace {
 template <typename Reader>
 [[nodiscard]] auto ExtractMaterial(
     const Reader&                           registry,
-    Entity                                  entity,
+    ZHLN::Entity                                  entity,
     const Components::MeshComponent&        mesh,
     const Components::SceneSourceComponent& source,
     MaterialLookup                          materials
-) -> SceneMaterial {
+) -> Material {
     const auto pbr = registry.template Get<Components::PBRComponent>(entity);
 
-    std::optional<Material> gpu;
+    std::optional<ZHLN::Material> gpu;
     if (materials.find != nullptr) {
         gpu = materials.find(materials.userdata, mesh.materialAsset);
     }
-    const SceneMaterial defaults {};
-    return SceneMaterial {
+    const Material defaults {};
+    return Material {
         .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
@@ -66,7 +66,7 @@ template <typename Reader>
 }
 
 template <typename Reader>
-[[nodiscard]] auto ExtractBodyKind(const Reader& registry, Entity entity) noexcept -> BodyKind {
+[[nodiscard]] auto ExtractBodyKind(const Reader& registry, ZHLN::Entity entity) noexcept -> BodyKind {
     const auto phys = registry.template Get<Components::PhysicsComponent>(entity);
     if (!phys) {
         return BodyKind::None;
@@ -75,10 +75,10 @@ template <typename Reader>
 }
 
 template <typename Reader>
-[[nodiscard]] auto ExtractEntities(const Reader& registry, MaterialLookup materials) -> std::vector<SceneEntity> {
-    std::vector<SceneEntity> entities;
+[[nodiscard]] auto ExtractEntities(const Reader& registry, MaterialLookup materials) -> std::vector<Entity> {
+    std::vector<Entity> entities;
 
-    for (const Entity entity: registry.template EntitiesWith<Components::SceneSourceComponent>()) {
+    for (const ZHLN::Entity entity: registry.template EntitiesWith<Components::SceneSourceComponent>()) {
         const auto source = registry.template Get<Components::SceneSourceComponent>(entity);
         if (!source || registry.template Get<Components::PendingDestroy>(entity))
             continue;
@@ -90,7 +90,7 @@ template <typename Reader>
         const auto transform = registry.template Get<Components::TransformComponent>(entity);
 
         entities.push_back(
-            SceneEntity {
+            Entity {
                 .name           = name ? std::string {std::string_view {name->name}} : std::string {},
                 .shape          = source->shape,
                 .halfExtents    = source->halfExtents,
@@ -99,7 +99,7 @@ template <typename Reader>
                 .transform      = transform ? ToDescriptionTransform(*transform) : Transform {},
                 .body           = authored ? authored->body : ExtractBodyKind(registry, entity),
                 .startsAsleep   = authored ? authored->startsAsleep : false,
-                .material       = mesh ? ExtractMaterial(registry, entity, *mesh, *source, materials) : (authored ? authored->material : SceneMaterial {}),
+                .material       = mesh ? ExtractMaterial(registry, entity, *mesh, *source, materials) : (authored ? authored->material : Material {}),
                 .drawFlags      = mesh ? mesh->flags : (authored ? authored->drawFlags : DrawFlags::None),
                 .hasAmbientCube = ambient || (authored && authored->hasAmbientCube),
                 .ambientCube    = ambient ? ambient->cube : (authored ? authored->ambientCube : std::array<FVec4, 6> {}),
@@ -111,11 +111,11 @@ template <typename Reader>
 }
 
 template <typename Reader>
-[[nodiscard]] auto ExtractLights(const Reader& registry) -> std::vector<SceneLight> {
-    std::vector<SceneLight> lights;
+[[nodiscard]] auto ExtractLights(const Reader& registry) -> std::vector<Light> {
+    std::vector<Light> lights;
     size_t                  unattributed = 0;
 
-    for (const Entity entity: registry.template EntitiesWith<Components::LightComponent>()) {
+    for (const ZHLN::Entity entity: registry.template EntitiesWith<Components::LightComponent>()) {
         if (!registry.template Get<Components::SceneLightTagComponent>(entity) || registry.template Get<Components::PendingDestroy>(entity)) {
             ++unattributed;
             continue;
@@ -125,10 +125,10 @@ template <typename Reader>
         const auto name      = registry.template Get<Components::NameComponent>(entity);
         const auto transform = registry.template Get<Components::TransformComponent>(entity);
 
-        const SceneLight defaults {};
+        const Light defaults {};
 
         lights.push_back(
-            SceneLight {
+            Light {
                 .name             = name ? std::string {std::string_view {name->name}} : std::string {},
                 .type             = std::string {ZHLN::Reflect::EnumToString(light.type)},
                 .position         = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
@@ -158,8 +158,8 @@ template <typename Reader>
 } // namespace
 
 template <typename Reader>
-auto ExtractSnapshot(const Camera& camera, const GraphicsSettings& gfx, const Reader& registry, MaterialLookup materials) -> Scene {
-    return Scene {
+auto ExtractSnapshot(const ZHLN::Camera& camera, const GraphicsSettings& gfx, const Reader& registry, MaterialLookup materials) -> Document {
+    return Document {
         .camera      = ToDescriptionCamera(camera),
         .environment = ExtractEnvironment(gfx),
         .entities    = ExtractEntities(registry, materials),

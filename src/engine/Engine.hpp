@@ -54,7 +54,7 @@ class EventBus;
 
 
 namespace COM {
-class EngineCOM;
+class Engine;
 struct JointAllocator;
 }
 
@@ -296,7 +296,7 @@ class Engine {
 
   private:
     friend struct EngineCore;
-    friend class COM::EngineCOM;
+    friend class COM::Engine;
     friend struct COM::JointAllocator;
     friend void DespawnEntity(Engine& engine, Entity entity);
 

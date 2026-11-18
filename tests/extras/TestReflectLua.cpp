@@ -6,7 +6,7 @@
 // Exercises plugins/lua/ReflectLua.hpp + SceneLua.hpp:
 //   * Reflection-driven evaluation into scalars, FixedString<N>, std::array,
 //     std::vector, maps, Optional, enums, ZHLN::FVec3/FVec3/FVec4/Quat,
-//     GraphicsSettings, and ZHLN::Scene::Scene.
+//     GraphicsSettings, and ZHLN::Scene::Document.
 //   * Computed expressions (loops, math, helpers) and pure function reducers
 //     (EvaluateCallString).
 //   * Transactional deep patching (ApplyPatchString) that preserves sibling
@@ -161,7 +161,7 @@ struct ReflectLuaSuite {
             }
         )lua";
 
-        auto scene = ZHLN::ReflectLua::EvaluateString<ZHLN::Scene::Scene>(kSceneChunk, "ring_scene");
+        auto scene = ZHLN::ReflectLua::EvaluateString<ZHLN::Scene::Document>(kSceneChunk, "ring_scene");
         if (!scene) {
             return std::unexpected(LuaSuiteFail::UnexpectedError);
         }
@@ -412,7 +412,7 @@ struct ReflectLuaSuite {
             if (gfxPath.empty()) {
                 return std::unexpected(LuaSuiteFail::UnexpectedError);
             }
-            auto gfxSrc = ZHLN::ReflectLua::ReadLuaFileText(gfxPath);
+            auto gfxSrc = ZHLN::ReflectLua::ReadFileText(gfxPath);
             if (!gfxSrc) {
                 return std::unexpected(LuaSuiteFail::UnexpectedError);
             }

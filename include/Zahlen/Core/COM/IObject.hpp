@@ -34,9 +34,9 @@ static_assert(std::is_standard_layout_v<InterfaceID> && std::is_trivially_copyab
 // Compile-time 128-bit hash of the canonical interface name. The name is
 // reflected, so there is no GUID registry and no IDL to keep in sync; the
 // values follow the documented canonical grammar, not compiler display text.
-template <typename Interface>
+template <typename Iface>
 [[nodiscard]] consteval InterfaceID InterfaceIdOf() noexcept {
-    constexpr std::string_view name = Reflect::CanonicalTypeName<Interface>();
+    constexpr std::string_view name = Reflect::CanonicalTypeName<Iface>();
     return InterfaceID {
         .high = Hash64(name),
         .low  = Hash64(name.substr(0, name.size() / 2)),

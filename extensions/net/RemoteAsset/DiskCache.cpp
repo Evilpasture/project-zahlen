@@ -55,7 +55,7 @@ inline constexpr std::string_view kTempMarker       = ".tmp-";
     return ec ? absolute.lexically_normal() : canonical;
 }
 
-// CDNManager and its fetcher copy a cache; two managers can also independently
+// Manager and its fetcher copy a cache; two managers can also independently
 // open the same directory. Both cases must serialize read/check/remove with
 // commit and sweep, or a failed read could delete somebody else's new write.
 // Only locks are shared across independent instances: each keeps its policy

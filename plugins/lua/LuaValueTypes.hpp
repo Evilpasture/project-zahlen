@@ -12,16 +12,16 @@ namespace ZHLN::ReflectLua {
 // Native math values must retain the same sequence/named-table Lua contract as
 // Jolt's storage vectors. Their fields are public and reflection can visit them.
 template <>
-struct LuaVector<ZHLN::FVec2>: std::true_type {};
+struct Vector<ZHLN::FVec2>: std::true_type {};
 
 template <>
-struct LuaVector<ZHLN::FVec3>: std::true_type {};
+struct Vector<ZHLN::FVec3>: std::true_type {};
 
 template <>
-struct LuaVector<ZHLN::FVec4>: std::true_type {};
+struct Vector<ZHLN::FVec4>: std::true_type {};
 
 template <>
-struct LuaVector<ZHLN::DVec3>: std::true_type {};
+struct Vector<ZHLN::DVec3>: std::true_type {};
 
 namespace TemplatedDetail {
 
@@ -45,7 +45,7 @@ struct Vec4TablePatch {
 // Matrices cross Lua as a flat, column-major sequence. Require every element:
 // silently accepting a partial transform would replace its omitted lanes with zero.
 template <std::floating_point T, size_t Rows, size_t Cols, size_t Alignment>
-struct LuaValueTrait<ZHLN::Matrix<T, Rows, Cols, Alignment>> {
+struct ValueTrait<ZHLN::Matrix<T, Rows, Cols, Alignment>> {
     static constexpr bool specialized = true;
     using Mat                         = ZHLN::Matrix<T, Rows, Cols, Alignment>;
 
@@ -72,7 +72,7 @@ struct LuaValueTrait<ZHLN::Matrix<T, Rows, Cols, Alignment>> {
 };
 
 template <>
-struct LuaValueTrait<FVec3> {
+struct ValueTrait<FVec3> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<FVec3, ErrorCode> {
@@ -106,7 +106,7 @@ struct LuaValueTrait<FVec3> {
 };
 
 template <>
-struct LuaValueTrait<FVec4> {
+struct ValueTrait<FVec4> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<FVec4, ErrorCode> {
@@ -142,7 +142,7 @@ struct LuaValueTrait<FVec4> {
 };
 
 template <>
-struct LuaValueTrait<ZHLN::Quat> {
+struct ValueTrait<ZHLN::Quat> {
     static constexpr bool specialized = true;
 
     static auto Read(Value reader) -> std::expected<ZHLN::Quat, ErrorCode> {

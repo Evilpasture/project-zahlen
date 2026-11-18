@@ -34,7 +34,7 @@
 
 namespace ZHLN::BSP {
 
-enum class BSPError : uint8_t {
+enum class Error : uint8_t {
     FileTooSmall       ZHLN_ANNOTATION(ZHLN::Description<"File too small for a BSP header"> {}) = 1,
     InvalidIdent       ZHLN_ANNOTATION(ZHLN::Description<"Not a valid VBSP image (bad magic)"> {}),
     UnsupportedVersion ZHLN_ANNOTATION(ZHLN::Description<"Unsupported BSP version (mainline 19-21 only)"> {}),
@@ -130,7 +130,7 @@ template <typename T>
 }
 
 // One entity from LUMP_ENTITIES: an ordered key/value list, Source style.
-struct BSPEntity {
+struct Entity {
     std::vector<std::pair<std::string, std::string>> keys;
 
     [[nodiscard]] auto Find(std::string_view key) const noexcept -> std::string_view;
@@ -170,10 +170,10 @@ struct StaticProp {
 // The parsed map: every lump the importer needs, plus the entity list and
 // resolved material names. Raw lump spans stay valid only while the caller's
 // file bytes live; the struct vectors are owned copies.
-struct BSPMap {
+struct Map {
     int32_t version = 0;
 
-    std::vector<BSPEntity> entities;
+    std::vector<Entity> entities;
 
     std::vector<DPlane>      planes;
     std::vector<DVertex>     vertices;
@@ -213,7 +213,7 @@ struct BSPMap {
 // as the lightmaps. Returns false if the leaf has no samples.
 using AmbientCube = std::array<std::array<float, 3>, 6>;
 
-[[nodiscard]] inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>& p) -> std::optional<AmbientCube> {
+[[nodiscard]] inline auto SampleLeafAmbientCube(const Map& map, const std::array<float, 3>& p) -> std::optional<AmbientCube> {
     if (map.nodes.empty() || map.leafs.empty()) {
         return std::nullopt;
     }
@@ -293,13 +293,13 @@ using AmbientCube = std::array<std::array<float, 3>, 6>;
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,
 // lump bounds) and on every struct read; empty lumps are legal and common.
-[[nodiscard]] auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCode>;
+[[nodiscard]] auto Parse(std::span<const std::byte> bytes) -> std::expected<Map, ErrorCode>;
 
 // LUMP_ENTITIES text -> entities.
-[[nodiscard]] auto ParseEntities(std::string_view text) -> std::vector<BSPEntity>;
+[[nodiscard]] auto ParseEntities(std::string_view text) -> std::vector<Entity>;
 
 // LUMP_GAMELUMP (Lump 35) directory and static prop ('sprp') parsing.
-[[nodiscard]] auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, BSPMap& map)
+[[nodiscard]] auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, Map& map)
     -> std::expected<void, ErrorCode>;
 
 } // namespace ZHLN::BSP

@@ -5,7 +5,7 @@
 //
 // Emits a cookable scene from Compiler::IRManifest as a self-contained glTF
 // 2.0 binary container. The document model (GLBModel.hpp) is the schema and
-// ZHLN::ReflectJSON::SerializeJSON writes it -- no JSON is built by hand.
+// ZHLN::ReflectJSON::Serialize writes it -- no JSON is built by hand.
 // The PNG half of the BIN chunk is stb_image_write; the container framing
 // (magic, chunk headers, padding) is the one binary shape the layer above
 // must stay hand-assembled.
@@ -1003,7 +1003,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, std::string_view levelFolder,
     doc.scenes.push_back(GlbScene {.nodes = {rootNodeIndices.begin(), rootNodeIndices.end()}});
     doc.buffers.push_back(GlbBuffer {.byteLength = static_cast<uint32_t>(binBuffer.size())});
 
-    std::string json = ZHLN::ReflectJSON::SerializeJSON(doc, 2, {.omitEmpty = true});
+    std::string json = ZHLN::ReflectJSON::Serialize(doc, 2, {.omitEmpty = true});
 
     while (json.length() % 4 != 0)
         json += ' ';

@@ -46,7 +46,7 @@ struct HostLaunchConfig {
 
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
 void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesystem::path& path) {
-    auto source = ZHLN::ReflectLua::ReadLuaFileText(path);
+    auto source = ZHLN::ReflectLua::ReadFileText(path);
     if (!source) {
         return;
     }
@@ -99,7 +99,7 @@ struct DiagnosticHost {
     ZHLN::FallbackScene::DefaultPreset           fallback;
     std::unique_ptr<ZHLN::FS::FileSystemWatcher> watcher;
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
-    std::unique_ptr<ZHLN::Discord::DiscordPresenceClient> presence;
+    std::unique_ptr<ZHLN::Discord::PresenceClient> presence;
 #endif
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
     ZHLN::Tools::TerrainDiagnostic terrainDemo;
@@ -110,7 +110,7 @@ struct DiagnosticHost {
     float dt = 0;
     auto  Start(ZHLN::COM::IEngine& engine) -> std::expected<void, ZHLN::ErrorCode> {
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
-        presence = std::make_unique<ZHLN::Discord::DiscordPresenceClient>("1548152303939358720");
+        presence = std::make_unique<ZHLN::Discord::PresenceClient>("1548152303939358720");
         if (const auto started = presence->Start(); !started) {
             ZHLN::LogWarning("[Discord] Failed to start presence: {}", started.error());
             presence.reset();
@@ -126,12 +126,12 @@ struct DiagnosticHost {
 #endif
         if (launch->terrainDemo) {
             if (!launch->scenePath.empty())
-                return std::unexpected(ZHLN::COM::ComError::InvalidArgument);
+                return std::unexpected(ZHLN::COM::Error::InvalidArgument);
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
             if (auto started = terrainDemo.Start(engine, !launch->rasterOnly); !started)
                 return started;
 #else
-            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+            return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
 #endif
         } else if (launch->scenePath.empty()) {
             fallback.BuildFallbackScene(engine, {.buildBLAS = !launch->rasterOnly});
@@ -153,7 +153,7 @@ struct DiagnosticHost {
         }
 #else
         if (!launch->consoleCommands.empty())
-            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+            return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
 #endif
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
         const auto path = launch->graphicsConfigPath;
@@ -286,7 +286,7 @@ int main(int argc, char* argv[]) {
     app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
         if (launch.graphicsConfigPath != "config/graphics.lua") {
             ZHLN::LogError("[SceneHost] --graphics-config requires the Lua extension");
-            return std::unexpected(ZHLN::COM::ComError::UnsupportedExtension);
+            return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
         }
         return {};
     });

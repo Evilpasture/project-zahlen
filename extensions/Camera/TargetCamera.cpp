@@ -18,10 +18,10 @@ auto ReadInput(const COM::IActionContext& input) -> InputSnapshot {
 void Apply(COM::IEntities& entities, const InputSnapshot& input, float dt) {
     if (!std::isfinite(dt) || dt < 0.0f)
         return;
-    for (const auto entity: entities.EntitiesWith<TargetCameraComponent>()) {
-        if (entities.Get<FreeCam::FreeCamTagComponent>(entity) || entities.Get<Components::PendingDestroy>(entity))
+    for (const auto entity: entities.EntitiesWith<TargetComponent>()) {
+        if (entities.Get<FreeCam::TagComponent>(entity) || entities.Get<Components::PendingDestroy>(entity))
             continue;
-        auto* rig    = entities.Get<TargetCameraComponent>(entity);
+        auto* rig    = entities.Get<TargetComponent>(entity);
         auto* camera = entities.Get<Components::CameraComponent>(entity);
         if (!rig || !camera || !entities.IsAlive(rig->target) || entities.Get<Components::PendingDestroy>(rig->target))
             continue;
@@ -65,8 +65,8 @@ void Apply(COM::IEntities& entities, const InputSnapshot& input, float dt) {
 void Step(COM::IEngine& engine, float dt) {
     auto&      entities = *engine.Entities();
     const auto camera   = entities.SingletonEntity<Components::MainCameraTagComponent>();
-    if (camera.HasValue() && !entities.Get<Components::PendingDestroy>(camera.value) && !entities.Get<TargetCameraComponent>(camera.value))
-        (void) entities.Attach(camera.value, TargetCameraComponent {});
+    if (camera.HasValue() && !entities.Get<Components::PendingDestroy>(camera.value) && !entities.Get<TargetComponent>(camera.value))
+        (void) entities.Attach(camera.value, TargetComponent {});
     Apply(entities, ReadInput(*engine.Actions()), dt);
 }
 } // namespace ZHLN::CameraRig

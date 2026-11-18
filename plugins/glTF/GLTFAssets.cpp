@@ -27,35 +27,35 @@ auto UploadImpl(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, cons
     -> std::expected<Asset, ErrorCode> {
     const auto& path = document.virtualPath;
     if (path.empty() || path.size() >= 256 || path.find('\0') != std::string::npos)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(std::string_view(path));
     if (const auto cached = assets.DescribePrefab(hash); cached.HasValue()) {
         if (cached.value.emissiveFactorScale != document.options.emissiveFactorScale ||
             cached.value.maxTextureDimension != document.options.maxTextureDimension)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if (!replacement) {
             if (!cached.value.gpuResourcesReady)
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
             return Asset {.hash = hash};
         }
         if (cached.value.gpuRevision != replacement->revision || cached.value.partCount != document.parts.size())
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
     } else if (replacement)
-        return std::unexpected(COM::ComError::AssetNotCached);
+        return std::unexpected(COM::Error::AssetNotCached);
     for (const auto& part: document.parts)
         if (part.primitive >= document.primitives.size())
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
     for (const auto& p: document.primitives) {
         if (p.positions.empty() || p.positions.size() > UINT32_MAX || p.indices.size() > UINT32_MAX || p.tangentFrames.size() != p.positions.size() ||
             p.surfaces.size() != p.positions.size() || (!p.skins.empty() && p.skins.size() != p.positions.size()) || p.activeMorphCount > 4 ||
             p.morphDeltas.size() != size_t(p.activeMorphCount) * p.positions.size() * 4)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         for (const auto index: p.indices)
             if (index >= p.positions.size())
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
         for (const auto& binding: p.textures)
             if (!binding.field || binding.imageIndex >= document.textures.size())
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
     }
     Pending                pending {graphics};
     std::vector<TextureID> textures(document.textures.size(), TextureID::Invalid);
@@ -64,7 +64,7 @@ auto UploadImpl(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, cons
         if (image.rgba.empty())
             continue; // original best-effort image policy
         if (!image.extent.width || !image.extent.height || uint64_t(image.extent.width) * image.extent.height * 4 != image.rgba.size())
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         const auto texture = graphics.CreateTexture(COM::StringView {}, std::as_bytes(std::span(image.rgba)), image.extent, image.isSRGB);
         if (!texture.HasValue())
             return std::unexpected(texture.error);
@@ -241,7 +241,7 @@ auto Upload(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics, const Do
 auto RebuildGPUResources(COM::IEngine& engine, const Document& document, Asset& asset, UploadOptions options) -> std::expected<void, ErrorCode> {
     auto& assets = *engine.Assets();
     if (!asset.ownsResources || asset.hash != assets.PrefabHash(std::string_view(document.virtualPath)))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     const Replacement replacement {engine.DeviceGeneration(), asset.gpuRevision};
     auto              uploaded = UploadImpl(assets, *engine.Graphics(), document, options, &replacement);
     if (!uploaded)

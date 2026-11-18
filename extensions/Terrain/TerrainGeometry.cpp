@@ -14,7 +14,7 @@ bool ValidGrid(uint32_t n, float size) {
 auto FromHeights(uint32_t samples, float worldSize, std::span<const float> input, std::span<const float> colors) -> std::expected<Geometry, ErrorCode> {
     if (!ValidGrid(samples, worldSize) || input.size() != size_t(samples) * samples || (!colors.empty() && colors.size() != input.size() * 4) ||
         !std::ranges::all_of(input, [](float v) { return std::isfinite(v); }) || !std::ranges::all_of(colors, [](float v) { return std::isfinite(v); }))
-        return std::unexpected(TerrainError::InvalidData);
+        return std::unexpected(Error::InvalidData);
     const int    sampleCount = static_cast<int>(samples);
     const float* heights     = input.data();
     const float* colorsRGBA  = colors.empty() ? nullptr : colors.data();
@@ -127,8 +127,8 @@ auto FromHeights(uint32_t samples, float worldSize, std::span<const float> input
 }
 auto Generate(const GenerateInfo& info) -> std::expected<Geometry, ErrorCode> {
     if (!ValidGrid(info.sampleCount, info.worldSize) || !std::isfinite(info.maxHeight) || info.maxHeight <= 0 ||
-        (info.type != TerrainType::Default && info.type != TerrainType::Snow && info.type != TerrainType::Desert))
-        return std::unexpected(TerrainError::InvalidData);
+        (info.type != Type::Default && info.type != Type::Snow && info.type != Type::Desert))
+        return std::unexpected(Error::InvalidData);
     const int          sampleCount = static_cast<int>(info.sampleCount);
     const float        worldSize = info.worldSize, maxHeight = info.maxHeight;
     const auto         type = info.type;
@@ -147,7 +147,7 @@ auto Generate(const GenerateInfo& info) -> std::expected<Geometry, ErrorCode> {
     };
 
     auto get_height = [&](float x, float z) -> float {
-        if (type == TerrainType::Snow) {
+        if (type == Type::Snow) {
             float tx = x * 0.012f;
             float tz = z * 0.012f;
 
@@ -245,7 +245,7 @@ auto Generate(const GenerateInfo& info) -> std::expected<Geometry, ErrorCode> {
                 float slope = normal.y;
                 float normY = y / maxHeight;
 
-                if (type == TerrainType::Snow) {
+                if (type == Type::Snow) {
                     if (slope < 0.60f) {
                         return Math::PackColor(0.22f, 0.25f, 0.30f, 1.0f);
                     }

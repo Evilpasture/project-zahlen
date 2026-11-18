@@ -5,7 +5,7 @@
 #include <Zahlen/Render/Vertex.hpp>
 #include <random>
 #include <vector>
-namespace ZHLN::LightningHost {
+namespace ZHLN::Lightning {
 struct ConfigInfo {
     float eta = 2, peakCurrentKA = 45, timeDilation = 1, ribbonWidth = .8f;
     int   subdivisions = 5;
@@ -19,4 +19,4 @@ struct GeneratedRibbon {
 };
 
 auto GenerateRibbon(FVec3 start, FVec3 end, FVec3 camera, const ConfigInfo&, std::mt19937&) -> GeneratedRibbon;
-} // namespace ZHLN::LightningHost
+} // namespace ZHLN::Lightning

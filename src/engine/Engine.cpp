@@ -1,5 +1,5 @@
 #include "ArticulationContext.hpp"
-#include "COMJointAllocator.hpp"
+#include "JointAllocator.hpp"
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -585,7 +585,7 @@ void Engine::ReleaseSceneContents() {
     }
 }
 
-uint32_t COM::JointAllocator::AllocateJoints(Engine& engine, uint32_t count) noexcept {
+uint32_t COM::JointAllocator::AllocateJoints(ZHLN::Engine& engine, uint32_t count) noexcept {
     return engine._impl->world->GetArticulationContext().AllocateJoints(count);
 }
 

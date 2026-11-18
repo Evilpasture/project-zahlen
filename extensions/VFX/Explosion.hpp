@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <expected>
 #include <memory>
-namespace ZHLN::ExplosionHost {
+namespace ZHLN::Explosion {
 enum class Kind : uint8_t { StandardFireball, ArtilleryMortar };
 struct SpawnInfo {
     FVec3 origin {};
@@ -20,14 +20,14 @@ struct EmitterState {
 struct CraterState {
     float age = 0, lifetime = 28;
 };
-class Host {
+class System {
   public:
-    Host();
-    ~Host();
-    Host(Host&&) noexcept;
-    auto operator=(Host&&) noexcept -> Host&;
-    Host(const Host&)                    = delete;
-    auto operator=(const Host&) -> Host& = delete;
+    System();
+    ~System();
+    System(System&&) noexcept;
+    auto operator=(System&&) noexcept -> System&;
+    System(const System&)                    = delete;
+    auto operator=(const System&) -> System& = delete;
     auto Start(COM::IEngine&) -> std::expected<void, ErrorCode>;
     auto Spawn(const SpawnInfo&) -> std::expected<Entity, ErrorCode>;
     auto BeforeRender(COM::IEngine&, float) -> std::expected<void, ErrorCode>;
@@ -41,4 +41,4 @@ class Host {
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };
-} // namespace ZHLN::ExplosionHost
+} // namespace ZHLN::Explosion

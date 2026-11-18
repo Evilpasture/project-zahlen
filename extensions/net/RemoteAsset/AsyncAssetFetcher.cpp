@@ -309,7 +309,7 @@ void AsyncAssetFetcher::WorkerTrampoline(void* arg) noexcept {
 void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
     if (job->cancelSignal.load(std::memory_order::relaxed)) {
         job->lastError = "cancelled";
-        job->result    = std::unexpected(HTTP::HTTPError::TransferFailed);
+        job->result    = std::unexpected(HTTP::Error::TransferFailed);
         job->isDone.store(true, std::memory_order::release);
         return;
     }
@@ -327,7 +327,7 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
         // entry evicted/replaced while the request was in flight needs bytes.
         for (int attempt = 0; attempt < 2; ++attempt) {
             if (job->cancelSignal.load(std::memory_order::relaxed)) {
-                miss(HTTP::HTTPError::TransferFailed, "cancelled");
+                miss(HTTP::Error::TransferFailed, "cancelled");
                 break;
             }
             HTTP::Request req {
@@ -352,7 +352,7 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
                 break;
             }
             if (job->cancelSignal.load(std::memory_order::relaxed)) {
-                miss(HTTP::HTTPError::TransferFailed, "cancelled");
+                miss(HTTP::Error::TransferFailed, "cancelled");
                 break;
             }
             if (conditional && IsRedirect(resp->statusCode)) {
@@ -446,7 +446,7 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
             detail += std::format("{}: {}", candidate.url, candidate.detail);
         });
         job->lastError = detail.empty() ? std::string("no candidate answered") : std::move(detail);
-        job->result    = std::unexpected(attempts.FirstError() != nullptr ? attempts.FirstError()->error : ErrorCode(HTTP::HTTPError::ConnectionFailed));
+        job->result    = std::unexpected(attempts.FirstError() != nullptr ? attempts.FirstError()->error : ErrorCode(HTTP::Error::ConnectionFailed));
     }
     job->isDone.store(true, std::memory_order::release);
 }

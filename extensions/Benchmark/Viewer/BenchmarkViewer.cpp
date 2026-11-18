@@ -255,7 +255,7 @@ inline constexpr float kChartScaleLows    = 1.5f;
 // drawn the moment it is decided sits under every row below it, which is the bug
 // the ordering exists to prevent.
 
-struct BenchmarkViewer::Impl {
+struct Viewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
 
     // The viewer's own monotonic clock (`maxDeltaTime = 0.25f`), with built-in
@@ -360,7 +360,7 @@ struct BenchmarkViewer::Impl {
     }
 };
 
-void BenchmarkViewer::Impl::Advance() noexcept {
+void Viewer::Impl::Advance() noexcept {
     frameClock.SetPaused(!running || benchmark == nullptr);
     frameClock.Tick();
 
@@ -382,7 +382,7 @@ void BenchmarkViewer::Impl::Advance() noexcept {
     }
 }
 
-void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::COM::IEngine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
+void Viewer::Impl::BuildTableStyles(ZHLN::COM::IEngine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
     // The atlas the Context will draw with, so the columns are sized against the
     // font that is actually on screen rather than a guess at its metrics.
     const ZHLN::FontAtlas* fontAtlas = atlas;
@@ -423,12 +423,12 @@ void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::COM::IEngine& engine, std::sp
     telemetryWidth   = content + (kPanelPadding * 2.0f);
 }
 
-void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
+void Viewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     if (benchmark == nullptr) {
         return;
     }
 
-    const BenchmarkMetrics&   metrics = benchmark->GetMetrics();
+    const Metrics&   metrics = benchmark->GetMetrics();
     const std::vector<float>& history = benchmark->GetTickHistory();
 
     // Ticks per second over the run, and the last second of history: the two
@@ -515,7 +515,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     );
 }
 
-void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
+void Viewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
     if (samples.empty()) {
         return;
     }
@@ -548,7 +548,7 @@ void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const f
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
+void Viewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
     if (rows.empty()) {
         return;
     }
@@ -564,7 +564,7 @@ void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const Fra
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumn(
+void Viewer::Impl::DrawStageColumn(
     GUI::Frame&                    ui,
     std::span<const FrameStageRow> rows,
     const TableStyle&              style,
@@ -585,7 +585,7 @@ void BenchmarkViewer::Impl::DrawStageColumn(
     });
 }
 
-void BenchmarkViewer::Impl::DrawStageRow(
+void Viewer::Impl::DrawStageRow(
     GUI::Frame&          ui,
     const FrameStageRow& row,
     const TableStyle&    style,
@@ -672,7 +672,7 @@ void BenchmarkViewer::Impl::DrawStageRow(
     }
 }
 
-void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
+void Viewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
     // Nothing was read, and the reason is the only useful thing left to draw. It
     // is a note, not an error: a machine whose platform exposes no counters is
     // running the frames perfectly well, and the frame numbers above are
@@ -787,7 +787,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
+void Viewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
     if (cores.empty()) {
         return;
     }
@@ -834,7 +834,7 @@ void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTel
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
+void Viewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
     const std::string_view id = TableId("core", 0, cell, 0);
 
     ui.Box(
@@ -906,7 +906,7 @@ void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& co
     }
 }
 
-void BenchmarkViewer::Impl::ToggleCapture() {
+void Viewer::Impl::ToggleCapture() {
     if (telemetry.IsCapturing()) {
         telemetry.StopCapture();
         ZHLN::Log("[Bench] frame telemetry capture stopped: {} frames -> {}", telemetry.CapturedFrames(), telemetry.CapturePath().string());
@@ -921,7 +921,7 @@ void BenchmarkViewer::Impl::ToggleCapture() {
     ZHLN::LogError("[Bench] frame telemetry capture could not open {}", telemetry.CapturePath().string());
 }
 
-void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
+void Viewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     const FrameTelemetrySnapshot&        stats    = telemetry.Snapshot();
     SystemTelemetry&                     system   = telemetry.System();
     const std::span<const float>         chart    = telemetry.ChartSamples();
@@ -1055,12 +1055,12 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngin
     );
 }
 
-BenchmarkViewer::BenchmarkViewer(): m_impl(std::make_unique<Impl>()) {
+Viewer::Viewer(): m_impl(std::make_unique<Impl>()) {
 }
 
-BenchmarkViewer::~BenchmarkViewer() = default;
+Viewer::~Viewer() = default;
 
-void BenchmarkViewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
+void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
     m_impl->frameTicked     = false;
     m_impl->gpuNameTaken    = false;
     m_impl->pendingEntities = initialEntities;
@@ -1083,7 +1083,7 @@ void BenchmarkViewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities)
     ZHLN::Log("[Bench] viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
-void BenchmarkViewer::Tick(ZHLN::COM::IEngine& engine) {
+void Viewer::Tick(ZHLN::COM::IEngine& engine) {
     const uint64_t frameId = engine.CurrentFrame();
     if (m_impl->frameTicked && frameId == m_impl->lastFrameId) {
         return; // this engine frame has been ticked already: one frame, one sample
@@ -1122,7 +1122,7 @@ void BenchmarkViewer::Tick(ZHLN::COM::IEngine& engine) {
     }
 }
 
-void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
+void Viewer::DrawPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1132,12 +1132,12 @@ void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     }
 }
 
-void BenchmarkViewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
+void Viewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     Tick(engine);
     m_impl->DrawTelemetryPanel(ui, engine);
 }
 
-void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
+void Viewer::DrawPanels(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1151,35 +1151,35 @@ void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     }
 }
 
-void BenchmarkViewer::SetFontAtlas(const FontAtlas* atlas) noexcept {
+void Viewer::SetFontAtlas(const FontAtlas* atlas) noexcept {
     m_impl->atlas = atlas;
 }
 
-void BenchmarkViewer::SetVisible(bool visible) noexcept {
+void Viewer::SetVisible(bool visible) noexcept {
     m_impl->visible = visible;
 }
 
-auto BenchmarkViewer::IsVisible() const noexcept -> bool {
+auto Viewer::IsVisible() const noexcept -> bool {
     return m_impl->visible;
 }
 
-void BenchmarkViewer::ToggleVisible() noexcept {
+void Viewer::ToggleVisible() noexcept {
     m_impl->visible = !m_impl->visible;
 }
 
-void BenchmarkViewer::SetTelemetryVisible(bool visible) noexcept {
+void Viewer::SetTelemetryVisible(bool visible) noexcept {
     m_impl->telemetryVisible = visible;
 }
 
-auto BenchmarkViewer::IsTelemetryVisible() const noexcept -> bool {
+auto Viewer::IsTelemetryVisible() const noexcept -> bool {
     return m_impl->telemetryVisible;
 }
 
-void BenchmarkViewer::ToggleTelemetryVisible() noexcept {
+void Viewer::ToggleTelemetryVisible() noexcept {
     m_impl->telemetryVisible = !m_impl->telemetryVisible;
 }
 
-void BenchmarkViewer::SetRunning(bool running) noexcept {
+void Viewer::SetRunning(bool running) noexcept {
     if (running && !m_impl->running) {
         m_impl->frameClock.ResetFixedAccumulator();
     }
@@ -1187,23 +1187,23 @@ void BenchmarkViewer::SetRunning(bool running) noexcept {
     m_impl->frameClock.SetPaused(!running);
 }
 
-auto BenchmarkViewer::IsRunning() const noexcept -> bool {
+auto Viewer::IsRunning() const noexcept -> bool {
     return m_impl->running;
 }
 
-auto BenchmarkViewer::GetBenchmark() noexcept -> LogicBenchmark* {
+auto Viewer::GetBenchmark() noexcept -> LogicBenchmark* {
     return m_impl->benchmark.get();
 }
 
-auto BenchmarkViewer::GetBenchmark() const noexcept -> const LogicBenchmark* {
+auto Viewer::GetBenchmark() const noexcept -> const LogicBenchmark* {
     return m_impl->benchmark.get();
 }
 
-auto BenchmarkViewer::GetFrameTelemetry() noexcept -> FrameTelemetry& {
+auto Viewer::GetFrameTelemetry() noexcept -> FrameTelemetry& {
     return m_impl->telemetry;
 }
 
-auto BenchmarkViewer::GetFrameTelemetry() const noexcept -> const FrameTelemetry& {
+auto Viewer::GetFrameTelemetry() const noexcept -> const FrameTelemetry& {
     return m_impl->telemetry;
 }
 

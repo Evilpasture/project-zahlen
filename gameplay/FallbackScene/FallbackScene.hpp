@@ -19,7 +19,7 @@ class DefaultPreset {
     DefaultPreset(DefaultPreset&&) noexcept                                         = default;
     auto                      operator=(DefaultPreset&&) noexcept -> DefaultPreset& = default;
     void                      BuildFallbackScene(COM::IEngine&, Scene::InstantiateOptions options = {});
-    [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
+    [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Document&;
     void                      Update(COM::IEngine&, float dt);
     [[nodiscard]] auto        DrawUI(COM::IEngine&, HostUI&, float dt) -> COM::Result<void>;
     [[nodiscard]] bool        IsActive() const noexcept;

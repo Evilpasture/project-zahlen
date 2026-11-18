@@ -544,26 +544,26 @@ zhln_toolchain_source_package(Editor
 zhln_toolchain_source_package(Terrain
     CHECK_TARGET zahlen_terrain
     DEPENDS Engine
-    HEADER_FILES extensions/Terrain/TerrainHost.hpp
+    HEADER_FILES extensions/Terrain/Terrain.hpp
                  extensions/Terrain/TerrainGeometry.hpp
                  extensions/Terrain/TerrainComponents.hpp
     HEADER_DEST Terrain
-    SOURCES extensions/Terrain/TerrainGeometry.cpp extensions/Terrain/TerrainHost.cpp
+    SOURCES extensions/Terrain/TerrainGeometry.cpp extensions/Terrain/Terrain.cpp
     PUBLIC_LINKS Zahlen::Engine)
 
 zhln_toolchain_source_package(VFX
     CHECK_TARGET zahlen_vfx
     DEPENDS Engine
     HEADER_FILES extensions/VFX/CombatFX.hpp
-                 extensions/VFX/LightningHost.hpp
+                 extensions/VFX/Lightning.hpp
                  extensions/VFX/LightningGeometry.hpp
-                 extensions/VFX/ExplosionHost.hpp
+                 extensions/VFX/Explosion.hpp
                  extensions/VFX/ExplosionPolicy.hpp
     HEADER_DEST VFX
     SOURCES extensions/VFX/CombatFXLifecycle.cpp
             extensions/VFX/LightningGeometry.cpp
-            extensions/VFX/LightningHost.cpp
-            extensions/VFX/ExplosionHost.cpp
+            extensions/VFX/Lightning.cpp
+            extensions/VFX/Explosion.cpp
     PUBLIC_LINKS Zahlen::Engine)
 
 zhln_toolchain_source_package(FreeCam
@@ -584,7 +584,7 @@ zhln_toolchain_source_package(CharacterController
     CHECK_TARGET zahlen_character_controller
     DEPENDS Engine
     HEADER_DIRS extensions/CharacterController
-    SOURCES extensions/CharacterController/CharacterHost.cpp
+    SOURCES extensions/CharacterController/CharacterController.cpp
     PUBLIC_LINKS Zahlen::Engine)
 
 zhln_toolchain_source_package(AnimationControls
@@ -596,7 +596,7 @@ zhln_toolchain_source_package(AnimationControls
                  extensions/Animation/IK.hpp
                  extensions/Animation/IKControls.hpp
     HEADER_DEST Animation
-    SOURCES extensions/Animation/AnimatorHost.cpp
+    SOURCES extensions/Animation/Animator.cpp
     MODULES extensions/Animation/Animator.cppm
     PUBLIC_LINKS Zahlen::Engine)
 
@@ -605,7 +605,7 @@ zhln_toolchain_source_package(Animation
     DEPENDS Engine AnimationControls CharacterController Camera FreeCam
     HEADER_DIRS extensions/Animation
     SOURCES extensions/Animation/TwoBoneIK.cpp
-            extensions/Animation/AnimationContext.cpp
+            extensions/Animation/Context.cpp
             extensions/Animation/AnimationSystem.cpp
             extensions/Animation/LocomotionLifecycle.cpp
             extensions/Animation/ProceduralAnimation.cpp

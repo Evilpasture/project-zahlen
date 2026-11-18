@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Zahlen/COM/COMTypes.hpp
+// Zahlen/COM/Types.hpp
 //
 // The vocabulary the public API speaks. Everything here is standard layout
 // and trivially copyable, so it travels as plain bytes in registers or via

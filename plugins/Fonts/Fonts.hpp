@@ -18,8 +18,8 @@
 // composition root is the one place that names both sides.
 //
 // This header is the public surface of zahlen_fonts: where the loader looks
-// and how to load/upload it explicitly. The low-level BMFont scanner (FontBMChar,
-// FontBMDescriptor, ParseFontBMDescriptor, AssembleBakedFont) is an internal
+// and how to load/upload it explicitly. The low-level BMFont scanner (BMChar,
+// BMDescriptor, ParseBMDescriptor, AssembleBakedFont) is an internal
 // implementation detail and lives in FontBMParser.hpp, not here.
 
 #pragma once

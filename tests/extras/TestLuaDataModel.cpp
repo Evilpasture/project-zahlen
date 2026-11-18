@@ -42,7 +42,7 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(player->SetParent(players).has_value());
             ZHLN::Test::ExpectTrue(players->SetLocalPlayer(player).has_value());
 
-            auto vm = ZHLN::ReflectLua::LuaVm::Create();
+            auto vm = ZHLN::ReflectLua::Vm::Create();
             ZHLN::Test::ExpectTrue(vm.has_value());
             if (!vm) {
                 return {};

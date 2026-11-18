@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <span>
-namespace ZHLN::LightningHost {
+namespace ZHLN::Lightning {
 namespace {
 struct LightningSegment {
     FVec3 start;
@@ -130,4 +130,4 @@ auto GenerateRibbon(FVec3 start, FVec3 end, FVec3 camera, const ConfigInfo& cfg,
         return {};
     return BuildCameraFacingRibbon(GenerateFractalSegments(start, end, cfg.ribbonWidth, cfg, rng), camera);
 }
-} // namespace ZHLN::LightningHost
+} // namespace ZHLN::Lightning

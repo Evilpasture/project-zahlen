@@ -32,7 +32,7 @@ int main() {
     check(floats && floats->pixels[0] == 1.0f && floats->pixels[3] == 1.0f);
     const std::array<uint8_t, 8> gray {11, 22, 0, 0, 33, 44, 0, 0};
     auto                         padded  = EncodePNGToMemory(gray, 2, 2, 1, 4);
-    auto                         decoded = padded ? DecodeRGBA8(*padded) : std::expected<RGBA8, ImageError>(std::unexpected(ImageError::EncodeFailed));
+    auto                         decoded = padded ? DecodeRGBA8(*padded) : std::expected<RGBA8, Error>(std::unexpected(Error::EncodeFailed));
     check(
         decoded && decoded->pixels[0] == 11 && decoded->pixels[4] == 22 && decoded->pixels[8] == 33 && decoded->pixels[12] == 44 && decoded->pixels[3] == 255
     );

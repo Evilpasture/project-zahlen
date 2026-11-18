@@ -1,7 +1,7 @@
 # Optional animation runtime and engine character motor
 
 Animation is not an Engine subsystem. `zahlen_engine` does not compile or link
-AnimationContext, skeletal evaluation, playback synchronization or TwoBoneIK.
+Context, skeletal evaluation, playback synchronization or TwoBoneIK.
 Plain Engine/COM engine creation installs no animation modules, owns no animation
 state and publishes no Animator or IK components.
 
@@ -13,7 +13,7 @@ idempotent. IK installs its animation prerequisite. The optional runtime owns
 its context, graph systems, prefab-root seeding, component publication and scene
 cleanup through generic extension services and lifecycle hooks.
 
-COM consumers link `Zahlen::AnimationControls`, include `<Animation/AnimationContext.hpp>`
+COM consumers link `Zahlen::AnimationControls`, include `<Animation/Context.hpp>`
 and explicitly use `Animation::CreateEngineRef(configChain)`. This extension
 factory installs the optional runtime before returning the ordinary COM engine;
 it does not add an animation interface or hidden native accessor to IEngine.
@@ -38,7 +38,7 @@ facilities; they neither instantiate nor execute an animation evaluator.
 The extension reclaims runtime handles for pending entities and scene clear.
 Its managed-handle sweep also reclaims handles after generic component removal
 or replacement, without teaching Engine's ECS bridge about animation resources.
-Explicit raw AnimationContext clients still own their non-managed handles.
+Explicit raw Context clients still own their non-managed handles.
 Animator::Detach removes host controls/IK, not the prefab or Animator state.
 Cancelled frames and scene clear discard unpublished graphics palette uploads.
 

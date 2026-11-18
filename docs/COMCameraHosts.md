@@ -16,7 +16,7 @@ Core continues to own camera matrix projection.
 // when the optional target exists; Application itself has no optional defaults.
 auto app = ZHLN::App();
 app.AddLayer(ZHLN::FreeCam::Layer {});
-// Or choose the orbit layer, and set TargetCameraComponent::target yourself:
+// Or choose the orbit layer, and set TargetComponent::target yourself:
 // app.AddLayer(ZHLN::CameraRig::Layer {});
 ```
 

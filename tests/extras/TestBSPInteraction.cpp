@@ -33,8 +33,8 @@ namespace {
 
 using ZHLN::FVec3;
 
-auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
-    ZHLN::BSP::BSPMap map;
+auto BuildSyntheticMap() -> ZHLN::BSP::Map {
+    ZHLN::BSP::Map map;
     map.version = 20;
 
     // Submodel 0: Worldspawn
@@ -79,14 +79,14 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 0: worldspawn
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "worldspawn"});
         map.entities.push_back(ent);
     }
 
     // Entity 1: info_player_start
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "info_player_start"});
         ent.keys.push_back({"origin", "0 0 16"});
         ent.keys.push_back({"angles", "0 90 0"});
@@ -95,7 +95,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 2: func_door
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "func_door"});
         ent.keys.push_back({"targetname", "door_main"});
         ent.keys.push_back({"model", "*1"});
@@ -109,7 +109,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 3: prop_door_rotating
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "prop_door_rotating"});
         ent.keys.push_back({"targetname", "door_rot"});
         ent.keys.push_back({"model", "models/props/door01.glb"});
@@ -124,7 +124,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 4: func_button
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "func_button"});
         ent.keys.push_back({"targetname", "btn_entry"});
         ent.keys.push_back({"model", "*2"});
@@ -139,7 +139,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 5: trigger_multiple
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "trigger_multiple"});
         ent.keys.push_back({"targetname", "trig_entrance"});
         ent.keys.push_back({"model", "*3"});
@@ -150,7 +150,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
 
     // Entity 6: trigger_once
     {
-        ZHLN::BSP::BSPEntity ent;
+        ZHLN::BSP::Entity ent;
         ent.keys.push_back({"classname", "trigger_once"});
         ent.keys.push_back({"targetname", "trig_secret"});
         ent.keys.push_back({"origin", "30 30 10"});
@@ -231,8 +231,8 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> teleport_destination_preserves_decoded_rotation() {
-            ZHLN::BSP::BSPMap map;
-            ZHLN::BSP::BSPEntity destination;
+            ZHLN::BSP::Map map;
+            ZHLN::BSP::Entity destination;
             destination.keys = {{"classname", "info_teleport_destination"}, {"targetname", "landing"},
                                 {"origin", "100 200 300"}, {"angles", "15 75 20"}};
             map.entities.push_back(destination);
@@ -347,7 +347,7 @@ struct BSPInteractionTestSuite {
         }
 
         // Regression: a sliding func_door / func_button used to be emitted with
-        // the SceneEntity default transform -- the map origin -- because
+        // the Entity default transform -- the map origin -- because
         // DescribeScene only stamped transform.position for rotating
         // submodels. Three things then read that origin as the door's real
         // position: BSPInteraction's closedPosition (and therefore the
@@ -355,7 +355,7 @@ struct BSPInteractionTestSuite {
         // Scene::Instantiate's kinematic root collider. The door rendered in
         // place, collided at the origin, and could never be used.
         std::expected<void, ZHLN::ErrorCode> sliding_door_transform_is_not_the_map_origin() {
-            ZHLN::BSP::BSPMap map;
+            ZHLN::BSP::Map map;
             map.version = 20;
 
             // Model 0 is the worldspawn brush.
@@ -381,12 +381,12 @@ struct BSPInteractionTestSuite {
             map.models.push_back(doorModel);
 
             {
-                ZHLN::BSP::BSPEntity ent;
+                ZHLN::BSP::Entity ent;
                 ent.keys.push_back({"classname", "worldspawn"});
                 map.entities.push_back(ent);
             }
             {
-                ZHLN::BSP::BSPEntity ent;
+                ZHLN::BSP::Entity ent;
                 ent.keys.push_back({"classname", "func_door"});
                 ent.keys.push_back({"targetname", "gate"});
                 ent.keys.push_back({"model", "*1"});

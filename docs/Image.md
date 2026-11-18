@@ -16,7 +16,7 @@ if (image) {
 }
 ```
 
-The API exposes owned vectors and `std::expected<T, ImageError>`:
+The API exposes owned vectors and `std::expected<T, Error>`:
 - Inspect: source dimensions/channel count without allocating decoded pixels.
 - IsHDR: true for a recognized HDR input, false for recognized LDR, an error
   for empty/unrecognized input. Not a claim that arbitrary compressed data is
@@ -38,7 +38,7 @@ interface. STB read/write implementations are static symbols in Image.cpp
 only. Temporary decode allocations are RAII-owned and copied into vectors;
 this intentional allocation/copy boundary keeps C allocator ownership private.
 As with other no-exception vector APIs in the repository, process allocation
-failure is not a recoverable ImageError contract.
+failure is not a recoverable Error contract.
 
 ## Consumers and Core boundary
 

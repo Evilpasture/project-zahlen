@@ -19,16 +19,16 @@ auto Run(const ZHLN::EngineConfig& config, const std::filesystem::path& scenePat
     ProcessScope process;
     auto         created = COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
-            COM::EngineWindowConfig {
+            COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+            COM::WindowConfig {
                 .width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless
             },
-            COM::EngineRenderConfig {
+            COM::RenderConfig {
                 .validationMode        = config.validationMode,
                 .enableMeshShading     = config.enableMeshShading,
                 .initialPipelineBinary = config.initialPipelineBinaryData
             },
-            config.physics, COM::EngineDiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
+            config.physics, COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
         )
     );
     if (!created)

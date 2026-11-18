@@ -49,9 +49,9 @@ struct BSPAssetsSuite {
             using Test::ExpectTrue;
             using Test::ExpectEq;
             auto created = COM::CreateEngineRef(COM::InChain(
-                COM::EngineAppConfig {.appName = String64("COM Studio files"), .logLevel = LogLevel::Quiet},
-                COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                COM::EngineRenderConfig {.validationMode = ValidationMode::Off}));
+                COM::AppConfig {.appName = String64("COM Studio files"), .logLevel = LogLevel::Quiet},
+                COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                COM::RenderConfig {.validationMode = ValidationMode::Off}));
             if (!ExpectTrue(created.has_value())) return {};
             auto engine = std::move(*created);
             auto& assets = *engine->Assets();
@@ -103,9 +103,9 @@ struct BSPAssetsSuite {
             using Test::ExpectTrue;
             using Test::ExpectEq;
             auto created = COM::CreateEngineRef(COM::InChain(
-                COM::EngineAppConfig {.appName = String64("COM Source assets"), .logLevel = LogLevel::Quiet},
-                COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                COM::EngineRenderConfig {.validationMode = ValidationMode::Off}));
+                COM::AppConfig {.appName = String64("COM Source assets"), .logLevel = LogLevel::Quiet},
+                COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                COM::RenderConfig {.validationMode = ValidationMode::Off}));
             if (!ExpectTrue(created.has_value())) return {};
             auto engine = std::move(*created);
             auto& assets = *engine->Assets();
@@ -139,7 +139,7 @@ struct BSPAssetsSuite {
             graphics.failMaterial = true;
             auto failed = BSP::UploadStudioAsset(assets, graphics, vfs, data, "studio/rollback", raster);
             ExpectTrue(!failed.has_value());
-            if (!failed) ExpectTrue(failed.error().Is(COM::ComError::InvalidArgument));
+            if (!failed) ExpectTrue(failed.error().Is(COM::Error::InvalidArgument));
             ExpectEq(graphics.createdMeshes, 1u);
             ExpectEq(graphics.destroyedMeshes, 1u);
             ExpectEq(graphics.createdTextures, 1u);

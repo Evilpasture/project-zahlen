@@ -127,7 +127,7 @@ auto SpawnCharacter(
             .sprintMultiplier = sprintMult,
             .jumpForce        = setup.jumpVelocity,
         },
-        Character::HostCharacterComponent {});
+        Character::ControllerComponent {});
 
     if ((!prefab.animations.empty() || !prefab.skeletons.empty()) && !entities->Has<Animation::AnimatorComponent>(entity)) {
         (void)entities->Attach(entity, Animation::AnimatorComponent {
@@ -168,9 +168,9 @@ void DestroyCharacter(COM::IEngine& engine, Entity characterEntity) {
     if (entities == nullptr || !entities->IsAlive(characterEntity)) return;
 
     const Entity activeCam = FindActiveCamera(*entities);
-    if (const auto* rig = entities->Get<CameraRig::TargetCameraComponent>(activeCam);
+    if (const auto* rig = entities->Get<CameraRig::TargetComponent>(activeCam);
         rig != nullptr && rig->target == characterEntity) {
-        (void)entities->Detach<CameraRig::TargetCameraComponent>(activeCam);
+        (void)entities->Detach<CameraRig::TargetComponent>(activeCam);
     }
     if (const auto* physicsComp = entities->Get<Components::PhysicsComponent>(characterEntity);
         physicsComp != nullptr && physicsComp->physicsID != Physics::BodyID::Null()) {
@@ -191,7 +191,7 @@ void SwitchToFollowCamera(COM::IEngine& engine, Entity characterEntity, const Ch
     const auto*  camComp   = entities->Get<Components::CameraComponent>(activeCam);
     if (camComp == nullptr) return;
 
-    CameraRig::TargetCameraComponent rig {
+    CameraRig::TargetComponent rig {
         .target         = characterEntity,
         .distance       = setup.cameraDistance,
         .targetDistance = setup.cameraDistance,
@@ -217,7 +217,7 @@ void RecenterFollowCamera(COM::IEngine& engine, Entity characterEntity) {
     auto* entities = engine.Entities();
     if (entities == nullptr) return;
     const Entity activeCam = FindActiveCamera(*entities);
-    auto*        rig       = entities->Get<CameraRig::TargetCameraComponent>(activeCam);
+    auto*        rig       = entities->Get<CameraRig::TargetComponent>(activeCam);
     const auto*  transform = entities->Get<Components::TransformComponent>(characterEntity);
     if (rig == nullptr || rig->target != characterEntity || transform == nullptr) return;
     const FVec3 forward = transform->rotation * FVec3::UnitZ();

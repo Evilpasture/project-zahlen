@@ -271,7 +271,7 @@ class System {
      */
     [[nodiscard]] auto Update(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
         if (!std::isfinite(dt) || dt < 0)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if (auto ready = Init(engine); !ready)
             return ready;
         auto& scene = *engine.Debug();

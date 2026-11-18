@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Entity.hpp>
@@ -17,26 +17,26 @@ struct ISimulation;
 
 namespace ZHLN::Animation {
 
-ZHLN_STATIC_API void Sync(COM::IEntities& entities, AnimationContext& anim);
+ZHLN_STATIC_API void Sync(COM::IEntities& entities, Context& anim);
 
 ZHLN_STATIC_API void PublishResults(
     COM::IEntities&         entities,
-    const AnimationContext& anim,
+    const Context& anim,
     bool (*skipRigidNodes)(const COM::IEntities&, Entity) = nullptr);
 
 ZHLN_STATIC_API void Step(
     COM::IEntities&           entities,
-    AnimationContext&         anim,
+    Context&         anim,
     float                     dt,
     const COM::IAssetLibrary* assets     = nullptr,
     COM::IGraphicsDevice*     graphics   = nullptr,
     COM::ISimulation*         simulation = nullptr,
     PoseUploadCallback        sink       = {});
 
-ZHLN_STATIC_API void Step(COM::IEngine& engine, AnimationContext& anim, float dt);
+ZHLN_STATIC_API void Step(COM::IEngine& engine, Context& anim, float dt);
 
 struct Layer {
-    AnimationContext context;
+    Context context;
 
     void Tick(COM::IEngine& engine, float dt) {
         Step(engine, context, dt);

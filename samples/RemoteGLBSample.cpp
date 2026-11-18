@@ -85,7 +85,7 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <GitHub/GitHub.hpp>
@@ -1357,7 +1357,7 @@ auto main(int argc, char* argv[]) -> int {
     // subscribes its own device-lost rebuild. Once, next to the first import (see
     // GLTF::InstallDeviceLostHandler).
     
-    ZHLN::Animation::AnimationContext animCtx {};
+    ZHLN::Animation::Context animCtx {};
 
     SampleState state;
     state.rayTraced   = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");

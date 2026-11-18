@@ -18,7 +18,7 @@
 // otherwise the two entry points race and the order of a frame is a property of
 // the host instead of the engine.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
@@ -165,7 +165,7 @@ struct IActionContext : IObject {
     }
 
     [[nodiscard]] auto SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept -> Result<void> {
-        if (!seat.IsValid()) return ComError::InvalidArgument;
+        if (!seat.IsValid()) return Error::InvalidArgument;
         InputRoutingConfig current {};
         (void)GetRouting(OutChain(current));
         if (enabled) {

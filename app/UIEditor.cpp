@@ -649,7 +649,7 @@ void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
 
 #if defined(ZHLN_HAS_UI_TOML)
 void SaveTree(const GUI::UINode& tree, std::string_view path) {
-    const std::string text = ZHLN::ReflectTOML::SerializeTOML(tree);
+    const std::string text = ZHLN::ReflectTOML::Serialize(tree);
     std::ofstream     out {std::string {path}, std::ios::binary | std::ios::trunc};
     if (!out) {
         ZHLN::Log("[UIEditor] could not open '{}' for writing", path);

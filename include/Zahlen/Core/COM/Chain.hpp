@@ -16,7 +16,7 @@
 //
 // On the callee side, DispatchInChain / DispatchOutChain walk pNext, reject
 // unknown structure types, duplicate structure types, null payloads, and
-// size/layout drift with explicit ComError codes rather than reading past the
+// size/layout drift with explicit Error codes rather than reading past the
 // caller's allocation.
 
 #include <Zahlen/Core/COM/Types.hpp>
@@ -203,11 +203,11 @@ template <typename Allowed, std::size_t Index, std::size_t Total, typename Visit
     }
     matched = true;
     if (seen[Index]) {
-        return ComError::DuplicateExtension;
+        return Error::DuplicateExtension;
     }
     seen[Index] = true;
     if (node.size != sizeof(Allowed) || node.layoutHash != Reflect::LayoutHash<Allowed>()) {
-        return ComError::LayoutMismatch;
+        return Error::LayoutMismatch;
     }
     const auto& typed = *static_cast<const Allowed*>(node.data);
     if constexpr (std::is_void_v<decltype(visitor(typed))>) {
@@ -226,11 +226,11 @@ template <typename Allowed, std::size_t Index, std::size_t Total, typename Visit
     }
     matched = true;
     if (seen[Index]) {
-        return ComError::DuplicateExtension;
+        return Error::DuplicateExtension;
     }
     seen[Index] = true;
     if (node.size != sizeof(Allowed) || node.layoutHash != Reflect::LayoutHash<Allowed>()) {
-        return ComError::LayoutMismatch;
+        return Error::LayoutMismatch;
     }
     auto& typed = *static_cast<Allowed*>(node.data);
     if constexpr (std::is_void_v<decltype(visitor(typed))>) {
@@ -248,7 +248,7 @@ template <typename... AllowedTs, std::size_t... Is, typename Visitor>
     Result<void> outcome {};
     ((matched ? void() : (outcome = TryMatchInNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
     if (!matched) {
-        return ComError::UnsupportedExtension;
+        return Error::UnsupportedExtension;
     }
     return outcome;
 }
@@ -260,7 +260,7 @@ template <typename... AllowedTs, std::size_t... Is, typename Visitor>
     Result<void> outcome {};
     ((matched ? void() : (outcome = TryMatchOutNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
     if (!matched) {
-        return ComError::UnsupportedExtension;
+        return Error::UnsupportedExtension;
     }
     return outcome;
 }
@@ -299,10 +299,10 @@ template <ChainPayload... AllowedTs, typename Visitor>
     std::size_t                            depth = 0;
     for (const ChainInNode* current = head; current != nullptr; current = current->pNext) {
         if (++depth > TemplatedDetail::kMaxChainDepth) {
-            return ComError::DuplicateExtension;
+            return Error::DuplicateExtension;
         }
         if (current->data == nullptr) {
-            return ComError::NullArgument;
+            return Error::NullArgument;
         }
         const Result<void> step =
             TemplatedDetail::DispatchInNodeImpl<AllowedTs...>(*current, seen, visitor, std::index_sequence_for<AllowedTs...> {});
@@ -319,16 +319,16 @@ template <ChainPayload... AllowedTs, typename Visitor>
     static_assert(TemplatedDetail::ChainTypesUnique<AllowedTs...>(),
                   "DispatchOutChain allowed type list must not contain duplicates.");
     if (head == nullptr) {
-        return ComError::NullArgument;
+        return Error::NullArgument;
     }
     std::array<bool, sizeof...(AllowedTs)> seen {};
     std::size_t                            depth = 0;
     for (ChainOutNode* current = head; current != nullptr; current = current->pNext) {
         if (++depth > TemplatedDetail::kMaxChainDepth) {
-            return ComError::DuplicateExtension;
+            return Error::DuplicateExtension;
         }
         if (current->data == nullptr) {
-            return ComError::NullArgument;
+            return Error::NullArgument;
         }
         const Result<void> step =
             TemplatedDetail::DispatchOutNodeImpl<AllowedTs...>(*current, seen, visitor, std::index_sequence_for<AllowedTs...> {});

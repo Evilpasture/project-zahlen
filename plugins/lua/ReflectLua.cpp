@@ -103,7 +103,7 @@ namespace {
 
 } // namespace
 
-struct LuaVm::Impl {
+struct Vm::Impl {
     lua_State* state                     = nullptr;
     lua_Alloc  baseAlloc                 = nullptr;
     void*      baseAllocUd               = nullptr;
@@ -225,9 +225,9 @@ struct LuaVm::Impl {
     }
 };
 
-LuaVm::LuaVm() noexcept = default;
+Vm::Vm() noexcept = default;
 
-LuaVm::~LuaVm() {
+Vm::~Vm() {
     if (_impl && _impl->state != nullptr) {
         lua_sethook(_impl->state, nullptr, 0, 0);
         if (_impl->baseAlloc != nullptr) {
@@ -238,10 +238,10 @@ LuaVm::~LuaVm() {
     }
 }
 
-LuaVm::LuaVm(LuaVm&& other) noexcept = default;
-auto LuaVm::operator=(LuaVm&& other) noexcept -> LuaVm& = default;
+Vm::Vm(Vm&& other) noexcept = default;
+auto Vm::operator=(Vm&& other) noexcept -> Vm& = default;
 
-auto LuaVm::Create(LuaBudget budget) noexcept -> std::expected<LuaVm, ErrorCode> {
+auto Vm::Create(LuaBudget budget) noexcept -> std::expected<Vm, ErrorCode> {
     lua_State* raw = luaL_newstate();
     if (raw == nullptr) {
         return std::unexpected(LuaError::AllocationFailed);
@@ -272,29 +272,29 @@ auto LuaVm::Create(LuaBudget budget) noexcept -> std::expected<LuaVm, ErrorCode>
         return std::unexpected(oom ? LuaError::MemoryBudgetExceeded : LuaError::AllocationFailed);
     }
 
-    LuaVm vm;
+    Vm vm;
     vm._impl = std::move(impl);
     return vm;
 }
 
-auto LuaVm::IsValid() const noexcept -> bool {
+auto Vm::IsValid() const noexcept -> bool {
     return _impl != nullptr && _impl->state != nullptr;
 }
 
-auto LuaVm::Budget() const noexcept -> const LuaBudget& {
+auto Vm::Budget() const noexcept -> const LuaBudget& {
     static constexpr LuaBudget kDefault {};
     return _impl != nullptr ? _impl->budget : kDefault;
 }
 
-auto LuaVm::UsedMemoryBytes() const noexcept -> size_t {
+auto Vm::UsedMemoryBytes() const noexcept -> size_t {
     return _impl != nullptr ? _impl->usedBytes : 0u;
 }
 
-auto LuaVm::RawState() noexcept -> lua_State* {
+auto Vm::RawState() noexcept -> lua_State* {
     return _impl != nullptr ? _impl->state : nullptr;
 }
 
-auto LuaVm::ExecuteString(std::string_view code, std::string_view chunkName) noexcept
+auto Vm::ExecuteString(std::string_view code, std::string_view chunkName) noexcept
     -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(LuaError::AllocationFailed);
@@ -309,8 +309,8 @@ auto LuaVm::ExecuteString(std::string_view code, std::string_view chunkName) noe
     return runRes;
 }
 
-auto LuaVm::ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+auto Vm::ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode> {
+    auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }
@@ -318,7 +318,7 @@ auto LuaVm::ExecuteFile(const std::filesystem::path& path) noexcept -> std::expe
     return ExecuteString(*source, chunkName);
 }
 
-auto LuaVm::EvaluateTop(
+auto Vm::EvaluateTop(
     std::string_view code,
     std::string_view chunkName,
     const void*      consumeCtx,
@@ -346,7 +346,7 @@ auto LuaVm::EvaluateTop(
     return res;
 }
 
-auto LuaVm::EvaluateCallTop(
+auto Vm::EvaluateCallTop(
     std::string_view code,
     std::string_view chunkName,
     const void*      pushCtx,
@@ -658,7 +658,7 @@ void Builder::SetElementTop(size_t zeroBasedIndex) noexcept {
 // File helper
 // ----------------------------------------------------------------------------
 
-auto ReadLuaFileText(const std::filesystem::path& path) noexcept -> std::expected<std::string, ErrorCode> {
+auto ReadFileText(const std::filesystem::path& path) noexcept -> std::expected<std::string, ErrorCode> {
     std::ifstream in(path, std::ios::binary);
     if (!in.is_open()) {
         ZHLN::Log("[Lua] failed to open '{}'", path.string());

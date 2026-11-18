@@ -16,9 +16,9 @@ using Test::ExpectTrue;
 auto FallbackEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("Fallback host"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("Fallback host"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }

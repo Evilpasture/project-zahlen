@@ -351,7 +351,7 @@ if(TARGET zahlen_project_light_lua)
     )
 
     # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/ReflectLua.hpp> and
-    # calls ReflectLua::LuaVm::Create / ExecuteString. It used to arrive only
+    # calls ReflectLua::Vm::Create / ExecuteString. It used to arrive only
     # through zahlen_project_light_lua's PUBLIC zahlen_lua, which is gone.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_lua
@@ -567,18 +567,18 @@ target_link_libraries(Extras_CombatHost PRIVATE zahlen_vfx)
 zahlen_register_extras_test(Extras_CombatHost POOL gpu LABELS "GPU;Extras;COM")
 
 zahlen_add_extras_group(Extras_TerrainHost
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestTerrainHost.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestTerrain.cpp)
 target_link_libraries(Extras_TerrainHost PRIVATE zahlen_terrain zahlen_vfx zahlen_scene zahlen_fallback_scene zahlen_application zahlen_screenshot)
 target_include_directories(Extras_TerrainHost PRIVATE ${PROJECT_SOURCE_DIR}/utils/scene)
 zahlen_register_extras_test(Extras_TerrainHost POOL gpu LABELS "GPU;Extras;COM")
 
 zahlen_add_extras_group(Extras_LightningHost
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLightningHost.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLightning.cpp)
 target_link_libraries(Extras_LightningHost PRIVATE zahlen_vfx)
 zahlen_register_extras_test(Extras_LightningHost POOL gpu LABELS "GPU;Extras;COM")
 
 zahlen_add_extras_group(Extras_ExplosionHost
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestExplosionHost.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestExplosion.cpp)
 target_link_libraries(Extras_ExplosionHost PRIVATE zahlen_vfx)
 zahlen_register_extras_test(Extras_ExplosionHost POOL gpu LABELS "GPU;Extras;COM")
 
@@ -616,6 +616,6 @@ zahlen_register_extras_test(Extras_RuntimeControls POOL gpu LABELS GPU Extras)
 
 # Capability-only character host: no native controller, Jolt or graph adapter.
 zahlen_add_extras_group(Extras_CharacterHost
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCharacterHost.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCharacterController.cpp)
 target_link_libraries(Extras_CharacterHost PRIVATE zahlen_character_controller zahlen_application)
 zahlen_register_extras_test(Extras_CharacterHost POOL gpu LABELS GPU Extras)

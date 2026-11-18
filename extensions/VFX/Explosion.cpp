@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "ExplosionHost.hpp"
+#include "Explosion.hpp"
 #include "ExplosionPolicy.hpp"
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -9,11 +9,11 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <array>
 #include <string>
-namespace ZHLN::ExplosionHost {
-struct Host::Impl {
+namespace ZHLN::Explosion {
+struct System::Impl {
     struct Emitter {
         Entity             entity, debris;
-        ExplosionComponent particles;
+        Component particles;
     };
     struct Crater {
         Entity               entity;
@@ -47,7 +47,7 @@ struct Host::Impl {
             graphics.UnregisterMaterial(materialID);
             resources = entities.Spawn(Components::NameComponent {.name = String64("HostExplosionResources")});
             if (resources == Entity::Null())
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
             auto id    = std::to_string(resources.index) + "_" + std::to_string(resources.generation);
             meshID     = HashAssetID("host_explosion_debris_" + id);
             materialID = HashAssetID("host_explosion_material_" + id);
@@ -86,7 +86,7 @@ struct Host::Impl {
             mesh = built;
             if (!entities.Attach(resources, Components::OwnedMeshComponent {.meshAsset = meshID, .mesh = mesh})) {
                 (void) graphics.DestroyMesh(COM::InChain(mesh));
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
             }
         }
         auto registered = graphics.RegisterMesh(meshID, mesh);
@@ -110,7 +110,7 @@ struct Host::Impl {
             }
         return {};
     }
-    auto SpawnCrater(ExplosionComponent& exp) -> std::expected<void, ErrorCode> {
+    auto SpawnCrater(Component& exp) -> std::expected<void, ErrorCode> {
         auto  yaw      = Quat::FromAxisAngle(FVec3::UnitY(), RadF {Hash31(exp.origin) * 6.2831853f});
         auto  base     = Quat::FromAxisAngle(FVec3::UnitX(), RadF {-std::numbers::pi_v<float> * .5f});
         auto  rotation = (yaw * base).Normalized();
@@ -125,7 +125,7 @@ struct Host::Impl {
             CraterState {}
         );
         if (entity == Entity::Null())
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         craters.push_back({entity, {.baseRadius = radius, .baseDepth = depth, .origin = exp.origin, .rotation = rotation}});
         exp.craterSpawned = true;
         return {};
@@ -135,20 +135,20 @@ struct Host::Impl {
         engine->Entities()->Despawn(emitter.entity);
     }
 };
-Host::Host(): _impl(std::make_unique<Impl>()) {
+System::System(): _impl(std::make_unique<Impl>()) {
 }
-Host::~Host() {
+System::~System() {
     Clear();
 }
-Host::Host(Host&&) noexcept = default;
-auto Host::operator=(Host&& other) noexcept -> Host& {
+System::System(System&&) noexcept = default;
+auto System::operator=(System&& other) noexcept -> System& {
     if (this != &other) {
         Clear();
         _impl = std::move(other._impl);
     }
     return *this;
 }
-auto Host::Start(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
+auto System::Start(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
     if (!_impl)
         _impl = std::make_unique<Impl>();
     if (_impl->engine.Get() != &engine) {
@@ -157,13 +157,13 @@ auto Host::Start(COM::IEngine& engine) -> std::expected<void, ErrorCode> {
     }
     return _impl->Ensure();
 }
-auto Host::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
+auto System::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
     if (!_impl || !_impl->engine || !std::isfinite(info.origin.x) || !std::isfinite(info.origin.y) || !std::isfinite(info.origin.z) ||
         !std::isfinite(info.scale) || info.scale <= 0 || info.scale > 100 || (info.kind != Kind::StandardFireball && info.kind != Kind::ArtilleryMortar))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (auto ready = _impl->Ensure(); !ready)
         return std::unexpected(ready.error());
-    ExplosionComponent exp {.type = info.kind, .origin = info.origin, .scale = info.scale, .duration = info.kind == Kind::ArtilleryMortar ? 3.5f : 2.5f};
+    Component exp {.type = info.kind, .origin = info.origin, .scale = info.scale, .duration = info.kind == Kind::ArtilleryMortar ? 3.5f : 2.5f};
     if (info.kind == Kind::ArtilleryMortar)
         Policy::InitArtilleryParticles(exp, _impl->rng);
     else
@@ -182,7 +182,7 @@ auto Host::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
         }
     );
     if (root == Entity::Null())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     Entity debris = Entity::Null();
     if (info.kind == Kind::ArtilleryMortar) {
         float scale = info.scale;
@@ -213,7 +213,7 @@ auto Host::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
         );
         if (debris == Entity::Null()) {
             entities.Despawn(root);
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         }
     }
     _impl->emitters.push_back({root, debris, std::move(exp)});
@@ -249,9 +249,9 @@ auto Host::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
     );
     return root;
 }
-auto Host::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+auto System::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
     if (!_impl || _impl->engine.Get() != &engine || !std::isfinite(dt) || dt < 0 || dt > 60)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     auto& entities = *engine.Entities();
     std::erase_if(_impl->emitters, [&](auto& emitter) {
         if (entities.IsAlive(emitter.entity) && !entities.Get<Components::PendingDestroy>(emitter.entity))
@@ -313,7 +313,7 @@ auto Host::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void, E
     }
     return {};
 }
-void Host::Remove(Entity entity) {
+void System::Remove(Entity entity) {
     if (!_impl || !_impl->engine)
         return;
     std::erase_if(_impl->emitters, [&](auto& emitter) {
@@ -329,7 +329,7 @@ void Host::Remove(Entity entity) {
         return true;
     });
 }
-void Host::Clear() {
+void System::Clear() {
     if (!_impl || !_impl->engine)
         return;
     for (auto& emitter: _impl->emitters)
@@ -343,15 +343,15 @@ void Host::Clear() {
     _impl->engine->Graphics()->UnregisterMaterial(_impl->materialID);
     _impl->DropTextures();
 }
-void Host::Stop(COM::IEngine&) {
+void System::Stop(COM::IEngine&) {
     Clear();
     if (_impl)
         _impl->engine = {};
 }
-auto Host::Size() const noexcept -> size_t {
+auto System::Size() const noexcept -> size_t {
     return _impl ? _impl->emitters.size() : 0;
 }
-auto Host::CraterCount() const noexcept -> size_t {
+auto System::CraterCount() const noexcept -> size_t {
     return _impl ? _impl->craters.size() : 0;
 }
-} // namespace ZHLN::ExplosionHost
+} // namespace ZHLN::Explosion

@@ -6,7 +6,7 @@
 // Minimal COM host for inspecting glTF / GLB assets. Drop a .glb / .gltf file
 // onto the window (or pass --model <path>) to upload, animate, and orbit it.
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <Camera/TargetCamera.hpp>
@@ -50,7 +50,7 @@ namespace {
 
 struct InspectorState {
     ZHLN::COM::IEngine*           engine = nullptr;
-    ZHLN::Animation::AnimationContext animCtx {};
+    ZHLN::Animation::Context animCtx {};
     std::optional<ZHLN::GLTF::Document> document;
     ZHLN::GLTF::Asset             asset {};
     std::vector<ZHLN::Entity>     spawned;
@@ -118,7 +118,7 @@ struct InspectorState {
         const auto camOpt = ents.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         const ZHLN::Entity cam = camOpt.HasValue() ? camOpt.value : ZHLN::Entity{};
         if (cam != ZHLN::Entity::Null()) {
-            ZHLN::CameraRig::TargetCameraComponent rig {};
+            ZHLN::CameraRig::TargetComponent rig {};
             rig.target         = orbitPivot;
             rig.targetOffset   = ZHLN::FVec3::Zero();
             rig.distance       = std::max(radius * 2.4f, 1.5f);

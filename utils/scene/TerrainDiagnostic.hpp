@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <FallbackScene/FallbackScene.hpp>
-#include <Terrain/TerrainHost.hpp>
+#include <Terrain/Terrain.hpp>
 #include <VFX/CombatFX.hpp>
-#include <VFX/ExplosionHost.hpp>
-#include <VFX/LightningHost.hpp>
+#include <VFX/Explosion.hpp>
+#include <VFX/Lightning.hpp>
 #include <Zahlen/HostUI.hpp>
 #include <cmath>
 namespace ZHLN::Tools {
@@ -13,9 +13,9 @@ namespace ZHLN::Tools {
 // falling rigid bodies, decals, tracers, sparks, rings and procedural audio.
 // No Engine facade, render graph registration, registry or engine service.
 struct TerrainDiagnostic {
-    LightningHost::Host lightning;
-    ExplosionHost::Host explosions;
-    Terrain::Host       terrain;
+    Lightning::System lightning;
+    Explosion::System explosions;
+    Terrain::System       terrain;
     CombatFX::System    combat;
     bool                active     = false;
     bool                paused     = false;
@@ -29,7 +29,7 @@ struct TerrainDiagnostic {
         description.environment.enableRTR = buildBLAS;
         description.entities.clear();
         for (int i = 0; i < 8; ++i) {
-            Scene::SceneEntity stone;
+            Scene::Entity stone;
             stone.name               = "TerrainDrop";
             stone.body               = Scene::BodyKind::Dynamic;
             stone.halfExtents        = {0.35f, 0.35f, 0.35f};
@@ -43,7 +43,7 @@ struct TerrainDiagnostic {
         if (auto ready = explosions.Start(engine); !ready)
             return ready;
         terrain.Start(engine);
-        auto geometry = Terrain::Generate({.sampleCount = 64, .worldSize = 70, .maxHeight = 12, .type = Terrain::TerrainType::Snow});
+        auto geometry = Terrain::Generate({.sampleCount = 64, .worldSize = 70, .maxHeight = 12, .type = Terrain::Type::Snow});
         if (!geometry)
             return std::unexpected(geometry.error());
         if (auto tile = terrain.Create(std::move(*geometry), {.position = {0, -5, 0}, .buildBLAS = buildBLAS}); !tile)

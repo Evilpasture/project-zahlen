@@ -117,7 +117,7 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
             continue;
         auto it = _materials.find(entity.Pack());
         if (it == _materials.end()) {
-            Scene::SceneMaterial initial;
+            Scene::Material initial;
             if (auto* authored = entities.Get<Scene::AuthoringComponent>(entity))
                 initial = authored->material;
             it = _materials.emplace(entity.Pack(), initial).first;
@@ -137,7 +137,7 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
         Mesh        mesh  = owner ? owner->mesh : Mesh {};
         if (mesh.posBuffer == BufferID::Invalid) {
             Mesh                        built {};
-            COM::Result<void>           result = COM::ComError::InvalidArgument;
+            COM::Result<void>           result = COM::Error::InvalidArgument;
             const COM::MeshBuildOptions options {.buildBLAS = _buildBLAS};
             const FVec4                 color = it->second.baseColor;
             switch (source.shape) {
@@ -167,7 +167,7 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
             mesh = built;
             if (!entities.Attach(entity, Components::OwnedMeshComponent {.meshAsset = binding->meshAsset, .mesh = mesh})) {
                 (void) graphics.DestroyMesh(COM::InChain(mesh));
-                return std::unexpected(COM::ComError::InvalidArgument);
+                return std::unexpected(COM::Error::InvalidArgument);
             }
         }
         if (!graphics.FindMesh(binding->meshAsset).HasValue()) {
@@ -213,12 +213,12 @@ auto Session::SpawnShape(COM::IEngine& engine, int kind, FVec3 position) -> std:
     if (!_started || _engine.Get() != &engine)
         return std::unexpected(SessionError::NotStarted);
     if (kind < 0 || kind > 4 || !std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     PrefabFactory::SpawnParams params;
     params.position                    = position.Cast<double>();
     auto&                       assets = *engine.Assets();
     const COM::MeshBuildOptions options {.buildBLAS = _buildBLAS};
-    COM::Result<Entity>         created = COM::ComError::InvalidArgument;
+    COM::Result<Entity>         created = COM::Error::InvalidArgument;
     switch (kind) {
         case 0:
             created = assets.SpawnPrimitive(COM::InChain(COM::BoxMeshDesc {.halfExtents = {.5f, .5f, .5f}}, params, options));
@@ -245,7 +245,7 @@ auto Session::SpawnShape(COM::IEngine& engine, int kind, FVec3 position) -> std:
             created.value, Components::SceneSourceComponent {.shape = shapes[kind], .halfExtents = {.5f, .5f, .5f}, .extent = kind == 1 ? 2.f : .5f}
         )) {
         engine.Entities()->Despawn(created.value);
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     }
     if (auto ready = RefreshPrimitives(engine); !ready) {
         engine.Entities()->Despawn(created.value);
@@ -261,7 +261,7 @@ auto Session::Save(COM::IEngine& engine, const std::filesystem::path& path) -> s
         return ready;
     auto scene         = Scene::Extract(engine);
     scene.name         = path.stem().string();
-    auto          text = ReflectTOML::SerializeTOML(scene);
+    auto          text = ReflectTOML::Serialize(scene);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out)
         return std::unexpected(SessionError::WriteFailed);
@@ -296,7 +296,7 @@ auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expe
     if (!_started || _engine.Get() != &engine)
         return std::unexpected(SessionError::NotStarted);
     if (!std::isfinite(dt) || dt < 0)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (auto ready = RefreshPrimitives(engine); !ready)
         return ready;
     if (auto ready = hostUI.BeginFrame(); !ready.HasValue())
@@ -323,7 +323,7 @@ auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expe
     if (!applied.HasValue())
         return std::unexpected(applied.error);
     bool keyboard        = gui.IsTextInputFocused();
-    bool transformActive = state.transformMode != EditorState::TransformMode::None;
+    bool transformActive = state.transformMode != State::TransformMode::None;
     UpdateTransformMode(entities, input, state, camera, SceneViewport {viewport.x, viewport.y, viewport.width, viewport.height}, keyboard);
     bool escape = input.IsKeyDown(KeyCode::Escape);
     if (escape && !_escapeDown && !keyboard && !transformActive)
@@ -352,13 +352,13 @@ auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expe
     // requested simulation time. The host poses its camera before Finish.
     auto pipeline = COM::Ref<COM::IFramePipeline>::Adopt(engine.Query<COM::IFramePipeline>());
     if (!pipeline)
-        return std::unexpected(COM::ComError::UnsupportedExtension);
+        return std::unexpected(COM::Error::UnsupportedExtension);
     auto advanced = pipeline->AdvanceFrame(simulationRunning ? dt : 0);
     if (!advanced.HasValue())
         return std::unexpected(advanced.error);
-    if (!keyboard && state.transformMode == EditorState::TransformMode::None)
+    if (!keyboard && state.transformMode == State::TransformMode::None)
         if (auto* component = entities.Get<Components::CameraComponent>(cameraEntity.value))
-            FreeCam::Drive(component->camera, FreeCam::FreeCamComponent {.speed = 25}, FreeCam::ReadInput(*engine.Actions()), dt);
+            FreeCam::Drive(component->camera, FreeCam::Component {.speed = 25}, FreeCam::ReadInput(*engine.Actions()), dt);
     auto finished = pipeline->FinishFrame();
     if (!finished.HasValue()) {
         (void) pipeline->CancelFrame();
@@ -375,7 +375,7 @@ void Session::Stop(COM::IEngine& engine) {
     _started = false;
     _materials.clear();
     _engine   = {};
-    state     = EditorState {};
+    state     = State {};
     _saveDown = _escapeDown = _mouseDown = false;
 }
 } // namespace ZHLN::Editor

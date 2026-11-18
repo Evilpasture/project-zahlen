@@ -18,32 +18,32 @@ auto ParseStudioModel(
 ) -> std::expected<StudioModelData, ErrorCode> {
     // 1. Validate & Parse .MDL Header
     if (mdlBytes.size() < sizeof(StudioHdr)) {
-        return std::unexpected(BSPError::FileTooSmall);
+        return std::unexpected(Error::FileTooSmall);
     }
 
     StudioHdr hdr {};
     std::memcpy(&hdr, mdlBytes.data(), sizeof(StudioHdr));
 
     if (hdr.id != kStudioHdrMagic) {
-        return std::unexpected(BSPError::InvalidIdent);
+        return std::unexpected(Error::InvalidIdent);
     }
     if (hdr.version < 44 || hdr.version > 53) {
-        return std::unexpected(BSPError::UnsupportedVersion);
+        return std::unexpected(Error::UnsupportedVersion);
     }
 
     // 2. Validate & Parse .VVD Header
     if (vvdBytes.size() < sizeof(VvdHeader)) {
-        return std::unexpected(BSPError::FileTooSmall);
+        return std::unexpected(Error::FileTooSmall);
     }
 
     VvdHeader vvd {};
     std::memcpy(&vvd, vvdBytes.data(), sizeof(VvdHeader));
 
     if (vvd.id != kVvdMagic) {
-        return std::unexpected(BSPError::InvalidIdent);
+        return std::unexpected(Error::InvalidIdent);
     }
     if (vvd.checksum != hdr.checksum) {
-        return std::unexpected(BSPError::ChecksumMismatch);
+        return std::unexpected(Error::ChecksumMismatch);
     }
 
     // Process .VVD vertices for LOD 0
@@ -55,14 +55,14 @@ auto ParseStudioModel(
         if (vvd.numFixups == 0) {
             if (vvd.vertexDataStart < 0 ||
                 static_cast<size_t>(vvd.vertexDataStart) + static_cast<size_t>(numTargetLODVerts) * sizeof(StudioVertex) > vvdBytes.size()) {
-                return std::unexpected(BSPError::ShortRead);
+                return std::unexpected(Error::ShortRead);
             }
             lod0Vertices.resize(static_cast<size_t>(numTargetLODVerts));
             std::memcpy(lod0Vertices.data(), vvdBytes.data() + vvd.vertexDataStart, static_cast<size_t>(numTargetLODVerts) * sizeof(StudioVertex));
         } else {
             if (vvd.fixupTableStart < 0 ||
                 static_cast<size_t>(vvd.fixupTableStart) + static_cast<size_t>(vvd.numFixups) * sizeof(VvdFixup) > vvdBytes.size()) {
-                return std::unexpected(BSPError::ShortRead);
+                return std::unexpected(Error::ShortRead);
             }
 
             const auto* fixups   = reinterpret_cast<const VvdFixup*>(vvdBytes.data() + vvd.fixupTableStart);
@@ -73,7 +73,7 @@ auto ParseStudioModel(
                 const VvdFixup& fixup = fixups[i];
                 if (fixup.lod >= static_cast<int32_t>(targetLOD)) {
                     if (static_cast<size_t>(vvd.vertexDataStart) + static_cast<size_t>(fixup.sourceVertexID + fixup.numVertexes) * sizeof(StudioVertex) > vvdBytes.size()) {
-                        return std::unexpected(BSPError::ShortRead);
+                        return std::unexpected(Error::ShortRead);
                     }
                     for (int32_t v = 0; v < fixup.numVertexes; ++v) {
                         lod0Vertices.push_back(rawVerts[fixup.sourceVertexID + v]);
@@ -85,14 +85,14 @@ auto ParseStudioModel(
 
     // 3. Validate & Parse .VTX Header
     if (vtxBytes.size() < sizeof(VtxHeader)) {
-        return std::unexpected(BSPError::FileTooSmall);
+        return std::unexpected(Error::FileTooSmall);
     }
 
     VtxHeader vtx {};
     std::memcpy(&vtx, vtxBytes.data(), sizeof(VtxHeader));
 
     if (vtx.checkSum != hdr.checksum) {
-        return std::unexpected(BSPError::ChecksumMismatch);
+        return std::unexpected(Error::ChecksumMismatch);
     }
 
     // 4. Populate Model Metadata & Textures

@@ -3,7 +3,7 @@
 #include <Animation/Animator.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/IKControls.hpp>
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
@@ -39,8 +39,8 @@ auto FirstTimedTrack(const GLTF::Document& doc) -> int32_t {
 auto RuntimeEngine(bool animated = true) {
     (void)animated;
     return COM::CreateEngineRef(COM::InChain(
-        COM::EngineAppConfig {.appName = String64("Engine runtime controls"), .logLevel = LogLevel::Quiet},
-        COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true}, COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+        COM::AppConfig {.appName = String64("Engine runtime controls"), .logLevel = LogLevel::Quiet},
+        COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true}, COM::RenderConfig {.validationMode = ValidationMode::Off}
     ));
 }
 struct RuntimeControlsSuite {
@@ -53,7 +53,7 @@ struct RuntimeControlsSuite {
             auto& entities = *(*made)->Entities();
             ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<Animation::AnimatorComponent>())));
             ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<Animation::AnimatorControlComponent>())));
-            ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<IK::TwoBoneIKComponent>())));
+            ExpectTrue(!entities.IsEngineComponent(COM::StringView(Reflect::CanonicalTypeName<IK::TwoBoneComponent>())));
             return {};
         }
 
@@ -118,7 +118,7 @@ struct RuntimeControlsSuite {
                 camera->camera.yaw      = DegF {-90};
                 camera->camera.pitch    = DegF {0};
             }
-            Animation::AnimationContext animCtx {};
+            Animation::Context animCtx {};
             const int32_t track = FirstTimedTrack(*document);
             ExpectTrue(Animator::Play(entities, root, track));
             for (int i = 0; i < 3; ++i) {
@@ -175,7 +175,7 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(!parts.empty()))
                 return {};
             const auto root = parts.front();
-            Animation::AnimationContext animCtx {};
+            Animation::Context animCtx {};
             const int32_t track = FirstTimedTrack(*document);
             ExpectTrue(Animator::Play(entities, root, track));
             const auto advance = [&] {
@@ -218,7 +218,7 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto       engine   = std::move(*made);
-            Animation::AnimationContext animCtx {};
+            Animation::Context animCtx {};
             auto&      entities = *engine->Entities();
             const auto plain    = entities.CreateEntity();
             ExpectTrue(!Animator::Play(entities, plain, 0));
@@ -238,12 +238,12 @@ struct RuntimeControlsSuite {
             ExpectEq(snapshot.trackIndex, 1);
             ExpectEq(snapshot.time, 0.25f);
             ExpectEq(snapshot.speed, 0.0f);
-            IK::TwoBoneIKComponent ik;
-            ExpectTrue(ik.AddChain(IK::TwoBoneIKChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
+            IK::TwoBoneComponent ik;
+            ExpectTrue(ik.AddChain(IK::TwoBoneChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
             ExpectTrue(Animator::SetIK(entities, root, ik));
             ik.chains[0].weight = 2;
             ExpectTrue(!Animator::SetIK(entities, root, ik));
-            ExpectEq(entities.Get<IK::TwoBoneIKComponent>(root)->chains[0].weight, 1.0f);
+            ExpectEq(entities.Get<IK::TwoBoneComponent>(root)->chains[0].weight, 1.0f);
             Animator::Detach(entities, root);
             ExpectTrue(entities.Get<Animation::AnimatorComponent>(root) != nullptr);
             ExpectTrue(entities.Get<Animation::AnimatorControlComponent>(root) == nullptr);
@@ -259,10 +259,10 @@ struct RuntimeControlsSuite {
             auto  engine   = std::move(*made);
             auto& entities = *engine->Entities();
             ExpectTrue(!entities.IsEngineComponent(COM::IEntities::ComponentName<Animation::AnimatorControlComponent>()));
-            ExpectTrue(!entities.IsEngineComponent(COM::IEntities::ComponentName<IK::TwoBoneIKComponent>()));
-            IK::TwoBoneIKComponent ik;
-            ExpectTrue(ik.AddChain(IK::TwoBoneIKChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
-            Animation::AnimationContext animCtx {};
+            ExpectTrue(!entities.IsEngineComponent(COM::IEntities::ComponentName<IK::TwoBoneComponent>()));
+            IK::TwoBoneComponent ik;
+            ExpectTrue(ik.AddChain(IK::TwoBoneChain {.upperNodeIndex = 0, .lowerNodeIndex = 1, .endNodeIndex = 2}));
+            Animation::Context animCtx {};
             const auto root = entities.Spawn(
                 Animation::AnimatorComponent {},
                 Animation::AnimatorControlComponent {.trackIndex = 3, .playbackSpeed = 0.5f, .seekTime = 1.25f, .seekRequested = true}, ik
@@ -276,7 +276,7 @@ struct RuntimeControlsSuite {
                 ExpectEq(animator->currentTrackTime, 1.25f);
                 ExpectTrue(!control->seekRequested);
             }
-            ExpectTrue(entities.GetRaw(root, COM::IEntities::ComponentName<IK::TwoBoneIKComponent>()) != nullptr);
+            ExpectTrue(entities.GetRaw(root, COM::IEntities::ComponentName<IK::TwoBoneComponent>()) != nullptr);
             return {};
         }
     };

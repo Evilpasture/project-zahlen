@@ -8,24 +8,24 @@ Scene runner or editor has already been ported.
 
 `BSPAssets.hpp` exposes:
 
-- `ReadBSPAssets`: read a Source VFS/disk file, parse and prepare it.
-- `DecodeBSPAssets`: parse supplied bytes, retain embedded pak data and prepare.
-- `PrepareBSPAssets`: prepare an already parsed BSPMap.
-- `UploadBSPAsset`: upload/register one prepared prefab through IAssetLibrary and
+- `ReadAssets`: read a Source VFS/disk file, parse and prepare it.
+- `DecodeAssets`: parse supplied bytes, retain embedded pak data and prepare.
+- `PrepareAssets`: prepare an already parsed Map.
+- `UploadAsset`: upload/register one prepared prefab through IAssetLibrary and
   IGraphicsDevice, returning its caller-owned SourceAsset texture manifest.
 
-`PreparedBSPAssets` is a consumer-side document containing a SourceVFS, world and
+`PreparedAssets` is a consumer-side document containing a SourceVFS, world and
 moving-brush geometry documents, and deduplicated StudioModel import requests.
 Neither the documents nor their strings/vectors enter Core. Their decoded
 geometry uses FVec3 bounds rather than vendor JPH::Float3 values.
 
 ```cpp
-BSP::BSPAssetOptions options;
+BSP::AssetOptions options;
 BSP::SourceVFS source(*engine.Assets());
-auto prepared = BSP::ReadBSPAssets(std::move(source), "maps/level.bsp", options.import);
+auto prepared = BSP::ReadAssets(std::move(source), "maps/level.bsp", options.import);
 if (!prepared) return std::unexpected(prepared.error());
 for (const auto& document: prepared->prefabs) {
-    auto uploaded = BSP::UploadBSPAsset(*engine.Assets(), *engine.Graphics(),
+    auto uploaded = BSP::UploadAsset(*engine.Assets(), *engine.Graphics(),
                                       prepared->source, document, options);
     if (!uploaded) return std::unexpected(uploaded.error());
     session.importedAssets.push_back(std::move(*uploaded)); // persistent ownership ledger

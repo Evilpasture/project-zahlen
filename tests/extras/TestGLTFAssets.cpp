@@ -23,9 +23,9 @@ auto ExerciseGPURecovery(RecoveryExercise mode) -> std::expected<void, ZHLN::Err
     using Test::ExpectTrue;
     auto created = COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM glTF recovery"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM glTF recovery"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
     if (!ExpectTrue(created.has_value()))
@@ -248,9 +248,9 @@ struct GLTFAssetsSuite {
             ExpectTrue(!doc->parts.empty() && !doc->skeletons.empty() && !doc->animations.empty());
             auto created = COM::CreateEngineRef(
                 COM::InChain(
-                    COM::EngineAppConfig {.appName = String64("COM glTF rig"), .logLevel = LogLevel::Quiet},
-                    COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                    COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+                    COM::AppConfig {.appName = String64("COM glTF rig"), .logLevel = LogLevel::Quiet},
+                    COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                    COM::RenderConfig {.validationMode = ValidationMode::Off}
                 )
             );
             if (!ExpectTrue(created.has_value()))
@@ -274,9 +274,9 @@ struct GLTFAssetsSuite {
             using Test::ExpectTrue;
             auto created = COM::CreateEngineRef(
                 COM::InChain(
-                    COM::EngineAppConfig {.appName = String64("COM glTF"), .logLevel = LogLevel::Quiet},
-                    COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                    COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+                    COM::AppConfig {.appName = String64("COM glTF"), .logLevel = LogLevel::Quiet},
+                    COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                    COM::RenderConfig {.validationMode = ValidationMode::Off}
                 )
             );
             if (!ExpectTrue(created.has_value()))

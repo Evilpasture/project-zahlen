@@ -14,7 +14,7 @@
 //   * ActionRegistry  -- "editor.save_scene" -> a typed event on an ECS bus
 //   * PropertyStore   -- "camera.speed"      -> the float a Slider edits
 //
-// UINode is the description. It is format-free, the same way Scene::Scene is:
+// UINode is the description. It is format-free, the same way Scene::Document is:
 // plugins/toml can walk it later without this header knowing a parser exists.
 // RenderUITree is the walk that turns one description into one frame of
 // Context calls. FindNodeById / InsertChild / RemoveNodeById are the mutations

@@ -110,7 +110,7 @@ viewport behavior is unchanged.
 
 `zahlen_scene_host` is now an Application with COM document loading, host-owned
 HostUI and an instance-owned DefaultPreset. Its optional FileSystemWatcher and
-DiscordPresenceClient belong to the host layer and are retired in Stop while
+PresenceClient belong to the host layer and are retired in Stop while
 the process/task scope is alive. It neither installs engine services nor links
 the native Scene/document/HostUI or Discord engine-integration adapters.
 

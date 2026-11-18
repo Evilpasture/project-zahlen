@@ -42,7 +42,7 @@ namespace ZHLN::Bench {
 // one Step() cost the engine: the two differ by however much the host spent
 // between calls. Both are worth having -- a host that stars at 2000 ticks/s
 // and reaches 900 is either looking at the engine or at its own frame.
-struct BenchmarkMetrics {
+struct Metrics {
     uint64_t totalTicks          = 0;
     double   totalTimeSec        = 0.0;
     float    lastTickTimeMs      = 0.0f;
@@ -98,7 +98,7 @@ class ZHLN_STATIC_API LogicBenchmark {
     // that wants the same workload back calls it with the same count.
     void Reset();
 
-    [[nodiscard]] const BenchmarkMetrics& GetMetrics() const noexcept;
+    [[nodiscard]] const Metrics& GetMetrics() const noexcept;
 
     // Oldest first, at most kHistoryCapacity samples: one float per tick, the
     // same number that went into lastTickTimeMs.
@@ -121,7 +121,7 @@ class ZHLN_STATIC_API LogicBenchmark {
     // seeds m_runStartSeconds from it and totalTimeSec is the difference.
     Clock              m_clock;
     double             m_runStartSeconds = 0.0;
-    BenchmarkMetrics   m_metrics {};
+    Metrics   m_metrics {};
     std::vector<float> m_history;
 
     // Live bodies the benchmark itself created: the floor plus every dynamic

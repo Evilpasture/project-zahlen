@@ -17,17 +17,17 @@ using Test::ExpectTrue;
 auto EditorEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM editor"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 800, .height = 480, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM editor"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 800, .height = 480, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
 auto EditorScene() {
-    Scene::Scene scene;
+    Scene::Document scene;
     scene.camera.position       = {0, 0, 8};
     scene.environment.enableRTR = false;
-    Scene::SceneEntity box;
+    Scene::Entity box;
     box.name = "EditableBox";
     box.body = Scene::BodyKind::Dynamic;
     scene.entities.push_back(box);
@@ -52,7 +52,7 @@ struct EditorHostSuite {
                 kind.remove(entities, root);
                 ExpectTrue(!kind.has(entities, root));
             }
-            Editor::EditorState state;
+            Editor::State state;
             state.selectedEntity = root;
             Editor::DestroySelected(*engine.Get(), state);
             ExpectTrue(state.selectedEntity == Entity::Null());
@@ -70,7 +70,7 @@ struct EditorHostSuite {
             auto                engine   = std::move(*made);
             auto&               entities = *engine->Entities();
             auto                entity   = Editor::CreateEntity(entities, "Modal");
-            Editor::EditorState state;
+            Editor::State state;
             state.selectedEntity = entity;
             Camera camera;
             camera.position = {0, 0, 8};
@@ -83,7 +83,7 @@ struct EditorHostSuite {
             auto key     = [&](KeyCode code, bool down) { input.keyDown[uint32_t(code)] = down; };
             key(KeyCode::G, true);
             Editor::UpdateTransformMode(entities, input, state, camera, viewport, true);
-            ExpectTrue(state.transformMode == Editor::EditorState::TransformMode::None);
+            ExpectTrue(state.transformMode == Editor::State::TransformMode::None);
             key(KeyCode::G, false);
             Editor::UpdateTransformMode(entities, input, state, camera, viewport, false);
             key(KeyCode::G, true);
@@ -105,7 +105,7 @@ struct EditorHostSuite {
             ExpectTrue(entities.Get<Components::TransformComponent>(entity)->scale.x > 1);
             key(KeyCode::Enter, true);
             Editor::UpdateTransformMode(entities, input, state, camera, viewport, false);
-            ExpectTrue(state.transformMode == Editor::EditorState::TransformMode::None);
+            ExpectTrue(state.transformMode == Editor::State::TransformMode::None);
             key(KeyCode::Enter, false);
             Editor::UpdateTransformMode(entities, input, state, camera, viewport, false);
             key(KeyCode::R, true);
@@ -177,7 +177,7 @@ struct EditorHostSuite {
             auto  engine   = std::move(*made);
             auto& graphics = *engine->Graphics();
             auto  before   = graphics.Viewport();
-            ExpectTrue(!graphics.ApplySettings(COM::InChain(COM::ViewportInfo {{20, 0, 300, 240}}, COM::EngineWindowConfig {})).HasValue());
+            ExpectTrue(!graphics.ApplySettings(COM::InChain(COM::ViewportInfo {{20, 0, 300, 240}}, COM::WindowConfig {})).HasValue());
             ExpectEq(graphics.Viewport().x, before.x);
             ExpectEq(graphics.Viewport().width, before.width);
             ExpectTrue(graphics.ApplySettings(COM::InChain(COM::ViewportInfo {{20, 0, 300, 240}})).HasValue());

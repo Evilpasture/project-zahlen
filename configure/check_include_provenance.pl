@@ -180,20 +180,21 @@ my %FIRST_PARTY = (
     DispatchInChain             => ['include/Zahlen/Core/COM/Chain.hpp'],
     DispatchOutChain            => ['include/Zahlen/Core/COM/Chain.hpp'],
     'ZHLN::Reflect::LayoutHash' => ['include/Zahlen/Core/Reflection/LayoutHash.hpp'],
-    EngineAppConfig             => ['include/Zahlen/COM/EngineFactory.hpp'],
-    EngineWindowConfig          => ['include/Zahlen/COM/EngineFactory.hpp'],
-    EngineRenderConfig          => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::AppConfig'       => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::WindowConfig'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::RenderConfig'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::DiagnosticsInfo' => ['include/Zahlen/COM/EngineFactory.hpp'],
     QualifiedTypeName     => ['include/Zahlen/Core/Reflection/Core.hpp'],
     MethodSignature       => ['include/Zahlen/Core/Reflection/Class.hpp'],
     ForEachMethodSignature => ['include/Zahlen/Core/Reflection/Class.hpp'],
-    ComInterfaceLayoutCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComParameterCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComReturnCompliant    => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComParameterAudit     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    InterfaceLayoutCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ParameterCompliant       => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ReturnCompliant          => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ParameterAudit           => ['include/Zahlen/Core/COM/Reflect.hpp'],
     IEngine          => ['include/Zahlen/COM/IEngine.hpp'],
     IGraphicsDevice  => ['include/Zahlen/COM/IGraphicsDevice.hpp'],
     IEntities        => ['include/Zahlen/COM/IEntities.hpp'],
-    ComComponent     => ['include/Zahlen/COM/IEntities.hpp'],
+    'ZHLN::COM::Component' => ['include/Zahlen/COM/IEntities.hpp'],
     # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
     # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every
     # call to it -- including the unqualified ones a `using` makes possible.
@@ -259,7 +260,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp', 'ValueTypes.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'COMTypes.hpp', 'ExplosionHost.hpp', 'LightningHost.hpp', 'TerrainHost.hpp', 'AnimationContext.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp', 'ValueTypes.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a

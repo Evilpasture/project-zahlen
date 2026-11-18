@@ -250,7 +250,7 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
 
         const FVec3 halfExtents = FVec3::Splat(0.5f);
         auto* assets = engine.Assets();
-        COM::Result<Entity> spawned = COM::ComError::InvalidArgument;
+        COM::Result<Entity> spawned = COM::Error::InvalidArgument;
         switch (object.shape) {
             case PartShape::Sphere:
             case PartShape::Head:
@@ -413,7 +413,7 @@ void SyncEnvironment(COM::IEngine& engine, SceneMirrorState& state) {
     // and the environment at `ambientExposure` above. `exposure` is the display
     // half of that convention -- blit.slang multiplies the whole HDR buffer by
     // it before tone mapping -- and 0.015 is the value Zahlen's own scene preset
-    // pairs with exactly those numbers (Scene.hpp SceneEnvironment::exposure,
+    // pairs with exactly those numbers (Scene.hpp Environment::exposure,
     // next to a 180-intensity fallback sun). Left at the component default of
     // 1.0, a lit white surface drives ~57 into the tone curve and both ACES and
     // PBR Neutral saturate it: the whole frame reads as pastel white.
@@ -598,7 +598,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     auto bindCamera = [&](Entity target) -> void {
         if (target == Entity::Null()) return;
         for (Entity camera: entities.EntitiesWith<Components::MainCameraTagComponent>()) {
-            if (auto* rig = entities.Get<CameraRig::TargetCameraComponent>(camera)) {
+            if (auto* rig = entities.Get<CameraRig::TargetComponent>(camera)) {
                 if (rig->target != target) {
                     rig->target              = target;
                     rig->hasInitSmoothTarget = 0;
@@ -672,7 +672,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
         moveComp.speed     = std::max(0.0f, humanoid->walkSpeed);
         moveComp.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
     }
-    (void)Character::Attach(entities, controller, moveComp, Character::HostCharacterComponent {});
+    (void)Character::Attach(entities, controller, moveComp, Character::ControllerComponent {});
     state.localController      = controller;
     state.controllerForRootUid = state.localRootPartUid;
 

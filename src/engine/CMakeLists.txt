@@ -22,8 +22,8 @@ set(RAW_ENGINE_SOURCES
     World.cpp
     VisibilityList.cpp
     system/CharacterMotorSystem.cpp
-    EngineCOM.cpp
-    LogicWorldCOM.cpp
+    com/Engine.cpp
+    com/LogicWorld.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp

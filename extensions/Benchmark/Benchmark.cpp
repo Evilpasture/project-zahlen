@@ -228,7 +228,7 @@ void LogicBenchmark::Reset() {
     m_entities.clear();
     m_world = {};
 
-    m_metrics         = BenchmarkMetrics {};
+    m_metrics         = Metrics {};
     m_runStartSeconds = 0.0;
     m_liveBodies      = 0;
     m_spawnedCubes    = 0;
@@ -237,7 +237,7 @@ void LogicBenchmark::Reset() {
     m_history.clear();
 }
 
-auto LogicBenchmark::GetMetrics() const noexcept -> const BenchmarkMetrics& {
+auto LogicBenchmark::GetMetrics() const noexcept -> const Metrics& {
     return m_metrics;
 }
 

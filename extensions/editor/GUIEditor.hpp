@@ -74,7 +74,7 @@ enum class TransformInput : uint16_t {
 // Persistent editor state, owned by the host application (one instance per
 // editor window). The panels read and update it every frame; nothing else in
 // the engine sees it.
-struct EditorState {
+struct State {
     // Entity shown in the inspector. Entity::Null() = nothing selected.
     ZHLN::Entity selectedEntity = ZHLN::Entity::Null();
 
@@ -151,7 +151,7 @@ ZHLN_STATIC_API auto CreateEntity(ZHLN::COM::IEntities& reg, std::string_view na
 // in the editor state even if the entity turns out to be gone already. The
 // engine-owned lifecycle pipeline cascades children before their parent and
 // notifies external resource systems before each registry destroy.
-ZHLN_STATIC_API void DestroySelected(ZHLN::COM::IEngine& engine, EditorState& state) noexcept;
+ZHLN_STATIC_API void DestroySelected(ZHLN::COM::IEngine& engine, State& state) noexcept;
 
 // One component the editor knows how to add to an entity, remove from it, and
 // display. Function pointers rather than a std::function, so the table is a
@@ -212,7 +212,7 @@ struct SceneViewport {
 ZHLN_STATIC_API void UpdateTransformMode(
     ZHLN::COM::IEntities&           reg,
     const ZHLN::COM::HostInputInfo& input,
-    EditorState&                    state,
+    State&                    state,
     const Camera&                   camera,
     const SceneViewport&            viewport,
     bool                            uiOwnsInput
@@ -228,7 +228,7 @@ ZHLN_STATIC_API void UpdateTransformMode(
 // `engine` is explicit because Delete must use its ordered resource-lifecycle
 // pipeline; the panel edits that engine's registry. GUI::Context itself remains
 // stateless with respect to the ECS.
-ZHLN_STATIC_API void DrawHierarchyPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEngine& engine, EditorState& state, std::string_view id = "Hierarchy");
+ZHLN_STATIC_API void DrawHierarchyPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEngine& engine, State& state, std::string_view id = "Hierarchy");
 
 // Draws the inspector for `state.selectedEntity`: a labelled header plus one
 // collapsing section per editable component present on the entity, and a
@@ -239,7 +239,7 @@ ZHLN_STATIC_API void DrawHierarchyPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEngin
 // entity that is showing it rather than from a list kept elsewhere.
 //
 // NOTE: `reg` is separate from `gui` for the same reason as above.
-ZHLN_STATIC_API void DrawInspectorPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEntities& reg, EditorState& state, std::string_view id = "Inspector");
+ZHLN_STATIC_API void DrawInspectorPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEntities& reg, State& state, std::string_view id = "Inspector");
 
 } // namespace ZHLN::Editor
 

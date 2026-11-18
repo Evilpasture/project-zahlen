@@ -32,7 +32,7 @@ constexpr float kSentinelEpsilon     = 0.01f;
 
 // The three components of a space separated keyvalue, or nothing when the key
 // is absent or unparseable.
-[[nodiscard]] auto OptionalVec3(const BSPEntity& entity, std::string_view key) -> std::optional<FVec3> {
+[[nodiscard]] auto OptionalVec3(const Entity& entity, std::string_view key) -> std::optional<FVec3> {
     const auto arr = entity.FindVector(key);
     if (!arr) {
         return std::nullopt;
@@ -63,7 +63,7 @@ auto ParseFloatOr(std::string_view text, float fallback) noexcept -> float {
     return fallback;
 }
 
-auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput> {
+auto ParseEntityOutputs(const Entity& entity) -> std::vector<EntityOutput> {
     std::vector<EntityOutput> outputs;
 
     for (const auto& [key, rawValue]: entity.keys) {
@@ -138,7 +138,7 @@ auto ParseEntityOutputs(const BSPEntity& entity) -> std::vector<EntityOutput> {
     return outputs;
 }
 
-auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -> FVec3 {
+auto ParseMoveDirection(const Entity& entity, const ImportOptions& options) -> FVec3 {
     const std::string_view movedirStr = entity.Find("movedir");
     if (movedirStr.empty()) {
         return ConvertDirection(options, FVec3::UnitX());
@@ -182,7 +182,7 @@ auto ParseMoveDirection(const BSPEntity& entity, const ImportOptions& options) -
 
 // --- Resolution -------------------------------------------------------------
 
-auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchName, std::string_view modelSource) -> Entity {
+auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchName, std::string_view modelSource) -> ZHLN::Entity {
     if (!modelSource.empty()) {
         // A targetname is not an entity identity: Source deliberately allows
         // many brush entities to share one so an input can address the whole
@@ -192,7 +192,7 @@ auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchNa
         if (modelSource.starts_with('*')) {
             modelSuffix = "#model_" + std::string(modelSource.substr(1));
         }
-        for (const Entity e: entities.EntitiesWith<Components::SceneSourceComponent>()) {
+        for (const ZHLN::Entity e: entities.EntitiesWith<Components::SceneSourceComponent>()) {
             const auto srcComp = entities.Get<Components::SceneSourceComponent>(e);
             if (!srcComp) {
                 continue;
@@ -203,13 +203,13 @@ auto FindMatchingEntity(const COM::IEntities& entities, std::string_view matchNa
             }
         }
     }
-    for (const Entity e: entities.EntitiesWith<Components::NameComponent>()) {
+    for (const ZHLN::Entity e: entities.EntitiesWith<Components::NameComponent>()) {
         const auto nameComp = entities.Get<Components::NameComponent>(e);
         if (nameComp && std::string_view(nameComp->name) == matchName) {
             return e;
         }
     }
-    return Entity::Null();
+    return ZHLN::Entity::Null();
 }
 
 // --- The describe pass ------------------------------------------------------
@@ -292,11 +292,11 @@ namespace {
 
 } // namespace
 
-auto DescribeInteractiveEntities(const COM::IEntities& entities, const BSPMap& map, const ImportOptions& options) -> std::vector<EntityRecord> {
+auto DescribeInteractiveEntities(const COM::IEntities& entities, const Map& map, const ImportOptions& options) -> std::vector<EntityRecord> {
     std::vector<EntityRecord> records;
     records.reserve(map.entities.size() / 4);
 
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
             continue;
@@ -339,7 +339,7 @@ auto DescribeInteractiveEntities(const COM::IEntities& entities, const BSPMap& m
 
         record.matchName = record.targetName.empty() ? FallbackMatchName(className, record.model) : record.targetName;
         record.entity    = FindMatchingEntity(entities, record.matchName, record.model);
-        if (record.entity == Entity::Null()) {
+        if (record.entity == ZHLN::Entity::Null()) {
             continue;
         }
 

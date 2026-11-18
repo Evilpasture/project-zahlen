@@ -7,7 +7,7 @@ namespace ZHLN::CombatFX {
 auto System::SpawnImpact(COM::IEngine& engine, const FVec3& point, const FVec3& normal, uint32_t surfaceId) -> std::expected<void, ErrorCode> {
     if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) || !std::isfinite(normal.LengthSquared()) ||
         normal.LengthSquared() < 1e-10f)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (auto ready = Init(engine); !ready)
         return ready;
     auto                   it  = m_surfaces.find(surfaceId);
@@ -36,7 +36,7 @@ auto System::SpawnImpact(COM::IEngine& engine, const FVec3& point, const FVec3& 
             Components::DecalComponent {.albedoMap = cfg.decalTexture, .normalMap = cfg.normalTexture, .roughness = cfg.decalRoughness, .metallic = 0.0f}
         );
         if (decalEnt == Entity::Null())
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         m_decals.push_back({decalEnt, cfg.decalLifetime, cfg.decalTexture == m_defaultHoleTex});
     }
 

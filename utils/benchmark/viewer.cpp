@@ -18,18 +18,18 @@ auto Run(const ZHLN::EngineConfig& config, uint32_t frames) -> std::expected<voi
     ProcessScope process;
     auto         created = COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
-            COM::EngineWindowConfig {
+            COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+            COM::WindowConfig {
                 .width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless
             },
-            COM::EngineRenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading}, config.physics
+            COM::RenderConfig {.validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading}, config.physics
         )
     );
     if (!created)
         return std::unexpected(created.error());
     auto                   engine = std::move(*created);
     HostUI                 host(*engine.Get());
-    Bench::BenchmarkViewer viewer;
+    Bench::Viewer viewer;
     viewer.Attach(*engine.Get());
     viewer.SetVisible(true);
     viewer.SetTelemetryVisible(true);

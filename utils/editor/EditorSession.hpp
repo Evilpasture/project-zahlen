@@ -21,7 +21,7 @@ class Session {
     ~Session();
     Session(const Session&)                           = delete;
     auto        operator=(const Session&) -> Session& = delete;
-    EditorState state;
+    State state;
     bool        simulationRunning = false;
     auto        Start(COM::IEngine&, bool buildBLAS = true) -> std::expected<void, ErrorCode>;
     auto        Frame(COM::IEngine&, HostUI&, float) -> std::expected<void, ErrorCode>;
@@ -32,7 +32,7 @@ class Session {
 
   private:
     auto                                               RefreshPrimitives(COM::IEngine&) -> std::expected<void, ErrorCode>;
-    std::unordered_map<uint64_t, Scene::SceneMaterial> _materials;
+    std::unordered_map<uint64_t, Scene::Material> _materials;
     auto                                               Draw(COM::IEngine&, HostUI&, float) -> std::expected<void, ErrorCode>;
     bool                                               _started   = false;
     bool                                               _buildBLAS = true, _saveDown = false, _escapeDown = false, _mouseDown = false;

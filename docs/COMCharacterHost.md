@@ -35,7 +35,7 @@ assigned to it. The host preserves the existing WASD/gamepad normalization,
 RMB look, jump/sprint, trigger threshold and wheel/D-pad zoom rules. The same
 pure snapshot translator is shared by the native input adapter to prevent two
 versions of the arithmetic from drifting. Physical reads do not decide UI/game
-capture policy: disable HostCharacterComponent or supply a frozen explicit
+capture policy: disable ControllerComponent or supply a frozen explicit
 snapshot when the application owns that decision.
 
 `Character::Apply` accepts explicit intent for replay, AI and deterministic
@@ -55,7 +55,7 @@ frame. This is not a second character integrator.
 
 Include `<Animation/Animator.hpp>` and link `zahlen_animation_controls` /
 `Zahlen::AnimationControls`. The playback evaluator belongs to the optional AnimationControls runtime.
-Compose it explicitly via `<Animation/AnimationContext.hpp>` and
+Compose it explicitly via `<Animation/Context.hpp>` and
 `Animation::CreateEngineRef`, or native `Animation::Install`/`IK::Install`;
 this archive's new helpers only author published POD controls:
 
@@ -68,7 +68,7 @@ this archive's new helpers only author published POD controls:
 - `Detach` removes controls/IK, not the Animator or cached prefab resources.
 
 Clip/gait selection stays in the host. These helpers do not acquire an
-AnimationContext or export native animation containers across COM.
+Context or export native animation containers across COM.
 
 ## COM-only surface
 

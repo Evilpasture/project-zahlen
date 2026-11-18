@@ -49,7 +49,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Animation/AnimationSystem.hpp>
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -123,7 +123,7 @@ struct MorphPosePassSuite {
     // purpose: a skipped channel must leave these untouched.
     static constexpr float kDefaultMorphWeight0 = 0.2f;
     static constexpr float kDefaultMorphWeight1 = 0.4f;
-    static inline ZHLN::Animation::AnimationContext s_animCtx {};
+    static inline ZHLN::Animation::Context s_animCtx {};
 
     MorphPosePassSuite() {
         // Nested in the group binary's session: the task system and the pooled
@@ -139,7 +139,7 @@ struct MorphPosePassSuite {
         auto engine = ZHLN::Test::Headless::AcquireEngine(
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Morph Pose Pass", .width = 640, .height = 480}
         );
-        s_animCtx = ZHLN::Animation::AnimationContext {};
+        s_animCtx = ZHLN::Animation::Context {};
         if (engine.Valid()) {
             ZHLN::Test::Headless::SetPreTickHook(+[](ZHLN::COM::IEngine& eng, float dt) {
                 ZHLN::Animation::Step(eng, s_animCtx, dt);

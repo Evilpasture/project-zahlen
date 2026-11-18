@@ -10,7 +10,7 @@
 // reflected ChainInNode headers so descriptor evolution is layout-checked.
 
 #include <Zahlen/Audio/AudioValues.hpp>
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -33,7 +33,7 @@ struct IAudioDevice : IObject {
 
     // Supported node: VoiceDesc (nullptr uses default VoiceDesc). Returns
     // VoiceID::Invalid inside the Result when the file is missing or every
-    // voice slot is taken; returns a ComError on chain validation failure.
+    // voice slot is taken; returns a Error on chain validation failure.
     [[nodiscard]] virtual Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept = 0;
 
     virtual void               PlayVoice(VoiceID voice) noexcept = 0;

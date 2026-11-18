@@ -100,7 +100,7 @@ struct CameraLookAtTestSuite {
             // missing, so this survives the first tick).
             reg.AttachMany(
                 cameras[0],
-                ZHLN::CameraRig::TargetCameraComponent {
+                ZHLN::CameraRig::TargetComponent {
                     .target              = target,
                     .distance            = 5.0f,
                     .targetDistance      = 5.0f,

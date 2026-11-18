@@ -36,12 +36,12 @@ auto BuildSyntheticBspWithStaticProps(
     BinaryWriter fileBytes;
 
     // 1. BSP Header
-    ZHLN::BSP::BspHeader header {};
+    ZHLN::BSP::Header header {};
     header.ident = (('P' << 24) | ('S' << 16) | ('B' << 8) | 'V');
     header.version = 20;
 
     // We'll place GameLump directory and sprp lump data right after the header
-    const size_t headerSize = sizeof(ZHLN::BSP::BspHeader);
+    const size_t headerSize = sizeof(ZHLN::BSP::Header);
     fileBytes.resize(headerSize, std::byte {0});
 
     // 2. Build sprp lump payload
@@ -120,7 +120,7 @@ struct BSPStaticPropsTestSuite {
             const std::vector<std::byte> propBytes;
 
             const auto bsp = BuildSyntheticBspWithStaticProps(4, dict, leafs, propBytes, 0);
-            const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
+            const auto mapExp = ZHLN::BSP::Parse(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
             const auto& map = *mapExp;
@@ -200,7 +200,7 @@ struct BSPStaticPropsTestSuite {
             }
 
             const auto bsp = BuildSyntheticBspWithStaticProps(4, dict, leafs, propBytes.bytes(), 2);
-            const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
+            const auto mapExp = ZHLN::BSP::Parse(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
             const auto& map = *mapExp;
@@ -277,7 +277,7 @@ struct BSPStaticPropsTestSuite {
             }
 
             const auto bsp = BuildSyntheticBspWithStaticProps(8, dict, leafs, propBytes.bytes(), 1);
-            const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
+            const auto mapExp = ZHLN::BSP::Parse(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
             const auto& map = *mapExp;
@@ -340,7 +340,7 @@ struct BSPStaticPropsTestSuite {
             }
 
             const auto bsp = BuildSyntheticBspWithStaticProps(11, dict, leafs, propBytes.bytes(), 1);
-            const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
+            const auto mapExp = ZHLN::BSP::Parse(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
             const auto& map = *mapExp;
@@ -357,7 +357,7 @@ struct BSPStaticPropsTestSuite {
         }
 
         auto static_prop_scene_entity_conversion() -> std::expected<void, std::string> {
-            ZHLN::BSP::BSPMap map;
+            ZHLN::BSP::Map map;
             map.version = 20;
 
             // Add submodel 0 (Worldspawn) so DescribeScene is happy
@@ -455,9 +455,9 @@ struct BSPStaticPropsTestSuite {
 
         auto hdr_faces_lump_priority() -> std::expected<void, std::string> {
             BinaryWriter fileBytes;
-            fileBytes.resize(sizeof(ZHLN::BSP::BspHeader), std::byte {0});
+            fileBytes.resize(sizeof(ZHLN::BSP::Header), std::byte {0});
 
-            ZHLN::BSP::BspHeader header {};
+            ZHLN::BSP::Header header {};
             header.ident = (('P' << 24) | ('S' << 16) | ('B' << 8) | 'V');
             header.version = 20;
 
@@ -497,7 +497,7 @@ struct BSPStaticPropsTestSuite {
 
             std::memcpy(fileBytes.data(), &header, sizeof(header));
 
-            const auto mapExp = ZHLN::BSP::ParseBsp(fileBytes.bytes());
+            const auto mapExp = ZHLN::BSP::Parse(fileBytes.bytes());
             ZHLN::Test::ExpectTrue(mapExp.has_value());
             ZHLN::Test::ExpectEq(mapExp->faces.size(), size_t {2});
             ZHLN::Test::ExpectEq(mapExp->faces[0].texinfo, int16_t {20});
@@ -510,7 +510,7 @@ struct BSPStaticPropsTestSuite {
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = 0;
             std::memcpy(fileBytes.data(), &header, sizeof(header));
 
-            const auto fallbackMapExp = ZHLN::BSP::ParseBsp(fileBytes.bytes());
+            const auto fallbackMapExp = ZHLN::BSP::Parse(fileBytes.bytes());
             ZHLN::Test::ExpectTrue(fallbackMapExp.has_value());
             ZHLN::Test::ExpectEq(fallbackMapExp->faces.size(), size_t {1});
             ZHLN::Test::ExpectEq(fallbackMapExp->faces[0].texinfo, int16_t {10});

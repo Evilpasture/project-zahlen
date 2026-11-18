@@ -32,17 +32,17 @@ struct ConsoleHostSuite {
         std::expected<void, ErrorCode> real_scene_console_reads_edits_rejects_raw_native_escape_and_renders() {
             auto made = COM::CreateEngineRef(
                 COM::InChain(
-                    COM::EngineWindowConfig {.width = 640, .height = 360, .vsync = false, .headless = true},
-                    COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+                    COM::WindowConfig {.width = 640, .height = 360, .vsync = false, .headless = true},
+                    COM::RenderConfig {.validationMode = ValidationMode::Off}
                 )
             );
             if (!made)
                 return std::unexpected(made.error());
             auto         engine = std::move(*made);
-            Scene::Scene scene;
+            Scene::Document scene;
             scene.camera.position       = {0, 0, 8};
             scene.environment.enableRTR = false;
-            Scene::SceneEntity box;
+            Scene::Entity box;
             box.name = "ConsoleTarget";
             box.body = Scene::BodyKind::Dynamic;
             scene.entities.push_back(box);

@@ -19,7 +19,7 @@ namespace ZHLN::Scene {
 
 namespace {
 
-[[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
+[[nodiscard]] auto MakeSpawnParams(const Entity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
         .position =
             {static_cast<double>(entity.transform.position.x), static_cast<double>(entity.transform.position.y),
@@ -41,11 +41,11 @@ namespace {
     };
 }
 
-[[nodiscard]] auto NeedsMaterial(const SceneMaterial& material) noexcept -> bool {
+[[nodiscard]] auto NeedsMaterial(const Material& material) noexcept -> bool {
     return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
 
-[[nodiscard]] auto BuildMaterial(COM::IGraphicsDevice& gfx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
+[[nodiscard]] auto BuildMaterial(COM::IGraphicsDevice& gfx, const Material& material) -> std::expected<ZHLN::Material, ErrorCode> {
     const auto result = gfx.CreateMaterial(
         MaterialDesc {
             .metallic  = material.metallic,
@@ -54,19 +54,19 @@ namespace {
             .emissive  = {material.emissive.x, material.emissive.y, material.emissive.z, 1.0f}
         }
     );
-    return result.HasValue() ? std::expected<Material, ErrorCode>(result.value) : std::unexpected(result.error);
+    return result.HasValue() ? std::expected<ZHLN::Material, ErrorCode>(result.value) : std::unexpected(result.error);
 }
 
-auto NameEntity(COM::IEntities& entities, Entity entity, std::string_view name) -> bool {
-    if (name.empty() || entity == Entity::Null()) {
-        return entity != Entity::Null();
+auto NameEntity(COM::IEntities& entities, ZHLN::Entity entity, std::string_view name) -> bool {
+    if (name.empty() || entity == ZHLN::Entity::Null()) {
+        return entity != ZHLN::Entity::Null();
     }
     return entities.Attach(entity, Components::NameComponent {.name = String64(name)}) != nullptr;
 }
 
-auto StampSource(COM::IEntities& entities, Entity entity, const SceneEntity& description) -> bool {
-    if (entity == Entity::Null()) {
-        return entity != Entity::Null();
+auto StampSource(COM::IEntities& entities, ZHLN::Entity entity, const Entity& description) -> bool {
+    if (entity == ZHLN::Entity::Null()) {
+        return entity != ZHLN::Entity::Null();
     }
     const auto* stamped = entities.Attach(
         entity, Components::SceneSourceComponent {
@@ -87,24 +87,24 @@ auto StampSource(COM::IEntities& entities, Entity entity, const SceneEntity& des
 
 } // namespace
 
-auto Validate(const COM::IAssetLibrary& assets, const Scene& description) -> std::expected<void, ErrorCode> {
+auto Validate(const COM::IAssetLibrary& assets, const Document& description) -> std::expected<void, ErrorCode> {
     // Resolve dependencies before touching the world. Importers remain host-owned.
     for (const auto& entity: description.entities) {
         if (static_cast<uint8_t>(entity.shape) > static_cast<uint8_t>(ShapeKind::Cone) ||
             static_cast<uint8_t>(entity.body) > static_cast<uint8_t>(BodyKind::Kinematic))
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if ((entity.shape == ShapeKind::Sphere || entity.shape == ShapeKind::Cylinder || entity.shape == ShapeKind::Cone) &&
             (!std::isfinite(entity.extent) || entity.extent <= 0 || !std::isfinite(entity.halfExtents.y) || entity.halfExtents.y <= 0))
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if (entity.shape == ShapeKind::Prefab) {
             const auto info = assets.DescribePrefab(assets.PrefabHash(COM::StringView(entity.source)));
             if (!info.HasValue() || !info.value.gpuResourcesReady)
-                return std::unexpected(SceneError::PrefabNotFound);
+                return std::unexpected(Error::PrefabNotFound);
         }
     }
     for (const auto& light: description.lights)
         if (!Reflect::StringToEnum<LightType>(light.type))
-            return std::unexpected(SceneError::UnknownLightType);
+            return std::unexpected(Error::UnknownLightType);
     return {};
 }
 
@@ -113,7 +113,7 @@ auto Instantiate(
     COM::IAssetLibrary&   assets,
     COM::IGraphicsDevice& graphics,
     COM::ISimulation&     simulation,
-    const Scene&          description,
+    const Document&          description,
     InstantiateOptions    options
 ) -> std::expected<Instance, ErrorCode> {
     Instance instance;
@@ -131,14 +131,14 @@ auto Instantiate(
                 entities.Despawn(e);
         }
     });
-    for (const SceneEntity& entity: description.entities) {
+    for (const Entity& entity: description.entities) {
         PrefabFactory::SpawnParams params = MakeSpawnParams(entity);
 
         if (NeedsMaterial(entity.material) || entity.shape == ShapeKind::Box || entity.shape == ShapeKind::Plane) {
             auto material = BuildMaterial(graphics, entity.material);
             if (!material) {
                 ZHLN::Log("[Scene] entity '{}': material creation failed", entity.name);
-                return std::unexpected(SceneError::MaterialCreationFailed);
+                return std::unexpected(Error::MaterialCreationFailed);
             }
             params.materialOverride = *material;
         }
@@ -152,12 +152,12 @@ auto Instantiate(
                 );
                 if (!spawned.HasValue())
                     return std::unexpected(spawned.error);
-                const Entity created = spawned.value;
-                if (created == Entity::Null())
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                const ZHLN::Entity created = spawned.value;
+                if (created == ZHLN::Entity::Null())
+                    return std::unexpected(Error::EntityCreationFailed);
                 instance.entities.push_back(created);
                 if (!NameEntity(entities, created, entity.name) || !StampSource(entities, created, entity))
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                    return std::unexpected(Error::EntityCreationFailed);
                 entities.Patch<Components::MeshComponent>(created, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
                 break;
             }
@@ -167,19 +167,19 @@ auto Instantiate(
                 );
                 if (!spawned.HasValue())
                     return std::unexpected(spawned.error);
-                const Entity created = spawned.value;
-                if (created == Entity::Null())
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                const ZHLN::Entity created = spawned.value;
+                if (created == ZHLN::Entity::Null())
+                    return std::unexpected(Error::EntityCreationFailed);
                 instance.entities.push_back(created);
                 if (!NameEntity(entities, created, entity.name) || !StampSource(entities, created, entity))
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                    return std::unexpected(Error::EntityCreationFailed);
                 entities.Patch<Components::MeshComponent>(created, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
                 break;
             }
             case ShapeKind::Sphere:
             case ShapeKind::Cylinder:
             case ShapeKind::Cone: {
-                COM::Result<Entity>         spawned = COM::ComError::InvalidArgument;
+                COM::Result<ZHLN::Entity>         spawned = COM::Error::InvalidArgument;
                 const COM::MeshBuildOptions build {.buildBLAS = options.buildBLAS};
                 if (entity.shape == ShapeKind::Sphere)
                     spawned =
@@ -199,11 +199,11 @@ auto Instantiate(
                     );
                 if (!spawned.HasValue())
                     return std::unexpected(spawned.error);
-                if (spawned.value == Entity::Null())
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                if (spawned.value == ZHLN::Entity::Null())
+                    return std::unexpected(Error::EntityCreationFailed);
                 instance.entities.push_back(spawned.value);
                 if (!NameEntity(entities, spawned.value, entity.name) || !StampSource(entities, spawned.value, entity))
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                    return std::unexpected(Error::EntityCreationFailed);
                 entities.Patch<Components::MeshComponent>(spawned.value, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
                 break;
             }
@@ -220,11 +220,11 @@ auto Instantiate(
                 const auto hash  = assets.PrefabHash(COM::StringView(entity.source));
                 auto       parts = assets.Instantiate(hash, params);
                 if (parts.empty())
-                    return std::unexpected(SceneError::PrefabNotFound);
+                    return std::unexpected(Error::PrefabNotFound);
                 const auto recorded = static_cast<uint32_t>(parts.size());
                 instance.entities.insert(instance.entities.end(), parts.begin(), parts.end());
                 if (!NameEntity(entities, parts[0], entity.name) || !StampSource(entities, parts[0], entity))
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                    return std::unexpected(Error::EntityCreationFailed);
 
                 // Every mesh part of a prop carries the same leaf ambient cube.
                 if (entity.hasAmbientCube) {
@@ -268,26 +268,26 @@ auto Instantiate(
                 const auto scale    = entity.transform.scale;
                 const auto world    = ComposeTransform(position, rotation, scale);
 
-                const Entity created = entities.Spawn(
+                const ZHLN::Entity created = entities.Spawn(
                     Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
                     Components::WorldTransformComponent {.world = world, .previous = world}
                 );
-                if (created == Entity::Null())
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                if (created == ZHLN::Entity::Null())
+                    return std::unexpected(Error::EntityCreationFailed);
                 instance.entities.push_back(created);
                 if (!NameEntity(entities, created, entity.name) || !StampSource(entities, created, entity))
-                    return std::unexpected(SceneError::EntityCreationFailed);
+                    return std::unexpected(Error::EntityCreationFailed);
                 entities.Patch<Components::MeshComponent>(created, [&](auto& mesh) { mesh.flags = mesh.flags | entity.drawFlags; });
                 break;
             }
         }
     }
 
-    for (const SceneLight& light: description.lights) {
+    for (const Light& light: description.lights) {
         const auto type = ZHLN::Reflect::StringToEnum<LightType>(light.type);
         if (!type) {
             ZHLN::Log("[Scene] light '{}': '{}' is not a LightType", light.name, light.type);
-            return std::unexpected(SceneError::UnknownLightType);
+            return std::unexpected(Error::UnknownLightType);
         }
 
         const auto position = light.position;
@@ -297,7 +297,7 @@ auto Instantiate(
         const auto rawDirection = light.direction;
         const auto direction    = rawDirection.LengthSquared() > 1e-8f ? rawDirection.Normalized() : rawDirection;
 
-        const Entity created = entities.Spawn(
+        const ZHLN::Entity created = entities.Spawn(
             Components::NameComponent {.name = String64(light.name)},
             Components::TransformComponent {.position = position, .rotation = rotation, .scale = {1.0f, 1.0f, 1.0f}},
             Components::WorldTransformComponent {.world = world, .previous = world},
@@ -317,22 +317,22 @@ auto Instantiate(
             Components::SceneLightTagComponent {}
         );
 
-        if (created == Entity::Null())
-            return std::unexpected(SceneError::EntityCreationFailed);
+        if (created == ZHLN::Entity::Null())
+            return std::unexpected(Error::EntityCreationFailed);
         instance.lights.push_back(created);
     }
 
     // Ensure a main camera entity exists in the world, creating one when a
     // caller despawned it before instantiating this description.
     const auto camera       = entities.SingletonEntity<Components::MainCameraTagComponent>();
-    Entity     cameraEntity = camera.HasValue() ? camera.value : Entity::Null();
-    if (cameraEntity == Entity::Null()) {
+    ZHLN::Entity     cameraEntity = camera.HasValue() ? camera.value : ZHLN::Entity::Null();
+    if (cameraEntity == ZHLN::Entity::Null()) {
         cameraEntity = entities.Spawn(Components::MainCameraTagComponent {}, Components::CameraComponent {});
     }
-    if (cameraEntity == Entity::Null())
-        return std::unexpected(SceneError::EntityCreationFailed);
+    if (cameraEntity == ZHLN::Entity::Null())
+        return std::unexpected(Error::EntityCreationFailed);
     if (!entities.Get<Components::CameraComponent>(cameraEntity) && !entities.Attach(cameraEntity, Components::CameraComponent {}))
-        return std::unexpected(SceneError::EntityCreationFailed);
+        return std::unexpected(Error::EntityCreationFailed);
     entities.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
         c.camera.position = FVec3 {description.camera.position};
         c.camera.yaw      = DegF {description.camera.yaw};
@@ -342,7 +342,7 @@ auto Instantiate(
 
     // The scene description is a source of settings, not their owner: it hands
     // them to the graphics device and keeps no copy.
-    const SceneEnvironment& environment = description.environment;
+    const Environment& environment = description.environment;
     {
         GraphicsSettings gfx = graphics.Settings();
         CopySharedFields(gfx.post, environment);
@@ -361,21 +361,21 @@ auto Instantiate(
     return instance;
 }
 
-auto Instantiate(COM::IEngine& engine, const Scene& description, InstantiateOptions options) -> std::expected<Instance, ErrorCode> {
+auto Instantiate(COM::IEngine& engine, const Document& description, InstantiateOptions options) -> std::expected<Instance, ErrorCode> {
     return Instantiate(*engine.Entities(), *engine.Assets(), *engine.Graphics(), *engine.Simulation(), description, options);
 }
-auto Extract(const Camera& camera, const GraphicsSettings& gfx, const COM::IEntities& entities, MaterialLookup materials) -> Scene {
+auto Extract(const ZHLN::Camera& camera, const GraphicsSettings& gfx, const COM::IEntities& entities, MaterialLookup materials) -> Document {
     return ExtractSnapshot(camera, gfx, entities, materials);
 }
-auto Extract(COM::IEngine& engine) -> Scene {
+auto Extract(COM::IEngine& engine) -> Document {
     const auto  mainCamera = engine.Entities()->SingletonEntity<Components::MainCameraTagComponent>();
     const auto* cam        = mainCamera.HasValue() ? engine.Entities()->Get<Components::CameraComponent>(mainCamera.value) : nullptr;
     const auto* graphics   = engine.Graphics();
     return Extract(
-        cam ? cam->camera : Camera {}, graphics->Settings(), *engine.Entities(),
-        MaterialLookup {graphics, [](const void* ctx, MaterialID id) -> std::optional<Material> {
+        cam ? cam->camera : ZHLN::Camera {}, graphics->Settings(), *engine.Entities(),
+        MaterialLookup {graphics, [](const void* ctx, MaterialID id) -> std::optional<ZHLN::Material> {
                             const auto material = static_cast<const COM::IGraphicsDevice*>(ctx)->FindMaterial(id);
-                            return material.HasValue() ? std::optional<Material>(material.value) : std::nullopt;
+                            return material.HasValue() ? std::optional<ZHLN::Material>(material.value) : std::nullopt;
                         }}
     );
 }

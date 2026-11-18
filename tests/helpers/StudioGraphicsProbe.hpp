@@ -23,7 +23,7 @@ struct StudioGraphicsProbe final : IGraphicsDevice {
     Result<void> UpdateBuffer(BufferID handle, Span<const std::byte> data) noexcept override { return next.UpdateBuffer(handle, data); }
     Result<TextureID> CreateTexture(const ChainInNode* textureChain) noexcept override { const auto result = next.CreateTexture(textureChain); if (result.HasValue()) ++createdTextures; return result; }
     void UnloadTexture(TextureID handle) noexcept override { ++unloadedTextures; next.UnloadTexture(handle); }
-    Result<void> CreateMaterial(const ChainInNode* descChain, ChainOutNode* outMaterialChain) noexcept override { if (failMaterial) return ComError::InvalidArgument; return next.CreateMaterial(descChain, outMaterialChain); }
+    Result<void> CreateMaterial(const ChainInNode* descChain, ChainOutNode* outMaterialChain) noexcept override { if (failMaterial) return Error::InvalidArgument; return next.CreateMaterial(descChain, outMaterialChain); }
     Result<void> RegisterMaterial(MaterialID id, const ChainInNode* materialChain) noexcept override { return next.RegisterMaterial(id, materialChain); }
     Result<void> GetMaterial(MaterialID id, ChainOutNode* outMaterialChain) const noexcept override { return next.GetMaterial(id, outMaterialChain); }
     void UnregisterMaterial(MaterialID id) noexcept override { next.UnregisterMaterial(id); }

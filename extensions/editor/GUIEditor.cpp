@@ -229,7 +229,7 @@ auto CreateEntity(ZHLN::COM::IEntities& reg, std::string_view name) -> ZHLN::Ent
     return entity;
 }
 
-void DestroySelected(ZHLN::COM::IEngine& engine, EditorState& state) noexcept {
+void DestroySelected(ZHLN::COM::IEngine& engine, State& state) noexcept {
     auto&              reg    = *engine.Entities();
     const ZHLN::Entity victim = state.selectedEntity;
 
@@ -248,7 +248,7 @@ void DestroySelected(ZHLN::COM::IEngine& engine, EditorState& state) noexcept {
 // ============================================================================
 //
 // The mode is a small state machine over raw input LEVELS, edge-detected
-// against EditorState::transformPrevInput: InputState carries key
+// against State::transformPrevInput: InputState carries key
 // levels, not presses, exactly like the host's Ctrl+S handling.
 //
 // All manipulation math is camera-ray based (the same unproject
@@ -351,15 +351,15 @@ struct EditorRay {
     };
 }
 
-auto AxisVector(EditorState::TransformAxis axis) noexcept -> FVec3 {
+auto AxisVector(State::TransformAxis axis) noexcept -> FVec3 {
     switch (axis) {
-        case EditorState::TransformAxis::X:
+        case State::TransformAxis::X:
             return FVec3::UnitX();
-        case EditorState::TransformAxis::Y:
+        case State::TransformAxis::Y:
             return FVec3::UnitY();
-        case EditorState::TransformAxis::Z:
+        case State::TransformAxis::Z:
             return FVec3::UnitZ();
-        case EditorState::TransformAxis::None:
+        case State::TransformAxis::None:
             break;
     }
     return FVec3::Zero();
@@ -376,7 +376,7 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
 void UpdateTransformMode(
     ZHLN::COM::IEntities&           reg,
     const ZHLN::COM::HostInputInfo& input,
-    EditorState&                    state,
+    State&                    state,
     const Camera&                   camera,
     const SceneViewport&            viewport,
     bool                            uiOwnsInput
@@ -392,24 +392,24 @@ void UpdateTransformMode(
     const float          mx      = input.mouseX;
     const float          my      = input.mouseY;
 
-    if (state.transformMode == EditorState::TransformMode::None) {
+    if (state.transformMode == State::TransformMode::None) {
         // Enter a mode only on a live selection. Plain S starts Scale, but a
         // Ctrl+S is the save chord and must never grab the object.
-        EditorState::TransformMode mode = EditorState::TransformMode::None;
+        State::TransformMode mode = State::TransformMode::None;
         if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
             if ((pressed & TransformInput::G) != TransformInput::None) {
-                mode = EditorState::TransformMode::Move;
+                mode = State::TransformMode::Move;
             } else if ((pressed & TransformInput::R) != TransformInput::None) {
-                mode = EditorState::TransformMode::Rotate;
+                mode = State::TransformMode::Rotate;
             } else if ((pressed & TransformInput::S) != TransformInput::None && (level & TransformInput::Ctrl) == TransformInput::None) {
-                mode = EditorState::TransformMode::Scale;
+                mode = State::TransformMode::Scale;
             }
         }
-        if (mode != EditorState::TransformMode::None) {
+        if (mode != State::TransformMode::None) {
             const auto t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
             if (t) {
                 state.transformMode          = mode;
-                state.transformAxis          = EditorState::TransformAxis::None;
+                state.transformAxis          = State::TransformAxis::None;
                 state.transformEntity        = state.selectedEntity;
                 state.transformStartPosition = t->position;
                 state.transformStartRotation = t->rotation;
@@ -429,7 +429,7 @@ void UpdateTransformMode(
     } else {
         const ZHLN::Entity e = state.transformEntity;
         if (!reg.IsAlive(e)) {
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else if ((pressed & (TransformInput::Esc | TransformInput::RMB)) != TransformInput::None) {
             // Cancel: write the captures back, drop the mode.
             reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
@@ -437,25 +437,25 @@ void UpdateTransformMode(
                 t.rotation = {state.transformStartRotation.x, state.transformStartRotation.y, state.transformStartRotation.z, state.transformStartRotation.w};
                 t.scale    = state.transformStartScale;
             });
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else if ((pressed & (TransformInput::Enter | TransformInput::LMB)) != TransformInput::None) {
             // Confirm: the live transform stands.
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else {
             if ((pressed & TransformInput::X) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::X) ? EditorState::TransformAxis::None : EditorState::TransformAxis::X;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::X) ? State::TransformAxis::None : State::TransformAxis::X;
             } else if ((pressed & TransformInput::Y) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Y) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Y;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::Y) ? State::TransformAxis::None : State::TransformAxis::Y;
             } else if ((pressed & TransformInput::Z) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Z) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Z;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::Z) ? State::TransformAxis::None : State::TransformAxis::Z;
             }
 
             switch (state.transformMode) {
-                case EditorState::TransformMode::Move: {
+                case State::TransformMode::Move: {
                     const auto ray = MouseRay(camera, mx, my, viewport);
                     if (const auto hit = ray ? RayPlane(ray->origin, ray->dir, state.transformPlaneNormal, state.transformStartPosition) : std::nullopt) {
                         FVec3 delta = *hit - state.transformAnchor;
-                        if (state.transformAxis != EditorState::TransformAxis::None) {
+                        if (state.transformAxis != State::TransformAxis::None) {
                             const FVec3 axis = AxisVector(state.transformAxis);
                             delta                = axis * Dot(delta, axis);
                         }
@@ -464,7 +464,7 @@ void UpdateTransformMode(
                     }
                     break;
                 }
-                case EditorState::TransformMode::Rotate: {
+                case State::TransformMode::Rotate: {
                     if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
                         const float ox = screen->x, oy = screen->y;
                         // Screen pixels are y-down; the viewer thinks y-up, so
@@ -474,7 +474,7 @@ void UpdateTransformMode(
                         // camera forward), making a positive seen delta a
                         // positive right-handed turn about it.
                         const float     angle  = std::atan2(oy - my, mx - ox);
-                        const FVec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
+                        const FVec3 axis   = (state.transformAxis != State::TransformAxis::None) ? AxisVector(state.transformAxis) :
                                                                                                              state.transformPlaneNormal * -1.0f;
                         const Quat      turn   = Quat::FromAxisAngle(axis, RadF {angle - state.transformStartAngle});
                         const Quat      newRot = turn * state.transformStartRotation;
@@ -484,7 +484,7 @@ void UpdateTransformMode(
                     }
                     break;
                 }
-                case EditorState::TransformMode::Scale: {
+                case State::TransformMode::Scale: {
                     if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
                         const float ox = screen->x, oy = screen->y;
                         // Screen-space distance ratio, like Blender's uniform
@@ -493,14 +493,14 @@ void UpdateTransformMode(
                         const float     factor = std::max(dist / state.transformStartDist, 1e-3f);
                         const FVec3 start  = state.transformStartScale;
                         FVec3       next   = start * factor;
-                        if (state.transformAxis != EditorState::TransformAxis::None) {
+                        if (state.transformAxis != State::TransformAxis::None) {
                             next               = start;
-                            const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.x * factor :
-                                                 (state.transformAxis == EditorState::TransformAxis::Y) ? start.y * factor :
+                            const float scaled = (state.transformAxis == State::TransformAxis::X) ? start.x * factor :
+                                                 (state.transformAxis == State::TransformAxis::Y) ? start.y * factor :
                                                                                                           start.z * factor;
-                            if (state.transformAxis == EditorState::TransformAxis::X) {
+                            if (state.transformAxis == State::TransformAxis::X) {
                                 next = {scaled, start.y, start.z};
-                            } else if (state.transformAxis == EditorState::TransformAxis::Y) {
+                            } else if (state.transformAxis == State::TransformAxis::Y) {
                                 next = {start.x, scaled, start.z};
                             } else {
                                 next = {start.x, start.y, scaled};
@@ -514,7 +514,7 @@ void UpdateTransformMode(
                     }
                     break;
                 }
-                case EditorState::TransformMode::None:
+                case State::TransformMode::None:
                     break;
             }
         }
@@ -523,7 +523,7 @@ void UpdateTransformMode(
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, EditorState& state, std::string_view id) {
+void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, State& state, std::string_view id) {
     auto& reg = *engine.Entities();
     struct Row {
         ZHLN::Entity entity;
@@ -589,14 +589,14 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, EditorState
 
     // The running modal transform gets a visible affordance, so the keybinds
     // are not invisible state.
-    if (state.transformMode != EditorState::TransformMode::None) {
+    if (state.transformMode != State::TransformMode::None) {
         std::array<char, 96>   modeBuf {};
-        const std::string_view modeName = state.transformMode == EditorState::TransformMode::Move   ? "Move" :
-                                          state.transformMode == EditorState::TransformMode::Rotate ? "Rotate" :
+        const std::string_view modeName = state.transformMode == State::TransformMode::Move   ? "Move" :
+                                          state.transformMode == State::TransformMode::Rotate ? "Rotate" :
                                                                                                       "Scale";
-        const std::string_view axisName = state.transformAxis == EditorState::TransformAxis::X ? "X" :
-                                          state.transformAxis == EditorState::TransformAxis::Y ? "Y" :
-                                          state.transformAxis == EditorState::TransformAxis::Z ? "Z" :
+        const std::string_view axisName = state.transformAxis == State::TransformAxis::X ? "X" :
+                                          state.transformAxis == State::TransformAxis::Y ? "Y" :
+                                          state.transformAxis == State::TransformAxis::Z ? "Z" :
                                                                                                  "free";
         gui.Text(ZHLN::FormatTo(modeBuf, "{} [{}] - LMB/Enter confirm, Esc/RMB cancel", modeName, axisName), 12.0f, {0.9f, 0.8f, 0.4f, 1.0f});
     }
@@ -630,7 +630,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, EditorState
     gui.EndColumn();
 }
 
-void DrawInspectorPanel(GUI::Frame& gui, ZHLN::COM::IEntities& reg, EditorState& state, std::string_view id) {
+void DrawInspectorPanel(GUI::Frame& gui, ZHLN::COM::IEntities& reg, State& state, std::string_view id) {
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 

@@ -12,7 +12,7 @@
 // breaking vtable slots. Inline non-virtual overloads provide one-line C++
 // ergonomics in the consumer's own translation unit.
 
-#include <Zahlen/COM/COMTypes.hpp>
+#include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/GraphicsTypes.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>

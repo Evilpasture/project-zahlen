@@ -30,7 +30,7 @@ auto RegisterStudioParts(COM::IAssetLibrary& assets, std::string_view path,
 
 auto Placeholder(COM::IAssetLibrary& assets, std::string_view path, bool colliders)
     -> std::expected<StudioAsset, ErrorCode> {
-    if (!ValidPath(path)) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!ValidPath(path)) return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(path);
     if (assets.HasPrefab(hash)) return StudioAsset {.hash = hash};
     const auto key = std::string(path) + "#fallback";
@@ -49,7 +49,7 @@ auto Placeholder(COM::IAssetLibrary& assets, std::string_view path, bool collide
 auto UploadStudioAsset(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics,
     const SourceVFS& vfs, const StudioModelData& data, std::string_view virtualPath,
     const StudioAssetOptions& options) -> std::expected<StudioAsset, ErrorCode> {
-    if (!ValidPath(virtualPath)) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!ValidPath(virtualPath)) return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(virtualPath);
     if (assets.HasPrefab(hash)) return StudioAsset {.hash = hash};
 
@@ -58,13 +58,13 @@ auto UploadStudioAsset(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphic
         if (source.positions.empty() || source.indices.empty()) continue;
         if (source.positions.size() > UINT32_MAX || source.indices.size() > UINT32_MAX ||
             source.tangentFrames.size() != source.positions.size() || source.surfaces.size() != source.positions.size() ||
-            source.indices.size() % 3 != 0) return std::unexpected(COM::ComError::InvalidArgument);
+            source.indices.size() % 3 != 0) return std::unexpected(COM::Error::InvalidArgument);
         for (const auto index: source.indices)
-            if (index >= source.positions.size()) return std::unexpected(COM::ComError::InvalidArgument);
+            if (index >= source.positions.size()) return std::unexpected(COM::Error::InvalidArgument);
         if (!std::isfinite(source.boundsMin.x) || !std::isfinite(source.boundsMin.y) || !std::isfinite(source.boundsMin.z) ||
             !std::isfinite(source.boundsMax.x) || !std::isfinite(source.boundsMax.y) || !std::isfinite(source.boundsMax.z) ||
             source.boundsMin.x > source.boundsMax.x || source.boundsMin.y > source.boundsMax.y || source.boundsMin.z > source.boundsMax.z)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
     }
 
     AssetAuthoring::Upload upload {graphics};
@@ -118,7 +118,7 @@ auto LoadStudioAssetFromMemory(COM::IAssetLibrary& assets, COM::IGraphicsDevice&
     const SourceVFS& vfs, std::span<const std::byte> mdl, std::span<const std::byte> vvd,
     std::span<const std::byte> vtx, std::span<const std::byte> phy, std::string_view virtualPath,
     const StudioAssetOptions& options) -> std::expected<StudioAsset, ErrorCode> {
-    if (!ValidPath(virtualPath)) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!ValidPath(virtualPath)) return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(virtualPath);
     if (assets.HasPrefab(hash)) return StudioAsset {.hash = hash};
     const auto parsed = ParseStudioModel(mdl, vvd, vtx, phy, options.import);
@@ -129,7 +129,7 @@ auto LoadStudioAssetFromMemory(COM::IAssetLibrary& assets, COM::IGraphicsDevice&
 auto LoadStudioAsset(COM::IAssetLibrary& assets, COM::IGraphicsDevice& graphics,
     const SourceVFS& vfs, std::string_view virtualPath, const StudioAssetOptions& options)
     -> std::expected<StudioAsset, ErrorCode> {
-    if (!ValidPath(virtualPath)) return std::unexpected(COM::ComError::InvalidArgument);
+    if (!ValidPath(virtualPath)) return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(virtualPath);
     if (assets.HasPrefab(hash)) return StudioAsset {.hash = hash};
     const auto resolved = vfs.ResolveModel(virtualPath);

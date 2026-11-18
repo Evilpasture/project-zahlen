@@ -13,7 +13,7 @@
 // transfer codes live in HTTP.cpp, which also keeps a libcurl upgrade from
 // recompiling the world.
 //
-// HTTPError is for the transfer (no DNS, no connect, timeout, redirect loop,
+// Error is for the transfer (no DNS, no connect, timeout, redirect loop,
 // TLS handshake). An HTTP status is not a transfer failure: 404 and 500 come
 // back as an engaged Response with that statusCode and the server's body.
 // MalformedRequest and InvalidURL refuse a request this client will not put on
@@ -51,7 +51,7 @@ namespace ZHLN::HTTP {
 inline constexpr uint64_t kMaxBodyBytes = 268435456ULL;
 
 // How many redirects a request may follow before libcurl is told to stop,
-// which arrives as HTTPError::TooManyRedirects.
+// which arrives as Error::TooManyRedirects.
 inline constexpr uint32_t kMaxRedirects = 20;
 
 // What stopped a transfer, grouped by the one thing a caller usually wants to
@@ -60,7 +60,7 @@ inline constexpr uint32_t kMaxRedirects = 20;
 // MalformedRequest are the caller's, and fail identically until the request
 // changes; the rest are the client's or the peer's, and repeating the same
 // request repeats them.
-enum class HTTPError : uint8_t {
+enum class Error : uint8_t {
     ClientInitFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize CURL easy session"> {}) = 1,
     ConnectionFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to connect to host"> {}),
     Timeout            ZHLN_ANNOTATION(ZHLN::Description<"HTTP request timed out"> {}),
@@ -112,8 +112,8 @@ struct Header {
 // would send. Leaving followRedirects off is how a caller decides that itself.
 //
 // A URL, method or header carrying CR, LF or NUL is refused before libcurl sees
-// it -- the URL as HTTPError::InvalidURL, the method and the headers as
-// HTTPError::MalformedRequest. That is not pedantry: libcurl sends what it is
+// it -- the URL as Error::InvalidURL, the method and the headers as
+// Error::MalformedRequest. That is not pedantry: libcurl sends what it is
 // handed, so a newline inside a header value is a second header on the wire and
 // a newline inside the method is a second request line -- request smuggling,
 // opened by a string the caller built out of something it did not write itself.
@@ -126,13 +126,13 @@ struct Request {
     uint32_t             timeoutSeconds  = 30;
     bool                 followRedirects = true;
     // When non-null, libcurl polls this each progress tick and aborts with
-    // CURLE_ABORTED_BY_CALLBACK (mapped to HTTPError::TransferFailed) as soon
+    // CURLE_ABORTED_BY_CALLBACK (mapped to Error::TransferFailed) as soon
     // as it is true. The pointed-to atomic must outlive the Fetch call.
     const ZHLN::Atomic<bool>* cancelSignal = nullptr;
 };
 
 // What came back. Engaged whenever the transfer completed, so statusCode is
-// the thing to branch on: 404 is a Response, not an HTTPError.
+// the thing to branch on: 404 is a Response, not an Error.
 struct Response {
     int32_t              statusCode = 0;
     std::vector<Header>  headers;
@@ -164,7 +164,7 @@ struct Response {
 };
 
 // Runs @p request to completion on the calling thread and returns the
-// response, or the HTTPError that stopped the transfer. Blocking: an engine
+// response, or the Error that stopped the transfer. Blocking: an engine
 // that must not stall a frame calls this from a worker and keeps the
 // std::expected, which is plain data and moves across threads freely.
 [[nodiscard]] auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode>;

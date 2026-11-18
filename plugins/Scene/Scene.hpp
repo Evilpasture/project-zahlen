@@ -37,7 +37,7 @@ struct Transform {
     ZHLN::FVec3 scale    = {1.0f, 1.0f, 1.0f};
 };
 
-struct SceneMaterial {
+struct Material {
     ZHLN::FVec4 baseColor = {0.8f, 0.4f, 0.2f, 1.0f};
     float       roughness = 0.5f;
     float       metallic  = 0.0f;
@@ -49,16 +49,16 @@ struct SceneMaterial {
 // Host-owned POD provenance for values a prefab root's renderer components
 // cannot represent. Stored through IEntities' consumer-component path, not Core.
 struct AuthoringComponent {
-    SceneMaterial        material;
+    Material        material;
     BodyKind             body           = BodyKind::None;
     bool                 startsAsleep   = false;
     DrawFlags            drawFlags      = DrawFlags::None;
     bool                 hasAmbientCube = false;
     std::array<FVec4, 6> ambientCube {};
 };
-static_assert(COM::ComComponent<AuthoringComponent>);
+static_assert(COM::Component<AuthoringComponent>);
 
-struct SceneEntity {
+struct Entity {
     std::string name;
     ShapeKind   shape = ShapeKind::Box;
 
@@ -74,7 +74,7 @@ struct SceneEntity {
     // not simulate until a force or an active body disturbs it. Mirrors the
     // Source prop_physics "Start Asleep" behaviour.
     bool          startsAsleep = false;
-    SceneMaterial material;
+    Material material;
     // Draw layer for the spawned mesh parts (see DrawFlags::Background): the
     // BSP scene routes skybox entities here so they composite behind the world.
     DrawFlags drawFlags = DrawFlags::None;
@@ -84,7 +84,7 @@ struct SceneEntity {
     std::array<ZHLN::FVec4, 6> ambientCube {};
 };
 
-// SceneLight::baked ownership classes. A map compile can bake a light in two
+// Light::baked ownership classes. A map compile can bake a light in two
 // different ways, and they do not own the same terms:
 //
 //   kBakeOwnsNone     - a live light. Nothing is withheld.
@@ -103,7 +103,7 @@ struct SceneEntity {
 // The distinction matters at close range: a proxy sits centimetres off its own
 // mounting surface, which is exactly where a punctual GGX lobe is largest. Left
 // live, every lamp in a map paints a clipped highlight on the floor beside it.
-struct SceneLight {
+struct Light {
     std::string name;
     std::string type        = "Point";
     ZHLN::FVec3 position    = {0.0f, 3.0f, 0.0f};
@@ -128,20 +128,20 @@ struct SceneLight {
     // kBakeOwnsAll above). A baked light still runs live -- props, entities and
     // skybox scenery have no lightmap and would go dark without it -- but the
     // deferred pass withholds what the bake already holds, so a compiled
-    // fixture is not lit twice. See SceneLight::pinned for the other authoring
+    // fixture is not lit twice. See Light::pinned for the other authoring
     // flag: this one is about who owns the shading, that one about which lights
     // survive the renderer's budget.
     uint32_t baked = 0;
 };
 
-struct SceneCamera {
+struct Camera {
     ZHLN::FVec3 position = {0.0f, 2.0f, 8.0f};
     float       yaw      = -90.0f;
     float       pitch    = 0.0f;
     float       fov      = 60.0f;
 };
 
-struct SceneEnvironment {
+struct Environment {
     float       ambientExposure = 25.0f;
     float       giIntensity     = 1.2f;
     ZHLN::FVec3 skyZenith       = {0.003f, 0.008f, 0.020f};
@@ -167,20 +167,20 @@ struct SceneEnvironment {
     ZHLN::FVec3 colorFilter   = {1.0f, 1.0f, 1.0f};
 };
 
-struct Scene {
+struct Document {
     std::string              name = "untitled";
-    SceneCamera              camera;
-    SceneEnvironment         environment;
-    std::vector<SceneEntity> entities;
-    std::vector<SceneLight>  lights;
+    Camera              camera;
+    Environment         environment;
+    std::vector<Entity> entities;
+    std::vector<Light>  lights;
 };
 
 struct Instance {
-    std::vector<Entity> entities;
-    std::vector<Entity> lights;
+    std::vector<ZHLN::Entity> entities;
+    std::vector<ZHLN::Entity> lights;
 };
 
-enum class SceneError : uint8_t {
+enum class Error : uint8_t {
     MaterialCreationFailed = 1,
     PrefabNotFound,
     UnknownLightType,
@@ -192,29 +192,29 @@ struct InstantiateOptions {
     bool buildBLAS = true;
 };
 
-[[nodiscard]] auto Validate(const COM::IAssetLibrary& assets, const Scene& description) -> std::expected<void, ErrorCode>;
+[[nodiscard]] auto Validate(const COM::IAssetLibrary& assets, const Document& description) -> std::expected<void, ErrorCode>;
 
 // Assets must already be decoded/uploaded by the host (glTF/BSP/etc.).
 // This operation never reads source files or installs importer callbacks.
-[[nodiscard]] auto Instantiate(COM::IEngine& engine, const Scene& description, InstantiateOptions options = {}) -> std::expected<Instance, ErrorCode>;
+[[nodiscard]] auto Instantiate(COM::IEngine& engine, const Document& description, InstantiateOptions options = {}) -> std::expected<Instance, ErrorCode>;
 [[nodiscard]] auto Instantiate(
     COM::IEntities&       entities,
     COM::IAssetLibrary&   assets,
     COM::IGraphicsDevice& graphics,
     COM::ISimulation&     simulation,
-    const Scene&          description,
+    const Document&          description,
     InstantiateOptions    options = {}
 ) -> std::expected<Instance, ErrorCode>;
 
-[[nodiscard]] auto Extract(COM::IEngine& engine) -> Scene;
+[[nodiscard]] auto Extract(COM::IEngine& engine) -> Document;
 
 struct MaterialLookup {
     const void* userdata                                                 = nullptr;
-    std::optional<Material> (*find)(const void* userdata, MaterialID id) = nullptr;
+    std::optional<ZHLN::Material> (*find)(const void* userdata, MaterialID id) = nullptr;
 };
 
 // Snapshot at a host phase boundary. Returned document owns all its storage.
-[[nodiscard]] auto Extract(const Camera& camera, const GraphicsSettings& gfx, const COM::IEntities& entities, MaterialLookup materials = {}) -> Scene;
+[[nodiscard]] auto Extract(const ZHLN::Camera& camera, const GraphicsSettings& gfx, const COM::IEntities& entities, MaterialLookup materials = {}) -> Document;
 
 } // namespace Scene
 } // namespace ZHLN

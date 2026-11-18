@@ -9,20 +9,20 @@
 //
 // JPH::Float2/3/4 are plain structs to C++ and coordinates to a reader, so
 // this header opts them into array form: `position = [x, y, z]` instead of a
-// `[position.x]` table. That is what lets a core ZHLN::Scene::Scene -- whose
+// `[position.x]` table. That is what lets a core ZHLN::Scene::Document -- whose
 // fields are Jolt storage types -- read and write as a document:
 //
 //     #include <Scene/Scene.hpp>
 //     #include <toml/TOML.hpp>
 //     #include <toml/SceneTOML.hpp>
 //
-//     const auto scene = ReflectTOML::Parse<ZHLN::Scene::Scene>(text);
+//     const auto scene = ReflectTOML::Parse<ZHLN::Scene::Document>(text);
 //     const auto built = ZHLN::Scene::Instantiate(engine, *scene);
 //
 // The bindings live here, not in toml/TOML.hpp (that header stays free of any
 // dependency on Jolt) and not in Scene/Scene.hpp (the consumer scene model stays
 // free of any dependency on the document format), and they must be visible
-// wherever ReflectTOML::Parse / SerializeTOML is instantiated over one of
+// wherever ReflectTOML::Parse / Serialize is instantiated over one of
 // these vector types, or the field serialises as a table of members instead
 // of `[x, y, z]`.
 //
@@ -50,12 +50,12 @@ namespace ZHLN::ReflectTOML {
 // quietly change shape -- `color = [r, g, b, a]` becoming a table of x/y/z/w --
 // as soon as a field was spelled in a value type instead of a Jolt one.
 template <>
-struct TOMLVector<ZHLN::FVec2>: std::true_type {};
+struct Vector<ZHLN::FVec2>: std::true_type {};
 template <>
-struct TOMLVector<ZHLN::FVec3>: std::true_type {};
+struct Vector<ZHLN::FVec3>: std::true_type {};
 template <>
-struct TOMLVector<ZHLN::FVec4> : std::true_type {};
+struct Vector<ZHLN::FVec4> : std::true_type {};
 template <>
-struct TOMLVector<ZHLN::DVec3> : std::true_type {};
+struct Vector<ZHLN::DVec3> : std::true_type {};
 
 } // namespace ZHLN::ReflectTOML

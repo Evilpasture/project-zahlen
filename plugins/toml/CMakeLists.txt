@@ -8,7 +8,7 @@
 # here is this directory's translation unit.
 #
 #   TOML.hpp       reflection-driven TOML read and write
-#   SceneTOML.hpp  Jolt vector bindings; what makes a core ZHLN::Scene::Scene a
+#   SceneTOML.hpp  Jolt vector bindings; what makes a core ZHLN::Scene::Document a
 #                  document. The world editor's Ctrl+S path uses it directly
 #                  (utils/editor/main.cpp); utils/scene/SceneDocument.cpp reads it.
 #   UITOML.hpp     the same for GUI::UINode (app/UIEditor.cpp, ZHLN_HAS_UI_TOML).

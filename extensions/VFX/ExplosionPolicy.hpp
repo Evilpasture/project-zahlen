@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 // Private host policy. CPU state stays outside Core and outside ECS components.
-#include "ExplosionHost.hpp"
+#include "Explosion.hpp"
 #include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Math3D.hpp>
@@ -13,7 +13,7 @@
 #include <random>
 #include <span>
 #include <vector>
-namespace ZHLN::ExplosionHost {
+namespace ZHLN::Explosion {
 // ============================================================================
 // Modernized Fast SIMD & Noise Utilities
 // ============================================================================
@@ -71,7 +71,7 @@ struct ShockwaveParticle {
     bool  isGround = false;
 };
 
-struct ExplosionParticle {
+struct Particle {
     FVec3 position {};
     FVec3 velocity {};
     float life      = 0.0f;
@@ -84,15 +84,15 @@ struct ExplosionParticle {
     FVec3 colorEnd {};
 };
 
-struct ExplosionComponent {
+struct Component {
     Kind  type     = Kind::ArtilleryMortar;
     FVec3 origin   = FVec3::Zero();
     float scale    = 1.0f;
     float age      = 0.0f;
     float duration = 3.5f;
 
-    std::vector<ExplosionParticle> fireball;
-    std::vector<ExplosionParticle> soilSmoke;
+    std::vector<Particle> fireball;
+    std::vector<Particle> soilSmoke;
     std::vector<ShockwaveParticle> shockwaves;
 
     Entity debrisEntity  = Entity::Null();
@@ -335,7 +335,7 @@ struct Sink {
     }
 };
 struct Policy {
-    static void InitArtilleryParticles(ExplosionComponent& exp, std::mt19937& gen) {
+    static void InitArtilleryParticles(Component& exp, std::mt19937& gen) {
         exp.fireball.resize(78);
         for (size_t i = 0; i < exp.fireball.size(); ++i) {
             bool  isRing = (i > 52);
@@ -416,7 +416,7 @@ struct Policy {
         };
     }
 
-    static void InitStandardFireballParticles(ExplosionComponent& exp, std::mt19937& gen) {
+    static void InitStandardFireballParticles(Component& exp, std::mt19937& gen) {
         exp.fireball.resize(120);
         for (auto& p: exp.fireball) {
             FVec3 dir = RandomInUnitSphere(gen);
@@ -457,7 +457,7 @@ struct Policy {
         }
     }
 
-    static void UpdateGroup(std::span<ExplosionParticle> group, float dt, bool isSmoke) noexcept {
+    static void UpdateGroup(std::span<Particle> group, float dt, bool isSmoke) noexcept {
         for (auto& p: group) {
             p.life += dt;
             if (p.life > p.maxLife) {
@@ -474,7 +474,7 @@ struct Policy {
         }
     }
 
-    void RenderBatchGPU(Sink& scene, ExplosionComponent& exp) {
+    void RenderBatchGPU(Sink& scene, Component& exp) {
         // The authored simulation produces world-space quads. Sink copies the
         // batches through IDebugDraw; the renderer owns all GPU storage.
         thread_local std::vector<BillboardQuad> t_quads;
@@ -597,4 +597,4 @@ struct Policy {
     TextureID s_CraterTexID       = TextureID::Invalid;
     TextureID s_CraterNormalTexID = TextureID::Invalid;
 };
-} // namespace ZHLN::ExplosionHost
+} // namespace ZHLN::Explosion

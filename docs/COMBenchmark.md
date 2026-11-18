@@ -52,7 +52,7 @@ initialization. ZHLN_BENCH_ENTITIES and ZHLN_BENCH_TICKS are unchanged.
 
 ## Host-owned viewer
 
-BenchmarkViewer accepts COM::IEngine and draws panels into the host's active
+Viewer accepts COM::IEngine and draws panels into the host's active
 GUI::Frame. The host owns context, atlas lifetime, input, BeginFrame, End and
 SubmitUI. No Run/UI callback inversion or hidden UI compositor is installed.
 SetFontAtlas borrows a host-owned atlas until replaced/destruction, or null uses
@@ -84,7 +84,7 @@ through COM; the transitional native benchmark viewer target has been removed.
 - Actual headless workload and bounded viewer CLIs run on the existing VM.
 - Installed C++26 external find_package(ZahlenBenchmarkViewer) consumer links and
   runs the real Benchmark and constructs the viewer. Packages: Zahlen::Benchmark,
-  Zahlen::BenchmarkViewer and supporting Zahlen::Widgets; Engine exports factory.
+  Zahlen::Viewer and supporting Zahlen::Widgets; Engine exports factory.
   Native viewer header is not installed.
 
 Console / ScriptECSBridge and Option B engine-owned Animator/CharacterMotor are

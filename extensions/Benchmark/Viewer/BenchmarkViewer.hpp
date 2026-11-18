@@ -17,7 +17,7 @@
 
 namespace ZHLN::Bench {
 
-class ZHLN_STATIC_API BenchmarkViewer {
+class ZHLN_STATIC_API Viewer {
   public:
     // The simulated step, and the cap on how many of them one frame may run.
     // Eight substeps is a frame budget of 133 ms of simulation: past that the
@@ -26,11 +26,11 @@ class ZHLN_STATIC_API BenchmarkViewer {
     static constexpr float kFixedStep        = 1.0f / 60.0f;
     static constexpr int   kMaxTicksPerFrame = 8;
 
-    BenchmarkViewer();
-    ~BenchmarkViewer();
+    Viewer();
+    ~Viewer();
 
-    BenchmarkViewer(const BenchmarkViewer&)                    = delete;
-    auto operator=(const BenchmarkViewer&) -> BenchmarkViewer& = delete;
+    Viewer(const Viewer&)                    = delete;
+    auto operator=(const Viewer&) -> Viewer& = delete;
 
     // Binds the panel to an Engine the caller owns: the benchmark's World is
     // created here, and the Engine is asked for exactly one thing -- whether

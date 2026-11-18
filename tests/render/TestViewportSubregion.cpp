@@ -126,7 +126,7 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::COM::IEngine& engine) {
         // (extensions/Camera); removing it is inert when no sibling suite
         // installed the rig, and when the rig is present its frame step
         // re-seeds the boot default -- a Null target that takes no drive anyway.
-        reg.Detach<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
+        reg.Detach<ZHLN::CameraRig::TargetComponent>(camEnt);
     }
     // AA off so the static scene is actually static.
     (void)engine.Graphics()->PatchSettings([](auto& gfx) {

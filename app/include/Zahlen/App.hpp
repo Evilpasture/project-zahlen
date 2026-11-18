@@ -23,10 +23,6 @@
 
 namespace ZHLN {
 
-// Compatibility hook; the base Application installs no optional modules.
-// Compose modules explicitly with Install().
-inline void InstallApplicationDefaults(COM::IEngine&) noexcept {}
-
 // A layer may implement Start, Tick, UI, BeforeRender and/or Stop. Start runs after
 // scene creation; Tick runs after event/input pumping; UI runs in the host
 // loop before update and Engine::Tick, never in a core frame step. Hooks run
@@ -50,13 +46,6 @@ concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine)
 class ZHLN_API Application {
   public:
     explicit Application(EngineConfig config = {}): _config(std::move(config)) {}
-
-    // Retained for source compatibility. The base defaults are empty; use
-    // Install() to compose modules before the first frame executes.
-    auto WithDefaultModules(bool enabled = true) noexcept -> Application& {
-        _defaultModules = enabled;
-        return *this;
-    }
 
     auto Install(std::function<void(COM::IEngine&)> installer) -> Application& {
         if (installer) {
@@ -253,7 +242,6 @@ class ZHLN_API Application {
     std::vector<std::function<void(COM::IEngine&)>>       _installers;
     ConfigCli                                        _cli;
     std::vector<LayerSlot>                          _layers;
-    bool                                            _defaultModules = true;
 };
 
 [[nodiscard]] inline auto App(EngineConfig config = {}) -> Application {

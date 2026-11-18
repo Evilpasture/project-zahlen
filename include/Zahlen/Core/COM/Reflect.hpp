@@ -31,7 +31,7 @@ namespace ZHLN::COM {
 struct ImplementationTag {};
 
 template <typename T>
-concept ComInterface = std::is_base_of_v<IObject, T> &&
+concept Interface = std::is_base_of_v<IObject, T> &&
                        !std::is_same_v<T, IObject> &&
                        !std::is_base_of_v<ImplementationTag, T>;
 
@@ -41,7 +41,7 @@ concept ComInterface = std::is_base_of_v<IObject, T> &&
 template <typename T, typename F>
 constexpr void ForEachInterfaceBase(F&& f) {
     Reflect::ForEachBase<T>([&]<typename Base>() -> auto {
-        if constexpr (ComInterface<Base>) {
+        if constexpr (Interface<Base>) {
             f.template operator()<Base>();
         }
         if constexpr (!std::is_same_v<Base, IObject> && std::is_class_v<Base>) {
@@ -59,7 +59,7 @@ constexpr void ForEachInterfaceBase(F&& f) {
 // rejected: the boundary cannot express how long the referent stays alive,
 // which is exactly what refcounting a pointer is for.
 template <typename Return>
-[[nodiscard]] consteval bool ComReturnCompliant() noexcept {
+[[nodiscard]] consteval bool ReturnCompliant() noexcept {
     if constexpr (std::is_void_v<Return> || std::is_pointer_v<Return>) {
         return true;
     } else {
@@ -74,7 +74,7 @@ template <typename Return>
 // std::string is not trivially copyable, so its layout and its allocator
 // would have to match on both sides.
 template <typename Parameter>
-[[nodiscard]] consteval bool ComParameterCompliant() noexcept {
+[[nodiscard]] consteval bool ParameterCompliant() noexcept {
     using Bare = std::remove_cvref_t<Parameter>;
     if constexpr (std::is_pointer_v<Bare>) {
         return true;
@@ -84,24 +84,24 @@ template <typename Parameter>
 }
 
 template <typename ParameterPack>
-struct ComParameterAudit;
+struct ParameterAudit;
 
 template <typename... Parameters>
-struct ComParameterAudit<std::tuple<Parameters...>> {
-    static constexpr bool kCompliant = (... && ComParameterCompliant<Parameters>());
+struct ParameterAudit<std::tuple<Parameters...>> {
+    static constexpr bool kCompliant = (... && ParameterCompliant<Parameters>());
 };
 
 // A method that takes std::string by value is noexcept and returns void, so
 // auditing the return type alone would pass it. Parameters are half the
 // signature and half the ABI.
 template <typename Signature>
-[[nodiscard]] consteval bool ComMethodCompliant() noexcept {
+[[nodiscard]] consteval bool MethodCompliant() noexcept {
     if constexpr (!Signature::IsNoexcept) {
         return false;
-    } else if constexpr (!ComReturnCompliant<typename Signature::ReturnType>()) {
+    } else if constexpr (!ReturnCompliant<typename Signature::ReturnType>()) {
         return false;
     } else {
-        return ComParameterAudit<typename Signature::ParameterTypes>::kCompliant;
+        return ParameterAudit<typename Signature::ParameterTypes>::kCompliant;
     }
 }
 
@@ -124,26 +124,26 @@ template <typename Signature>
 // be *defined* here. A non-virtual member left to be defined inside the shared
 // library would be a cross-boundary symbol that no longer passes under the
 // audit's eye.
-template <typename Interface>
-[[nodiscard]] consteval bool ComInterfaceLayoutCompliant() noexcept {
-    if constexpr (std::has_virtual_destructor_v<Interface>) {
+template <typename Iface>
+[[nodiscard]] consteval bool InterfaceLayoutCompliant() noexcept {
+    if constexpr (std::has_virtual_destructor_v<Iface>) {
         return false;
     }
 
     bool compliant = true;
-    Reflect::ForEachVirtualMethodSignature<Interface>([&]<typename Signature>() -> auto {
-        if constexpr (!ComMethodCompliant<Signature>()) {
+    Reflect::ForEachVirtualMethodSignature<Iface>([&]<typename Signature>() -> auto {
+        if constexpr (!MethodCompliant<Signature>()) {
             compliant = false;
         }
     });
     return compliant;
 }
 
-template <typename Interface>
+template <typename Iface>
 [[nodiscard]] consteval bool AuditInterfaceABI() noexcept {
-    static_assert(std::is_base_of_v<IObject, Interface>, "A COM interface must derive from IObject.");
-    static_assert(!std::has_virtual_destructor_v<Interface>, "A COM interface must not have a virtual destructor.");
-    return ComInterfaceLayoutCompliant<Interface>();
+    static_assert(std::is_base_of_v<IObject, Iface>, "A COM interface must derive from IObject.");
+    static_assert(!std::has_virtual_destructor_v<Iface>, "A COM interface must not have a virtual destructor.");
+    return InterfaceLayoutCompliant<Iface>();
 }
 
 template <typename Derived, typename... Interfaces>

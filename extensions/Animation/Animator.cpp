@@ -76,7 +76,7 @@ bool Speed(COM::IEntities& entities, Entity entity, float multiplier) {
     entities.Get<Animation::AnimatorControlComponent>(entity)->playbackSpeed = multiplier;
     return true;
 }
-bool SetIK(COM::IEntities& entities, Entity entity, const IK::TwoBoneIKComponent& ik) {
+bool SetIK(COM::IEntities& entities, Entity entity, const IK::TwoBoneComponent& ik) {
     if (EnsureAnimator(entities, entity) == nullptr || ik.chainCount > ik.chains.size())
         return false;
     for (const auto& chain: ik.ActiveChains()) {
@@ -91,6 +91,6 @@ bool SetIK(COM::IEntities& entities, Entity entity, const IK::TwoBoneIKComponent
 }
 void Detach(COM::IEntities& entities, Entity entity) {
     entities.Detach<Animation::AnimatorControlComponent>(entity);
-    entities.Detach<IK::TwoBoneIKComponent>(entity);
+    entities.Detach<IK::TwoBoneComponent>(entity);
 }
 } // namespace ZHLN::Animator

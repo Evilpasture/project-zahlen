@@ -22,7 +22,7 @@ class ScriptComponentAccess {
     }
     template <class T>
     void Register(bool requirePublished = false, bool writable = !SceneResources::ReadOnlyReflective<T>) {
-        if constexpr (COM::ComComponent<T>) {
+        if constexpr (COM::Component<T>) {
             constexpr auto canonical = Reflect::CanonicalTypeName<T>();
             if (requirePublished && !m_entities->IsEngineComponent(canonical))
                 return;
@@ -68,11 +68,11 @@ class ScriptComponentAccess {
             }
         }
     }
-    template <COM::ComComponent T>
+    template <COM::Component T>
     auto EntitiesWith() const {
         return m_entities->EntitiesWith<T>();
     }
-    template <COM::ComComponent T>
+    template <COM::Component T>
     auto Read(Entity e) const -> const T* {
         return m_entities->Get<T>(e);
     }

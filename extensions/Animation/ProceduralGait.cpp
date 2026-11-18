@@ -642,7 +642,7 @@ void SolveLegGrounding(
             authoredPole = fallbackPole - targetAxis * Dot(fallbackPole, targetAxis);
         }
         const FVec3 pole = SafeNormalized(authoredPole, FVec3::UnitZ());
-        const auto      ik   = IK::SolveTwoBoneIK({
+        const auto      ik   = IK::SolveTwoBone({
             .upperPosition  = thighPosition,
             .targetPosition = target,
             .poleVector     = pole,
@@ -659,7 +659,7 @@ void SolveLegGrounding(
         // second analytic solve keeps both lengths exact at every IK weight.
         const float     poseWeight  = SmoothStep(solveWeight);
         const FVec3 posedTarget = footPosition + (ik.endPosition - footPosition) * poseWeight;
-        const auto      posedIK     = IK::SolveTwoBoneIK({
+        const auto      posedIK     = IK::SolveTwoBone({
             .upperPosition  = thighPosition,
             .targetPosition = posedTarget,
             .poleVector     = pole,

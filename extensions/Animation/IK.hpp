@@ -23,13 +23,13 @@ namespace COM {
 struct IEntities;
 }
 namespace Animation {
-class AnimationContext;
+class Context;
 }
 namespace IK {
 
-ZHLN_STATIC_API void ApplyTwoBoneIK(const COM::IEntities& entities, Animation::AnimationContext& anim);
+ZHLN_STATIC_API void ApplyTwoBone(const COM::IEntities& entities, Animation::Context& anim);
 
-struct TwoBoneIKSolverInput {
+struct TwoBoneSolverInput {
     FVec3 upperPosition;
     FVec3 targetPosition;
     FVec3 poleVector; // Direction hint for middle joint (elbow/knee)
@@ -38,7 +38,7 @@ struct TwoBoneIKSolverInput {
     float maxExtension = 0.9999f; // < 1 keeps the middle joint from locking straight.
 };
 
-struct TwoBoneIKSolverOutput {
+struct TwoBoneSolverOutput {
     FVec3 midPosition;
     FVec3 endPosition;
     FVec3 upperDirection;
@@ -53,8 +53,8 @@ struct TwoBoneIKSolverOutput {
  * @brief Evaluates an analytic 2-Bone IK chain (e.g. Upper Arm -> Forearm -> Hand).
  * Uses the Law of Cosines to solve middle joint placement in O(1) time.
  */
-inline TwoBoneIKSolverOutput SolveTwoBoneIK(const TwoBoneIKSolverInput& input) noexcept {
-    TwoBoneIKSolverOutput out;
+inline TwoBoneSolverOutput SolveTwoBone(const TwoBoneSolverInput& input) noexcept {
+    TwoBoneSolverOutput out;
 
     const FVec3 axis              = input.targetPosition - input.upperPosition;
     const float requestedDistance = axis.Length();

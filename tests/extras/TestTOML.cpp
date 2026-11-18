@@ -13,7 +13,7 @@
 // just another reflected struct. Note the direction of that dependency: the
 // core scene model (Scene/Scene.hpp) knows nothing about TOML, and it is
 // plugins/toml/SceneTOML.hpp's Jolt vector bindings that make a
-// ZHLN::Scene::Scene a document.
+// ZHLN::Scene::Document a document.
 //
 // TOML is an optional layer, so this suite lives here rather than in
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
@@ -103,7 +103,7 @@ struct TOMLTestSuite {
                 .route    = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
             };
 
-            const std::string text = ZHLN::ReflectTOML::SerializeTOML(config);
+            const std::string text = ZHLN::ReflectTOML::Serialize(config);
             ZHLN::Println("    [INFO] serialised document:\n{}", text);
 
             const size_t firstTable  = text.find("[window]");
@@ -152,7 +152,7 @@ struct TOMLTestSuite {
                 .route      = {{.label = "a", .at = {1.0f, 2.0f, 3.0f}}}
             };
 
-            const std::string text   = ZHLN::ReflectTOML::SerializeTOML(original);
+            const std::string text   = ZHLN::ReflectTOML::Serialize(original);
             const auto        parsed = ZHLN::ReflectTOML::Parse<Config>(text);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
@@ -175,7 +175,7 @@ struct TOMLTestSuite {
 
             // Text -> struct -> text is stable, which is the property that
             // makes a serialised scene reviewable in a diff.
-            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*parsed), text);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::Serialize(*parsed), text);
             return {};
         }
 
@@ -356,7 +356,7 @@ position = [2.0, 4.0, 2.0]
 intensity = 250.0
 )";
 
-            const auto scene = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(kScene);
+            const auto scene = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>(kScene);
             if (!ZHLN::Test::ExpectTrue(scene.has_value())) {
                 return {};
             }
@@ -369,11 +369,11 @@ intensity = 250.0
 
             // A Jolt vector is a struct in C++ and `[x, y, z]` in the
             // document -- the emitted text has to keep saying so.
-            ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::SerializeTOML(*scene).contains("position = [0.0, 2.0, 12.0]"));
+            ZHLN::Test::ExpectTrue(ZHLN::ReflectTOML::Serialize(*scene).contains("position = [0.0, 2.0, 12.0]"));
             // ... and only in that form.
-            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
+            ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>("[camera.position]\nx = 1.0\n").has_value());
             // A FVec3 accepts the integers a person types.
-            const auto integral = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
+            const auto integral = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>("[camera]\nposition = [0, 2, 12]\n");
             ZHLN::Test::ExpectTrue(integral.has_value()) && ZHLN::Test::ExpectEq(integral->camera.position.z, 12.0f);
 
             ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2});
@@ -400,13 +400,13 @@ intensity = 250.0
                 ZHLN::Test::ExpectEq(scene->lights[0].type, "Point");
             }
 
-            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*scene);
-            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
+            const std::string emitted  = ZHLN::ReflectTOML::Serialize(*scene);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted scene:\n{}", emitted);
                 return {};
             }
-            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::Serialize(*reparsed), emitted);
 
             return {};
         }
@@ -415,7 +415,7 @@ intensity = 250.0
          * The engine's own fallback scene is expressible as a document.
          *
          * DefaultPreset no longer parses one at runtime -- it builds a
-         * ZHLN::Scene::Scene in C++ and calls Scene::Instantiate(), so the
+         * ZHLN::Scene::Document in C++ and calls Scene::Instantiate(), so the
          * fail-safe path has no text parser on it. What is still worth pinning
          * down is that the two halves have not drifted: the compiled-in
          * description has to survive text -> struct -> text unchanged, or a
@@ -427,28 +427,28 @@ intensity = 250.0
          * the Instance by position.
          */
         std::expected<void, ZHLN::ErrorCode> the_fallback_scene_description_round_trips() {
-            ZHLN::Scene::Scene scene;
+            ZHLN::Scene::Document scene;
             scene.name        = "Zahlen Fallback";
-            scene.camera      = ZHLN::Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
-            scene.environment = ZHLN::Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
+            scene.camera      = ZHLN::Scene::Camera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
+            scene.environment = ZHLN::Scene::Environment {.enableSSR = false, .enableRTR = true};
 
-            ZHLN::Scene::SceneEntity ground;
+            ZHLN::Scene::Entity ground;
             ground.name     = "FallbackGround";
             ground.shape    = ZHLN::Scene::ShapeKind::Plane;
             ground.extent   = 35.0f;
-            ground.material = ZHLN::Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
+            ground.material = ZHLN::Scene::Material {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
 
-            ZHLN::Scene::SceneEntity emblem;
+            ZHLN::Scene::Entity emblem;
             emblem.name        = "FallbackEmblem";
             emblem.shape       = ZHLN::Scene::ShapeKind::Box;
             emblem.halfExtents = {1.2f, 1.2f, 1.2f};
             emblem.transform   = ZHLN::Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
-            emblem.material    = ZHLN::Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
+            emblem.material    = ZHLN::Scene::Material {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
 
             scene.entities.push_back(std::move(ground));
             scene.entities.push_back(std::move(emblem));
 
-            ZHLN::Scene::SceneLight sun;
+            ZHLN::Scene::Light sun;
             sun.name      = "FallbackSun";
             sun.type      = "Sun";
             sun.position  = {12.0f, 25.0f, 12.0f};
@@ -459,7 +459,7 @@ intensity = 250.0
             sun.radius    = 0.0f;
             sun.range     = 0.0f;
 
-            ZHLN::Scene::SceneLight orbit;
+            ZHLN::Scene::Light orbit;
             orbit.name      = "FallbackPointLight";
             orbit.type      = "Point";
             orbit.position  = {0.0f, 2.5f, 0.0f};
@@ -482,7 +482,7 @@ intensity = 250.0
             ZHLN::Test::ExpectTrue(scene.entities[1].shape == ZHLN::Scene::ShapeKind::Box);
             ZHLN::Test::ExpectEq(scene.lights[1].name, std::string {"FallbackPointLight"});
 
-            // The sun is oriented, which is why SceneLight grew a rotation:
+            // The sun is oriented, which is why Light grew a rotation:
             // LightingSystem packs a Sun's direction from the world matrix.
             ZHLN::Test::ExpectEq(scene.lights[0].type, std::string {"Sun"});
             ZHLN::Test::ExpectEq(scene.lights[0].rotation.x, 50.0f);
@@ -495,12 +495,12 @@ intensity = 250.0
             // fallback would restyle the frame on its way past.
             ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
             ZHLN::Test::ExpectTrue(!scene.environment.enableSSR);
-            ZHLN::Test::ExpectEq(scene.environment.ambientExposure, ZHLN::Scene::SceneEnvironment {}.ambientExposure);
-            ZHLN::Test::ExpectEq(scene.environment.giIntensity, ZHLN::Scene::SceneEnvironment {}.giIntensity);
+            ZHLN::Test::ExpectEq(scene.environment.ambientExposure, ZHLN::Scene::Environment {}.ambientExposure);
+            ZHLN::Test::ExpectEq(scene.environment.giIntensity, ZHLN::Scene::Environment {}.giIntensity);
 
             // And the document layer can carry all of it without loss.
-            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
-            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
+            const std::string emitted  = ZHLN::ReflectTOML::Serialize(scene);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted fallback scene:\n{}", emitted);
                 return {};
@@ -509,7 +509,7 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(reparsed->entities[1].name, std::string {"FallbackEmblem"});
             ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
-            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::Serialize(*reparsed), emitted);
 
             return {};
         }
@@ -557,13 +557,13 @@ onClickAction = "editor.save_scene"
                 ZHLN::Test::ExpectEq(parsed->children[1].onClickAction, std::string {"editor.save_scene"});
             }
 
-            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*parsed);
+            const std::string emitted  = ZHLN::ReflectTOML::Serialize(*parsed);
             const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::GUI::UINode>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted ui tree:\n{}", emitted);
                 return {};
             }
-            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::Serialize(*reparsed), emitted);
             ZHLN::Test::ExpectTrue(emitted.contains("kind = \"Column\""));
             ZHLN::Test::ExpectTrue(emitted.contains("color = [0.1, 0.1, 0.12, 1.0]"));
             ZHLN::Test::ExpectTrue(emitted.contains("onClickAction = \"editor.save_scene\""));
@@ -747,14 +747,14 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectLt(std::abs(sun.rotation.x - 50.0f), 1e-3f);
 
             // And the document carries all of it without loss.
-            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
-            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Scene>(emitted);
+            const std::string emitted  = ZHLN::ReflectTOML::Serialize(scene);
+            const auto        reparsed = ZHLN::ReflectTOML::Parse<ZHLN::Scene::Document>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] extracted scene:\n{}", emitted);
                 return {};
             }
 
-            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::Serialize(*reparsed), emitted);
             ZHLN::Test::ExpectEq(reparsed->entities[0].halfExtents.z, 2.5f);
             ZHLN::Test::ExpectEq(reparsed->entities[0].material.baseColor.x, 0.1f);
             ZHLN::Test::ExpectEq(reparsed->entities[0].material.emissive.x, 80.0f);

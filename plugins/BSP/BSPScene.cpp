@@ -3,7 +3,7 @@
 
 // plugins/BSP/BSPScene.cpp
 //
-// Entity lump -> ZHLN::Scene::Scene. One world prefab entity carries the map
+// Entity lump -> ZHLN::Scene::Document. One world prefab entity carries the map
 // geometry (source = the .bsp virtual path), lights become SceneLights, and
 // point entities with models become prefab entities. No spawning happens
 // here; Scene::Instantiate consumes the description.
@@ -29,7 +29,7 @@ namespace {
 // Source's brightness ladder: `_ambient`'s fourth component runs 0-255 over
 // the same 30-units-per-255 scale `_light` uses, so both normalise identically.
 constexpr float kAmbientBrightnessNormalisation = 30.0f;
-// SceneEnvironment::ambientExposure, the divisor the renderer applies to an
+// Environment::ambientExposure, the divisor the renderer applies to an
 // environment-derived irradiance before it becomes sky radiance.
 constexpr float kAmbientExposure = 25.0f;
 
@@ -138,7 +138,7 @@ auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOp
 // propAmbientCubeScale, which carries the same kSourceLuxelToEngineRadiance
 // normalization the atlas gets -- a prop and the wall behind it therefore stay
 // on one radiance scale. See ImportOptions::propAmbientCubeScale.
-static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::SceneEntity& entity) {
+static void ApplyAmbientCube(const Map& map, const ImportOptions& options, std::array<float, 3> sourcePos, Scene::Entity& entity) {
     const auto cubeOpt = SampleLeafAmbientCube(map, sourcePos);
     if (!cubeOpt) {
         return;
@@ -151,15 +151,15 @@ static void ApplyAmbientCube(const BSPMap& map, const ImportOptions& options, st
     entity.hasAmbientCube = true;
 }
 
-auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
-    Scene::Scene scene;
+auto DescribeScene(const Map& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Document {
+    Scene::Document scene;
     scene.name = std::string(virtualPath);
 
     // The map itself: one prefab reference the instantiator resolves through
     // the prefab cache (filled by the importer adapter). Static body so the
     // map's collision comes up with it.
     {
-        Scene::SceneEntity world;
+        Scene::Entity world;
         world.name   = "worldspawn";
         world.shape  = Scene::ShapeKind::Prefab;
         world.source = std::string(virtualPath);
@@ -171,7 +171,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
     // The sun's direction comes from the map's light_environment, and it has to
     // be known before the entity loop reaches it (the loop builds the sun
-    // SceneLight in place). EnvironmentSunDirection falls back to a 45-degree
+    // Light in place). EnvironmentSunDirection falls back to a 45-degree
     // elevation when the map carries no light_environment at all. It returns a
     // Source (Z-up) vector, so it has to take the same ConvertDirection hop the
     // spot branch gives its beam; unconverted, the engine's Y-up sun pointed
@@ -242,7 +242,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // play boundaries the way Source renders the sky.
     const SkyboxTransform skybox = MakeSkyboxTransform(map, options.importSkybox);
 
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
             continue;
@@ -302,13 +302,13 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 continue;
             }
 
-            Scene::SceneLight light;
+            Scene::Light light;
             light.name = entity.Find("targetname").empty() ? std::string(className) : std::string(entity.Find("targetname"));
             // VRAD compiled every light entity in this map into the lightmaps
             // that describe its surfaces, so each one is a *baked* light: it
             // still runs live for props, entities and skybox scenery, but the
             // deferred pass withholds its diffuse on the pixels whose lightmap
-            // already owns it (see SceneLight::baked / Res_BakedMask). Without
+            // already owns it (see Light::baked / Res_BakedMask). Without
             // this the whole map is lit twice -- once by the bake, once by the
             // live light -- which is exactly what a mapper sees as "the
             // lightmap does nothing". Its specular stays live: no lightmap
@@ -411,7 +411,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const FVec3 enginePosition = ConvertPosition(options, origin);
             scene.camera.position          = {enginePosition.x, enginePosition.y, enginePosition.z};
 
-            // SceneCamera yaw/pitch invert its own direction formula
+            // Camera yaw/pitch invert its own direction formula
             // (cos p cos y, sin p, cos p sin y); take them from the exact
             // conjugated rotation's forward, not the Euler slots, because the
             // slots' yaw sign is the prop convention, not the camera's.
@@ -430,7 +430,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         const bool isTrigger = className.starts_with("trigger_");
 
         if (isDoor || isButton || isTrigger) {
-            Scene::SceneEntity interactive;
+            Scene::Entity interactive;
             const auto         targetName = entity.Find("targetname");
             interactive.name              = targetName.empty() ? std::string(className) : std::string(targetName);
 
@@ -495,7 +495,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                     // sweep around the pivot; translations start from it.
                     //
                     // This used to be stamped only for rotating submodels, and
-                    // a sliding door/button was left at the SceneEntity default
+                    // a sliding door/button was left at the Entity default
                     // -- the map origin. Everything downstream then measured
                     // the door from the origin instead of from the door: the
                     // interaction layer's 2.5 m use radius never reached it,
@@ -593,7 +593,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             std::from_chars(flagsText.data(), flagsText.data() + flagsText.size(), propFlags);
             const bool motionDisabled = (propFlags & 8) != 0;
 
-            Scene::SceneEntity prop;
+            Scene::Entity prop;
             prop.name   = std::string(entity.Find("targetname"));
             prop.shape  = Scene::ShapeKind::Prefab;
             prop.source = std::string(modelName);
@@ -652,7 +652,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             propOrigin = {placed[0], placed[1], placed[2]};
         }
 
-        Scene::SceneEntity propEntity;
+        Scene::Entity propEntity;
         propEntity.name   = "prop_static_" + std::to_string(propIdx);
         propEntity.shape  = Scene::ShapeKind::Prefab;
         propEntity.source = sp.modelName;
@@ -701,21 +701,21 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // Fixture damping is measured against the entity lights, which live
         // here as SceneLights. FinalizeEmissiveSurfaces only reads type and
         // position off them, so this is a straight copy.
-        std::vector<BspPointLight> entityLights;
+        std::vector<PointLight> entityLights;
         entityLights.reserve(scene.lights.size());
-        for (const Scene::SceneLight& light: scene.lights) {
+        for (const Scene::Light& light: scene.lights) {
             if (light.type == "Sun" || light.type == "Directional") {
                 continue;
             }
-            BspPointLight proxy;
+            PointLight proxy;
             proxy.name     = light.name;
             proxy.type     = LightType::Point;
             proxy.position = {light.position.x, light.position.y, light.position.z};
             entityLights.push_back(std::move(proxy));
         }
 
-        for (const BspPointLight& proxy: GatherEmissiveAreaLights(map, options, entityLights)) {
-            Scene::SceneLight light;
+        for (const PointLight& proxy: GatherEmissiveAreaLights(map, options, entityLights)) {
+            Scene::Light light;
             light.name             = proxy.name;
             // EmissiveLightFor always builds a Point proxy; say so directly
             // rather than pulling the reflection header in for one enum name.
@@ -737,7 +737,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // lightmapped pixel: the proxy is a reconstruction of a surface
             // VRAD already integrated, standing centimetres off the panel it
             // describes, and its punctual specular is a lobe Source's lamp
-            // faces never had. See SceneLight::baked.
+            // faces never had. See Light::baked.
             light.baked            = Scene::kBakeOwnsAll;
             scene.lights.push_back(std::move(light));
         }
@@ -754,7 +754,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
         std::vector<PunctualShadowCandidate> candidates;
         for (size_t index = 0; index < scene.lights.size(); ++index) {
-            Scene::SceneLight& light = scene.lights[index];
+            Scene::Light& light = scene.lights[index];
             if (light.pinned || light.castsShadow) {
                 continue;
             }

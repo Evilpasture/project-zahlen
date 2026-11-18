@@ -275,11 +275,11 @@ struct SceneSourceComponent {
         float innerConeRadians = 0.0f;
         float outerConeRadians = 0.0f;
         // Geometry-derived light (a BSP emissive-surface proxy). See
-        // SceneLight::pinned: LightingSystem publishes these first so the
+        // Scene::Light::pinned: LightingSystem publishes these first so the
         // renderer's scene-light budget cannot discard them.
         bool pinned = false;
         // The map compiler baked this light into the map's lightmaps. See
-        // SceneLight::baked: the light still runs live for unbaked geometry,
+        // Scene::Light::baked: the light still runs live for unbaked geometry,
         // but deferred shading withholds what the bake already owns there.
         // Scene::kBakeOwnsNone / Scene::kBakeOwnsDiffuse / Scene::kBakeOwnsAll.
         uint32_t baked = 0;

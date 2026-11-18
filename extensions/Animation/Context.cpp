@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/IK.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -370,8 +370,8 @@ void ApplyIKAndPropagateDescendantFK(
         const FVec3 pLower = lowerModel.Column(3).XYZ();
         const FVec3 pEnd   = endModel.Column(3).XYZ();
 
-        const IK::TwoBoneIKSolverOutput solved = IK::SolveTwoBoneIK(
-            IK::TwoBoneIKSolverInput {
+        const IK::TwoBoneSolverOutput solved = IK::SolveTwoBone(
+            IK::TwoBoneSolverInput {
                 .upperPosition  = pUpper,
                 .targetPosition = chain.targetPosition,
                 .poleVector     = chain.poleVector,
@@ -469,7 +469,7 @@ void ApplyIKAndPropagateDescendantFK(
 
 } // namespace
 
-struct AnimationContext::Impl {
+struct Context::Impl {
     std::vector<Slot>          slots;
     std::vector<uint32_t>      freeSlots;
     std::vector<AnimationID>   activeIDs;
@@ -498,16 +498,16 @@ struct AnimationContext::Impl {
     }
 };
 
-AnimationContext::AnimationContext(): _impl(std::make_unique<Impl>()) {
+Context::Context(): _impl(std::make_unique<Impl>()) {
 }
 
-AnimationContext::~AnimationContext() noexcept = default;
+Context::~Context() noexcept = default;
 
-AnimationContext::AnimationContext(AnimationContext&&) noexcept = default;
+Context::Context(Context&&) noexcept = default;
 
-auto AnimationContext::operator=(AnimationContext&&) noexcept -> AnimationContext& = default;
+auto Context::operator=(Context&&) noexcept -> Context& = default;
 
-auto AnimationContext::Create(AssetID prefabAsset) -> AnimationID {
+auto Context::Create(AssetID prefabAsset) -> AnimationID {
     uint32_t slotIdx = 0;
     if (!_impl->freeSlots.empty()) {
         slotIdx = _impl->freeSlots.back();
@@ -527,7 +527,7 @@ auto AnimationContext::Create(AssetID prefabAsset) -> AnimationID {
     return handle;
 }
 
-void AnimationContext::Destroy(std::span<const AnimationID> handles) noexcept {
+void Context::Destroy(std::span<const AnimationID> handles) noexcept {
     for (const AnimationID handle: handles) {
         const auto denseOpt = _impl->ResolveDense(handle);
         if (!denseOpt) {
@@ -556,7 +556,7 @@ void AnimationContext::Destroy(std::span<const AnimationID> handles) noexcept {
     }
 }
 
-void AnimationContext::Clear() noexcept {
+void Context::Clear() noexcept {
     for (uint32_t slotIdx = 0; slotIdx < static_cast<uint32_t>(_impl->slots.size()); ++slotIdx) {
         Slot& slot = _impl->slots[slotIdx];
         if (slot.denseIndex != kInvalidDense) {
@@ -571,11 +571,11 @@ void AnimationContext::Clear() noexcept {
     _impl->poses.Clear();
 }
 
-void AnimationContext::Manage(AnimationID handle) {
+void Context::Manage(AnimationID handle) {
     if (handle.IsValid())
         _impl->managedIDs.push_back(handle);
 }
-void AnimationContext::CollectManaged(std::span<const AnimationID> retained) {
+void Context::CollectManaged(std::span<const AnimationID> retained) {
     std::vector<AnimationID> doomed;
     std::erase_if(_impl->managedIDs, [&](AnimationID handle) {
         if (std::ranges::find(retained, handle) != retained.end())
@@ -586,15 +586,15 @@ void AnimationContext::CollectManaged(std::span<const AnimationID> retained) {
     Destroy(doomed);
 }
 
-auto AnimationContext::Valid(AnimationID handle) const noexcept -> bool {
+auto Context::Valid(AnimationID handle) const noexcept -> bool {
     return _impl->ResolveDense(handle).has_value();
 }
 
-auto AnimationContext::ActiveCount() const noexcept -> size_t {
+auto Context::ActiveCount() const noexcept -> size_t {
     return _impl->instances.size();
 }
 
-void AnimationContext::Sync(AnimationID handle, const PlaybackConfig& config) noexcept {
+void Context::Sync(AnimationID handle, const PlaybackConfig& config) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -661,7 +661,7 @@ void AnimationContext::Sync(AnimationID handle, const PlaybackConfig& config) no
     }
 }
 
-void AnimationContext::BindSkeletons(AnimationID handle, std::span<const SkeletonBinding> bindings) noexcept {
+void Context::BindSkeletons(AnimationID handle, std::span<const SkeletonBinding> bindings) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -672,7 +672,7 @@ void AnimationContext::BindSkeletons(AnimationID handle, std::span<const Skeleto
     inst.skeletonCount = static_cast<uint32_t>(copied);
 }
 
-void AnimationContext::SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept {
+void Context::SetIKChains(AnimationID handle, std::span<const IKChain> chains) noexcept {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return;
@@ -683,22 +683,22 @@ void AnimationContext::SetIKChains(AnimationID handle, std::span<const IKChain> 
     inst.ikChainCount = static_cast<uint32_t>(copied);
 }
 
-void AnimationContext::SuppressPaletteUpload(AnimationID handle) noexcept {
+void Context::SuppressPaletteUpload(AnimationID handle) noexcept {
     if (const auto denseOpt = _impl->ResolveDense(handle)) {
         _impl->instances[*denseOpt].suppressPaletteUpload = true;
     }
 }
 
-void AnimationContext::CacheRig(AssetID id, PrefabRig rig) {
+void Context::CacheRig(AssetID id, PrefabRig rig) {
     rig.hash            = id;
     _impl->rigCache[id] = std::move(rig);
 }
 
-void AnimationContext::InvalidateRigs() noexcept {
+void Context::InvalidateRigs() noexcept {
     _impl->rigCache.clear();
 }
 
-auto AnimationContext::ResolveRig(const COM::IAssetLibrary* assets, AssetID id) -> const PrefabRig* {
+auto Context::ResolveRig(const COM::IAssetLibrary* assets, AssetID id) -> const PrefabRig* {
     if (id == InvalidAssetID) return nullptr;
     auto it = _impl->rigCache.find(id);
     if (it != _impl->rigCache.end()) {
@@ -719,7 +719,7 @@ auto AnimationContext::ResolveRig(const COM::IAssetLibrary* assets, AssetID id) 
     return &inserted->second;
 }
 
-void AnimationContext::Step(
+void Context::Step(
     float                     dt,
     const COM::IAssetLibrary* assets,
     COM::IGraphicsDevice*     graphics,
@@ -949,14 +949,14 @@ void AnimationContext::Step(
     }
 }
 
-auto AnimationContext::Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState> {
+auto Context::Playback(AnimationID handle) const noexcept -> ZHLN::Optional<PlaybackState> {
     return _impl->ResolveDense(handle).transform([this](uint32_t denseIdx) {
         const InstanceState& inst = _impl->instances[denseIdx];
         return PlaybackState {.trackTime = inst.activeTime, .finished = inst.finished};
     });
 }
 
-auto AnimationContext::Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample> {
+auto Context::Morph(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<MorphSample> {
     return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<MorphSample> {
         const InstanceState& inst = _impl->instances[denseIdx];
         if (nodeIndex >= inst.nodeCount) {
@@ -970,7 +970,7 @@ auto AnimationContext::Morph(AnimationID handle, uint32_t nodeIndex) const noexc
     });
 }
 
-auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<TransformParts> {
+auto Context::RigidNode(AnimationID handle, uint32_t nodeIndex) const noexcept -> ZHLN::Optional<TransformParts> {
     return _impl->ResolveDense(handle).and_then([this, nodeIndex](uint32_t denseIdx) -> ZHLN::Optional<TransformParts> {
         const InstanceState& inst = _impl->instances[denseIdx];
         if (nodeIndex >= inst.nodeCount) {
@@ -984,7 +984,7 @@ auto AnimationContext::RigidNode(AnimationID handle, uint32_t nodeIndex) const n
     });
 }
 
-auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
+auto Context::LocalPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};
@@ -993,7 +993,7 @@ auto AnimationContext::LocalPose(AnimationID handle) const noexcept -> std::span
     return _impl->poses.Local(inst.poseOffset, inst.nodeCount);
 }
 
-auto AnimationContext::ModelPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
+auto Context::ModelPose(AnimationID handle) const noexcept -> std::span<const Mat4x4> {
     const auto denseOpt = _impl->ResolveDense(handle);
     if (!denseOpt) {
         return {};

@@ -49,10 +49,10 @@ auto CacheStreams(COM::IAssetLibrary& assets, CollisionAssetID id, const Materia
 }
 } // namespace
 
-auto PrepareBSPAssets(const BSPMap& map, SourceVFS source, std::string_view virtualPath, const ImportOptions& options)
-    -> std::expected<PreparedBSPAssets, ErrorCode> {
+auto PrepareAssets(const Map& map, SourceVFS source, std::string_view virtualPath, const ImportOptions& options)
+    -> std::expected<PreparedAssets, ErrorCode> {
     if (!ValidAssetPath(virtualPath) || !std::isfinite(options.unitScale) || options.unitScale <= 0)
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (!options.assetRoot.empty())
         source.AddSearchPath(options.assetRoot);
     const std::filesystem::path path(virtualPath);
@@ -68,10 +68,10 @@ auto PrepareBSPAssets(const BSPMap& map, SourceVFS source, std::string_view virt
         worldOptions.skipModels.push_back(sub.modelIndex);
     auto world = ImportMapGeometry(map, worldOptions);
     if (world.parts.empty())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (worldOptions.gatherEmissiveSurfaces)
         world.emissive = RefineEmissiveSurfaces(source, world.emissive, world);
-    PreparedBSPAssets result {.source = std::move(source)};
+    PreparedAssets result {.source = std::move(source)};
     result.prefabs.push_back({std::string(virtualPath), std::move(world)});
     for (const auto& sub: moving) {
         auto subOptions             = options;
@@ -90,7 +90,7 @@ auto PrepareBSPAssets(const BSPMap& map, SourceVFS source, std::string_view virt
             ShiftImportedGeometry(geometry, -sub.pivot);
         auto key = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
         if (!ValidAssetPath(key))
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         result.prefabs.push_back({std::move(key), std::move(geometry)});
     }
     const auto request = [&](std::string_view name) {
@@ -107,63 +107,63 @@ auto PrepareBSPAssets(const BSPMap& map, SourceVFS source, std::string_view virt
     return result;
 }
 
-auto DecodeBSPAssets(std::span<const std::byte> bytes, SourceVFS source, std::string_view virtualPath, const ImportOptions& options)
-    -> std::expected<PreparedBSPAssets, ErrorCode> {
-    const auto parsed = ParseBsp(bytes);
+auto DecodeAssets(std::span<const std::byte> bytes, SourceVFS source, std::string_view virtualPath, const ImportOptions& options)
+    -> std::expected<PreparedAssets, ErrorCode> {
+    const auto parsed = Parse(bytes);
     if (!parsed)
         return std::unexpected(parsed.error());
-    // ParseBsp has validated every lump range; the SourceVFS keeps its own pak
+    // Parse has validated every lump range; the SourceVFS keeps its own pak
     // copy, so neither the caller's bytes nor the parser result is borrowed.
-    BspHeader header {};
+    Header header {};
     std::memcpy(&header, bytes.data(), sizeof(header));
     const auto& pak = header.lumps[static_cast<size_t>(Lump::PakFile)];
     if (pak.filelen > 0)
         source.SetPakfileData(bytes.subspan(static_cast<size_t>(pak.fileofs), static_cast<size_t>(pak.filelen)));
-    return PrepareBSPAssets(*parsed, std::move(source), virtualPath, options);
+    return PrepareAssets(*parsed, std::move(source), virtualPath, options);
 }
 
-auto ReadBSPAssets(SourceVFS source, std::string_view virtualPath, const ImportOptions& options) -> std::expected<PreparedBSPAssets, ErrorCode> {
+auto ReadAssets(SourceVFS source, std::string_view virtualPath, const ImportOptions& options) -> std::expected<PreparedAssets, ErrorCode> {
     if (!ValidAssetPath(virtualPath))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     if (!options.assetRoot.empty())
         source.AddSearchPath(options.assetRoot);
     const auto bytes = source.ReadFile(virtualPath);
     if (!bytes)
-        return std::unexpected(BSPError::ShortRead);
-    return DecodeBSPAssets(*bytes, std::move(source), virtualPath, options);
+        return std::unexpected(Error::ShortRead);
+    return DecodeAssets(*bytes, std::move(source), virtualPath, options);
 }
 
-auto UploadBSPAsset(
+auto UploadAsset(
     COM::IAssetLibrary&     assets,
     COM::IGraphicsDevice&   graphics,
     const SourceVFS&        source,
-    const BSPAssetDocument& document,
-    const BSPAssetOptions&  options
+    const AssetDocument& document,
+    const AssetOptions&  options
 ) -> std::expected<SourceAsset, ErrorCode> {
     const auto& path     = document.virtualPath;
     const auto& geometry = document.geometry;
     if (!ValidAssetPath(path))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     const auto hash = assets.PrefabHash(std::string_view(path));
     if (assets.HasPrefab(hash))
         return SourceAsset {.hash = hash};
     if (!std::isfinite(options.import.sourceLightmapScale))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     for (const auto& part: geometry.parts) {
         if (!ValidStreams(part, true))
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         if (!std::isfinite(part.boundsMin.x) || !std::isfinite(part.boundsMin.y) || !std::isfinite(part.boundsMin.z) || !std::isfinite(part.boundsMax.x) ||
             !std::isfinite(part.boundsMax.y) || !std::isfinite(part.boundsMax.z) || part.boundsMin.x > part.boundsMax.x ||
             part.boundsMin.y > part.boundsMax.y || part.boundsMin.z > part.boundsMax.z)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
     }
     if (!ValidStreams(geometry.collisionOnly, false))
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     for (const auto& page: geometry.lightmaps.pages) {
         if (page.rgba16f.empty())
             continue;
         if (!page.width || !page.height || uint64_t(page.width) * page.height != page.rgba16f.size() / 4 || page.rgba16f.size() % 4)
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
     }
 
     AssetAuthoring::Upload upload {graphics};
@@ -266,7 +266,7 @@ auto UploadBSPAsset(
         authored.push_back(&part);
     }
     if (parts.empty())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     // Collisions are committed only after all GPU allocation/material work has
     // succeeded. CacheCollisionMesh copies each stream; no caller memory escapes.
     for (size_t i = 0; i < parts.size(); ++i) {

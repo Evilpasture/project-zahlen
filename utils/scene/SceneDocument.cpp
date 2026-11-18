@@ -13,7 +13,7 @@
 #include <iterator>
 #include <string>
 namespace ZHLN::Tools {
-auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene::Scene, ErrorCode> {
+auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene::Document, ErrorCode> {
     const auto ext = path.extension().string();
     if (ext == ".toml") {
         std::ifstream in(path, std::ios::binary);
@@ -22,11 +22,11 @@ auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         if (in.bad())
             return std::unexpected(SceneDocumentError::ReadFailed);
-        return ReflectTOML::Parse<Scene::Scene>(text);
+        return ReflectTOML::Parse<Scene::Document>(text);
     }
 #if defined(ZHLN_SCENE_DOC_HAS_LUA)
     if (ext == ".lua")
-        return ReflectLua::EvaluateFile<Scene::Scene>(path);
+        return ReflectLua::EvaluateFile<Scene::Document>(path);
 #endif
     return std::unexpected(SceneDocumentError::UnsupportedFormat);
 }

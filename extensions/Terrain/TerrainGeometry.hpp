@@ -8,7 +8,7 @@
 #include <span>
 #include <vector>
 namespace ZHLN::Terrain {
-enum class TerrainError : uint8_t {
+enum class Error : uint8_t {
     InvalidData ZHLN_ANNOTATION(ZHLN::Description<"Invalid heightfield dimensions, samples, colors or pose."> {}) = 1,
     NotStarted  ZHLN_ANNOTATION(ZHLN::Description<"Terrain host has no engine binding."> {})
 };
@@ -25,7 +25,7 @@ struct GenerateInfo {
     uint32_t    sampleCount = 128;
     float       worldSize   = 280;
     float       maxHeight   = 35;
-    TerrainType type        = TerrainType::Default;
+    Type type        = Type::Default;
 };
 [[nodiscard]] auto FromHeights(uint32_t sampleCount, float worldSize, std::span<const float> heights, std::span<const float> colorsRGBA = {})
     -> std::expected<Geometry, ErrorCode>;

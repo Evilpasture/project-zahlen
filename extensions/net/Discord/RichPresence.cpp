@@ -137,13 +137,13 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
 }
 
 [[nodiscard]] auto BuildHandshakePayload(const std::string_view applicationId) -> std::string {
-    return ReflectJSON::SerializeJSON(HandshakePayload {.v = 1, .client_id = std::string(applicationId)});
+    return ReflectJSON::Serialize(HandshakePayload {.v = 1, .client_id = std::string(applicationId)});
 }
 
 [[nodiscard]] auto BuildActivityPayload(const ActivityUpdate& update, const uint64_t nonce) -> std::string {
     const std::string nonceText = std::to_string(nonce);
     if (!update.activity) {
-        return ReflectJSON::SerializeJSON(
+        return ReflectJSON::Serialize(
             ClearActivityPayload {.cmd = "SET_ACTIVITY", .args = {.pid = static_cast<uint64_t>(ZHLN::GetPID()), .activity = std::nullopt}, .nonce = nonceText}
         );
     }
@@ -164,7 +164,7 @@ void WriteU32LittleEndian(const std::span<uint8_t, 4> bytes, const uint32_t valu
         activity.assets = std::move(assets);
     }
 
-    return ReflectJSON::SerializeJSON(
+    return ReflectJSON::Serialize(
         SetActivityPayload {.cmd = "SET_ACTIVITY", .args = {.pid = static_cast<uint64_t>(ZHLN::GetPID()), .activity = std::move(activity)}, .nonce = nonceText},
         0, {.omitEmpty = true}
     );
@@ -459,7 +459,7 @@ auto DecodeRpcFrame(const std::span<const uint8_t> bytes) noexcept -> std::expec
     return RpcFrame {.opcode = opcode, .payload = std::string(reinterpret_cast<const char*>(bytes.data() + 8), payloadSize)};
 }
 
-class DiscordPresenceClient::Impl {
+class PresenceClient::Impl {
   public:
     explicit Impl(std::string appId): applicationId(std::move(appId)) {
     }
@@ -644,28 +644,28 @@ class DiscordPresenceClient::Impl {
     TaskSystem::Counter           workerCompletion {};
 };
 
-DiscordPresenceClient::DiscordPresenceClient(std::string applicationId): _impl(std::make_unique<Impl>(std::move(applicationId))) {
+PresenceClient::PresenceClient(std::string applicationId): _impl(std::make_unique<Impl>(std::move(applicationId))) {
 }
 
-DiscordPresenceClient::~DiscordPresenceClient() noexcept = default;
+PresenceClient::~PresenceClient() noexcept = default;
 
-auto DiscordPresenceClient::Start() noexcept -> std::expected<void, PresenceError> {
+auto PresenceClient::Start() noexcept -> std::expected<void, PresenceError> {
     return _impl->Start();
 }
 
-void DiscordPresenceClient::SetActivity(RichPresence activity) noexcept {
+void PresenceClient::SetActivity(RichPresence activity) noexcept {
     _impl->SetActivity(std::move(activity));
 }
 
-void DiscordPresenceClient::ClearActivity() noexcept {
+void PresenceClient::ClearActivity() noexcept {
     _impl->ClearActivity();
 }
 
-void DiscordPresenceClient::Stop() noexcept {
+void PresenceClient::Stop() noexcept {
     _impl->Stop();
 }
 
-auto DiscordPresenceClient::State() const noexcept -> PresenceState {
+auto PresenceClient::State() const noexcept -> PresenceState {
     return _impl->State();
 }
 

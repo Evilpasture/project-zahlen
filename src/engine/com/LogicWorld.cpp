@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "Hierarchy.hpp"
+#include <engine/Hierarchy.hpp>
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -122,24 +122,22 @@ auto                 FindLogic(StringView name) noexcept -> const LogicComponent
 }
 
 } // namespace
-class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld, IEntities, ISimulation> {
+class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, ISimulation> {
   public:
-    explicit LogicWorldAdapter(std::unique_ptr<World> world, PhysicsConfig config): m_world(std::move(world)), m_config(config) {
+    explicit LogicWorld(std::unique_ptr<World> world, PhysicsConfig config): m_world(std::move(world)), m_config(config) {
         Reflect::ForEachNestedType<Components>([&]<class T>() {
             constexpr auto name = Reflect::CanonicalTypeName<T>();
             m_engineNames.insert(name);
             ECS::Registry::InternAndMapNameToFamilyID(name, ECS::ComponentFamily::GetTypeID<T>());
         });
     }
-    IEntities* Entities() noexcept override {
-        return this;
-    }
+    IEntities* Entities() noexcept override;
     ISimulation* Simulation() noexcept override {
         return this;
     }
     Result<void> GetInfo(ChainOutNode* output) const noexcept override {
         if (!output)
-            return ComError::NullArgument;
+            return Error::NullArgument;
         return DispatchOutChain<LogicWorldInfo>(output, [&](LogicWorldInfo& out) -> Result<void> {
             out = {m_config, m_world->GetPhysics().GetActiveBodyCount()};
             return {};
@@ -147,7 +145,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     }
     Result<void> Advance(float dt) noexcept override {
         if (!std::isfinite(dt) || dt <= 0)
-            return ComError::InvalidArgument;
+            return Error::InvalidArgument;
         Flush();
         Sim().Step(dt);
         return {};
@@ -339,7 +337,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
 
     [[nodiscard]] Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept override {
         if (descChain == nullptr)
-            return ComError::NullArgument;
+            return Error::NullArgument;
 
         Physics::RigidBodyPose                       pose {};
         Physics::RigidBodySurface                    surface {};
@@ -364,36 +362,36 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
                 ++shapeNodeCount;
                 if constexpr (std::is_same_v<NodeT, Physics::BoxShapeDesc>) {
                     if (node.halfExtents.x <= 0.0F || node.halfExtents.y <= 0.0F || node.halfExtents.z <= 0.0F) {
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     }
                     builtShape = Physics::AnyShape {Physics::Shape<Physics::Box>(node.halfExtents)};
                 } else if constexpr (std::is_same_v<NodeT, Physics::SphereShapeDesc>) {
                     if (node.radius <= 0.0F)
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     builtShape = Physics::AnyShape {Physics::Shape<Physics::Sphere>(node.radius)};
                 } else if constexpr (std::is_same_v<NodeT, Physics::CapsuleShapeDesc>) {
                     if (node.halfHeight <= 0.0F || node.radius <= 0.0F)
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     builtShape = Physics::AnyShape {Physics::Shape<Physics::Capsule>(node.halfHeight, node.radius)};
                 } else if constexpr (std::is_same_v<NodeT, Physics::CylinderShapeDesc>) {
                     if (node.halfHeight <= 0.0F || node.radius <= 0.0F)
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     builtShape = Physics::AnyShape {Physics::Shape<Physics::Cylinder>(node.halfHeight, node.radius)};
                 } else if constexpr (std::is_same_v<NodeT, Physics::PlaneShapeDesc>) {
                     builtShape = Physics::AnyShape {Physics::Shape<Physics::Plane>(node.normal, node.constant)};
                 } else if constexpr (std::is_same_v<NodeT, Physics::MeshShapeDesc>) {
                     if (node.asset != CollisionAssetID::Invalid) {
-                        return ComError::AssetNotCached;
+                        return Error::AssetNotCached;
                     } else {
                         auto geom = ValidateAndBuildMeshGeometry(node.vertices, node.vertexCount, node.indices, node.indexCount);
                         if (!geom.has_value())
-                            return ComError::InvalidArgument;
+                            return Error::InvalidArgument;
                         pinnedMesh = std::make_shared<Physics::MeshGeometry>(std::move(*geom));
                         builtShape = Physics::AnyShape {Physics::Shape<Physics::Mesh>(pinnedMesh)};
                     }
                 } else if constexpr (std::is_same_v<NodeT, Physics::HeightFieldShapeDesc>) {
                     if (node.heights == nullptr || node.sampleCount < 2U || node.worldSize <= 0.0F) {
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     }
                     const size_t totalSamples = static_cast<size_t>(node.sampleCount) * node.sampleCount;
                     builtShape                = Physics::AnyShape {
@@ -401,14 +399,14 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
                     };
                 } else if constexpr (std::is_same_v<NodeT, Physics::CompoundShapeDesc>) {
                     if (node.children == nullptr || node.childCount == 0U)
-                        return ComError::InvalidArgument;
+                        return Error::InvalidArgument;
                     Physics::Shape<Physics::Compound> comp {};
                     comp.children.reserve(node.childCount);
                     for (uint32_t i = 0; i < node.childCount; ++i) {
                         const Physics::CompoundChildDesc& child = node.children[i];
                         auto                              sub   = MakePrimitiveSubShape(child);
                         if (!sub.has_value())
-                            return ComError::InvalidArgument;
+                            return Error::InvalidArgument;
                         comp.children.push_back(
                             Physics::Shape<Physics::Compound>::Child {
                                 .position = child.position,
@@ -425,7 +423,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
         if (!chainRes.HasValue())
             return chainRes.error;
         if (shapeNodeCount != 1U || !builtShape.has_value())
-            return ComError::InvalidArgument;
+            return Error::InvalidArgument;
 
         if (hasSurface && surface.registerMaterial) {
             Sim().RegisterMaterial(surface.materialID, surface.friction, surface.restitution);
@@ -460,7 +458,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
         }
         if (dual.has_value()) {
             if (dual->lifterRadius <= 0.0F || dual->bumperRadiusXZ <= 0.0F || dual->bumperRadiusY <= 0.0F) {
-                return ComError::InvalidArgument;
+                return Error::InvalidArgument;
             }
             const Physics::CharacterParams params {
                 .shape                    = Physics::CreateDualShape(*dual),
@@ -475,7 +473,7 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
             return Sim().CreateCharacter(desc.position, params);
         }
         if (desc.useCustomCapsule && (desc.capsuleRadius <= 0.0F || desc.capsuleHalfHeight <= 0.0F)) {
-            return ComError::InvalidArgument;
+            return Error::InvalidArgument;
         }
         return Sim().CreateCustomCharacter(desc);
     }
@@ -485,8 +483,8 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     }
 
   private:
-    friend class Implements<LogicWorldAdapter, ILogicWorld, IEntities, ISimulation>;
-    ~LogicWorldAdapter() = default;
+    friend class Implements<LogicWorld, ILogicWorld, IEntities, ISimulation>;
+    ~LogicWorld() = default;
     auto Registry() const noexcept -> ECS::Registry& {
         return m_world->GetRegistry();
     }
@@ -503,6 +501,10 @@ class LogicWorldAdapter final: public Implements<LogicWorldAdapter, ILogicWorld,
     std::unordered_set<uint32_t>         m_dynamicFamilies;
     std::unordered_set<std::string_view> m_engineNames;
 };
+
+IEntities* LogicWorld::Entities() noexcept {
+    return this;
+}
 auto CreateLogicWorld(const ChainInNode* config) noexcept -> Result<ILogicWorld*> {
     PhysicsConfig physics {};
     auto          read = DispatchInChain<PhysicsConfig>(config, [&](const PhysicsConfig& c) -> Result<void> {
@@ -512,13 +514,13 @@ auto CreateLogicWorld(const ChainInNode* config) noexcept -> Result<ILogicWorld*
     if (!read.HasValue())
         return read.error;
     if (!physics.maxBodies || !physics.maxBodyPairs || !physics.maxContactConstraints || !physics.tempAllocatorSize)
-        return ComError::InvalidArgument;
+        return Error::InvalidArgument;
     auto world = World::Create(physics);
     if (!world)
         return world.error();
-    auto* object = new (std::nothrow) LogicWorldAdapter(std::move(*world), physics);
+    auto* object = new (std::nothrow) LogicWorld(std::move(*world), physics);
     if (!object)
-        return ComError::AllocationFailed;
+        return Error::AllocationFailed;
     return static_cast<ILogicWorld*>(object);
 }
 } // namespace ZHLN::COM

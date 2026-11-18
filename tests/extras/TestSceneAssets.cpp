@@ -22,9 +22,9 @@ auto SceneEngine() {
     using namespace ZHLN;
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM scene"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM scene"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
@@ -41,12 +41,12 @@ struct SceneAssetsSuite {
             auto         engine = std::move(*created);
             const auto   path   = std::filesystem::temp_directory_path() /
                                   ("zahlen-scene-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".toml");
-            Scene::Scene doc;
+            Scene::Document doc;
             doc.entities.push_back({.name = "logic", .shape = Scene::ShapeKind::Empty});
             doc.entities.push_back({.name = "document_box", .shape = Scene::ShapeKind::Box});
             {
                 std::ofstream out(path);
-                out << ReflectTOML::SerializeTOML(doc);
+                out << ReflectTOML::Serialize(doc);
             }
             const auto parsed = Tools::ReadSceneDocument(path);
             ExpectTrue(parsed.has_value());
@@ -58,7 +58,7 @@ struct SceneAssetsSuite {
             doc.entities.push_back({.shape = Scene::ShapeKind::Prefab, .source = "not/prepared.glb"});
             {
                 std::ofstream out(path);
-                out << ReflectTOML::SerializeTOML(doc);
+                out << ReflectTOML::Serialize(doc);
             }
             ExpectTrue(!Tools::LoadSceneDocument(*engine.Get(), path, {.buildBLAS = false}));
             if (!saved.empty())
@@ -130,7 +130,7 @@ struct SceneAssetsSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto         engine = std::move(*created);
-            Scene::Scene doc;
+            Scene::Document doc;
             doc.camera.position         = {3, 4, 8};
             doc.camera.fov              = 72;
             doc.environment.giIntensity = 2.5f;
@@ -195,8 +195,8 @@ struct SceneAssetsSuite {
             ExpectTrue(out.lights[0].pinned);
             ExpectEq(out.lights[0].baked, Scene::kBakeOwnsDiffuse);
             ExpectEq(out.lights[0].direction.y, -1.f);
-            const auto serialized = ReflectTOML::SerializeTOML(out);
-            const auto parsed     = ReflectTOML::Parse<Scene::Scene>(serialized);
+            const auto serialized = ReflectTOML::Serialize(out);
+            const auto parsed     = ReflectTOML::Parse<Scene::Document>(serialized);
             ExpectTrue(parsed.has_value());
             if (parsed) {
                 ExpectEq(parsed->entities.size(), size_t(3));
@@ -252,7 +252,7 @@ struct SceneAssetsSuite {
             ExpectEq(bounds.max.z, 3.f);
             ExpectTrue(!assets.GetPrefabBounds(cached.value, nullptr).HasValue());
             ExpectTrue(!assets.GetPrefabBounds(0, COM::OutChain(bounds)).HasValue());
-            Scene::Scene doc;
+            Scene::Document doc;
             doc.entities.push_back(
                 {.name           = "door",
                  .shape          = Scene::ShapeKind::Prefab,
@@ -309,7 +309,7 @@ struct SceneAssetsSuite {
             auto         engine = std::move(*created);
             const auto   before = engine->Entities()->EntitiesWith<Components::SceneSourceComponent>().size();
             const auto   camera = Scene::Extract(*engine.Get()).camera;
-            Scene::Scene doc;
+            Scene::Document doc;
             doc.camera.position = {99, 99, 99};
             doc.entities.push_back({.name = "would_spawn", .shape = Scene::ShapeKind::Empty});
             doc.lights.push_back({.type = "NotALightType"});

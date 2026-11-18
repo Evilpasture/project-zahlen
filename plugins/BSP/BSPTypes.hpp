@@ -92,7 +92,7 @@ struct LumpEntry {
     int32_t fourCC;
 };
 
-struct BspHeader {
+struct Header {
     int32_t   ident;
     int32_t   version;
     LumpEntry lumps[static_cast<uint32_t>(Lump::Count)];
@@ -289,7 +289,7 @@ inline constexpr int32_t kGameLumpStaticProps    = 0x70727073; // 'sprp' (little
 inline constexpr int32_t kGameLumpStaticPropsAlt = 0x73707270; // 'prps' (big-endian)
 
 static_assert(sizeof(LumpEntry) == 16);
-static_assert(sizeof(BspHeader) == 4 + 4 + 16 * 64);
+static_assert(sizeof(Header) == 4 + 4 + 16 * 64);
 static_assert(sizeof(DPlane) == 20);
 static_assert(sizeof(DVertex) == 12);
 static_assert(sizeof(DEdge) == 4);

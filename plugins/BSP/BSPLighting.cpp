@@ -4,7 +4,7 @@
 // plugins/BSP/BSPLighting.cpp
 //
 // See BSPLighting.hpp for the rule list. Everything here is deterministic and
-// engine-free: given the same BSPMap and ImportOptions it produces the same
+// engine-free: given the same Map and ImportOptions it produces the same
 // lights, which is what makes the diagnostics trustworthy.
 
 #include "BSPLighting.hpp"
@@ -70,13 +70,13 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     return haystack.find(target) != std::string::npos;
 }
 
-[[nodiscard]] auto KeyFloat(const BSPEntity& entity, std::string_view key, float fallback) noexcept -> float {
+[[nodiscard]] auto KeyFloat(const Entity& entity, std::string_view key, float fallback) noexcept -> float {
     return entity.FindFloat(key).value_or(fallback);
 }
 
 // Source parses "0" and "" the same way for floats, so a present-but-zero
 // override has to stay distinguishable from an absent one.
-[[nodiscard]] auto KeyFloatPresent(const BSPEntity& entity, std::string_view key) noexcept -> std::optional<float> {
+[[nodiscard]] auto KeyFloatPresent(const Entity& entity, std::string_view key) noexcept -> std::optional<float> {
     const auto v = entity.Find(key);
     if (v.empty()) {
         return std::nullopt;
@@ -128,7 +128,7 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 
 // The pitch/yaw pair, honouring `pitch` as an override for `angles`' X lane
 // (Hammer writes both for light_spot and point_spotlight).
-[[nodiscard]] auto EntityAngles(const BSPEntity& entity) noexcept -> std::array<float, 3> {
+[[nodiscard]] auto EntityAngles(const Entity& entity) noexcept -> std::array<float, 3> {
     auto angles = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
     if (const auto pitch = entity.FindFloat("pitch")) {
         angles[0] = *pitch;
@@ -176,7 +176,7 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 // not at the origin.
 // `rendercolor` + `renderamt` (+ `HDRColorScale`): the CS:GO / GMod spelling
 // used by point_spotlight, env_projectedtexture and the *_dynamic family.
-auto ParseRenderColorValue(const BSPEntity& entity) noexcept -> SourceLightValue {
+auto ParseRenderColorValue(const Entity& entity) noexcept -> SourceLightValue {
     SourceLightValue out;
     // `rendercolor` is colour255; `lightcolor` is colour32. Both carry the RGB
     // in the first three lanes.
@@ -226,7 +226,7 @@ auto ClassifyLightEntity(std::string_view className) noexcept -> LightEntityKind
 // Attenuation
 // ---------------------------------------------------------------------------
 
-auto ParseSourceAttenuation(const BSPEntity& entity) noexcept -> SourceAttenuation {
+auto ParseSourceAttenuation(const Entity& entity) noexcept -> SourceAttenuation {
     SourceAttenuation atten;
     atten.constant  = KeyFloat(entity, "_constant_attn", 0.0f);
     atten.linear    = KeyFloat(entity, "_linear_attn", 0.0f);
@@ -293,7 +293,7 @@ auto AttenuationRangeMetres(const SourceAttenuation& atten, float engineIntensit
 // Light values
 // ---------------------------------------------------------------------------
 
-auto ParseSourceLightValue(const BSPEntity& entity) noexcept -> SourceLightValue {
+auto ParseSourceLightValue(const Entity& entity) noexcept -> SourceLightValue {
     SourceLightValue out;
 
     std::string_view text = entity.Find("_light");
@@ -333,8 +333,8 @@ auto ParseSourceLightValue(const BSPEntity& entity) noexcept -> SourceLightValue
 // Ambient
 // ---------------------------------------------------------------------------
 
-auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm {
-    for (const BSPEntity& entity: map.entities) {
+auto ReadEnvironmentAmbient(const Map& map) noexcept -> AmbientTerm {
+    for (const Entity& entity: map.entities) {
         if (entity.Find("classname") != "light_environment") {
             continue;
         }
@@ -357,8 +357,8 @@ auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm {
     return {};
 }
 
-auto EnvironmentSunDirection(const BSPMap& map) noexcept -> FVec3 {
-    for (const BSPEntity& entity: map.entities) {
+auto EnvironmentSunDirection(const Map& map) noexcept -> FVec3 {
+    for (const Entity& entity: map.entities) {
         if (entity.Find("classname") != "light_environment") {
             continue;
         }
@@ -519,9 +519,9 @@ auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma
 
 // Fills the shared position/direction/cone/range fields and applies the
 // calibration. Returns false when the light should not be emitted at all.
-auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEntityKind kind, const SourceLightValue& value, bool useRenderColor)
-    -> std::optional<BspPointLight> {
-    BspPointLight light;
+auto BuildLight(const Entity& entity, const ImportOptions& options, LightEntityKind kind, const SourceLightValue& value, bool useRenderColor)
+    -> std::optional<PointLight> {
+    PointLight light;
     light.type      = (kind == LightEntityKind::Sun) ? LightType::Sun : ((kind == LightEntityKind::Spot) ? LightType::Spot : LightType::Point);
     light.name      = std::string(entity.Find("targetname"));
     light.className = std::string(entity.Find("classname"));
@@ -619,9 +619,9 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
     return light;
 }
 
-auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std::vector<BspPointLight> {
-    std::vector<BspPointLight> out;
-    for (const BSPEntity& entity: map.entities) {
+auto GatherEntityLights(const Map& map, const ImportOptions& options) -> std::vector<PointLight> {
+    std::vector<PointLight> out;
+    for (const Entity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         const LightEntityKind  kind      = ClassifyLightEntity(className);
         if (kind == LightEntityKind::NotALight) {
@@ -684,7 +684,7 @@ auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std:
 // Emissive surface assembly
 // ---------------------------------------------------------------------------
 
-auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights)
+auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const PointLight> entityLights, float unitScale, uint32_t maxLights)
     -> std::vector<EmissiveSurface> {
     const float cellMetres      = std::max(kEmissiveClusterCellInches * unitScale, 0.1f);
     const float fixtureMetres   = std::max(kEmissiveFixtureRadiusInches * unitScale, 0.1f);
@@ -795,7 +795,7 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     //    housing of that light, and its emission is already accounted for.
     for (EmissiveSurface& surface: out) {
         float bestSq = fixtureMetresSq;
-        for (const BspPointLight& light: entityLights) {
+        for (const PointLight& light: entityLights) {
             if (light.type == LightType::Sun) {
                 continue;
             }
@@ -825,8 +825,8 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     return out;
 }
 
-auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> BspPointLight {
-    BspPointLight light;
+auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> PointLight {
+    PointLight light;
     light.name      = "Glow_" + surface.materialName;
     light.className = "info_emissive_proxy";
     light.type      = LightType::Point;
@@ -870,12 +870,12 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 // Diagnostics / guarantee
 // ---------------------------------------------------------------------------
 
-auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const BSPMap& map)
+auto AuditLighting(std::span<const PointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const Map& map)
     -> LightingDiagnostics {
     LightingDiagnostics out;
     uint32_t            offered   = 0;
     uint32_t            beamCones = 0;
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const LightEntityKind kind = ClassifyLightEntity(entity.Find("classname"));
         if (kind == LightEntityKind::NotALight) {
             continue;
@@ -889,7 +889,7 @@ auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const 
     // after this pass has already harvested the entities, so counting the whole
     // vector here would make "offered - dropped" go negative and wrap.
     uint32_t entityEmitted = 0;
-    for (const BspPointLight& light: entityLights) {
+    for (const PointLight& light: entityLights) {
         if (!light.fromEmissive) {
             ++entityEmitted;
         }
@@ -908,13 +908,13 @@ auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const 
         }
         out.totalEmissiveIntensity += EmissiveLightFor(surface, ImportOptions {}).intensity;
     }
-    for (const BspPointLight& light: entityLights) {
+    for (const PointLight& light: entityLights) {
         out.totalEntityIntensity += light.intensity;
     }
     return out;
 }
 
-auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const ImportOptions& options, LightingDiagnostics& diagnostics) -> bool {
+auto EnforceLightingFloor(ImportedMapData& data, const Map& map, const ImportOptions& options, LightingDiagnostics& diagnostics) -> bool {
     if (!options.enforceLightingFloor) {
         return false;
     }
@@ -942,7 +942,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     const bool hasLights   = !data.lights.empty();
     const bool hasEmissive = !data.emissive.empty();
     if (!hasLights && !hasEmissive) {
-        BspPointLight fill;
+        PointLight fill;
         fill.name         = "map_fill_light";
         fill.className    = "info_fill_light";
         fill.fromEmissive = true;
@@ -969,7 +969,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     //    black and the whole map reads as an interior. Lift the sun itself: the
     //    renderer derives the environment sun's intensity from the ambient
     //    exposure, so a brightened sun carries the sky with it.
-    auto sunIt = std::find_if(data.lights.begin(), data.lights.end(), [](const BspPointLight& light) { return light.type == LightType::Sun; });
+    auto sunIt = std::find_if(data.lights.begin(), data.lights.end(), [](const PointLight& light) { return light.type == LightType::Sun; });
     if (sunIt != data.lights.end() && sunIt->intensity < kSunFloorIntensity) {
         sunIt->intensity = kSunFloorIntensity;
         intervened       = true;

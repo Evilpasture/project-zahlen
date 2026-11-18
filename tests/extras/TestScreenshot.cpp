@@ -53,9 +53,9 @@ void test_screenshot_png_encoding_and_failures(TempDir& tmp) {
 
 void test_screenshot_com_consumer_readback(TempDir& tmp) {
     auto created = COM::CreateEngineRef(COM::InChain(
-        COM::EngineAppConfig {.appName = String64("COM screenshot test"), .logLevel = LogLevel::Quiet},
-        COM::EngineWindowConfig {.width = 64, .height = 48, .vsync = false, .headless = true},
-        COM::EngineRenderConfig {.validationMode = ValidationMode::Off}));
+        COM::AppConfig {.appName = String64("COM screenshot test"), .logLevel = LogLevel::Quiet},
+        COM::WindowConfig {.width = 64, .height = 48, .vsync = false, .headless = true},
+        COM::RenderConfig {.validationMode = ValidationMode::Off}));
     if (!ExpectTrue(created.has_value())) return;
     auto engine = std::move(*created);
     Screenshot::CaptureBuffer capture;

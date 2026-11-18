@@ -10,7 +10,7 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -688,7 +688,7 @@ namespace ProceduralAnimation {
 
 void Evaluate(
     COM::IEntities&               entities,
-    Animation::AnimationContext&  anim,
+    Animation::Context&  anim,
     float                         dt,
     const COM::ISimulation*       physics  = nullptr,
     const COM::IAssetLibrary*     assets   = nullptr,
@@ -697,17 +697,17 @@ void Evaluate(
 
 void Step(
     COM::IEntities&               entities,
-    Animation::AnimationContext&  anim,
+    Animation::Context&  anim,
     float                         dt,
     const COM::ISimulation*       physics  = nullptr,
     const COM::IAssetLibrary*     assets   = nullptr,
     COM::IGraphicsDevice*         graphics = nullptr,
     Animation::PoseUploadCallback sink     = {});
 
-void Step(COM::IEngine& engine, Animation::AnimationContext& anim, float dt);
+void Step(COM::IEngine& engine, Animation::Context& anim, float dt);
 
 struct Layer {
-    Animation::AnimationContext context;
+    Animation::Context context;
 
     void Tick(COM::IEngine& engine, float dt) {
         ProceduralAnimation::Step(engine, context, dt);

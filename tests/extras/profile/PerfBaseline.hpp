@@ -5,7 +5,7 @@
 //
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
 // built on the JSON extra (ReflectJSON::Parse to read,
-// ReflectJSON::SerializeJSON to write), ZHLN::Mutex and ZHLN::Println.
+// ReflectJSON::Serialize to write), ZHLN::Mutex and ZHLN::Println.
 //
 // Every benchmark metric is recorded to perf-baseline.json at the PROJECT
 // ROOT (ZHLN_PROJECT_ROOT, defined once in the root CMakeLists), so
@@ -14,7 +14,7 @@
 // fails the test via ZHLN::Test::VerifyBaseline (TestsFramework.hpp).
 //
 // Storage: one reflected struct (PerfBaselineFile below) serialised through
-// ReflectJSON::SerializeJSON and read back with ReflectJSON::Parse --
+// ReflectJSON::Serialize and read back with ReflectJSON::Parse --
 // the file format IS the struct declaration:
 // The machine key is hostname | Config.hpp Compiler | BuildType (+ " ASan"),
 // so different machines/toolchains/profiles keep independent baselines in
@@ -453,7 +453,7 @@ namespace detail {
                 ours.frame_benchmarks[name] = frameMetrics;
             }
 
-            WriteBaselineAtomically(BaselineFilePath(), ReflectJSON::SerializeJSON(file, 2));
+            WriteBaselineAtomically(BaselineFilePath(), ReflectJSON::Serialize(file, 2));
         }
     };
 

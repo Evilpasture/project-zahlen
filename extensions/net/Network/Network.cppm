@@ -80,10 +80,10 @@ inline constexpr float INV_QUAT_SCALE = 1.0f / 32767.0f;
 
 // ============================================================================
 // Error Codes (API level — placeholder-free messages; wire-level errors use
-// ZHLN::Wire::WireError and carry formatted context in ZHLN::Wire::Failure)
+// ZHLN::Wire::Error and carry formatted context in ZHLN::Wire::Failure)
 // ============================================================================
 
-enum class NetworkError : uint8_t {
+enum class Error : uint8_t {
     SocketError ZHLN_ANNOTATION(ZHLN::Description<"Socket operation failed"> {}) = 1,
     ConnectionFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to establish server connection"> {}),
     HandshakeFailed ZHLN_ANNOTATION(ZHLN::Description<"Server handshake or token verification failed"> {}),
@@ -222,7 +222,7 @@ struct ZHLN::Wire::Codec<ZHLN::FVec3> {
         for (const float component: components) {
             const double meters = static_cast<double>(component);
             if (!std::isfinite(component) || meters < -WorldMax || meters > WorldMax) {
-                return std::unexpected(writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, meters, -WorldMax, WorldMax));
+                return std::unexpected(writer.Fail(ZHLN::Wire::Error::ValueOutOfRange, meters, -WorldMax, WorldMax));
             }
             const double scaled  = std::round(meters * ZHLN::Net::POSITION_SCALE);
             const double clamped = std::clamp(scaled, -2147483647.0, 2147483647.0);
@@ -269,7 +269,7 @@ struct ZHLN::Wire::Codec<ZHLN::Quat> {
         const float components[4] = {x, y, z, w};
         for (const float component: components) {
             if (!std::isfinite(component)) {
-                return std::unexpected(writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, static_cast<double>(component), -1.0, 1.0));
+                return std::unexpected(writer.Fail(ZHLN::Wire::Error::ValueOutOfRange, static_cast<double>(component), -1.0, 1.0));
             }
             // Clamp instead of rejecting: normalized quaternions can overshoot
             // ±1 by one ULP.
@@ -311,7 +311,7 @@ struct ZHLN::Wire::Codec<ZHLN::Quat> {
 // all of those have to agree on one definition.
 namespace ZHLN::Net {
 
-auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
+auto Fail(Wire::Error error, auto&&... args) -> Wire::Failure {
     return Wire::MakeFailure(error, static_cast<decltype(args)>(args)...);
 }
 
@@ -339,33 +339,33 @@ auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
 auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
     if (body.size() < 5) { // flags byte + trailing CRC32
         return std::unexpected(
-            Fail(Wire::WireError::InvalidFrame, std::format("frame body of {} byte(s) is smaller than flags + CRC32", body.size())));
+            Fail(Wire::Error::InvalidFrame, std::format("frame body of {} byte(s) is smaller than flags + CRC32", body.size())));
     }
     const uint8_t flags = body[0];
     if ((flags & ~FRAME_FLAG_COMPRESSED) != 0) {
-        return std::unexpected(Fail(Wire::WireError::InvalidFrame, std::format("unknown frame flags 0x{:02x}", flags)));
+        return std::unexpected(Fail(Wire::Error::InvalidFrame, std::format("unknown frame flags 0x{:02x}", flags)));
     }
     if ((flags & FRAME_FLAG_COMPRESSED) != 0) {
         if (body.size() < 9) { // flags + rawLen + crc32
-            return std::unexpected(Fail(Wire::WireError::InvalidFrame, "compressed frame is missing its raw length"));
+            return std::unexpected(Fail(Wire::Error::InvalidFrame, "compressed frame is missing its raw length"));
         }
         const uint32_t            rawLength     = ReadLE32(body.subspan(1, 4));
         const std::span<const uint8_t> compressed    = body.subspan(5, body.size() - 9);
         const uint32_t            expectedCrc   = ReadLE32(body.subspan(body.size() - 4, 4));
         if (rawLength > MAX_STREAM_FRAME_BYTES) {
-            return std::unexpected(Fail(Wire::WireError::FrameTooLarge, rawLength, MAX_STREAM_FRAME_BYTES));
+            return std::unexpected(Fail(Wire::Error::FrameTooLarge, rawLength, MAX_STREAM_FRAME_BYTES));
         }
         auto raw = Wire::Compression::Decompress(compressed, rawLength);
         if (!raw) {
             return std::unexpected(raw.error());
         }
         if (raw->size() != rawLength) {
-            return std::unexpected(Fail(Wire::WireError::InvalidFrame,
+            return std::unexpected(Fail(Wire::Error::InvalidFrame,
                                         std::format("decompressed {} byte(s) but the frame announced {}", raw->size(), rawLength)));
         }
         const uint32_t computedCrc = Wire::Checksum::Crc32(*raw);
         if (computedCrc != expectedCrc) {
-            return std::unexpected(Fail(Wire::WireError::ChecksumMismatch, computedCrc, expectedCrc));
+            return std::unexpected(Fail(Wire::Error::ChecksumMismatch, computedCrc, expectedCrc));
         }
         return raw;
     }
@@ -374,7 +374,7 @@ auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<
     const uint32_t            expectedCrc = ReadLE32(body.subspan(body.size() - 4, 4));
     const uint32_t            computedCrc = Wire::Checksum::Crc32(payload);
     if (computedCrc != expectedCrc) {
-        return std::unexpected(Fail(Wire::WireError::ChecksumMismatch, computedCrc, expectedCrc));
+        return std::unexpected(Fail(Wire::Error::ChecksumMismatch, computedCrc, expectedCrc));
     }
     return std::vector<uint8_t>(payload.begin(), payload.end());
 }
@@ -415,11 +415,11 @@ export namespace ZHLN::Net {
 
 auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t> {
     if (streamPrefix.size() < 4) {
-        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "need at least 4 bytes to read a frame length"));
+        return std::unexpected(Fail(Wire::Error::InvalidFrame, "need at least 4 bytes to read a frame length"));
     }
     const uint32_t length = ReadBE32(streamPrefix.subspan(0, 4));
     if (length < 5 || length > MAX_STREAM_FRAME_BYTES) {
-        return std::unexpected(Fail(Wire::WireError::FrameTooLarge, length, MAX_STREAM_FRAME_BYTES));
+        return std::unexpected(Fail(Wire::Error::FrameTooLarge, length, MAX_STREAM_FRAME_BYTES));
     }
     return length;
 }
@@ -447,7 +447,7 @@ auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uin
         return std::unexpected(length.error());
     }
     if (frame.size() != static_cast<size_t>(*length) + 4) {
-        return std::unexpected(Fail(Wire::WireError::FrameLengthMismatch, *length + 4ull, frame.size()));
+        return std::unexpected(Fail(Wire::Error::FrameLengthMismatch, *length + 4ull, frame.size()));
     }
     return DecodeFrameBody(frame.subspan(4));
 }
@@ -470,17 +470,17 @@ auto EncodeEnvelope(MessageType type, std::span<const uint8_t> payload) -> Wire:
 auto DecodeEnvelope(std::span<const uint8_t> bytes) -> Wire::Result<MessageEnvelope> {
     if (bytes.size() < 4) {
         return std::unexpected(Fail(
-            Wire::WireError::InvalidFrame, std::format("envelope of {} byte(s) is smaller than its 4 byte header", bytes.size())));
+            Wire::Error::InvalidFrame, std::format("envelope of {} byte(s) is smaller than its 4 byte header", bytes.size())));
     }
     if (bytes[0] != 'Z' || bytes[1] != 'W') {
-        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "envelope magic bytes are not 'ZW'"));
+        return std::unexpected(Fail(Wire::Error::InvalidFrame, "envelope magic bytes are not 'ZW'"));
     }
     if (bytes[2] != PROTOCOL_VERSION) {
-        return std::unexpected(Fail(Wire::WireError::ProtocolVersionMismatch, bytes[2], PROTOCOL_VERSION));
+        return std::unexpected(Fail(Wire::Error::ProtocolVersionMismatch, bytes[2], PROTOCOL_VERSION));
     }
     const uint8_t rawType = bytes[3];
     if (!ZHLN::Reflect::EnumHasValue<MessageType>(rawType)) {
-        return std::unexpected(Fail(Wire::WireError::UnknownMessageType, rawType, PROTOCOL_VERSION));
+        return std::unexpected(Fail(Wire::Error::UnknownMessageType, rawType, PROTOCOL_VERSION));
     }
     MessageEnvelope envelope;
     envelope.type    = static_cast<MessageType>(rawType);
@@ -514,7 +514,7 @@ auto DecodeMessage(MessageType expected, std::span<const uint8_t> bytes) -> Wire
     }
     if (envelope->type != expected) {
         return std::unexpected(Fail(
-            Wire::WireError::InvalidFrame,
+            Wire::Error::InvalidFrame,
             std::format("expected message type {}, received {}", ZHLN::Reflect::EnumToString(expected),
                         ZHLN::Reflect::EnumToString(envelope->type))));
     }
@@ -569,12 +569,12 @@ auto DecodeClientInput(std::span<const uint8_t> bytes) -> Wire::Result<ClientInp
 // ECS Network Components
 // ============================================================================
 
-struct NetworkIdentityComponent {
+struct IdentityComponent {
     uint64_t serverUID    = 0;
     bool     isLocalOwner = false;
 };
 
-struct NetworkInterpolationComponent {
+struct InterpolationComponent {
     ZHLN::FVec3 targetPosition     = {};
     ZHLN::Quat  targetRotation     = ZHLN::Quat::Identity();
     ZHLN::FVec3 linearVelocity     = {};
@@ -607,15 +607,15 @@ class ClientReplicator {
 
 export namespace ZHLN::Net {
 
-class ZHLN_STATIC_API NetworkClient {
+class ZHLN_STATIC_API Client {
   public:
-    NetworkClient();
-    ~NetworkClient();
+    Client();
+    ~Client();
 
-    NetworkClient(const NetworkClient&)                    = delete;
-    auto operator=(const NetworkClient&) -> NetworkClient& = delete;
-    NetworkClient(NetworkClient&&) noexcept;
-    auto operator=(NetworkClient&&) noexcept -> NetworkClient&;
+    Client(const Client&)                    = delete;
+    auto operator=(const Client&) -> Client& = delete;
+    Client(Client&&) noexcept;
+    auto operator=(Client&&) noexcept -> Client&;
 
     [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept -> std::expected<void, ErrorCode>;
     void               Disconnect() noexcept;

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -178,7 +178,7 @@ float g_frameDt = 0.0f;
 // viewer a local of main(), inside that scope; static storage is exactly what
 // that rule forbids. It is attached lazily, on the first frame it draws, so a
 // session that never presses F3 never builds the benchmark's world.
-ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
+ZHLN::Bench::Viewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::COM::IEngine& engine, bool captured) {
     g_mouseCaptured = captured;
@@ -400,7 +400,7 @@ ZHLN::Entity g_player = ZHLN::Entity::Null();
 // leaf cube at the player's position and write it onto the rig parts, so the
 // character follows the lighting of the room it stands in.
 std::vector<ZHLN::Entity>       g_playerRigParts;
-const ZHLN::BSP::BSPMap*        g_rigCubeMap = nullptr;
+const ZHLN::BSP::Map*        g_rigCubeMap = nullptr;
 ZHLN::BSP::ImportOptions        g_rigImportOpts {};
 
 void UpdatePlayerRigAmbientCube(ZHLN::COM::IEngine& engine) {
@@ -970,7 +970,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
         // Back to the eye camera: the orbit rig goes away, and the look the
         // orbit was driving becomes this frame's first-person look so the view
         // does not snap.
-        registry.Detach<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
+        registry.Detach<ZHLN::CameraRig::TargetComponent>(camEnt);
     } else {
         // The orbit starts behind the character looking the way the camera
         // already is -- from the fly cam, the first-person eye or another orbit,
@@ -979,7 +979,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
         const auto                                   camera    = registry.Get<ZHLN::Components::CameraComponent>(camEnt);
         const float                                  seedYaw   = camera ? camera->camera.yaw.value : g_view.yaw;
         const float                                  seedPitch = camera ? camera->camera.pitch.value : kOrbitPitch;
-        const ZHLN::CameraRig::TargetCameraComponent orbit {
+        const ZHLN::CameraRig::TargetComponent orbit {
             .target         = g_player,
             .distance       = kOrbitDistance,
             .targetDistance = kOrbitDistance,
@@ -990,7 +990,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
             .fov            = kOrbitFov,
             .targetFov      = kOrbitFov,
         };
-        if (!registry.Patch<ZHLN::CameraRig::TargetCameraComponent>(camEnt, [&](auto& rig) -> auto { rig = orbit; })) {
+        if (!registry.Patch<ZHLN::CameraRig::TargetComponent>(camEnt, [&](auto& rig) -> auto { rig = orbit; })) {
             (void)registry.Attach(camEnt, orbit);
         }
     }
@@ -1072,8 +1072,8 @@ void FirstPersonCameraStep(ZHLN::COM::IEngine& engine) {
     // either, since both drive yaw/pitch themselves. A boot component with no
     // target is the rig's re-seed, not an active orbit, which is why the check
     // is on the target rather than on the component's presence.
-    const auto orbitCamera = reg.Get<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
-    if (reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt) || (orbitCamera && reg.IsAlive(orbitCamera->target))) {
+    const auto orbitCamera = reg.Get<ZHLN::CameraRig::TargetComponent>(camEnt);
+    if (reg.Get<ZHLN::FreeCam::TagComponent>(camEnt) || (orbitCamera && reg.IsAlive(orbitCamera->target))) {
         // Whatever is driving the camera also owns the pose, so this step stands
         // down entirely. The fly cam needs more than this step's silence, though:
         // the procedural first-person layer writes the same Camera from the
@@ -1311,7 +1311,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Loaded BSP file ({} KiB)", bspBytes.size() / 1024U);
 
     // 3. Parse BSP headers & lumps
-    auto bspMapExp = ZHLN::BSP::ParseBsp(bspBytes);
+    auto bspMapExp = ZHLN::BSP::Parse(bspBytes);
     if (!bspMapExp) {
         ZHLN::LogError("[BSPSample] Failed to parse BSP: {}", ZHLN::Error(bspMapExp.error()).Message());
         return EXIT_FAILURE;
@@ -1354,7 +1354,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 #endif
 
-    ZHLN::Bench::BenchmarkViewer benchmarkViewer;
+    ZHLN::Bench::Viewer benchmarkViewer;
     benchmarkViewer.Attach(*engine);
     g_benchmarkViewer = &benchmarkViewer;
 
@@ -1381,7 +1381,7 @@ auto main(int argc, char* argv[]) -> int {
     const auto rawBspBytes = std::as_bytes(std::span(bspBytes));
     ZHLN::BSP::SourceVFS vfs(*engine->Assets());
     if (!assetRoot.empty()) vfs.AddSearchPath(assetRoot.string());
-    auto prepared = ZHLN::BSP::DecodeBSPAssets(rawBspBytes, std::move(vfs), virtualPath, importOpts);
+    auto prepared = ZHLN::BSP::DecodeAssets(rawBspBytes, std::move(vfs), virtualPath, importOpts);
     if (!prepared || prepared->prefabs.empty()) {
         ZHLN::LogError("[BSPSample] Failed to prepare BSP assets for '{}'", virtualPath);
         return EXIT_FAILURE;
@@ -1389,7 +1389,7 @@ auto main(int argc, char* argv[]) -> int {
 
     uint64_t worldPrefabHash = 0;
     for (size_t i = 0; i < prepared->prefabs.size(); ++i) {
-        auto uploaded = ZHLN::BSP::UploadBSPAsset(*engine->Assets(), *engine->Graphics(), prepared->source, prepared->prefabs[i], {.import = importOpts, .buildBLAS = true});
+        auto uploaded = ZHLN::BSP::UploadAsset(*engine->Assets(), *engine->Graphics(), prepared->source, prepared->prefabs[i], {.import = importOpts, .buildBLAS = true});
         if (!uploaded) {
             if (i == 0) {
                 ZHLN::LogError("[BSPSample] Failed to upload world BSP asset: {}", ZHLN::Error(uploaded.error()).Message());
@@ -1415,7 +1415,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
-    const ZHLN::Scene::Scene sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
+    const ZHLN::Scene::Document sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
     auto instanceExp = ZHLN::Scene::Instantiate(*engine, sceneDesc);
     if (!instanceExp) {
         ZHLN::LogError("[BSPSample] Failed to instantiate scene: {}", ZHLN::Error(instanceExp.error()).Message());
@@ -1426,7 +1426,7 @@ auto main(int argc, char* argv[]) -> int {
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
     ZHLN::Interaction::InitializeBSPEntities(*engine, bspMap, instance, importOpts);
 
-    const bool hasPlayerStart = std::any_of(bspMap.entities.begin(), bspMap.entities.end(), [](const ZHLN::BSP::BSPEntity& ent) {
+    const bool hasPlayerStart = std::any_of(bspMap.entities.begin(), bspMap.entities.end(), [](const ZHLN::BSP::Entity& ent) {
         return ent.Find("classname") == "info_player_start";
     });
 
@@ -1555,7 +1555,7 @@ auto main(int argc, char* argv[]) -> int {
             const bool freeCamKeyDown = input.KeyDown(ZHLN::KeyCode::V, ZHLN::kPrimarySeat);
             if (freeCamKeyDown && !freeCamKeyWasDown) {
                 const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
-                const bool flying = camEnt != ZHLN::Entity::Null() && static_cast<bool>(reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt));
+                const bool flying = camEnt != ZHLN::Entity::Null() && static_cast<bool>(reg.Get<ZHLN::FreeCam::TagComponent>(camEnt));
                 if (flying) {
                     ZHLN::FreeCam::Detach(reg);
                     SetFirstPersonView(*engine, g_view.firstPerson);
@@ -1621,7 +1621,7 @@ auto main(int argc, char* argv[]) -> int {
         procAnimLayer.Tick(*engine, dt);
         {
             const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
-            if (camEnt != ZHLN::Entity::Null() && reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt)) {
+            if (camEnt != ZHLN::Entity::Null() && reg.Get<ZHLN::FreeCam::TagComponent>(camEnt)) {
                 ZHLN::FreeCam::Step(*engine, dt);
             } else {
                 ZHLN::CameraRig::Step(*engine, dt);

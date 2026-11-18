@@ -31,9 +31,9 @@ ZHLN_STATIC_API uint32_t FireEntityOutputs(COM::IEntities& entities, Entity enti
                                            COM::IAudioDevice* audio = nullptr);
 
 // Translates decoded BSP interactive records into Interaction components.
-ZHLN_STATIC_API void InitializeBSPEntities(COM::IEntities& entities, const BSP::BSPMap& map,
+ZHLN_STATIC_API void InitializeBSPEntities(COM::IEntities& entities, const BSP::Map& map,
                                            const Scene::Instance& instance, const BSP::ImportOptions& options = {});
-ZHLN_STATIC_API void InitializeBSPEntities(COM::IEngine& engine, const BSP::BSPMap& map,
+ZHLN_STATIC_API void InitializeBSPEntities(COM::IEngine& engine, const BSP::Map& map,
                                            const Scene::Instance& instance, const BSP::ImportOptions& options = {});
 
 } // namespace ZHLN::Interaction

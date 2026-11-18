@@ -17,9 +17,9 @@
 #include <vector>
 
 namespace {
-auto WorldMap() -> ZHLN::BSP::BSPMap {
+auto WorldMap() -> ZHLN::BSP::Map {
     using namespace ZHLN::BSP;
-    BSPMap map;
+    Map map;
     map.version = 20;
     DPlane plane {};
     plane.normal[2] = 1;
@@ -135,9 +135,9 @@ auto StoredMapPak() -> std::vector<std::byte> {
     return bytes;
 }
 
-auto WorldBytes(const ZHLN::BSP::BSPMap& map) -> std::vector<std::byte> {
+auto WorldBytes(const ZHLN::BSP::Map& map) -> std::vector<std::byte> {
     using namespace ZHLN::BSP;
-    BspHeader header {};
+    Header header {};
     header.ident   = kBspIdent;
     header.version = 20;
     std::vector<std::byte> bytes(sizeof(header));
@@ -191,7 +191,7 @@ struct BSPWorldAssetsSuite {
             BSP::ImportOptions options {.convertCoordinates = false, .unitScale = 1};
             options.gatherEmissiveSurfaces = false;
             options.enforceLightingFloor   = false;
-            auto prepared                  = BSP::PrepareBSPAssets(map, {}, "maps/test.bsp", options);
+            auto prepared                  = BSP::PrepareAssets(map, {}, "maps/test.bsp", options);
             if (!ExpectTrue(prepared.has_value()))
                 return {};
             ExpectEq(prepared->prefabs.size(), size_t {2});
@@ -207,7 +207,7 @@ struct BSPWorldAssetsSuite {
             ExpectTrue(prepared->prefabs[0].geometry.lights.empty());
             ExpectTrue(prepared->prefabs[1].geometry.lightmaps.pages.empty());
             auto bytes   = WorldBytes(map);
-            auto decoded = BSP::DecodeBSPAssets(bytes, {}, "maps/test.bsp", options);
+            auto decoded = BSP::DecodeAssets(bytes, {}, "maps/test.bsp", options);
             if (ExpectTrue(decoded.has_value())) {
                 bytes.clear();
                 map = {};
@@ -220,9 +220,9 @@ struct BSPWorldAssetsSuite {
                     ExpectTrue(text.find("0.1 0.2 0.3") != std::string::npos);
                 }
             }
-            ExpectTrue(!BSP::DecodeBSPAssets({}, {}, "broken.bsp", options).has_value());
-            ExpectTrue(!BSP::ReadBSPAssets({}, "not-present.bsp", options).has_value());
-            ExpectTrue(!BSP::PrepareBSPAssets(WorldMap(), {}, "", options).has_value());
+            ExpectTrue(!BSP::DecodeAssets({}, {}, "broken.bsp", options).has_value());
+            ExpectTrue(!BSP::ReadAssets({}, "not-present.bsp", options).has_value());
+            ExpectTrue(!BSP::PrepareAssets(WorldMap(), {}, "", options).has_value());
             return {};
         }
 
@@ -232,9 +232,9 @@ struct BSPWorldAssetsSuite {
             using Test::ExpectTrue;
             auto created = COM::CreateEngineRef(
                 COM::InChain(
-                    COM::EngineAppConfig {.appName = String64("COM BSP world"), .logLevel = LogLevel::Quiet},
-                    COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-                    COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+                    COM::AppConfig {.appName = String64("COM BSP world"), .logLevel = LogLevel::Quiet},
+                    COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+                    COM::RenderConfig {.validationMode = ValidationMode::Off}
                 )
             );
             if (!ExpectTrue(created.has_value()))
@@ -249,38 +249,38 @@ struct BSPWorldAssetsSuite {
             std::ofstream(root / "materials/source/glass.vmt") << "VertexLitGeneric {\"$translucent\" \"1\"}";
             BSP::SourceVFS source;
             source.AddSearchPath(root.string());
-            BSP::BSPAssetDocument document {.virtualPath = "world/test"};
+            BSP::AssetDocument document {.virtualPath = "world/test"};
             auto                  sky       = WorldPart(-10, "source/lit");
             sky.skyboxLayer                 = true;
             document.geometry.parts         = {sky, WorldPart(0, "source/lit"), WorldPart(10, "source/glass")};
             document.geometry.collisionOnly = WorldPart(4, "tools/toolsclip");
             document.geometry.lightmaps.pages.push_back({.width = 1, .height = 1, .rgba16f = {0x3c00, 0x3c00, 0x3c00, 0x3c00}});
-            const BSP::BSPAssetOptions raster {.buildBLAS = false};
+            const BSP::AssetOptions raster {.buildBLAS = false};
             auto                       malformed   = document;
             malformed.geometry.parts[0].indices[0] = 100;
-            ExpectTrue(!BSP::UploadBSPAsset(assets, graphics, source, malformed, raster).has_value());
+            ExpectTrue(!BSP::UploadAsset(assets, graphics, source, malformed, raster).has_value());
             ExpectEq(graphics.createdMeshes, 0u);
             ExpectEq(graphics.createdTextures, 0u);
 
             graphics.failMaterial = true;
-            auto failed           = BSP::UploadBSPAsset(assets, graphics, source, document, raster);
+            auto failed           = BSP::UploadAsset(assets, graphics, source, document, raster);
             ExpectTrue(!failed.has_value());
             if (!failed)
-                ExpectTrue(failed.error().Is(COM::ComError::InvalidArgument));
+                ExpectTrue(failed.error().Is(COM::Error::InvalidArgument));
             ExpectEq(graphics.createdMeshes, 1u);
             ExpectEq(graphics.destroyedMeshes, 1u);
             ExpectEq(graphics.createdTextures, 1u);
             ExpectEq(graphics.unloadedTextures, 1u);
             ExpectTrue(!assets.HasPrefab(assets.PrefabHash("world/test")));
             graphics.failMaterial = false;
-            auto imported         = BSP::UploadBSPAsset(assets, graphics, source, document, raster);
+            auto imported         = BSP::UploadAsset(assets, graphics, source, document, raster);
             if (!ExpectTrue(imported.has_value())) {
                 std::filesystem::remove_all(root);
                 return {};
             }
             ExpectEq(imported->textures.size(), size_t {1});
             const auto count  = graphics.createdMeshes;
-            auto       cached = BSP::UploadBSPAsset(assets, graphics, source, document, raster);
+            auto       cached = BSP::UploadAsset(assets, graphics, source, document, raster);
             ExpectTrue(cached.has_value() && cached->textures.empty());
             ExpectEq(graphics.createdMeshes, count);
             // Registration copied the documents and collision data.

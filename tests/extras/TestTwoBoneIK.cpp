@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/IK.hpp>
@@ -67,7 +67,7 @@ using ZHLN::Quat;
 struct TwoBoneIKTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> two_bone_ik_solver() {
-            const auto solved = ZHLN::IK::SolveTwoBoneIK({
+            const auto solved = ZHLN::IK::SolveTwoBone({
                 .upperPosition  = {0.0f, 1.0f, 0.0f},
                 .targetPosition = {0.0f, 0.2f, 0.0f},
                 .poleVector     = {0.0f, 0.0f, 1.0f},
@@ -80,7 +80,7 @@ struct TwoBoneIKTestSuite {
             ZHLN::Test::ExpectTrue(std::abs((solved.endPosition - solved.midPosition).Length() - 0.5f) < 1e-4f);
             ZHLN::Test::ExpectTrue(solved.midPosition.z > 0.25f);
 
-            const auto clamped = ZHLN::IK::SolveTwoBoneIK({
+            const auto clamped = ZHLN::IK::SolveTwoBone({
                 .upperPosition  = {0.0f, 0.0f, 0.0f},
                 .targetPosition = {0.0f, 5.0f, 0.0f},
                 .poleVector     = {0.0f, 0.0f, 1.0f},
@@ -94,7 +94,7 @@ struct TwoBoneIKTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> animation_context_generational_ids_and_playback() {
             constexpr ZHLN::AssetID kAsset {101};
-            ZHLN::Animation::AnimationContext ctx;
+            ZHLN::Animation::Context ctx;
             ctx.CacheRig(kAsset, MakeThreeBoneArmRig());
 
             const auto id1 = ctx.Create(kAsset);
@@ -120,7 +120,7 @@ struct TwoBoneIKTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> animation_context_ik_descendant_fk_and_pose_upload_sink() {
             constexpr ZHLN::AssetID kAsset {202};
-            ZHLN::Animation::AnimationContext ctx;
+            ZHLN::Animation::Context ctx;
             ctx.CacheRig(kAsset, MakeThreeBoneArmRig());
 
             const auto id = ctx.Create(kAsset);
@@ -177,13 +177,13 @@ struct TwoBoneIKTestSuite {
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& entities = *(*worldRes)->Entities();
 
-            ZHLN::Animation::AnimationContext ctx;
+            ZHLN::Animation::Context ctx;
             ctx.CacheRig(kAsset, MakeThreeBoneArmRig());
 
             const auto targetEntity = entities.Spawn(
                 ZHLN::Components::TransformComponent {.position = {0.0f, -0.55f, 0.30f}}
             );
-            ZHLN::IK::TwoBoneIKComponent ikComp {};
+            ZHLN::IK::TwoBoneComponent ikComp {};
             ikComp.chainCount = 1;
             ikComp.chains[0].upperNodeIndex = 0;
             ikComp.chains[0].lowerNodeIndex = 1;

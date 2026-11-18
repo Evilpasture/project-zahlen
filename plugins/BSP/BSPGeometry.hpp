@@ -140,7 +140,7 @@ struct ImportOptions {
     uint32_t bakeVplBudget  = 384;
     float    bakeVplWeight  = 0.5f;
 
-    // Restrict the import to one submodel (index into BSPMap::models); -1
+    // Restrict the import to one submodel (index into Map::models); -1
     // imports every model not listed in skipModels. Interactive brush
     // entities (func_door, func_button, ...) get their own prefab per
     // submodel so they can animate instead of being baked into the world.
@@ -202,7 +202,7 @@ struct MaterialStreams {
 // `fromEmissive` separates the lights this pass derived from self-illuminated
 // geometry from the ones an entity authored, so the audit's counters stay
 // exhaustive when both end up in the same vector.
-struct BspPointLight {
+struct PointLight {
     std::string name;
     LightType   type = LightType::Point; // Direct reuse of engine enum
 
@@ -301,7 +301,7 @@ struct LightingDiagnostics {
 
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
-    std::vector<BspPointLight>   lights;
+    std::vector<PointLight>   lights;
 
     // Native decoded VRAD pages. Geometry parts refer to their pages through
     // MaterialStreams::lightmapPage; BSPAssets uploads them once and binds
@@ -350,7 +350,7 @@ struct ImportedMapData {
 // the only per-material brightness signal that reaches the BSP without a .vmt,
 // which is what makes it usable as an emissive gate. Exposed so the importer
 // adapter can run the same probe the geometry pass does.
-[[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float;
+[[nodiscard]] auto TexDataReflectivityLuma(const Map& map, const DFace& face) noexcept -> float;
 
 // Source's 3D skybox: background scenery compiled at 1/scale size around the
 // `sky_camera` entity, rendered by the engine at full size around the player's
@@ -396,7 +396,7 @@ struct SkyboxTransform {
 // `importSkybox` false resolves the membership (which faces belong to the
 // miniscape) but stops before the placement pass, so callers can drop that
 // content without paying for it.
-[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform;
+[[nodiscard]] auto MakeSkyboxTransform(const Map& map, bool importSkybox) noexcept -> SkyboxTransform;
 [[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
 // A point in PLACED (transformed source) coordinates: inside the world volume.
 // Guards skybox light entities only; geometry uses the background layer.
@@ -418,7 +418,7 @@ struct InteractiveSubmodel {
     FVec3 pivot {0.0f, 0.0f, 0.0f};
 };
 
-[[nodiscard]] auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
+[[nodiscard]] auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
 
 // The emissive half of the lighting heuristics as a standalone entry point.
 //
@@ -436,13 +436,13 @@ struct InteractiveSubmodel {
 // pass the entity lights the scene already gathered. Name-gate strengths only:
 // this layer has no VFS, so there is no .vmt / .vtf refinement here.
 [[nodiscard]] auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
-) -> std::vector<BspPointLight>;
+    const Map& map, const ImportOptions& options, std::span<const PointLight> entityLights
+) -> std::vector<PointLight>;
 
 // Faces + displacements -> per-material native streams; entities -> lights.
 // Faces whose texinfo is missing or node-only are skipped (they are tree
 // partitions, not surfaces). Degenerate polygons (fewer than 3 unique corners)
 // are skipped rather than producing zero-area triangles.
-[[nodiscard]] auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options = {}) -> ImportedMapData;
+[[nodiscard]] auto ImportMapGeometry(const Map& map, const ImportOptions& options = {}) -> ImportedMapData;
 
 } // namespace ZHLN::BSP

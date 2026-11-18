@@ -28,7 +28,7 @@ auto ReadInput(const COM::IActionContext& input) -> InputSnapshot {
         .sprint     = down(KeyCode::LShift),
     };
 }
-void Drive(Camera& cam, const FreeCamComponent& knobs, const InputSnapshot& input, float dt) {
+void Drive(Camera& cam, const Component& knobs, const InputSnapshot& input, float dt) {
     if (!knobs.enabled || !std::isfinite(dt) || dt <= 0.0f)
         return;
     if (!knobs.lookRequiresButton || input.lookButton) {
@@ -46,11 +46,11 @@ void Drive(Camera& cam, const FreeCamComponent& knobs, const InputSnapshot& inpu
         cam.position += move.Normalized() * knobs.speed * (input.sprint ? knobs.sprintMultiplier : 1.0f) * dt;
 }
 void Apply(COM::IEntities& entities, const InputSnapshot& input, float dt) {
-    for (const auto entity: entities.EntitiesWith<FreeCamTagComponent>()) {
+    for (const auto entity: entities.EntitiesWith<TagComponent>()) {
         if (entities.Get<Components::PendingDestroy>(entity))
             continue;
-        const auto* knobs  = entities.Get<FreeCamComponent>(entity);
-        const auto  config = knobs ? *knobs : FreeCamComponent {};
+        const auto* knobs  = entities.Get<Component>(entity);
+        const auto  config = knobs ? *knobs : Component {};
         entities.Patch<Components::CameraComponent>(entity, [&](auto& cc) { Drive(cc.camera, config, input, dt); });
     }
 }
@@ -58,17 +58,17 @@ bool Attach(COM::IEntities& entities, float speed, bool lookRequiresButton) {
     const auto camera = MainCamera(entities);
     if (camera == Entity::Null() || entities.Get<Components::PendingDestroy>(camera))
         return false;
-    if (!entities.Get<FreeCamTagComponent>(camera) && !entities.Attach(camera, FreeCamTagComponent {}))
+    if (!entities.Get<TagComponent>(camera) && !entities.Attach(camera, TagComponent {}))
         return false;
-    if (!entities.Patch<FreeCamComponent>(
+    if (!entities.Patch<Component>(
             camera,
             [&](auto& fc) {
                 fc.speed              = speed;
                 fc.lookRequiresButton = lookRequiresButton;
             }
         ) &&
-        !entities.Attach(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton})) {
-        entities.Detach<FreeCamTagComponent>(camera);
+        !entities.Attach(camera, Component {.speed = speed, .lookRequiresButton = lookRequiresButton})) {
+        entities.Detach<TagComponent>(camera);
         return false;
     }
     entities.Detach<HostFreeCamOptOutComponent>(camera);
@@ -81,18 +81,18 @@ void Detach(COM::IEntities& entities) {
     // If allocation fails, retain the old state rather than immediately reseed.
     if (!entities.Get<HostFreeCamOptOutComponent>(camera) && !entities.Attach(camera, HostFreeCamOptOutComponent {}))
         return;
-    entities.Detach<FreeCamTagComponent>(camera);
-    entities.Detach<FreeCamComponent>(camera);
+    entities.Detach<TagComponent>(camera);
+    entities.Detach<Component>(camera);
 }
 void Step(COM::IEngine& engine, float dt) {
     auto&      entities = *engine.Entities();
     const auto camera   = MainCamera(entities);
     if (camera != Entity::Null() && !entities.Get<HostFreeCamOptOutComponent>(camera) && !entities.Get<Components::PendingDestroy>(camera)) {
         // Seed independently: a caller may intentionally attach only the tag.
-        if (!entities.Get<FreeCamTagComponent>(camera))
-            (void) entities.Attach(camera, FreeCamTagComponent {});
-        if (!entities.Get<FreeCamComponent>(camera))
-            (void) entities.Attach(camera, FreeCamComponent {});
+        if (!entities.Get<TagComponent>(camera))
+            (void) entities.Attach(camera, TagComponent {});
+        if (!entities.Get<Component>(camera))
+            (void) entities.Attach(camera, Component {});
     }
     Apply(entities, ReadInput(*engine.Actions()), dt);
 }

@@ -11,7 +11,7 @@
 # whole chain is optional: this file returns early when zahlen_remote_asset does
 # not exist, the way RemoteAsset returns early when HTTP is absent.
 #
-# No base URL is compiled in. The host is supplied at runtime through CDNConfig.
+# No base URL is compiled in. The host is supplied at runtime through CDN::Config.
 #
 # Public headers are included as <CDN/CDN.hpp>.
 

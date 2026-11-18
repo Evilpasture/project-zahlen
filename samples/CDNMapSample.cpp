@@ -3,9 +3,9 @@
 
 // samples/CDNMapSample.cpp
 //
-// Fetch one .glb through ZHLN::CDN::CDNManager, upload through GLTFAssets, fly with FreeCam.
+// Fetch one .glb through ZHLN::CDN::Manager, upload through GLTFAssets, fly with FreeCam.
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <CDN/CDN.hpp>
@@ -86,13 +86,13 @@ auto main(int argc, char* argv[]) -> int {
         engine->FocusWindow(engine->PrimaryWindow());
     }
 
-    ZHLN::CDN::CDNConfig config {
+    ZHLN::CDN::Config config {
         .baseURL        = kBaseURL,
         .timeoutSeconds = kTimeout,
     };
-    auto cdn = ZHLN::CDN::CDNManager::Create(config);
+    auto cdn = ZHLN::CDN::Manager::Create(config);
     if (!cdn) {
-        ZHLN::LogError("[CDNMap] CDNManager::Create failed: {}", ZHLN::Error(cdn.error()).Message());
+        ZHLN::LogError("[CDNMap] CDN::Manager::Create failed: {}", ZHLN::Error(cdn.error()).Message());
         return EXIT_FAILURE;
     }
 
@@ -179,7 +179,7 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    ZHLN::Animation::AnimationContext animCtx {};
+    ZHLN::Animation::Context animCtx {};
     uint64_t lastGeneration = engine->DeviceGeneration();
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {

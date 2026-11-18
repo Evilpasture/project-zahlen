@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/Components.hpp>
 #include <Animation/IK.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -11,10 +11,10 @@
 
 namespace ZHLN::IK {
 
-void ApplyTwoBoneIK(const COM::IEntities& entities, Animation::AnimationContext& anim) {
-    for (const Entity entity : entities.EntitiesWith<TwoBoneIKComponent>()) {
+void ApplyTwoBone(const COM::IEntities& entities, Animation::Context& anim) {
+    for (const Entity entity : entities.EntitiesWith<TwoBoneComponent>()) {
         const auto* animComp = entities.Get<Animation::AnimatorComponent>(entity);
-        const auto* ikComp   = entities.Get<TwoBoneIKComponent>(entity);
+        const auto* ikComp   = entities.Get<TwoBoneComponent>(entity);
         if (animComp == nullptr || ikComp == nullptr || !animComp->animationID.IsValid()) continue;
 
         auto invEntityLocal = Mat4x4::Identity();
@@ -27,7 +27,7 @@ void ApplyTwoBoneIK(const COM::IEntities& entities, Animation::AnimationContext&
         std::array<Animation::IKChain, kMaxTwoBoneIKChains> translated {};
         size_t                                              count = 0;
 
-        for (const TwoBoneIKChain& src : ikComp->ActiveChains()) {
+        for (const TwoBoneChain& src : ikComp->ActiveChains()) {
             if (count >= translated.size()) break;
             FVec3 targetPosModel = src.targetPosition;
             auto  targetRotModel = src.targetRotation;

@@ -42,7 +42,7 @@ void AppendUniqueBinding(std::vector<SkeletonBinding>& bindings, SkeletonBinding
 
 } // namespace
 
-void Sync(COM::IEntities& entities, AnimationContext& anim) {
+void Sync(COM::IEntities& entities, Context& anim) {
     SeedAnimatedPrefabRoots(entities);
 
     const auto               animatorEntities = entities.EntitiesWith<AnimatorComponent>();
@@ -130,12 +130,12 @@ void Sync(COM::IEntities& entities, AnimationContext& anim) {
         anim.BindSkeletons(entry.animationID, entry.list);
     }
 
-    IK::ApplyTwoBoneIK(entities, anim);
+    IK::ApplyTwoBone(entities, anim);
 }
 
 void PublishResults(
     COM::IEntities&         entities,
-    const AnimationContext& anim,
+    const Context& anim,
     bool (*skipRigidNodes)(const COM::IEntities&, Entity)) {
     const auto animatorEntities = entities.EntitiesWith<AnimatorComponent>();
     if (animatorEntities.size() == 0) return;
@@ -195,7 +195,7 @@ void PublishResults(
 
 void Step(
     COM::IEntities&           entities,
-    AnimationContext&         anim,
+    Context&         anim,
     float                     dt,
     const COM::IAssetLibrary* assets,
     COM::IGraphicsDevice*     graphics,
@@ -206,7 +206,7 @@ void Step(
     PublishResults(entities, anim);
 }
 
-void Step(COM::IEngine& engine, AnimationContext& anim, float dt) {
+void Step(COM::IEngine& engine, Context& anim, float dt) {
     auto* entities = engine.Entities();
     if (entities == nullptr) return;
     const auto* assets   = engine.Assets();

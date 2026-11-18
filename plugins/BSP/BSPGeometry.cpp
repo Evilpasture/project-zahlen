@@ -68,7 +68,7 @@ void UpdateBounds(FVec3& boundsMin, FVec3& boundsMax, bool& first, FVec3 p) {
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
-[[nodiscard]] auto FaceWinding(const BSPMap& map, const DFace& face) -> std::optional<std::vector<FVec3>> {
+[[nodiscard]] auto FaceWinding(const Map& map, const DFace& face) -> std::optional<std::vector<FVec3>> {
     if (face.firstedge < 0 || face.numedges < 3) {
         return std::nullopt;
     }
@@ -119,7 +119,7 @@ struct FaceProjection {
 
 };
 
-[[nodiscard]] auto ProjectionFor(const BSPMap& map, const DFace& face) -> std::optional<FaceProjection> {
+[[nodiscard]] auto ProjectionFor(const Map& map, const DFace& face) -> std::optional<FaceProjection> {
     if (face.texinfo == kTexInfoNode || face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return std::nullopt;
     }
@@ -139,7 +139,7 @@ struct FaceProjection {
     return out;
 }
 
-[[nodiscard]] auto MaterialNameFor(const BSPMap& map, const DFace& face) -> std::string_view {
+[[nodiscard]] auto MaterialNameFor(const Map& map, const DFace& face) -> std::string_view {
     if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return "unknown";
     }
@@ -203,7 +203,7 @@ enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
 //   Render        -> visible world mesh
 //   CollisionOnly -> world physics hull only (invisible yet solid)
 //   Drop          -> invisible AND non-solid, meaning literally nothing
-[[nodiscard]] auto DispositionFor(const BSPMap& map, const DFace& face) -> FaceDisposition {
+[[nodiscard]] auto DispositionFor(const Map& map, const DFace& face) -> FaceDisposition {
     if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return FaceDisposition::Render;
     }
@@ -308,7 +308,7 @@ constexpr int32_t kContentsSolid = 0x1;
 // BSPTree point classification against model 0's head node: walks split
 // planes down to a leaf and reports its contents. Mirrors Source's own "what
 // volume is this point in" query; runs in Source coordinates.
-[[nodiscard]] auto ContentsAtPoint(const BSPMap& map, const FVec3& p) noexcept -> int32_t {
+[[nodiscard]] auto ContentsAtPoint(const Map& map, const FVec3& p) noexcept -> int32_t {
     if (map.models.empty() || map.nodes.empty()) {
         return kContentsSolid;
     }
@@ -340,7 +340,7 @@ constexpr int32_t kContentsSolid = 0x1;
 // it, the marks land exactly on single-sheet walls players can stand behind
 // (gm_murder_drones: ~5000 audit hits, only the spawn-building subset is
 // reachable, the rest sits in sealed chases -- harmless but inclusive).
-void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const TwinRecord> records, const ImportOptions& options) {
+void ApplyTwinAudit(const Map& map, ImportedMapData& result, std::span<const TwinRecord> records, const ImportOptions& options) {
     if (records.empty()) {
         return;
     }
@@ -431,7 +431,7 @@ void EmitVertex(
     MaterialStreams&          part,
     const ImportOptions&      options,
     const FaceProjection&     projection,
-    const BSPMap&             map,
+    const Map&             map,
     const DFace&              face,
     const VradLightmapAtlas&  lightmaps,
     const VradLightmapChart*  lightmapChart,
@@ -504,7 +504,7 @@ void EmitVertex(
 // every surface a mapper excluded from the lightmap bake, which for a non-tool
 // material means the surface is its own light source. Every self-illuminated
 // face in a compiled map carries it; an ordinary wall never does.
-[[nodiscard]] auto HasSurfNoLight(const BSPMap& map, const DFace& face) noexcept -> bool {
+[[nodiscard]] auto HasSurfNoLight(const Map& map, const DFace& face) noexcept -> bool {
     if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return false;
     }
@@ -515,7 +515,7 @@ void EmitVertex(
 // Source's `reflectivity` is the material's diffuse albedo in linear 0-1, and
 // it is the only per-material brightness signal that survives into the BSP
 // without a .vmt -- which is what makes it usable as an emissive gate.
-[[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float {
+[[nodiscard]] auto TexDataReflectivityLuma(const Map& map, const DFace& face) noexcept -> float {
     if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return 0.0f;
     }
@@ -577,7 +577,7 @@ void ParseVec3(std::string_view text, float out[3]) {
 }
 
 // Centroid of a face's surfedge loop, in source coordinates.
-[[nodiscard]] auto FaceCentroidSource(const BSPMap& map, const DFace& face) noexcept -> std::array<float, 3> {
+[[nodiscard]] auto FaceCentroidSource(const Map& map, const DFace& face) noexcept -> std::array<float, 3> {
     std::array<float, 3> c {0.0f, 0.0f, 0.0f};
     if (face.firstedge < 0 || face.numedges <= 0) {
         return c;
@@ -610,10 +610,10 @@ namespace {
 constexpr float kSourceViewHeight = 64.0f;
 } // namespace
 
-auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform {
+auto MakeSkyboxTransform(const Map& map, bool importSkybox) noexcept -> SkyboxTransform {
     SkyboxTransform t;
 
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         if (entity.Find("classname") != "sky_camera") {
             continue;
         }
@@ -646,7 +646,7 @@ auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> Skybo
     // point -- the placed miniscape is re-centred on the map further down --
     // but a map with no spawn keeps a sane relative placement instead of
     // collapsing to the world origin.
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const std::string_view cls = entity.Find("classname");
         if (cls.starts_with("info_player")) {
             ParseVec3(entity.Find("origin"), t.anchor);
@@ -802,10 +802,10 @@ void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) no
     }
 }
 
-auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel> {
+auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel> {
     std::vector<InteractiveSubmodel> result;
 
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         const bool             isDoor =
             (className == "func_door" || className == "func_door_rotating" || className == "prop_door_rotating" || className == "momentary_door");
@@ -852,9 +852,9 @@ auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options
 // reflectivity and the SURF_NOLIGHT flag. Kept in step with the inline version
 // in ImportMapGeometry -- if one changes, the other must.
 auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
-) -> std::vector<BspPointLight> {
-    std::vector<BspPointLight> out;
+    const Map& map, const ImportOptions& options, std::span<const PointLight> entityLights
+) -> std::vector<PointLight> {
+    std::vector<PointLight> out;
     if (!options.gatherEmissiveSurfaces) {
         return out;
     }
@@ -945,7 +945,7 @@ auto GatherEmissiveAreaLights(
     return out;
 }
 
-auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> ImportedMapData {
+auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> ImportedMapData {
     ImportedMapData result;
     bool            globalBoundsFirst = true;
 
@@ -1441,7 +1441,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
         if (field.hasBake) {
             result.ambient      = field.ambient;
             result.stats.bakeLuxels = field.sampleCount;
-            for (const BspPointLight& vpl: field.vpls) {
+            for (const PointLight& vpl: field.vpls) {
                 result.lights.push_back(vpl);
             }
             result.stats.bakeVpls = static_cast<uint32_t>(field.vpls.size());

@@ -21,9 +21,9 @@ using Test::ExpectTrue;
 auto StagedEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("Staged frames"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("Staged frames"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
@@ -194,7 +194,7 @@ struct FramePipelineSuite {
             if (!ExpectTrue(cameraID.HasValue()))
                 return {};
             (void) entities.Attach(
-                cameraID.value, CameraRig::TargetCameraComponent {
+                cameraID.value, CameraRig::TargetComponent {
                                     .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0
                                 }
             );
@@ -236,7 +236,7 @@ struct FramePipelineSuite {
             const auto target   = entities.Spawn(Components::TransformComponent {.position = {4, 3, 2}}, Components::WorldTransformComponent {});
             const auto camera   = entities.Spawn(
                 Components::CameraComponent {},
-                CameraRig::TargetCameraComponent {
+                CameraRig::TargetComponent {
                     .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0
                 }
             );
@@ -297,7 +297,7 @@ struct FramePipelineSuite {
                         if (main.HasValue())
                             (void) entities.Attach(
                                 main.value,
-                                CameraRig::TargetCameraComponent {
+                                CameraRig::TargetComponent {
                                     .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0
                                 }
                             );

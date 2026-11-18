@@ -44,7 +44,7 @@ struct VradLightmapPage {
 
 struct VradLightmapAtlas {
     std::vector<VradLightmapPage> pages;
-    // Indexed by BSPMap::faces. Invalid for faces with no static VRAD chart,
+    // Indexed by Map::faces. Invalid for faces with no static VRAD chart,
     // malformed offsets, or charts too large for the configured page size.
     std::vector<VradLightmapChart> faceCharts;
 
@@ -70,8 +70,8 @@ struct VradLightmapAtlas {
 // `gutter` replicated edge luxels protect bilinear sampling at chart seams.
 // Pages use exact NPOT used extents; phase one samples mip zero so no sparse
 // page is inflated merely to manufacture a mip chain.
-// Secondary light styles are intentionally retained in BSPMap for the future
+// Secondary light styles are intentionally retained in Map for the future
 // animated-light-style stage; phase one uses Source's base (styles[0]) chart.
-[[nodiscard]] auto BuildVradLightmapAtlas(const BSPMap& map, uint32_t maxPageSize, uint32_t gutter = 2u) -> VradLightmapAtlas;
+[[nodiscard]] auto BuildVradLightmapAtlas(const Map& map, uint32_t maxPageSize, uint32_t gutter = 2u) -> VradLightmapAtlas;
 
 } // namespace ZHLN::BSP

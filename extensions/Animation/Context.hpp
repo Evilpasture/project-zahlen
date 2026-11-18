@@ -72,15 +72,15 @@ struct PoseUploadCallback {
     void (*uploadKinematic)(void* user, uint32_t jointOffset, std::span<const Mat4x4> joints) = nullptr;
 };
 
-class ZHLN_STATIC_API AnimationContext {
+class ZHLN_STATIC_API Context {
   public:
-    AnimationContext();
-    ~AnimationContext() noexcept;
+    Context();
+    ~Context() noexcept;
 
-    AnimationContext(const AnimationContext&)                    = delete;
-    auto operator=(const AnimationContext&) -> AnimationContext& = delete;
-    AnimationContext(AnimationContext&&) noexcept;
-    auto operator=(AnimationContext&&) noexcept -> AnimationContext&;
+    Context(const Context&)                    = delete;
+    auto operator=(const Context&) -> Context& = delete;
+    Context(Context&&) noexcept;
+    auto operator=(Context&&) noexcept -> Context&;
 
     [[nodiscard]] auto Create(AssetID prefabAsset) -> AnimationID;
     void               Destroy(std::span<const AnimationID> handles) noexcept;

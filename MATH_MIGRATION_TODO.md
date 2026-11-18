@@ -34,7 +34,7 @@ conventions, units, precision and wire/ABI compatibility when addressing them.
   `src/engine/PrefabFactory.cpp` explicitly use `AsVec4()`. Consider a deliberate
   interface migration to `Quat`, with conversion to Jolt inside physics; do not
   bypass `PhysicsContext` shape factories or introduce implicit conversions.
-- **Imported animation data:** `extensions/Animation/AnimationContext.cpp`
+- **Imported animation data:** `extensions/Animation/Context.cpp`
   constructs quaternions from four scalar samples. Those arrays are an asset
   format boundary; review whether their representation can be typed without
   changing interpolation, glTF channel layout or serialization.

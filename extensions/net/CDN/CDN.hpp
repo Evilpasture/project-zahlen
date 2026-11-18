@@ -8,7 +8,7 @@
 //   Fetch(path)  -- a local file path for the asset via AsyncAssetFetcher::FetchSync.
 //   Load(path)   -- the asset's bytes, same transfer; the fetcher writes the cache.
 //
-// The base URL is configuration, not code. It arrives in a CDNConfig that the
+// The base URL is configuration, not code. It arrives in a Config that the
 // caller fills from wherever it keeps settings (a file, the command line, an
 // environment variable). Nothing in this directory names a host.
 //
@@ -44,12 +44,12 @@ namespace ZHLN::CDN {
 // non-empty".
 using ValidatorFn = ZHLN::Remote::ValidatorFn;
 
-// Everything CDNManager needs. Build one, pass it to CDNManager::Create, and
+// Everything Manager needs. Build one, pass it to Manager::Create, and
 // let it go: the manager keeps its own copy of the base URL.
-struct CDNConfig {
+struct Config {
     // Scheme, host and optional path prefix, e.g. "https://cdn.example.com/assets".
     // A view, so the string it points at must be alive for the call to
-    // CDNManager::Create. A trailing '/' is accepted and dropped.
+    // Manager::Create. A trailing '/' is accepted and dropped.
     std::string_view baseURL = {};
 
     // Dedicated cache directory. Empty means <engine cache dir>/cdn.
@@ -66,15 +66,15 @@ struct CDNConfig {
 };
 
 // What the CDN layer itself can refuse. Transfer failures are not in here: a
-// name that did not resolve or a timeout comes back as the HTTPError it is, the
+// name that did not resolve or a timeout comes back as the Error it is, the
 // same code ZHLN::HTTP::Fetch returns, so a caller can tell "the network is
 // down" from "the file is not there".
 //
 // Each annotated description is a std::format template, the way Wire's
-// WireError messages are. The failure site formats it with the runtime context
+// Error messages are. The failure site formats it with the runtime context
 // it has (the URL, the status) through ZHLN::Reflect::FormatEnumMessage, so the
 // wording lives in one place and the log line carries the specifics.
-enum class CDNError : uint8_t {
+enum class Error : uint8_t {
     InvalidConfig ZHLN_ANNOTATION(ZHLN::Description<"CDN base URL '{}' is not an absolute http or https URL with a host."> {}) = 1,
     InvalidPath   ZHLN_ANNOTATION(ZHLN::Description<"asset path '{}' is empty, escapes the base URL, or has a character a URL should not carry."> {}),
     NotFound      ZHLN_ANNOTATION(ZHLN::Description<"the CDN has no asset at '{}' (HTTP 404)."> {}),
@@ -83,11 +83,11 @@ enum class CDNError : uint8_t {
     CacheWrite    ZHLN_ANNOTATION(ZHLN::Description<"'{}' was downloaded, but could not be written to '{}'."> {}),
 };
 
-class CDNManager {
+class Manager {
   public:
     // Validates the URL and opens the cache, pruning old entries. Fails with
-    // CDNError::InvalidConfig when baseURL is not an absolute http or https URL.
-    [[nodiscard]] static auto Create(const CDNConfig& config) -> std::expected<CDNManager, ZHLN::ErrorCode>;
+    // Error::InvalidConfig when baseURL is not an absolute http or https URL.
+    [[nodiscard]] static auto Create(const Config& config) -> std::expected<Manager, ZHLN::ErrorCode>;
 
     // The base URL, without a trailing '/'. Lives as long as the manager.
     [[nodiscard]] auto GetURL() const noexcept -> std::string_view {
@@ -96,7 +96,7 @@ class CDNManager {
 
     // The full URL of @p relativePath under the base, e.g.
     // GetURL("models/helmet.glb") -> "https://host/assets/models/helmet.glb".
-    // Fails with CDNError::InvalidPath under the same rules Fetch and Load apply.
+    // Fails with Error::InvalidPath under the same rules Fetch and Load apply.
     [[nodiscard]] auto GetURL(std::string_view relativePath) const -> std::expected<std::string, ZHLN::ErrorCode>;
 
     // A path to a valid copy of the asset on disk: the cache file if one is
@@ -124,7 +124,7 @@ class CDNManager {
     void Cancel(ZHLN::Remote::FetchID handle);
 
   private:
-    CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
+    Manager(std::string baseURL, ZHLN::Remote::DiskCache cache, std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
 
     std::string                                      m_baseURL;
     ZHLN::Remote::DiskCache                          m_cache;

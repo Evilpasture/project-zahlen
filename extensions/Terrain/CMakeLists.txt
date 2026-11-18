@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Capability-only host terrain; no module, global slot table or graph adapter.
-add_library(zahlen_terrain STATIC TerrainGeometry.cpp TerrainHost.cpp)
+add_library(zahlen_terrain STATIC TerrainGeometry.cpp Terrain.cpp)
 set_target_properties(zahlen_terrain PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(zahlen_terrain PUBLIC zahlen_engine PRIVATE zahlen_warnings)
 target_include_directories(zahlen_terrain PUBLIC ${PROJECT_SOURCE_DIR}/extensions)

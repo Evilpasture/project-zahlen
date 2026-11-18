@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "TerrainHost.hpp"
+#include "Terrain.hpp"
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
@@ -13,7 +13,7 @@
 #include <string>
 #include <utility>
 namespace ZHLN::Terrain {
-struct Host::Impl {
+struct System::Impl {
     struct Tile {
         Entity     entity;
         Geometry   geometry;
@@ -44,7 +44,7 @@ struct Host::Impl {
         // replacement, otherwise recovery erases the mesh we just registered.
         if (uploaded && !entities.Attach(tile.entity, Components::OwnedMeshComponent {.meshAsset = tile.meshID, .mesh = mesh})) {
             (void) graphics.DestroyMesh(COM::InChain(mesh));
-            return std::unexpected(COM::ComError::InvalidArgument);
+            return std::unexpected(COM::Error::InvalidArgument);
         }
         const auto registered = graphics.RegisterMesh(tile.meshID, mesh);
         if (!registered.HasValue()) {
@@ -56,7 +56,7 @@ struct Host::Impl {
         const float roughness = config ? config->roughness : tile.info.roughness;
         const float metallic  = config ? config->metallic : tile.info.metallic;
         if (!std::isfinite(roughness) || roughness < 0 || roughness > 1 || !std::isfinite(metallic) || metallic < 0 || metallic > 1)
-            return std::unexpected(TerrainError::InvalidData);
+            return std::unexpected(Error::InvalidData);
         auto material = graphics.FindMaterial(tile.materialID);
         if (!material.HasValue()) {
             const auto built = graphics.CreateMaterial(MaterialDesc::Basic());
@@ -72,20 +72,20 @@ struct Host::Impl {
         return {};
     }
 };
-Host::Host(): _impl(std::make_unique<Impl>()) {
+System::System(): _impl(std::make_unique<Impl>()) {
 }
-Host::~Host() {
+System::~System() {
     Clear();
 }
-Host::Host(Host&&) noexcept = default;
-auto Host::operator=(Host&& other) noexcept -> Host& {
+System::System(System&&) noexcept = default;
+auto System::operator=(System&& other) noexcept -> System& {
     if (this != &other) {
         Clear();
         _impl = std::move(other._impl);
     }
     return *this;
 }
-void Host::Start(COM::IEngine& engine) {
+void System::Start(COM::IEngine& engine) {
     if (!_impl)
         _impl = std::make_unique<Impl>();
     if (_impl->engine.Get() == &engine)
@@ -93,9 +93,9 @@ void Host::Start(COM::IEngine& engine) {
     Clear();
     _impl->engine = COM::Ref<COM::IEngine>(&engine);
 }
-auto Host::Create(Geometry geometry, const CreateInfo& info) -> std::expected<Entity, ErrorCode> {
+auto System::Create(Geometry geometry, const CreateInfo& info) -> std::expected<Entity, ErrorCode> {
     if (!_impl || !_impl->engine)
-        return std::unexpected(TerrainError::NotStarted);
+        return std::unexpected(Error::NotStarted);
     const auto     n      = geometry.sampleCount;
     const uint64_t count  = n >= 2 ? uint64_t(n - 1) * (n - 1) * 6 : 0;
     const auto     finite = [](float v) { return std::isfinite(v); };
@@ -106,7 +106,7 @@ auto Host::Create(Geometry geometry, const CreateInfo& info) -> std::expected<En
         ) ||
         !std::ranges::all_of(geometry.heights, finite) || !finite(info.position.x) || !finite(info.position.y) || !finite(info.position.z) ||
         !finite(info.roughness) || info.roughness < 0 || info.roughness > 1 || !finite(info.metallic) || info.metallic < 0 || info.metallic > 1)
-        return std::unexpected(TerrainError::InvalidData);
+        return std::unexpected(Error::InvalidData);
     auto&        engine   = *_impl->engine.Get();
     auto&        entities = *engine.Entities();
     const auto   world    = CreateTranslation(info.position);
@@ -115,7 +115,7 @@ auto Host::Create(Geometry geometry, const CreateInfo& info) -> std::expected<En
         Components::WorldTransformComponent {.world = world, .previous = world}, TileComponent {.roughness = info.roughness, .metallic = info.metallic}
     );
     if (entity == Entity::Null())
-        return std::unexpected(COM::ComError::InvalidArgument);
+        return std::unexpected(COM::Error::InvalidArgument);
     const auto identity = std::to_string(entity.index) + "_" + std::to_string(entity.generation);
     Impl::Tile tile {
         .entity     = entity,
@@ -133,7 +133,7 @@ auto Host::Create(Geometry geometry, const CreateInfo& info) -> std::expected<En
     if (!entities.Attach(
             entity, Components::MeshComponent {.meshAsset = tile.meshID, .materialAsset = tile.materialID, .cullRadius = tile.geometry.worldSize * 1.5f}
         ))
-        return fail(COM::ComError::InvalidArgument);
+        return fail(COM::Error::InvalidArgument);
     if (info.createPhysics) {
         const auto body = engine.Simulation()->CreateRigidBody(
             COM::InChain(
@@ -146,15 +146,15 @@ auto Host::Create(Geometry geometry, const CreateInfo& info) -> std::expected<En
             return fail(body.error);
         if (!entities.Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true})) {
             engine.Simulation()->DestroyBody(body.value);
-            return fail(COM::ComError::InvalidArgument);
+            return fail(COM::Error::InvalidArgument);
         }
     }
     _impl->tiles.push_back(std::move(tile));
     return entity;
 }
-auto Host::BeforeRender(COM::IEngine& engine, float) -> std::expected<void, ErrorCode> {
+auto System::BeforeRender(COM::IEngine& engine, float) -> std::expected<void, ErrorCode> {
     if (!_impl || _impl->engine.Get() != &engine)
-        return std::unexpected(TerrainError::NotStarted);
+        return std::unexpected(Error::NotStarted);
     auto& entities = *engine.Entities();
     std::erase_if(_impl->tiles, [&](const auto& tile) { return !entities.IsAlive(tile.entity) || entities.Get<Components::PendingDestroy>(tile.entity); });
     for (auto& tile: _impl->tiles)
@@ -162,7 +162,7 @@ auto Host::BeforeRender(COM::IEngine& engine, float) -> std::expected<void, Erro
             return refreshed;
     return {};
 }
-auto Host::SampleHeightAt(float x, float z) const noexcept -> float {
+auto System::SampleHeightAt(float x, float z) const noexcept -> float {
     if (!_impl || !_impl->engine || !std::isfinite(x) || !std::isfinite(z))
         return 0;
     auto& entities = *_impl->engine->Entities();
@@ -186,10 +186,10 @@ auto Host::SampleHeightAt(float x, float z) const noexcept -> float {
     }
     return 0;
 }
-auto Host::Size() const noexcept -> size_t {
+auto System::Size() const noexcept -> size_t {
     return _impl ? _impl->tiles.size() : 0;
 }
-void Host::Remove(Entity entity) {
+void System::Remove(Entity entity) {
     if (!_impl || !_impl->engine)
         return;
     auto& entities = *_impl->engine->Entities();
@@ -200,7 +200,7 @@ void Host::Remove(Entity entity) {
         return true;
     });
 }
-void Host::Clear() {
+void System::Clear() {
     if (!_impl)
         return;
     if (_impl->engine)
@@ -209,7 +209,7 @@ void Host::Clear() {
     _impl->tiles.clear();
     _impl->engine = {};
 }
-void Host::Stop(COM::IEngine&) {
+void System::Stop(COM::IEngine&) {
     Clear();
 }
 } // namespace ZHLN::Terrain

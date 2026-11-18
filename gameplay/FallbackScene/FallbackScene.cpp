@@ -38,33 +38,33 @@ namespace {
 // Only the fields that differ from the struct defaults in Scene/Scene.hpp are
 // set, so the two stay in step by construction -- exactly what a scene document
 // would have said.
-[[nodiscard]] auto MakeFallbackScene() -> Scene::Scene {
-    Scene::Scene scene;
+[[nodiscard]] auto MakeFallbackScene() -> Scene::Document {
+    Scene::Document scene;
     scene.name = "Zahlen Fallback";
 
-    scene.camera = Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
+    scene.camera = Scene::Camera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
 
     // Reflections on the emblem are the point of the scene; everything else is
     // the engine default and is therefore left unsaid.
-    scene.environment = Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
+    scene.environment = Scene::Environment {.enableSSR = false, .enableRTR = true};
 
-    Scene::SceneEntity ground;
+    Scene::Entity ground;
     ground.name     = "FallbackGround";
     ground.shape    = Scene::ShapeKind::Plane;
     ground.extent   = 35.0f;
-    ground.material = Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
+    ground.material = Scene::Material {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
 
-    Scene::SceneEntity emblem;
+    Scene::Entity emblem;
     emblem.name        = "FallbackEmblem";
     emblem.shape       = Scene::ShapeKind::Box;
     emblem.halfExtents = {1.2f, 1.2f, 1.2f};
     emblem.transform   = Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
-    emblem.material    = Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
+    emblem.material    = Scene::Material {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
 
     scene.entities.push_back(std::move(ground));
     scene.entities.push_back(std::move(emblem));
 
-    Scene::SceneLight sun;
+    Scene::Light sun;
     sun.name      = "FallbackSun";
     sun.type      = "Sun";
     sun.position  = {12.0f, 25.0f, 12.0f};
@@ -77,7 +77,7 @@ namespace {
     sun.radius = 0.0f;
     sun.range  = 0.0f;
 
-    Scene::SceneLight orbit;
+    Scene::Light orbit;
     orbit.name      = "FallbackPointLight";
     orbit.type      = "Point";
     orbit.position  = {0.0f, 2.5f, 0.0f};
@@ -99,11 +99,11 @@ constexpr size_t kPointLightIndex = 1;
 
 } // namespace
 
-auto DefaultPreset::FallbackScene() noexcept -> const Scene::Scene& {
+auto DefaultPreset::FallbackScene() noexcept -> const Scene::Document& {
     // Built on first use: a description holds strings and vectors, so it cannot
     // be a constexpr object, and there is no reason to pay for it in a process
     // that boots a real scene instead.
-    static const Scene::Scene kScene = MakeFallbackScene();
+    static const Scene::Document kScene = MakeFallbackScene();
     return kScene;
 }
 

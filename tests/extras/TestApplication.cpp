@@ -474,7 +474,7 @@ void test_host_ui_precedes_engine_tick_and_layers_stop_on_host_error() {
     };
     std::vector<std::string_view> calls;
     auto app = App(EngineConfig {.appName = "HostUILifecycle", .validationMode = ValidationMode::Off, .headless = true});
-    app.WithDefaultModules(false).AddLayer(HostLayer {&calls});
+    app.AddLayer(HostLayer {&calls});
     const auto result = app.Run([&](COM::IEngine&, float) -> std::expected<void, ErrorCode> {
         calls.push_back("update"); return std::unexpected(PreparationFailure::Refused);
     });

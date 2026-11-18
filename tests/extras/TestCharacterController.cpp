@@ -17,9 +17,9 @@ using Test::ExpectTrue;
 auto CharacterEngine() {
     return COM::CreateEngineRef(
         COM::InChain(
-            COM::EngineAppConfig {.appName = String64("COM character policy"), .logLevel = LogLevel::Quiet},
-            COM::EngineWindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
-            COM::EngineRenderConfig {.validationMode = ValidationMode::Off}
+            COM::AppConfig {.appName = String64("COM character policy"), .logLevel = LogLevel::Quiet},
+            COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
+            COM::RenderConfig {.validationMode = ValidationMode::Off}
         )
     );
 }
@@ -164,7 +164,7 @@ struct CharacterHostSuite {
             auto&      entities = *engine->Entities();
             const auto body     = engine->Simulation()->CreateCharacter(DVec3 {0, 5, 0});
             const auto player   = entities.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false});
-            ExpectTrue(Character::Attach(entities, player, Character::MovementComponent {.speed = 4}, Character::HostCharacterComponent {.gravity = 0}));
+            ExpectTrue(Character::Attach(entities, player, Character::MovementComponent {.speed = 4}, Character::ControllerComponent {.gravity = 0}));
             const auto advance = [&] {
                 Character::Apply(entities, player, {.moveZ = 1}, 0, 1.0f / 60);
                 ExpectTrue(pipeline->AdvanceFrame(1.0f / 60).HasValue());

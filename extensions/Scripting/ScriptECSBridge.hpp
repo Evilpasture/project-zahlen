@@ -19,7 +19,7 @@ class ZHLN_STATIC_API ScriptECSBridge {
     void RegisterComponentManifest() {
         ZHLN::RegisterManifest<Manifest>();
         ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto {
-            static_assert(COM::ComComponent<Comp>, "COM component manifests require POD roots; keep STL-owning data host-side");
+            static_assert(COM::Component<Comp>, "COM component manifests require POD roots; keep STL-owning data host-side");
             m_inspection.Register<Comp>();
         });
     }

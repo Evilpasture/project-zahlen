@@ -13,7 +13,7 @@ module;
 #include <Zahlen/Math/Vec3.hpp>
 #include <Animation/ProceduralMath.hpp>
 // clang-format on
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/AttachmentSync.hpp>
 #include <Animation/PrefabRig.hpp>
@@ -1663,7 +1663,7 @@ bool HasProceduralLocomotion(const COM::IEntities& entities, Entity entity) {
 
 void ProceduralAnimation::Step(
     COM::IEntities&               entities,
-    Animation::AnimationContext&  anim,
+    Animation::Context&  anim,
     float                         dt,
     const COM::ISimulation*       physics,
     const COM::IAssetLibrary*     assets,
@@ -1681,7 +1681,7 @@ void ProceduralAnimation::Step(
     Evaluate(entities, anim, dt, physics, assets, graphics, sink);
 }
 
-void ProceduralAnimation::Step(COM::IEngine& engine, Animation::AnimationContext& anim, float dt) {
+void ProceduralAnimation::Step(COM::IEngine& engine, Animation::Context& anim, float dt) {
     auto* entities = engine.Entities();
     if (entities == nullptr) return;
     const auto* sim      = engine.Simulation();
@@ -1869,7 +1869,7 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
 
 void ProceduralAnimation::Evaluate(
     COM::IEntities&               entities,
-    Animation::AnimationContext&  animContext,
+    Animation::Context&  animContext,
     float                         dt,
     const COM::ISimulation*       physics,
     const COM::IAssetLibrary*     assets,

@@ -55,7 +55,7 @@ remaining host-specific reads now cross the boundary explicitly:
 - `IGraphicsDevice::PacedDeltaTime`: fixed-layout optional presentation timing.
 - `IState::TraceDiagnostics`: delegates crash diagnostics through a capability;
   ProcessScope no longer accepts a concrete Engine pointer.
-- `EngineDiagnosticsInfo`: copied crash-dump path as an independent factory
+- `DiagnosticsInfo`: copied crash-dump path as an independent factory
   chain slice. Effective EngineConfig publication is internal to the factory,
   not a service-container escape available to host code.
 

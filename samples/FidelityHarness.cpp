@@ -33,7 +33,7 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
-#include <Animation/AnimationContext.hpp>
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Components.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
@@ -680,7 +680,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->FocusWindow(engine->PrimaryWindow());
     }
 
-    ZHLN::Animation::AnimationContext animCtx {};
+    ZHLN::Animation::Context animCtx {};
 
     ZHLN::Log(
         "[Fidelity] '{}': model='{}', lighting='{}', {}x{}, orbit(theta={:.1f}, phi={:.1f}, radius={:.3f}), fov={:.1f}.",

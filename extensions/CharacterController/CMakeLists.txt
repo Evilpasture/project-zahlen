@@ -4,7 +4,7 @@
 # extensions/CharacterController -- COM host character locomotion (zahlen_character_controller).
 # Public headers are reached as <CharacterController/...>.
 
-add_library(zahlen_character_controller STATIC CharacterHost.cpp)
+add_library(zahlen_character_controller STATIC CharacterController.cpp)
 
 set_target_properties(zahlen_character_controller PROPERTIES
     CXX_STANDARD 26

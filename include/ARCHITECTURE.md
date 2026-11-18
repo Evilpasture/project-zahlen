@@ -616,7 +616,7 @@ container object, allocator or exception crosses the boundary.
 
 | header | contents |
 | :--- | :--- |
-| `Types.hpp` | `ComError`, `StringView`, `Span<T>`, `Option<T>`, `Result<T>` / `Result<void>` -- fixed-layout values that convert to and from `std::string_view`, `std::span`, `std::optional` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
+| `Types.hpp` | `Error`, `StringView`, `Span<T>`, `Option<T>`, `Result<T>` / `Result<void>` -- fixed-layout values that convert to and from `std::string_view`, `std::span`, `std::optional` and `std::expected`. `Result<T>` requires a standard-layout, trivially copyable `T`; both variants keep the original `ErrorCode` on failure. |
 | `Chain.hpp` | `ChainInNode` / `ChainOutNode`, `ChainTypeID<T>()`, caller-side `COM::InChain(...)` / `COM::OutChain(...)`, and callee-side `COM::DispatchInChain` / `COM::DispatchOutChain`. Non-intrusive `sType`/`layoutHash`/`size`/`pNext` linked lists keep plain value structs standard-layout while allowing configuration and resource descriptors to evolve without shifting vtable slots or reading past caller-owned structs. |
 | `IObject.hpp` | `InterfaceID` and the three virtuals (`AddRef`, `Release`, `QueryRaw`). `InterfaceIdOf<T>()` is a compile-time 128-bit hash of the canonical type name, so there is no GUID registry and no IDL. `Query<T>()` is a caller-side template. |
 | `Reflect.hpp` | `Implements<Derived, Interfaces...>` and `AuditInterfaceABI<I>()`. Reflection walks the whole base graph to build `QueryRaw`'s dispatch; there is no interface map, no switch and no macro. |
@@ -668,8 +668,8 @@ The reflection library has **no domain**: it gained only generic primitives --
 `ForEachBase`. `MethodSignature` reports a return type, a `noexcept` bit and
 the declaration-order parameter types as `std::tuple<Parameters...>`, with no
 implicit object parameter; it does not know that any of them means anything.
-Every ABI policy decision -- `ComReturnCompliant`, `ComParameterCompliant`,
-`ComMethodCompliant`, `AuditInterfaceABI<I>()` -- lives in
+Every ABI policy decision -- `ReturnCompliant`, `ParameterCompliant`,
+`MethodCompliant`, `AuditInterfaceABI<I>()` -- lives in
 `Core/COM/Reflect.hpp`. `check_reflection_boundary.py` keeps the raw
 `std::meta` tokens inside `Reflection/`, so COM consumes plain types and
 bools and never a reflection `info`.
@@ -687,7 +687,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 
 | header | contents |
 | :--- | :--- |
-| `COMTypes.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
+| `Types.hpp` | GPU resource and procedural mesh chain nodes (`BufferCreateInfo`, `TextureCreateInfo`, `PbrMaterialConfig`, `MeshBuildOptions`, `MeshStreamsDesc`, `BoxMeshDesc`, ...) and static asserts keeping reused value types fixed-layout |
 | `IEngine.hpp` | lifecycle (`IsRunning`, `ProcessEvents`, `RequestClose`, `Tick`, `ClearScene`) and borrowed accessors for the seven capability interfaces |
 | `IGraphicsDevice.hpp` | resolution, viewport, chained `ApplySettings` / `GetSettings` (full `GraphicsSettings` or sub-slices), buffers, textures, PBR materials, procedural & stream meshes, mesh registries and BLAS builds |
 | `IEntities.hpp` | type-erased ECS operations (`AttachRaw`, `GetRaw`, `DetachRaw`, `AttachEngineRaw`, `GetEngineRaw`, `DetachEngineRaw`, `EntitiesWithRaw`), 34 published `ZHLN::Components` with `SceneResources` ownership safety, and consumer-side typed templates |
@@ -696,9 +696,9 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
 | `IActionContext.hpp` | raw device injection, chained action-map / action / binding / rebind / multi-seat routing configuration, default-binding snapshots/resets, virtual actions and physical state |
 | `IState.hpp` | engine-level `CullingStats` readback, reset, and `SetCullingEnabled` / `SetFreezeFrustum` toggles |
-| `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`EngineAppConfig`, `EngineWindowConfig`, `EngineRenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
+| `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
 
-One `EngineCOM` implements all eight interfaces, so `engine->Graphics()` and
+One `Engine` implements all eight interfaces, so `engine->Graphics()` and
 `engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
 accessors are **borrows** and must not be released; `Query` / `As` take a
 reference the way COM expects.
@@ -714,8 +714,8 @@ standard-layout structs (`COM::InChain(appCfg, winCfg, renderCfg)` or
 `Reflect::LayoutHash<T>()` before reading or writing it. Shipped node structs
 remain frozen -- new fields ship in new extension structs chained via `pNext` --
 while `LayoutHash<T>()` catches accidental inner-struct drift with
-`ComError::LayoutMismatch` and unknown extensions with
-`ComError::UnsupportedExtension`. Single-struct ergonomics remain inline
+`Error::LayoutMismatch` and unknown extensions with
+`Error::UnsupportedExtension`. Single-struct ergonomics remain inline
 methods compiled in the consumer's own TU.
 
 There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
@@ -746,7 +746,7 @@ TU. Thirty-five fixed-layout `ZHLN::Components` are published directly to their
 typed ECS families (releasing owned Jolt/audio/GPU handles via `SceneResources`
 on overwrite or detach); consumer-defined components fall through to the
 registry's dynamic-component path, which holds raw bytes and runs no destructor
--- hence the `ComComponent` constraint.
+-- hence the `Component` constraint.
 
 Interface IDs are a hash of the qualified type name, so adding a capability
 interface needs no GUID and no registry.
@@ -980,7 +980,7 @@ records the clicked node id (including empty Box/Row/Column hits) instead
 so a builder click cannot fire Save, and tints `selectedId`.
 `FindNodeById` / `InsertChild` / `RemoveNodeById` turn that string into a
 live node. The tree is format-free — `plugins/toml/UITOML.hpp` walks it
-the same way `SceneTOML.hpp` walks `Scene::Scene`.
+the same way `SceneTOML.hpp` walks `Scene::Document`.
 
 ### Optional layer: the native editor
 

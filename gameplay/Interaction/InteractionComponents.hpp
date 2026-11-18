@@ -184,7 +184,7 @@ struct EntityConnectionComponent {
     }
 };
 
-// Raw metadata preserved from BSPEntity lump
+// Raw metadata preserved from Entity lump
 struct BSPEntityMetadataComponent {
     String64 className;
     String64 targetName;
