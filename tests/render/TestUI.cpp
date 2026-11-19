@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -9,7 +9,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>

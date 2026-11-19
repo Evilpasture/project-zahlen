@@ -10,7 +10,6 @@
 #include <engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <physics/Physics.hpp>
@@ -34,13 +33,6 @@ auto CreateBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 colo
 auto CreateSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-
-// Legacy render-tool helper. Runtime hosts own atlases and upload them through
-// GraphicsDevice::CreateTexture (see the host-side HostUI composition).
-auto CreateFontAtlas(RenderContext& ctx) -> FontAtlas;
-
-// Asset loading only; this does not allocate or own a runtime UI atlas.
-auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
 auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;
 

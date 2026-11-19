@@ -22,7 +22,7 @@
 //
 // Lives in extensions/UI/ (zahlen_ui_schema), not core: this is the document
 // schema behind the UI editor and the TOML round-trip, not the immediate-mode
-// substrate. Core keeps src/gui/ -- the Clay wrapper, TextEdit and the font
+// substrate over extensions/UI/ (zahlen_ui) -- the Clay wrapper, TextEdit and the font
 // rasterizer -- and this layer builds on GUI::Context through its public API.
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
@@ -32,7 +32,7 @@
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <source_location>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <string>
 #include <string_view>

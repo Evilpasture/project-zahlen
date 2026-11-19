@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-# OBJECT library (like zahlen_ecs and zahlen_gui): its translation units define
+# OBJECT library (like zahlen_ecs and zahlen_filesystem): its translation units define
 # public ZHLN_API runtime symbols (Mutex, SharedMutex, ConditionalVariable,
 # Fiber, TaskSystem) and must enter libzahlen_engine directly so neither archive
 # dead-stripping nor -Wl,--exclude-libs,ALL can drop or hide them. Do not name

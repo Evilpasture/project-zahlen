@@ -312,7 +312,6 @@ add_subdirectory(src/filesystem)
 add_subdirectory(src/physics)
 add_subdirectory(src/ecs)
 add_subdirectory(src/audio)
-add_subdirectory(src/gui)
 
 # --- what `zahlen --version` reports as the build's flags --------------------
 #
@@ -468,7 +467,7 @@ add_subdirectory(src/render)
 #      SPIRV-Reflect, vendored GLFW).
 #   2. Archive sealing (-Wl,--exclude-libs,ALL on ELF and MinGW; sub-libraries
 #      that own ZHLN_API definitions -- zahlen_threading, zahlen_filesystem,
-#      zahlen_gui -- are OBJECT targets so their exports enter directly while
+#      are OBJECT targets so their exports enter directly while
 #      every STATIC archive's symbols are forced hidden, including system .a
 #      dependencies and C++ stdlib weak helpers).
 #   3. Explicit linker export allowlist (cmake/zahlen_engine.map on ELF,
@@ -521,7 +520,6 @@ target_link_libraries(
           zahlen_filesystem
           zahlen_ecs
           zahlen_audio
-          zahlen_gui
           meshoptimizer
           glfw
           ${ZSTD_LIBRARY}
@@ -546,8 +544,7 @@ set(ZHLN_ENGINE_LIB_TARGETS
     zahlen_filesystem
     zahlen_ecs
     zahlen_audio
-    zahlen_miniaudio
-    zahlen_gui)
+    zahlen_miniaudio)
 if(ZHLN_BUILD_RENDER)
     list(APPEND ZHLN_ENGINE_LIB_TARGETS zahlen_vulkan)
     if(TARGET zahlen_shader_bytecode)
@@ -645,8 +642,7 @@ target_include_directories(
   zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(
   zahlen_engine SYSTEM
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/clay
-          ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
 )
 
 target_compile_options(
@@ -661,9 +657,10 @@ if(WIN32)
     target_compile_options(zahlen_engine PRIVATE -Wno-unknown-pragmas -D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+include(PluginTarget)
 add_subdirectory(extensions/Signal)
 add_subdirectory(extensions/CommandLine)
-# Screenshot encoding is reusable and available even in a core-only build.
+# Screenshot encoding and its optional COM plugin are available even in a core-only build.
 add_subdirectory(extensions/Screenshot)
 
 add_executable(zahlen app/main.cpp)
@@ -683,31 +680,7 @@ set_target_properties(zahlen_cube PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIR
                                                         CXX_EXTENSIONS OFF)
 zahlen_set_bin_output(zahlen_cube)
 
-if(ZHLN_BUILD_EXTRAS)
-    add_executable(zahlen_ui_editor app/UIEditor.cpp)
-    # The hierarchy row's label fit lives in the widget layer
-    # (extensions/Widget), so the editor measures through it instead of keeping
-    # its own copy of that arithmetic. zahlen_widgets arrives with
-    # add_subdirectory(extensions) further down: a link item resolves to its
-    # target by generate time, whatever the order here.
-    # zahlen_widgets is PUBLIC zahlen_engine (which publishes core COM usage
-    # requirements through zahlen_jolt_headers) but does not
-    # publish its own include root, so extensions/ is named here. The document
-    # format and the schema are linked further down, next to the code that uses
-    # them (ZHLN_HAS_UI_TOML).
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_widgets)
-    target_include_directories(zahlen_ui_editor PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
 
-    zahlen_add_runtime_dlls(zahlen_ui_editor)
-    set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
-                                                    CXX_STANDARD_REQUIRED ON)
-    zahlen_set_bin_output(zahlen_ui_editor)
-else()
-    message(
-    STATUS
-      "Skipping zahlen_ui_editor: the UI document schema is an optional extension (ZHLN_BUILD_EXTRAS=OFF)"
-  )
-endif()
 
 include(ECSCompiler)
 include(AssetPipeline)
@@ -725,9 +698,6 @@ add_custom_target(
   COMMENT "Creating zero-copy symlinks for resources...")
 
 add_dependencies(zahlen link_resources)
-if(TARGET zahlen_ui_editor)
-    add_dependencies(zahlen_ui_editor link_resources)
-endif()
 
 if(USE_SANITIZERS)
     zahlen_install_sanitizer_runtime(zahlen)
@@ -739,14 +709,10 @@ zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_audio)
 zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
-zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_cube)
-if(TARGET zahlen_ui_editor)
-    zahlen_enable_reflection(zahlen_ui_editor)
-endif()
 zahlen_enable_reflection(zcook)
 
 if(ZHLN_BUILD_RENDER)
@@ -798,20 +764,34 @@ if(ZHLN_BUILD_EXTRAS)
     # than no list: it reads as an inventory. Removed; the guard in
     # tests/CMakeLists.txt now tests the option alone.
 
-    # The UI-document editor remains its own existing executable. The game
-    # does not inherit scene, Discord, editor, benchmark, or fallback targets.
-    if(TARGET zahlen_serialization)
-        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
-        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
-        if(TARGET zahlen_ui_schema)
-            target_link_libraries(zahlen_ui_editor PRIVATE zahlen_ui_schema)
+    # Build the UI-document editor only when its UI schema, widget, TOML
+    # serializer, and baked-font targets are all present (zero #ifdefs in source).
+    if(TARGET zahlen_ui_schema AND TARGET zahlen_widgets AND TARGET zahlen_serialization AND TARGET zahlen_fonts)
+        add_executable(zahlen_ui_editor app/UIEditor.cpp)
+        set_target_properties(zahlen_ui_editor PROPERTIES
+            CXX_STANDARD 26
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        zahlen_set_bin_output(zahlen_ui_editor)
+        target_link_libraries(zahlen_ui_editor PRIVATE
+            zahlen_ui_schema
+            zahlen_widgets
+            zahlen_serialization
+            zahlen_fonts
+            zahlen_warnings
+        )
+        add_dependencies(zahlen_ui_editor link_resources)
+        zahlen_add_runtime_dlls(zahlen_ui_editor)
+        zahlen_enable_reflection(zahlen_ui_editor)
+        if(USE_SANITIZERS)
+            zahlen_install_sanitizer_runtime(zahlen_ui_editor)
         endif()
+    else()
+        message(STATUS "Skipping zahlen_ui_editor: requires zahlen_ui_schema, zahlen_widgets, zahlen_serialization, and zahlen_fonts")
     endif()
-
-    if(TARGET zahlen_fonts)
-        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
-        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
-    endif()
+else()
+    message(STATUS "Skipping zahlen_ui_editor: optional UI extensions are disabled (ZHLN_BUILD_EXTRAS=OFF)")
 endif()
 
 # Reusable high-level game frontend. Its implementation (and optional-module
@@ -849,12 +829,10 @@ if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_project_light_client)
     endif()
 endif()
 
-target_link_libraries(zahlen PRIVATE zahlen_application zahlen_screenshot)
-# This consumer must not gain Application/HostRunner or concrete-engine helper
-# symbols transitively. The COM App is header-only; CLI and PNG are host policy.
-target_include_directories(zahlen_cube PRIVATE ${PROJECT_SOURCE_DIR}/app/include)
-target_link_libraries(zahlen_cube PRIVATE zahlen_engine zahlen_command_line zahlen_screenshot)
-zahlen_enable_reflection(zahlen_cube)
+# Both shipping host executables drive libzahlen_engine through the unified
+# ZHLN::App host without linking immediate-mode UI or optional gameplay archives.
+target_link_libraries(zahlen PRIVATE zahlen_application zahlen_warnings)
+target_link_libraries(zahlen_cube PRIVATE zahlen_application zahlen_warnings)
 
 # Tool-specific dependencies stay on tool targets. The core-only build still
 # produces a callable-driven game; extras add standalone editor, scene host and
@@ -899,9 +877,18 @@ endif()
 # ZHLN_GLIBC_BASELINE set -- the release lane sets it -- `--target glibc-floor`
 # holds them to the floor they ship with, before anything is packaged or signed.
 include(GlibcFloor)
-zhln_add_glibc_floor_check(zahlen_engine zcook)
+set(_zhln_glibc_targets zahlen_engine zcook)
+foreach(_zhln_plugin_target IN ITEMS zahlen_plugin_freecam zahlen_plugin_screenshot)
+    if(TARGET ${_zhln_plugin_target})
+        list(APPEND _zhln_glibc_targets ${_zhln_plugin_target})
+    endif()
+endforeach()
+zhln_add_glibc_floor_check(${_zhln_glibc_targets})
+unset(_zhln_glibc_targets)
+unset(_zhln_plugin_target)
 
-if(TARGET zahlen_freecam)
-    target_link_libraries(zahlen PRIVATE zahlen_freecam)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_HOST_FREECAM=1)
+if(TARGET zahlen_plugin_freecam)
+    # Build-order only: zahlen never links or includes FreeCam, and still runs
+    # cleanly if libzahlen_plugin_freecam is removed at runtime.
+    add_dependencies(zahlen zahlen_plugin_freecam)
 endif()

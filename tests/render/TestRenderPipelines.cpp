@@ -13,8 +13,8 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/GUI.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>

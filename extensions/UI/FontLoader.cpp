@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <UI/FontLoader.hpp>
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -30,7 +30,7 @@ auto GetState() noexcept -> FontLoaderState& {
 #endif
 
 constexpr uint8_t kEmbeddedDefaultFontRaw[] = {
-#embed ZHLN_DEFAULT_FONT_ZFONT_PATH
+#embed <DefaultFont.zfont>
 };
 
 #if defined(__clang__)

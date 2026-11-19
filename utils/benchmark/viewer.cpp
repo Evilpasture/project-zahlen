@@ -7,7 +7,7 @@
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <charconv>

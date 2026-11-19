@@ -58,17 +58,19 @@ side and are never overwritten.
 
 | Component / config suffix | Installed target | Requires |
 |---|---|---|
-| Engine | Engine, Jolt | distro runtime libraries |
+| Engine | Engine (`libzahlen_engine.so`) | distro runtime libraries |
 | CommandLine | CommandLine | system C++ runtime |
+| Image | Image | system C++ runtime |
 | Signal | Signal | Engine |
+| Screenshot | Screenshot + `libzahlen_plugin_screenshot.so` | Engine, Image |
 | HostRunner | HostRunner | Engine, CommandLine, Signal |
-| Application | Application | Engine, CommandLine, HostRunner |
-| UISchema | UISchema | Engine |
+| Application | Application | Engine, CommandLine, HostRunner, Screenshot |
+| UI | UI (`GUI::Context`, `HostUI`, embedded default font) | Engine |
+| UISchema | UISchema | Engine, UI |
 | Serialization | Serialization | Engine, UISchema, system simdjson |
 | GLTF | GLTF | Engine, Serialization |
-| Screenshot | Screenshot | Engine |
 | Netpbm | Netpbm (header-only) | Engine |
-| FreeCam | FreeCam | Engine |
+| FreeCam | FreeCam + `libzahlen_plugin_freecam.so` | Engine |
 | Camera | Camera | Engine, FreeCam |
 | CharacterController | CharacterController | Engine, FreeCam |
 | SkeletalAnimation | SkeletalAnimation | Engine |
@@ -204,7 +206,7 @@ Link and compose what the application uses:
 #include <Zahlen/App.hpp>
 #include <CharacterController/CharacterController.hpp>
 // Also find_package(ZahlenCharacterController) and link Zahlen::CharacterController.
-// Compose ZHLN::Character::Layer over ZHLN::COM::IEngine& via Application::AddLayer.
+// Compose ZHLN::Character::Layer over ZHLN::COM::IEngine& via ZHLN::App::AddLayer.
 ```
 
 Applications that rely on fonts, terrain, interaction, cameras, animation or
@@ -214,18 +216,22 @@ authoring tools register those layers explicitly.
 
 `ZahlenEngine` ships a **single** shared library (`libzahlen_engine.so`) and the
 stripped public COM/Core headers; `ZahlenCooker` ships `bin/zcook`. Every
-optional extension and plugin (`Application`, `HostRunner`, `HostUI`, `COMApp`,
+optional extension and plugin (`Application`, `HostRunner`, `UI`,
 `CommandLine`, `Signal`, `Image`, `GLTF`, `Scene`, `Serialization`, `Fonts`,
 `UISchema`, `Screenshot`, `Netpbm`, `FreeCam`, `Camera`, `CharacterController`,
 `AnimationControls`, `Animation`, `Terrain`, `VFX`, `Widgets`, `Console`,
 `Editor`, `Benchmark`, `BenchmarkViewer`, `Scripting`, `Lua`) ships as a
 relocatable **source/header package** under `share/zahlen/src/<pkg>` — zero
-prebuilt `.a` archives and zero compiler-specific module BMIs. Consumers compile
+prebuilt `.a` archives and zero compiler-specific module BMIs. `ZahlenFreeCam`
+and `ZahlenScreenshot` additionally ship dynamically loadable `COM::IAppLayer`
+shared libraries (`lib/zahlen/plugins/libzahlen_plugin_{freecam,screenshot}.so`,
+exporting only `ZHLN_CreateAppLayer`) for `App::LoadPlugin`,
+`App::TryLoadPlugin`, and `--plugin`. Consumers compile
 those sources with their own compiler release, flags, and build type (`Debug`,
 `RelWithDebInfo`, or `Release`) directly against the single Release
 `libzahlen_engine.so`.
 
-Jolt Physics, Vulkan/volk/VMA, Clay, miniaudio, meshoptimizer, SPIRV-Reflect,
+Jolt Physics, Vulkan/volk/VMA, miniaudio, meshoptimizer, SPIRV-Reflect,
 and vendored GLFW/zstd archives are completely sealed inside
 `libzahlen_engine.so` via hidden visibility presets, `-Wl,--exclude-libs,ALL`,
 and the linker export allowlist (`cmake/zahlen_engine.map`), audited by
@@ -271,7 +277,7 @@ search with the directory **containing** `data/`.
 
 There is deliberately no Data package. What would have been in one is either a
 build input or the sandbox's own scene: shaders are `#embed`ded into the
-renderer, the default font is `#embed`ded in `src/gui/FontLoader.cpp`, and
+renderer, the default font is `#embed`ded in the optional `ZahlenUI` package (`extensions/UI/FontLoader.cpp`), and
 `Kernel.cpp` only warns when no pack is present. Shipping it also made every
 toolchain package depend on the asset pipeline, because the install rule copied a
 `cook_assets` artifact -- which is why `--component ZahlenData` could fail with a

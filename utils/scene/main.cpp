@@ -12,6 +12,7 @@
 #include "TerrainDiagnostic.hpp"
 #endif
 #include <FallbackScene/FallbackScene.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
@@ -92,6 +93,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesyst
 struct DiagnosticHost {
     HostLaunchConfig*                            launch;
     ZHLN::FallbackScene::DefaultPreset           fallback;
+    std::unique_ptr<ZHLN::HostUI>                hostUI;
     std::unique_ptr<ZHLN::FS::FileSystemWatcher> watcher;
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
     std::unique_ptr<ZHLN::Discord::PresenceClient> presence;
@@ -104,6 +106,7 @@ struct DiagnosticHost {
 #endif
     float dt = 0;
     auto  Start(ZHLN::COM::IEngine& engine) -> std::expected<void, ZHLN::ErrorCode> {
+        hostUI = std::make_unique<ZHLN::HostUI>(engine);
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
         presence = std::make_unique<ZHLN::Discord::PresenceClient>("1548152303939358720");
         if (const auto started = presence->Start(); !started) {
@@ -175,6 +178,16 @@ struct DiagnosticHost {
         if (auto updated = terrainDemo.Tick(engine, delta); !updated)
             return updated;
 #endif
+        if (!engine.IsRunning())
+            return {};
+        hostUI->BeginFrame();
+#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
+        if (terrainDemo.active)
+            return terrainDemo.DrawUI(engine, *hostUI);
+#endif
+        const auto result = fallback.DrawUI(engine, *hostUI, dt);
+        if (!result.HasValue())
+            return std::unexpected(result.error);
         return {};
     }
     auto BeforeRender(ZHLN::COM::IEngine& engine, float delta) -> std::expected<void, ZHLN::ErrorCode> {
@@ -183,16 +196,6 @@ struct DiagnosticHost {
 #else
         return {};
 #endif
-    }
-    auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
-#if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
-        if (terrainDemo.active)
-            return terrainDemo.UI(engine, ui);
-#endif
-        const auto result = fallback.DrawUI(engine, ui, dt);
-        if (!result.HasValue())
-            return std::unexpected(result.error);
-        return {};
     }
     void Stop(ZHLN::COM::IEngine& engine) {
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
@@ -205,6 +208,7 @@ struct DiagnosticHost {
         presence.reset();
 #endif
         fallback.ClearFallback();
+        hostUI.reset();
     }
 };
 } // namespace
@@ -263,7 +267,7 @@ int main(int argc, char* argv[]) {
         },
     };
     auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Zahlen Scene Host"});
-    app.WithFrameLimit().WithCliOptions(handlers);
+    app.WithCliOptions(handlers);
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
     app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
         if (launch.graphicsConfigPath != "config/graphics.lua") {
@@ -274,5 +278,5 @@ int main(int argc, char* argv[]) {
     });
 #endif
     app.AddLayer(DiagnosticHost {.launch = &launch});
-    return app.Run(argc, argv) ? EXIT_SUCCESS : EXIT_FAILURE;
+    return app.Main(argc, argv);
 }

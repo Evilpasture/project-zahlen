@@ -47,6 +47,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # zahlen_use_custom_libcxx(), which every other target in this tree takes.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_ui
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

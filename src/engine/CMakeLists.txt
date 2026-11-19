@@ -59,7 +59,7 @@ if(USE_SANITIZERS)
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
     )
     # The rules are #embed-ed from the paths exported here, the same way the
-    # default font reaches src/gui/FontLoader.cpp: absolute, so the directive
+    # embedded resources reach consumer targets: absolute, so the directive
     # cannot drift when a file moves, and never a run-time lookup. Only one
     # level of backslash is needed around the quotes -- "PATH=\"${path}\"" reaches
     # the compiler as -DPATH="/abs/path", which is a string literal; the doubled

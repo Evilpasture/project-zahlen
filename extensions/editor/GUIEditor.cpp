@@ -12,7 +12,7 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Math3D.hpp>

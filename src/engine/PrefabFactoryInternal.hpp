@@ -20,7 +20,6 @@ class ArticulationContext;
 class AssetManager;
 class PhysicsContext;
 class RenderContext;
-struct FontAtlas;
 struct ModelPrefab;
 
 namespace ECS {
@@ -33,12 +32,6 @@ auto BuildPlaneMesh(RenderContext& gfx, float extent, FVec4 color, bool buildBLA
 auto BuildSphereMesh(RenderContext& gfx, float radius, FVec4 color, bool buildBLAS) -> Mesh;
 auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
 auto BuildConeMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
-
-// The cache-parameterized forms: engine-internal, which is why they are not in
-// include/. A host reaches the same work through Engine (fonts) or through the
-// spawned-prefab entry points (models).
-auto CreateFontAtlas(RenderContext& ctx, AssetManager& assetMgr, AssetID fontID) -> FontAtlas;
-auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
 auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity;
 

@@ -17,3 +17,8 @@ target_link_libraries(zahlen_screenshot PUBLIC zahlen_engine PRIVATE zahlen_imag
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_screenshot)
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_screenshot screenshot ScreenshotPlugin.cpp)
+    target_link_libraries(zahlen_plugin_screenshot PRIVATE zahlen_screenshot)
+endif()

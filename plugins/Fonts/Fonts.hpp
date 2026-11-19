@@ -25,7 +25,7 @@
 #pragma once
 
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <UI/FontLoader.hpp>
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <string>

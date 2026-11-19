@@ -1,0 +1,13 @@
+/*
+ * Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * ELF symbol version script for dynamically loaded COM::IAppLayer plugins.
+ * Only the single extern "C" factory crosses the plugin DSO boundary.
+ */
+{
+  global:
+    ZHLN_CreateAppLayer;
+  local:
+    *;
+};

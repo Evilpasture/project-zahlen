@@ -1,28 +1,23 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The default executable is a statically linked C++ game, not a DLL host.
-// App owns platform setup, modules, input polling, frame pacing and teardown.
+// Default sandbox executable. App owns CLI flags (including --frames,
+// --capture, and --plugin), process setup, plugin loading, frame pacing, and
+// teardown; optional fly-camera support loads dynamically when present.
 #include <Zahlen/App.hpp>
-#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
-#include <Zahlen/COM/IActionContext.hpp>
-#include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Log.hpp>
-#include <Screenshot/Screenshot.hpp>
-#if defined(ZHLN_HAS_HOST_FREECAM)
-#include <FreeCam/FreeCam.hpp>
-#endif
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
-#include <string>
 
 namespace {
 
@@ -31,9 +26,7 @@ using ZHLN::FVec4;
 
 struct GameLaunchConfig {
     uint32_t cubes ZHLN_ANNOTATION(ZHLN::Description<"Initial physics boxes (0-64)"> {}, = ZHLN::CliRange<0, 64> {}, = ZHLN::CliShort<'c'> {}) = 5;
-    uint32_t seed ZHLN_ANNOTATION(ZHLN::Description<"Jitter the initial box grid reproducibly (default: 0)"> {}) = 0;
-    std::string captureFrame ZHLN_ANNOTATION(ZHLN::Description<"Capture a PNG to this path and exit"> {}) = {};
-    uint32_t warmupFrames ZHLN_ANNOTATION(ZHLN::Description<"Completed frames before capture (default: 10)"> {}, = ZHLN::CliRange<1, 100000> {}) = 10;
+    uint32_t seed ZHLN_ANNOTATION(ZHLN::Description<"Jitter the initial box grid reproducibly (default: 0)"> {})                                 = 0;
 };
 
 struct SandboxGame {
@@ -42,7 +35,7 @@ struct SandboxGame {
     float             elapsed = 0.0f;
 
     void Start(ZHLN::COM::IEngine& engine) {
-        auto& reg = *engine.Entities();
+        auto&      reg     = *engine.Entities();
         const auto cameras = reg.EntitiesWith<ZHLN::Components::CameraComponent>();
         if (!cameras.empty()) {
             reg.Patch<ZHLN::Components::CameraComponent>(cameras.front(), [](auto& camera) {
@@ -58,15 +51,11 @@ struct SandboxGame {
         gfx.environment.skyHorizon      = {0.40f, 0.55f, 0.72f, 1.0f};
         engine.Graphics()->ApplySettings(gfx);
 
-        // Everything here is scene-owned: Engine's normal teardown reclaims
-        // both the generated GPU meshes and their Jolt bodies.
-        engine.Assets()->SpawnPlane( 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
+        engine.Assets()->SpawnPlane(30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
 
-        // --cubes controls the initial physics population. --seed optionally
-        // jitters the grid with a fixed integer LCG (the default stays aligned).
-        const uint32_t seed = launch.seed;
+        const uint32_t seed   = launch.seed;
         uint32_t       random = seed;
-        const auto jitter = [&random]() -> float {
+        const auto     jitter = [&random]() -> float {
             random = random * 1664525u + 1013904223u;
             return (static_cast<float>(random >> 24) / 255.0f - 0.5f) * 0.6f;
         };
@@ -74,33 +63,36 @@ struct SandboxGame {
             const float x      = (static_cast<float>(i % 8) - 2.0f) * 1.65f + (seed ? jitter() : 0.0f);
             const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
             const float stripe = static_cast<float>(i % 5);
-            engine.Assets()->SpawnBox( {0.55f, 0.55f, 0.55f},
+            engine.Assets()->SpawnBox(
+                {0.55f, 0.55f, 0.55f},
                 {.position        = {x, 2.5f + stripe * 0.35f, z},
                  .createPhysics   = true,
                  .isStaticPhysics = false,
-                 .color           = FVec4{0.35f + stripe * 0.10f, 0.6f, 0.9f - stripe * 0.10f, 1.0f}}
+                 .color           = FVec4 {0.35f + stripe * 0.10f, 0.6f, 0.9f - stripe * 0.10f, 1.0f}}
             );
         }
 
         reg.Spawn(
-            ZHLN::Components::SunTagComponent {}, ZHLN::Components::LightComponent {
-                                                      .type        = ZHLN::LightType::Sun,
-                                                      .color       = FVec3{1.0f, 0.95f, 0.85f},
-                                                      .intensity   = 32.0f,
-                                                      .direction   = FVec3{0.45f, 1.0f, 0.30f}.Normalized(),
-                                                      .castsShadow = true,
-                                                  }
+            ZHLN::Components::SunTagComponent {},
+            ZHLN::Components::LightComponent {
+                .type        = ZHLN::LightType::Sun,
+                .color       = FVec3 {1.0f, 0.95f, 0.85f},
+                .intensity   = 32.0f,
+                .direction   = FVec3 {0.45f, 1.0f, 0.30f}.Normalized(),
+                .castsShadow = true,
+            }
         );
         lamp = reg.Spawn(
-            ZHLN::Components::TransformComponent {.position = FVec3{3.0f, 4.0f, 0.0f}}, ZHLN::Components::LightComponent {
-                                                                                                .type      = ZHLN::LightType::Point,
-                                                                                                .color     = FVec3{0.30f, 0.65f, 1.0f},
-                                                                                                .intensity = 180.0f,
-                                                                                                .radius    = 0.35f,
-                                                                                                .range     = 18.0f,
-                                                                                            }
+            ZHLN::Components::TransformComponent {.position = FVec3 {3.0f, 4.0f, 0.0f}},
+            ZHLN::Components::LightComponent {
+                .type      = ZHLN::LightType::Point,
+                .color     = FVec3 {0.30f, 0.65f, 1.0f},
+                .intensity = 180.0f,
+                .radius    = 0.35f,
+                .range     = 18.0f,
+            }
         );
-        ZHLN::Log("[Sandbox] F: launch a cube | R: reset view | Esc: quit. With extras: WASD fly, RMB look, Shift sprint.");
+        ZHLN::Log("[Sandbox] F: launch a cube | R: reset view | Esc: quit. With freecam plugin: WASD fly, RMB look, Shift sprint.");
     }
 
     void Tick(ZHLN::COM::IEngine& engine, float dt) {
@@ -123,24 +115,29 @@ struct SandboxGame {
         }
         if (input.KeyPressed(ZHLN::KeyCode::R, ZHLN::kPrimarySeat)) {
             const auto cameras = reg.EntitiesWith<ZHLN::Components::CameraComponent>();
-            if (!cameras.empty()) reg.Patch<ZHLN::Components::CameraComponent>(cameras.front(), [](auto& cc) {
-                cc.camera.position = {0.0f, 3.0f, 11.0f};
-                cc.camera.yaw = ZHLN::DegF {-90.0f};
-                cc.camera.pitch = ZHLN::DegF {-10.0f};
-            });
+            if (!cameras.empty()) {
+                reg.Patch<ZHLN::Components::CameraComponent>(cameras.front(), [](auto& cc) {
+                    cc.camera.position = {0.0f, 3.0f, 11.0f};
+                    cc.camera.yaw      = ZHLN::DegF {-90.0f};
+                    cc.camera.pitch    = ZHLN::DegF {-10.0f};
+                });
+            }
         }
-        // F rather than E: the optional FreeCam already uses E to fly up.
+        // F rather than E: the optional freecam plugin uses E to fly up.
         if (!input.KeyPressed(ZHLN::KeyCode::F, ZHLN::kPrimarySeat)) {
             return;
         }
 
-        const auto&        cam     = camera->camera;
-        const float        yaw     = cam.yaw.ToRadians().value;
-        const float        pitch   = cam.pitch.ToRadians().value;
-        const FVec3    forward = FVec3{std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)}.Normalized();
-        const auto cube = engine.Assets()->SpawnBox(
+        const auto& cam     = camera->camera;
+        const float yaw     = cam.yaw.ToRadians().value;
+        const float pitch   = cam.pitch.ToRadians().value;
+        const FVec3 forward = FVec3 {std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)}.Normalized();
+        const auto  cube    = engine.Assets()->SpawnBox(
             {0.30f, 0.30f, 0.30f},
-            {.position = (cam.position + forward * 2.0f).Cast<double>(), .createPhysics = true, .isStaticPhysics = false, .color = FVec4{1.0f, 0.75f, 0.28f, 1.0f}}
+            {.position        = (cam.position + forward * 2.0f).Cast<double>(),
+             .createPhysics   = true,
+             .isStaticPhysics = false,
+             .color           = FVec4 {1.0f, 0.75f, 0.28f, 1.0f}}
         );
         if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
@@ -148,14 +145,12 @@ struct SandboxGame {
             }
         }
         if (engine.Audio()->Initialized()) {
-            engine.Audio()->PostEvent(
-                ZHLN::AudioEvent {
-                    .type     = ZHLN::AudioEventType::ProceduralBeep,
-                    .volume   = 0.22f,
-                    .param1   = 620.0f,
-                    .duration = 0.10f,
-                }
-            );
+            engine.Audio()->PostEvent(ZHLN::AudioEvent {
+                .type     = ZHLN::AudioEventType::ProceduralBeep,
+                .volume   = 0.22f,
+                .param1   = 620.0f,
+                .duration = 0.10f,
+            });
         }
     }
 };
@@ -163,31 +158,11 @@ struct SandboxGame {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    GameLaunchConfig                 launch;
-    ZHLN::Screenshot::CaptureOutcome capture;
-    auto                             app = ZHLN::App();
-    app.WithConfig(launch)
+    GameLaunchConfig launch;
+    return ZHLN::App()
+        .Title("Zahlen Sandbox")
+        .WithConfig(launch)
         .AddLayer(SandboxGame {.launch = launch})
-        .AddLayer(ZHLN::Screenshot::CaptureLayer::Bind(launch.captureFrame, launch.warmupFrames, capture));
-#if defined(ZHLN_HAS_HOST_FREECAM)
-    app.AddLayer(ZHLN::FreeCam::Layer {});
-#endif
-    const auto result = app.Run(argc, argv);
-    if (!result) return EXIT_FAILURE;
-    // Help/version/graph requests exit before creating a frame and remain success.
-    // A closed window or failed write must not silently count as a capture.
-    if (*result == ZHLN::AppExitReason::UserClosed && !launch.captureFrame.empty()) {
-        if (capture.Succeeded()) {
-            ZHLN::Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).",
-                      capture.extent.width, capture.extent.height, launch.captureFrame, capture.metrics.meanLuma);
-            return EXIT_SUCCESS;
-        }
-        if (capture.status == ZHLN::Screenshot::CaptureStatus::ReadFailed) {
-            ZHLN::LogError("[Capture] Failed to capture a completed frame.");
-        } else if (capture.status == ZHLN::Screenshot::CaptureStatus::WriteFailed) {
-            ZHLN::LogError("[Capture] Failed to write PNG '{}'.", launch.captureFrame);
-        }
-        return EXIT_FAILURE;
-    }
-    return EXIT_SUCCESS;
+        .TryLoadPlugin("freecam")
+        .Main(argc, argv);
 }

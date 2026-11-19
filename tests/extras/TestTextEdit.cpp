@@ -12,7 +12,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/GUI/TextBuffer.hpp>
+#include <UI/TextBuffer.hpp>
 #include <expected>
 #include <string>
 #include <string_view>

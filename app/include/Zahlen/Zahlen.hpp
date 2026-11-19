@@ -47,11 +47,11 @@
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/COM/IState.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/COM/IPlugin.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 
 // --- host policy (not linked into the engine) ---------------------------------
 #include <Zahlen/App.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/HostUI.hpp>
 #include <Zahlen/HostRunner.hpp>

@@ -49,8 +49,7 @@ class Error {
         if consteval {
             return "CompileTimeError";
         } else {
-            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
-            return (cat != nullptr) ? cat->name : "None";
+            return TemplatedDetail::LookupErrorStrings(_category_hash, _value).category;
         }
     }
 
@@ -58,8 +57,7 @@ class Error {
         if consteval {
             return "CompileTimeError";
         } else {
-            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
-            return (cat != nullptr) ? cat->to_string(_value) : "None";
+            return TemplatedDetail::LookupErrorStrings(_category_hash, _value).message;
         }
     }
 
@@ -67,8 +65,7 @@ class Error {
         if consteval {
             return "CompileTimeError";
         } else {
-            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
-            return (cat != nullptr) ? cat->to_name(_value) : "None";
+            return TemplatedDetail::LookupErrorStrings(_category_hash, _value).name;
         }
     }
 

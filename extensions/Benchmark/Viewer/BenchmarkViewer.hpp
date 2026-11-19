@@ -8,7 +8,7 @@
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

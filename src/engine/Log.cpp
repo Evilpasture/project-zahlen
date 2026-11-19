@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <print>
 #include <string>
@@ -27,12 +28,112 @@
 
 namespace ZHLN {
 
-// The single process-wide error-category registry head, exported from
-// libzahlen_engine and shared by every consumer on ELF, Mach-O, and PE (see
-// <Zahlen/Core/ErrorCode.hpp>).
-auto TemplatedDetail::GetRegistryHead() noexcept -> std::atomic<TemplatedDetail::RegistryNode*>& {
-    static std::atomic<TemplatedDetail::RegistryNode*> head {nullptr};
-    return head;
+namespace {
+
+struct OwnedEnumEntry {
+    uint32_t    value = 0;
+    std::string name;
+    std::string message;
+};
+
+struct OwnedErrorRecord {
+    uint32_t                    hash    = 0;
+    const ErrorCategory*        foreign = nullptr;
+    std::string                 categoryName;
+    std::vector<OwnedEnumEntry> entries;
+};
+
+struct ErrorRegistryState {
+    std::mutex                                     mutex;
+    std::vector<std::unique_ptr<OwnedErrorRecord>> records;
+};
+
+// Function-local static inside libzahlen_engine ensures construction on first
+// use even when invoked from another DSO's static initializer, and frees all
+// owned strings cleanly when libzahlen_engine unloads at process exit.
+auto GetErrorRegistry() noexcept -> ErrorRegistryState& {
+    static ErrorRegistryState state;
+    return state;
+}
+
+} // namespace
+
+void TemplatedDetail::RegisterEnumCategory(
+    const uint32_t        hash,
+    const std::string_view categoryName,
+    const EnumErrorEntry* entries,
+    const std::size_t     entryCount
+) noexcept {
+    auto&                   registry = GetErrorRegistry();
+    const std::scoped_lock  lock(registry.mutex);
+    for (const auto& existing: registry.records) {
+        if (existing->hash == hash) {
+            return;
+        }
+    }
+    auto record          = std::make_unique<OwnedErrorRecord>();
+    record->hash         = hash;
+    record->categoryName = std::string(categoryName);
+    record->entries.reserve(entryCount);
+    for (std::size_t i = 0; i < entryCount; ++i) {
+        record->entries.push_back(OwnedEnumEntry {
+            .value   = entries[i].value,
+            .name    = std::string(entries[i].name),
+            .message = std::string(entries[i].message),
+        });
+    }
+    registry.records.push_back(std::move(record));
+}
+
+auto TemplatedDetail::LookupErrorStrings(const uint32_t hash, const uint32_t value) noexcept
+    -> TemplatedDetail::ResolvedErrorStrings {
+    auto&                  registry = GetErrorRegistry();
+    const std::scoped_lock lock(registry.mutex);
+    for (const auto& record: registry.records) {
+        if (record->hash != hash) {
+            continue;
+        }
+        if (record->foreign != nullptr) {
+            return {
+                .category = record->foreign->name,
+                .name     = record->foreign->to_name(value),
+                .message  = record->foreign->to_string(value),
+            };
+        }
+        for (std::size_t i = record->entries.size(); i > 0; --i) {
+            const auto& entry = record->entries[i - 1];
+            if (entry.value == value) {
+                return {
+                    .category = record->categoryName,
+                    .name     = entry.name,
+                    .message  = entry.message,
+                };
+            }
+        }
+        return {
+            .category = record->categoryName,
+            .name     = "Unknown",
+            .message  = "Unknown",
+        };
+    }
+    return {};
+}
+
+void RegisterErrorCategory(const uint32_t hash, const ErrorCategory* category) noexcept {
+    if (category == nullptr) {
+        return;
+    }
+    auto&                  registry = GetErrorRegistry();
+    const std::scoped_lock lock(registry.mutex);
+    for (const auto& existing: registry.records) {
+        if (existing->hash == hash) {
+            return;
+        }
+    }
+    auto record     = std::make_unique<OwnedErrorRecord>();
+    record->hash    = hash;
+    record->foreign = category;
+    registry.records.push_back(std::move(record));
 }
 
 namespace {

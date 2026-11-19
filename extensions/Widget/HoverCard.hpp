@@ -36,7 +36,7 @@
 // ===========================================================================
 
 #include <Zahlen/Common.h>  // Extent2D: the window the card is kept inside
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <string>
 #include <string_view>

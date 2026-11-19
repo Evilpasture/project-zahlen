@@ -431,9 +431,6 @@ struct EngineCore {
 };
 
 namespace PrefabFactory {
-auto LoadFontAsset(Engine& engine, std::string_view path) -> std::expected<AssetID, ErrorCode> {
-    return LoadFontAsset(EngineCore::Assets(engine), path);
-}
 auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
     return CreateBoxInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params);
 }

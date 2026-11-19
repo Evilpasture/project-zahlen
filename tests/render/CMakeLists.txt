@@ -33,7 +33,7 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     # binary an include root for src/ -- exactly the one that
     # configure/check_tests_public_api.py and the include list below keep out.
     target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_engine zahlen_image zahlen_screenshot zahlen_host_ui
+        zahlen_engine zahlen_image zahlen_screenshot zahlen_ui
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.

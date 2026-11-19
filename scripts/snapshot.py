@@ -62,7 +62,6 @@ PRESETS = {
     ],
     "gui": [
         "include/Zahlen/GUI",
-        "src/gui",
         "src/render/ui",
         "app/UIEditor.cpp",
         "resources/shaders/ui.slang",

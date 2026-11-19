@@ -117,8 +117,9 @@ accidents, and a rule against them would fail the existing composition.
 
 A generic layer must be able to invoke domain-provided policy without knowing the
 domain exists, and a gameplay or plugin module must be able to contribute one
-without inverting the DAG. `Zahlen/GUI/FontLoader.hpp` (`BakedFontLoader`) and
-`Zahlen/Engine/GameModule.hpp` (`Module`) are the canonical seams:
+without inverting the DAG. `Zahlen/COM/IPlugin.hpp` (`COM::IAppLayer`),
+`UI/FontLoader.hpp` (`BakedFontLoader`), and `Zahlen/Engine/GameModule.hpp`
+(`Module`) are the canonical seams:
 
 1. **Core declares the shape.** `Module` declares lifecycle hooks, `ModuleStep`
    placements, and `GraphSystemsFn` callbacks; `Engine::InstallModule` composes
@@ -332,7 +333,7 @@ fragment and CMake library are named after:
 | `include/Zahlen/Audio/` | `modules/zahlen-audio.cppm` | `zahlen_audio` |
 | `include/Zahlen/Window/` | — | `zahlen_window` |
 | `include/Zahlen/Input/` | — | header-only |
-| `include/Zahlen/GUI/` | — | `zahlen_gui` |
+| `include/Zahlen/GUI/` | — | header-only POD submission/font structs (`UIData.hpp`, `Font.hpp`); Clay & `HostUI` live in `extensions/UI/` (`zahlen_ui`) |
 | `include/Zahlen/FileSystem/` | — | `zahlen_filesystem` |
 | `include/Zahlen/Engine/` | `modules/zahlen-engine.cppm` | `zahlen_engine` |
 
@@ -902,7 +903,7 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
 
-## 8. Immediate-mode GUI (`Zahlen/GUI/GUI.hpp`)
+## 8. Immediate-mode GUI (`extensions/UI/GUI.hpp` + `extensions/UI/HostUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 persistent `GUI::Context` owns its Clay layout arena and widget interaction
@@ -961,12 +962,15 @@ explicitly acquired frame's command stream. Window presenters persist; their
 acquired images, layout and written state live only with the frame. The two
 are not stored together in a table of versioned texture IDs.
 
-`Engine` owns the device-scoped SDF `FontAtlas` (`GetFontAtlas` / `EnsureFontAtlas`),
-rebuilding it automatically across GPU device loss and feeding it as a plain
-asset value into `GUI::Context`. Immediate-mode widget emission is gated behind
-the move-only `GUI::Frame` capability token returned by
-`GUI::Context::BeginFrame(const UIInput&)`, so `zahlen_gui` has zero binary or
-header coupling to `Engine`, `ECS::Registry`, or `PlatformHost`. Core never
+`libzahlen_engine.so` exposes only the POD draw-batch and glyph descriptors
+(`Zahlen/GUI/UIData.hpp`, `Zahlen/GUI/Font.hpp`) and the raw `IEngine::SubmitUI`
+and `IWindowInput` seams — zero Clay symbols, layout state, or baked font data.
+`extensions/UI/` (`zahlen_ui` / `Zahlen::UI`) encapsulates Clay, `GUI::Context`,
+`TextBuffer`, `#embed`ded `DefaultFont.zfont`, and `HostUI`, which owns the
+device-scoped SDF `FontAtlas` (reuploading across device generations) and submits
+batched geometry over COM. Immediate-mode widget emission is gated behind the
+move-only `GUI::Frame` capability token returned by
+`GUI::Context::BeginFrame(const UIInput&)`. Core never
 walks a private UI parent link: `DespawnEntity` follows
 `Components::HierarchyComponent` only.
 

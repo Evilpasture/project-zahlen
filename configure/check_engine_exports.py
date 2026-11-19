@@ -57,7 +57,6 @@ PRIVATE_ENGINE_TARGETS = (
     "zahlen_ecs",
     "zahlen_audio",
     "zahlen_miniaudio",
-    "zahlen_gui",
     "zahlen_presentation",
     "zahlen_shader_bytecode",
     "HostBlitSwapchain",
@@ -66,7 +65,7 @@ PRIVATE_ENGINE_TARGETS = (
     "spirv-reflect-static",
 )
 
-API_OBJECT_TARGETS = ("zahlen_threading", "zahlen_filesystem", "zahlen_gui")
+API_OBJECT_TARGETS = ("zahlen_threading", "zahlen_filesystem")
 
 FORBIDDEN_INTERNAL_SCOPES = frozenset({
     "Engine",
@@ -162,9 +161,6 @@ FORBIDDEN_CANARY_SYMBOLS: tuple[str, ...] = (
     "_ZNK4ZHLN2FS17VirtualFileSystem24IndexDirectoryTreeLockedERKNSt10filesystem7__cxx114pathE",
     "_ZNK4ZHLN2FS17VirtualFileSystem27RebuildDirectoryIndexLockedEv",
     "_ZN4ZHLN2FS17FileSystemWatcher4Impl3RunEv",
-    "_ZN4ZHLN3GUI7Context4ImplC1Ev",
-    "_ZN4ZHLN3GUI5FrameC1EPNS0_7Context4ImplE",
-    "_ZN4ZHLN3GUI5FrameC2EPNS0_7Context4ImplE",
     "_ZN4ZHLN3COM12CreateEngine6NestedEv",
     "_ZN4ZHLN3COM18CreateEngineHelperEv",
     "_ZN3JPH13PhysicsSystem4InitEjjjj",
@@ -194,7 +190,9 @@ REQUIRED_DSO_PREFIXES: tuple[tuple[str, str], ...] = (
     ("ZHLN::COM::CreateEngine", "_ZN4ZHLN3COM12CreateEngine"),
     ("ZHLN::COM::CreateLogicWorld", "_ZN4ZHLN3COM16CreateLogicWorld"),
     ("ZHLN::COM::RenderGraphDump", "_ZN4ZHLN3COM15RenderGraphDump"),
-    ("ZHLN::TemplatedDetail::GetRegistryHead", "_ZN4ZHLN15TemplatedDetail15GetRegistryHead"),
+    ("ZHLN::TemplatedDetail::RegisterEnumCategory", "_ZN4ZHLN15TemplatedDetail20RegisterEnumCategory"),
+    ("ZHLN::TemplatedDetail::LookupErrorStrings", "_ZN4ZHLN15TemplatedDetail18LookupErrorStrings"),
+    ("ZHLN::RegisterErrorCategory", "_ZN4ZHLN21RegisterErrorCategory"),
 )
 
 _COMMENT_OR_STR_RE = re.compile(
@@ -862,7 +860,6 @@ def check_cmake_invariants(errors: list[str]) -> None:
     for obj_target, rel in (
         ("zahlen_threading", "src/threading/CMakeLists.txt"),
         ("zahlen_filesystem", "src/filesystem/CMakeLists.txt"),
-        ("zahlen_gui", "src/gui/CMakeLists.txt"),
     ):
         cm = _strip_cmake_comments((ROOT / rel).read_text(encoding="utf-8"))
         if not re.search(rf"\badd_library\s*\(\s*{obj_target}\s+OBJECT\b", cm):

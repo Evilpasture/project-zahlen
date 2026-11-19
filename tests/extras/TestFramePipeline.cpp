@@ -43,7 +43,7 @@ struct FramePipelineSuite {
             };
             struct Fails {
                 std::vector<int>* order;
-                auto              Start(COM::IEngine&, HostUI&) -> std::expected<void, ErrorCode> {
+                auto              Start(COM::IEngine&) -> std::expected<void, ErrorCode> {
                     order->push_back(2);
                     return std::unexpected(Test::StageFailure::Refused);
                 }

@@ -6,7 +6,7 @@
 #include <VFX/CombatFX.hpp>
 #include <VFX/Explosion.hpp>
 #include <VFX/Lightning.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 #include <cmath>
 namespace ZHLN::Tools {
 // Real scene-host composition: noise/tint terrain, a heightfield collider,
@@ -94,7 +94,7 @@ struct TerrainDiagnostic {
             return ready;
         return combat.BeforeRender(engine, paused ? 0 : delta);
     }
-    auto UI(COM::IEngine& engine, HostUI& hostUI) -> std::expected<void, ErrorCode> {
+    auto DrawUI(COM::IEngine& engine, HostUI& hostUI) -> std::expected<void, ErrorCode> {
         if (!active)
             return {};
         auto ui = hostUI.Context().BeginFrame(hostUI.ConsumeInput(dt));

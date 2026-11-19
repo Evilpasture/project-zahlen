@@ -6,7 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/GUI/Font.hpp>
-#include <Zahlen/GUI/TextBuffer.hpp>
+#include <UI/TextBuffer.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
@@ -115,11 +115,11 @@ struct UIInput {
     return font.LineHeight(scale);
 }
 
-[[nodiscard]] ZHLN_API auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
+[[nodiscard]] ZHLN_STATIC_API auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
 
 class Frame;
 
-class ZHLN_API Context {
+class ZHLN_STATIC_API Context {
   public:
     using ElementRect = GUI::ElementRect;
 
@@ -157,7 +157,7 @@ class ZHLN_API Context {
 // Ephemeral capability token gating immediate-mode widget emission to an active frame.
 // Minted exclusively by Context::BeginFrame; std::move(frame).End() commits draw batches,
 // and ~Frame() aborts an un-ended layout pass cleanly.
-class ZHLN_API Frame {
+class ZHLN_STATIC_API Frame {
   public:
     using ElementRect = GUI::ElementRect;
 

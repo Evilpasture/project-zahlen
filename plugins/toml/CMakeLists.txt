@@ -18,7 +18,7 @@
 # header names GUI::UINode in its signatures, but UINode is a plain aggregate, so
 # only the include root is needed -- this directory publishes extensions/ itself.
 # The schema implementation (zahlen_ui_schema) is not linked into
-# zahlen_serialization, and zahlen_gui is not needed to compile or link this.
+# zahlen_serialization, and zahlen_ui is not needed to compile or link this.
 
 set(ZHLN_TOML_SOURCES
     TOML.cpp

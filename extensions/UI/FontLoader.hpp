@@ -44,19 +44,19 @@ inline constexpr AssetID kDefaultFontAssetID = HashAssetID(kDefaultFontAssetPath
 
 using BakedFontLoader = auto (*)(void* user) -> std::optional<BakedFontAsset>;
 
-ZHLN_API void               InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
-ZHLN_API void               UninstallBakedFontLoader() noexcept;
-[[nodiscard]] ZHLN_API auto HasBakedFontLoader() noexcept -> bool;
-[[nodiscard]] ZHLN_API auto GetBakedFontLoaderUser() noexcept -> void*;
+ZHLN_STATIC_API void               InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
+ZHLN_STATIC_API void               UninstallBakedFontLoader() noexcept;
+[[nodiscard]] ZHLN_STATIC_API auto HasBakedFontLoader() noexcept -> bool;
+[[nodiscard]] ZHLN_STATIC_API auto GetBakedFontLoaderUser() noexcept -> void*;
 
-[[nodiscard]] ZHLN_API auto LoadBakedFont() -> std::optional<BakedFontAsset>;
+[[nodiscard]] ZHLN_STATIC_API auto LoadBakedFont() -> std::optional<BakedFontAsset>;
 
-[[nodiscard]] ZHLN_API auto GetDefaultBakedFont() -> const BakedFontAsset&;
+[[nodiscard]] ZHLN_STATIC_API auto GetDefaultBakedFont() -> const BakedFontAsset&;
 
-ZHLN_API void SetDefaultBakedFont(BakedFontAsset font) noexcept;
+ZHLN_STATIC_API void SetDefaultBakedFont(BakedFontAsset font) noexcept;
 
-[[nodiscard]] ZHLN_API auto BuildFontAtlas(const BakedFontAsset& asset, TextureID texture = TextureID::Invalid) noexcept -> FontAtlas;
+[[nodiscard]] ZHLN_STATIC_API auto BuildFontAtlas(const BakedFontAsset& asset, TextureID texture = TextureID::Invalid) noexcept -> FontAtlas;
 
-[[nodiscard]] ZHLN_API auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
+[[nodiscard]] ZHLN_STATIC_API auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
 
 }

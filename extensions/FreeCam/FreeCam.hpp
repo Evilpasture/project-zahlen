@@ -39,6 +39,7 @@ void Drive(Camera& camera, const Component& knobs, const InputSnapshot& input, f
 // Apply only drives already attached cameras; Step also seeds the boot camera.
 void Apply(COM::IEntities&, const InputSnapshot&, float dt);
 void Step(COM::IEngine&, float dt);
+bool Attach(COM::IEntities&, const Component& config);
 bool Attach(COM::IEntities&, float speed = 12.0f, bool lookRequiresButton = true);
 void Detach(COM::IEntities&);
 // Explicit Application::AddLayer composition. No automatic installation.

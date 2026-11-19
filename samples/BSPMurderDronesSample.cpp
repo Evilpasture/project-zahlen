@@ -41,8 +41,8 @@
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/GUI.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>

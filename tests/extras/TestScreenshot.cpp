@@ -5,11 +5,9 @@
 #include <Screenshot/Screenshot.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/AppOutcome.hpp>
-#include <Zahlen/COM/App.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
-#include <Zahlen/COM/Host.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
@@ -51,7 +49,7 @@ void ExpectValidPng(const std::filesystem::path& path, uint32_t expectedWidth, u
     ExpectEq(ReadBigEndian32(header.data() + 20), expectedHeight);
 }
 
-[[nodiscard]] auto InvokeRunApp(COM::App app, std::initializer_list<std::string_view> tokens) -> int {
+[[nodiscard]] auto InvokeAppMain(const App& app, std::initializer_list<std::string_view> tokens) -> int {
     std::vector<std::string> storage;
     storage.reserve(tokens.size() + 1);
     storage.emplace_back("com-host-test");
@@ -59,7 +57,7 @@ void ExpectValidPng(const std::filesystem::path& path, uint32_t expectedWidth, u
     std::vector<char*> argv;
     argv.reserve(storage.size());
     for (std::string& token: storage) argv.push_back(token.data());
-    return COM::RunApp(std::span<char* const>(argv), std::move(app));
+    return app.Main(std::span<char* const>(argv));
 }
 } // namespace
 
@@ -124,7 +122,7 @@ void test_screenshot_com_consumer_readback(TempDir& tmp) {
 
 void test_screenshot_com_host_empty_scene_capture_and_cli(TempDir& tmp) {
     auto baseApp = [] {
-        return COM::App()
+        return App()
             .Title("COM Host Smoke")
             .LogLevel(LogLevel::Quiet)
             .Validation(false)
@@ -136,22 +134,24 @@ void test_screenshot_com_host_empty_scene_capture_and_cli(TempDir& tmp) {
     bool started = false;
     const auto neverCaptured = tmp.Path() / "never.png";
     ExpectEq(
-        InvokeRunApp(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--help", "--capture", neverCaptured.string()}),
+        InvokeAppMain(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--help", "--capture", neverCaptured.string()}),
         EXIT_SUCCESS
     );
-    ExpectEq(InvokeRunApp(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--version"}), EXIT_SUCCESS);
-    ExpectEq(InvokeRunApp(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--width", "0"}), EXIT_FAILURE);
-    ExpectEq(InvokeRunApp(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--unknown"}), EXIT_FAILURE);
+    ExpectEq(InvokeAppMain(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--version"}), EXIT_SUCCESS);
+    ExpectEq(InvokeAppMain(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--width", "0"}), EXIT_FAILURE);
+    ExpectEq(InvokeAppMain(baseApp().OnStart([&](COM::IEngine&) { started = true; }), {"--unknown"}), EXIT_FAILURE);
     ExpectFalse(started);
     ExpectFalse(std::filesystem::exists(neverCaptured));
 
     // Empty argument span works cleanly when configured programmatically.
     uint64_t emptySpanFrames = 0;
     ExpectEq(
-        COM::RunApp(
-            std::span<char* const> {},
-            baseApp().Resolution(64, 48).Headless(true).MaxFrames(1).AfterTick([&](COM::IEngine& e) { emptySpanFrames = e.CurrentFrame(); })
-        ),
+        baseApp()
+            .Resolution(64, 48)
+            .Headless(true)
+            .MaxFrames(1)
+            .AfterTick([&](COM::IEngine& e) { emptySpanFrames = e.CurrentFrame(); })
+            .Main(std::span<char* const> {}),
         EXIT_SUCCESS
     );
     ExpectEq(emptySpanFrames, uint64_t {1});
@@ -159,7 +159,7 @@ void test_screenshot_com_host_empty_scene_capture_and_cli(TempDir& tmp) {
     // Bounded headless run without --capture stops after exact --frames count.
     uint64_t boundedFrames = 0;
     ExpectEq(
-        InvokeRunApp(
+        InvokeAppMain(
             baseApp().AfterTick([&](COM::IEngine& e) { boundedFrames = e.CurrentFrame(); }),
             {"--headless", "--frames", "2", "--width", "64", "--height", "48"}
         ),
@@ -171,27 +171,27 @@ void test_screenshot_com_host_empty_scene_capture_and_cli(TempDir& tmp) {
     uint64_t lastFrame = 0;
     const auto emptyPng = tmp.Path() / "empty.png";
     ExpectEq(
-        InvokeRunApp(
+        InvokeAppMain(
             baseApp().AfterTick([&](COM::IEngine& e) { lastFrame = e.CurrentFrame(); }),
             {"--headless", "--frames", "2", "--width", "64", "--height", "48", "--capture", emptyPng.string()}
         ),
         EXIT_SUCCESS
     );
     ExpectValidPng(emptyPng, 64, 48);
-    // CaptureLayer requests close on frame 2, exiting without a third frame.
-    ExpectEq(lastFrame, uint64_t {1});
+    // Built-in capture runs after AfterTick on frame 2 and exits without a third frame.
+    ExpectEq(lastFrame, uint64_t {2});
 
     // Capture without --frames defaults to one completed frame.
     const auto defaultPng = tmp.Path() / "single.png";
     ExpectEq(
-        InvokeRunApp(baseApp(), {"--headless", "--width", "48", "--height", "32", "--capture", defaultPng.string()}),
+        InvokeAppMain(baseApp(), {"--headless", "--width", "48", "--height", "32", "--capture", defaultPng.string()}),
         EXIT_SUCCESS
     );
     ExpectValidPng(defaultPng, 48, 32);
 
     // Failed PNG write and close before target frame both fail the host exit status.
     ExpectEq(
-        InvokeRunApp(
+        InvokeAppMain(
             baseApp(),
             {"--headless", "--width", "64", "--height", "48", "--capture", (tmp.Path() / "missing" / "out.png").string()}
         ),
@@ -199,7 +199,7 @@ void test_screenshot_com_host_empty_scene_capture_and_cli(TempDir& tmp) {
     );
     const auto earlyPng = tmp.Path() / "early.png";
     ExpectEq(
-        InvokeRunApp(
+        InvokeAppMain(
             baseApp().OnStart([](COM::IEngine& e) { e.RequestClose(); }),
             {"--headless", "--frames", "2", "--width", "64", "--height", "48", "--capture", earlyPng.string()}
         ),

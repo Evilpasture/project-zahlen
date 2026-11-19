@@ -54,25 +54,31 @@ void Apply(COM::IEntities& entities, const InputSnapshot& input, float dt) {
         entities.Patch<Components::CameraComponent>(entity, [&](auto& cc) { Drive(cc.camera, config, input, dt); });
     }
 }
-bool Attach(COM::IEntities& entities, float speed, bool lookRequiresButton) {
+bool Attach(COM::IEntities& entities, const Component& config) {
     const auto camera = MainCamera(entities);
     if (camera == Entity::Null() || entities.Get<Components::PendingDestroy>(camera))
         return false;
     if (!entities.Get<TagComponent>(camera) && !entities.Attach(camera, TagComponent {}))
         return false;
-    if (!entities.Patch<Component>(
-            camera,
-            [&](auto& fc) {
-                fc.speed              = speed;
-                fc.lookRequiresButton = lookRequiresButton;
-            }
-        ) &&
-        !entities.Attach(camera, Component {.speed = speed, .lookRequiresButton = lookRequiresButton})) {
+    if (!entities.Patch<Component>(camera, [&](auto& fc) { fc = config; }) &&
+        !entities.Attach(camera, config)) {
         entities.Detach<TagComponent>(camera);
         return false;
     }
     entities.Detach<HostFreeCamOptOutComponent>(camera);
     return true;
+}
+bool Attach(COM::IEntities& entities, float speed, bool lookRequiresButton) {
+    const auto camera = MainCamera(entities);
+    Component config {.speed = speed, .lookRequiresButton = lookRequiresButton};
+    if (camera != Entity::Null()) {
+        if (const auto* existing = entities.Get<Component>(camera)) {
+            config                    = *existing;
+            config.speed              = speed;
+            config.lookRequiresButton = lookRequiresButton;
+        }
+    }
+    return Attach(entities, config);
 }
 void Detach(COM::IEntities& entities) {
     const auto camera = MainCamera(entities);

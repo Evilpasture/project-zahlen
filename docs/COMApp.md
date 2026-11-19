@@ -1,95 +1,84 @@
-# Consumer-side COM App
+# Unified `ZHLN::App` & COM Plugin ABI
 
-`app/include/Zahlen/COM/App.hpp` provides a header-only `ZHLN::COM::App`. Link the
-engine shared library for `ZHLN::COM::CreateEngine(const ChainInNode*)`; do not
-link the in-tree application or host-runner libraries. Configuration slices
-(`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`)
-are forwarded to `CreateEngineRef(COM::InChain(...))`. `Run` returns any factory
-or tick error as `ErrorCode`. `App.hpp` has no dependency on `ConfigCli` or
-`Screenshot`.
+`app/include/Zahlen/App.hpp` provides `ZHLN::App`, the single application host
+and fluent builder over `libzahlen_engine.so` (`Zahlen::Engine`). Link
+`zahlen_application` in-tree, or `find_package(ZahlenApplication CONFIG REQUIRED)`
+and link `Zahlen::Application` in an installed toolchain consumer. Neither
+`libzahlen_engine.so` nor `ZHLN::App` depends on Clay or `extensions/UI/`.
 
-In a source checkout add `app/include` and `include` to the consumer include
-paths. With toolchain packaging enabled, install the `ZahlenCOMApp` component
-alongside `ZahlenEngine`; the wrapper does not require the `ZahlenApplication`
-component or its static libraries.
+## Minimal Application
 
 ```cpp
-#include <Zahlen/COM/App.hpp>
+#include <Zahlen/App.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 
-int main() {
-    return ZHLN::COM::App()
-        .Title("My COM Game")
-        .Headless(true)
-        .MaxFrames(1)
+int main(int argc, char** argv) {
+    return ZHLN::App()
+        .Title("My Game")
+        .Resolution(1280, 720)
         .OnStart([](ZHLN::COM::IEngine& engine) {
-            engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f});
+            (void)engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f});
         })
-        .Run() ? 0 : 1;
+        .Main(argc, argv);
 }
 ```
 
-Include the relevant capability headers (`<Zahlen/COM/IGraphicsDevice.hpp>`,
+Include capability headers (`<Zahlen/COM/IGraphicsDevice.hpp>`,
 `<Zahlen/COM/IEntities.hpp>`, `<Zahlen/COM/ISimulation.hpp>`,
 `<Zahlen/COM/IAudioDevice.hpp>`, `<Zahlen/COM/IAssetLibrary.hpp>`,
-`<Zahlen/COM/IActionContext.hpp>`, `<Zahlen/COM/IState.hpp>`) separately to call
-methods on `engine.Graphics()`, `engine.Entities()`, `engine.Simulation()`,
-`engine.Audio()`, `engine.Assets()`, `engine.Actions()`, and `engine.State()`.
-They are forward declared by `IEngine`.
+`<Zahlen/COM/IActionContext.hpp>`, `<Zahlen/COM/IState.hpp>`) separately for the
+facades a translation unit calls.
 
-Layers may implement any subset of `Start(IEngine&)`, `Tick(IEngine&, float dt)`,
-`AfterTick(IEngine&)` (or `AfterTick(IEngine&, float dt)`), and `Stop(IEngine&)`.
-Layers start, tick, and run `AfterTick` in registration order; `App::AfterTick`
-runs immediately after layer `AfterTick` hooks, with `engine.CurrentFrame()`
-already reflecting the completed tick. `MaxFrames(n)` stops cleanly after `n`
-completed frames (zero leaves the run unbounded). Layers stop in reverse order
-before engine release, including on tick failure. Do not mutate the app from its
-callbacks. Copies of an `App` share layer state. The frame cap is client-side
-and uses a steady clock; zero disables it. Frame deltas delivered to layers, the
-update callback, and the engine are clamped to 0.25 seconds. Pacing uses
-`std::this_thread::sleep_for` and is subject to OS scheduler granularity; on
-Windows, hosts requiring finer pacing may manage timer resolution themselves.
+## Built-in CLI Flags
 
-## Optional CLI & Screenshot Host Harness
+`App::Run(argv)` and `App::Main(argc, argv)` bind every scalar field of
+`EngineConfig` (plus any caller `.WithConfig(cfg)` or `.AddFlag(...)` bindings)
+and provide:
 
-Standalone COM executables that also link `zahlen_command_line` and
-`zahlen_screenshot` can wrap `COM::App` with `ZHLN::COM::RunApp` from
-`app/include/Zahlen/COM/Host.hpp` (still without linking `Application`,
-`HostRunner`, or `HostUI`). It accepts `std::span<char* const>`, binds
-`--width`, `--height`, `--headless`, `--frames`, and `--capture` via
-`ConfigCli`, attaches `ZHLN::Screenshot::CaptureLayer` when `--capture` is set,
-and returns `EXIT_SUCCESS` or `EXIT_FAILURE`:
+- `--help` / `-h`, `--version`, `--print-graph [none|fxaa|smaa]`, `--debug-attach`
+- `--frames <N>` — stop cleanly after `N` completed frames (`0`: unlimited)
+- `--capture <path.png>` — read back the primary window and write a PNG after
+  `--frames` completed frames (default `1` when `--frames` is omitted), then exit
+- `--plugin <name|path>` — dynamically load a `COM::IAppLayer` shared library
+  (repeatable; preserves registration order)
 
-```cpp
-#include <Zahlen/COM/App.hpp>
-#include <Zahlen/COM/Host.hpp>
-#include <Zahlen/COM/IAssetLibrary.hpp>
-#include <cstddef>
-#include <span>
+Programmatic `app.Run()` / `app.Run(update)` bypass CLI parsing and run with the
+builder's configured `EngineConfig`, `MaxFrames`, `Capture`, layers, and plugins.
 
-int main(int argc, char* argv[]) {
-    return ZHLN::COM::RunApp(std::span(argv, static_cast<size_t>(argc)),
-        ZHLN::COM::App()
-            .Title("Zahlen COM Cube")
-            .OnStart([](ZHLN::COM::IEngine& e) { e.Assets()->SpawnBox({1, 1, 1}); }));
-}
-```
+## Layers and Dynamic `COM::IAppLayer` Plugins
 
-## Direct Factory & Chain Usage
+C++ layers registered with `.AddLayer(layer)` may implement any subset of
+`Start(IEngine&)`, `Tick(IEngine&, float dt)`, `BeforeRender(IEngine&, float dt)`,
+`AfterTick(IEngine&)` (or `AfterTick(IEngine&, float dt)`), and `Stop(IEngine&)`,
+returning `void` or `std::expected<void, ErrorCode>`.
 
-Callers managing their own main loop can invoke `CreateEngineRef` directly with
-any subset of configuration slices via `ZHLN::COM::InChain(...)`:
+Dynamically loaded plugins (`<Zahlen/COM/IPlugin.hpp>`) implement
+`ZHLN::COM::IAppLayer` and export a single C symbol:
 
 ```cpp
-#include <Zahlen/COM/EngineFactory.hpp>
-
-auto engine = ZHLN::COM::CreateEngineRef(ZHLN::COM::InChain(
-    ZHLN::COM::AppConfig{.appName = ZHLN::String64("CustomHost")},
-    ZHLN::COM::WindowConfig{.width = 1920, .height = 1080, .vsync = true}
-));
+extern "C" void ZHLN_CreateAppLayer(
+    const ZHLN::COM::ChainInNode*        config,
+    ZHLN::COM::Result<ZHLN::COM::IAppLayer*>* outResult
+) noexcept;
 ```
 
-**Current SDK notes:** the COM headers are Jolt-free (using `ZHLN::FVec*`,
-`ZHLN::DVec*`, `ZHLN::Quat`, and `ZHLN::Mat4x4`), and rely on
-`Zahlen/Core/Reflection/*`, which requires C++26 static reflection
-(`-freflection`) on a compatible Itanium C++ ABI toolchain.
+- `app.AddPlugin(COM::Ref<COM::IAppLayer>)` attaches an in-process COM layer.
+- `app.LoadPlugin("freecam", COM::InChain(FreeCam::Component{...}))` loads a
+  required plugin (`libzahlen_plugin_<name>.so`/`.dylib`/`.dll` or an explicit
+  path), failing with `AppError::PluginNotFound` / `PluginLoadFailed` /
+  `PluginSymbolMissing` if unavailable.
+- `app.TryLoadPlugin("freecam")` loads the plugin when found (`ZHLN_PLUGIN_PATH`,
+  next to the executable, `../lib`, or `<engine-lib>/zahlen/plugins`) and skips
+  it cleanly if the library file is absent.
+- Shipped plugins: `zahlen_plugin_freecam` (`FreeCam::Component` config chain)
+  and `zahlen_plugin_screenshot` (`Screenshot::PluginConfig` config chain).
+- Shutdown runs `Stop` / `OnStop` in reverse registration order while `IEngine`
+  is still alive, destroys all layer objects (releasing `Ref<IAppLayer>`), drops
+  `IEngine`, and only then closes plugin `SharedLibrary` handles.
+
+## Optional Immediate-Mode UI (`extensions/UI/`)
+
+Applications and tools that render immediate-mode Clay panels link `zahlen_ui`
+(`Zahlen::UI`), include `<UI/HostUI.hpp>`, construct `HostUI(engine)` inside
+their layer's `Start`, call `ui.BeginFrame()` + `ui.Submit(...)` in `Tick`, and
+destroy `HostUI` in `Stop` before `IEngine` shuts down.

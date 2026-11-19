@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <Zahlen/COM/IEngine.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <Zahlen/Common.h>
+#include <UI/GUI.hpp>
+#include <UI/FontLoader.hpp>
 #include <optional>
 #include <vector>
 
 namespace ZHLN {
-// Owned by Application (or an explicit external host), never the engine.
+// Owned explicitly by UI-using hosts/tools, never by Core or App.
 // No callbacks: the host composes each window and submits before Tick.
-class HostUI {
+class ZHLN_STATIC_API HostUI {
 public:
     explicit HostUI(COM::IEngine& engine): _engine(engine) {}
     ~HostUI();
@@ -24,7 +25,7 @@ public:
     auto Submit(UIDrawData data, WindowID window = WindowID::Primary) -> COM::Result<void>;
     void BeginFrame();
 private:
-    COM::IEngine& _engine; // borrowed from the owning Application's Ref
+    COM::IEngine& _engine; // borrowed from the owning host's Ref
     FontAtlas _font {};
     GUI::BakedFontAsset _baked;
     TextureID _texture = TextureID::Invalid;

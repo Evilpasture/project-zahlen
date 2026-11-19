@@ -148,33 +148,6 @@ uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCo
     return _prefabCache.GetAll(outPrefabs, maxCount);
 }
 
-auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&> {
-    GUI::BakedFontAsset* found = BorrowCachedFont(hash);
-    return found != nullptr ? ZHLN::Optional<GUI::BakedFontAsset&> {*found} : ZHLN::Optional<GUI::BakedFontAsset&> {std::nullopt};
-}
-
-auto AssetManager::BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset* {
-    GUI::BakedFontAsset* found = nullptr;
-    _fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
-    return found;
-}
-
-void AssetManager::CacheFont(uint64_t hash, GUI::BakedFontAsset* font) {
-    _fontCache.Insert(hash, font);
-}
-
-void AssetManager::CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font) {
-    _fontCache.Insert(hash, std::move(font));
-}
-
-void AssetManager::ClearFontCache() noexcept {
-    _fontCache.Clear();
-}
-
-uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount) {
-    return _fontCache.GetAll(outFonts, maxCount);
-}
-
 auto AssetManager::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
     if (key.empty() || image.width == 0 || image.height == 0 || static_cast<size_t>(image.width) > std::numeric_limits<size_t>::max() / 4u / image.height ||
         image.rgba.size() != static_cast<size_t>(image.width) * image.height * 4u ||

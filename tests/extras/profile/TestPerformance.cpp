@@ -12,7 +12,7 @@
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

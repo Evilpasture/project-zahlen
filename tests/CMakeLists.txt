@@ -28,8 +28,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestError.cpp
     core/TestFileSystem.cpp
     core/TestFileSystemWatcher.cpp
-    core/TestFontAsset.cpp
-    core/TestGUIContext.cpp
+    core/TestUIData.cpp
     core/TestGraphicsSettings.cpp
     core/TestInputLive.cpp
     core/TestMath.cpp
@@ -41,7 +40,6 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestSignal.cpp
     core/TestSoA.cpp
     core/TestTestFramework.cpp
-    core/TestTextEdit.cpp
     core/TestWaitIdle.cpp
     physics/TestPhysics.cpp
     threading/TestChannel.cpp
@@ -69,7 +67,7 @@ target_link_libraries(ztest_cpu PRIVATE
     zahlen_engine
     zahlen_asset_cooking
     zahlen_image
-    zahlen_host_ui
+    zahlen_application
 )
 
 target_include_directories(ztest_cpu PRIVATE

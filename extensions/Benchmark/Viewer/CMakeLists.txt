@@ -67,6 +67,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_benchmark
     zahlen_engine
+    zahlen_ui
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE

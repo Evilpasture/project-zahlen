@@ -29,3 +29,8 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_freecam freecam FreeCamPlugin.cpp)
+    target_link_libraries(zahlen_plugin_freecam PRIVATE zahlen_freecam)
+endif()

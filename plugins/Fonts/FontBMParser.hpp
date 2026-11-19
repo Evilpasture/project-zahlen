@@ -20,7 +20,7 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <UI/FontLoader.hpp>
 #include <json/JSONSchema.hpp>
 
 #include <cstdint>

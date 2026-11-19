@@ -11,7 +11,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/GUI/Font.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <UI/FontLoader.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

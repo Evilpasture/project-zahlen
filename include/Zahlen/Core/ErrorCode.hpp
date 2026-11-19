@@ -8,7 +8,8 @@
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <atomic>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
@@ -30,81 +31,66 @@ constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
     return Hash32(str);
 }
 
-template <typename E>
-    requires std::is_enum_v<E>
-inline auto GetCategoryInstance() noexcept -> const ErrorCategory* {
-    [[maybe_unused]] auto dummy = Reflect::EnumToString(E {});
-
-    static constexpr ErrorCategory cat = {
-        .name      = Reflect::ScopedTypeName<E>(),
-        .to_string = [](uint32_t val) noexcept -> std::string_view {
-            return Reflect::EnumToMessage(static_cast<E>(val));
-        },
-        .to_name = [](uint32_t val) noexcept -> std::string_view {
-            return Reflect::EnumToString(static_cast<E>(val));
-        }
-    };
-    return &cat;
-}
-
-struct RegistryNode {
-    uint32_t             hash;
-    const ErrorCategory* category;
-    RegistryNode*        next;
+struct EnumErrorEntry {
+    uint32_t         value = 0;
+    std::string_view name {};
+    std::string_view message {};
 };
 
-// The error-category registry must be one list per process across libzahlen_engine
-// and every consumer image. An inline function-local static cannot arrange that
-// once libzahlen_engine seals its symbol table (hidden visibility + linker
-// version script localizes ELF STB_GNU_UNIQUE objects and Mach-O weak globals,
-// and PE never merges per-image statics at all): an Error constructed inside the
-// engine would push its category onto the engine's private list while the host
-// formatted it against an empty list and answered "None". Declared ZHLN_API
-// here, defined once in src/engine/Log.cpp, and imported by every consumer, all
-// platforms share the single process-wide list without leaking STB_GNU_UNIQUE.
-ZHLN_API auto GetRegistryHead() noexcept -> std::atomic<RegistryNode*>&;
+struct ResolvedErrorStrings {
+    std::string_view category = "None";
+    std::string_view name     = "None";
+    std::string_view message  = "None";
+};
+
+// The error-category registry lives inside libzahlen_engine so the engine, the
+// host executable, and dynamically loaded plugin shared libraries share one
+// table across ELF, Mach-O, and PE. Enum categories copy their reflected name
+// and description strings into engine-owned storage on first registration so a
+// plugin can return a typed ErrorCode and be unloaded via dlclose/FreeLibrary
+// without leaving dangling .data/.rodata/.text pointers behind.
+ZHLN_API void RegisterEnumCategory(
+    uint32_t              hash,
+    std::string_view      categoryName,
+    const EnumErrorEntry* entries,
+    std::size_t           entryCount
+) noexcept;
+
+ZHLN_API auto LookupErrorStrings(uint32_t hash, uint32_t value) noexcept -> ResolvedErrorStrings;
+
+template <typename E>
+    requires std::is_enum_v<E>
+consteval auto MakeEnumErrorTable() -> std::array<EnumErrorEntry, Reflect::kEnumEntries<E>.size()> {
+    constexpr auto&                                             src = Reflect::kEnumEntries<E>;
+    std::array<EnumErrorEntry, Reflect::kEnumEntries<E>.size()> out {};
+    for (std::size_t i = 0; i < src.size(); ++i) {
+        out[i] = EnumErrorEntry {
+            .value   = static_cast<uint32_t>(src[i].value),
+            .name    = src[i].name,
+            .message = !src[i].message.empty() ? src[i].message : src[i].name,
+        };
+    }
+    return out;
+}
 
 template <typename E>
     requires std::is_enum_v<E>
 struct CategoryRegistration {
-    static inline RegistryNode node = {.hash = HashTypeName(ZHLN::Reflect::ScopedTypeName<E>()), .category = GetCategoryInstance<E>(), .next = nullptr};
-
-    static inline bool registered = []() -> auto {
-        auto&         head     = GetRegistryHead();
-        RegistryNode* expected = head.load(std::memory_order::relaxed);
-        do {
-            node.next = expected;
-        } while (!head.compare_exchange_weak(expected, &node, std::memory_order::release, std::memory_order::relaxed));
+    static inline bool registered = []() noexcept -> bool {
+        static constexpr auto table = MakeEnumErrorTable<E>();
+        RegisterEnumCategory(
+            HashTypeName(ZHLN::Reflect::ScopedTypeName<E>()),
+            ZHLN::Reflect::ScopedTypeName<E>(),
+            table.data(),
+            table.size()
+        );
         return true;
     }();
 };
 
-inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
-    RegistryNode* curr = GetRegistryHead().load(std::memory_order::acquire);
-    while (curr != nullptr) {
-        if (curr->hash == hash) {
-            return curr->category;
-        }
-        curr = curr->next;
-    }
-    return nullptr;
-}
+} // namespace TemplatedDetail
 
-}
-
-inline void RegisterErrorCategory(const uint32_t hash, const ErrorCategory* category) noexcept {
-    auto& head = TemplatedDetail::GetRegistryHead();
-    for (auto* curr = head.load(std::memory_order::acquire); curr != nullptr; curr = curr->next) {
-        if (curr->hash == hash) {
-            return;
-        }
-    }
-    auto* node     = new TemplatedDetail::RegistryNode {hash, category, head.load(std::memory_order::relaxed)};
-    auto  expected = node->next;
-    while (!head.compare_exchange_weak(expected, node, std::memory_order::release, std::memory_order::relaxed)) {
-        node->next = expected;
-    }
-}
+ZHLN_API void RegisterErrorCategory(uint32_t hash, const ErrorCategory* category) noexcept;
 
 extern void ERROR_CODE_CANNOT_BE_ZERO();
 
@@ -172,4 +158,4 @@ struct ErrorCode {
 static_assert(sizeof(ErrorCode) == 8);
 static_assert(std::is_standard_layout_v<ErrorCode> && std::is_trivially_copyable_v<ErrorCode>);
 
-}
+} // namespace ZHLN

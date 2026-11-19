@@ -107,6 +107,10 @@ auto ParseEngineConfig(std::span<char* const> args, EngineConfig& config, std::s
     if (!parsed) {
         return std::unexpected(parsed.error());
     }
+    if (!parsed->helpRequested && !parsed->versionRequested && !graphRequested &&
+        (config.width == 0 || config.height == 0 || config.width > 16384 || config.height > 16384)) {
+        return std::unexpected(CommandLineError::InvalidValue);
+    }
     return EngineCliResult {
         .helpRequested    = parsed->helpRequested,
         .versionRequested = parsed->versionRequested,

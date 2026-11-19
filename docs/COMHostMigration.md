@@ -1,3 +1,5 @@
+> **Note:** Superseded in part by the unified `ZHLN::App` & `extensions/UI/` split (see `docs/COMApp.md`): `HostUI` now lives in `extensions/UI/` (`<UI/HostUI.hpp>`, `zahlen_ui` / `Zahlen::UI`) and is constructed explicitly by UI-using layers rather than owned implicitly by `ZHLN::App`.
+
 # COM host cut
 
 ## Production host ownership

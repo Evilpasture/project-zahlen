@@ -9,7 +9,7 @@
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 #include <format>
 namespace {
 using namespace ZHLN;

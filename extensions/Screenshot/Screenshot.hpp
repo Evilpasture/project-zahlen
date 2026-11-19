@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <Zahlen/Core/COM/Types.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <cstdint>
@@ -36,6 +38,20 @@ private:
 // invalid frame, unsupported dimensions, encoding failure, or I/O failure.
 [[nodiscard]] auto WritePNG(std::string_view path, const CapturedFrame& frame) -> bool;
 
+enum class Error : uint8_t {
+    WriteFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to encode or write captured frame PNG"> {}) = 1,
+    Incomplete ZHLN_ANNOTATION(ZHLN::Description<"Engine closed before requested capture frame completed"> {}) = 2,
+};
+
+// ABI-stable configuration node passed via COM::InChain to the screenshot
+// shared-library plugin factory (ZHLN_CreateAppLayer). The plugin copies path
+// bytes during creation, so the caller's string need not outlive the call.
+struct PluginConfig {
+    COM::StringView path {};
+    uint32_t        afterFrames = 1;
+};
+static_assert(std::is_standard_layout_v<PluginConfig> && std::is_trivially_copyable_v<PluginConfig>);
+
 enum class CaptureStatus : uint8_t {
     Pending,
     Succeeded,
@@ -57,7 +73,7 @@ struct CaptureOutcome {
     }
 };
 
-// Host layer compatible with both COM::App and ZHLN::Application. Once
+// Single-shot host capture layer compatible with ZHLN::App. Once
 // `engine.CurrentFrame() >= afterFrames`, AfterTick reads back the primary
 // window, writes a PNG to `path`, stores the outcome in caller-owned storage,
 // and calls `engine.RequestClose()`. An empty path disables capture; an

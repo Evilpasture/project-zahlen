@@ -107,8 +107,8 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/GUI.hpp>
+#include <UI/HostUI.hpp>
 #ifdef ZHLN_HAS_FONTS
 #include <Fonts/Fonts.hpp>
 #endif

@@ -267,6 +267,7 @@ function(zhln_toolchain_source_package name)
         endforeach()
         if(_has_vendored)
             string(APPEND _script "  target_include_directories(${_tname} SYSTEM PRIVATE \"\${_zhln_src_dir}/vendor\")\n")
+            string(APPEND _script "  target_compile_options(${_tname} PRIVATE \"--embed-dir=\${_zhln_src_dir}/vendor\")\n")
         endif()
         string(APPEND _script "  target_compile_features(${_tname} PUBLIC cxx_std_26)\n")
         string(APPEND _script "  target_compile_options(${_tname} PUBLIC \"\$<\$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>\")\n")
@@ -374,19 +375,19 @@ zhln_toolchain_source_package(Signal
             extensions/Signal/WorkerCrashReports.cpp
     PUBLIC_LINKS Zahlen::Engine)
 
-zhln_toolchain_source_package(COMApp
-    DEPENDS Engine
-    HEADER_FILES app/include/Zahlen/COM/App.hpp
-    HEADER_DEST Zahlen/COM
-    PUBLIC_LINKS Zahlen::Engine)
-
-zhln_toolchain_source_package(HostUI
-    CHECK_TARGET zahlen_host_ui
-    DEPENDS Engine
-    HEADER_FILES app/include/Zahlen/HostUI.hpp
-    HEADER_DEST Zahlen
-    SOURCES app/HostUI.cpp
-    PUBLIC_LINKS Zahlen::Engine)
+zhln_toolchain_source_package(Screenshot
+    CHECK_TARGET zahlen_screenshot
+    DEPENDS Engine Image
+    HEADER_DIRS extensions/Screenshot
+    SOURCES extensions/Screenshot/Screenshot.cpp
+    PUBLIC_LINKS Zahlen::Engine
+    PRIVATE_LINKS Zahlen::Image)
+if(TARGET zahlen_plugin_screenshot)
+    set_target_properties(zahlen_plugin_screenshot PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
+    install(TARGETS zahlen_plugin_screenshot
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenScreenshot
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenScreenshot)
+endif()
 
 zhln_toolchain_source_package(HostRunner
     CHECK_TARGET zahlen_host_runner
@@ -399,33 +400,43 @@ zhln_toolchain_source_package(HostRunner
 
 zhln_toolchain_source_package(Application
     CHECK_TARGET zahlen_application
-    DEPENDS Engine CommandLine HostRunner HostUI COMApp
+    DEPENDS Engine CommandLine HostRunner Screenshot
     HEADER_FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp app/include/Zahlen/Zahlen.hpp
     HEADER_DEST Zahlen
     SOURCES app/Application.cpp
-    PUBLIC_LINKS Zahlen::Engine Zahlen::CommandLine Zahlen::HostRunner Zahlen::HostUI)
+    PUBLIC_LINKS Zahlen::Engine Zahlen::CommandLine Zahlen::HostRunner
+    PRIVATE_LINKS Zahlen::Screenshot)
 
-# --- 3. Plugins & serialization (source/header packages) --------------------
+# --- 3. Plugins, UI & serialization (source/header packages) ----------------
 zhln_toolchain_source_package(Netpbm
     CHECK_TARGET zahlen_netpbm
     DEPENDS Engine
     HEADER_DIRS plugins/netpbm
     PUBLIC_LINKS Zahlen::Engine)
 
-zhln_toolchain_source_package(Screenshot
-    CHECK_TARGET zahlen_screenshot
-    DEPENDS Engine Image
-    HEADER_DIRS extensions/Screenshot
-    SOURCES extensions/Screenshot/Screenshot.cpp
-    PUBLIC_LINKS Zahlen::Engine
-    PRIVATE_LINKS Zahlen::Image)
+zhln_toolchain_source_package(UI
+    CHECK_TARGET zahlen_ui
+    DEPENDS Engine
+    HEADER_FILES extensions/UI/FontLoader.hpp
+                 extensions/UI/GUI.hpp
+                 extensions/UI/HostUI.hpp
+                 extensions/UI/Text.hpp
+                 extensions/UI/TextBuffer.hpp
+    HEADER_DEST UI
+    SOURCES extensions/UI/FontLoader.cpp
+            extensions/UI/GUIContext.cpp
+            extensions/UI/HostUI.cpp
+            extensions/UI/Text.cpp
+    VENDORED_HEADERS extern/clay/clay.h resources/fonts/DefaultFont.zfont
+    PUBLIC_LINKS Zahlen::Engine)
 
 zhln_toolchain_source_package(UISchema
     CHECK_TARGET zahlen_ui_schema
-    DEPENDS Engine
-    HEADER_DIRS extensions/UI
+    DEPENDS Engine UI
+    HEADER_FILES extensions/UI/UITree.hpp
+    HEADER_DEST UI
     SOURCES extensions/UI/UITree.cpp
-    PUBLIC_LINKS Zahlen::Engine)
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
 
 zhln_toolchain_source_package(Scene
     CHECK_TARGET zahlen_scene
@@ -459,10 +470,10 @@ zhln_toolchain_source_package(GLTF
 
 zhln_toolchain_source_package(Fonts
     CHECK_TARGET zahlen_fonts
-    DEPENDS Engine Serialization Image
+    DEPENDS Engine UI Serialization Image
     HEADER_DIRS plugins/Fonts
     SOURCES plugins/Fonts/Fonts.cpp
-    PUBLIC_LINKS Zahlen::Engine
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI
     PRIVATE_LINKS Zahlen::Image Zahlen::Serialization)
 if(TARGET zahlen_fonts)
     install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
@@ -481,10 +492,10 @@ zhln_toolchain_source_package(Lua
 # --- 4. Optional COM extensions (source/header packages) --------------------
 zhln_toolchain_source_package(Widgets
     CHECK_TARGET zahlen_widgets
-    DEPENDS Engine
+    DEPENDS Engine UI
     HEADER_DIRS extensions/Widget
     SOURCES extensions/Widget/BarStrip.cpp extensions/Widget/HoverCard.cpp extensions/Widget/TextFit.cpp
-    PUBLIC_LINKS Zahlen::Engine)
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
 
 zhln_toolchain_source_package(Benchmark
     CHECK_TARGET zahlen_benchmark
@@ -496,7 +507,7 @@ zhln_toolchain_source_package(Benchmark
 
 zhln_toolchain_source_package(BenchmarkViewer
     CHECK_TARGET zahlen_benchmark_viewer
-    DEPENDS Engine Benchmark Widgets
+    DEPENDS Engine UI Benchmark Widgets
     HEADER_FILES extensions/Benchmark/Viewer/BenchmarkViewer.hpp
                  extensions/Benchmark/Viewer/FrameTelemetry.hpp
                  extensions/Benchmark/Viewer/SystemProbe.hpp
@@ -506,7 +517,7 @@ zhln_toolchain_source_package(BenchmarkViewer
             extensions/Benchmark/Viewer/FrameTelemetry.cpp
             extensions/Benchmark/Viewer/SystemTelemetry.cpp
             extensions/Benchmark/Viewer/SystemProbeLinux.cpp
-    PUBLIC_LINKS Zahlen::Engine Zahlen::Benchmark Zahlen::Widgets)
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI Zahlen::Benchmark Zahlen::Widgets)
 
 zhln_toolchain_source_package(Scripting
     CHECK_TARGET zahlen_scripting
@@ -535,11 +546,11 @@ endif()
 
 zhln_toolchain_source_package(Editor
     CHECK_TARGET zahlen_editor
-    DEPENDS Engine
+    DEPENDS Engine UI
     HEADER_FILES extensions/editor/GUIEditor.hpp
     HEADER_DEST editor
     SOURCES extensions/editor/GUIEditor.cpp
-    PUBLIC_LINKS Zahlen::Engine)
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
 
 zhln_toolchain_source_package(Terrain
     CHECK_TARGET zahlen_terrain
@@ -572,6 +583,12 @@ zhln_toolchain_source_package(FreeCam
     HEADER_DIRS extensions/FreeCam
     SOURCES extensions/FreeCam/FreeCam.cpp
     PUBLIC_LINKS Zahlen::Engine)
+if(TARGET zahlen_plugin_freecam)
+    set_target_properties(zahlen_plugin_freecam PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
+    install(TARGETS zahlen_plugin_freecam
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenFreeCam
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenFreeCam)
+endif()
 
 zhln_toolchain_source_package(Camera
     CHECK_TARGET zahlen_camera

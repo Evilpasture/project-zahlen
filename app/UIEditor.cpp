@@ -1,4 +1,4 @@
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -35,14 +35,10 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Widget/TextFit.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <UI/UITree.hpp>
-#if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
-#endif
-#if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -182,7 +178,7 @@ struct Session {
     GUI::Context                  previewGui;
     GUI::UIInput                 editorInput {};
     bool editorCaptureKeyboard = false;
-    ZHLN::HostUI* hostUI = nullptr; // borrowed from Application, not engine-owned
+    ZHLN::HostUI* hostUI = nullptr; // borrowed from EditorLayer, not engine-owned
     GUI::UIInput                 previewInput {};
     GUI::PropertyStore            previewProperties; // runtime instance; Design keeps `properties`
 
@@ -559,10 +555,8 @@ void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::CO
     session.confirmWasDown = confirmDown;
 }
 
-#if defined(ZHLN_HAS_UI_TOML)
 void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
-#endif
 
 // Explicit host composition: both windows submit copied geometry before Tick.
 auto DrawPreview(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Result<void> {
@@ -647,7 +641,6 @@ void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
     ZHLN::Log("[UIEditor] Preview window open");
 }
 
-#if defined(ZHLN_HAS_UI_TOML)
 void SaveTree(const GUI::UINode& tree, std::string_view path) {
     const std::string text = ZHLN::ReflectTOML::Serialize(tree);
     std::ofstream     out {std::string {path}, std::ios::binary | std::ios::trunc};
@@ -680,7 +673,6 @@ void LoadTree(Session& session, std::string_view path) {
     session.selectedId = RootPath(session.tree);
     ZHLN::Log("[UIEditor] loaded '{}'", path);
 }
-#endif
 
 // Builds this window's UI and publishes it. The render step draws whatever is
 // published for a window into that window's acquired target, which is why this
@@ -700,16 +692,13 @@ auto SubmitEditorUI(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::
     }
     session.escWasDown = escDown;
 
-#if defined(ZHLN_HAS_UI_TOML)
     const bool controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
     const bool saveDown    = controlDown && state.IsKeyDown(ZHLN::KeyCode::S);
     if (saveDown && !session.saveWasDown && !uiOwnsKeyboard) {
         SaveTree(session.tree, kDocumentPath);
     }
     session.saveWasDown = saveDown;
-#endif
 
-    const ZHLN::Extent2D size = engine.WindowExtent(engine.PrimaryWindow());
     session.editorGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.editorGui.BeginFrame(
         session.editorInput = session.hostUI->ConsumeInput(session.dt)
@@ -775,14 +764,12 @@ auto SubmitEditorUI(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::
                             } else {
                                 gui.Text("G grab   S scale   R rotate", 12.0f, {0.5f, 0.55f, 0.6f, 1.0f});
                             }
-#if defined(ZHLN_HAS_UI_TOML)
                             if (gui.Button("Save", {0.16f, 0.30f, 0.20f, 0.95f})) {
                                 SaveTree(session.tree, kDocumentPath);
                             }
                             if (gui.Button("Load", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 LoadTree(session, kDocumentPath);
                             }
-#endif
                         }
                     );
 
@@ -839,22 +826,23 @@ auto main(int argc, char* argv[]) -> int {
     BindHostActions(session);
 
     struct EditorLayer {
-        Session* session;
-        void Start(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) {
-            session->hostUI = &ui;
-#if defined(ZHLN_HAS_FONTS)
-            auto baked = ZHLN::Fonts::LoadBakedFont(engine.Assets(), ZHLN::Fonts::VendoredDefaultFontSource());
-            if (baked) ui.SetBakedFont(std::move(*baked));
-            else ZHLN::LogWarning("Font load failed ({}); using embedded default.", baked.error());
-#endif
+        Session*                      session = nullptr;
+        std::unique_ptr<ZHLN::HostUI> ui;
+
+        void Start(ZHLN::COM::IEngine& engine) {
+            ui              = std::make_unique<ZHLN::HostUI>(engine);
+            session->hostUI = ui.get();
+            auto baked      = ZHLN::Fonts::LoadBakedFont(engine.Assets(), ZHLN::Fonts::VendoredDefaultFontSource());
+            if (baked) {
+                ui->SetBakedFont(std::move(*baked));
+            } else {
+                ZHLN::LogWarning("Font load failed ({}); using embedded default.", baked.error());
+            }
         }
-        void Tick(ZHLN::COM::IEngine& engine, float dt) {
+        auto Tick(ZHLN::COM::IEngine& engine, float dt) -> std::expected<void, ZHLN::ErrorCode> {
+            ui->BeginFrame();
             UpdateEditor(engine, *session, dt);
-        }
-        auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
-            // The host retains the CPU atlas and rebuilds its texture whenever
-            // the device generation changes; no engine callback captures Session.
-            session->fontAtlas = ui.GetFontAtlas();
+            session->fontAtlas = ui->GetFontAtlas();
             session->editorGui.SetFontAtlas(session->fontAtlas);
             session->previewGui.SetFontAtlas(session->fontAtlas);
             const auto submitted = SubmitEditorUI(engine, *session);
@@ -865,10 +853,14 @@ auto main(int argc, char* argv[]) -> int {
             }
             return {};
         }
-        void Stop(ZHLN::COM::IEngine& engine) { StopPreview(engine, *session); session->hostUI = nullptr; }
+        void Stop(ZHLN::COM::IEngine& engine) {
+            StopPreview(engine, *session);
+            session->hostUI = nullptr;
+            ui.reset();
+        }
     };
-    ZHLN::EngineConfig editorConfig {};
-    editorConfig.appName = "Zahlen UI Editor";
-    const auto result = ZHLN::Application(editorConfig).WithFrameLimit().AddLayer(EditorLayer {&session}).Run(argc, argv);
-    return result ? EXIT_SUCCESS : EXIT_FAILURE;
+    return ZHLN::App()
+        .Title("Zahlen UI Editor")
+        .AddLayer(EditorLayer {.session = &session})
+        .Main(argc, argv);
 }

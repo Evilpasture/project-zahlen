@@ -3,8 +3,7 @@
 
 #pragma once
 
-// Host-level outcomes, shared by the Engine application and Kernel-only tools.
-// No OS exit code crosses this boundary; executable entrypoints translate it.
+// Host-level outcomes, shared by ZHLN::App and bespoke host tools.
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
@@ -13,19 +12,22 @@
 namespace ZHLN {
 
 enum class AppExitReason : uint8_t {
-    UserClosed,          // The primary host was closed by the user or application.
+    UserClosed,          // The primary host was closed by the user, frame limit, or capture.
     CliHelpRequested,    // --help was printed before host creation.
     CliVersionRequested, // --version was printed before host creation.
     CliGraphRequested,   // --print-graph was printed before host creation.
 };
 
 // Use AppError only where a lower layer has no ErrorCode to return. CLI
-// parsing, Engine/Kernel creation and device recovery preserve their original
-// (more specific) ErrorCode categories instead of erasing the underlying cause.
+// parsing, Engine creation, frame capture, and plugin factories preserve their
+// original (more specific) ErrorCode categories instead of erasing the cause.
 enum class AppError : uint8_t {
     InvalidArguments ZHLN_ANNOTATION(ZHLN::Description<"Invalid argc or argv passed to the application"> {}) = 1,
     SceneInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Scene initialization failed"> {}),
     FrameTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine tick failed during frame execution"> {}),
+    PluginNotFound ZHLN_ANNOTATION(ZHLN::Description<"Plugin shared library could not be found"> {}),
+    PluginLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open plugin shared library"> {}),
+    PluginSymbolMissing ZHLN_ANNOTATION(ZHLN::Description<"Plugin shared library does not export ZHLN_CreateAppLayer"> {}),
 };
 
 using AppRunResult = std::expected<AppExitReason, ErrorCode>;

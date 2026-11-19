@@ -14,7 +14,6 @@
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <engine/ModelPrefab.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
@@ -101,18 +100,6 @@ class AssetManager {
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
-    [[nodiscard]] auto GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&>;
-
-    template <typename Fn>
-        requires std::invocable<Fn, const GUI::BakedFontAsset&>
-    [[nodiscard]] auto WithCachedFont(uint64_t hash, Fn&& fn) const {
-        return _fontCache.With(hash, std::forward<Fn>(fn));
-    }
-
-    [[nodiscard]] auto BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset*;
-    void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
-    void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
-
     // The application or an optional asset tool supplies prepared linear RGBA
     // pixels under the key named by EnvironmentMapComponent::source. Core does
     // not read files or decode radiance formats. Zero dimensions and mismatched
@@ -135,10 +122,8 @@ class AssetManager {
     // Evicts prefabs and releases their meshes. As with the existing raw
     // ModelPrefab* API, first remove scene instances referencing those prefabs.
     void ClearCache() noexcept;
-    void ClearFontCache() noexcept;
 
     uint32_t GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount);
-    uint32_t GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount);
 
     [[nodiscard]] auto VFS() noexcept -> FS::VirtualFileSystem& { return _vfs; }
     [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem& { return _vfs; }
@@ -165,7 +150,6 @@ class AssetManager {
     mutable ZHLN::Mutex _collisionMutex {};
     FS::AssetCache<std::shared_ptr<const Physics::MeshGeometry>> _collisionMeshes;
     FS::AssetCache<ModelPrefab> _prefabCache;
-    FS::AssetCache<GUI::BakedFontAsset> _fontCache;
     FS::AssetCache<EnvironmentImage> _environmentImages;
 };
 

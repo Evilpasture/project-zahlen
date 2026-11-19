@@ -35,8 +35,10 @@
     /* include/Zahlen/Config.hpp */
     _ZN4ZHLN16GetGitCommitHash[BE]*;                                /* @api ZHLN::GetGitCommitHash */
 
-    /* include/Zahlen/Core/ErrorCode.hpp (single process-wide error registry) */
-    _ZN4ZHLN15TemplatedDetail15GetRegistryHead[BE]*;                /* @api ZHLN::TemplatedDetail::GetRegistryHead */
+    /* include/Zahlen/Core/ErrorCode.hpp (process-wide dlclose-safe error registry) */
+    _ZN4ZHLN15TemplatedDetail20RegisterEnumCategory[BE]*;           /* @api ZHLN::TemplatedDetail::RegisterEnumCategory */
+    _ZN4ZHLN15TemplatedDetail18LookupErrorStrings[BE]*;             /* @api ZHLN::TemplatedDetail::LookupErrorStrings */
+    _ZN4ZHLN21RegisterErrorCategory[BE]*;                           /* @api ZHLN::RegisterErrorCategory */
 
     /* include/Zahlen/Log.hpp */
     _ZN4ZHLN11SetLogLevel[BE]*;                                     /* @api ZHLN::SetLogLevel */
@@ -130,70 +132,6 @@
     _ZN4ZHLN2FS17VirtualFileSystem10FreeMemory[BE]*;                /* @api ZHLN::FS::VirtualFileSystem::FreeMemory */
     _ZNK4ZHLN2FS17VirtualFileSystem6Exists[BE]*;                    /* @api ZHLN::FS::VirtualFileSystem::Exists const */
     _ZNK4ZHLN2FS17VirtualFileSystem8ReadFile[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::ReadFile const */
-
-    /* include/Zahlen/GUI/FontLoader.hpp */
-    _ZN4ZHLN3GUI22InstallBakedFontLoader[BE]*;                      /* @api ZHLN::GUI::InstallBakedFontLoader */
-    _ZN4ZHLN3GUI24UninstallBakedFontLoader[BE]*;                    /* @api ZHLN::GUI::UninstallBakedFontLoader */
-    _ZN4ZHLN3GUI18HasBakedFontLoader[BE]*;                          /* @api ZHLN::GUI::HasBakedFontLoader */
-    _ZN4ZHLN3GUI22GetBakedFontLoaderUser[BE]*;                      /* @api ZHLN::GUI::GetBakedFontLoaderUser */
-    _ZN4ZHLN3GUI13LoadBakedFont[BE]*;                               /* @api ZHLN::GUI::LoadBakedFont */
-    _ZN4ZHLN3GUI19GetDefaultBakedFont[BE]*;                         /* @api ZHLN::GUI::GetDefaultBakedFont */
-    _ZN4ZHLN3GUI19SetDefaultBakedFont[BE]*;                         /* @api ZHLN::GUI::SetDefaultBakedFont */
-    _ZN4ZHLN3GUI14BuildFontAtlas[BE]*;                              /* @api ZHLN::GUI::BuildFontAtlas */
-    _ZN4ZHLN3GUI16DecodeCookedFont[BE]*;                            /* @api ZHLN::GUI::DecodeCookedFont */
-
-    /* include/Zahlen/GUI/GUI.hpp — MeasureTextBounds & Context */
-    _ZN4ZHLN3GUI17MeasureTextBounds[BE]*;                           /* @api ZHLN::GUI::MeasureTextBounds */
-    _ZN4ZHLN3GUI7ContextC[12]Ev;                                    /* @api ZHLN::GUI::Context::Context */
-    _ZN4ZHLN3GUI7ContextC[12]ERKNS_9FontAtlasE;                     /* @api ZHLN::GUI::Context::Context */
-    _ZN4ZHLN3GUI7ContextC[12]EOS1_;                                 /* @api ZHLN::GUI::Context::Context */
-    _ZN4ZHLN3GUI7ContextD[012]Ev;                                   /* @api ZHLN::GUI::Context::~Context */
-    _ZN4ZHLN3GUI7ContextaSEOS1_;                                    /* @api ZHLN::GUI::Context::operator= */
-    _ZN4ZHLN3GUI7Context12SetFontAtlas[BE]*;                        /* @api ZHLN::GUI::Context::SetFontAtlas */
-    _ZNK4ZHLN3GUI7Context12GetFontAtlas[BE]*;                       /* @api ZHLN::GUI::Context::GetFontAtlas const */
-    _ZN4ZHLN3GUI7Context12SetClipboard[BE]*;                        /* @api ZHLN::GUI::Context::SetClipboard */
-    _ZNK4ZHLN3GUI7Context16GetLastFrameRect[BE]*;                   /* @api ZHLN::GUI::Context::GetLastFrameRect const */
-    _ZNK4ZHLN3GUI7Context14GetScrollState[BE]*;                     /* @api ZHLN::GUI::Context::GetScrollState const */
-    _ZNK4ZHLN3GUI7Context13IsPointerOver[BE]*;                      /* @api ZHLN::GUI::Context::IsPointerOver const */
-    _ZNK4ZHLN3GUI7Context18IsTextInputFocused[BE]*;                 /* @api ZHLN::GUI::Context::IsTextInputFocused const */
-    _ZNK4ZHLN3GUI7Context17WantsCaptureMouse[BE]*;                  /* @api ZHLN::GUI::Context::WantsCaptureMouse const */
-    _ZNK4ZHLN3GUI7Context20WantsCaptureKeyboard[BE]*;               /* @api ZHLN::GUI::Context::WantsCaptureKeyboard const */
-    _ZNK4ZHLN3GUI7Context14HasActiveFrame[BE]*;                     /* @api ZHLN::GUI::Context::HasActiveFrame const */
-    _ZN4ZHLN3GUI7Context10BeginFrame[BE]*;                          /* @api ZHLN::GUI::Context::BeginFrame */
-
-    /* include/Zahlen/GUI/GUI.hpp — Frame (private Frame(Context::Impl*) stays local;
-     * TextInputImpl is called by the public inline TextInput<N> template) */
-    _ZN4ZHLN3GUI5FrameC[12]EOS1_;                                   /* @api ZHLN::GUI::Frame::Frame */
-    _ZN4ZHLN3GUI5FrameD[012]Ev;                                     /* @api ZHLN::GUI::Frame::~Frame */
-    _ZNO4ZHLN3GUI5Frame3End[BE]*;                                   /* @api ZHLN::GUI::Frame::End && */
-    _ZN4ZHLN3GUI5Frame6Cancel[BE]*;                                 /* @api ZHLN::GUI::Frame::Cancel */
-    _ZN4ZHLN3GUI5Frame8BeginBox[BE]*;                               /* @api ZHLN::GUI::Frame::BeginBox */
-    _ZN4ZHLN3GUI5Frame6EndBox[BE]*;                                 /* @api ZHLN::GUI::Frame::EndBox */
-    _ZN4ZHLN3GUI5Frame8BeginRow[BE]*;                               /* @api ZHLN::GUI::Frame::BeginRow */
-    _ZN4ZHLN3GUI5Frame6EndRow[BE]*;                                 /* @api ZHLN::GUI::Frame::EndRow */
-    _ZN4ZHLN3GUI5Frame11BeginColumn[BE]*;                           /* @api ZHLN::GUI::Frame::BeginColumn */
-    _ZN4ZHLN3GUI5Frame9EndColumn[BE]*;                              /* @api ZHLN::GUI::Frame::EndColumn */
-    _ZN4ZHLN3GUI5Frame15BeginScrollArea[BE]*;                       /* @api ZHLN::GUI::Frame::BeginScrollArea */
-    _ZN4ZHLN3GUI5Frame13EndScrollArea[BE]*;                         /* @api ZHLN::GUI::Frame::EndScrollArea */
-    _ZN4ZHLN3GUI5Frame4Text[BE]*;                                   /* @api ZHLN::GUI::Frame::Text */
-    _ZN4ZHLN3GUI5Frame6Button[BE]*;                                 /* @api ZHLN::GUI::Frame::Button */
-    _ZN4ZHLN3GUI5Frame8Checkbox[BE]*;                               /* @api ZHLN::GUI::Frame::Checkbox */
-    _ZN4ZHLN3GUI5Frame6Slider[BE]*;                                 /* @api ZHLN::GUI::Frame::Slider */
-    _ZN4ZHLN3GUI5Frame9TextInput[BE]*;                              /* @api ZHLN::GUI::Frame::TextInput */
-    _ZN4ZHLN3GUI5Frame13TextInputImpl[BE]*;                         /* @api ZHLN::GUI::Frame::TextInputImpl */
-    _ZN4ZHLN3GUI5Frame8Dropdown[BE]*;                               /* @api ZHLN::GUI::Frame::Dropdown */
-    _ZN4ZHLN3GUI5Frame21BeginCollapsingHeader[BE]*;                 /* @api ZHLN::GUI::Frame::BeginCollapsingHeader */
-    _ZN4ZHLN3GUI5Frame19EndCollapsingHeader[BE]*;                   /* @api ZHLN::GUI::Frame::EndCollapsingHeader */
-    _ZNK4ZHLN3GUI5Frame13IsItemHovered[BE]*;                        /* @api ZHLN::GUI::Frame::IsItemHovered const */
-    _ZNK4ZHLN3GUI5Frame12IsItemActive[BE]*;                         /* @api ZHLN::GUI::Frame::IsItemActive const */
-    _ZNK4ZHLN3GUI5Frame25IsPointerPressedThisFrame[BE]*;            /* @api ZHLN::GUI::Frame::IsPointerPressedThisFrame const */
-    _ZNK4ZHLN3GUI5Frame8Viewport[BE]*;                              /* @api ZHLN::GUI::Frame::Viewport const */
-    _ZNK4ZHLN3GUI5Frame9DeltaTime[BE]*;                             /* @api ZHLN::GUI::Frame::DeltaTime const */
-    _ZNK4ZHLN3GUI5Frame12GetFontAtlas[BE]*;                         /* @api ZHLN::GUI::Frame::GetFontAtlas const */
-    _ZNK4ZHLN3GUI5Frame16GetLastFrameRect[BE]*;                     /* @api ZHLN::GUI::Frame::GetLastFrameRect const */
-    _ZNK4ZHLN3GUI5Frame14GetScrollState[BE]*;                       /* @api ZHLN::GUI::Frame::GetScrollState const */
-    _ZNK4ZHLN3GUI5Frame13IsPointerOver[BE]*;                        /* @api ZHLN::GUI::Frame::IsPointerOver const */
-    _ZNK4ZHLN3GUI5Frame18IsTextInputFocused[BE]*;                   /* @api ZHLN::GUI::Frame::IsTextInputFocused const */
 
     /* include/Zahlen/Render/Meshlet.hpp */
     _ZN4ZHLN13BuildMeshlets[BE]*;                                   /* @api ZHLN::BuildMeshlets */

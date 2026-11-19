@@ -32,7 +32,7 @@
 // between frames. The same samples and the same style are the same pixels.
 // ===========================================================================
 
-#include <Zahlen/GUI/GUI.hpp> // the context, its boxes, and the layout a strip is
+#include <UI/GUI.hpp> // the context, its boxes, and the layout a strip is
 #include <Zahlen/Math/Vec4.hpp> // the native colour value
 #include <cstddef>
 #include <cstdint>

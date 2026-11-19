@@ -9,8 +9,8 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/FontLoader.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec4.hpp>

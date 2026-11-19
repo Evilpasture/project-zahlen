@@ -5,7 +5,7 @@
 #include <Screenshot/Screenshot.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
-#include <Zahlen/HostUI.hpp>
+#include <UI/HostUI.hpp>
 namespace {
 using namespace ZHLN;
 using Test::ExpectEq;

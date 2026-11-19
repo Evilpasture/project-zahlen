@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
-# OBJECT library (like zahlen_ecs, zahlen_gui, and zahlen_threading): defines
+# OBJECT library (like zahlen_ecs and zahlen_threading): defines
 # public ZHLN_API filesystem symbols (FileSystemWatcher, MappedFile, Paths,
 # VirtualFileSystem) owned by libzahlen_engine, so its objects must enter the
 # shared library directly rather than through a -Wl,--exclude-libs,ALL archive.

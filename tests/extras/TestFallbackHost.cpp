@@ -3,7 +3,9 @@
 #include <FallbackScene/FallbackScene.hpp>
 #include <Scene/Scene.hpp>
 #include <TestsFramework.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/App.hpp>
+#include <memory>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/ECS/Components.hpp>
@@ -56,19 +58,20 @@ struct FallbackHostSuite {
         std::expected<void, ErrorCode> diagnostic_popup_and_scene_submit_through_application_host_ui() {
             struct Layer {
                 FallbackScene::DefaultPreset preset;
-                int*                         uiFrames;
-                void                         Start(COM::IEngine& engine) {
+                int*                         uiFrames = nullptr;
+                std::unique_ptr<HostUI>      ui;
+                void Start(COM::IEngine& engine) {
+                    ui = std::make_unique<HostUI>(engine);
                     preset.BuildFallbackScene(engine, {.buildBLAS = false});
                 }
-                void Tick(COM::IEngine& engine, float dt) {
+                auto Tick(COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
                     if (engine.CurrentFrame() >= 2) {
                         engine.RequestClose();
-                        return;
+                        return {};
                     }
                     preset.Update(engine, dt);
-                }
-                auto UI(COM::IEngine& engine, HostUI& ui) -> std::expected<void, ErrorCode> {
-                    const auto result = preset.DrawUI(engine, ui, 1.0f / 60.0f);
+                    ui->BeginFrame();
+                    const auto result = preset.DrawUI(engine, *ui, 1.0f / 60.0f);
                     if (!result.HasValue())
                         return std::unexpected(result.error);
                     ++*uiFrames;
@@ -76,6 +79,7 @@ struct FallbackHostSuite {
                 }
                 void Stop(COM::IEngine&) {
                     preset.ClearFallback();
+                    ui.reset();
                 }
             };
             int        uiFrames = 0;

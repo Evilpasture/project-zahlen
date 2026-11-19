@@ -179,10 +179,22 @@ zahlen_add_extras_group(Extras_Application
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestApplication.cpp
     TestScreenshot.cpp
+    TestPlugin.cpp
 )
-target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot)
+# Deliberately does NOT link zahlen_ui, zahlen_freecam, or either plugin .so:
+# TestPlugin loads libzahlen_plugin_freecam and libzahlen_plugin_screenshot
+# dynamically through ZHLN::App::LoadPlugin / --plugin at runtime.
+target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot zahlen_image)
+set_property(TARGET Extras_Application APPEND PROPERTY BUILD_RPATH "${CMAKE_BINARY_DIR}/lib")
+if(TARGET zahlen_plugin_freecam)
+    add_dependencies(Extras_Application zahlen_plugin_freecam)
+endif()
+if(TARGET zahlen_plugin_screenshot)
+    add_dependencies(Extras_Application zahlen_plugin_screenshot)
+endif()
 zahlen_register_extras_test(Extras_Application TIMEOUT 180)
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
+zahlen_add_extras_build_alias(Extras_Application TestPlugin)
 
 # --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
 
@@ -208,6 +220,10 @@ zahlen_add_extras_build_alias(Extras_Socket TestDiscordRPC)
 # 2. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
 zahlen_add_extras_group(Extras_UI
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    TestFontAsset.cpp
+    TestGUIContext.cpp
+    TestTextEdit.cpp
+    TestHostUI.cpp
     TestUITree.cpp
     TestWidgets.cpp
     TestConsoleDebugger.cpp
@@ -215,12 +231,14 @@ zahlen_add_extras_group(Extras_UI
 )
 target_link_libraries(Extras_UI PRIVATE
     zahlen_engine
+    zahlen_application
+    zahlen_ui
     zahlen_ui_schema
     zahlen_widgets
     zahlen_console
     zahlen_fonts
 )
-zahlen_register_extras_test(Extras_UI)
+zahlen_register_extras_test(Extras_UI TIMEOUT 180)
 zahlen_add_extras_build_alias(Extras_UI TestUITree)
 zahlen_add_extras_build_alias(Extras_UI TestWidgets)
 zahlen_add_extras_build_alias(Extras_UI TestConsoleDebugger)
@@ -404,7 +422,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # suite references JPH symbols from its own object file rather than reaching
 # them through the engine's DT_NEEDED entry.
 target_link_libraries(${TARGET_NAME} PRIVATE
-    zahlen_engine
+    zahlen_engine zahlen_ui
     zahlen_serialization
 )
 
@@ -598,13 +616,13 @@ endif()
 if(TARGET zahlen_benchmark_viewer)
     zahlen_add_extras_group(Extras_BenchmarkHost
         ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBenchmarkHost.cpp)
-    target_link_libraries(Extras_BenchmarkHost PRIVATE zahlen_benchmark_viewer zahlen_host_ui zahlen_screenshot)
+    target_link_libraries(Extras_BenchmarkHost PRIVATE zahlen_benchmark_viewer zahlen_ui zahlen_screenshot)
     zahlen_register_extras_test(Extras_BenchmarkHost POOL gpu LABELS "GPU;Extras;COM")
 endif()
 if(TARGET zahlen_console)
     zahlen_add_extras_group(Extras_ConsoleHost
         ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestConsoleHost.cpp)
-    target_link_libraries(Extras_ConsoleHost PRIVATE zahlen_console zahlen_scene zahlen_screenshot zahlen_host_ui)
+    target_link_libraries(Extras_ConsoleHost PRIVATE zahlen_console zahlen_scene zahlen_screenshot zahlen_ui)
     zahlen_register_extras_test(Extras_ConsoleHost POOL gpu LABELS "GPU;Extras;COM")
 endif()
 

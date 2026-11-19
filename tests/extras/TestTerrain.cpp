@@ -5,6 +5,7 @@
 #include <Terrain/Terrain.hpp>
 #include <TerrainDiagnostic.hpp>
 #include <Zahlen/App.hpp>
+#include <memory>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
@@ -168,6 +169,7 @@ struct TerrainHostSuite {
                 Screenshot::CaptureBuffer capture;
                 int*                      captures;
                 bool*                     stopped;
+                std::unique_ptr<HostUI> ui;
                 auto                      Start(COM::IEngine& engine) {
                     return demo.Start(engine, false);
                 }
@@ -192,16 +194,19 @@ struct TerrainHostSuite {
                             return {};
                         }
                     }
-                    return demo.Tick(engine, dt);
+                    if (auto ticked = demo.Tick(engine, dt); !ticked)
+                        return ticked;
+                    if (!ui)
+                        ui = std::make_unique<HostUI>(engine);
+                    ui->BeginFrame();
+                    return demo.DrawUI(engine, *ui);
                 }
-                auto BeforeRender(COM::IEngine& engine, float dt) {
+                auto BeforeRender(COM::IEngine& engine, float) {
                     return demo.BeforeRender(engine, engine.CurrentFrame() == 0 ? .25f : .05f);
-                }
-                auto UI(COM::IEngine& engine, HostUI& ui) {
-                    return demo.UI(engine, ui);
                 }
                 void Stop(COM::IEngine& engine) {
                     demo.Stop(engine);
+                    ui.reset();
                     ExpectEq(demo.terrain.Size(), size_t(0));
                     ExpectEq(demo.lightning.Size(), size_t(0));
                     ExpectEq(demo.explosions.Size(), size_t(0));

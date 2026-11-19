@@ -1,51 +1,72 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/UI -- the data-driven UI schema (zahlen_ui_schema).
+# extensions/UI -- immediate-mode UI runtime (zahlen_ui) and declarative UI
+# document schema (zahlen_ui_schema).
 #
-# UINode / NodeKind / TreeMode document types plus the ActionRegistry and
-# PropertyStore tables a document names, and RenderUITree, the walk that turns
-# a description into one frame of GUI::Context calls. This is the schema the
-# UI-tree editor (zahlen_ui_editor) authors and plugins/toml round-trips --
-# presentation data, not substrate. Core keeps src/gui/: the immediate-mode
-# Clay wrapper, TextEdit and the font rasterizer.
-#
-# The namespace stays ZHLN::GUI (the schema reads as part of the GUI family
-# and consumers are untouched by the move); the ZHLN_API symbols are compiled
-# here and exported through libzahlen_engine like any other engine entry.
+# Core keeps only the renderer submission PODs (<Zahlen/GUI/UIData.hpp>) and
+# cooked font container layout (<Zahlen/GUI/Font.hpp>). The Clay layout
+# engine, UTF-8 text measurement/editing, baked font decoder/default font, and
+# COM HostUI bridge all live here so libzahlen_engine carries zero UI layout
+# state, zero Clay code, and zero GUI symbol exports.
 #
 # Public headers are reached as <UI/...>.
 
-set(TARGET_NAME zahlen_ui_schema)
-
-set(ZHLN_UI_SCHEMA_SOURCES
-    UITree.cpp
+add_library(zahlen_ui STATIC
+    FontLoader.cpp
+    GUIContext.cpp
+    HostUI.cpp
+    Text.cpp
 )
 
-add_library(${TARGET_NAME} STATIC ${ZHLN_UI_SCHEMA_SOURCES})
-
-set_target_properties(${TARGET_NAME} PROPERTIES
+set_target_properties(zahlen_ui PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE.
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Core is a public dependency: the schema walks GUI::Context's public API,
-# pushes through GUI::ActionQueue and uses Jolt storage vectors in NodeBox.
-target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+set_source_files_properties(FontLoader.cpp PROPERTIES
+    OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/resources/fonts/DefaultFont.zfont"
 )
 
-target_include_directories(${TARGET_NAME} PUBLIC
+target_link_libraries(zahlen_ui
+    PUBLIC zahlen_engine
+    PRIVATE zahlen_warnings
+)
+
+target_include_directories(zahlen_ui PUBLIC ${PROJECT_SOURCE_DIR}/extensions)
+target_compile_options(zahlen_ui PRIVATE "--embed-dir=${PROJECT_SOURCE_DIR}/resources/fonts")
+
+# Clay is strictly private to GUIContext.cpp; no consumer sees <clay.h>.
+target_include_directories(zahlen_ui SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/clay
+)
+
+if(COMMAND zahlen_enable_reflection)
+    zahlen_enable_reflection(zahlen_ui)
+endif()
+
+add_library(zahlen_ui_schema STATIC
+    UITree.cpp
+)
+
+set_target_properties(zahlen_ui_schema PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+)
+
+target_link_libraries(zahlen_ui_schema
+    PUBLIC zahlen_ui
+    PRIVATE zahlen_warnings
+)
+
+target_include_directories(zahlen_ui_schema PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
 if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(${TARGET_NAME})
+    zahlen_enable_reflection(zahlen_ui_schema)
 endif()
-
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)

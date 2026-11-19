@@ -4,7 +4,6 @@
 #include "ArticulationContext.hpp"
 #include "PrefabFactoryInternal.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -29,104 +28,6 @@
 #include <vector>
 
 namespace ZHLN::PrefabFactory {
-
-namespace {
-
-auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset& {
-    if (mgr && fontID != InvalidAssetID) {
-        if (auto cached = mgr->GetCachedFont(fontID)) {
-            return *cached;
-        }
-        AssetLoadRequest req;
-        req.assetID = fontID;
-        if (mgr->LoadSync(req)) {
-            const auto* bytes   = static_cast<const std::byte*>(req.outData);
-            auto        decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
-            mgr->FreeMemory(req);
-            if (decoded) {
-                auto  ownedPtr = std::make_unique<GUI::BakedFontAsset>(std::move(*decoded));
-                auto* raw      = ownedPtr.get();
-                owned          = *raw;
-                mgr->CacheFont(fontID, std::move(ownedPtr));
-                return *raw;
-            }
-        }
-    }
-    if (auto loaded = GUI::LoadBakedFont()) {
-        owned = std::move(*loaded);
-        return owned;
-    }
-    return GUI::GetDefaultBakedFont();
-}
-
-} // namespace
-
-auto CreateFontAtlas(RenderContext& render, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> FontAtlas {
-    GUI::BakedFontAsset        ownedAsset;
-    const GUI::BakedFontAsset* asset = &ResolveFontAsset(assetMgr, fontID, ownedAsset);
-
-    if (asset == &GUI::GetDefaultBakedFont() && assetMgr && fontID == InvalidAssetID) {
-        if (auto def = assetMgr->GetCachedFont(GUI::kDefaultFontAssetID)) {
-            asset = &*def;
-        }
-    }
-
-    if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
-        LogWarning("No baked font available; text cannot be drawn.");
-        return GUI::BuildFontAtlas(*asset, TextureID::Invalid);
-    }
-
-    std::vector<uint32_t> rgbaPixels(asset->coverage.size());
-    for (size_t i = 0; i < asset->coverage.size(); ++i) {
-        rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
-    }
-
-    // No mip chain: the atlas packs glyphs side by side, so a generated mip
-    // averages neighbours into each other and any sampled LOD above zero
-    // smears text together. Single-level also pins the sampler at mip 0 no
-    // matter the LOD range the scene sampler uses.
-    const TextureID texID = render.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
-    return GUI::BuildFontAtlas(*asset, texID);
-}
-
-// Engine-internal, declared in PrefabFactoryInternal.hpp. The optional form
-// below is the one implementation: this is the caching caller's spelling of it.
-auto CreateFontAtlas(RenderContext& render, AssetManager& assetMgr, AssetID fontID) -> FontAtlas {
-    return CreateFontAtlas(render, ZHLN::Optional<AssetManager&> {assetMgr}, fontID);
-}
-
-auto CreateFontAtlas(RenderContext& render) -> FontAtlas {
-    return CreateFontAtlas(render, ZHLN::Optional<AssetManager&> {}, GUI::kDefaultFontAssetID);
-}
-
-auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
-    const AssetID id = HashAssetPath(path);
-    if (auto cached = assetMgr.GetCachedFont(id)) {
-        return id;
-    }
-
-    AssetLoadRequest req;
-    req.assetID = id;
-
-    if (!assetMgr.LoadSync(req)) {
-        return std::unexpected(GUI::FontAssetError::Truncated);
-    }
-
-    const auto* bytes   = static_cast<const std::byte*>(req.outData);
-    auto        decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
-    assetMgr.FreeMemory(req);
-
-    if (!decoded) {
-        LogWarning("Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
-        return std::unexpected(decoded.error());
-    }
-
-    auto  heap = std::make_unique<GUI::BakedFontAsset>(std::move(*decoded));
-    auto* raw  = heap.get();
-    assetMgr.CacheFont(id, std::move(heap));
-    GUI::SetDefaultBakedFont(*raw);
-    return id;
-}
 
 namespace {
 

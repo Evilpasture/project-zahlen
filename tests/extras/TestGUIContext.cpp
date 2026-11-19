@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Pure CPU verification of Zahlen's binary-decoupled immediate-mode GUI
-// subsystem (`zahlen_gui`):
+// extension (`zahlen_ui`):
 //   - Zero header or link coupling to Engine, ECS::Registry, Components,
 //     PlatformHost, or RenderContext.
 //   - FontAtlas treated strictly as an asset value fed into GUI::Context.
@@ -11,8 +11,8 @@
 //     capability token.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/GUI/FontLoader.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/FontLoader.hpp>
+#include <UI/GUI.hpp>
 
 #include <array>
 #include <expected>
