@@ -10,6 +10,7 @@
 #include "InputContext.hpp"
 #include <unordered_map>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
 #include <render/Render.hpp>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <new>
 #include <vector>
@@ -104,8 +106,9 @@ void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::sp
     if (const auto parent = target.parent_path(); !parent.empty()) {
         std::filesystem::create_directories(parent, ec);
     }
-    // Write-then-rename so a crash mid-write never leaves a torn cache behind.
-    const std::filesystem::path temp = std::filesystem::path(target).concat(".tmp");
+    // Write-then-rename with a per-process suffix so concurrent workers (e.g.
+    // parallel ztest shards) never truncate each other's staging file.
+    const std::filesystem::path temp = std::filesystem::path(target).concat(std::format(".{}.tmp", GetPID()));
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {

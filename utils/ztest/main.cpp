@@ -47,6 +47,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -881,7 +882,12 @@ auto ParseCommandLine(int argc, char** argv) -> std::optional<ZtestOptions> {
         },
     };
 
-    static constexpr std::array<ZHLN::CliEnvDoc, 2> kEnvironmentDocs {{
+    static constexpr std::array<ZHLN::CliEnvDoc, 3> kEnvironmentDocs {{
+        {
+            .name        = "ZHLN_TEST_TIMEOUT",
+            .value       = "<sec>",
+            .description = "Per-case alarm budget in workers (0 disables; default 15s, 120s sanitized)",
+        },
         {
             .name        = "ZHLN_ZTEST_SYMBOLIZE",
             .value       = "0|1",
@@ -1129,6 +1135,9 @@ auto BuildChildEnvMap(const Manifest& mf, const TargetSpec& target, const ZtestO
     if (opts.validationOverride.has_value()) {
         envMap["ZHLN_VALIDATION"] = std::string {ValidationModeEnvString(*opts.validationOverride)};
     }
+    if (opts.timeoutOverride.has_value() && !envMap.contains("ZHLN_TEST_TIMEOUT")) {
+        envMap["ZHLN_TEST_TIMEOUT"] = std::to_string(*opts.timeoutOverride);
+    }
 
     if (!target.pathPrepend.empty()) {
         constexpr char sep =
@@ -1167,8 +1176,9 @@ struct WorkItem {
     std::vector<std::string> sourceFiles;
     std::vector<std::string> exactCases;
     std::string              skipUntilCase;
-    uint32_t                 respawnDepth   = 0;
-    bool                     explicitTarget = false;
+    uint32_t                 respawnDepth      = 0;
+    uint32_t                 maxCaseTimeoutSec = 0;
+    bool                     explicitTarget    = false;
     // Set on a shard that carries exactly one ZHLN::Test::WaitIdle case: the
     // scheduler holds it back until nothing else is running.
     bool                     waitIdle       = false;
@@ -1252,6 +1262,7 @@ struct ActiveWorker {
     int                                   pipeFd     = -1;
     std::chrono::steady_clock::time_point startTime  = {};
     std::chrono::steady_clock::time_point deadline   = {};
+    uint32_t                              timeoutSec = 120;
     bool                                  timedOut   = false;
     std::string                           lineBuffer = {};
     std::string                           inFlightFile;
@@ -1373,15 +1384,24 @@ auto SpawnWorkerPosix(
         ::fcntl(pipeFds[0], F_SETFL, flags | O_NONBLOCK);
     }
 
-    const uint32_t timeoutSec = opts.timeoutOverride.value_or(listMode ? 30u : target.timeoutSec);
-    const auto     now        = std::chrono::steady_clock::now();
+    constexpr uint32_t kWatchdogGraceSec = 30u;
+    constexpr uint32_t kMaxTimeoutSec    = std::numeric_limits<uint32_t>::max();
+    const uint32_t     caseFloorSec      = item.maxCaseTimeoutSec == 0
+        ? 0u
+        : (item.maxCaseTimeoutSec > kMaxTimeoutSec - kWatchdogGraceSec
+               ? kMaxTimeoutSec
+               : item.maxCaseTimeoutSec + kWatchdogGraceSec);
+    const uint32_t defaultTimeoutSec = listMode ? 60u : std::max(target.timeoutSec, caseFloorSec);
+    const uint32_t timeoutSec        = opts.timeoutOverride.value_or(defaultTimeoutSec);
+    const auto     now               = std::chrono::steady_clock::now();
 
     ActiveWorker worker {};
-    worker.item      = item;
-    worker.pid       = pid;
-    worker.pipeFd    = pipeFds[0];
-    worker.startTime = now;
-    worker.deadline  = now + std::chrono::seconds(timeoutSec);
+    worker.item       = item;
+    worker.pid        = pid;
+    worker.pipeFd     = pipeFds[0];
+    worker.startTime  = now;
+    worker.timeoutSec = timeoutSec;
+    worker.deadline   = now + std::chrono::seconds(timeoutSec);
     return worker;
 }
 
@@ -1476,7 +1496,16 @@ auto RunWorkerSyncWin32(const Manifest& mf, const WorkItem& item, const ZtestOpt
     }
     CloseHandle(readPipe);
 
-    const uint32_t timeoutMs = opts.timeoutOverride.value_or(listMode ? 30u : target.timeoutSec) * 1000u;
+    constexpr uint32_t kWatchdogGraceSec = 30u;
+    constexpr uint32_t kMaxWinTimeoutSec = 0xFFFFFFFEu / 1000u;
+    const uint32_t     caseFloorSec      = item.maxCaseTimeoutSec == 0
+        ? 0u
+        : (item.maxCaseTimeoutSec > kMaxWinTimeoutSec - kWatchdogGraceSec
+               ? kMaxWinTimeoutSec
+               : item.maxCaseTimeoutSec + kWatchdogGraceSec);
+    const uint32_t defaultSec = listMode ? 60u : std::max(target.timeoutSec, caseFloorSec);
+    const uint32_t clampedSec = std::min(opts.timeoutOverride.value_or(defaultSec), kMaxWinTimeoutSec);
+    const uint32_t timeoutMs  = clampedSec * 1000u;
     if (WaitForSingleObject(pi.hProcess, timeoutMs) == WAIT_TIMEOUT) {
         TerminateProcess(pi.hProcess, 124);
         res.timedOut = true;
@@ -2201,11 +2230,12 @@ auto BuildShardedExecutionQueue(
         // creates -- a per-file shard.
         if (dc.waitIdle) {
             WorkItem solo {};
-            solo.target        = dc.target;
-            solo.shardLabel    = dc.relFile;
-            solo.sourceFiles   = {dc.relFile};
-            solo.exactCases    = {dc.nodeId};
-            solo.waitIdle      = true;
+            solo.target            = dc.target;
+            solo.shardLabel        = dc.relFile;
+            solo.sourceFiles       = {dc.relFile};
+            solo.exactCases        = {dc.nodeId};
+            solo.maxCaseTimeoutSec = dc.timeoutSec;
+            solo.waitIdle          = true;
             queue.push_back(std::move(solo));
             continue;
         }
@@ -2216,22 +2246,26 @@ auto BuildShardedExecutionQueue(
             const auto        it  = cpuShardIndex.find(key);
             if (it == cpuShardIndex.end()) {
                 WorkItem shard {};
-                shard.target      = dc.target;
-                shard.shardLabel  = dc.relFile;
-                shard.sourceFiles = {dc.relFile};
+                shard.target            = dc.target;
+                shard.shardLabel        = dc.relFile;
+                shard.sourceFiles       = {dc.relFile};
+                shard.maxCaseTimeoutSec = dc.timeoutSec;
                 if (const auto baseIt = baseByTarget.find(dc.target); baseIt != baseByTarget.end()) {
                     shard.exactCases = baseIt->second->exactCases;
                 }
                 shard.suppressWaitIdle = filesWithMeasurements.contains(key);
                 cpuShardIndex.emplace(key, queue.size());
                 queue.push_back(std::move(shard));
+            } else {
+                queue[it->second].maxCaseTimeoutSec = std::max(queue[it->second].maxCaseTimeoutSec, dc.timeoutSec);
             }
         } else {
             const auto it = gpuShardIndex.find(dc.target);
             if (it == gpuShardIndex.end()) {
                 WorkItem shard {};
-                shard.target     = dc.target;
-                shard.shardLabel = dc.relFile;
+                shard.target            = dc.target;
+                shard.shardLabel        = dc.relFile;
+                shard.maxCaseTimeoutSec = dc.timeoutSec;
                 shard.sourceFiles.push_back(dc.relFile);
                 if (const auto baseIt = baseByTarget.find(dc.target); baseIt != baseByTarget.end()) {
                     shard.exactCases = baseIt->second->exactCases;
@@ -2242,7 +2276,8 @@ auto BuildShardedExecutionQueue(
                 gpuShardIndex.emplace(dc.target, queue.size());
                 queue.push_back(std::move(shard));
             } else {
-                auto& files = queue[it->second].sourceFiles;
+                queue[it->second].maxCaseTimeoutSec = std::max(queue[it->second].maxCaseTimeoutSec, dc.timeoutSec);
+                auto& files                         = queue[it->second].sourceFiles;
                 if (std::find(files.begin(), files.end(), dc.relFile) == files.end()) {
                     files.push_back(dc.relFile);
                     queue[it->second].shardLabel = std::format("{} ({} files)", files.front(), files.size());
@@ -2699,6 +2734,10 @@ auto main(int argc, char** argv) -> int {
                     .quiesced    = w.item.waitIdle,
                     .quiesceUs   = w.quiesceUs,
                 });
+                // Forward progress: refresh the worker watchdog for the next case
+                // (and post-suite teardown / LSan) so multi-engine shards are
+                // bounded per stuck step rather than summed against one timer.
+                w.deadline = std::max(w.deadline, std::chrono::steady_clock::now() + std::chrono::seconds(w.timeoutSec));
                 w.inFlightFile.clear();
                 w.inFlightNodeId.clear();
                 w.currentLog.clear();

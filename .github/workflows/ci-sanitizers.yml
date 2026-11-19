@@ -89,7 +89,10 @@ jobs:
       - name: Run ztest suite
         run: |
           set -o pipefail
-          docker run --rm zahlen-builder:asan \
+          # Headless COM and host suites compile and execute Vulkan pipelines on
+          # software Lavapipe under ASan/UBSan across shared runner cores; use a
+          # CI per-case budget instead of the 15 s interactive dev alarm.
+          docker run --rm -e ZHLN_TEST_TIMEOUT=180 zahlen-builder:asan \
             ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
 
       - name: Upload ztest log

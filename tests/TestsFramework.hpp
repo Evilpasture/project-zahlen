@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <source_location>
 #include <span>
@@ -567,18 +568,66 @@ struct AssertionFailure {
     return {};
 }
 
-inline unsigned int GetDefaultTimeoutSeconds() noexcept {
-    static unsigned int defaultSec = []() -> unsigned int {
+// Instrumented builds (ASan/UBSan/TSan/MSan) run full headless Vulkan engines
+// on software Lavapipe at 3-5x wall-clock cost while several workers share a
+// small CI runner; the 15 s interactive unit-test budget trips mid-init there.
+#if defined(ZHLN_SANITIZER_BUILD) || defined(__ASAN_ENABLED__) || defined(__SANITIZE_ADDRESS__) \
+    || defined(__SANITIZE_THREAD__) || defined(__SANITIZE_UNDEFINED__)
+inline constexpr bool kSanitizerTestBuild = true;
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) \
+    || __has_feature(undefined_behavior_sanitizer) || __has_feature(memory_sanitizer)
+inline constexpr bool kSanitizerTestBuild = true;
+#else
+inline constexpr bool kSanitizerTestBuild = false;
+#endif
+#else
+inline constexpr bool kSanitizerTestBuild = false;
+#endif
+
+inline constexpr unsigned int kDefaultCaseTimeoutSeconds = kSanitizerTestBuild ? 120u : 15u;
+inline constexpr unsigned int kSanitizerTimeoutScale     = kSanitizerTestBuild ? 3u : 1u;
+
+[[nodiscard]] inline auto ConfiguredTimeoutOverrideSeconds() noexcept -> std::optional<unsigned int> {
+    static const std::optional<unsigned int> overrideSec = []() -> std::optional<unsigned int> {
         if (const char* env = std::getenv("ZHLN_TEST_TIMEOUT")) {
-            char* end = nullptr;
-            long  val = std::strtol(env, &end, 10);
+            char*      end = nullptr;
+            const long val = std::strtol(env, &end, 10);
             if (end != env && val >= 0) {
                 return static_cast<unsigned int>(val);
             }
         }
-        return 15;
+        return std::nullopt;
     }();
-    return defaultSec;
+    return overrideSec;
+}
+
+inline unsigned int GetDefaultTimeoutSeconds() noexcept {
+    if (const auto overrideSec = ConfiguredTimeoutOverrideSeconds()) {
+        return *overrideSec;
+    }
+    return kDefaultCaseTimeoutSeconds;
+}
+
+// Resolves an explicit Timeout<N> / SetTimeout(N) budget against sanitizer
+// slowdown and any outer ZHLN_TEST_TIMEOUT floor (0 disables the alarm).
+[[nodiscard]] inline unsigned int ResolveCaseTimeoutSeconds(unsigned int requested) noexcept {
+    if (requested == 0) {
+        return 0;
+    }
+    constexpr unsigned int kMaxSec = std::numeric_limits<unsigned int>::max();
+    const unsigned int     scaled =
+        requested > kMaxSec / kSanitizerTimeoutScale ? kMaxSec : requested * kSanitizerTimeoutScale;
+    if (const auto overrideSec = ConfiguredTimeoutOverrideSeconds()) {
+        if (*overrideSec == 0) {
+            return 0;
+        }
+        return std::max(scaled, *overrideSec);
+    }
+    if constexpr (kSanitizerTestBuild) {
+        return std::max(scaled, kDefaultCaseTimeoutSeconds);
+    }
+    return scaled;
 }
 
 struct TestContext {
@@ -586,7 +635,7 @@ struct TestContext {
     std::vector<AssertionFailure> failures;
     bool                          allowValidationErrors = false;
     bool                          allowDeviceLost       = false;
-    unsigned int                  timeoutSeconds        = 15;
+    unsigned int                  timeoutSeconds        = kDefaultCaseTimeoutSeconds;
 
     void Reset(std::string_view testName) {
         currentTestName = testName;
@@ -613,10 +662,11 @@ inline void AllowDeviceLost(bool allow = true) noexcept {
 
 // Dynamic test timeout adjustment
 inline void SetTimeout(unsigned int seconds) noexcept {
-    GetThreadLocalContext().timeoutSeconds = seconds;
+    const unsigned int effective           = ResolveCaseTimeoutSeconds(seconds);
+    GetThreadLocalContext().timeoutSeconds = effective;
 #if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
     if (!IsDebuggerAttached()) {
-        alarm(seconds);
+        alarm(effective);
     }
 #endif
 }
@@ -2669,7 +2719,8 @@ inline void EmitSuiteCasesRuntime(
         }
 
         const std::string  nodeId     = MakeNodeId(relFile, suiteName, desc.name);
-        const unsigned int timeoutSec = desc.marks.hasTimeout ? desc.marks.timeoutSeconds : GetDefaultTimeoutSeconds();
+        const unsigned int timeoutSec =
+            desc.marks.hasTimeout ? ResolveCaseTimeoutSeconds(desc.marks.timeoutSeconds) : GetDefaultTimeoutSeconds();
         if (opts.ztestList) {
             std::string_view state  = "normal";
             std::string      reason = {};
@@ -2872,7 +2923,7 @@ inline auto ExecuteSuiteRuntime(
         auto& ctx = GetThreadLocalContext();
         ctx.Reset(name);
         if (marks.hasTimeout) {
-            ctx.timeoutSeconds = marks.timeoutSeconds;
+            ctx.timeoutSeconds = ResolveCaseTimeoutSeconds(marks.timeoutSeconds);
         }
         if (marks.allowValidationErrors) {
             ctx.allowValidationErrors = true;

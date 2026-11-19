@@ -181,7 +181,7 @@ zahlen_add_extras_group(Extras_Application
     TestScreenshot.cpp
 )
 target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot)
-zahlen_register_extras_test(Extras_Application)
+zahlen_register_extras_test(Extras_Application TIMEOUT 180)
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
 
 # --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
@@ -531,7 +531,7 @@ zahlen_add_extras_group(Extras_GLTFAssets
 target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal zahlen_command_line)
 # ztest workers may run from a build/output directory, not the checkout root.
 target_compile_definitions(Extras_GLTFAssets PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-zahlen_register_extras_test(Extras_GLTFAssets)
+zahlen_register_extras_test(Extras_GLTFAssets TIMEOUT 180)
 
 
 # Scene orchestration is a consumer library; this executable links no native adapter.
@@ -548,7 +548,7 @@ if(TARGET zahlen_freecam AND TARGET zahlen_camera)
     zahlen_add_extras_group(Extras_CameraHosts
         ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCameraHosts.cpp TestFramePipeline.cpp)
     target_link_libraries(Extras_CameraHosts PRIVATE zahlen_freecam zahlen_camera zahlen_application)
-    zahlen_register_extras_test(Extras_CameraHosts POOL gpu LABELS GPU Extras)
+    zahlen_register_extras_test(Extras_CameraHosts POOL gpu TIMEOUT 180 LABELS GPU Extras)
 endif()
 
 if(TARGET zahlen_fallback_scene)
@@ -570,7 +570,7 @@ zahlen_add_extras_group(Extras_TerrainHost
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestTerrain.cpp)
 target_link_libraries(Extras_TerrainHost PRIVATE zahlen_terrain zahlen_vfx zahlen_scene zahlen_fallback_scene zahlen_application zahlen_screenshot)
 target_include_directories(Extras_TerrainHost PRIVATE ${PROJECT_SOURCE_DIR}/utils/scene)
-zahlen_register_extras_test(Extras_TerrainHost POOL gpu LABELS "GPU;Extras;COM")
+zahlen_register_extras_test(Extras_TerrainHost POOL gpu TIMEOUT 180 LABELS "GPU;Extras;COM")
 
 zahlen_add_extras_group(Extras_LightningHost
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLightning.cpp)
@@ -612,7 +612,7 @@ endif()
 zahlen_add_extras_group(Extras_RuntimeControls
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestRuntimeControls.cpp)
 target_link_libraries(Extras_RuntimeControls PRIVATE zahlen_gltf_assets zahlen_animation zahlen_application)
-zahlen_register_extras_test(Extras_RuntimeControls POOL gpu LABELS GPU Extras)
+zahlen_register_extras_test(Extras_RuntimeControls POOL gpu TIMEOUT 240 LABELS GPU Extras)
 
 # Capability-only character host: no native controller, Jolt or graph adapter.
 zahlen_add_extras_group(Extras_CharacterHost

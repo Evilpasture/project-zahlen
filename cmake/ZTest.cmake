@@ -114,6 +114,12 @@ function(zahlen_register_ztest_target TARGET_NAME)
     if(NOT ZTEST_TIMEOUT)
         set(ZTEST_TIMEOUT 120)
     endif()
+    # Match TestsFramework.hpp's sanitizer slowdown factor on the orchestrator
+    # watchdog (covers both -DUSE_SANITIZERS=ON and manual -fsanitize=* builds).
+    set(_zhln_ztest_flags "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS}")
+    if((USE_SANITIZERS OR _zhln_ztest_flags MATCHES "(^|[ ;])-fsanitize=") AND ZTEST_TIMEOUT GREATER 0)
+        math(EXPR ZTEST_TIMEOUT "${ZTEST_TIMEOUT} * 3")
+    endif()
     if(NOT ZTEST_WORKING_DIRECTORY)
         set(ZTEST_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     endif()

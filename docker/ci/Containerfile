@@ -212,6 +212,7 @@ RUN mkdir -p /workspace/dist/data && \
 # failing test is reported without ever blocking the build job.
 FROM builder AS test
 
+ENV ZHLN_TEST_TIMEOUT=120
 RUN ./build/bin/ztest --test-dir build -V
 
 

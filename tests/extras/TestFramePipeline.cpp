@@ -289,7 +289,7 @@ struct FramePipelineSuite {
             Entity     target       = Entity::Null();
             int        observations = 0;
             const auto result =
-                App(EngineConfig {.appName = "Current frame orbit", .validationMode = ValidationMode::Off, .headless = true})
+                App(EngineConfig {.appName = "Current frame orbit", .width = 160, .height = 120, .validationMode = ValidationMode::Off, .headless = true})
                     .OnStart([&](COM::IEngine& engine) {
                         auto& entities  = *engine.Entities();
                         target          = entities.Spawn(Components::TransformComponent {}, Components::WorldTransformComponent {});
@@ -334,7 +334,7 @@ struct FramePipelineSuite {
                 }
             };
             bool       stopped = false;
-            const auto result  = App(EngineConfig {.appName = "Before render failure", .validationMode = ValidationMode::Off, .headless = true})
+            const auto result  = App(EngineConfig {.appName = "Before render failure", .width = 160, .height = 120, .validationMode = ValidationMode::Off, .headless = true})
                                      .AddLayer(Layer {&stopped})
                                      .Run();
             ExpectTrue(!result.has_value());

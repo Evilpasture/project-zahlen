@@ -159,7 +159,7 @@ jobs:
       - name: Run ztest suite
         run: |
           set -o pipefail
-          docker run --rm "${{ steps.image.outputs.ref }}" \
+          docker run --rm -e ZHLN_TEST_TIMEOUT=120 "${{ steps.image.outputs.ref }}" \
             ./build/bin/ztest --test-dir build -V 2>&1 | tee ztest.log
 
       - name: Upload ztest log

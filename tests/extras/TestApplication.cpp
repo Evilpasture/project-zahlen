@@ -473,7 +473,7 @@ void test_host_ui_precedes_engine_tick_and_layers_stop_on_host_error() {
         void Stop(COM::IEngine&) { calls->push_back("stop"); }
     };
     std::vector<std::string_view> calls;
-    auto app = App(EngineConfig {.appName = "HostUILifecycle", .validationMode = ValidationMode::Off, .headless = true});
+    auto app = App(EngineConfig {.appName = "HostUILifecycle", .width = 96, .height = 64, .validationMode = ValidationMode::Off, .headless = true});
     app.AddLayer(HostLayer {&calls});
     const auto result = app.Run([&](COM::IEngine&, float) -> std::expected<void, ErrorCode> {
         calls.push_back("update"); return std::unexpected(PreparationFailure::Refused);
@@ -523,7 +523,7 @@ void test_com_application_injected_ui_input_owns_spans() {
             engine.RequestClose();
         }
     };
-    const auto result = App(EngineConfig {.appName = "COMHostUIInput", .validationMode = ValidationMode::Off, .headless = true})
+    const auto result = App(EngineConfig {.appName = "COMHostUIInput", .width = 96, .height = 64, .validationMode = ValidationMode::Off, .headless = true})
         .AddLayer(Layer {}).Run();
     Expect(result.has_value());
 }
@@ -547,7 +547,7 @@ void test_com_application_ui_errors_stop_layers_in_reverse() {
         }
     };
     std::vector<int> calls;
-    const auto result = App(EngineConfig {.appName = "COMHostUIFailure", .validationMode = ValidationMode::Off, .headless = true})
+    const auto result = App(EngineConfig {.appName = "COMHostUIFailure", .width = 96, .height = 64, .validationMode = ValidationMode::Off, .headless = true})
         .AddLayer(Layer {1, &calls}).AddLayer(Layer {2, &calls}).Run();
     Expect(!result.has_value());
     if (!result) Expect(result.error().Is(PreparationFailure::Refused));

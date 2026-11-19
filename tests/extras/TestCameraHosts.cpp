@@ -162,7 +162,7 @@ struct CameraHostsSuite {
                 }
             };
             bool       ran    = false;
-            const auto result = App(EngineConfig {.appName = "Camera layers", .validationMode = ValidationMode::Off, .headless = true})
+            const auto result = App(EngineConfig {.appName = "Camera layers", .width = 160, .height = 120, .validationMode = ValidationMode::Off, .headless = true})
                                     .AddLayer(FreeCam::Layer {})
                                     .AddLayer(CameraRig::Layer {})
                                     .AddLayer(Monitor {&ran})
