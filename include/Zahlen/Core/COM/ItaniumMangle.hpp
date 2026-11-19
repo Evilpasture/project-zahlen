@@ -414,7 +414,18 @@ struct TemplateArgumentEncoder {
     consteval void OnValue() {
         using V = std::remove_cv_t<decltype(Value)>;
         if constexpr (std::is_null_pointer_v<V>) {
+            /*
+             * TODO(Evilpasture): Temporary for now.
+             * https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling.literal
+             * The pointer literal expression nullptr is encoded as "LDnE". In contrast, a template argument which happens to be a null pointer (an extension
+             * made standard in C++11) is mangled as if it were a literal 0 of the appropriate pointer type; for example, "LPi0E" or "LDn0E". This inconsistency
+             * is an unfortunate accident.
+             * */
+#if defined(__GNUC__) && !defined(__clang__)
             m.out += "LDnE";
+#else
+            m.out += "LDn0E";
+#endif
         } else if constexpr (std::is_same_v<V, bool>) {
             m.out += Value ? "Lb1E" : "Lb0E";
         } else if constexpr (std::is_integral_v<V> && sizeof(V) <= sizeof(uint64_t)) {
