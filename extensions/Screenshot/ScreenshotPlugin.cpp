@@ -3,6 +3,7 @@
 
 #include <Screenshot/Screenshot.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Common.h>
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
@@ -62,7 +63,7 @@ class ScreenshotPlugin final : public COM::Implements<ScreenshotPlugin, COM::IAp
 
 namespace ZHLN::COM {
 
-auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     Screenshot::PluginConfig parsed {};
     const auto               checked = DispatchInChain<Screenshot::PluginConfig>(
         config, [&](const Screenshot::PluginConfig& value) noexcept {

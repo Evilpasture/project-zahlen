@@ -23,7 +23,6 @@ function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
             RUNTIME_OUTPUT_DIRECTORY_${_cfg} "${CMAKE_BINARY_DIR}/bin"
         )
     endforeach()
-    target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_PLUGIN_BUILD)
     target_link_libraries(${TARGET_NAME} PRIVATE zahlen_engine zahlen_warnings)
     if(UNIX AND NOT APPLE)
         set(_zhln_plugin_map "${PROJECT_SOURCE_DIR}/cmake/zahlen_plugin.map")

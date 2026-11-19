@@ -72,6 +72,20 @@
     _ZN4ZHLN10HaltThread[BE]*;                                      /* @api ZHLN::HaltThread */
     _ZN4ZHLN8Platform4Init[BE]*;                                    /* @api ZHLN::Platform::Init */
 
+    /* include/Zahlen/Core/SharedLibrary.hpp */
+    _ZN4ZHLN13SharedLibrary4Open[BE]*;                              /* @api ZHLN::SharedLibrary::Open */
+    _ZN4ZHLN13SharedLibrary10OpenPlugin[BE]*;                        /* @api ZHLN::SharedLibrary::OpenPlugin */
+    _ZN4ZHLN13SharedLibrary5Close[BE]*;                             /* @api ZHLN::SharedLibrary::Close */
+    _ZNK4ZHLN13SharedLibrary9GetSymbol[BE]*;                        /* @api ZHLN::SharedLibrary::GetSymbol const */
+    _ZN4ZHLN13SharedLibrary10ModulePath[BE]*;                        /* @api ZHLN::SharedLibrary::ModulePath */
+    _ZN4ZHLN13SharedLibrary15ModuleDirectory[BE]*;                   /* @api ZHLN::SharedLibrary::ModuleDirectory */
+    _ZN4ZHLN13SharedLibrary17RuntimeModulePath[BE]*;                 /* @api ZHLN::SharedLibrary::RuntimeModulePath */
+    _ZN4ZHLN13SharedLibrary22RuntimeModuleDirectory[BE]*;            /* @api ZHLN::SharedLibrary::RuntimeModuleDirectory */
+    _ZN4ZHLN13SharedLibrary19HasLibraryExtension[BE]*;               /* @api ZHLN::SharedLibrary::HasLibraryExtension */
+    _ZN4ZHLN13SharedLibrary14IsExplicitPath[BE]*;                    /* @api ZHLN::SharedLibrary::IsExplicitPath */
+    _ZN4ZHLN13SharedLibrary15FormatFileNames[BE]*;                   /* @api ZHLN::SharedLibrary::FormatFileNames */
+    _ZN4ZHLN13SharedLibrary15SplitSearchPath[BE]*;                   /* @api ZHLN::SharedLibrary::SplitSearchPath */
+
     /* include/Zahlen/Core/Profiler.hpp */
     _ZN4ZHLN11CPUProfiler6Record[BE]*;                              /* @api ZHLN::CPUProfiler::Record */
     _ZN4ZHLN11CPUProfiler14IterateMetrics[BE]*;                     /* @api ZHLN::CPUProfiler::IterateMetrics */
@@ -117,6 +131,7 @@
     _ZN4ZHLN2FS10MappedFile5Reset[BE]*;                             /* @api ZHLN::FS::MappedFile::Reset */
 
     /* include/Zahlen/FileSystem/Paths.hpp */
+    _ZN4ZHLN2FS5Paths13ExecutableDir[BE]*;                          /* @api ZHLN::FS::Paths::ExecutableDir */
     _ZN4ZHLN2FS5Paths8CacheDir[BE]*;                                /* @api ZHLN::FS::Paths::CacheDir */
     _ZN4ZHLN2FS5Paths12FindDataFile[BE]*;                           /* @api ZHLN::FS::Paths::FindDataFile */
 

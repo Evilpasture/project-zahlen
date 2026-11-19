@@ -13,10 +13,8 @@
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#if !defined(_WIN32)
-    #include <dlfcn.h>
-#endif
 #include <Zahlen/ECS/Components.hpp>
 #include <cmath>
 #include <cstdlib>
@@ -223,7 +221,7 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
 
     // Existing invalid file fails even under TryLoadPlugin (broken plugin is never silently ignored).
     TempDir    tmp;
-    const auto bogusSo = tmp.Path() / "libzahlen_plugin_bogus.so";
+    const auto bogusSo = tmp.Path() / SharedLibrary::FormatFileNames("zahlen_plugin_bogus").front();
     {
         std::ofstream out(bogusSo, std::ios::binary);
         out << "not a valid shared library";
@@ -254,42 +252,30 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     if (!driftedRes) ExpectTrue(driftedRes.error().Is(COM::Error::LayoutMismatch));
 }
 
-#if !defined(_WIN32)
 void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
-#if defined(__APPLE__)
-    constexpr std::string_view kExt = ".dylib";
-#else
-    constexpr std::string_view kExt = ".so";
-#endif
-    std::error_code             ec;
-    const std::filesystem::path exeDir =
-#if defined(__linux__)
-        std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
-#else
-        std::filesystem::current_path(ec);
-#endif
-    const std::filesystem::path buildRoot = exeDir.parent_path().parent_path();
-    std::filesystem::path       enginePath;
-    Dl_info                     info {};
-    if (dladdr(reinterpret_cast<const void*>(&GetLogLevel), &info) != 0 &&
-        info.dli_fname != nullptr &&
-        std::filesystem::path(info.dli_fname).filename().string().find("zahlen_engine") != std::string::npos &&
-        std::filesystem::exists(info.dli_fname, ec)) {
-        enginePath = info.dli_fname;
-    } else {
-        for (const auto& d: {buildRoot, buildRoot / "lib", exeDir.parent_path()}) {
-            const auto cand = d / ("libzahlen_engine" + std::string(kExt));
-            if (std::filesystem::exists(cand)) { enginePath = cand; break; }
-        }
-    }
+    const std::filesystem::path enginePath = SharedLibrary::RuntimeModulePath();
     if (!ExpectFalse(enginePath.empty())) return;
 
+    const std::filesystem::path exeDir       = FS::Paths::ExecutableDir();
+    const std::filesystem::path engineDir    = enginePath.parent_path();
+    const std::filesystem::path buildRoot    = exeDir.parent_path().parent_path();
+    const std::filesystem::path searchDirs[] = {
+        exeDir,
+        exeDir / "plugins",
+        exeDir.parent_path() / "lib",
+        exeDir.parent_path() / "bin",
+        engineDir / "lib",
+        engineDir,
+        buildRoot / "lib",
+        buildRoot / "bin",
+    };
+
     for (const std::string_view name: {"freecam", "screenshot"}) {
-        const std::string filename = "libzahlen_plugin_" + std::string(name) + std::string(kExt);
-        SharedLibrary     lib;
-        for (const auto& d: {enginePath.parent_path() / "lib", enginePath.parent_path(), buildRoot / "lib"}) {
-            if (lib.Open((d / filename).string().c_str(), SharedLibraryBind::Local)) break;
-        }
+        SharedLibrary lib;
+        ExpectTrue(
+            lib.OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs}) ==
+            SharedLibraryOpenStatus::Opened
+        );
         if (!ExpectTrue(lib.IsOpen())) continue;
 
         // Old extern "C" entry point is absent; consteval-mangled C++ symbol resolves cleanly.
@@ -331,6 +317,4 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
         );
     }
 }
-#endif
-
 } // namespace ZHLN::Test

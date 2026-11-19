@@ -59,7 +59,7 @@ Dynamically loaded plugins (`<Zahlen/COM/IPlugin.hpp>`) implement
 
 ```cpp
 namespace ZHLN::COM {
-Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
+ZHLN_EXPORT Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
 }
 ```
 

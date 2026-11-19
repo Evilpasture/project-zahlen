@@ -93,7 +93,6 @@ set_target_properties(ztest_mangle_fixture PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
-target_compile_definitions(ztest_mangle_fixture PRIVATE ZHLN_MANGLE_FIXTURE_BUILD)
 target_include_directories(ztest_mangle_fixture PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/core

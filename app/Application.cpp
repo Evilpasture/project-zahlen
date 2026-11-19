@@ -10,6 +10,7 @@
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
@@ -21,15 +22,8 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
-
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#elif !defined(_WIN32)
-#include <unistd.h>
-#endif
 
 namespace ZHLN {
 
@@ -40,177 +34,54 @@ struct BuiltinHostOptions {
     std::string capture ZHLN_ANNOTATION(Description<"Capture a PNG after --frames completed frames (default: 1) and exit"> {}) = {};
 };
 
-[[nodiscard]] auto CurrentExecutableDir() -> std::filesystem::path {
-#if defined(__APPLE__)
-    uint32_t length = 0;
-    _NSGetExecutablePath(nullptr, &length);
-    if (length == 0) return {};
-    std::string buffer(length, '\0');
-    if (_NSGetExecutablePath(buffer.data(), &length) != 0) return {};
-    std::error_code ec;
-    const auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buffer.c_str()), ec);
-    return ec ? std::filesystem::path(buffer.c_str()).parent_path() : resolved.parent_path();
-#elif defined(_WIN32)
-    std::wstring buffer(32768, L'\0');
-    const DWORD written = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (written == 0 || written >= buffer.size()) return {};
-    buffer.resize(written);
-    return std::filesystem::path(buffer).parent_path();
-#else
-    std::string buffer(4096, '\0');
-    const auto written = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
-    if (written <= 0) return {};
-    buffer.resize(static_cast<size_t>(written));
-    return std::filesystem::path(buffer).parent_path();
-#endif
-}
-
-[[nodiscard]] auto EngineLibraryDir() -> std::filesystem::path {
-#if defined(_WIN32)
-    HMODULE mod = nullptr;
-    if (!::GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCWSTR>(&GetLogLevel),
-            &mod
-        ) ||
-        mod == nullptr) {
-        return {};
-    }
-    std::wstring buffer(MAX_PATH, L'\0');
-    for (;;) {
-        const DWORD written = ::GetModuleFileNameW(mod, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (written == 0) return {};
-        if (written < buffer.size() - 1) {
-            buffer.resize(written);
-            return std::filesystem::path(buffer).parent_path();
+[[nodiscard]] auto DefaultPluginSearchDirs() -> std::vector<std::filesystem::path> {
+    std::vector<std::filesystem::path> dirs;
+    if (const auto exeDir = FS::Paths::ExecutableDir(); !exeDir.empty()) {
+        dirs.push_back(exeDir);
+        dirs.push_back(exeDir / "plugins");
+        if (const auto prefix = exeDir.parent_path(); !prefix.empty() && prefix != exeDir) {
+            dirs.push_back(prefix / "lib" / "zahlen" / "plugins");
+            dirs.push_back(prefix / "lib64" / "zahlen" / "plugins");
+            dirs.push_back(prefix / "lib");
+            dirs.push_back(prefix / "lib64");
         }
-        buffer.resize(buffer.size() * 2);
     }
-#else
-    Dl_info info {};
-    if (::dladdr(reinterpret_cast<const void*>(&GetLogLevel), &info) == 0 || info.dli_fname == nullptr) {
-        return {};
+    if (const auto engineDir = SharedLibrary::RuntimeModuleDirectory(); !engineDir.empty()) {
+        dirs.push_back(engineDir / "zahlen" / "plugins");
+        dirs.push_back(engineDir / "lib");
+        dirs.push_back(engineDir);
     }
-    return std::filesystem::path(info.dli_fname).parent_path();
-#endif
-}
-
-[[nodiscard]] auto IsExplicitPluginPath(std::string_view spec) noexcept -> bool {
-    if (spec.find('/') != std::string_view::npos || spec.find('\\') != std::string_view::npos) {
-        return true;
-    }
-    return spec.ends_with(".so") || spec.ends_with(".dll") || spec.ends_with(".dylib");
-}
-
-[[nodiscard]] auto PluginFileNames(std::string_view name) -> std::vector<std::string> {
-#if defined(_WIN32)
-    return {
-        std::string("libzahlen_plugin_") + std::string(name) + ".dll",
-        std::string("zahlen_plugin_") + std::string(name) + ".dll",
-    };
-#elif defined(__APPLE__)
-    return {std::string("libzahlen_plugin_") + std::string(name) + ".dylib"};
-#else
-    return {std::string("libzahlen_plugin_") + std::string(name) + ".so"};
-#endif
+    return dirs;
 }
 
 [[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary)
     -> std::expected<bool, ErrorCode> {
-    if (spec.empty()) {
-        return std::unexpected(AppError::PluginNotFound);
-    }
-
-    auto tryFile = [&](const std::filesystem::path& candidate) -> std::expected<bool, ErrorCode> {
-        std::error_code ec;
-        if (!std::filesystem::exists(candidate, ec) || ec) {
-            return false;
-        }
-        const std::string pathStr = candidate.string();
-        if (!outLibrary.Open(pathStr.c_str(), SharedLibraryBind::Local)) {
-            LogError("[App] Failed to open plugin library '{}'.", pathStr);
-            return std::unexpected(AppError::PluginLoadFailed);
-        }
-        return true;
-    };
-
-    if (IsExplicitPluginPath(spec)) {
-        const auto opened = tryFile(std::filesystem::path(spec));
-        if (!opened) return std::unexpected(opened.error());
-        if (*opened) return true;
-        if (!required) return false;
-        LogError("[App] Plugin '{}' not found.", spec);
-        return std::unexpected(AppError::PluginNotFound);
-    }
-
-    const auto names = PluginFileNames(spec);
-    if (const char* envPath = std::getenv("ZHLN_PLUGIN_PATH"); envPath != nullptr && *envPath != '\0') {
-#if defined(_WIN32)
-        constexpr char kSep = ';';
-#else
-        constexpr char kSep = ':';
-#endif
-        std::string_view remaining(envPath);
-        while (!remaining.empty()) {
-            const auto pos   = remaining.find(kSep);
-            const auto entry = (pos == std::string_view::npos) ? remaining : remaining.substr(0, pos);
-            remaining        = (pos == std::string_view::npos) ? std::string_view {} : remaining.substr(pos + 1);
-            if (entry.empty()) continue;
-            const std::filesystem::path dir(entry);
-            for (const auto& filename: names) {
-                const auto opened = tryFile(dir / filename);
-                if (!opened) return std::unexpected(opened.error());
-                if (*opened) return true;
-            }
-        }
-    }
-
-    const auto exeDir = CurrentExecutableDir();
-    if (!exeDir.empty()) {
-        const std::filesystem::path searchDirs[] = {
-            exeDir,
-            exeDir / "plugins",
-            exeDir.parent_path() / "lib" / "zahlen" / "plugins",
-            exeDir.parent_path() / "lib64" / "zahlen" / "plugins",
-            exeDir.parent_path() / "lib",
-            exeDir.parent_path() / "lib64",
-        };
-        for (const auto& dir: searchDirs) {
-            for (const auto& filename: names) {
-                const auto opened = tryFile(dir / filename);
-                if (!opened) return std::unexpected(opened.error());
-                if (*opened) return true;
-            }
-        }
-    }
-
-    if (const auto engineDir = EngineLibraryDir(); !engineDir.empty()) {
-        const std::filesystem::path engineSearchDirs[] = {
-            engineDir / "zahlen" / "plugins",
-            engineDir / "lib",
-            engineDir,
-        };
-        for (const auto& dir: engineSearchDirs) {
-            for (const auto& filename: names) {
-                const auto opened = tryFile(dir / filename);
-                if (!opened) return std::unexpected(opened.error());
-                if (*opened) return true;
-            }
-        }
-    }
-
-    for (const auto& filename: names) {
-        if (outLibrary.Open(filename.c_str(), SharedLibraryBind::Local)) {
+    const char* const             rawEnv     = std::getenv("ZHLN_PLUGIN_PATH");
+    const auto                    searchDirs = DefaultPluginSearchDirs();
+    std::filesystem::path         resolvedPath;
+    const SharedLibraryOpenStatus status     = outLibrary.OpenPlugin(
+        spec,
+        PluginSearchOptions {
+            .envPath    = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {},
+            .searchDirs = searchDirs,
+        },
+        &resolvedPath
+    );
+    switch (status) {
+        case SharedLibraryOpenStatus::Opened:
             return true;
-        }
+        case SharedLibraryOpenStatus::LoadFailed:
+            LogError("[App] Failed to open plugin library '{}'.", resolvedPath.string());
+            return std::unexpected(AppError::PluginLoadFailed);
+        case SharedLibraryOpenStatus::NotFound:
+            if (required) {
+                LogError("[App] Required plugin '{}' not found.", spec);
+                return std::unexpected(AppError::PluginNotFound);
+            }
+            return false;
     }
-    if (required) {
-        LogError("[App] Required plugin '{}' not found.", spec);
-        return std::unexpected(AppError::PluginNotFound);
-    }
-    return false;
+    return std::unexpected(AppError::PluginNotFound);
 }
-
 } // namespace
 
 auto App::MakePluginSlot(COM::Ref<COM::IAppLayer> plugin) -> LayerSlot {

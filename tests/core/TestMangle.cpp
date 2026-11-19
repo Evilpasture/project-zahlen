@@ -18,6 +18,8 @@
 #include <Zahlen/Core/Reflection/Callable.hpp>
 #include <Zahlen/Core/Reflection/Entity.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
+#include <vector>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <filesystem>
@@ -26,9 +28,6 @@
 #include <tuple>
 #include <type_traits>
 
-#if !defined(_WIN32)
-    #include <dlfcn.h>
-#endif
 
 namespace ZHLN::Test {
 
@@ -159,63 +158,28 @@ static_assert(!COM::AuditFunctionABI<&VariadicFn>());
 static_assert(!COM::FunctionTypeCompliant<int>());
 static_assert(!COM::FunctionTypeCompliant<void*>());
 
-[[nodiscard]] auto SelfExecutablePath() -> std::filesystem::path {
-#if defined(__linux__)
-    std::error_code ec;
-    return std::filesystem::read_symlink("/proc/self/exe", ec);
-#else
-    return {};
-#endif
-}
-
-[[nodiscard]] auto FindLoadedEnginePath() -> std::filesystem::path {
-#if !defined(_WIN32)
-    Dl_info info {};
-    if (dladdr(reinterpret_cast<const void*>(&GetLogLevel), &info) != 0 &&
-        info.dli_fname != nullptr && info.dli_fname[0] != '\0') {
-        const std::filesystem::path p(info.dli_fname);
-        std::error_code ec;
-        if (p.filename().string().find("zahlen_engine") != std::string::npos && std::filesystem::exists(p, ec)) {
-            return p;
-        }
-    }
-    if (const auto exe = SelfExecutablePath(); !exe.empty()) {
-#if defined(__APPLE__)
-        constexpr const char* kEng = "libzahlen_engine.dylib";
-#else
-        constexpr const char* kEng = "libzahlen_engine.so";
-#endif
-        const auto exeDir = exe.parent_path();
-        for (const auto& d: {exeDir, exeDir.parent_path(), exeDir.parent_path() / "lib", exeDir.parent_path().parent_path()}) {
-            std::error_code ec;
-            if (std::filesystem::exists(d / kEng, ec)) return d / kEng;
-        }
-    }
-#endif
-    return {};
-}
-
 [[nodiscard]] auto OpenMangleFixture(SharedLibrary& out) -> bool {
-#if defined(_WIN32)
-    constexpr const char* kFile = "libztest_mangle_fixture.dll";
-#elif defined(__APPLE__)
-    constexpr const char* kFile = "libztest_mangle_fixture.dylib";
-#else
-    constexpr const char* kFile = "libztest_mangle_fixture.so";
-#endif
-    if (const auto eng = FindLoadedEnginePath(); !eng.empty()) {
-        const auto engDir = eng.parent_path();
-        for (const auto& d: {engDir / "lib", engDir}) {
-            if (out.Open((d / kFile).string().c_str(), SharedLibraryBind::Local)) return true;
+    std::vector<std::filesystem::path> dirs;
+    if (const auto engDir = SharedLibrary::RuntimeModuleDirectory(); !engDir.empty()) {
+        dirs.push_back(engDir / "lib");
+        dirs.push_back(engDir / "bin");
+        dirs.push_back(engDir);
+    }
+    if (const auto exeDir = FS::Paths::ExecutableDir(); !exeDir.empty()) {
+        dirs.push_back(exeDir);
+        if (const auto parent = exeDir.parent_path(); !parent.empty() && parent != exeDir) {
+            dirs.push_back(parent / "lib");
+            dirs.push_back(parent / "bin");
+            dirs.push_back(parent);
         }
     }
-    if (const auto exe = SelfExecutablePath(); !exe.empty()) {
-        const auto exeDir = exe.parent_path();
-        for (const auto& d: {exeDir, exeDir.parent_path() / "lib", exeDir.parent_path()}) {
-            if (out.Open((d / kFile).string().c_str(), SharedLibraryBind::Local)) return true;
-        }
-    }
-    return out.Open(kFile, SharedLibraryBind::Local);
+    return out.OpenPlugin(
+               "ztest_mangle_fixture",
+               PluginSearchOptions {
+                   .stemPrefix = "",
+                   .searchDirs = dirs,
+               }
+           ) == SharedLibraryOpenStatus::Opened;
 }
 
 using FixtureAddrFn = decltype(&Mangle::FixtureSymbolAddress);
@@ -412,24 +376,23 @@ void test_mangle_dso_symbol_resolution_and_invocation() {
     }
 }
 
-#if !defined(_WIN32)
 namespace {
 template <auto Fn>
-[[nodiscard]] auto ExpectExactEngineSymbol(const SharedLibrary& engineLib) -> decltype(Fn) {
-    constexpr std::string_view mangled     = COM::MangleFunction<Fn>();
-    void* const                fromHandle  = engineLib.GetSymbol(mangled.data());
-    const auto                 typed       = COM::ResolveSymbol<Fn>(engineLib);
-    void* const                fromDefault = dlsym(RTLD_DEFAULT, mangled.data());
+[[nodiscard]] auto ExpectExactEngineSymbol(
+    const SharedLibrary&         engineLib,
+    const std::filesystem::path& expectedModule
+) -> decltype(Fn) {
+    constexpr std::string_view mangled    = COM::MangleFunction<Fn>();
+    void* const                fromHandle = engineLib.GetSymbol(mangled.data());
+    const auto                 typed      = COM::ResolveSymbol<Fn>(engineLib);
     ExpectTrue(fromHandle != nullptr);
     ExpectTrue(fromHandle == reinterpret_cast<void*>(typed));
-    ExpectTrue(fromDefault == fromHandle || fromDefault == reinterpret_cast<const void*>(Fn));
     if (fromHandle != nullptr) {
-        Dl_info sym {};
-        if (ExpectTrue(dladdr(fromHandle, &sym) != 0)) {
-            ExpectTrue(sym.dli_saddr == fromHandle);
-            if (ExpectTrue(sym.dli_sname != nullptr)) {
-                ExpectEq(std::string_view {sym.dli_sname}, mangled);
-            }
+        std::error_code ec;
+        const auto      owner = SharedLibrary::ModulePath(fromHandle);
+        ExpectFalse(owner.empty());
+        if (!owner.empty()) {
+            ExpectTrue(std::filesystem::equivalent(owner, expectedModule, ec) && !ec);
         }
     }
     return typed;
@@ -437,34 +400,34 @@ template <auto Fn>
 } // namespace
 
 void test_mangle_matches_live_engine_dso_exports() {
-    const auto enginePath = FindLoadedEnginePath();
+    const auto enginePath = SharedLibrary::RuntimeModulePath();
     if (!ExpectFalse(enginePath.empty())) return;
 
     SharedLibrary engineLib;
-    if (!ExpectTrue(engineLib.Open(enginePath.string().c_str(), SharedLibraryBind::Local))) return;
+    if (!ExpectTrue(engineLib.Open(enginePath, SharedLibraryBind::Local))) return;
 
     // Verify exact symbol name and in-DSO code address against libzahlen_engine.so.
-    (void) ExpectExactEngineSymbol<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>(engineLib);
-    (void) ExpectExactEngineSymbol<&COM::CreateLogicWorld>(engineLib);
-    const auto rgDump = ExpectExactEngineSymbol<&COM::RenderGraphDump>(engineLib);
-    (void) ExpectExactEngineSymbol<&RegisterErrorCategory>(engineLib);
-    const auto getLvl = ExpectExactEngineSymbol<&GetLogLevel>(engineLib);
-    (void) ExpectExactEngineSymbol<&SetLogLevel>(engineLib);
-    (void) ExpectExactEngineSymbol<&BeginLogCapture>(engineLib);
-    (void) ExpectExactEngineSymbol<&CancelLogCapture>(engineLib);
-    const auto pageSz = ExpectExactEngineSymbol<&GetPageSize>(engineLib);
-    (void) ExpectExactEngineSymbol<&AllocatePages>(engineLib);
-    (void) ExpectExactEngineSymbol<&ProtectPages>(engineLib);
-    (void) ExpectExactEngineSymbol<&FreePages>(engineLib);
-    (void) ExpectExactEngineSymbol<&AllocateGuardedRegion>(engineLib);
-    (void) ExpectExactEngineSymbol<&FreeGuardedRegion>(engineLib);
-    const auto getPid = ExpectExactEngineSymbol<&GetPID>(engineLib);
-    (void) ExpectExactEngineSymbol<&HaltThread>(engineLib);
-    (void) ExpectExactEngineSymbol<&Platform::Init>(engineLib);
-    (void) ExpectExactEngineSymbol<&CPUProfiler::IterateMetrics>(engineLib);
-    (void) ExpectExactEngineSymbol<&TaskSystem::GetWorkerIndex>(engineLib);
-    const auto workers = ExpectExactEngineSymbol<&TaskSystem::GetWorkerCount>(engineLib);
-    (void) ExpectExactEngineSymbol<&TaskSystem::Shutdown>(engineLib);
+    (void) ExpectExactEngineSymbol<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&COM::CreateLogicWorld>(engineLib, enginePath);
+    const auto rgDump = ExpectExactEngineSymbol<&COM::RenderGraphDump>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&RegisterErrorCategory>(engineLib, enginePath);
+    const auto getLvl = ExpectExactEngineSymbol<&GetLogLevel>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&SetLogLevel>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&BeginLogCapture>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&CancelLogCapture>(engineLib, enginePath);
+    const auto pageSz = ExpectExactEngineSymbol<&GetPageSize>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&AllocatePages>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&ProtectPages>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&FreePages>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&AllocateGuardedRegion>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&FreeGuardedRegion>(engineLib, enginePath);
+    const auto getPid = ExpectExactEngineSymbol<&GetPID>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&HaltThread>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&Platform::Init>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&CPUProfiler::IterateMetrics>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&TaskSystem::GetWorkerIndex>(engineLib, enginePath);
+    const auto workers = ExpectExactEngineSymbol<&TaskSystem::GetWorkerCount>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&TaskSystem::Shutdown>(engineLib, enginePath);
 
     // Invoke safe side-effect-free getters and verify identical return values.
     if (getLvl) ExpectTrue(getLvl() == GetLogLevel());
@@ -473,6 +436,4 @@ void test_mangle_matches_live_engine_dso_exports() {
     if (workers) ExpectEq(workers(), TaskSystem::GetWorkerCount());
     if (rgDump) ExpectEq(std::string_view(rgDump(AAMode::None)), std::string_view(COM::RenderGraphDump(AAMode::None)));
 }
-#endif
-
 } // namespace ZHLN::Test

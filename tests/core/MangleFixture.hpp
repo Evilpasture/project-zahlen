@@ -8,6 +8,7 @@
 // (which never links the fixture and resolves every symbol strictly through
 // COM::MangleFunction + SharedLibrary::GetSymbol / COM::ResolveSymbol<Fn>(lib)).
 
+#include <Zahlen/Common.h>
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Types.hpp>
@@ -34,19 +35,9 @@ struct ZHLN_MangleSizedBuf {
 template <template <typename> class TT>
 struct ZHLN_MangleHigher {};
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t ZHLN_MangleGlobalEmpty() noexcept;
+ZHLN_EXPORT uint32_t ZHLN_MangleGlobalEmpty() noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-int32_t ZHLN_MangleGlobalSubst(
+ZHLN_EXPORT int32_t ZHLN_MangleGlobalSubst(
     ZHLN_MangleGlobalPod a, const ZHLN_MangleGlobalPod* b, ZHLN_MangleGlobalPod* c
 ) noexcept;
 
@@ -101,37 +92,17 @@ struct Tag {
     uint32_t v = 0;
 };
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t InlineNsEntry(Tag a, const Tag* b) noexcept;
+ZHLN_EXPORT uint32_t InlineNsEntry(Tag a, const Tag* b) noexcept;
 } // namespace Inl
 
 struct StaticHost {
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-    __declspec(dllexport)
-#elif !defined(_WIN32)
-    [[gnu::visibility("default")]]
-#endif
-    static int32_t Entry(const Node* node, const StaticHost* self) noexcept;
+    ZHLN_EXPORT static int32_t Entry(const Node* node, const StaticHost* self) noexcept;
     int32_t        addend = 0;
 };
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-COM::Result<int32_t> CreateValue(const COM::ChainInNode* config, int32_t input) noexcept;
+ZHLN_EXPORT COM::Result<int32_t> CreateValue(const COM::ChainInNode* config, int32_t input) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t RepeatedQualifiers(
+ZHLN_EXPORT uint32_t RepeatedQualifiers(
     const Node*          a,
     const Node*          b,
     Node*                c,
@@ -142,12 +113,7 @@ uint32_t RepeatedQualifiers(
     const Node* const*   h
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t AllBuiltinsAndAliases(
+ZHLN_EXPORT uint32_t AllBuiltinsAndAliases(
     bool                pBool,
     char                pChar,
     signed char         pSChar,
@@ -185,12 +151,7 @@ uint32_t AllBuiltinsAndAliases(
     const std::byte*    pConstByte
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t ArraysAndUnions(
+ZHLN_EXPORT uint32_t ArraysAndUnions(
     const int (*a)[4],
     const int (*b)[4],
     const Int4Alias* c,
@@ -202,12 +163,7 @@ uint32_t ArraysAndUnions(
     const Payload* k
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-int32_t FunctionPointers(
+ZHLN_EXPORT int32_t FunctionPointers(
     int32_t (*noexceptCbA)(int32_t) noexcept,
     int32_t (*throwingCb)(int32_t),
     int32_t (*noexceptCbB)(int32_t) noexcept,
@@ -215,12 +171,7 @@ int32_t FunctionPointers(
     COM::CreateAppLayerFn pluginFactory
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t TemplatesAndNttps(
+ZHLN_EXPORT uint32_t TemplatesAndNttps(
     ZHLN_MangleGlobalBox<float>,
     ZHLN_MangleGlobalBox<int>,
     ZHLN_MangleGlobalBox<float>,
@@ -249,96 +200,36 @@ uint32_t TemplatesAndNttps(
     ZHLN_MangleHigher<Outer>
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t TemplateArgBeforeSpec(
+ZHLN_EXPORT uint32_t TemplateArgBeforeSpec(
     ZHLN_MangleHigher<Outer>, Outer<float>, ZHLN_MangleHigher<Outer>
 ) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-int32_t References(const Node& a, Node& b, Node&& c, const Node& d) noexcept;
+ZHLN_EXPORT int32_t References(const Node& a, Node& b, Node&& c, const Node& d) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-int32_t TopLevelConstStripped(int* const ptr, const uint32_t addend) noexcept;
+ZHLN_EXPORT int32_t TopLevelConstStripped(int* const ptr, const uint32_t addend) noexcept;
 
 // Overload set disambiguated solely through mangled parameter encodings.
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(const Node*) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(const Node*) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(Node*) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(Node*) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(const Node* const*) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(const Node* const*) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(char) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(char) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(signed char) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(signed char) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(unsigned char) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(unsigned char) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(uint32_t) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(uint32_t) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Overloaded(uint64_t) noexcept;
+ZHLN_EXPORT uint32_t Overloaded(uint64_t) noexcept;
 
 // Base-36 substitution rollover (>37 distinct substitution candidates: S_, S0_..S9_, SA_..SZ_, S10_..).
 template <unsigned K>
 struct Slot {};
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t Base36Rollover(
+ZHLN_EXPORT uint32_t Base36Rollover(
     Slot<0>,  Slot<1>,  Slot<2>,  Slot<3>,  Slot<4>,  Slot<5>,  Slot<6>,  Slot<7>,  Slot<8>,  Slot<9>,
     Slot<10>, Slot<11>, Slot<12>, Slot<13>, Slot<14>, Slot<15>, Slot<16>, Slot<17>, Slot<18>, Slot<19>,
     Slot<20>, Slot<21>, Slot<22>, Slot<23>, Slot<24>, Slot<25>, Slot<26>, Slot<27>, Slot<28>, Slot<29>,
@@ -349,34 +240,14 @@ uint32_t Base36Rollover(
 template <typename>
 struct FreshTmpl {};
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t NoexceptVsPlainCallback(void (*a)(int) noexcept, void (*b)(int), void (*c)(int) noexcept) noexcept;
+ZHLN_EXPORT uint32_t NoexceptVsPlainCallback(void (*a)(int) noexcept, void (*b)(int), void (*c)(int) noexcept) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t ConstVolatileSub(const volatile int* a, const volatile int* b, const int* c, volatile int* d) noexcept;
+ZHLN_EXPORT uint32_t ConstVolatileSub(const volatile int* a, const volatile int* b, const int* c, volatile int* d) noexcept;
 
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-uint32_t TemplateTemplateBeforeSpec(ZHLN_MangleHigher<FreshTmpl>, FreshTmpl<int>, ZHLN_MangleHigher<FreshTmpl>) noexcept;
+ZHLN_EXPORT uint32_t TemplateTemplateBeforeSpec(ZHLN_MangleHigher<FreshTmpl>, FreshTmpl<int>, ZHLN_MangleHigher<FreshTmpl>) noexcept;
 
 // Returns the compiler-emitted in-DSO address of each fixture symbol by index,
 // letting TestMangle assert exact bit-for-bit equality against dlsym(mangled).
-#if defined(ZHLN_MANGLE_FIXTURE_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-const void* FixtureSymbolAddress(uint32_t index) noexcept;
+ZHLN_EXPORT const void* FixtureSymbolAddress(uint32_t index) noexcept;
 
 } // namespace ZHLN::Test::Mangle

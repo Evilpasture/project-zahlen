@@ -12,6 +12,7 @@
 namespace ZHLN::FS::Paths {
 
 [[nodiscard]] auto IsDevTree() -> bool;
+[[nodiscard]] ZHLN_API auto ExecutableDir() -> std::filesystem::path;
 [[nodiscard]] ZHLN_API auto CacheDir() -> std::filesystem::path;
 [[nodiscard]] auto PipelineCacheFile() -> std::filesystem::path;
 [[nodiscard]] auto CrashDumpFile() -> std::filesystem::path;

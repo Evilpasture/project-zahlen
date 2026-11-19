@@ -19,6 +19,7 @@
 // via COM::DispatchInChain; unrecognized extensions or layout mismatches fail
 // cleanly before any engine state is mutated.
 
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
@@ -43,15 +44,10 @@ protected:
     ~IAppLayer() = default;
 };
 
-// Exported by each plugin shared library (never by libzahlen_engine). On PE,
-// zahlen_add_plugin defines ZHLN_PLUGIN_BUILD to attach dllexport; hosts leave
-// it undecorated so no dllimport reference is generated.
-#if defined(ZHLN_PLUGIN_BUILD) && defined(_WIN32)
-__declspec(dllexport)
-#elif !defined(_WIN32)
-[[gnu::visibility("default")]]
-#endif
-[[nodiscard]] Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
+// Exported by each plugin shared library (never by libzahlen_engine). ZHLN_EXPORT
+// gives plugin definitions default visibility / dllexport without generating a
+// dllimport reference in host translation units.
+[[nodiscard]] ZHLN_EXPORT Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
 
 static_assert(AuditInterfaceABI<IAppLayer>(), "IAppLayer violates the COM ABI rules.");
 static_assert(AuditFunctionABI<&CreateAppLayer>(), "CreateAppLayer violates the COM ABI rules.");
