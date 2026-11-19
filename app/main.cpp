@@ -163,38 +163,31 @@ struct SandboxGame {
 } // namespace
 
 int main(int argc, char* argv[]) {
-    GameLaunchConfig launch;
-    bool     captured = false;
-    uint32_t completedFrames = 0;
-    ZHLN::Screenshot::CaptureBuffer capture;
-    auto                            app = ZHLN::App();
-    app.WithConfig(launch).AddLayer(SandboxGame {.launch = launch});
+    GameLaunchConfig                 launch;
+    ZHLN::Screenshot::CaptureOutcome capture;
+    auto                             app = ZHLN::App();
+    app.WithConfig(launch)
+        .AddLayer(SandboxGame {.launch = launch})
+        .AddLayer(ZHLN::Screenshot::CaptureLayer::Bind(launch.captureFrame, launch.warmupFrames, capture));
 #if defined(ZHLN_HAS_HOST_FREECAM)
     app.AddLayer(ZHLN::FreeCam::Layer {});
 #endif
-    const auto result =
-        app.Run(argc, argv, [&](ZHLN::COM::IEngine& engine, float) {
-            if (launch.captureFrame.empty())
-                return;
-            // This callback runs before Engine::Tick. Each prior invocation
-            // that reaches here is followed by one completed engine frame.
-            if (completedFrames++ < launch.warmupFrames)
-                return;
-            const auto frame = capture.Read(*engine.Graphics(), engine.WindowExtent(engine.PrimaryWindow()));
-            if (!frame || !(*frame)->Valid()) {
-                ZHLN::LogError("[Capture] Failed to capture a completed frame.");
-            } else if (!ZHLN::Screenshot::WritePNG(launch.captureFrame, **frame)) {
-                ZHLN::LogError("[Capture] Failed to write PNG '{}'.", launch.captureFrame);
-            } else {
-                captured = true;
-                ZHLN::Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).",
-                          (*frame)->extent.width, (*frame)->extent.height, launch.captureFrame, (*frame)->metrics.meanLuma);
-            }
-            engine.RequestClose();
-        });
+    const auto result = app.Run(argc, argv);
     if (!result) return EXIT_FAILURE;
     // Help/version/graph requests exit before creating a frame and remain success.
     // A closed window or failed write must not silently count as a capture.
-    if (*result == ZHLN::AppExitReason::UserClosed && !launch.captureFrame.empty() && !captured) return EXIT_FAILURE;
+    if (*result == ZHLN::AppExitReason::UserClosed && !launch.captureFrame.empty()) {
+        if (capture.Succeeded()) {
+            ZHLN::Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).",
+                      capture.extent.width, capture.extent.height, launch.captureFrame, capture.metrics.meanLuma);
+            return EXIT_SUCCESS;
+        }
+        if (capture.status == ZHLN::Screenshot::CaptureStatus::ReadFailed) {
+            ZHLN::LogError("[Capture] Failed to capture a completed frame.");
+        } else if (capture.status == ZHLN::Screenshot::CaptureStatus::WriteFailed) {
+            ZHLN::LogError("[Capture] Failed to write PNG '{}'.", launch.captureFrame);
+        }
+        return EXIT_FAILURE;
+    }
     return EXIT_SUCCESS;
 }

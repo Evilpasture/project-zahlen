@@ -554,4 +554,56 @@ void test_com_application_ui_errors_stop_layers_in_reverse() {
     Expect(calls == std::vector<int> {1, 2, 11, -2, -1});
 }
 
+void test_application_max_frames_frame_limit_cli_and_after_tick() {
+    ExpectError(RunConfigCli(App().WithFrameLimit(), {"--frames=bad"}), CommandLineError::InvalidValue);
+    ExpectError(RunConfigCli(App().WithFrameLimit(), {"--frames=-1"}), CommandLineError::InvalidValue);
+    ExpectError(RunConfigCli(App().WithFrameLimit(), {"--frames"}), CommandLineError::MissingValue);
+    ExpectError(
+        RunConfigCli(
+            App().WithFrameLimit().AddCliOption(
+                CliFlag {.key = "--frames", .action = [](std::string_view) -> std::expected<void, CommandLineError> { return {}; }}
+            ),
+            {"--help"}
+        ),
+        CommandLineError::DuplicateFlag
+    );
+
+    struct PostLayer {
+        std::vector<std::string>* events;
+        void Tick(COM::IEngine& engine, float) {
+            events->push_back("tick@" + std::to_string(engine.CurrentFrame()));
+        }
+        void BeforeRender(COM::IEngine& engine, float) {
+            events->push_back("before@" + std::to_string(engine.CurrentFrame()));
+        }
+        void AfterTick(COM::IEngine& engine) {
+            events->push_back("after@" + std::to_string(engine.CurrentFrame()));
+        }
+        void Stop(COM::IEngine& engine) {
+            events->push_back("stop@" + std::to_string(engine.CurrentFrame()));
+        }
+    };
+
+    std::vector<std::string> events;
+    auto app = App(EngineConfig {
+        .appName        = "AppMaxFrames",
+        .width          = 64,
+        .height         = 48,
+        .vsync          = false,
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+        .logLevel       = LogLevel::Quiet,
+    });
+    app.WithFrameLimit().MaxFrames(4).AddLayer(PostLayer {&events}).AfterTick([&](COM::IEngine& engine) {
+        events.push_back("appAfter@" + std::to_string(engine.CurrentFrame()));
+    });
+    ExpectExit(RunConfigCli(app, {"--frames=2"}), AppExitReason::UserClosed);
+    const std::vector<std::string> expected {
+        "tick@0", "before@0", "after@1", "appAfter@1",
+        "tick@1", "before@1", "after@2", "appAfter@2",
+        "stop@2",
+    };
+    Expect(events == expected);
+}
+
 } // namespace ZHLN::Test

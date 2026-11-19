@@ -25,7 +25,6 @@
 #include <Discord/RichPresence.hpp>
 #endif
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <expected>
@@ -38,7 +37,6 @@ namespace {
 struct HostLaunchConfig {
     std::filesystem::path scenePath;
     std::filesystem::path graphicsConfigPath = "config/graphics.lua";
-    uint32_t              frames             = 0;
     bool                  rasterOnly         = false;
     bool                  terrainDemo        = false;
     std::vector<std::string> consoleCommands;
@@ -173,8 +171,6 @@ struct DiagnosticHost {
             watcher->DispatchEvents();
         if (fallback.IsActive())
             fallback.Update(engine, delta);
-        if (launch->frames && engine.CurrentFrame() >= launch->frames)
-            engine.RequestClose();
 #if defined(ZHLN_SCENE_HOST_HAS_TERRAIN)
         if (auto updated = terrainDemo.Tick(engine, delta); !updated)
             return updated;
@@ -250,17 +246,6 @@ int main(int argc, char* argv[]) {
             }
         },
         ZHLN::CliFlag {
-            .key         = "--frames",
-            .placeholder = "<count>",
-            .description = "Close after this many completed frames (0: unlimited)",
-            .action      = [&](std::string_view value) -> std::expected<void, ZHLN::CommandLineError> {
-                const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), launch.frames);
-                if (error != std::errc {} || end != value.data() + value.size())
-                    return std::unexpected(ZHLN::CommandLineError::InvalidValue);
-                return {};
-            }
-        },
-        ZHLN::CliFlag {
             .key         = "--terrain-demo",
             .description = "Run the COM snow terrain / heightfield / combat host demo",
             .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
@@ -278,7 +263,7 @@ int main(int argc, char* argv[]) {
         },
     };
     auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Zahlen Scene Host"});
-    app.WithCliOptions(handlers);
+    app.WithFrameLimit().WithCliOptions(handlers);
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
     app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
         if (launch.graphicsConfigPath != "config/graphics.lua") {

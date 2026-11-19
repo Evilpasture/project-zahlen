@@ -66,4 +66,73 @@ void test_com_app_runs_layers_and_update() {
     const std::vector<std::string> expected {"start1", "start2", "onstart", "tick1", "tick2", "update", "tick1", "tick2", "update", "stop2", "stop1"};
     ExpectTrue(events == expected);
 }
+
+void test_com_app_max_frames_and_after_tick() {
+    struct PostTickLayer {
+        int id;
+        std::vector<std::string>* events;
+        bool closeOnFirstAfterTick = false;
+        void Start(COM::IEngine&) { events->push_back("start" + std::to_string(id)); }
+        void Tick(COM::IEngine& engine, float) {
+            events->push_back("tick" + std::to_string(id) + "@" + std::to_string(engine.CurrentFrame()));
+        }
+        void AfterTick(COM::IEngine& engine) {
+            events->push_back("after" + std::to_string(id) + "@" + std::to_string(engine.CurrentFrame()));
+            if (closeOnFirstAfterTick) engine.RequestClose();
+        }
+        void Stop(COM::IEngine&) { events->push_back("stop" + std::to_string(id)); }
+    };
+
+    std::vector<std::string> events;
+    const auto result = COM::App()
+        .Title("COM App frame limit")
+        .Resolution(64, 48)
+        .Headless(true)
+        .Validation(false)
+        .VSync(false)
+        .MeshShading(false)
+        .MaxFrames(2)
+        .AddLayer(PostTickLayer {1, &events})
+        .AddLayer(PostTickLayer {2, &events})
+        .AfterTick([&](COM::IEngine& engine, float dt) {
+            ExpectTrue(dt >= 0.0f && dt <= 0.25f);
+            events.push_back("appAfter@" + std::to_string(engine.CurrentFrame()));
+        })
+        .Run([&](COM::IEngine& engine) {
+            events.push_back("update@" + std::to_string(engine.CurrentFrame()));
+        });
+    if (!result) {
+        ExpectTrue(result.error() != ErrorCode {});
+        ExpectTrue(events.empty());
+        return;
+    }
+    const std::vector<std::string> expected {
+        "start1", "start2",
+        "tick1@0", "tick2@0", "update@0", "after1@1", "after2@1", "appAfter@1",
+        "tick1@1", "tick2@1", "update@1", "after1@2", "after2@2", "appAfter@2",
+        "stop2", "stop1",
+    };
+    ExpectTrue(events == expected);
+
+    // RequestClose inside a layer AfterTick skips later post-tick hooks and
+    // exits before starting another frame.
+    events.clear();
+    const auto earlyClose = COM::App()
+        .Title("COM App early post-tick close")
+        .Resolution(64, 48)
+        .Headless(true)
+        .Validation(false)
+        .VSync(false)
+        .MeshShading(false)
+        .MaxFrames(5)
+        .AddLayer(PostTickLayer {1, &events, true})
+        .AddLayer(PostTickLayer {2, &events, false})
+        .AfterTick([&](COM::IEngine&) { events.push_back("appAfter"); })
+        .Run();
+    if (!ExpectTrue(earlyClose.has_value())) return;
+    const std::vector<std::string> expectedEarly {
+        "start1", "start2", "tick1@0", "tick2@0", "after1@1", "stop2", "stop1",
+    };
+    ExpectTrue(events == expectedEarly);
+}
 } // namespace ZHLN::Test

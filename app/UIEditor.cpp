@@ -838,10 +838,8 @@ auto main(int argc, char* argv[]) -> int {
     session.selectedId = "panel";
     BindHostActions(session);
 
-    struct EditorOptions { uint32_t frames = 0; } options;
     struct EditorLayer {
         Session* session;
-        uint32_t* frameLimit;
         void Start(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) {
             session->hostUI = &ui;
 #if defined(ZHLN_HAS_FONTS)
@@ -852,7 +850,6 @@ auto main(int argc, char* argv[]) -> int {
         }
         void Tick(ZHLN::COM::IEngine& engine, float dt) {
             UpdateEditor(engine, *session, dt);
-            if (*frameLimit && engine.CurrentFrame() >= *frameLimit) engine.RequestClose();
         }
         auto UI(ZHLN::COM::IEngine& engine, ZHLN::HostUI& ui) -> std::expected<void, ZHLN::ErrorCode> {
             // The host retains the CPU atlas and rebuilds its texture whenever
@@ -872,6 +869,6 @@ auto main(int argc, char* argv[]) -> int {
     };
     ZHLN::EngineConfig editorConfig {};
     editorConfig.appName = "Zahlen UI Editor";
-    const auto result = ZHLN::Application(editorConfig).WithConfig(options).AddLayer(EditorLayer {&session, &options.frames}).Run(argc, argv);
+    const auto result = ZHLN::Application(editorConfig).WithFrameLimit().AddLayer(EditorLayer {&session}).Run(argc, argv);
     return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

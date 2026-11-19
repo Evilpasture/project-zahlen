@@ -3,17 +3,18 @@
 
 #include "Screenshot.hpp"
 #include <Image/Image.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/Core/COM/Types.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 auto ZHLN::Screenshot::CaptureBuffer::Read(COM::IGraphicsDevice& graphics, Extent2D extent)
@@ -67,4 +68,36 @@ auto ZHLN::Screenshot::WritePNG(std::string_view path, const ZHLN::CapturedFrame
     }
 
     return ZHLN::Image::WritePNG(path, rgb, frame.extent.width, frame.extent.height, 3).has_value();
+}
+
+void ZHLN::Screenshot::CaptureLayer::Start(COM::IEngine&) noexcept {
+    if (_outcome != nullptr) *_outcome = {};
+}
+
+void ZHLN::Screenshot::CaptureLayer::AfterTick(COM::IEngine& engine) {
+    if (_outcome == nullptr || _outcome->Attempted()) return;
+    const std::string_view path = _boundPath != nullptr ? std::string_view(*_boundPath) : std::string_view(_path);
+    if (path.empty()) return;
+    const uint32_t configured = _boundAfterFrames != nullptr ? *_boundAfterFrames : _afterFrames;
+    const uint32_t target     = configured ? configured : 1u;
+    if (engine.CurrentFrame() < target) return;
+
+    auto* graphics = engine.Graphics();
+    if (graphics == nullptr) {
+        *_outcome = CaptureOutcome {.status = CaptureStatus::ReadFailed, .error = COM::Error::NullArgument};
+        engine.RequestClose();
+        return;
+    }
+
+    const auto frame = _buffer.Read(*graphics, engine.WindowExtent(engine.PrimaryWindow()));
+    if (!frame) {
+        *_outcome = CaptureOutcome {.status = CaptureStatus::ReadFailed, .error = frame.error()};
+    } else {
+        *_outcome = CaptureOutcome {
+            .status  = WritePNG(path, **frame) ? CaptureStatus::Succeeded : CaptureStatus::WriteFailed,
+            .extent  = (*frame)->extent,
+            .metrics = (*frame)->metrics,
+        };
+    }
+    engine.RequestClose();
 }

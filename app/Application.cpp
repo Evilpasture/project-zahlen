@@ -7,6 +7,7 @@
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <optional>
@@ -18,8 +19,19 @@
 
 namespace ZHLN {
 
+namespace {
+struct FrameLimitOption {
+    uint32_t frames ZHLN_ANNOTATION(Description<"Close after this many completed frames (0: unlimited)"> {}) = 0;
+};
+} // namespace
+
 auto Application::RunFromCLI(EngineConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult {
-    auto parsed = ParseEngineConfig(args, config, _cli.Flags());
+    FrameLimitOption frameLimit {.frames = _maxFrames};
+    ConfigCli        cli = _cli;
+    if (_bindFrameLimit) {
+        cli.WithConfig(frameLimit);
+    }
+    auto parsed = ParseEngineConfig(args, config, cli.Flags());
     if (!parsed) {
         std::println(stderr, "Error: {}", parsed.error());
         return std::unexpected(parsed.error());
@@ -33,10 +45,10 @@ auto Application::RunFromCLI(EngineConfig config, std::span<char* const> args, c
     if (parsed->graphRequested) {
         return AppExitReason::CliGraphRequested;
     }
-    return RunConfigured(config, update);
+    return RunConfigured(config, update, frameLimit.frames);
 }
 
-auto Application::RunConfigured(const EngineConfig& config, const Update& update) const -> AppRunResult {
+auto Application::RunConfigured(const EngineConfig& config, const Update& update, uint32_t maxFrames) const -> AppRunResult {
     SetLogLevel(config.logLevel);
     if (_prepare) {
         if (auto prepared = _prepare(); !prepared) {
@@ -86,6 +98,10 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
     FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
     while (!frameError && engine->IsRunning()) {
+        if (maxFrames > 0 && engine->CurrentFrame() >= maxFrames) {
+            engine->RequestClose();
+            break;
+        }
         const auto frameStart = FramePacer::BeginFrame();
         ProcessScope::PollCrashes(engine.Get());
         engine->ProcessEvents(); // includes input and renderer resize synchronization
@@ -150,6 +166,31 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
         if (auto finished = pipeline->FinishFrame(); !finished.HasValue()) {
             LogError("[Application] engine frame failed: {}", finished.error);
             frameError = finished.error;
+            break;
+        }
+        for (const auto& layer: _layers) {
+            if (layer.afterTick != nullptr) {
+                const auto after = layer.afterTick(layer.state.get(), *engine.Get(), dt);
+                if (!after) {
+                    frameError = after.error();
+                    break;
+                }
+            }
+            if (!engine->IsRunning())
+                break;
+        }
+        if (frameError)
+            break;
+        if (engine->IsRunning() && _afterTick) {
+            if (auto after = _afterTick(*engine.Get(), dt); !after) {
+                frameError = after.error();
+                break;
+            }
+        }
+        if (!engine->IsRunning())
+            break;
+        if (maxFrames > 0 && engine->CurrentFrame() >= maxFrames) {
+            engine->RequestClose();
             break;
         }
         pacer.EndFrame(frameStart, pacedDt);

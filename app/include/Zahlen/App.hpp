@@ -12,6 +12,7 @@
 #include <Zahlen/AppOutcome.hpp>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <memory>
@@ -23,15 +24,16 @@
 
 namespace ZHLN {
 
-// A layer may implement Start, Tick, UI, BeforeRender and/or Stop. Start runs after
-// scene creation; Tick runs after event/input pumping; UI runs in the host
-// loop before update and Engine::Tick, never in a core frame step. Hooks run
-// in registration order; BeforeRender runs after simulation/transform cleanup and
-// before camera projection/culling/presentation. Start, Tick, UI and BeforeRender
-// may return void or expected<void, ErrorCode>;
-// failure or close cancels presentation before Stop. Stop runs in reverse order
-// before Engine teardown for entered layers (including a partially failed Start).
-// Unvisited layers receive no Stop. Layers can own move-only state.
+// A layer may implement Start, Tick, UI, BeforeRender, AfterTick and/or Stop.
+// Start runs after scene creation; Tick runs after event/input pumping; UI runs
+// in the host loop before update and frame advance, never in a core frame step.
+// Hooks run in registration order; BeforeRender runs after simulation/transform
+// cleanup and before camera projection/culling/presentation; AfterTick runs
+// immediately after presentation completes (CurrentFrame() has advanced).
+// Start, Tick, UI, BeforeRender and AfterTick may return void or
+// expected<void, ErrorCode>. Stop runs in reverse order before Engine teardown
+// for entered layers (including a partially failed Start). Unvisited layers
+// receive no Stop. Layers can own move-only state.
 template <typename T>
 concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Start(engine); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) { layer.Start(engine, ui); } ||
@@ -39,6 +41,8 @@ concept AppLayer = requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine)
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.UI(engine); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, HostUI& ui) { layer.UI(engine, ui); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) { layer.BeforeRender(engine, dt); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.AfterTick(engine); } ||
+                   requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine, float dt) { layer.AfterTick(engine, dt); } ||
                    requires(std::remove_cvref_t<T>& layer, COM::IEngine& engine) { layer.Stop(engine); };
 
 // Application is compiled into zahlen_application (a static/source consumer
@@ -60,6 +64,19 @@ class ZHLN_STATIC_API Application {
     // typed ErrorCode and never starts an engine. Borrowed state must outlive Run.
     auto BeforeEngineCreate(std::function<std::expected<void, ErrorCode>()> prepare) -> Application& {
         _prepare = std::move(prepare);
+        return *this;
+    }
+
+    // Stop cleanly after `frames` completed rendered frames (0: unlimited).
+    auto MaxFrames(uint32_t frames) noexcept -> Application& {
+        _maxFrames = frames;
+        return *this;
+    }
+
+    // Expose `--frames <uint32>` on the CLI schema, overriding MaxFrames() for
+    // that CLI invocation (0: unlimited).
+    auto WithFrameLimit() noexcept -> Application& {
+        _bindFrameLimit = true;
         return *this;
     }
 
@@ -149,6 +166,23 @@ class ZHLN_STATIC_API Application {
                     return static_cast<Stored*>(state)->BeforeRender(engine, dt);
             };
         }
+        if constexpr (requires(Stored& l, COM::IEngine& engine, float dt) { l.AfterTick(engine, dt); }) {
+            slot.afterTick = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->AfterTick(engine, dt))>) {
+                    static_cast<Stored*>(state)->AfterTick(engine, dt);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->AfterTick(engine, dt);
+            };
+        } else if constexpr (requires(Stored& l, COM::IEngine& engine) { l.AfterTick(engine); }) {
+            slot.afterTick = [](void* state, COM::IEngine& engine, float) -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<decltype(static_cast<Stored*>(state)->AfterTick(engine))>) {
+                    static_cast<Stored*>(state)->AfterTick(engine);
+                    return {};
+                } else
+                    return static_cast<Stored*>(state)->AfterTick(engine);
+            };
+        }
         if constexpr (requires(Stored& l, COM::IEngine& engine) { l.Stop(engine); }) {
             slot.stop = [](void* state, COM::IEngine& engine) { static_cast<Stored*>(state)->Stop(engine); };
         }
@@ -163,9 +197,52 @@ class ZHLN_STATIC_API Application {
         return *this;
     }
 
+    // Runs once after each completed rendered frame (after layer AfterTick hooks).
+    auto AfterTick(std::nullptr_t) noexcept -> Application& {
+        _afterTick = {};
+        return *this;
+    }
+
+    template <typename PostFrame>
+        requires(!std::same_as<std::remove_cvref_t<PostFrame>, std::nullptr_t> &&
+                 std::copy_constructible<std::decay_t<PostFrame>> &&
+                 (std::invocable<std::decay_t<PostFrame>&, COM::IEngine&> ||
+                  std::invocable<std::decay_t<PostFrame>&, COM::IEngine&, float>))
+    auto AfterTick(PostFrame&& callback) -> Application& {
+        using Stored = std::decay_t<PostFrame>;
+        if constexpr (requires(const Stored& fn) { static_cast<bool>(fn); }) {
+            if (!callback) {
+                _afterTick = {};
+                return *this;
+            }
+        }
+        if constexpr (std::invocable<Stored&, COM::IEngine&, float>) {
+            _afterTick = [fn = Stored(std::forward<PostFrame>(callback))](COM::IEngine& engine, float dt) mutable
+                -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<std::invoke_result_t<Stored&, COM::IEngine&, float>>) {
+                    std::invoke(fn, engine, dt);
+                    return {};
+                } else {
+                    return std::invoke(fn, engine, dt);
+                }
+            };
+        } else {
+            _afterTick = [fn = Stored(std::forward<PostFrame>(callback))](COM::IEngine& engine, float) mutable
+                -> std::expected<void, ErrorCode> {
+                if constexpr (std::is_void_v<std::invoke_result_t<Stored&, COM::IEngine&>>) {
+                    std::invoke(fn, engine);
+                    return {};
+                } else {
+                    return std::invoke(fn, engine);
+                }
+            };
+        }
+        return *this;
+    }
+
     // System-driven apps need no per-frame callable. All paths publish the
     // canonical EngineConfig, whether or not CLI arguments were used.
-    [[nodiscard]] auto Run() const -> AppRunResult { return RunConfigured(_config, {}); }
+    [[nodiscard]] auto Run() const -> AppRunResult { return RunConfigured(_config, {}, _maxFrames); }
     [[nodiscard]] auto Run(std::span<char* const> args) const -> AppRunResult { return RunFromCLI(_config, args, {}); }
 
     // Adapter for main(int argc, char* argv[]). Reject malformed C arguments
@@ -183,7 +260,7 @@ class ZHLN_STATIC_API Application {
     template <typename GameLogic>
         requires(std::invocable<GameLogic&, COM::IEngine&> || std::invocable<GameLogic&, COM::IEngine&, float>)
     [[nodiscard]] auto Run(GameLogic&& logic) const -> AppRunResult {
-        return RunConfigured(_config, BindLogic(logic));
+        return RunConfigured(_config, BindLogic(logic), _maxFrames);
     }
 
     template <typename GameLogic>
@@ -204,13 +281,14 @@ class ZHLN_STATIC_API Application {
   private:
     struct LayerSlot {
         // Shared ownership keeps the existing copyable Application API and
-        // leaves no virtual dispatch in any of the four lifecycle phases.
+        // leaves no virtual dispatch in any lifecycle phase.
         std::shared_ptr<void> state;
         std::expected<void, ErrorCode> (*start)(void*, COM::IEngine&, HostUI&)       = nullptr;
         std::expected<void, ErrorCode> (*tick)(void*, COM::IEngine&, float)          = nullptr;
         std::expected<void, ErrorCode> (*ui)(void*, COM::IEngine&, HostUI&)          = nullptr;
         std::expected<void, ErrorCode> (*beforeRender)(void*, COM::IEngine&, float)  = nullptr;
-        void (*stop)(void*, COM::IEngine&)        = nullptr;
+        std::expected<void, ErrorCode> (*afterTick)(void*, COM::IEngine&, float)     = nullptr;
+        void (*stop)(void*, COM::IEngine&)                                           = nullptr;
     };
 
     using Update = std::function<std::expected<void, ErrorCode>(COM::IEngine&, float)>;
@@ -234,15 +312,18 @@ class ZHLN_STATIC_API Application {
         }
     }
 
-    auto RunConfigured(const EngineConfig& config, const Update& update) const -> AppRunResult;
+    auto RunConfigured(const EngineConfig& config, const Update& update, uint32_t maxFrames) const -> AppRunResult;
     auto RunFromCLI(EngineConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult;
 
-    EngineConfig                                 _config;
+    EngineConfig                                    _config;
     std::function<std::expected<void, ErrorCode>()> _prepare;
-    std::function<void(COM::IEngine&)>                    _start;
-    std::vector<std::function<void(COM::IEngine&)>>       _installers;
-    ConfigCli                                        _cli;
+    std::function<void(COM::IEngine&)>              _start;
+    Update                                          _afterTick;
+    std::vector<std::function<void(COM::IEngine&)>> _installers;
+    ConfigCli                                       _cli;
     std::vector<LayerSlot>                          _layers;
+    uint32_t                                        _maxFrames      = 0;
+    bool                                            _bindFrameLimit = false;
 };
 
 [[nodiscard]] inline auto App(EngineConfig config = {}) -> Application {

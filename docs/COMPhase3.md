@@ -5,34 +5,30 @@ entire application/sample/plugin tree has been migrated.
 
 ## Migrated executable
 
-`app/cube.cpp` now uses `ZHLN::COM::App`, `IAssetLibrary` and
-`IGraphicsDevice`. It does not include the concrete `Engine`, capability
-facades, `PrefabFactory`, `Application`, or `HostRunner`. Its CMake target links
-only `zahlen_engine` plus the host-owned CLI and screenshot libraries (and
-those libraries' normal dependencies). Reflection is enabled explicitly for
-this consumer rather than inherited through Application.
+`app/cube.cpp` spawns a single cube via `ZHLN::COM::App` and `IAssetLibrary`,
+delegating host CLI flags and optional PNG capture to `ZHLN::COM::RunApp`
+(`app/include/Zahlen/COM/Host.hpp`). It does not include the concrete `Engine`,
+capability facades, `PrefabFactory`, `Application`, or `HostRunner`. Its CMake
+target links only `zahlen_engine` plus the host-owned CLI and screenshot
+libraries (and those libraries' normal dependencies). Reflection is enabled
+explicitly for this consumer rather than inherited through Application.
 
-The no-argument behavior is still a window containing a generated cube. CLI
-controls were added for reproducible host/capture testing:
+The no-argument behavior is still a window containing a generated cube. Standard
+COM host flags are provided by `COM::RunApp`:
 
 ```sh
 zahlen_cube --help
 zahlen_cube --headless --frames 10
 zahlen_cube --headless --frames 2 --capture cube.png
-zahlen_cube --headless --empty-scene --frames 2 --width 64 --height 48 --capture empty.png
 ```
 
-`--empty-scene` deliberately skips procedural mesh/BLAS creation. It is not a
-renderer fallback or a workaround applied to production rendering. It allows
-the consumer lifecycle/capture path to be exercised on the known VM driver.
-
-`--frames` requests exit after that many completed frames (zero means
-interactive). Capture with no explicit frame limit defaults to one completed
-frame. Capture happens in the pre-Tick callback, never before the first
-rendered frame. `RequestClose` is consumed by the next event pass, so a final
-Tick may occur after the request. Missing captures, spawn errors, tick errors,
-and file-write errors give a failing process exit code. Help/version and
-invalid CLI values are handled before engine creation.
+`--frames` stops after that many completed frames via `COM::App::MaxFrames`
+(zero means interactive). Capture with no explicit frame limit defaults to one
+completed frame and runs in `Screenshot::CaptureLayer::AfterTick` immediately
+after the target frame renders. Missing captures, tick errors, and file-write
+errors give a failing process exit code; help/version and invalid CLI values are
+handled before engine creation. Empty-scene COM host lifecycle/capture coverage
+lives in `tests/extras/TestScreenshot.cpp`.
 
 ## COM capture consumer
 
