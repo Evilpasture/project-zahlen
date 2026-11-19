@@ -4,7 +4,7 @@
 #include "TTYBackend.hpp"
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/Window.hpp>
+#include <window/Window.hpp>
 #include <algorithm>
 
 #ifdef __linux__

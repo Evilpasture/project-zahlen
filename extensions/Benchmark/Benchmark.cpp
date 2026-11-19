@@ -4,14 +4,9 @@
 // extensions/Benchmark/Benchmark.cpp
 #include <Benchmark/Benchmark.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -42,7 +37,7 @@ inline constexpr float  kFloorHalfHeight = 0.5f;
 // Where body `index` of the workload starts, in metres. The lattice is
 // continuous across SpawnWorkload() calls -- each batch continues where the
 // last stopped -- so growing a run does not restack it.
-[[nodiscard]] auto LatticePosition(size_t index) noexcept -> JPH::Vec3 {
+[[nodiscard]] auto LatticePosition(size_t index) noexcept -> FVec3 {
     const auto  width  = static_cast<float>(kLatticeWidth);
     const float column = static_cast<float>(index % kLatticeWidth) - (width * 0.5f);
     const float row    = static_cast<float>((index / kLatticeWidth) % kLatticeWidth) - (width * 0.5f);
@@ -50,13 +45,13 @@ inline constexpr float  kFloorHalfHeight = 0.5f;
 
     // The first layer sits one spacing up, i.e. clear of the floor slab whose
     // top face is the origin plane.
-    return JPH::Vec3 {column * kLatticeSpacing, (layer + 1.0f) * kLatticeSpacing, row * kLatticeSpacing};
+    return FVec3 {column * kLatticeSpacing, (layer + 1.0f) * kLatticeSpacing, row * kLatticeSpacing};
 }
 
 // The config a workload of this size needs, never smaller than what the caller
 // asked for. See the header for why this exists at all.
 [[nodiscard]] auto RaisedFor(const PhysicsConfig& physCfg, size_t entityCount) noexcept -> PhysicsConfig {
-    const auto needed = std::min<uint64_t>(static_cast<uint64_t>(entityCount) + LogicBenchmark::kBodyReserve, UINT32_MAX);
+    const auto needed = std::min<uint64_t>(static_cast<uint64_t>(entityCount) + LogicBenchmark::kBodyReserve + 1ULL, UINT32_MAX);
 
     PhysicsConfig raised = physCfg;
     raised.maxBodies     = static_cast<uint32_t>(std::max<uint64_t>(raised.maxBodies, needed));
@@ -83,20 +78,22 @@ LogicBenchmark::LogicBenchmark() {
     m_history.reserve(kHistoryCapacity);
 }
 
-LogicBenchmark::~LogicBenchmark() = default;
+LogicBenchmark::~LogicBenchmark() { Reset(); }
 
 auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& physCfg) -> bool {
     Reset();
 
     const PhysicsConfig config = RaisedFor(physCfg, initialEntityCount);
 
-    auto world = World::Create(config);
+    auto chain = COM::InChain(config);
+    auto world = COM::CreateLogicWorldRef(chain.Head());
     if (!world) {
         ZHLN::LogError("[Bench] world creation failed; no benchmark is running: {}", world.error());
         return false;
     }
 
     m_world = std::move(world.value());
+
     // The ceiling is what the PhysicsSystem was built for, less the reserve the
     // header documents. Spawning is bounded by this rather than by Jolt's own
     // refusal, which comes back as a silently invalid body.
@@ -118,24 +115,16 @@ auto LogicBenchmark::SpawnFloor() -> void {
         return;
     }
 
-    auto&                physics = m_world->GetPhysics();
-    const JPH::ShapeRefC slab    = physics.GetOrCreateShape(Physics::ShapeType::Box, kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent);
-    if (slab == nullptr) {
-        ZHLN::LogWarning("[Bench] the floor shape could not be created; the workload will fall through the world.");
+    auto*                  physics = m_world->Simulation();
+    Physics::BoxShapeDesc  slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
+    Physics::RigidBodyPose pose {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, .motionType = Physics::MotionType::Static};
+    auto                   chain = COM::InChain(slab, pose);
+    auto                   body  = physics->CreateRigidBody(chain.Head());
+    if (!body.HasValue() || body.value == Physics::BodyID::Null())
         return;
-    }
-
-    // A slab rather than a Jolt plane: a plane is infinite, and the workload is
-    // meant to land on a surface whose contacts cost what any other surface's
-    // do.
-    m_world->GetRegistry().Create(
-        Components::PhysicsComponent {
-            .physicsID = physics.CreateRigidBody(
-                slab, {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Static, Layers::ID::NON_MOVING
-            ),
-            .isStatic = true
-        }
-    );
+    auto*        entities = m_world->Entities();
+    const Entity e        = entities->CreateEntity();
+    entities->Attach(e, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
     ++m_liveBodies;
 }
 
@@ -144,14 +133,9 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         return;
     }
 
-    auto&                registry = m_world->GetRegistry();
-    auto&                physics  = m_world->GetPhysics();
-    const JPH::ShapeRefC cube     = physics.GetOrCreateShape(Physics::ShapeType::Box, kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent);
-    if (cube == nullptr) {
-        ZHLN::LogWarning("[Bench] the workload shape could not be created; no bodies were spawned.");
-        return;
-    }
-
+    auto*                 registry = m_world->Entities();
+    auto*                 physics  = m_world->Simulation();
+    Physics::BoxShapeDesc cube {.halfExtents = {kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent}};
     size_t spawned = 0;
     for (; spawned < count; ++spawned) {
         if (m_liveBodies >= m_bodyCeiling) {
@@ -165,12 +149,16 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
             break;
         }
 
-        const JPH::Vec3 position = LatticePosition(m_spawnedCubes);
-        const auto      handle   = physics.CreateRigidBody(cube, position, {0.0f, 0.0f, 0.0f, 1.0f}, JPH::EMotionType::Dynamic, Layers::ID::MOVING);
-
-        const Entity entity = registry.Create();
-        registry.Add(entity, Components::TransformComponent {.position = position});
-        registry.Add(entity, Components::PhysicsComponent {.physicsID = handle, .isStatic = false});
+        const FVec3 position = LatticePosition(m_spawnedCubes);
+        Physics::RigidBodyPose pose {.position = position.Cast<double>(), .motionType = Physics::MotionType::Dynamic};
+        auto                   chain = COM::InChain(cube, pose);
+        auto                   body  = physics->CreateRigidBody(chain.Head());
+        if (!body.HasValue() || body.value == Physics::BodyID::Null())
+            break;
+        const Entity entity = registry->CreateEntity();
+        registry->Attach(entity, Components::TransformComponent {.position = position});
+        registry->Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+        m_entities.push_back(entity);
         ++m_spawnedCubes;
         ++m_liveBodies;
     }
@@ -185,32 +173,32 @@ void LogicBenchmark::Step(float fixedDt) {
         return;
     }
 
-    auto& physics  = m_world->GetPhysics();
-    auto& registry = m_world->GetRegistry();
+    auto* physics  = m_world->Simulation();
+    auto* registry = m_world->Entities();
 
     const TickTimer::time_point begin = TickTimer::now();
 
-    physics.Step(fixedDt);
+    if (!m_world->Advance(fixedDt).HasValue())
+        return;
 
-    // The per-entity half of a game loop's tick: read every body's transform
-    // back out of physics and write it into the ECS. It walks the component
-    // set in dense order -- the same walk an archetype query does -- and each
-    // iteration is a real SoA lookup plus a Jolt handle decode, so the timing
-    // tracks the entity count instead of a loop a compiler could fold away.
+    // The per-entity half of a game loop: scalar COM lookups and physics
+    // readback into engine-owned typed ECS storage, in spawn order. This
+    // intentionally measures the scalar boundary. No bulk map or registry
+    // escape is introduced without profiling.
     size_t bodies = 0;
-    for (const Entity entity: registry.GetEntitiesWith<Components::PhysicsComponent>()) {
-        const auto physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
+    for (const Entity entity: m_entities) {
+        const auto physicsComponent = registry->Get<Components::PhysicsComponent>(entity);
         if (!physicsComponent || physicsComponent->isStatic || physicsComponent->physicsID == Physics::BodyID::Null()) {
             continue;
         }
         ++bodies;
 
-        const auto position = physics.BodyPosition(physicsComponent->physicsID);
-        if (!position) {
+        const auto position = physics->BodyPosition(physicsComponent->physicsID);
+        if (!position.HasValue()) {
             continue;
         }
-        if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = static_cast<JPH::Vec3>(*position);
+        if (auto transform = registry->Get<Components::TransformComponent>(entity)) {
+            transform->position = position.value.Cast<float>();
         }
     }
 
@@ -225,7 +213,10 @@ void LogicBenchmark::Step(float fixedDt) {
     m_metrics.avgTickTimeMs += (tickMilliseconds - m_metrics.avgTickTimeMs) / static_cast<float>(m_metrics.totalTicks);
     m_metrics.totalTimeSec        = m_clock.WallTimeSinceStart() - m_runStartSeconds;
     m_metrics.entityCount         = bodies;
-    m_metrics.activePhysicsBodies = physics.GetActiveBodyCount();
+    COM::LogicWorldInfo info {};
+    auto                output = COM::OutChain(info);
+    if (m_world->GetInfo(output.Head()).HasValue())
+        m_metrics.activePhysicsBodies = info.activePhysicsBodies;
 
     if (m_history.size() == kHistoryCapacity) {
         m_history.erase(m_history.begin());
@@ -234,12 +225,10 @@ void LogicBenchmark::Step(float fixedDt) {
 }
 
 void LogicBenchmark::Reset() {
-    // The world owns every body it holds: dropping it destroys the Jolt bodies
-    // through the PhysicsComponents and releases its Jolt registration, so
-    // there is nothing left to unwind by hand here.
-    m_world.reset();
+    m_entities.clear();
+    m_world = {};
 
-    m_metrics         = BenchmarkMetrics {};
+    m_metrics         = Metrics {};
     m_runStartSeconds = 0.0;
     m_liveBodies      = 0;
     m_spawnedCubes    = 0;
@@ -248,7 +237,7 @@ void LogicBenchmark::Reset() {
     m_history.clear();
 }
 
-auto LogicBenchmark::GetMetrics() const noexcept -> const BenchmarkMetrics& {
+auto LogicBenchmark::GetMetrics() const noexcept -> const Metrics& {
     return m_metrics;
 }
 
@@ -257,11 +246,11 @@ auto LogicBenchmark::GetTickHistory() const noexcept -> const std::vector<float>
 }
 
 auto LogicBenchmark::HasWorld() const noexcept -> bool {
-    return m_world != nullptr;
+    return static_cast<bool>(m_world);
 }
 
-auto LogicBenchmark::GetWorld() noexcept -> World& {
-    return *m_world;
+auto LogicBenchmark::GetWorld() noexcept -> COM::ILogicWorld* {
+    return m_world.Get();
 }
 
 } // namespace ZHLN::Bench

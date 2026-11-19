@@ -101,15 +101,15 @@ PRESENTATION_TYPE_RE = re.compile(r"\bPresentationTarget\b")
 # The public headers that may name the seam type at all: the low-level renderer
 # that takes one, and the two producers that hand it to the kernel privately.
 PRESENTATION_TYPE_ALLOWED_IN = {
-    "include/Zahlen/Render/RenderContext.hpp",
-    "include/Zahlen/Window/Window.hpp",
-    "include/Zahlen/Window/PlatformHost.hpp",
+    "src/render/RenderContext.hpp",
+    "src/window/Window.hpp",
+    "src/window/PlatformHost.hpp",
 }
 # Headers where the type may only appear where it is not public: the forward
 # declaration, and the private friends/members that read a producer's target.
 PRESENTATION_PRIVATE_ONLY_IN = {
-    "include/Zahlen/Window/Window.hpp",
-    "include/Zahlen/Window/PlatformHost.hpp",
+    "src/window/Window.hpp",
+    "src/window/PlatformHost.hpp",
 }
 FORWARD_DECLARATION_RE = re.compile(r"^class\s+PresentationTarget\s*;$")
 ACCESS_SPECIFIER_RE = re.compile(r"^(public|private|protected)\s*:")
@@ -121,8 +121,10 @@ ACCESS_SPECIFIER_RE = re.compile(r"^(public|private|protected)\s*:")
 # door, so both are rejected outright.
 FRIEND_CLASS_RE = re.compile(r"\bfriend\s+(?:class|struct)\s+([A-Za-z_]\w*)")
 CLASS_FRIENDS_ALLOWED_IN = {
-    "include/Zahlen/Window/Window.hpp": frozenset({"PlatformHost"}),
-    "include/Zahlen/Window/PlatformHost.hpp": frozenset({"Kernel"}),
+    "src/window/Window.hpp": frozenset({"PlatformHost"}),
+    # KernelSession is the engine's session -- the same single caller the rule
+    # was written for, under the name it has now that it is private.
+    "src/window/PlatformHost.hpp": frozenset({"KernelSession"}),
 }
 
 
@@ -176,8 +178,8 @@ def presentation_violations(relative: str, text: str) -> list[str]:
             line = text.count("\n", 0, match.start()) + 1
             violations.append(
                 f"{relative}:{line} grants class friendship to '{match.group(1)}'. Window may friend only PlatformHost, and "
-                "PlatformHost only Kernel: the engine resolves a frame's target through the host, never through an engine "
-                "class reachable from a window."
+                "PlatformHost only the engine's session: the engine resolves a frame's target through the host, never "
+                "through an engine class reachable from a window."
             )
 
     for match in PRESENTATION_ACCESSOR_RE.finditer(text):

@@ -1,0 +1,12 @@
+# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The configuration TUI. Optional: the engine builds without Python at all
+# (cmake/PythonProbe.cmake), and cmake/Kconfig.cmake is inert unless a .config
+# is pointed at it. This exists so `pip install -r` has something to read.
+#
+#   pip install -r scripts/requirements-menuconfig.txt
+#
+# On Windows, menuconfig also needs the curses binding:
+#   pip install windows-curses
+kconfiglib>=14.1.0

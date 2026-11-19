@@ -27,6 +27,7 @@
 
 #if ZHLN_REFLECTION_AVAILABLE
 #include <meta>
+#include <string>
 #include <vector>
 #endif
 
@@ -67,6 +68,44 @@ struct TypeReflector {
     }
 };
 
+// display_string_of is implementation-defined: some compilers include scope,
+// others return only the final identifier. Walk parents to obtain the scope
+// instead. Specializations have no identifier, so retain their display spelling
+// but remove only scope separators outside template argument lists.
+consteval auto LocalTypeSpelling(std::meta::info info) -> std::string_view {
+    if (std::meta::has_identifier(info)) {
+        return std::meta::identifier_of(info);
+    }
+    if (std::meta::is_namespace(info)) {
+        return "(anonymous namespace)";
+    }
+    const std::string_view display = std::meta::display_string_of(info);
+    size_t start = 0;
+    unsigned depth = 0;
+    for (size_t i = 0; i + 1 < display.size(); ++i) {
+        if (display[i] == '<') ++depth;
+        else if (display[i] == '>' && depth != 0) --depth;
+        else if (depth == 0 && display[i] == ':' && display[i + 1] == ':') {
+            start = i + 2;
+            ++i;
+        }
+    }
+    return display.substr(start);
+}
+
+consteval auto QualifiedTypeSpelling(std::meta::info info) -> std::string {
+    std::vector<std::string_view> parts;
+    for (auto current = info; current != ^^::; current = std::meta::parent_of(current)) {
+        parts.push_back(LocalTypeSpelling(current));
+    }
+    std::string name;
+    for (size_t i = parts.size(); i != 0; --i) {
+        if (!name.empty()) name += "::";
+        name += parts[i - 1];
+    }
+    return name;
+}
+
 }
 
 template <typename R>
@@ -99,22 +138,33 @@ consteval auto DefineStaticString(std::string_view sv) -> std::string_view {
     return std::string_view(span.data(), span.size());
 }
 
-// identifier_of() answers the unqualified spelling. display_string_of()
-// keeps the enclosing namespaces, which a fully qualified name needs.
+// Presentation-only compiler spelling. Never use this for canonical IDs.
 template <typename T>
 consteval auto QualifiedTypeName() -> std::string_view {
     return DefineStaticString(std::meta::display_string_of(std::meta::dealias(^^std::remove_cvref_t<T>)));
 }
 
+// Component names need actual declaring scopes even when a compiler's display
+// spelling omits them. The returned view has static storage.
+template <typename T>
+consteval auto ScopedTypeName() -> std::string_view {
+    constexpr auto info = std::meta::dealias(^^std::remove_cvref_t<T>);
+    if constexpr (std::meta::is_class_type(info) || std::meta::is_enum_type(info)) {
+        return DefineStaticString(TemplatedDetail::QualifiedTypeSpelling(info));
+    } else {
+        return DefineStaticString(std::meta::display_string_of(info));
+    }
+}
+
 #else
 
-// The stub era is over: no ZHLN_ALLOW_REFLECTION_STUBS exemption, no
-// __PRETTY_FUNCTION__ name extraction. A translation unit that reaches
-// here lacks -freflection and says so.
+// The single place a reflection-free build is turned away. Reflection changes
+// struct layout, so there is no useful degraded mode: the headers below carry no
+// stand-ins, and a TU that reaches here would be reading empty ones.
 static_assert(ReflectionAvailable,
               "ZHLN requires C++26 static reflection (-freflection); "
               "give the CMake target zahlen_enable_reflection(<target>)");
 
-#endif
+#endif  // ZHLN_REFLECTION_AVAILABLE
 
 }

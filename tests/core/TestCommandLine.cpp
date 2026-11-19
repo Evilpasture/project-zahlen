@@ -83,7 +83,6 @@ struct CommandLineTestSuite {
             ZHLN::Test::ExpectTrue(config.headless);
             ZHLN::Test::ExpectEq(config.validationMode, ZHLN::ValidationMode::Off);
             ZHLN::Test::ExpectEq(config.fpsLimit, 144u);
-            ZHLN::Test::ExpectTrue(config.enableFallbackScene);
             return {};
         }
     };

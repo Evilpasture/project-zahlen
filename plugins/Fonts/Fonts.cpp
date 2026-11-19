@@ -10,30 +10,24 @@
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
 // scripts/fontbm.sh). Legacy AngelCode text format is not supported.
 // JSON is parsed via the existing plugins/json library (simdjson wrapper).
-// Zero globals in this high-level module -- loader state lives on the heap
-// and is owned via core's BakedFontLoader hook user pointer.
+// Explicit host-owned decode and upload; no installed loader or teardown hook.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
-
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Image/Image.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#include <json/JSON.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <json/JSON.hpp>
+#include <limits>
 #include <memory>
 #include <string>
-
-#include <stb_image.h>
 
 namespace fs = std::filesystem;
 
@@ -42,18 +36,6 @@ namespace ZHLN::Fonts {
 namespace {
 
 // --- Byte sources: mounted paks first, then unpacked files -------------------
-
-auto ReadVirtual(AssetManager& mgr, std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    AssetLoadRequest req;
-    req.assetID = HashAssetPath(path);
-    if (!mgr.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
-        return std::nullopt;
-    }
-    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
-    std::vector<uint8_t> out(bytes, bytes + req.outSize);
-    mgr.FreeMemory(req);
-    return out;
-}
 
 auto ReadUnpacked(std::string_view path) -> std::optional<std::vector<uint8_t>> {
     std::ifstream file(fs::path(path), std::ios::binary | std::ios::ate);
@@ -72,15 +54,6 @@ auto ReadUnpacked(std::string_view path) -> std::optional<std::vector<uint8_t>> 
     return out;
 }
 
-auto ReadBytes(const BakedFontSource& source, AssetManager* assets, std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    if (assets != nullptr) {
-        if (auto out = ReadVirtual(*assets, path)) {
-            return out;
-        }
-    }
-    return source.allowUnpackedFallback ? ReadUnpacked(path) : std::nullopt;
-}
-
 auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string {
     const size_t slash = base.find_last_of('/');
     std::string joined = (slash == std::string_view::npos) ? std::string() : std::string(base.substr(0, slash + 1));
@@ -91,41 +64,46 @@ auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string
 // --- Resolution -------------------------------------------------------------
 
 struct LoaderInstance {
-    AssetManager* assets = nullptr;
-    BakedFontSource       source;
-    GUI::BakedFontAsset   cache;
-    bool                  attempted = false;
+    COM::IAssetLibrary* library = nullptr;
+    BakedFontSource             source;
 };
 
+auto ReadBytes(const LoaderInstance& self, std::string_view path) -> std::optional<std::vector<uint8_t>> {
+    // Mounted paks first, then an unpacked file: the capability answers the
+    // virtual path space, which is the whole of what this loader needs.
+    if (self.library) {
+        const auto size = self.library->ReadVirtualFile(path, {});
+        if (size.HasValue() && size.value && size.value <= std::vector<uint8_t>().max_size()) {
+            std::vector<uint8_t> bytes(static_cast<size_t>(size.value));
+            const auto copy = self.library->ReadVirtualFile(path, bytes);
+            if (copy.HasValue() && copy.value == bytes.size()) return bytes;
+        }
+    }
+    return self.source.allowUnpackedFallback ? ReadUnpacked(path) : std::nullopt;
+}
+
 auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    const auto fntBytes = ReadBytes(self.source, self.assets, self.source.fntPath);
+    const auto fntBytes = ReadBytes(self, self.source.fntPath);
     if (!fntBytes) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
     const std::string_view text(reinterpret_cast<const char*>(fntBytes->data()), fntBytes->size());
-    auto descExp = ParseFontBMDescriptor(text);
+    auto descExp = ParseBMDescriptor(text);
     if (!descExp.has_value()) {
         return std::unexpected(descExp.error());
     }
 
     const std::string pagePath = JoinVirtualDir(self.source.fntPath, descExp->pageFile);
-    const auto        pngBytes = ReadBytes(self.source, self.assets, pagePath);
-    if (!pngBytes) {
-        return std::unexpected(FontBMError::BadPage);
+    const auto        pngBytes = ReadBytes(self, pagePath);
+    if (!pngBytes || pngBytes->size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return std::unexpected(BMError::BadPage);
     }
 
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    unsigned char* pixels = stbi_load_from_memory(pngBytes->data(), static_cast<int>(pngBytes->size()), &width, &height, &channels, 4);
-    if (pixels == nullptr) {
-        return std::unexpected(FontBMError::BadPage);
-    }
-
-    const std::span<const uint8_t> rgba(pixels, static_cast<size_t>(width) * height * 4);
-    auto bakedExp = AssembleBakedFont(*descExp, rgba);
-    stbi_image_free(pixels);
+    const auto image = Image::DecodeRGBA8(*pngBytes);
+    if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight)
+        return std::unexpected(BMError::BadPage);
+    auto bakedExp = AssembleBakedFont(*descExp, image->pixels);
 
     if (!bakedExp.has_value()) {
         return std::unexpected(bakedExp.error());
@@ -135,9 +113,9 @@ auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
 }
 
 auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    const auto zfontBytes = ReadBytes(self.source, self.assets, self.source.zfontPath);
+    const auto zfontBytes = ReadBytes(self, self.source.zfontPath);
     if (!zfontBytes) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
     auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes->data()), zfontBytes->size()));
     if (!bakedExp.has_value()) {
@@ -146,72 +124,26 @@ auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
     return std::move(*bakedExp);
 }
 
-auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
-    auto& self = *static_cast<LoaderInstance*>(user);
-    if (!self.attempted) {
-        self.attempted = true;
-        self.cache = GUI::BakedFontAsset {};
-
-        // Try BMFont pair first, but only warn if file exists and fails to parse
-        bool fntExists = ReadBytes(self.source, self.assets, self.source.fntPath).has_value();
-        if (fntExists) {
-            if (auto bm = LoadFontBMPair(self); bm.has_value()) {
-                self.cache = std::move(*bm);
-                Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
-            } else {
-                // The code formats as its annotated message, so the line says
-                // what went wrong, not which number it was.
-                LogWarning("BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, bm.error());
-                if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
-                    self.cache = std::move(*cooked);
-                    Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
-                } else {
-                    // Only warn for cooked font if it exists
-                    if (ReadBytes(self.source, self.assets, self.source.zfontPath)) {
-                        LogWarning("Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
-                    }
-                }
-            }
-        } else {
-            // BMFont not present, try cooked font silently
-            bool zExists = ReadBytes(self.source, self.assets, self.source.zfontPath).has_value();
-            if (zExists) {
-                if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
-                    self.cache = std::move(*cooked);
-                    Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
-                } else {
-                    LogWarning("Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
-                }
-            }
-        }
-    }
-    if (self.cache.coverage.empty()) {
-        return false;
-    }
-    out = self.cache;
-    return true;
-}
-
 } // anonymous namespace
 
 // --- Public parser entry (JSON only, reflection) -----------------------------
 
-auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
+auto ParseBMDescriptor(std::string_view text) -> std::expected<BMDescriptor, ErrorCode> {
     if (text.size() >= 3 && text.substr(0, 3) == "BMF") {
-        return std::unexpected(FontBMError::UnsupportedFormat);
+        return std::unexpected(BMError::UnsupportedFormat);
     }
 
     auto docExp = ReflectJSON::Parse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
     if (!docExp.has_value()) {
-        return std::unexpected(FontBMError::Malformed);
+        return std::unexpected(BMError::Malformed);
     }
     const auto& doc = *docExp;
 
     if (doc.pages.empty() || doc.chars.empty() || doc.common.scaleW == 0 || doc.common.scaleH == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
-    FontBMDescriptor desc;
+    BMDescriptor desc;
     // BMFont encodes `size` as a negative number when it means "pixel height of
     // the bake" -- which is what fontbm writes for `--font-size 32`, the flag
     // scripts/fontbm.sh passes: the descriptor says -32. Everything downstream
@@ -229,7 +161,7 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     desc.pageFile    = doc.pages.front().file;
     desc.chars.reserve(doc.chars.size());
     for (const auto& c : doc.chars) {
-        FontBMChar ch;
+        BMChar ch;
         ch.id       = c.id;
         ch.x        = c.x;
         ch.y        = c.y;
@@ -242,19 +174,19 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     }
 
     if (desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
     return desc;
 }
 
-auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rgba8)
+auto AssembleBakedFont(const BMDescriptor& desc, std::span<const uint8_t> rgba8)
     -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     const size_t texels = static_cast<size_t>(desc.atlasWidth) * desc.atlasHeight;
     if (rgba8.size() != texels * 4) {
-        return std::unexpected(FontBMError::BadPage);
+        return std::unexpected(BMError::BadPage);
     }
     if (desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
+        return std::unexpected(BMError::MissingMetrics);
     }
 
     bool anyAlpha = false;
@@ -273,7 +205,7 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
     }
     const uint64_t span = static_cast<uint64_t>(lastCodepoint) - firstCodepoint + 1;
     if (span > 4096) {
-        return std::unexpected(FontBMError::Malformed);
+        return std::unexpected(BMError::Malformed);
     }
 
     float gapAdvance = desc.fontSize * 0.5f;
@@ -305,7 +237,7 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
         const uint32_t w = static_cast<uint32_t>(ch.width);
         const uint32_t h = static_cast<uint32_t>(ch.height);
         if ((x0 + w > desc.atlasWidth) || (y0 + h > desc.atlasHeight)) {
-            return std::unexpected(FontBMError::BadPage);
+            return std::unexpected(BMError::BadPage);
         }
 
         for (uint32_t row = 0; row < h; ++row) {
@@ -332,114 +264,6 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
     return asset;
 }
 
-// --- Install (zero globals in this high-level module) -----------------------
-// State lives on the heap and is owned via core's hook user pointer.
-// No namespace-scope globals.
-
-void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source) {
-    // Retire previous heap instance, if any, via core's current user pointer.
-    // Ownership is held by a unique_ptr even across the C-style void* seam
-    // (R.11: avoid explicit new/delete, R.20: unique_ptr represents ownership).
-    if (GUI::HasBakedFontLoader()) {
-        if (void* old = GUI::GetBakedFontLoaderUser(); old != nullptr) {
-            std::unique_ptr<LoaderInstance> oldOwner{static_cast<LoaderInstance*>(old)};
-        }
-    }
-
-    auto instance = std::make_unique<LoaderInstance>();
-    instance->assets = &assets;
-    instance->source = source;
-    instance->cache = {};
-    instance->attempted = false;
-    GUI::InstallBakedFontLoader(&LoaderFn, instance.release());
-}
-
-void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
-    InstallBakedFontLoader(ZHLN::EngineAccess::AssetsOf(engine), source);
-    engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
-        if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
-            std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
-        }
-        GUI::UninstallBakedFontLoader();
-        (void)e;
-    });
-}
-
-auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
-    // Install the loader hook first so fontbm pairs are resolvable.
-    InstallBakedFontLoader(assets, source);
-
-    // Cooked 'FNT0' out of the mounted paks (the shipped path: data/base.pak).
-    // Silent on failure here -- whether a container exists is the pak's business.
-    const auto loadCookedContainer = [&]() -> std::expected<AssetID, ErrorCode> {
-        auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath);
-        if (!res.has_value()) {
-            return std::unexpected(res.error());
-        }
-        Log("[Fonts] Baked font resolved from the cooked container '{}'.", source.zfontPath);
-        return *res;
-    };
-
-    // The fontbm pair, read here rather than through the hook: the hook falls
-    // back to the cooked container internally, which would put the placeholder
-    // back in play and make the source of the bake unknowable. The hook stays
-    // installed regardless -- core consults it on its own resolution path.
-    // AssetCache owns lifetime; the factory does the parsing. Cached as
-    // kDefaultFontAssetID so the atlas lookup finds it without touching disk.
-    const auto loadFontbmPair = [&]() -> std::expected<AssetID, ErrorCode> {
-        LoaderInstance self;
-        self.assets = &assets;
-        self.source = source;
-
-        auto baked = LoadFontBMPair(self);
-        if (!baked.has_value()) {
-            // MissingMetrics means the descriptor is not there at all (the normal
-            // case for a stock virtual path); anything else means it was read and
-            // rejected, which the caller cannot see from the failed return alone.
-            if (!baked.error().Is(FontBMError::MissingMetrics)) {
-                LogWarning("BMFont descriptor '{}' failed to parse ({}).", source.fntPath, baked.error());
-            }
-            return std::unexpected(baked.error());
-        }
-        if (baked->coverage.empty()) {
-            return std::unexpected(FontBMError::MissingMetrics);
-        }
-        auto heap = std::make_unique<GUI::BakedFontAsset>(*baked);
-        assets.CacheFont(GUI::kDefaultFontAssetID, std::move(heap));
-        GUI::SetDefaultBakedFont(*baked);
-        Log("[Fonts] Baked font resolved from the fontbm pair '{}' ({} glyphs).", source.fntPath, baked->glyphs.size());
-        return GUI::kDefaultFontAssetID;
-    };
-
-    // The order is the source's to choose (see BakedFontSource::preferFontbmPair):
-    // zcook always packs the Font8x8 placeholder at fonts/default.zfont, so a
-    // host that names its own pair would otherwise be handed the placeholder.
-    // Whichever source is tried last is the one whose failure goes back to the
-    // caller -- each source logs its own reason as it is tried, so the return
-    // only has to name the condition, not re-describe it.
-    if (source.preferFontbmPair) {
-        auto pair = loadFontbmPair();
-        if (pair.has_value()) {
-            return *pair;
-        }
-        auto cooked = loadCookedContainer();
-        if (!cooked.has_value()) {
-            return std::unexpected(cooked.error());
-        }
-        return *cooked;
-    }
-
-    auto cooked = loadCookedContainer();
-    if (cooked.has_value()) {
-        return *cooked;
-    }
-    auto pair = loadFontbmPair();
-    if (!pair.has_value()) {
-        return std::unexpected(pair.error());
-    }
-    return *pair;
-}
-
 auto VendoredDefaultFontSource() -> BakedFontSource {
     // The vendored font is a loose file in the checkout, not a pak entry, so it
     // is located through the engine's data-file search rather than the virtual
@@ -461,21 +285,28 @@ auto VendoredDefaultFontSource() -> BakedFontSource {
     return {};
 }
 
-auto LoadFontAsset(Engine& engine, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
-    auto res = LoadFontAsset(ZHLN::EngineAccess::AssetsOf(engine), source);
-    if (res.has_value()) {
-        // Ensure teardown still cleans the loader hook; InstallBakedFontLoader(Engine&)
-        // already added a hook, but LoadFontAsset(AssetManager&) installed via
-        // the lower overload without teardown. Add it here if not already.
-        engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
-            if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
-                std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
-            }
-            GUI::UninstallBakedFontLoader();
-            (void)e;
-        });
+auto LoadBakedFont(COM::IAssetLibrary* assets, const BakedFontSource& source) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
+    LoaderInstance self;
+    self.library = assets;
+    self.source = source;
+    if (source.preferFontbmPair) {
+        auto pair = LoadFontBMPair(self);
+        if (pair) return pair;
+        return LoadCookedFont(self);
     }
-    return res;
+    auto cooked = LoadCookedFont(self);
+    if (cooked) return cooked;
+    return LoadFontBMPair(self);
+}
+
+auto UploadFontAtlas(COM::IGraphicsDevice& graphics, const GUI::BakedFontAsset& asset) -> std::expected<FontAtlas, ErrorCode> {
+    if (!asset.atlasWidth || !asset.atlasHeight || uint64_t(asset.atlasWidth) * asset.atlasHeight != asset.coverage.size())
+        return std::unexpected(BMError::BadPage);
+    std::vector<uint32_t> rgba(asset.coverage.size());
+    for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = (uint32_t(asset.coverage[i]) << 24) | 0x00ffffffu;
+    const auto texture = graphics.CreateTexture("BakedFontAtlas", std::as_bytes(std::span(rgba)), {asset.atlasWidth, asset.atlasHeight}, false);
+    if (!texture.HasValue()) return std::unexpected(texture.error);
+    return GUI::BuildFontAtlas(asset, texture.value);
 }
 
 } // namespace ZHLN::Fonts

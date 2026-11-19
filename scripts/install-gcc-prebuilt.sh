@@ -22,7 +22,6 @@ trap 'printf "error: exit %s at line %s\n  command: %s\n" "$?" "${LINENO}" "${BA
 
 GCC_VERSION=${1:-16.2.0}
 PREFIX=${2:-/opt/gcc16}
-GCC_MIN=${GCC_MIN:-16.1.1}
 BASE_URL=${GCC_BASE_URL:-https://conda.anaconda.org/conda-forge}
 
 log() { printf '  %s\n' "$*"; }
@@ -265,17 +264,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Verify what was installed. The last check is the one that matters: trunk GCC
-# 16 refused Jolt's `static const StaticArray<Vec3, 1026>` member, and a
-# compiler that cannot compile that header cannot build this engine.
+# Verify what was installed. The version is reported, not gated on: GCC PR
+# c++/125280 was fixed by a cherry-pick onto releases/gcc-16, a branch that
+# reports 16.1.1 on both sides of the commit, so the number cannot answer
+# "can this compiler build the engine". The construct can, and does, below.
 # ---------------------------------------------------------------------------
 step "verify"
 version=$("${PREFIX}/bin/g++-16" -dumpfullversion -dumpversion 2>/dev/null | head -1)
-if [ -z "${version}" ] || ! printf '%s\n%s\n' "${GCC_MIN}" "${version}" | sort -V -C; then
-    echo "error: installed gcc is ${version:-unknown}, need >= ${GCC_MIN}" >&2
+if [ -z "${version}" ]; then
+    echo "error: ${PREFIX}/bin/g++-16 does not report a version" >&2
     exit 1
 fi
-log "g++-16: ${version} (>= ${GCC_MIN})"
+log "g++-16: ${version}"
 
 probe="${work}/probe"
 mkdir -p "${probe}"
@@ -323,11 +323,30 @@ case "${as_path}" in
         ;;
 esac
 
-# Two behavioural checks are deliberately *not* here: whether this gcc accepts
-# Jolt's static-member pattern, and whether its assembler accepts the `.base64`
-# directive. Both are questions about a compiler, and cmake/
-# ToolchainCapabilities.cmake now asks them at configure time, with the flags the
-# build actually uses -- so they answer for the engine, for every toolchain
+# This script downloads a compiler, so it is the one place where asking before
+# CMake does is worth it: a bad download should fail here, not in someone
+# else's configure. The flags are the ones the build uses, because the bug is
+# reflection-specific -- without -freflection every compiler passes.
+step "verify: GCC PR c++/125280 (Jolt's incomplete static member)"
+repro="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../cmake/probes/pr125280-static-member.cpp"
+if [ ! -f "${repro}" ]; then
+    echo "error: missing ${repro}" >&2
+    exit 1
+fi
+if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${repro}"; then
+    {
+        echo "error: the installed g++-16 (${version}) hits GCC PR c++/125280 and cannot"
+        echo "       compile JoltPhysics. Fixed in r17-498, cherry-picked to"
+        echo "       releases/gcc-16 as r16-8903 on 2026-05-13."
+    } >&2
+    exit 1
+fi
+log "compiles the PR 125280 construct under -freflection"
+
+# One behavioural check is deliberately *not* here: whether the assembler
+# accepts the `.base64` directive. That is a question about a compiler, and
+# cmake/ToolchainCapabilities.cmake asks it at configure time, with the flags the
+# build actually uses -- so it answers for the engine, for every toolchain
 # package, and for anyone who points CMake at this prefix, not only for the
 # machine that ran this script. What stays here is what configure cannot see:
 # that this prefix's own binutils is the one that answers, which is the `as`

@@ -2,46 +2,50 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Animation/Context.hpp>
+#include <Animation/Components.hpp>
+#include <Zahlen/Common.h>
+#include <Zahlen/ECS/Entity.hpp>
 
-#include "AnimationContext.hpp"
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/SystemAccess.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+namespace ZHLN::COM {
+struct IEngine;
+struct IEntities;
+struct IAssetLibrary;
+struct IGraphicsDevice;
+struct ISimulation;
+} // namespace ZHLN::COM
 
-namespace ZHLN {
+namespace ZHLN::Animation {
 
-class AssetManager;
-class Engine;
-class PoseUploadQueue;
+ZHLN_STATIC_API void Sync(COM::IEntities& entities, Context& anim);
 
-namespace Animation {
+ZHLN_STATIC_API void PublishResults(
+    COM::IEntities&         entities,
+    const Context& anim,
+    bool (*skipRigidNodes)(const COM::IEntities&, Entity) = nullptr);
 
-struct AnimationSyncSystem {
-    static void Update(
-        ECS::Query<
-            Components::AnimatorComponent&, const Components::SkeletalMeshComponent, const Components::HierarchyComponent,
-            const Components::RagdollComponent> query,
-        ECS::ResMut<AnimationContext>           anim
-    );
+ZHLN_STATIC_API void Step(
+    COM::IEntities&           entities,
+    Context&         anim,
+    float                     dt,
+    const COM::IAssetLibrary* assets     = nullptr,
+    COM::IGraphicsDevice*     graphics   = nullptr,
+    COM::ISimulation*         simulation = nullptr,
+    PoseUploadCallback        sink       = {});
+
+ZHLN_STATIC_API void Step(COM::IEngine& engine, Context& anim, float dt);
+
+struct Layer {
+    Context context;
+
+    void Tick(COM::IEngine& engine, float dt) {
+        Step(engine, context, dt);
+    }
+
+    void Stop(COM::IEngine&) noexcept {
+        context.Clear();
+        context.InvalidateRigs();
+    }
 };
 
-struct AnimationStepSystem {
-    static void Update(
-        ECS::Query<
-            Components::AnimatorComponent&, const Components::HierarchyComponent, const Components::MeshComponent,
-            const Components::SkeletalMeshComponent, Components::MorphTargetComponent&, Components::TransformComponent&> query,
-        ECS::ResMut<AnimationContext>                                                                                    anim,
-        ECS::Res<AssetManager>                                                                                           assets,
-        ECS::ResMut<PoseUploadQueue>                                                                                     poseUploads,
-        FrameDt                                                                                                          frameDt
-    );
-};
-
-[[nodiscard]] auto Describe() noexcept -> Module;
-void               Install(Engine& engine);
-
-} // namespace Animation
-} // namespace ZHLN
+} // namespace ZHLN::Animation

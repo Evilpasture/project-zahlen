@@ -1,14 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <expected>
+#include <vector>
 
 namespace {
 
@@ -36,10 +37,11 @@ struct RenderComputeTestSuite {
                 return std::unexpected(RenderComputeTestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
-            const auto bakeRes = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
-            if (!ZHLN::Test::ExpectTrue(bakeRes.has_value())) {
+            std::vector<uint32_t> pixels(128u * 128u, 0xFF804020u);
+            const auto bakeRes = rc.CreateTexture(std::span<const uint32_t> {pixels}, ZHLN::Extent2D {128u, 128u}, false);
+            if (!ZHLN::Test::ExpectTrue(bakeRes.HasValue())) {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
 
@@ -50,9 +52,9 @@ struct RenderComputeTestSuite {
                                    *bakeRes != ZHLN::SystemTextures::FlatNormal);
 
             rc.UnloadTexture(*bakeRes);
-            // A fresh bake must not resurrect the retired handle.
-            const auto rebaked = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
-            if (!ZHLN::Test::ExpectTrue(rebaked.has_value() && *rebaked != *bakeRes)) {
+            // A fresh upload must not resurrect the retired handle.
+            const auto rebaked = rc.CreateTexture(std::span<const uint32_t> {pixels}, ZHLN::Extent2D {128u, 128u}, false);
+            if (!ZHLN::Test::ExpectTrue(rebaked.HasValue() && *rebaked != *bakeRes)) {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
             rc.UnloadTexture(*rebaked);

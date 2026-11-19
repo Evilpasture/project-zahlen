@@ -524,7 +524,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
                     return CreatePerFrame(
-                        allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+                        allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly,
+                        ctx.AccelerationStructureScratchAlignment()
                     );
                 })
                 .and_then([&](auto&& tsb) {

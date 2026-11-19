@@ -32,8 +32,8 @@ enum class LogSeverity : uint8_t { Debug, Info, Warning, Error };
 
 using LogObserver = void (*)(LogSeverity severity, std::string_view message) noexcept;
 
-void SetLogLevel(LogLevel level) noexcept;
-auto GetLogLevel() noexcept -> LogLevel;
+ZHLN_API void SetLogLevel(LogLevel level) noexcept;
+ZHLN_API auto GetLogLevel() noexcept -> LogLevel;
 
 ZHLN_API void SetLogObserver(LogObserver observer) noexcept;
 ZHLN_API auto GetLogObserver() noexcept -> LogObserver;
@@ -45,9 +45,9 @@ ZHLN_API auto GetLogObserver() noexcept -> LogObserver;
 // shows RUN/PASS/FAIL instead of engine chatter. Not nestable: a second
 // BeginLogCapture clears the buffer and restarts. Panics bypass suppression
 // (InternalPanic cancels the capture first), so a fatal always prints.
-void BeginLogCapture(bool suppressOutput = true);
-auto EndLogCapture() -> std::vector<std::string>;
-void CancelLogCapture();
+ZHLN_API void BeginLogCapture(bool suppressOutput = true);
+ZHLN_API auto EndLogCapture() -> std::vector<std::string>;
+ZHLN_API void CancelLogCapture();
 
 struct LogContext {
     std::string_view     fmt;
@@ -61,12 +61,14 @@ struct LogContext {
     }
 };
 
-void              InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message);
-[[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message);
+// Reached from the inline Log<>/Panic<> templates, so the definition has to be
+// exported even though no consumer calls it by name.
+ZHLN_API void              InternalWriteLog(LogChannel channel, LogSeverity severity, const char* file, uint32_t line, std::string_view message);
+[[noreturn]] ZHLN_API void InternalPanic(const char* file, uint32_t line, std::string_view message);
 
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, LogSeverity Severity = LogSeverity::Info, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
-    if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
+    if (GetLogLevel() < Level) {
         if (const LogObserver observer = GetLogObserver(); observer != nullptr) {
             std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
             observer(Severity, formatted);
@@ -74,7 +76,7 @@ void Log(LogContext ctx, Args&&... args) {
         return;
     }
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
-    InternalWriteLog(static_cast<uint8_t>(Channel), static_cast<uint8_t>(Severity), ctx.loc.file_name(), ctx.loc.line(), formatted);
+    InternalWriteLog(Channel, Severity, ctx.loc.file_name(), ctx.loc.line(), formatted);
 }
 
 // Severity shorthands. Prefer these over hand-written "ERROR: "/"WARNING: "

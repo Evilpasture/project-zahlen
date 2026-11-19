@@ -4,14 +4,11 @@
 // gameplay/ALife/ALifeComponents.hpp
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "Types.hpp"
 #include <Zahlen/ECS/Entity.hpp>
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Jolt/Math/DVec3.h>
-#include <Jolt/Math/Real.h>
-#include <Jolt/Math/Vec3.h>
 #include <cstdint>
 
 namespace ZHLN::ALife {
@@ -20,7 +17,7 @@ struct ALifeComponent {
     using enum ALife::State;
     using enum ALife::TaskType;
 
-    JPH::RVec3   position     = JPH::RVec3::sZero();
+    DVec3   position     = DVec3::Zero();
     ALife::State state        = Offline;
     uint32_t     current_node = ALife::INVALID_GRAPH_NODE;
     uint32_t     target_node  = ALife::INVALID_GRAPH_NODE;

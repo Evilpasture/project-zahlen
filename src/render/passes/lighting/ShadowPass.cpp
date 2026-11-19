@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/passes/lighting/ShadowPass.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "render/Renderer.hpp"
 #include "render/features/ShadowAtlas.hpp"
 #include "render/features/ShadowRenderer.hpp"
 #include "render/passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 
 namespace ZHLN::Passes {
 
@@ -62,8 +63,8 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         }
 
         const uint32_t  vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
-        const JPH::Mat44 world      = drawCmd.instanceData.world;
-        const JPH::Vec3  meshPos    = world.GetTranslation();
+        const Mat4x4 world      = drawCmd.instanceData.world;
+        const FVec3  meshPos    = {world[0, 3], world[1, 3], world[2, 3]};
         const float     radius      = drawCmd.instanceData.cullRadius;
 
         bool inAnyCascade = false;
@@ -91,8 +92,8 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
             const auto& light = ctx.renderer.mappedLights[static_cast<size_t>(placement.lightIndex)];
 
-            const JPH::Vec3 lightPos {light.position};
-            const float     distToLightSq = (meshPos - lightPos).LengthSq();
+            const FVec3 lightPos {light.position};
+            const float     distToLightSq = (meshPos - lightPos).LengthSquared();
             const float     maxRange      = light.range + radius;
             if (distToLightSq > maxRange * maxRange) {
                 continue;

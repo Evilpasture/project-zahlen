@@ -1,7 +1,11 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
+# The option is the whole test. This used to also require `TARGET zahlen_extras`,
+# an aggregate nothing linked (see the root CMakeLists note); keeping a target
+# check for a target that no longer exists would make this whole directory
+# silently unreachable.
+if(NOT ZHLN_BUILD_EXTRAS)
     return()
 endif()
 
@@ -94,14 +98,14 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_animation
-    zahlen_gltf
+    zahlen_animation zahlen_locomotion zahlen_procedural_animation
+    zahlen_gltf_assets
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extern/cgltf
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
@@ -175,10 +179,22 @@ zahlen_add_extras_group(Extras_Application
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestApplication.cpp
     TestScreenshot.cpp
+    TestPlugin.cpp
 )
-target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot)
-zahlen_register_extras_test(Extras_Application)
+# Deliberately does NOT link zahlen_ui, zahlen_freecam, or either plugin .so:
+# TestPlugin loads libzahlen_plugin_freecam and libzahlen_plugin_screenshot
+# dynamically through ZHLN::App::LoadPlugin / --plugin at runtime.
+target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot zahlen_image)
+set_property(TARGET Extras_Application APPEND PROPERTY BUILD_RPATH "${CMAKE_BINARY_DIR}/lib")
+if(TARGET zahlen_plugin_freecam)
+    add_dependencies(Extras_Application zahlen_plugin_freecam)
+endif()
+if(TARGET zahlen_plugin_screenshot)
+    add_dependencies(Extras_Application zahlen_plugin_screenshot)
+endif()
+zahlen_register_extras_test(Extras_Application TIMEOUT 180)
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
+zahlen_add_extras_build_alias(Extras_Application TestPlugin)
 
 # --- Grouped Non-Module Extras Binaries (6 links instead of 20) ---
 
@@ -189,13 +205,11 @@ zahlen_add_extras_group(Extras_Socket
     TestLocalStream.cpp
     TestDiscordRPC.cpp
 )
-# zahlen_discord_engine is PUBLIC zahlen_discord_rpc; TestDiscordRPC.cpp calls
 # Discord::Encode/DecodeRpcFrame, which the rpc target owns.
 target_link_libraries(Extras_Socket PRIVATE
     zahlen_engine
     zahlen_socket
     zahlen_discord_rpc
-    zahlen_discord_engine
     zahlen_serialization
 )
 zahlen_register_extras_test(Extras_Socket)
@@ -206,6 +220,10 @@ zahlen_add_extras_build_alias(Extras_Socket TestDiscordRPC)
 # 2. Extras_UI: UI schema, widgets, console debugger, and baked font loader.
 zahlen_add_extras_group(Extras_UI
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
+    TestFontAsset.cpp
+    TestGUIContext.cpp
+    TestTextEdit.cpp
+    TestHostUI.cpp
     TestUITree.cpp
     TestWidgets.cpp
     TestConsoleDebugger.cpp
@@ -213,12 +231,14 @@ zahlen_add_extras_group(Extras_UI
 )
 target_link_libraries(Extras_UI PRIVATE
     zahlen_engine
+    zahlen_application
+    zahlen_ui
     zahlen_ui_schema
     zahlen_widgets
     zahlen_console
     zahlen_fonts
 )
-zahlen_register_extras_test(Extras_UI)
+zahlen_register_extras_test(Extras_UI TIMEOUT 180)
 zahlen_add_extras_build_alias(Extras_UI TestUITree)
 zahlen_add_extras_build_alias(Extras_UI TestWidgets)
 zahlen_add_extras_build_alias(Extras_UI TestConsoleDebugger)
@@ -228,20 +248,17 @@ zahlen_add_extras_build_alias(Extras_UI TestBakedFontLoader)
 zahlen_add_extras_group(Extras_Simulation
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestTwoBoneIK.cpp
-    TestTerrainLifecycle.cpp
     TestALife.cpp
     TestDataModel.cpp
 )
 target_link_libraries(Extras_Simulation PRIVATE
     zahlen_engine
-    zahlen_skeletal_animation
-    zahlen_terrain
+    zahlen_animation
     zahlen_alife
     zahlen_datamodel
 )
 zahlen_register_extras_test(Extras_Simulation)
 zahlen_add_extras_build_alias(Extras_Simulation TestTwoBoneIK)
-zahlen_add_extras_build_alias(Extras_Simulation TestTerrainLifecycle)
 zahlen_add_extras_build_alias(Extras_Simulation TestALife)
 zahlen_add_extras_build_alias(Extras_Simulation TestDataModel)
 
@@ -257,7 +274,6 @@ target_link_libraries(Extras_Serialization PRIVATE
     zahlen_engine
     zahlen_serialization
     zahlen_lua
-    zahlen_ragdoll_authoring
 )
 add_dependencies(Extras_Serialization zcook)
 zahlen_register_extras_test(Extras_Serialization
@@ -307,6 +323,12 @@ if(TARGET zahlen_http)
     endif()
 endif()
 
+# Capability-only authoring must link without the legacy BSP/Interaction archive.
+zahlen_add_extras_group(Extras_BSPAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBSPAssets.cpp TestBSPWorldAssets.cpp)
+target_link_libraries(Extras_BSPAssets PRIVATE zahlen_bsp_assets zahlen_signal zahlen_command_line)
+zahlen_register_extras_test(Extras_BSPAssets)
+
 # 6. Extras_BSP: BSP interactive entities, VMT/VTF materials, static props, StudioModel, VRAD/lighting.
 zahlen_add_extras_group(Extras_BSP
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
@@ -316,7 +338,7 @@ zahlen_add_extras_group(Extras_BSP
     TestBSPStudioModel.cpp
     TestBSPLighting.cpp
 )
-# zahlen_interaction is PUBLIC zahlen_engine and PUBLIC zahlen_bsp, and the
+# zahlen_interaction is PUBLIC zahlen_engine and PUBLIC zahlen_bsp_assets, and the
 # character components these suites touch are PODs reached through
 # ZHLN_OPTIONAL_INCLUDE_ROOTS. No BSP or Character:: symbol is called directly.
 target_link_libraries(Extras_BSP PRIVATE
@@ -347,7 +369,7 @@ if(TARGET zahlen_project_light_lua)
     )
 
     # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/ReflectLua.hpp> and
-    # calls ReflectLua::LuaVm::Create / ExecuteString. It used to arrive only
+    # calls ReflectLua::Vm::Create / ExecuteString. It used to arrive only
     # through zahlen_project_light_lua's PUBLIC zahlen_lua, which is gone.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_lua
@@ -400,8 +422,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # suite references JPH symbols from its own object file rather than reaching
 # them through the engine's DT_NEEDED entry.
 target_link_libraries(${TARGET_NAME} PRIVATE
-    Jolt
-    zahlen_engine
+    zahlen_engine zahlen_ui
     zahlen_serialization
 )
 
@@ -433,6 +454,7 @@ zahlen_register_extras_test(${TARGET_NAME}
 set(TARGET_NAME TestScripting)
 zahlen_wrap_ztest_sources(_scripting_sources _scripting_files
     scripting/TestScriptBinder.cpp
+    scripting/TestCOMScriptLifetime.cpp
     scripting/TestScriptECSBridge.cpp
     scripting/TestScriptValueTypes.cpp
 )
@@ -521,3 +543,97 @@ if(TARGET zahlen_svg)
 endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/ProjectLightClientTests.cmake)
+
+zahlen_add_extras_group(Extras_GLTFAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestGLTFAssets.cpp)
+target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal zahlen_command_line)
+# ztest workers may run from a build/output directory, not the checkout root.
+target_compile_definitions(Extras_GLTFAssets PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+zahlen_register_extras_test(Extras_GLTFAssets TIMEOUT 180)
+
+
+# Scene orchestration is a consumer library; this executable links no native adapter.
+zahlen_add_extras_group(Extras_SceneAssets
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestSceneAssets.cpp)
+target_link_libraries(Extras_SceneAssets PRIVATE zahlen_scene zahlen_serialization zahlen_signal zahlen_command_line)
+zahlen_register_extras_test(Extras_SceneAssets POOL gpu LABELS GPU Extras)
+if(TARGET zahlen_scene_documents)
+    target_link_libraries(Extras_SceneAssets PRIVATE zahlen_scene_documents)
+    target_compile_definitions(Extras_SceneAssets PRIVATE ZHLN_TEST_SCENE_DOCUMENTS=1)
+endif()
+
+if(TARGET zahlen_freecam AND TARGET zahlen_camera)
+    zahlen_add_extras_group(Extras_CameraHosts
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCameraHosts.cpp TestFramePipeline.cpp)
+    target_link_libraries(Extras_CameraHosts PRIVATE zahlen_freecam zahlen_camera zahlen_application)
+    zahlen_register_extras_test(Extras_CameraHosts POOL gpu TIMEOUT 180 LABELS GPU Extras)
+endif()
+
+if(TARGET zahlen_fallback_scene)
+    zahlen_add_extras_group(Extras_FallbackHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestFallbackHost.cpp)
+    target_link_libraries(Extras_FallbackHost PRIVATE zahlen_fallback_scene zahlen_application)
+    zahlen_register_extras_test(Extras_FallbackHost POOL gpu LABELS GPU Extras)
+endif()
+
+# Real COM combat policy scenarios, also available without the optional GPU
+# test catalog. No native VFX modules or registry fixtures are linked.
+zahlen_add_extras_group(Extras_CombatHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp ../render/extras/TestCombatFX.cpp)
+set_target_properties(Extras_CombatHost PROPERTIES CXX_SCAN_FOR_MODULES ON)
+target_link_libraries(Extras_CombatHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_CombatHost POOL gpu LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_TerrainHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestTerrain.cpp)
+target_link_libraries(Extras_TerrainHost PRIVATE zahlen_terrain zahlen_vfx zahlen_scene zahlen_fallback_scene zahlen_application zahlen_screenshot)
+target_include_directories(Extras_TerrainHost PRIVATE ${PROJECT_SOURCE_DIR}/utils/scene)
+zahlen_register_extras_test(Extras_TerrainHost POOL gpu TIMEOUT 180 LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_LightningHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLightning.cpp)
+target_link_libraries(Extras_LightningHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_LightningHost POOL gpu LABELS "GPU;Extras;COM")
+
+zahlen_add_extras_group(Extras_ExplosionHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestExplosion.cpp)
+target_link_libraries(Extras_ExplosionHost PRIVATE zahlen_vfx)
+zahlen_register_extras_test(Extras_ExplosionHost POOL gpu LABELS "GPU;Extras;COM")
+
+if(TARGET zahlen_editor_session)
+    zahlen_add_extras_group(Extras_EditorHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestEditorHost.cpp)
+    target_link_libraries(Extras_EditorHost PRIVATE zahlen_editor_session zahlen_screenshot)
+    zahlen_register_extras_test(Extras_EditorHost POOL gpu LABELS "GPU;Extras;COM")
+endif()
+
+if(TARGET zahlen_benchmark)
+    zahlen_add_extras_group(Extras_LogicWorld
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestLogicWorld.cpp)
+    target_link_libraries(Extras_LogicWorld PRIVATE zahlen_benchmark)
+    zahlen_register_extras_test(Extras_LogicWorld LABELS "Extras;COM;CPU")
+endif()
+if(TARGET zahlen_benchmark_viewer)
+    zahlen_add_extras_group(Extras_BenchmarkHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestBenchmarkHost.cpp)
+    target_link_libraries(Extras_BenchmarkHost PRIVATE zahlen_benchmark_viewer zahlen_ui zahlen_screenshot)
+    zahlen_register_extras_test(Extras_BenchmarkHost POOL gpu LABELS "GPU;Extras;COM")
+endif()
+if(TARGET zahlen_console)
+    zahlen_add_extras_group(Extras_ConsoleHost
+        ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestConsoleHost.cpp)
+    target_link_libraries(Extras_ConsoleHost PRIVATE zahlen_console zahlen_scene zahlen_screenshot zahlen_ui)
+    zahlen_register_extras_test(Extras_ConsoleHost POOL gpu LABELS "GPU;Extras;COM")
+endif()
+
+# Engine-owned motor/playback controls: no native animation/controller dependency.
+zahlen_add_extras_group(Extras_RuntimeControls
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestRuntimeControls.cpp)
+target_link_libraries(Extras_RuntimeControls PRIVATE zahlen_gltf_assets zahlen_animation zahlen_application)
+zahlen_register_extras_test(Extras_RuntimeControls POOL gpu TIMEOUT 240 LABELS GPU Extras)
+
+# Capability-only character host: no native controller, Jolt or graph adapter.
+zahlen_add_extras_group(Extras_CharacterHost
+    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp TestCharacterController.cpp)
+target_link_libraries(Extras_CharacterHost PRIVATE zahlen_character_controller zahlen_application)
+zahlen_register_extras_test(Extras_CharacterHost POOL gpu LABELS GPU Extras)

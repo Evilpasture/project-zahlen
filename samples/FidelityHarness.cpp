@@ -33,38 +33,36 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/ConfigCli.hpp>
-#include <Signal/CrashHandler.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Math/Geometry2D.hpp>
-#include <Zahlen/Render/GraphicsSettings.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-
-// The optional layer targets this harness consumes. They remain independent of
-// Core. samples/CMakeLists.txt skips the sample when a required target is absent,
-// so these includes do not need target guards.
+#include <Animation/Context.hpp>
 #include <Animation/AnimationSystem.hpp>
+#include <Animation/Components.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
-#include <glTF/GLTFImporter.hpp>
+#include <Screenshot/Screenshot.hpp>
+#include <Signal/CrashHandler.hpp>
+#include <Zahlen/COM/AssetTypes.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/QualityPresets.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <glTF/GLTFAssets.hpp>
+#include <glTF/GLTFDocument.hpp>
 #include <json/JSONSchema.hpp>
 #include <netpbm/PpmEncoder.hpp>
-
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
 #include <array>
@@ -84,6 +82,8 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
 
 std::atomic<uint32_t> g_validationErrors {0};
 
@@ -257,47 +257,39 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
 // or zero when the parse or the spawn produced nothing. The prefab is cached by
 // `virtualPath` (the resolved model path, unique per asset in the suite), so
 // repeated imports of the same asset and options reuse the same entry.
-uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) {
-    // The suite specifies glTF emissive factors in linear radiometric units.
-    // Do not use the engine's 100x low-exposure presentation boost here: it
-    // drives bright green emitters into neutral tonemapping's desaturation.
-    // The default importer downsizes images to 1024 for runtime memory. Keep
-    // authored 2048px shoe/cloth normal and color textures in fidelity stills;
-    // the renderer's trilinear/aniso samplers select the right mip at a distance.
-    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        ZHLN::EngineAccess::RenderOf(engine), ZHLN::EngineAccess::AssetsOf(engine), bytes, virtualPath, virtualPath,
-        ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
+uint32_t ImportModel(ZHLN::COM::IEngine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath, std::vector<ZHLN::TextureID>& ownedTextures) {
+    auto doc = ZHLN::GLTF::Decode(
+        bytes, virtualPath, virtualPath,
+        ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048},
+        engine.Assets()
     );
-    if (!prefab) {
+    if (!doc) {
         ZHLN::Log("[Fidelity] '{}' is not a glTF this importer can read.", virtualPath);
         return 0;
     }
-
-    const size_t capacity = 1u + prefab->parts.size(); // root + parts; no unauthored virtual lights
-    std::vector<ZHLN::Entity> instances(capacity);
-    const uint32_t            written = ZHLN::PrefabFactory::InstantiatePrefab(
-        engine, *prefab,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position              = {0.0, 0.0, 0.0},
-            .createPhysics         = false,
-            .isAnimated            = !prefab->animations.empty(),
-            .emissiveVirtualLights = false,
-        },
-        instances.data(), static_cast<uint32_t>(instances.size())
-    );
-
-    // The generator's Filament stills never play a glTF animation. Keep the
-    // AnimatorComponent for static skinning/bind-pose evaluation, but disable
-    // the prefab factory's automatic first-clip playback. Otherwise our eight
-    // settle ticks advance "Individuals" in MorphStressTest: its first target
-    // lifts the yellow block while the untouched blocks stay level.
-    if (written > 0 && !prefab->animations.empty() &&
-        !ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
-            animator.currentTrackIdx = -1;
-        })) {
-        ZHLN::Log("[Fidelity] Animated prefab '{}' has no animator root.", virtualPath);
+    auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
+    if (!asset) {
+        ZHLN::Log("[Fidelity] '{}' failed to upload.", virtualPath);
         return 0;
     }
+    if (asset->ownsResources) {
+        ownedTextures.insert(ownedTextures.end(), asset->textures.begin(), asset->textures.end());
+    }
+
+    const size_t              capacity = 1u + doc->parts.size();
+    std::vector<ZHLN::Entity> instances(capacity);
+    const ZHLN::PrefabFactory::SpawnParams   params {
+        .position      = {0.0, 0.0, 0.0},
+        .createPhysics = false,
+        .isAnimated    = !doc->animations.empty(),
+    };
+    instances = engine.Assets()->Instantiate(asset->hash, params);
+    const auto written = static_cast<uint32_t>(instances.size());
+    if (written == 0) {
+        return 0;
+    }
+    // Rest pose, not track 0: animated fidelity scenarios capture the bind/rest pose.
+    engine.Entities()->Patch<ZHLN::Animation::AnimatorComponent>(instances.front(), [](auto& animator) { animator.currentTrackIdx = -1; });
     return written;
 }
 
@@ -316,26 +308,26 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
 // Sponza's eye *at* its target (radius 0), still looking into the scene.
 // Deriving the forward vector from target - eye would normalize zero there.
 void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
-    const float thetaRad = JPH::DegreesToRadians(scenario.orbit.theta);
-    const float phiRad   = JPH::DegreesToRadians(scenario.orbit.phi);
+    const float thetaRad = ZHLN::DegF {scenario.orbit.theta}.ToRadians().value;
+    const float phiRad   = ZHLN::DegF {scenario.orbit.phi}.ToRadians().value;
 
-    const JPH::Vec3 direction(
+    const FVec3 direction(
         std::sin(phiRad) * std::sin(thetaRad),
         std::cos(phiRad),
         std::sin(phiRad) * std::cos(thetaRad)
     );
 
-    const JPH::Vec3 target(scenario.target.x, scenario.target.y, scenario.target.z);
+    const FVec3 target(scenario.target.x, scenario.target.y, scenario.target.z);
     camera.position = target + (direction * scenario.orbit.radius);
-    camera.fov      = scenario.verticalFov;
+    camera.fov      = ZHLN::DegF{scenario.verticalFov};
     camera.nearZ    = 0.01f;
     camera.farZ     = 100.0f;
 
     // The view frame is -direction even when radius is zero and eye == target.
     // Decompose the orbit angles, not the eye-to-target displacement.
-    const JPH::Vec3 forward = -direction;
-    camera.pitch            = JPH::RadiansToDegrees(std::asin(forward.GetY()));
-    camera.yaw              = JPH::RadiansToDegrees(std::atan2(forward.GetZ(), forward.GetX()));
+    const FVec3 forward = -direction;
+    camera.pitch            = ZHLN::RadF{std::asin(forward.y)}.ToDegrees();
+    camera.yaw              = ZHLN::RadF{std::atan2(forward.z, forward.x)}.ToDegrees();
 }
 
 // ============================================================================
@@ -355,13 +347,13 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // conformance wants that 1:1, which is why it is the default. `--no-aa` is
 // only for checking the unfiltered coverage against the SMAA capture.
 //
-// No analytical sun. InitializeDefaultScene does not spawn one; the 180-intensity
+// No analytical sun. Engine::Create does not spawn one; the 180-intensity
 // value LightingSystem returns when none is authored is the procedural sky's
 // fill, and RenderSystem drops it while an environment map is set. StripSceneLights
 // removes anything a later spawn attaches (an emissive part becomes a point light).
 [[nodiscard]] auto MakeConformanceSettings(float ambientScale, bool noAA) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
-    gfx.ApplyPreset(ZHLN::QualityLevel::High);
+    ZHLN::ApplyPreset(gfx, ZHLN::QualityLevel::High);
 
     // Final blit: the generator's ACES_HILL_EXPOSURE_BOOST path (index 4 in
     // blit.slang). `exposure` remains 1.0; the curve applies the 1/0.6 boost.
@@ -380,7 +372,6 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     gfx.post.mode        = 0;
     gfx.post.giIntensity = 1.0f;
     gfx.post.enableSSR   = 0;
-    gfx.post.enableRTR   = 0;
 
     // The reference stills have antialiased geometry. SMAA smooths the final
     // scene edges, including alpha, without moving the camera or accumulating
@@ -411,99 +402,30 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 
 // Writes a GraphicsSettings back into the ECS editing surface the renderer's
 // collector reads every frame -- post/GI/environment on the global-settings
-// entity, shadows and ray tracing beside it, AA on the main camera. This is the
-// same write-back RemoteGLBSample performs, minus the studio fields; it is what
-// makes RenderSystem re-apply the conformance numbers each frame instead of the
-// engine defaults.
-//
-// InitializeDefaultScene already attached these components. Patch replaces the
-// stored value; Add is only the path where the component was never created.
-void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& gfx) {
-    auto&              registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity settings = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (settings == ZHLN::Entity::Null()) {
-        ZHLN::Log("[Fidelity] No global-settings entity; the render settings have nowhere to go.");
-        return;
-    }
-
-    const ZHLN::Components::PostProcessSettingsComponent post {
-        .giMode            = gfx.post.mode,
-        .aoRadius          = gfx.post.aoRadius,
-        .aoBias            = gfx.post.aoBias,
-        .aoPower           = gfx.post.aoPower,
-        .giIntensity       = gfx.post.giIntensity,
-        .giSamples         = gfx.post.giSamples,
-        .useLocalProbe     = gfx.environment.useLocalProbe,
-        .vignetteIntensity = gfx.post.vignetteIntensity,
-        .vignettePower     = gfx.post.vignettePower,
-        .glowIntensity     = gfx.post.glowIntensity,
-        .enableSSR         = gfx.post.enableSSR,
-        .enableRTR         = gfx.post.enableRTR,
-        .fullBright        = gfx.environment.fullBright,
-        .exposure          = gfx.post.exposure,
-        .bloomStrength     = gfx.post.bloomStrength,
-        .contrast          = gfx.post.contrast,
-        .saturation        = gfx.post.saturation,
-        .tonemapper        = gfx.post.tonemapper,
-        .colorFilter       = gfx.post.colorFilter,
-        .ambientExposure   = gfx.environment.ambientExposure,
-        .probeMin          = gfx.environment.probeMin,
-        .probeMax          = gfx.environment.probeMax,
-        .probePos          = gfx.environment.probePos,
-        .skyZenith         = gfx.environment.skyZenith,
-        .skyHorizon        = gfx.environment.skyHorizon,
-        .skyGround         = gfx.environment.skyGround,
-    };
-    if (!registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { pp = post; })) {
-        registry.Add(settings, post);
-    }
-
-    const ZHLN::Components::ShadowSettingsComponent shadows {
-        .shadowWidth      = gfx.shadows.width,
-        .shadowResolution = static_cast<int>(gfx.shadows.resolution),
-        .sunSize          = gfx.shadows.sunSize,
-    };
-    if (!registry.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [&](auto& shadow) { shadow = shadows; })) {
-        registry.Add(settings, shadows);
-    }
-
-    const ZHLN::Components::RayTracingSettingsComponent rays {.config = gfx.rayTracing};
-    if (!registry.Patch<ZHLN::Components::RayTracingSettingsComponent>(settings, [&](auto& rt) { rt = rays; })) {
-        registry.Add(settings, rays);
-    }
-
-    const ZHLN::Entity camera = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-    if (camera == ZHLN::Entity::Null()) {
-        return;
-    }
-    if (!registry.Patch<ZHLN::Components::AASettingsComponent>(camera, [&gfx](auto& aa) -> auto {
-            aa.state.mode                 = gfx.antiAliasing.mode;
-            aa.state.fxaaSubpix           = gfx.antiAliasing.fxaaSubpix;
-            aa.state.fxaaEdgeThreshold    = gfx.antiAliasing.fxaaEdgeThreshold;
-            aa.state.fxaaEdgeThresholdMin = gfx.antiAliasing.fxaaEdgeThresholdMin;
-        })) {
-        registry.Add(camera, ZHLN::Components::AASettingsComponent {.state = gfx.antiAliasing});
-    }
+// Hands the conformance settings to the device that owns them: one transition,
+// no per-field write-back.
+void ApplyGraphicsSettings(ZHLN::COM::IEngine& engine, const ZHLN::GraphicsSettings& gfx) {
+    engine.Graphics()->ApplySettings(gfx);
 }
 
 // Khronos fidelity is the environment and nothing else. Copy the handles
 // before marking: cleanup compacts the dense arrays the spans view. These are
 // normally data-only lights, but the Engine path also safely releases any
 // owners attached to a light entity.
-void StripSceneLights(ZHLN::Engine& engine) {
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto lightSpan = registry.GetEntitiesWith<ZHLN::Components::LightComponent>();
-    const auto sunSpan   = registry.GetEntitiesWith<ZHLN::Components::SunTagComponent>();
+void StripSceneLights(ZHLN::COM::IEngine& engine) {
+    auto&      entities  = *engine.Entities();
+    const auto lightSpan = entities.EntitiesWith<ZHLN::Components::LightComponent>();
+    const auto sunSpan   = entities.EntitiesWith<ZHLN::Components::SunTagComponent>();
     const auto lights    = std::vector<ZHLN::Entity>(lightSpan.begin(), lightSpan.end());
     const auto suns      = std::vector<ZHLN::Entity>(sunSpan.begin(), sunSpan.end());
     for (const ZHLN::Entity e: lights) {
-        ZHLN::DespawnEntity(engine, e);
+        engine.Entities()->Despawn(e);
     }
     for (const ZHLN::Entity e: suns) {
-        ZHLN::DespawnEntity(engine, e);
+        engine.Entities()->Despawn(e);
     }
     if (!lights.empty() || !suns.empty()) {
-        engine.ProcessPendingDestroy();
+        (void)0;
         ZHLN::Log("[Fidelity] Removed {} light(s) and {} sun tag(s). The panorama is the only light.", lights.size(), suns.size());
     }
 }
@@ -537,23 +459,23 @@ enum class DiagnosticCapture {
     return std::nullopt;
 }
 
-[[nodiscard]] bool ApplyDiagnosticCapture(ZHLN::Engine& engine, DiagnosticCapture mode) {
+[[nodiscard]] bool ApplyDiagnosticCapture(ZHLN::COM::IEngine& engine, DiagnosticCapture mode) {
     if (mode == DiagnosticCapture::None) {
         return true;
     }
 
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    auto renderer = engine.Graphics();
+    auto& entities = *engine.Entities();
+    auto& renderer = *engine.Graphics();
     uint32_t transmitting = 0;
     uint32_t opaque       = 0;
     uint32_t iridescent   = 0;
 
-    for (const ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-        const auto mesh = registry.Get<ZHLN::Components::MeshComponent>(e);
+    for (const ZHLN::Entity e: entities.EntitiesWith<ZHLN::Components::MeshComponent>()) {
+        const auto mesh = entities.Get<ZHLN::Components::MeshComponent>(e);
         if (!mesh) {
             return false;
         }
-        auto material = renderer.Material(mesh->materialAsset);
+        auto material = renderer.FindMaterial(mesh->materialAsset);
         if (!material) {
             ZHLN::Log("[Fidelity] Diagnostic cannot find a material for an imported mesh.");
             return false;
@@ -565,7 +487,7 @@ enum class DiagnosticCapture {
                 // Hiding the entire forward draw preserves the opaque scene and
                 // the actual occlusion of the olives; it does not pretend that
                 // zeroing transmission turns glass into a missing surface.
-                if (!registry.Patch<ZHLN::Components::MeshComponent>(e, [](auto& part) { part.flags |= ZHLN::DrawFlags::Hidden; })) {
+                if (!entities.Patch<ZHLN::Components::MeshComponent>(e, [](auto& part) { part.flags |= ZHLN::DrawFlags::Hidden; })) {
                     return false;
                 }
             } else if (mode == DiagnosticCapture::TransmissionCoverage) {
@@ -640,7 +562,6 @@ auto main(int argc, char* argv[]) -> int {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
         .appName = "Zahlen :: Fidelity Harness",
         .vsync = false,
-        .enableFallbackScene = false,
     };
 
     HarnessConfig config;
@@ -708,7 +629,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig, appHandlers);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
+        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
@@ -747,19 +668,19 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::SetLogObserver(&OnFidelityLog);
 
-    auto engineRes = ZHLN::Engine::Create(engineConfig);
+    ZHLN::Platform::Init();
+    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
+    auto engine = std::move(*engineRes);
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->FocusWindow(engine->PrimaryWindow());
     }
 
-    ZHLN::Animation::Install(*engine);
-    engine->InitializeDefaultScene();
+    ZHLN::Animation::Context animCtx {};
 
     ZHLN::Log(
         "[Fidelity] '{}': model='{}', lighting='{}', {}x{}, orbit(theta={:.1f}, phi={:.1f}, radius={:.3f}), fov={:.1f}.",
@@ -774,8 +695,7 @@ auto main(int argc, char* argv[]) -> int {
     // The harness owns the camera, so core's WASD free-cam must come off the
     // camera entity or the two write the same transform every frame.
     {
-        auto&              registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity camera   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camera = engine->Entities()->SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
         if (camera != ZHLN::Entity::Null()) {
         }
         // Before the import, so a light the default scene attached cannot
@@ -800,42 +720,49 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
-        auto assets = engine->Assets();
-        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(ZHLN::EngineAccess::AssetsOf(*engine).VFS(), scenario.lighting);
+        auto& assets = *engine->Assets();
+        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets, scenario.lighting);
         if (!decoded) {
-            ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
+            ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, ZHLN::Error(decoded.error()).Message());
             return EXIT_FAILURE;
         }
-        if (!assets.CacheEnvironmentImage(scenario.lighting, std::move(*decoded))) {
+        const ZHLN::COM::EnvironmentImageCacheInfo cacheInfo {
+            .key          = {scenario.lighting.data(), scenario.lighting.size()},
+            .extent       = {decoded->width, decoded->height},
+            .rgba         = decoded->rgba,
+            .lightingRgba = decoded->lightingRgba,
+            .sun          = decoded->sun ? ZHLN::COM::Option<ZHLN::EnvironmentSun>(*decoded->sun) : ZHLN::COM::Option<ZHLN::EnvironmentSun>{},
+            .contentHash  = decoded->contentHash,
+        };
+        if (!assets.CacheEnvironmentImage(ZHLN::COM::InChain(cacheInfo)).HasValue()) {
             ZHLN::Log("[Fidelity] Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
             return EXIT_FAILURE;
         }
-        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settingsEnt == ZHLN::Entity::Null()) {
-            ZHLN::Log("[Fidelity] No global-settings entity; the environment has nowhere to go.");
-            return EXIT_FAILURE;
-        }
+        // The environment map is scene content and carries itself: RenderSystem
+        // finds it by component, not by which entity holds it.
         ZHLN::Components::EnvironmentMapComponent env;
         env.source.assign(scenario.lighting);
         env.renderSkybox = scenario.renderSkybox;
-        registry.Add(settingsEnt, std::move(env));
+        engine->Entities()->Spawn(std::move(env));
     }
 
-    auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!cameraComp) {
+    bool cameraValid = false;
+    const bool hasCamera = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>( [&](ZHLN::Components::CameraComponent& cameraComp) {
+        ZHLN::Camera& camera = cameraComp.camera;
+        SetFidelityCamera(camera, scenario);
+        cameraValid = std::isfinite(camera.position.x) && std::isfinite(camera.position.y) && std::isfinite(camera.position.z) &&
+                      std::isfinite(camera.yaw.value) && std::isfinite(camera.pitch.value);
+    });
+    if (!hasCamera) {
         ZHLN::Log("[Fidelity] No main camera entity for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
-    ZHLN::Camera& camera = cameraComp->camera;
-    SetFidelityCamera(camera, scenario);
-    if (!std::isfinite(camera.position.GetX()) || !std::isfinite(camera.position.GetY()) || !std::isfinite(camera.position.GetZ()) ||
-        !std::isfinite(camera.yaw) || !std::isfinite(camera.pitch)) {
+    if (!cameraValid) {
         ZHLN::Log("[Fidelity] Invalid camera for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
 
-    engine->Graphics().SetResolution(
+    engine->Graphics()->SetResolution(
         ZHLN::Extent2D {
             .width  = scenario.dimensions.width * kDevicePixelRatio,
             .height = scenario.dimensions.height * kDevicePixelRatio,
@@ -848,7 +775,8 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[Fidelity] Model load failed; nothing to render.");
         return EXIT_FAILURE;
     }
-    if (ImportModel(*engine, *modelBytes, scenario.model) == 0) {
+    std::vector<ZHLN::TextureID> ownedTextures;
+    if (ImportModel(*engine, *modelBytes, scenario.model, ownedTextures) == 0) {
         ZHLN::Log("[Fidelity] Model import produced no geometry; nothing to render.");
         return EXIT_FAILURE;
     }
@@ -866,16 +794,17 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     for (int frame = 0; frame < 8 && engine->IsRunning(); ++frame) {
         const float dt = clock.Tick();
-        ZHLN::CheckForCrashes(crashState, engine.get());
+        ZHLN::CheckForCrashes(crashState, engine.Get());
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
-        if (auto cameraComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>()) {
-            SetFidelityCamera(cameraComp->camera, scenario);
-        }
+        engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>( [&](auto& cameraComp) {
+            SetFidelityCamera(cameraComp.camera, scenario);
+        });
+        ZHLN::Animation::Step(*engine, animCtx, dt);
         const auto result = engine->Tick(dt);
-        if (!result) {
-            ZHLN::Log("[Fidelity] Render tick failed: {}; refusing an incomplete capture.", result.error());
+        if (!result.HasValue()) {
+            ZHLN::Log("[Fidelity] Render tick failed: {}; refusing an incomplete capture.", ZHLN::Error(result.error).Message());
             return EXIT_FAILURE;
         }
     }
@@ -888,11 +817,17 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    const auto capture = engine->Graphics().CaptureFrame();
-    if (!capture) {
-        ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
+    const ZHLN::Extent2D captureExtent {
+        .width  = scenario.dimensions.width * kDevicePixelRatio,
+        .height = scenario.dimensions.height * kDevicePixelRatio,
+    };
+    ZHLN::Screenshot::CaptureBuffer captureBuffer;
+    const auto captureRes = captureBuffer.Read(*engine->Graphics(), captureExtent);
+    if (!captureRes || *captureRes == nullptr) {
+        ZHLN::Log("[Fidelity] Capture failed.");
         return EXIT_FAILURE;
     }
+    const ZHLN::CapturedFrame* capture = *captureRes;
 
     // Alpha is the caller's choice, not the renderer's: a `.pam` output asks
     // for the RGBA form so omit-background pixels survive to the comparison;

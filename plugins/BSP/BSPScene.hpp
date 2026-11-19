@@ -3,19 +3,20 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPScene.hpp
 //
 // The other half of "import down to native representation, let the
 // instantiator do the rest": this turns the entity lump into a plain
-// ZHLN::Scene::Scene description -- the same document the reflection TOML
+// ZHLN::Scene::Document description -- the same document the reflection TOML
 // layer parses -- and ZHLN::Scene::Instantiate does all the spawning. World
-// geometry arrives as a single SceneEntity::source pointing at the .bsp
+// geometry arrives as a single Entity::source pointing at the .bsp
 // virtual path, which the prefab cache resolves once the importer adapter has
 // filled it.
 
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
-#include <Zahlen/Engine/Scene.hpp>
+#include <Scene/Scene.hpp>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -27,12 +28,12 @@ namespace ZHLN::BSP {
 // camera start, static/dynamic props, as well as interactive entities
 // (func_door, func_button, trigger_*, prop_door_rotating) with their kinematic
 // bodies, bounding extents, and prefab sources retained for ECS initialization.
-[[nodiscard]] auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options = {}) -> Scene::Scene;
+[[nodiscard]] auto DescribeScene(const Map& map, std::string_view virtualPath, const ImportOptions& options = {}) -> Scene::Document;
 
 // Converts a Source forward direction (and roll) into the engine's Euler
 // triplet: pitch about +X, yaw about +Y, roll about +Z, with +X as the model
 // forward axis. Exposed so the heading conversion is testable against Jolt's
 // own quaternion builder rather than a second copy of the formula.
-[[nodiscard]] auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3;
+[[nodiscard]] auto EngineEulerAnglesFromSourceAngles(FVec3 sourceAnglesDegrees, const ImportOptions& options) -> FVec3;
 
 } // namespace ZHLN::BSP

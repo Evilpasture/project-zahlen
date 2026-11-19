@@ -22,7 +22,7 @@ namespace ZHLN::Reflect {
 // `std::meta::reflect_constant_array`, whose `_ZTAX...` template-parameter
 // object mangling in GCC 16 encodes only the per-TU annotation ordinal for
 // `REFLECT_ANNOTATION` elements -- causing single-annotation entities imported
-// from two C++20 module BMIs (e.g. `ZHLN.Wire::WireError` and
+// from two C++20 module BMIs (e.g. `ZHLN.Wire::Error` and
 // `ZHLN.Network::MessageType`) to alias the same static annotation array.
 // Indexing `std::meta::annotations_of(EntityInfo)[Index]` directly inside
 // `consteval` helpers keyed on `<EntityInfo, Index>` avoids `reflect_constant_array`

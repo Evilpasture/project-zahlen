@@ -12,11 +12,8 @@
 // per-subsystem includes and has no engine-wide header of its own
 // (ARCHITECTURE.md §1.3).
 //
-// Jolt is deliberately not here. A unit that names a JPH:: type includes
-// <Zahlen/Physics/Jolt.hpp> itself, so the JPH_* ABI macros spread only as far
-// as the code that actually speaks Jolt.
+// Public umbrella header for COM application hosts; Jolt stays private to the engine.
 
-// --- foundation -------------------------------------------------------------
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Error.hpp>
@@ -37,41 +34,24 @@
 // --- threading --------------------------------------------------------------
 #include <Zahlen/Threading/TaskSystem.hpp>
 
-// --- ECS --------------------------------------------------------------------
+// --- fixed-layout engine vocabulary and COM capabilities ---------------------
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IDebugDraw.hpp>
+#include <Zahlen/COM/IState.hpp>
+#include <Zahlen/COM/IPlugin.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 
-// --- simulation -------------------------------------------------------------
-#include <Zahlen/Physics/Physics.hpp>
-#include <Zahlen/Audio/Audio.hpp>
-
-// --- presentation -----------------------------------------------------------
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Render/RenderGraphDump.hpp>
-#include <Zahlen/Render/View.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/Window/WindowInput.hpp>
-#include <Zahlen/Input/Input.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-
-// --- engine composition -----------------------------------------------------
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Scene.hpp>
-
-// --- application ------------------------------------------------------------
+// --- host policy (not linked into the engine) ---------------------------------
 #include <Zahlen/App.hpp>
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/KernelApp.hpp>

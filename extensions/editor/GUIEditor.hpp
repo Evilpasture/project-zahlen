@@ -3,29 +3,18 @@
 //
 // extensions/editor/GUIEditor.hpp
 //
-// The self-hosting editor's first native panels: a scene Hierarchy and a
-// reflection-driven Inspector, built entirely from ZHLN::GUI primitives.
-// No ImGui, no editor-private widget vocabulary — the editor is an ordinary
-// UI scene that edits another UI scene.
+// The self-hosting editor's COM panels: a scene Hierarchy and a
+// reflection-driven Inspector, built from ZHLN::GUI primitives. The editor is an
+// ordinary UI scene that edits another UI scene.
 //
-// Design notes:
-//
-//   * The editor draws into the same GUI::Context as the scene it edits.
-//     The registry is passed separately: the new Clay-based GUI::Context is
-//     pure layout and does not own or expose ECS state.
-//
-//   * The inspector is generic. Component fields are enumerated through
-//     ZHLN::Reflect::ForEachFieldWithName, so a new component (or a new field
-//     on an existing one) shows up in the inspector without touching this
-//     file. Field dispatch: float -> Slider, bool -> Checkbox, int -> Slider
-//     with step 1, enum -> Dropdown (via ZHLN::Reflect::EnumNames), String64/
-//     String256 -> TextInput stub, JPH::Vec4 -> four sliders. Handles,
-//     textures and padding fields (leading '_') get no row in this version.
-//
-//   * The reflection iteration lives in extensions/editor/GUIEditor.cpp, not here.
-//
-//   * Both panels are plain frame functions: call them once per frame inside
-//     your editor layout (a Columns split, a dock, ...).
+//   * Both panels draw into the same GUI::Context as the scene they edit; the
+//     entity capability is passed separately.
+//   * The inspector is generic: fields are enumerated through
+//     Reflect::ForEachFieldWithName, so a new component or field shows up
+//     without touching this file. float -> Slider, bool -> Checkbox,
+//     int -> Slider(step 1), enum -> Dropdown, String -> TextInput,
+//     FVec4 -> four sliders. Handles, textures and '_' padding get no row.
+//   * Both are plain frame functions: call them once per frame.
 
 #pragma once
 
@@ -33,22 +22,36 @@
 #include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags, for the editor's own input flag set
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <span>
 #include <string_view>
 
-namespace ZHLN::ECS {
-class Registry;
-}
 namespace ZHLN {
-class Engine;
+namespace COM {
+struct IEngine;
+struct IEntities;
+struct HostInputInfo;
+} // namespace COM
 struct Camera;
 }
 
 namespace ZHLN::GUI {
 class Context;
+class Frame;
 }
 
 namespace ZHLN::Editor {
+
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
 
 // Raw input levels the modal transform mode watches, sampled once per frame.
 // Presses are the edge between two samples (`level & ~previous`), which is why
@@ -71,7 +74,7 @@ enum class TransformInput : uint16_t {
 // Persistent editor state, owned by the host application (one instance per
 // editor window). The panels read and update it every frame; nothing else in
 // the engine sees it.
-struct EditorState {
+struct State {
     // Entity shown in the inspector. Entity::Null() = nothing selected.
     ZHLN::Entity selectedEntity = ZHLN::Entity::Null();
 
@@ -97,15 +100,15 @@ struct EditorState {
     ZHLN::Entity transformEntity = ZHLN::Entity::Null();
 
     // Captures taken at mode entry; cancel writes them back.
-    JPH::Vec3 transformStartPosition = JPH::Vec3::sZero();
-    JPH::Quat transformStartRotation = JPH::Quat::sIdentity();
-    JPH::Vec3 transformStartScale    = JPH::Vec3::sReplicate(1.0f);
+    FVec3 transformStartPosition = FVec3::Zero();
+    Quat  transformStartRotation = Quat::Identity();
+    FVec3 transformStartScale    = FVec3::Splat(1.0f);
 
     // Anchors for the running mode: Move intersects the mouse ray with a plane
     // through the start position (normal = camera forward at entry); Rotate and
     // Scale measure screen-space angle / distance around the projected object.
-    JPH::Vec3 transformPlaneNormal = JPH::Vec3::sAxisY();
-    JPH::Vec3 transformAnchor      = JPH::Vec3::sZero();
+    FVec3 transformPlaneNormal = FVec3::UnitY();
+    FVec3 transformAnchor      = FVec3::Zero();
     float     transformStartAngle  = 0.0f;
     float     transformStartDist   = 1.0f;
 
@@ -115,7 +118,7 @@ struct EditorState {
 
     // Spawn requested from the hierarchy's Add Shape dropdown, as an index
     // into SpawnShapeNames(); -1 means nothing requested. The host owns the
-    // Engine a spawn needs, so it consumes this after drawing the panels and
+    // asset capability a spawn needs, so it consumes this after drawing the panels and
     // resets it to -1.
     int requestedSpawn = -1;
 };
@@ -126,7 +129,7 @@ struct EditorState {
 //
 // These are separate from the panel functions on purpose. A panel needs a
 // GUI::Context, a viewport and a frame to do anything; these need only a
-// registry, so "create an entity", "destroy the selection" and "add/remove a
+// entity capability, so "create an entity", "destroy the selection" and "add/remove a
 // component" are callable from a script, a test or a key binding without
 // building a single widget -- and testable on a machine with no GPU.
 
@@ -139,25 +142,25 @@ struct EditorState {
 // MeshComponent or a LightComponent. That is deliberate. Both of those own
 // something the editor cannot conjure -- a GPU mesh and material, a body in
 // the physics world -- so "new entity" cannot mean "new box" from in here.
-// Spawning geometry is PrefabFactory's job and needs an Engine.
-ZHLN_STATIC_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {}) -> ZHLN::Entity;
+// Spawning geometry belongs to the host through IAssetLibrary.
+ZHLN_STATIC_API auto CreateEntity(ZHLN::COM::IEntities& reg, std::string_view name = {}) -> ZHLN::Entity;
 
 // Destroys `state.selectedEntity` and clears the selection.
 //
 // The selection is cleared before the destroy, so a stale handle is never left
 // in the editor state even if the entity turns out to be gone already. The
-// explicit Engine lifecycle pipeline cascades children before their parent and
+// engine-owned lifecycle pipeline cascades children before their parent and
 // notifies external resource systems before each registry destroy.
-ZHLN_STATIC_API void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept;
+ZHLN_STATIC_API void DestroySelected(ZHLN::COM::IEngine& engine, State& state) noexcept;
 
 // One component the editor knows how to add to an entity, remove from it, and
 // display. Function pointers rather than a std::function, so the table is a
 // constant and a caller needs no allocation to walk it.
 struct ComponentKind {
     std::string_view name;
-    bool (*has)(const ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
-    void (*add)(ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
-    void (*remove)(ZHLN::ECS::Registry& reg, ZHLN::Entity entity);
+    bool (*has)(const ZHLN::COM::IEntities& reg, ZHLN::Entity entity);
+    void (*add)(ZHLN::COM::IEntities& reg, ZHLN::Entity entity);
+    void (*remove)(ZHLN::COM::IEntities& reg, ZHLN::Entity entity);
 };
 
 // The components the editor can add, in the order the inspector lists them.
@@ -184,9 +187,9 @@ struct ComponentKind {
 // Runs the Blender-style modal transform for this frame: enters a mode on
 // G/R/S press edges (plain S only -- a Ctrl+S save chord never starts Scale),
 // manipulates the captured entity from the mouse ray, and confirms or cancels
-// it. Reads raw input levels from the registry's InputStateComponent
-// singleton and writes the entity's TransformComponent live, so the world
-// preview follows the pointer before confirmation.
+// it. Reads raw input levels from `input` and writes the entity's
+// TransformComponent live, so the world preview follows the pointer before
+// confirmation.
 //
 // Call once per frame BEFORE camera control and viewport picking: cancel and
 // confirm then win over the global Escape / click-to-select bindings on the
@@ -207,11 +210,12 @@ struct SceneViewport {
 };
 
 ZHLN_STATIC_API void UpdateTransformMode(
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    const Camera&        camera,
-    const SceneViewport& viewport,
-    bool                 uiOwnsInput
+    ZHLN::COM::IEntities&           reg,
+    const ZHLN::COM::HostInputInfo& input,
+    State&                    state,
+    const Camera&                   camera,
+    const SceneViewport&            viewport,
+    bool                            uiOwnsInput
 ) noexcept;
 
 // Draws the scene hierarchy: one selectable row per named entity that is not
@@ -224,12 +228,7 @@ ZHLN_STATIC_API void UpdateTransformMode(
 // `engine` is explicit because Delete must use its ordered resource-lifecycle
 // pipeline; the panel edits that engine's registry. GUI::Context itself remains
 // stateless with respect to the ECS.
-ZHLN_STATIC_API void DrawHierarchyPanel(
-    ZHLN::GUI::Frame& gui,
-    ZHLN::Engine&     engine,
-    EditorState&      state,
-    std::string_view  id = "Hierarchy"
-);
+ZHLN_STATIC_API void DrawHierarchyPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEngine& engine, State& state, std::string_view id = "Hierarchy");
 
 // Draws the inspector for `state.selectedEntity`: a labelled header plus one
 // collapsing section per editable component present on the entity, and a
@@ -240,12 +239,7 @@ ZHLN_STATIC_API void DrawHierarchyPanel(
 // entity that is showing it rather than from a list kept elsewhere.
 //
 // NOTE: `reg` is separate from `gui` for the same reason as above.
-ZHLN_STATIC_API void DrawInspectorPanel(
-    ZHLN::GUI::Frame&    gui,
-    ZHLN::ECS::Registry& reg,
-    EditorState&         state,
-    std::string_view     id = "Inspector"
-);
+ZHLN_STATIC_API void DrawInspectorPanel(ZHLN::GUI::Frame& gui, ZHLN::COM::IEntities& reg, State& state, std::string_view id = "Inspector");
 
 } // namespace ZHLN::Editor
 

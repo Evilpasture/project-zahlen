@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <functional>
@@ -34,8 +34,8 @@ struct VMTMaterial {
     float alphaCutoff   = 0.5f;  // $alphatestreference
     bool  noCull        = false; // $nocull 1
 
-    JPH::Float4 baseColor {1.0f, 1.0f, 1.0f, 1.0f}; // $color / $color2
-    JPH::Float4 envMapTint {1.0f, 1.0f, 1.0f, 1.0f}; // $envmaptint, scalar use is preserved in MaterialDesc
+    FVec4 baseColor {1.0f, 1.0f, 1.0f, 1.0f}; // $color / $color2
+    FVec4 envMapTint {1.0f, 1.0f, 1.0f, 1.0f}; // $envmaptint, scalar use is preserved in MaterialDesc
     bool        baseAlphaEnvMapMask = false; // $basealphaenvmapmask 1
 
     // All parameters preserved in lowercase (e.g. "$basetexture", "$surfaceprop")
@@ -54,7 +54,7 @@ struct VMTMaterial {
 
 // Shared Source-material rules used by importing and lighting.
 [[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float;
-[[nodiscard]] auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float;
+[[nodiscard]] auto Rec709Luma(const FVec3& rgb) noexcept -> float;
 
 // Parses a VMT KeyValues script. Nested shader-class blocks
 // ("LightmappedGeneric_DX9 { ... }") are merged into parameters, because that

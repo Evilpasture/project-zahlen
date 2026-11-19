@@ -16,11 +16,10 @@ Five invariants, enforced at CMake configure time:
    Core, Enums, Annotations, Structs, Class, Callable, Dynamic, Utilities. Everything
    else consumes their public API. The directory is closed on purpose -- a
    nested subdirectory would have to be added to REFLECTION_DIRS here, which is
-   the moment to ask whether the machinery really belongs in another module --
-   and each module carries its own degraded stand-ins in the ``#else`` of its own
-   feature guard, so a stub can never live outside a reflection header. The
-   P3394 annotation syntax ``[[= ...]]`` is source-level metadata, not a raw
-   token, and is exempt.
+   the moment to ask whether the machinery really belongs in another module.
+   Reflection has no degraded mode -- a compiler without -freflection fails at
+   configure time -- so these headers carry no stand-ins. The P3394 annotation
+   syntax ``[[= ...]]`` is source-level metadata, not a raw token, and is exempt.
 
 3. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
    The implementation helpers live in the per-module ``TemplatedDetail``

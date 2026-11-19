@@ -12,10 +12,10 @@
 
 namespace ZHLN::Diagnostics {
 
-void WriteToChannel(uint8_t channel, std::string_view msg) noexcept;
+void WriteToChannel(LogChannel channel, std::string_view msg) noexcept;
 
 inline void WriteErr(std::string_view msg) noexcept {
-    WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), msg);
+    WriteToChannel(LogChannel::StdErr, msg);
 }
 
 auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcept -> bool;

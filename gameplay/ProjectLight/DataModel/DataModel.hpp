@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // gameplay/ProjectLight/DataModel/DataModel.hpp
 //
 // Project-light's native, C++-owned DataModel object graph. This layer is
@@ -10,9 +11,9 @@
 // storage: script-facing Instance identities and parentage are stable, while
 // the adapter may bind renderable Instances to generation-safe ECS entities.
 
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Core/Reference.h>
-#include <Jolt/Math/Vec3.h>
+#include <atomic>
+#include <concepts>
+#include <cstddef>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <cstdint>
@@ -26,6 +27,75 @@
 #include <vector>
 
 namespace ZHLN::ProjectLight {
+
+// Intrusive atomic reference counting matching JPH::RefTarget / JPH::Ref shape
+// without exposing Jolt headers or ABI defines to ProjectLight consumers.
+template <typename Derived>
+class RefTarget {
+  public:
+    constexpr RefTarget() noexcept = default;
+    RefTarget(const RefTarget&) noexcept {}
+    auto operator=(const RefTarget&) noexcept -> RefTarget& { return *this; }
+    void AddRef() const noexcept { m_refCount.fetch_add(1u, std::memory_order_relaxed); }
+    void Release() const noexcept {
+        if (m_refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
+            delete static_cast<const Derived*>(this);
+        }
+    }
+    [[nodiscard]] auto GetRefCount() const noexcept -> uint32_t { return m_refCount.load(std::memory_order_relaxed); }
+  protected:
+    ~RefTarget() = default;
+  private:
+    mutable std::atomic<uint32_t> m_refCount {0u};
+};
+
+template <typename T>
+class Ref {
+  public:
+    constexpr Ref() noexcept = default;
+    constexpr Ref(std::nullptr_t) noexcept {}
+    Ref(T* ptr) noexcept: m_ptr(ptr) { AddRef(); }
+    Ref(const Ref& other) noexcept: m_ptr(other.m_ptr) { AddRef(); }
+    Ref(Ref&& other) noexcept: m_ptr(std::exchange(other.m_ptr, nullptr)) {}
+    template <typename U>
+        requires std::convertible_to<U*, T*>
+    Ref(const Ref<U>& other) noexcept: m_ptr(other.GetPtr()) { AddRef(); }
+    template <typename U>
+        requires std::convertible_to<U*, T*>
+    Ref(Ref<U>&& other) noexcept: m_ptr(other.Detach()) {}
+    ~Ref() noexcept { Release(); }
+
+    auto operator=(std::nullptr_t) noexcept -> Ref& { Release(); return *this; }
+    auto operator=(T* ptr) noexcept -> Ref& {
+        if (m_ptr != ptr) { Release(); m_ptr = ptr; AddRef(); }
+        return *this;
+    }
+    auto operator=(const Ref& other) noexcept -> Ref& { return *this = other.m_ptr; }
+    auto operator=(Ref&& other) noexcept -> Ref& {
+        if (this != &other) { Release(); m_ptr = std::exchange(other.m_ptr, nullptr); }
+        return *this;
+    }
+    template <typename U>
+        requires std::convertible_to<U*, T*>
+    auto operator=(const Ref<U>& other) noexcept -> Ref& { return *this = other.GetPtr(); }
+    template <typename U>
+        requires std::convertible_to<U*, T*>
+    auto operator=(Ref<U>&& other) noexcept -> Ref& { Release(); m_ptr = other.Detach(); return *this; }
+
+    [[nodiscard]] auto GetPtr() const noexcept -> T* { return m_ptr; }
+    [[nodiscard]] auto Detach() noexcept -> T* { return std::exchange(m_ptr, nullptr); }
+    [[nodiscard]] auto operator->() const noexcept -> T* { return m_ptr; }
+    [[nodiscard]] auto operator*() const noexcept -> T& { return *m_ptr; }
+    [[nodiscard]] explicit operator bool() const noexcept { return m_ptr != nullptr; }
+    [[nodiscard]] auto operator==(std::nullptr_t) const noexcept -> bool { return m_ptr == nullptr; }
+    [[nodiscard]] auto operator==(const T* rhs) const noexcept -> bool { return m_ptr == rhs; }
+    [[nodiscard]] auto operator==(const Ref& rhs) const noexcept -> bool { return m_ptr == rhs.m_ptr; }
+
+  private:
+    void AddRef() noexcept { if (m_ptr != nullptr) m_ptr->AddRef(); }
+    void Release() noexcept { if (T* old = std::exchange(m_ptr, nullptr); old != nullptr) old->Release(); }
+    T* m_ptr = nullptr;
+};
 
 using InstanceId = uint64_t;
 
@@ -47,22 +117,22 @@ class BasePart;
 
 // Strong Instance ownership is intrusive. The tree owns children; parent and
 // semantic cross-Instance relationships are stored by stable ID to avoid cycles.
-using InstancePtr = JPH::Ref<Instance>;
+using InstancePtr = Ref<Instance>;
 
 template <typename To, typename From>
-[[nodiscard]] auto StaticRefCast(const JPH::Ref<From>& value) noexcept -> JPH::Ref<To> {
-    return JPH::Ref<To> {static_cast<To*>(value.GetPtr())};
+[[nodiscard]] auto StaticRefCast(const Ref<From>& value) noexcept -> Ref<To> {
+    return Ref<To> {static_cast<To*>(value.GetPtr())};
 }
 
 template <typename Left, typename Right>
     requires(std::is_base_of_v<Instance, Left> && std::is_base_of_v<Instance, Right> && !std::is_same_v<Left, Right>)
-[[nodiscard]] auto operator==(const JPH::Ref<Left>& lhs, const JPH::Ref<Right>& rhs) noexcept -> bool {
+[[nodiscard]] auto operator==(const Ref<Left>& lhs, const Ref<Right>& rhs) noexcept -> bool {
     return static_cast<const Instance*>(lhs.GetPtr()) == static_cast<const Instance*>(rhs.GetPtr());
 }
 
 template <typename Left, typename Right>
     requires(std::is_base_of_v<Instance, Left> && std::is_base_of_v<Instance, Right> && !std::is_same_v<Left, Right>)
-[[nodiscard]] auto operator!=(const JPH::Ref<Left>& lhs, const JPH::Ref<Right>& rhs) noexcept -> bool {
+[[nodiscard]] auto operator!=(const Ref<Left>& lhs, const Ref<Right>& rhs) noexcept -> bool {
     return !(lhs == rhs);
 }
 
@@ -74,7 +144,7 @@ template <typename... Args>
 class DataModelSignal {
   private:
     using Callback = std::function<void(Args...)>;
-    struct SlotState: JPH::RefTarget<SlotState> {
+    struct SlotState: RefTarget<SlotState> {
         uint64_t                                      nextID = 1;
         ZHLN::Array<std::pair<uint64_t, Callback>, 2> slots;
         bool                                          active = true;
@@ -126,9 +196,9 @@ class DataModelSignal {
 
       private:
         friend class DataModelSignal;
-        Connection(const JPH::Ref<SlotState>& state, uint64_t id): m_state(state), m_id(id) {
+        Connection(const Ref<SlotState>& state, uint64_t id): m_state(state), m_id(id) {
         }
-        JPH::Ref<SlotState> m_state;
+        Ref<SlotState> m_state;
         uint64_t             m_id = 0;
     };
 
@@ -160,7 +230,7 @@ class DataModelSignal {
     }
 
     void Fire(Args... args) const {
-        const JPH::Ref<SlotState> state = m_state;
+        const Ref<SlotState> state = m_state;
         if (!state || !state->active) {
             return;
         }
@@ -179,10 +249,10 @@ class DataModelSignal {
     }
 
   private:
-    JPH::Ref<SlotState> m_state;
+    Ref<SlotState> m_state;
 };
 
-class Instance: public JPH::RefTarget<Instance> {
+class Instance: public RefTarget<Instance> {
   public:
     virtual ~Instance();
 
@@ -223,7 +293,7 @@ class Instance: public JPH::RefTarget<Instance> {
 
     template <typename T>
         requires(std::is_base_of_v<Instance, T>)
-    [[nodiscard]] auto IsDescendantOf(const JPH::Ref<T>& ancestor) const noexcept -> bool {
+    [[nodiscard]] auto IsDescendantOf(const Ref<T>& ancestor) const noexcept -> bool {
         return IsDescendantOf(StaticRefCast<Instance>(ancestor));
     }
     [[nodiscard]] auto GetFullName() const -> std::string;
@@ -232,7 +302,7 @@ class Instance: public JPH::RefTarget<Instance> {
 
     template <typename T>
         requires(std::is_base_of_v<Instance, T>)
-    [[nodiscard]] auto SetParent(const JPH::Ref<T>& parent) -> std::expected<void, DataModelError> {
+    [[nodiscard]] auto SetParent(const Ref<T>& parent) -> std::expected<void, DataModelError> {
         return SetParent(StaticRefCast<Instance>(parent));
     }
     void               Destroy();
@@ -256,7 +326,7 @@ class Instance: public JPH::RefTarget<Instance> {
     DataModelSignal<std::string>              PropertyChanged;
 
   protected:
-    Instance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot = false);
+    Instance(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot = false);
 
     void               NotifyChanged(std::string_view property) const noexcept;
     [[nodiscard]] auto BelongsTo(const Instance& other) const noexcept -> bool;
@@ -271,7 +341,7 @@ class Instance: public JPH::RefTarget<Instance> {
     void RemoveChild(const InstancePtr& child) noexcept;
     void DestroyChildren();
 
-    JPH::Ref<DataModelState>      m_state;
+    Ref<DataModelState>      m_state;
     InstanceId                    m_id = 0;
     std::string                   m_className;
     std::string                   m_name;
@@ -286,7 +356,7 @@ class Instance: public JPH::RefTarget<Instance> {
 
 class Service: public Instance {
   protected:
-    Service(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    Service(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
@@ -303,27 +373,27 @@ class WorkspaceService final: public Service {
 
     template <typename T>
         requires(std::is_base_of_v<Instance, T>)
-    [[nodiscard]] auto SetCurrentCamera(const JPH::Ref<T>& camera) -> std::expected<void, DataModelError> {
+    [[nodiscard]] auto SetCurrentCamera(const Ref<T>& camera) -> std::expected<void, DataModelError> {
         return SetCurrentCamera(StaticRefCast<Instance>(camera));
     }
 
   private:
     friend class DataModel;
-    WorkspaceService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    WorkspaceService(const Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId              m_currentCameraId = 0;
 };
 
 class PlayersService final: public Service {
   public:
     static constexpr std::string_view ClassNameValue = "PlayersService";
-    [[nodiscard]] auto                GetPlayers() const -> std::vector<JPH::Ref<class Player>>;
-    [[nodiscard]] auto                FindPlayerByUserId(uint64_t userId) const -> JPH::Ref<class Player>;
-    [[nodiscard]] auto                LocalPlayer() const noexcept -> JPH::Ref<class Player>;
-    [[nodiscard]] auto                SetLocalPlayer(const JPH::Ref<class Player>& player) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto                GetPlayers() const -> std::vector<Ref<class Player>>;
+    [[nodiscard]] auto                FindPlayerByUserId(uint64_t userId) const -> Ref<class Player>;
+    [[nodiscard]] auto                LocalPlayer() const noexcept -> Ref<class Player>;
+    [[nodiscard]] auto                SetLocalPlayer(const Ref<class Player>& player) -> std::expected<void, DataModelError>;
 
   private:
     friend class DataModel;
-    PlayersService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    PlayersService(const Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId                 m_localPlayerId = 0;
 };
 
@@ -333,7 +403,7 @@ class LightingService final: public Service {
 
   private:
     friend class DataModel;
-    LightingService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    LightingService(const Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 class PhysicsService final: public Service {
@@ -346,7 +416,7 @@ class PhysicsService final: public Service {
 
   private:
     friend class DataModel;
-    PhysicsService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    PhysicsService(const Ref<DataModelState>& state, InstanceId id, std::string name);
     bool m_serverAuthority = false;
 };
 
@@ -356,7 +426,7 @@ class SoundService final: public Service {
 
   private:
     friend class DataModel;
-    SoundService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    SoundService(const Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 // A service class known to project-light but not yet represented by a typed
@@ -365,29 +435,29 @@ class SoundService final: public Service {
 class OpaqueService final: public Service {
   private:
     friend class DataModel;
-    OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name);
+    OpaqueService(const Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name);
 };
 
 class Folder final: public Instance {
   private:
     friend class DataModel;
-    Folder(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Folder(const Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 class Model final: public Instance {
   public:
-    [[nodiscard]] auto PrimaryPart() const noexcept -> JPH::Ref<class BasePart>;
-    [[nodiscard]] auto SetPrimaryPart(const JPH::Ref<class BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto PrimaryPart() const noexcept -> Ref<class BasePart>;
+    [[nodiscard]] auto SetPrimaryPart(const Ref<class BasePart>& part) -> std::expected<void, DataModelError>;
 
     template <typename T>
         requires(std::is_base_of_v<BasePart, T>)
-    [[nodiscard]] auto SetPrimaryPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto SetPrimaryPart(const Ref<T>& part) -> std::expected<void, DataModelError>;
 
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
   private:
     friend class DataModel;
-    Model(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Model(const Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId                   m_primaryPartId = 0;
 };
 
@@ -395,24 +465,24 @@ class BasePart: public Instance {
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
-    [[nodiscard]] auto Position() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Position() const noexcept -> const FVec3& {
         return m_position;
     }
-    void SetPosition(const JPH::Vec3& value);
+    void SetPosition(const FVec3& value);
     // project-light scripts express rotations as Euler degrees; renderer and
     // physics adapters may convert this at their boundary to JPH::Quat.
-    [[nodiscard]] auto Rotation() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Rotation() const noexcept -> const FVec3& {
         return m_rotationEuler;
     }
-    void               SetRotation(const JPH::Vec3& value);
-    [[nodiscard]] auto Size() const noexcept -> const JPH::Vec3& {
+    void               SetRotation(const FVec3& value);
+    [[nodiscard]] auto Size() const noexcept -> const FVec3& {
         return m_size;
     }
-    void               SetSize(const JPH::Vec3& value);
-    [[nodiscard]] auto Color() const noexcept -> const JPH::Vec3& {
+    void               SetSize(const FVec3& value);
+    [[nodiscard]] auto Color() const noexcept -> const FVec3& {
         return m_color;
     }
-    void               SetColor(const JPH::Vec3& value);
+    void               SetColor(const FVec3& value);
     [[nodiscard]] auto Anchored() const noexcept -> bool {
         return m_anchored;
     }
@@ -425,19 +495,19 @@ class BasePart: public Instance {
         return m_transparency;
     }
     void               SetTransparency(float value);
-    [[nodiscard]] auto NetworkOwner() const noexcept -> JPH::Ref<Player>;
-    [[nodiscard]] auto SetNetworkOwner(const JPH::Ref<Player>& player) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto NetworkOwner() const noexcept -> Ref<Player>;
+    [[nodiscard]] auto SetNetworkOwner(const Ref<Player>& player) -> std::expected<void, DataModelError>;
 
   protected:
-    BasePart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    BasePart(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 
   private:
     friend class DataModel;
-    JPH::Vec3 m_position = JPH::Vec3::sZero();
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    JPH::Vec3             m_rotationEuler = JPH::Vec3::sZero();
-    JPH::Vec3             m_size          = JPH::Vec3(4.0f, 1.0f, 2.0f);
-    JPH::Vec3             m_color         = JPH::Vec3(0.75f, 0.75f, 0.75f);
+    FVec3             m_rotationEuler = FVec3::Zero();
+    FVec3             m_size          = {4.0f, 1.0f, 2.0f};
+    FVec3             m_color         = {0.75f, 0.75f, 0.75f};
     InstanceId           m_networkOwnerId = 0;
     bool                  m_anchored     = false;
     bool                  m_canCollide   = true;
@@ -496,7 +566,7 @@ class Part final: public BasePart {
 
   private:
     friend class DataModel;
-    Part(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Part(const Ref<DataModelState>& state, InstanceId id, std::string name);
     PartShape   m_shape         = PartShape::Cube;
     PartSurface m_frontSurface  = PartSurface::Smooth;
     PartSurface m_backSurface   = PartSurface::Smooth;
@@ -516,27 +586,27 @@ class MeshPart final: public BasePart {
 
   private:
     friend class DataModel;
-    MeshPart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    MeshPart(const Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string m_meshId;
 };
 
 class SpawnPoint final: public Instance {
   public:
-    [[nodiscard]] auto Position() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Position() const noexcept -> const FVec3& {
         return m_position;
     }
-    void               SetPosition(const JPH::Vec3& value);
-    [[nodiscard]] auto Rotation() const noexcept -> const JPH::Vec3& {
+    void               SetPosition(const FVec3& value);
+    [[nodiscard]] auto Rotation() const noexcept -> const FVec3& {
         return m_rotation;
     }
-    void SetRotation(const JPH::Vec3& value);
+    void SetRotation(const FVec3& value);
 
   private:
     friend class DataModel;
-    SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
-    JPH::Vec3 m_position = JPH::Vec3::sZero();
+    SpawnPoint(const Ref<DataModelState>& state, InstanceId id, std::string name);
+    FVec3 m_position = FVec3::Zero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
-    JPH::Vec3 m_rotation = JPH::Vec3::sZero();
+    FVec3 m_rotation = FVec3::Zero();
 };
 
 enum class DecalFace : uint8_t { Top, Bottom, Front, Back, Left, Right };
@@ -548,10 +618,10 @@ class Decal final: public Instance {
         return m_textureId;
     }
     void               SetTextureID(std::string value);
-    [[nodiscard]] auto Color() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Color() const noexcept -> const FVec3& {
         return m_color;
     }
-    void               SetColor(const JPH::Vec3& value);
+    void               SetColor(const FVec3& value);
     [[nodiscard]] auto Face() const noexcept -> DecalFace {
         return m_face;
     }
@@ -571,9 +641,9 @@ class Decal final: public Instance {
 
   private:
     friend class DataModel;
-    Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Decal(const Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string   m_textureId;
-    JPH::Vec3     m_color        = JPH::Vec3(1.0f, 1.0f, 1.0f);
+    FVec3     m_color        = {1.0f, 1.0f, 1.0f};
     DecalFace     m_face         = DecalFace::Front;
     DecalWrapMode m_wrapMode     = DecalWrapMode::Stretch;
     float         m_scale        = 1.0f;
@@ -605,7 +675,7 @@ class Sound final: public Instance {
 
   private:
     friend class DataModel;
-    Sound(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Sound(const Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string m_soundId;
     float       m_volume  = 1.0f;
     bool        m_loops   = false;
@@ -617,31 +687,31 @@ enum class HumanoidState : uint8_t { Idle, Running, Jumping, Freefall, FallingDo
 class Motor final: public Instance {
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
-    [[nodiscard]] auto Part1() const noexcept -> JPH::Ref<BasePart>;
-    [[nodiscard]] auto SetPart1(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto Part1() const noexcept -> Ref<BasePart>;
+    [[nodiscard]] auto SetPart1(const Ref<BasePart>& part) -> std::expected<void, DataModelError>;
 
     template <typename T>
         requires(std::is_base_of_v<BasePart, T>)
-    [[nodiscard]] auto SetPart1(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+    [[nodiscard]] auto SetPart1(const Ref<T>& part) -> std::expected<void, DataModelError> {
         return SetPart1(StaticRefCast<BasePart>(part));
     }
 
-    [[nodiscard]] auto Part2() const noexcept -> JPH::Ref<BasePart>;
-    [[nodiscard]] auto SetPart2(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto Part2() const noexcept -> Ref<BasePart>;
+    [[nodiscard]] auto SetPart2(const Ref<BasePart>& part) -> std::expected<void, DataModelError>;
 
     template <typename T>
         requires(std::is_base_of_v<BasePart, T>)
-    [[nodiscard]] auto SetPart2(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+    [[nodiscard]] auto SetPart2(const Ref<T>& part) -> std::expected<void, DataModelError> {
         return SetPart2(StaticRefCast<BasePart>(part));
     }
-    [[nodiscard]] auto Offset1() const noexcept -> const JPH::Vec3& {
+    [[nodiscard]] auto Offset1() const noexcept -> const FVec3& {
         return m_offset1;
     }
-    void               SetOffset1(const JPH::Vec3& value);
-    [[nodiscard]] auto Offset2() const noexcept -> const JPH::Vec3& {
+    void               SetOffset1(const FVec3& value);
+    [[nodiscard]] auto Offset2() const noexcept -> const FVec3& {
         return m_offset2;
     }
-    void               SetOffset2(const JPH::Vec3& value);
+    void               SetOffset2(const FVec3& value);
     [[nodiscard]] auto CurrentAngle() const noexcept -> float {
         return m_currentAngle;
     }
@@ -657,11 +727,11 @@ class Motor final: public Instance {
 
   private:
     friend class DataModel;
-    Motor(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Motor(const Ref<DataModelState>& state, InstanceId id, std::string name);
     InstanceId              m_part1Id = 0;
     InstanceId              m_part2Id = 0;
-    JPH::Vec3               m_offset1      = JPH::Vec3::sZero();
-    JPH::Vec3               m_offset2      = JPH::Vec3::sZero();
+    FVec3               m_offset1      = FVec3::Zero();
+    FVec3               m_offset2      = FVec3::Zero();
     float                   m_currentAngle = 0.0f;
     float                   m_desiredAngle = 0.0f;
     float                   m_maxVelocity  = 30.0f;
@@ -685,12 +755,12 @@ class Humanoid final: public Instance {
         return m_maxHealth;
     }
     void               SetMaxHealth(float value);
-    [[nodiscard]] auto RootPart() const noexcept -> JPH::Ref<BasePart>;
-    [[nodiscard]] auto SetRootPart(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto RootPart() const noexcept -> Ref<BasePart>;
+    [[nodiscard]] auto SetRootPart(const Ref<BasePart>& part) -> std::expected<void, DataModelError>;
 
     template <typename T>
         requires(std::is_base_of_v<BasePart, T>)
-    [[nodiscard]] auto SetRootPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+    [[nodiscard]] auto SetRootPart(const Ref<T>& part) -> std::expected<void, DataModelError> {
         return SetRootPart(StaticRefCast<BasePart>(part));
     }
 
@@ -704,7 +774,7 @@ class Humanoid final: public Instance {
 
   private:
     friend class DataModel;
-    Humanoid(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Humanoid(const Ref<DataModelState>& state, InstanceId id, std::string name);
     float                   m_walkSpeed = 16.0f;
     float                   m_jumpPower = 50.0f;
     float                   m_health    = 100.0f;
@@ -719,13 +789,13 @@ class Player final: public Instance {
         return m_userId;
     }
     void               SetUserId(uint64_t value);
-    [[nodiscard]] auto Character() const noexcept -> JPH::Ref<Model>;
-    [[nodiscard]] auto SetCharacter(const JPH::Ref<Model>& character) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto Character() const noexcept -> Ref<Model>;
+    [[nodiscard]] auto SetCharacter(const Ref<Model>& character) -> std::expected<void, DataModelError>;
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
   private:
     friend class DataModel;
-    Player(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    Player(const Ref<DataModelState>& state, InstanceId id, std::string name);
     uint64_t             m_userId = 0;
     InstanceId           m_characterId = 0;
 };
@@ -735,7 +805,7 @@ class Player final: public Instance {
 class OpaqueInstance final: public Instance {
   private:
     friend class DataModel;
-    OpaqueInstance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    OpaqueInstance(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 };
 
 class DataModel final {
@@ -751,12 +821,12 @@ class DataModel final {
         return m_root;
     }
     [[nodiscard]] auto FindById(InstanceId id) const noexcept -> InstancePtr;
-    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> JPH::Ref<Service>;
+    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> Ref<Service>;
 
     template <typename T>
-    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> JPH::Ref<T> {
+    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> Ref<T> {
         static_assert(std::is_base_of_v<Service, T>);
-        const JPH::Ref<Service> service = GetService(nameOrClass);
+        const Ref<Service> service = GetService(nameOrClass);
         if (!service) {
             return {};
         }
@@ -773,7 +843,7 @@ class DataModel final {
     }
 
     template <typename T>
-    [[nodiscard]] auto Create(std::string name = {}) -> std::expected<JPH::Ref<T>, DataModelError> {
+    [[nodiscard]] auto Create(std::string name = {}) -> std::expected<Ref<T>, DataModelError> {
         auto id = AllocateId();
         if (!id) {
             return std::unexpected(id.error());
@@ -782,7 +852,7 @@ class DataModel final {
     }
 
     template <typename T>
-    [[nodiscard]] auto CreateWithId(InstanceId id, std::string name = {}) -> std::expected<JPH::Ref<T>, DataModelError> {
+    [[nodiscard]] auto CreateWithId(InstanceId id, std::string name = {}) -> std::expected<Ref<T>, DataModelError> {
         static_assert(std::is_base_of_v<Instance, T>);
         if (id == 0) {
             return std::unexpected(DataModelError::InvalidId);
@@ -790,7 +860,7 @@ class DataModel final {
         if (HasEverUsedId(id)) {
             return std::unexpected(DataModelError::DuplicateId);
         }
-        JPH::Ref<T> instance;
+        Ref<T> instance;
         if constexpr (std::is_same_v<T, BasePart>) {
             instance = new BasePart(m_state, id, "BasePart", std::move(name));
         } else {
@@ -810,13 +880,13 @@ class DataModel final {
     [[nodiscard]] auto HasEverUsedId(InstanceId id) const noexcept -> bool;
     void               RegisterInstance(Instance* instance);
 
-    JPH::Ref<DataModelState> m_state;
+    Ref<DataModelState> m_state;
     InstancePtr              m_root;
 };
 
 template <typename T>
     requires(std::is_base_of_v<BasePart, T>)
-auto Model::SetPrimaryPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+auto Model::SetPrimaryPart(const Ref<T>& part) -> std::expected<void, DataModelError> {
     return SetPrimaryPart(StaticRefCast<BasePart>(part));
 }
 

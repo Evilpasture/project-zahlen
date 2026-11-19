@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // plugins/BSP/BSPGeometry.hpp
 //
 // The import step: BSP lumps in, Zahlen-native vertex streams out. The
@@ -139,7 +140,7 @@ struct ImportOptions {
     uint32_t bakeVplBudget  = 384;
     float    bakeVplWeight  = 0.5f;
 
-    // Restrict the import to one submodel (index into BSPMap::models); -1
+    // Restrict the import to one submodel (index into Map::models); -1
     // imports every model not listed in skipModels. Interactive brush
     // entities (func_door, func_button, ...) get their own prefab per
     // submodel so they can animate instead of being baked into the world.
@@ -162,8 +163,8 @@ struct MaterialStreams {
     std::vector<VertexSurface>      surfaces;
     std::vector<uint32_t>           indices;
 
-    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMin {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMax {0.0f, 0.0f, 0.0f};
 
     // Set when at least one face in this group has no opposite-facing twin:
     // a single-sheet wall whose only geometry faces AWAY from the reachable
@@ -201,13 +202,13 @@ struct MaterialStreams {
 // `fromEmissive` separates the lights this pass derived from self-illuminated
 // geometry from the ones an entity authored, so the audit's counters stay
 // exhaustive when both end up in the same vector.
-struct BspPointLight {
+struct PointLight {
     std::string name;
     LightType   type = LightType::Point; // Direct reuse of engine enum
 
-    JPH::Vec3 position {0.0f, 0.0f, 0.0f};
-    JPH::Vec3 direction {0.0f, -1.0f, 0.0f};
-    JPH::Vec3 color {1.0f, 1.0f, 1.0f};
+    FVec3 position {0.0f, 0.0f, 0.0f};
+    FVec3 direction {0.0f, -1.0f, 0.0f};
+    FVec3 color {1.0f, 1.0f, 1.0f};
     float     intensity        = 1.0f;
     float     innerConeRadians = 0.0f;
     float     outerConeRadians = 0.78539816339f; // Default 45 deg
@@ -230,7 +231,7 @@ struct BspPointLight {
 // the SH irradiance RTGI/DDGI probes start from, so a map with no sun still
 // has an irradiance floor. See BSPLighting.hpp for the reading rules.
 struct AmbientTerm {
-    JPH::Vec3 color {0.0f, 0.0f, 0.0f};
+    FVec3 color {0.0f, 0.0f, 0.0f};
     float     intensity = 0.0f;
     bool      authored  = false; // a light_environment was found
 };
@@ -241,9 +242,9 @@ struct AmbientTerm {
 // BSPLighting.hpp for the material heuristics that decide a face belongs here.
 struct EmissiveSurface {
     std::string materialName;
-    JPH::Vec3   position {0.0f, 0.0f, 0.0f};
-    JPH::Vec3   normal {0.0f, 1.0f, 0.0f};
-    JPH::Vec3   color {1.0f, 1.0f, 1.0f};
+    FVec3   position {0.0f, 0.0f, 0.0f};
+    FVec3   normal {0.0f, 1.0f, 0.0f};
+    FVec3   color {1.0f, 1.0f, 1.0f};
     float       areaSquareMetres = 0.0f;
     float       areaSquareInches = 0.0f;
     float       strength         = 0.0f;   // authored self-illumination, 0..1
@@ -300,10 +301,10 @@ struct LightingDiagnostics {
 
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
-    std::vector<BspPointLight>   lights;
+    std::vector<PointLight>   lights;
 
     // Native decoded VRAD pages. Geometry parts refer to their pages through
-    // MaterialStreams::lightmapPage; BSPImporter uploads them once and binds
+    // MaterialStreams::lightmapPage; BSPAssets uploads them once and binds
     // the resulting dedicated baked-irradiance material input.
     VradLightmapAtlas lightmaps;
 
@@ -331,8 +332,8 @@ struct ImportedMapData {
     // geometry. Empty unless options.buildColliders is set.
     MaterialStreams collisionOnly;
 
-    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMin {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMax {0.0f, 0.0f, 0.0f};
     uint32_t    faceCount         = 0;
     uint32_t    displacementCount = 0;
     uint32_t    triangleCount     = 0;
@@ -341,15 +342,15 @@ struct ImportedMapData {
 
 // Position transform for the options in force (Source Z-up inches -> engine
 // Y-up metres by default). Exposed so scene importing converts identically.
-[[nodiscard]] auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
-[[nodiscard]] auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
+[[nodiscard]] auto ConvertPosition(const ImportOptions& options, FVec3 in) noexcept -> FVec3;
+[[nodiscard]] auto ConvertDirection(const ImportOptions& options, FVec3 in) noexcept -> FVec3;
 
 // Rec.709 luma of the texdata reflectivity vbsp baked for a face's material.
 // Source's `reflectivity` is the material's diffuse albedo in linear 0-1 and is
 // the only per-material brightness signal that reaches the BSP without a .vmt,
 // which is what makes it usable as an emissive gate. Exposed so the importer
 // adapter can run the same probe the geometry pass does.
-[[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float;
+[[nodiscard]] auto TexDataReflectivityLuma(const Map& map, const DFace& face) noexcept -> float;
 
 // Source's 3D skybox: background scenery compiled at 1/scale size around the
 // `sky_camera` entity, rendered by the engine at full size around the player's
@@ -395,7 +396,7 @@ struct SkyboxTransform {
 // `importSkybox` false resolves the membership (which faces belong to the
 // miniscape) but stops before the placement pass, so callers can drop that
 // content without paying for it.
-[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map, bool importSkybox) noexcept -> SkyboxTransform;
+[[nodiscard]] auto MakeSkyboxTransform(const Map& map, bool importSkybox) noexcept -> SkyboxTransform;
 [[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
 // A point in PLACED (transformed source) coordinates: inside the world volume.
 // Guards skybox light entities only; geometry uses the background layer.
@@ -414,10 +415,10 @@ void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) no
 struct InteractiveSubmodel {
     int32_t   modelIndex = -1;
     bool      rotating   = false;
-    JPH::Vec3 pivot {0.0f, 0.0f, 0.0f};
+    FVec3 pivot {0.0f, 0.0f, 0.0f};
 };
 
-[[nodiscard]] auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
+[[nodiscard]] auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
 
 // The emissive half of the lighting heuristics as a standalone entry point.
 //
@@ -435,13 +436,13 @@ struct InteractiveSubmodel {
 // pass the entity lights the scene already gathered. Name-gate strengths only:
 // this layer has no VFS, so there is no .vmt / .vtf refinement here.
 [[nodiscard]] auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
-) -> std::vector<BspPointLight>;
+    const Map& map, const ImportOptions& options, std::span<const PointLight> entityLights
+) -> std::vector<PointLight>;
 
 // Faces + displacements -> per-material native streams; entities -> lights.
 // Faces whose texinfo is missing or node-only are skipped (they are tree
 // partitions, not surfaces). Degenerate polygons (fewer than 3 unique corners)
 // are skipped rather than producing zero-area triangles.
-[[nodiscard]] auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options = {}) -> ImportedMapData;
+[[nodiscard]] auto ImportMapGeometry(const Map& map, const ImportOptions& options = {}) -> ImportedMapData;
 
 } // namespace ZHLN::BSP

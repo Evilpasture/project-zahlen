@@ -33,9 +33,9 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ZHLN {
-class Engine;
-} // namespace ZHLN
+namespace ZHLN::COM {
+struct IEngine;
+} // namespace ZHLN::COM
 
 namespace ZHLN::ProjectLight {
 
@@ -77,14 +77,14 @@ class SceneMirror {
 
     // The whole reconcile: removals, poses, spawns/updates, then rigs,
     // environment and audio voices.
-    void SyncSceneEntities(Engine& engine, SceneMirrorState& state);
+    void SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& state);
 
     // Prepares, repairs or tears down the local character controller to match
     // what the server says about this player, and points the camera at it.
-    void UpdateLocalController(Engine& engine, SceneMirrorState& state);
+    void UpdateLocalController(COM::IEngine& engine, SceneMirrorState& state);
 
     // Drives this client's own character parts from its controller.
-    void UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& state, float dt);
+    void UpdateLocalCharacterParts(COM::IEngine& engine, SceneMirrorState& state, float dt);
 };
 
 } // namespace ZHLN::ProjectLight

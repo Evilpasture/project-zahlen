@@ -1,18 +1,17 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
+#include <Zahlen/Math/Angles.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -66,35 +65,43 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const auto camComp = engine->Entities()->GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue((camComp != nullptr))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
+            ZHLN::Camera cam = camComp->camera;
             const float aspect = 1280.0f / 720.0f;
 
             // Compute expected fixed 58-degree viewmodel projection
-            const JPH::Mat44 expectedVMProj = ZHLN::Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
+            const auto expectedVMProj = ZHLN::CreatePerspective(ZHLN::DegF{58.0f}.ToRadians(), aspect, cam.nearZ, cam.farZ);
+            const auto isClose = [](const auto& a, const auto& b) {
+                for (size_t column = 0; column < 4; ++column) {
+                    for (size_t row = 0; row < 4; ++row) {
+                        if (std::abs(a[row, column] - b[row, column]) > 1e-4f) return false;
+                    }
+                }
+                return true;
+            };
 
             // Test A: Normal Camera FOV (45.0 deg)
-            cam.fov                = 45.0f;
-            JPH::Mat44 worldProj45 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj45.IsClose(expectedVMProj, 1e-4f));
+            cam.fov                = ZHLN::DegF{45.0f};
+            auto worldProj45 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj45, expectedVMProj));
 
             // Test B: Sniper Scope / Zoomed-in Camera FOV (15.0 deg)
-            cam.fov                = 15.0f;
-            JPH::Mat44 worldProj15 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj15.IsClose(expectedVMProj, 1e-4f));
+            cam.fov                = ZHLN::DegF{15.0f};
+            auto worldProj15 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj15, expectedVMProj));
 
             // Test C: Ultra-Wide Camera FOV (110.0 deg)
-            cam.fov                 = 110.0f;
-            JPH::Mat44 worldProj110 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectFalse(worldProj110.IsClose(expectedVMProj, 1e-4f));
+            cam.fov                 = ZHLN::DegF{110.0f};
+            auto worldProj110 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectFalse(isClose(worldProj110, expectedVMProj));
 
             // Test D: When camera FOV is exactly 58.0 deg, both projections match
-            cam.fov                = 58.0f;
-            JPH::Mat44 worldProj58 = cam.GetProjectionMatrix(aspect);
-            ZHLN::Test::ExpectTrue(worldProj58.IsClose(expectedVMProj, 1e-4f));
+            cam.fov                = ZHLN::DegF{58.0f};
+            auto worldProj58 = cam.GetProjectionMatrix(aspect);
+            ZHLN::Test::ExpectTrue(isClose(worldProj58, expectedVMProj));
 
             return {};
         }
@@ -108,29 +115,27 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto& reg = *engine->Entities();
 
             // 1. Sun light
-            const ZHLN::Entity sunEnt = reg.Create();
-            reg.Add(
-                sunEnt, ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 10.0f, 0.0f)},
-                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 150.0f}
+            const ZHLN::Entity sunEnt = reg.Spawn();
+            reg.AttachMany(
+                sunEnt, ZHLN::Components::TransformComponent {.position = {0.0f, 10.0f, 0.0f}},
+                ZHLN::Components::LightComponent {.type = ZHLN::LightType::Sun, .color = {1.0f, 1.0f, 1.0f}, .intensity = 150.0f}
             );
 
             // 2. Spawn viewmodel weapon box in front of camera (-Z direction)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 0.5f, 1.0f};
+            vmMat.baseColorFactor    = {0.0f, 1.0f, 0.5f, 1.0f};
 
-            const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.08f, 0.08f, 0.35f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat}
-            );
+            const ZHLN::Entity vmGun = engine->Assets()->SpawnBox({0.08f, 0.08f, 0.35f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat});
 
             // Flag as Viewmodel
             reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             const auto mc = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
-            if (!ZHLN::Test::ExpectTrue(mc.has_value())) {
+            if (!ZHLN::Test::ExpectTrue((mc != nullptr))) {
                 return std::unexpected(ViewmodelTestError::ViewmodelComponentMissing);
             }
 
@@ -141,7 +146,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             return {};
@@ -156,24 +161,21 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
+            auto& reg = *engine->Entities();
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Setup Camera looking along standard forward direction (-Z)
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const auto camComp = engine->Entities()->GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue((camComp != nullptr))) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
-            cam.yaw      = -90.0f; // Look directly along -Z
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+            ZHLN::Camera cam = camComp->camera;
+            cam.position = {0.0f, 1.5f, 2.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f}; // Look directly along -Z
+            cam.pitch    = ZHLN::DegF{0.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
 
             // The test drives the main camera through the registry. If the extras
             // target camera rig is present on this pooled engine (a sibling
@@ -183,21 +185,17 @@ struct ViewmodelTestSuite {
 
             // 2. Solid Dark Wall directly in front of camera (at Z = -2.0m, dimensions 8x8m)
             ZHLN::Material wallMat;
-            wallMat.baseColorFactor    = JPH::Float4 {0.15f, 0.15f, 0.15f, 1.0f};
+            wallMat.baseColorFactor    = {0.15f, 0.15f, 0.15f, 1.0f};
 
-            const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
-                *engine, {4.0f, 4.0f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat}
-            );
+            const ZHLN::Entity darkWall = engine->Assets()->SpawnBox({4.0f, 4.0f, 0.2f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat});
             ZHLN::Test::ExpectTrue(reg.IsAlive(darkWall));
 
             // 3. Vibrant Cyan Viewmodel Object placed in front of camera (Z = +1.2m in world, 0.8m from camera)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 1.0f, 1.0f};
+            vmMat.baseColorFactor    = {0.0f, 1.0f, 1.0f, 1.0f};
 
-            const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat}
-            );
+            const ZHLN::Entity vmObject = engine->Assets()->SpawnBox({0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat});
             reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             // 4. Render 15 frames to stabilize G-buffer and Viewmodel pass
@@ -205,7 +203,7 @@ struct ViewmodelTestSuite {
             for (uint32_t frame = 0; frame < 15; ++frame) {
                 engine->ProcessEvents();
                 const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             // 5. Frame capture and pixel histogram analysis, in memory.

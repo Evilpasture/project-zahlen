@@ -110,8 +110,8 @@ auto DeviceConfigurator<Ts...>::OptionalRayTracing() && {
         {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
         [](auto& f) { f.accelerationStructure = VK_TRUE; },
         [](auto& f) { f.rayQuery = VK_TRUE; },
-        [](VkPhysicalDevice, const auto& accel, const auto& ray) {
-            return accel.accelerationStructure == VK_TRUE && ray.rayQuery == VK_TRUE;
+        [](VkPhysicalDevice gpu, const auto& accel, const auto& ray) {
+            return accel.accelerationStructure == VK_TRUE && ray.rayQuery == VK_TRUE && RayTracingDriverUsable(gpu);
         }
     );
 }

@@ -4,35 +4,28 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Vec3.h>
 #include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <cstdint>
 #include <vector>
 
-// Forward declare engine registry
-namespace ZHLN::ECS {
-class Registry;
+namespace ZHLN::COM {
+struct IEntities;
 }
 
 namespace ZHLN::ALife {
+
+struct ALifeComponent;
 
 class ZHLN_STATIC_API SpatialGrid {
   public:
     SpatialGrid(uint32_t w, uint32_t h, float cell_size);
 
-    void Clear() noexcept;
-    void UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos);
-    // Unlink before destroying the ECS component: its next link lives there.
-    void RemoveEntity(ECS::Registry& reg, Entity handle);
-
-    // Returns matching entities. A caller may move in a reusable buffer to retain its capacity.
-    [[nodiscard]] auto Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity> reusable = {}) const
-        -> std::vector<Entity>;
-
-    [[nodiscard]] auto GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t;
+    void               Clear() noexcept;
+    void               UpdateEntity(COM::IEntities& entities, Entity handle, DVec3 old_pos);
+    void               RemoveEntity(COM::IEntities& entities, Entity handle);
+    [[nodiscard]] auto Query(const COM::IEntities& entities, DVec3 pos, float radius, std::vector<Entity> reusable = {}) const -> std::vector<Entity>;
+    [[nodiscard]] auto GetCellIndex(DVec3 pos) const noexcept -> int32_t;
 
     std::vector<Entity> _cellHeads;
     uint32_t            _width;

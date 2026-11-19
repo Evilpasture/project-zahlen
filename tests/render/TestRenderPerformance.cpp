@@ -1,32 +1,29 @@
+#include <UI/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/IState.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "extras/profile/PerfBaseline.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 
 // clang-format off
-#include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Core/Factory.h>
-#include <Jolt/RegisterTypes.h>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
@@ -36,6 +33,7 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <format>
 #include <memory>
 #include <numbers>
@@ -106,7 +104,7 @@ struct RenderPerfEnvironment {
     static void Init() {
         ZHLN::Fiber::InitMainThread();
         ZHLN::TaskSystem::Init(4, 64, ZHLN::kMinimumFiberStackSize);
-        JPH::RegisterDefaultAllocator();
+        
     }
 
     static void Shutdown() {
@@ -114,7 +112,7 @@ struct RenderPerfEnvironment {
     }
 };
 
-auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> std::unique_ptr<ZHLN::Engine> {
+auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
 
     const ZHLN::EngineConfig cfg {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -125,59 +123,40 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
         .fullscreen     = false,
         .validationMode = mode,
         .headless       = true,
-        .enableFallbackScene = false,
     };
 
-    auto engineRes = ZHLN::Engine::Create(cfg);
+    auto engineRes = ZHLN::COM::CreateEngineRef(cfg);
     if (!engineRes) {
         return {};
     }
 
     auto engine = std::move(engineRes.value());
-    engine->InitializeDefaultScene();
     return engine;
 }
 
-void PrepareEngineForTest(ZHLN::Engine& engine) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
+void PrepareEngineForTest(ZHLN::COM::IEngine& engine) {
+    auto& rc = *engine.Graphics();
 
     // 1. Reset UI callbacks
-    engine.SetUICallback(nullptr);
+    (void)engine.SubmitUI(engine.PrimaryWindow(), ZHLN::COM::UISubmitInfo {});
 
-    // 2. Clear ECS entities and Command Buffer
+    // 2. Clear ECS entities, reset graph locals, reset World culling counters,
+    //    and re-seed the baseline camera/input/debug entities.
     engine.ClearScene();
 
-    // 3. Clear System Graphs before rebuilding default scene
-    engine.GetUpdateGraph().Clear();
-    engine.GetRenderGraph().Clear();
+    (void) rc;
 
-    // 4. Clear GPU resource caches & temporary buffers
-    rc.ClearCaches();
-    engine.ClearVisibilityLists();
-
-    // 5. Rebuild the clean default scene: the camera entity, the settings-tag
-    //    singletons, the font atlas. This has to run before the two resets below,
-    //    because the camera and the culling counters are components now --
-    //    InitializeDefaultScene is what creates their entities, and a reset
-    //    ahead of it asks a just-cleared registry for state that does not exist
-    //    yet.
-    engine.InitializeDefaultScene();
-
-    // 6. Reset what a scene clear leaves behind: the camera to defaults, and the
-    //    culling statistics (per-world rather than process-global, so this is
-    //    what kept them from leaking between cases). The camera lives in an entity
-    //    the rebuild above created; Patch reports a world without one instead of
-    //    panicking, and the (void) is the claim that the rebuild did its part.
-    auto&      camReg    = ZHLN::EngineAccess::RegistryOf(engine);
-    const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    // 4. Reset the main camera framing to defaults.
+    auto& camReg = *engine.Entities();
+    const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
     camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
-    engine.State().ResetCullingStats();
+    engine.State()->ResetCullingStats();
 }
 
-void TickEngine(ZHLN::Engine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f) {
+void TickEngine(ZHLN::COM::IEngine& engine, uint32_t frameCount, float dt = 1.0f / 60.0f, const std::function<void(float)>& drawUI = {}) {
     for (uint32_t i = 0; i < frameCount; ++i) {
         engine.ProcessEvents();
+        if (drawUI) drawUI(dt);
         (void) engine.Tick(dt);
     }
 }
@@ -190,19 +169,16 @@ const char* GetModeLabel(ZHLN::ValidationMode mode) {
 // Benchmark Execution Functions (Reusing Engine)
 // ============================================================================
 
-auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunGeometryTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 1: Mass Geometry & Culling [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
+    auto& reg = *engine.Entities();
+    auto& rc = *engine.Graphics();
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) { pp.fullBright = 1; });
-    }
+    engine.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
     constexpr size_t kGridCols = 40;
     constexpr size_t kGridRows = 40;
@@ -214,14 +190,12 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         for (size_t c = 0; c < kGridCols; ++c) {
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
-            const ZHLN::Entity box  = ZHLN::PrefabFactory::CreateBox(
-                engine, {0.5f, 0.5f, 0.5f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat}
-            );
+            const ZHLN::Entity box  = engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat});
             // A box has three vertex streams and three meshlet buffers. Fail
             // immediately rather than timing a scene with invalid geometry.
             const auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
-            if (!ZHLN::Test::ExpectTrue(owner.has_value())) {
+            if (!ZHLN::Test::ExpectTrue((owner != nullptr))) {
                 return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
             }
             const auto& mesh = owner->mesh;
@@ -236,24 +210,27 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         }
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam    = c.camera;
+        cam.position = {0.0f, 25.0f, -50.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-30.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = -30.0f;
-    cam.fov      = 60.0f;
 
     uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
-        float angle  = static_cast<float>(f) * 0.05f;
-        cam.position = JPH::Vec3(std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f);
-        cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
+        float angle = static_cast<float>(f) * 0.05f;
+        reg.PatchSingleton<ZHLN::Components::CameraComponent>([angle](auto& c) {
+            c.camera.position = {std::sin(angle) * 50.0f, 25.0f, std::cos(angle) * 50.0f};
+            c.camera.yaw      = ZHLN::RadF{std::atan2(-c.camera.position.z, -c.camera.position.x)}.ToDegrees();
+        });
 
         // The orbit moves the camera every frame, and the engine renders from the
         // registry's copy: the pose is written back before the tick.
@@ -268,12 +245,12 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         ZHLN::Test::ExpectEq(valRaised, 0u);
     }
 
-    ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
-    ZHLN::Test::ExpectGt(engine.State().CullingStats().TotalTriangles, 0);
+    ZHLN::Test::ExpectGt(engine.State()->CullingStats().TotalObjects, engine.State()->CullingStats().CulledObjects);
+    ZHLN::Test::ExpectGt(engine.State()->CullingStats().TotalTriangles, 0);
 
     ZHLN::Println(
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
-        engine.State().CullingStats().TotalTriangles / 1000.0
+        engine.State()->CullingStats().TotalTriangles / 1000.0
     );
     ZHLN::Test::VerifyBaseline(
         mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0
@@ -282,26 +259,21 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     return {};
 }
 
-auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunLightingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 2: Clustered Forward+ Lighting [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 8.0f;
-        });
-    }
+    engine.Graphics()->PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 8.0f;
+    });
 
-    ZHLN::PrefabFactory::CreatePlane(
-        engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
-    );
+    engine.Assets()->SpawnPlane(100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f});
 
     constexpr size_t          kLightCount = 64;
     std::vector<ZHLN::Entity> lightEntities;
@@ -309,10 +281,10 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
 
     for (size_t i = 0; i < kLightCount; ++i) {
         float     hue = static_cast<float>(i) / static_cast<float>(kLightCount);
-        JPH::Vec3 color(std::sin(hue * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.33f) * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.66f) * 6.28f) * 0.5f + 0.5f);
+        ZHLN::FVec3 color{std::sin(hue * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.33f) * 6.28f) * 0.5f + 0.5f, std::sin((hue + 0.66f) * 6.28f) * 0.5f + 0.5f};
 
-        auto l = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 2.0f, 0.0f)}, ZHLN::Components::LightComponent {
+        auto l = reg.Spawn(
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 2.0f, 0.0f}}, ZHLN::Components::LightComponent {
                                                                                                 .type      = ZHLN::LightType::Point,
                                                                                                 .color     = color,
                                                                                                 .intensity = 150.0f,
@@ -322,14 +294,15 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         lightEntities.push_back(l);
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 12.0f, -30.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-20.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 12.0f, -30.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = -20.0f;
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -342,7 +315,7 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
             float lz    = std::cos(phase * 0.9f) * (15.0f + static_cast<float>(i % 4) * 3.0f);
             float ly    = 1.5f + std::sin(phase * 2.0f) * 0.8f;
 
-            reg.Patch<ZHLN::Components::TransformComponent>(lightEntities[i], [&](auto& t) { t.position = JPH::Vec3(lx, ly, lz); });
+            reg.Patch<ZHLN::Components::TransformComponent>(lightEntities[i], [&](auto& t) { t.position = {lx, ly, lz}; });
         }
 
         engine.ProcessEvents();
@@ -358,20 +331,20 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     return {};
 }
 
-auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunParticlesTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 3: GPU Particle System [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
+    auto& reg = *engine.Entities();
+    auto& rc = *engine.Graphics();
 
     constexpr uint32_t  kMaxParticles = 20000;
-    ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
+    ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", ZHLN::Extent2D{64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
-    reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
+    reg.Spawn(
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -4.0f, 0.0f},
                                                                                                  .drag        = 0.1f,
@@ -395,14 +368,15 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
                                                                                         }
     );
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 8.0f, -20.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-15.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 8.0f, -20.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = -15.0f;
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -415,28 +389,28 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     return {};
 }
 
-auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunVolumetricsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 4: Volumetric Fog & Scattering [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
 
-    reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 0.0f)},
+    reg.Spawn(
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 0.0f}},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.95f, 0.85f), .intensity = 180.0f, .direction = JPH::Vec3(0.5f, 0.8f, 0.3f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.95f, 0.85f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.8f, 0.3f}.Normalized()
         }
     );
 
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.05f,
             .heightFalloff   = 0.02f,
             .heightOffset    = 0.0f,
             .anisotropy      = 0.65f,
-            .scatteringColor = JPH::Vec3(0.85f, 0.90f, 1.0f),
+            .scatteringColor = ZHLN::FVec3{0.85f, 0.90f, 1.0f},
             .noiseScale      = 0.05f,
             .noiseSpeed      = 1.2f,
             .noiseIntensity  = 0.6f,
@@ -444,18 +418,17 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         }
     );
 
-    ZHLN::PrefabFactory::CreatePlane(
-        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false}
-    );
+    engine.Assets()->SpawnPlane(80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false});
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 3.0f, -25.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 3.0f, -25.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = 0.0f;
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -468,45 +441,44 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     return {};
 }
 
-auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunDecalsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 5: Screen-Space Decal Projections [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
+    auto& reg = *engine.Entities();
+    auto& rc = *engine.Graphics();
 
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
-    );
+    engine.Assets()->SpawnBox({25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}});
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
-    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", {64, 64}, decalPixels, true);
+    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", ZHLN::Extent2D{64, 64}, decalPixels, true);
 
     constexpr size_t kDecalCount = 100;
     for (size_t i = 0; i < kDecalCount; ++i) {
         float posX = -20.0f + static_cast<float>(i % 20) * 2.0f;
         float posY = 1.5f + static_cast<float>(i / 20) * 2.5f;
 
-        const JPH::Vec3  pos(posX, posY, 0.0f);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
+        const ZHLN::FVec3  pos{posX, posY, 0.0f};
+        const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        reg.Create(
-            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
+        reg.Spawn(
+            ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = decalTex, .roughness = 0.8f, .metallic = 0.1f}
         );
     }
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 7.5f, -18.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{0.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 7.5f, -18.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = 0.0f;
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -519,16 +491,18 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     return {};
 }
 
-auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunUITest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 6: Immediate-Mode UI Compositing [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    ZHLN::GUI::Context perfGui(engine.GetFontAtlas());
-    engine.SetUICallback([&](ZHLN::Engine& eng) {
-        perfGui.SetFontAtlas(eng.GetFontAtlas());
-        ZHLN::GUI::Frame ui = perfGui.BeginFrame(eng.ConsumeUIInput(0.016f));
+    ZHLN::HostUI hostUI(engine);
+    ZHLN::GUI::Context perfGui(hostUI.GetFontAtlas());
+    auto composeUI = [&](float frameDt) {
+        hostUI.BeginFrame();
+        perfGui.SetFontAtlas(hostUI.GetFontAtlas());
+        ZHLN::GUI::Frame ui = perfGui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
         ui.Box(
             "PerfDashboard",
@@ -560,12 +534,12 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
             }
         );
 
-        eng.SubmitUI(std::move(ui).End());
-    });
+        (void) hostUI.Submit(std::move(ui).End());
+    };
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
-    TickEngine(engine, kFrames);
+    TickEngine(engine, kFrames, 1.0f / 60.0f, composeUI);
     double durationMs = timer.ElapsedMilliseconds();
 
     ZHLN::Println("    [UI Compositor] 60 frames x 10 Complex Panels + SDF Text in {:.2f} ms ({:.2f} FPS)", durationMs, (kFrames * 1000.0) / durationMs);
@@ -574,34 +548,27 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
     return {};
 }
 
-auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunPostProcessingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 7: Post-Processing & AA Stack [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
 
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::SMAA;
-        });
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+        engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 0;
-            pp.ambientExposure   = 10.0f;
-            pp.vignetteIntensity = 1.2f;
-            pp.vignettePower     = 1.6f;
-            pp.enableSSR         = 1;
-        });
-    }
+    engine.Graphics()->PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright      = 0;
+        gfx.environment.ambientExposure = 10.0f;
+        gfx.post.vignetteIntensity      = 1.2f;
+        gfx.post.vignettePower          = 1.6f;
+        gfx.post.enableSSR              = 1;
+    });
 
-    ZHLN::PrefabFactory::CreateBox(
-        engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
-    );
+    engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f});
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -616,11 +583,11 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
     return {};
 }
 
-auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(30);
     ZHLN::Println("\n  {}--- GPU Subsystem 8: Hardware Ray Tracing (RTR / RT Shadows) [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
-    auto rc = engine.Graphics();
+    auto& rc = *engine.Graphics();
     if (!rc.Info().rayTracingSupported) {
         ZHLN::Println("    [SKIP] Device does not support Hardware Ray Tracing (VK_KHR_ray_tracing / VK_KHR_ray_query).");
         return {};
@@ -628,31 +595,26 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright      = 0;
-            pp.ambientExposure = 6.0f;
-            pp.enableSSR       = 0;
-            pp.enableRTR       = 1;
-            pp.giMode          = 0;
-        });
-    }
+    engine.Graphics()->PatchSettings([](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 6.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = true;
+        gfx.post.mode                    = 0;
+    });
 
-    reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(40.0f, 50.0f, 30.0f)},
+    reg.Spawn(
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{40.0f, 50.0f, 30.0f}},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.94f), .intensity = 180.0f, .direction = JPH::Vec3(0.5f, 0.7f, 0.35f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.94f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.7f, 0.35f}.Normalized()
         }
     );
 
     auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
-    ZHLN::PrefabFactory::CreatePlane(
-        engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}
-    );
+    engine.Assets()->SpawnPlane(100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat});
 
     constexpr size_t kGridDim  = 20;
     auto             chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}});
@@ -663,38 +625,35 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
             float posX = (static_cast<float>(c) - kGridDim * 0.5f) * 2.5f;
             float posZ = (static_cast<float>(r) - kGridDim * 0.5f) * 2.5f;
 
-            ZHLN::PrefabFactory::CreateBox(
-                engine, {0.5f, 0.5f, 0.5f},
+            engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
-                }
-            );
+                });
         }
     }
 
     auto emissiveMat = rc.CreateMaterial(
         ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
-    const ZHLN::Entity emissiveCube = ZHLN::PrefabFactory::CreateBox(
-        engine, {2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat}
-    );
+    const ZHLN::Entity emissiveCube = engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat});
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        auto& cam = c.camera;
+        cam.position = {0.0f, 14.0f, -32.0f};
+        cam.yaw      = ZHLN::DegF{90.0f};
+        cam.pitch    = ZHLN::DegF{-22.0f};
+        cam.fov      = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 14.0f, -32.0f);
-    cam.yaw      = 90.0f;
-    cam.pitch    = -22.0f;
-    cam.fov      = 60.0f;
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
     for (uint32_t f = 0; f < kFrames; ++f) {
         float t = static_cast<float>(f) * 0.05f;
         reg.Patch<ZHLN::Components::TransformComponent>(emissiveCube, [&](auto& trans) {
-            trans.position = JPH::Vec3(std::sin(t) * 15.0f, 4.0f + std::sin(t * 2.0f) * 2.0f, std::cos(t) * 15.0f);
+            trans.position = {std::sin(t) * 15.0f, 4.0f + std::sin(t * 2.0f) * 2.0f, std::cos(t) * 15.0f};
         });
 
         engine.ProcessEvents();
@@ -703,13 +662,11 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     double durationMs = timer.ElapsedMilliseconds();
 
     const std::string ppmPath  = "headless_rt_isolated_output.ppm";
-    const auto        captured = rc.CaptureFrame();
-    if (!captured) {
+    const RgbImage outputImg = ZHLN::Test::Headless::Capture(engine, ppmPath);
+    if (!outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::RayTracingThroughputFailed);
     }
-
-    const RgbImage outputImg = ZHLN::Test::Headless::ToRgbImage(*captured);
-    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
+    ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     ZHLN::Test::ExpectGt(litPixels, 30000u);
@@ -722,7 +679,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     return {};
 }
 
-auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
+auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::expected<void, ZHLN::ErrorCode> {
     ZHLN::Test::SetTimeout(60);
 
     ZHLN::Println("\n  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
@@ -731,18 +688,16 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     PrepareEngineForTest(engine);
 
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-    auto rc = engine.Graphics();
+    auto& reg = *engine.Entities();
+    auto& rc = *engine.Graphics();
 
     const bool useHardwareRT = rc.Info().rayTracingSupported;
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor
     auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
-    ZHLN::PrefabFactory::CreatePlane(
-        engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}
-    );
+    engine.Assets()->SpawnPlane(120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat});
 
     // 2. Geometry Population (600 Distinct PBR Meshes with RT Reflection Targets)
     constexpr size_t kCols = 25;
@@ -758,17 +713,15 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             float posZ = (static_cast<float>(r) - kRows * 0.5f) * 3.0f;
             auto  mat  = (c % 3 == 0) ? *goldMat : ((c % 3 == 1) ? *redMat : *chromeMat);
 
-            ZHLN::PrefabFactory::CreateBox(
-                engine, {0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.6, posZ}, .createPhysics = false, .materialOverride = mat}
-            );
+            engine.Assets()->SpawnBox({0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.6, posZ}, .createPhysics = false, .materialOverride = mat});
         }
     }
 
     // 3. Clustered Forward+ Multi-Light Grid (48 Dynamic Point Lights + Sun)
-    reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 0.0f)},
+    reg.Spawn(
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 0.0f}},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 0.98f, 0.92f), .intensity = 160.0f, .direction = JPH::Vec3(0.6f, 0.75f, 0.4f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.92f}, .intensity = 160.0f, .direction = ZHLN::FVec3{0.6f, 0.75f, 0.4f}.Normalized()
         }
     );
 
@@ -778,11 +731,11 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     for (size_t i = 0; i < kLightCount; ++i) {
         float hue = static_cast<float>(i) / static_cast<float>(kLightCount);
-        auto  l   = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 2.0f, 0.0f)},
+        auto  l   = reg.Spawn(
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 2.0f, 0.0f}},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Point,
-                .color     = JPH::Vec3(std::sin(hue * 6.28f) * 0.5f + 0.5f, 0.8f, std::cos(hue * 6.28f) * 0.5f + 0.5f),
+                .color     = ZHLN::FVec3{std::sin(hue * 6.28f) * 0.5f + 0.5f, 0.8f, std::cos(hue * 6.28f) * 0.5f + 0.5f},
                 .intensity = 220.0f,
                 .range     = 20.0f,
             }
@@ -791,9 +744,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 4. GPU Particle Emitter (10,000 Particles)
-    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
-    reg.Create(
-        ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 1.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
+    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", ZHLN::Extent2D{64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
+    reg.Spawn(
+        ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 1.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -2.5f, 0.0f},
                                                                                                  .drag        = 0.15f,
@@ -818,13 +771,13 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     );
 
     // 5. Volumetric Fog Environment
-    reg.Create(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.035f,
             .heightFalloff   = 0.025f,
             .heightOffset    = 0.0f,
             .anisotropy      = 0.55f,
-            .scatteringColor = JPH::Vec3(0.8f, 0.88f, 1.0f),
+            .scatteringColor = ZHLN::FVec3{0.8f, 0.88f, 1.0f},
             .noiseScale      = 0.04f,
             .noiseSpeed      = 1.0f,
             .noiseIntensity  = 0.5f,
@@ -836,21 +789,23 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     for (size_t i = 0; i < 50; ++i) {
         float            posX  = -30.0f + static_cast<float>(i % 10) * 6.5f;
         float            posZ  = -30.0f + static_cast<float>(i / 10) * 12.0f;
-        const JPH::Vec3  pos   = JPH::Vec3(posX, 0.01f, posZ);
-        const JPH::Mat44 world = ZHLN::Math::CreateTransform(pos, {0.0f, 0.0f, 0.0f, 1.0f}, {2.5f, 2.5f, 2.5f});
+        const ZHLN::FVec3  pos   = {posX, 0.01f, posZ};
+        const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        reg.Create(
-            ZHLN::Components::TransformComponent {.position = pos, .scale = JPH::Vec3(2.5f, 2.5f, 2.5f)},
+        reg.Spawn(
+            ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = sparkTex, .roughness = 0.9f, .metallic = 0.0f}
         );
     }
 
     // 7. Immediate-Mode UI HUD Callback
-    ZHLN::GUI::Context hudGui(engine.GetFontAtlas());
-    engine.SetUICallback([&](ZHLN::Engine& eng) {
-        hudGui.SetFontAtlas(eng.GetFontAtlas());
-        ZHLN::GUI::Frame ui = hudGui.BeginFrame(eng.ConsumeUIInput(0.016f));
+    ZHLN::HostUI hostUI(engine);
+    ZHLN::GUI::Context hudGui(hostUI.GetFontAtlas());
+    auto composeUI = [&](float frameDt) {
+        hostUI.BeginFrame();
+        hudGui.SetFontAtlas(hostUI.GetFontAtlas());
+        ZHLN::GUI::Frame ui = hudGui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
         ui.Box(
             "GrandBenchmarkHUD",
@@ -863,7 +818,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             },
             [&]() {
                 ui.Text("GRAND MASTER RENDER BENCHMARK", 12.0f, {0.3f, 0.85f, 1.0f, 1.0f});
-                ui.Text(std::format("Frame: {} | Mode: {}", eng.GetCurrentFrame(), useHardwareRT ? "Hardware RTR + Shadows" : "Forward+ SSR"));
+                ui.Text(std::format("Frame: {} | Mode: {}", engine.CurrentFrame(), useHardwareRT ? "Hardware RTR + Shadows" : "Forward+ SSR"));
                 ui.Text(std::format("Validation: {}", GetModeLabel(mode)));
                 ui.Text("PBR Meshes: 600 | Clustered Lights: 49");
                 ui.Text("GPU Particles: 10,000 | Volumetric Froxels: Active");
@@ -875,33 +830,28 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             }
         );
 
-        eng.SubmitUI(std::move(ui).End());
-    });
+        (void) hostUI.Submit(std::move(ui).End());
+    };
 
     // 8. Configure Post-Processing
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) {
-            aa.state.mode        = ZHLN::AAMode::SMAA;
-        });
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+        engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [useHardwareRT](auto& pp) {
-            pp.fullBright        = 0;
-            pp.ambientExposure   = 10.0f;
-            pp.vignetteIntensity = 1.15f;
-            pp.enableSSR         = useHardwareRT ? 0 : 1;
-            pp.enableRTR         = useHardwareRT ? 1 : 0;
-        });
-    }
+    engine.Graphics()->PatchSettings([useHardwareRT](auto& gfx) {
+        gfx.environment.fullBright       = 0;
+        gfx.environment.ambientExposure  = 10.0f;
+        gfx.post.vignetteIntensity       = 1.15f;
+        gfx.post.enableSSR               = useHardwareRT ? 0 : 1;
+        gfx.rayTracing.enableReflections = useHardwareRT;
+    });
 
-    const auto camComp = ZHLN::EngineAccess::RegistryOf(engine).GetSingleton<ZHLN::Components::CameraComponent>();
-    if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+    const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+        c.camera.fov = ZHLN::DegF{60.0f};
+    });
+    if (!ZHLN::Test::ExpectTrue(camOk)) {
         return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
     }
-    ZHLN::Camera& cam = camComp->camera;
-    cam.fov   = 60.0f;
 
     uint32_t valBefore = ZHLN::Test::ValidationErrorCount();
 
@@ -918,10 +868,12 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                      .AvgLimit(avgLimitPct)
                      .P99Limit(50.0)
                      .Run([&](uint32_t f) {
-                         float t      = static_cast<float>(f) * 0.035f;
-                         cam.position = JPH::Vec3(std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f);
-                         cam.yaw      = JPH::RadiansToDegrees(std::atan2(-cam.position.GetZ(), -cam.position.GetX()));
-                         cam.pitch    = -18.0f + std::sin(t * 2.0f) * 4.0f;
+                         float t = static_cast<float>(f) * 0.035f;
+                         reg.PatchSingleton<ZHLN::Components::CameraComponent>([t](auto& c) {
+                             c.camera.position = {std::sin(t) * 45.0f, 18.0f + std::sin(t * 1.5f) * 6.0f, std::cos(t) * 45.0f};
+                             c.camera.yaw      = ZHLN::RadF{std::atan2(-c.camera.position.z, -c.camera.position.x)}.ToDegrees();
+                             c.camera.pitch    = ZHLN::DegF{-18.0f + std::sin(t * 2.0f) * 4.0f};
+                         });
 
                          // The orbit moves the camera every frame, and the engine renders
                          // from the registry's copy: the pose is written back before the tick.
@@ -932,22 +884,21 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                              float lz    = std::cos(phase * 1.1f) * (20.0f + static_cast<float>(i % 3) * 4.0f);
                              float ly    = 1.2f + std::sin(phase * 2.5f) * 0.8f;
 
-                             reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = JPH::Vec3(lx, ly, lz); });
+                             reg.Patch<ZHLN::Components::TransformComponent>(dynamicLights[i], [&](auto& trans) { trans.position = {lx, ly, lz}; });
                          }
 
                          engine.ProcessEvents();
+                         composeUI(1.0f / 60.0f);
                          (void) engine.Tick(1.0f / 60.0f);
                      });
 
     // 10. Frame Capture Verification
     const std::string ppmPath  = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
-    const auto        captured = rc.CaptureFrame();
-    if (!captured) {
+    const RgbImage outputImg = ZHLN::Test::Headless::Capture(engine, ppmPath);
+    if (!outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);
     }
-
-    const RgbImage outputImg = ZHLN::Test::Headless::ToRgbImage(*captured);
-    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
+    ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     uint32_t valRaised = ZHLN::Test::ValidationErrorCount() - valBefore;
@@ -986,14 +937,14 @@ namespace {
 // baseline, so a reading taken beside other workers is a report about the host
 // rather than about the renderer.
 struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"baseline comparison reads the GPU alone"> {}) RenderPerformanceValidationSuite {
-    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+    static inline ZHLN::COM::Ref<ZHLN::COM::IEngine> s_engine;
 
     RenderPerformanceValidationSuite() {
         RenderPerfEnvironment::Init();
         s_engine = CreateTestEngine(1280, 720, ZHLN::ValidationMode::On);
     }
     ~RenderPerformanceValidationSuite() {
-        s_engine.reset();
+        s_engine = {};
         RenderPerfEnvironment::Shutdown();
     }
 
@@ -1002,55 +953,55 @@ struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"baseline comparison reads the GPU a
         // failure; every test re-checks it so a failed Engine::Create reports
         // the error enum instead of binding a null Engine reference (UBSan).
         auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunUITest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::On);
         }
         auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::On);
@@ -1067,69 +1018,69 @@ namespace {
 // about the machine, not about the renderer. WaitIdle quiesces the other pools
 // for the duration of the case.
 struct ZHLN_ANNOTATION(ZHLN::Test::WaitIdle<"throughput gate reads the GPU alone"> {}) RenderPerformanceThroughputSuite {
-    static inline std::unique_ptr<ZHLN::Engine> s_engine;
+    static inline ZHLN::COM::Ref<ZHLN::COM::IEngine> s_engine;
 
     RenderPerformanceThroughputSuite() {
         RenderPerfEnvironment::Init();
         s_engine = CreateTestEngine(1280, 720, ZHLN::ValidationMode::Off);
     }
     ~RenderPerformanceThroughputSuite() {
-        s_engine.reset();
+        s_engine = {};
         RenderPerfEnvironment::Shutdown();
     }
 
     struct Tests {
         // Same contract as the validation suite above: guard before dereference.
         auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunUITest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
         auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::ErrorCode> {
-            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(static_cast<bool>(s_engine))) {
                 return std::unexpected(RenderPerfTestError::EngineInitFailed);
             }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::Off);

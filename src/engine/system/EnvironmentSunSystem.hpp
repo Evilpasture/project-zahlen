@@ -4,10 +4,10 @@
 #pragma once
 
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
+#include <engine/AssetManager.hpp>
 
 namespace ZHLN {
-class AssetManager;
 namespace ECS {
 class EntityCommandBuffer;
 }

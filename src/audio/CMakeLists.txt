@@ -11,6 +11,8 @@ add_library(zahlen_miniaudio STATIC
     MiniaudioImpl.c
 )
 set_target_properties(zahlen_miniaudio PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    OBJC_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
@@ -42,11 +44,11 @@ target_include_directories(zahlen_audio
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(zahlen_audio SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/miniaudio
-    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 
 # Jolt is public: include/Zahlen/Audio/Audio.hpp includes Jolt headers.
@@ -57,21 +59,13 @@ target_include_directories(zahlen_audio SYSTEM PUBLIC
 # that libzahlen_engine.so already exports. The ECS reaches this directory
 # through zahlen_engine, which links it PRIVATE, as it does for every other
 # engine subsystem.
-target_link_libraries(zahlen_audio PUBLIC
-    zahlen_jolt_headers
-)
 
+# zahlen_threading is an OBJECT library linked directly into zahlen_engine (same
+# rule as zahlen_ecs above); its headers come from ${PROJECT_SOURCE_DIR}/include.
 target_link_libraries(zahlen_audio PRIVATE
-    zahlen_threading
     zahlen_miniaudio
 )
 
-target_compile_definitions(zahlen_audio PRIVATE
-    JPH_DOUBLE_PRECISION
-    JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
-    $<$<CONFIG:Debug>:JPH_DEBUG>
-    $<$<CONFIG:Release>:JPH_RELEASE>
-)
 
 target_compile_options(zahlen_audio PRIVATE
     -fno-exceptions

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "VMTParser.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -106,7 +107,7 @@ class Tokenizer {
     size_t           _cursor = 0;
 };
 
-void ParseColorValues(std::string_view val, JPH::Float4& outColor) {
+void ParseColorValues(std::string_view val, FVec4& outColor) {
     if (val.empty()) {
         return;
     }
@@ -177,8 +178,8 @@ auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
     return 0.0f;
 }
 
-auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
-    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
+auto Rec709Luma(const FVec3& rgb) noexcept -> float {
+    return rgb.x * 0.2126f + rgb.y * 0.7152f + rgb.z * 0.0722f;
 }
 
 namespace {
@@ -265,13 +266,13 @@ auto DeriveVmtFields(VMTMaterial& mat) noexcept -> void {
             mat.alphaCutoff = 0.5f;
         }
     }
-    mat.baseColor = JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f};
+    mat.baseColor = FVec4 {1.0f, 1.0f, 1.0f, 1.0f};
     if (const auto it = mat.parameters.find("$color"); it != mat.parameters.end()) {
         ParseColorValues(it->second, mat.baseColor);
     } else if (const auto it2 = mat.parameters.find("$color2"); it2 != mat.parameters.end()) {
         ParseColorValues(it2->second, mat.baseColor);
     }
-    mat.envMapTint = JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f};
+    mat.envMapTint = FVec4 {1.0f, 1.0f, 1.0f, 1.0f};
     if (const auto it = mat.parameters.find("$envmaptint"); it != mat.parameters.end()) {
         ParseColorValues(it->second, mat.envMapTint);
     }

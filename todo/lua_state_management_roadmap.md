@@ -136,7 +136,7 @@ template <typename T>
 - [x] Create `plugins/lua/SceneLua.hpp` (mirroring `plugins/toml/SceneTOML.hpp`) specializing `JPH::Float3`, `JPH::Float4`, `JPH::Vec3`, `JPH::Vec4`, and `JPH::Quat`.
 - [x] Add `tests/extras/TestReflectLua.cpp` (`ReflectLuaSuite`: `6/6` passed) covering:
   - Default-preserving hydration, nested structs, enums, `JPH::Float3/4/Vec3/Vec4/Quat` array & `{x,y,z}` forms, fixed arrays, and `Optional`.
-  - Procedural `ZHLN::Scene::Scene` recipe generation (`TestProceduralSceneRecipe`).
+  - Procedural `ZHLN::Scene::Document` recipe generation (`TestProceduralSceneRecipe`).
   - Pure function evaluation `EvaluateCallString<GraphicsSettings>` + shipped `config/graphics.lua` & `config/ragdoll_humanoid.lua` (`TestShippedConfigProfiles`).
   - Transactional `ApplyPatchString` (verifying `target` is unchanged when a deep field fails validation).
   - Sandbox enforcement (`while true do end` -> `LuaError::InstructionBudgetExceeded`, exponential string allocation -> `LuaError::MemoryBudgetExceeded`, binary bytecode -> `LuaError::SyntaxError`, `io`/`os`/`ffi`/`package`/`debug`/`jit` -> `nil`).
@@ -165,7 +165,7 @@ template <typename T>
 - [x] **1. Hardware-Adaptive Graphics Profile (`config/graphics.lua`):**
   - Added Core-pure `ApplyGraphicsSettings(Engine&, const GraphicsSettings&)` in `src/engine/system/GraphicsSettingsSync.{hpp,cpp}` and wired `config/graphics.lua` (`ZHLN::RenderInfo` -> `ZHLN::GraphicsSettings` overlay + preset expansion + `FileSystemWatcher` hot-reload in `FramePhase::HotReload` after `"StateAndShaderReload"`) in `app/main.cpp` (`--graphics-config <file.lua>`).
 - [x] **2. Parametric Scene Recipes (`--scene <file.toml|file.lua>`):**
-  - Added `.lua` and `.toml` scene document loading in `app/main.cpp` (`ReflectLua::EvaluateFile<ZHLN::Scene::Scene>(path)` -> `ZHLN::Scene::Instantiate(engine, *scene)`).
+  - Added `.lua` and `.toml` scene document loading in `app/main.cpp` (`ReflectLua::EvaluateFile<ZHLN::Scene::Document>(path)` -> `ZHLN::Scene::Instantiate(engine, *scene)`).
 - [x] **3. Data-Driven Ragdoll Authoring Policy (`gameplay/RagdollAuthoring` + `config/ragdoll_humanoid.lua`):**
   - Replaced `SetupRagdollArgs` / `ScriptCommandRegistry` with reflected `RagdollRecipe` (`RagdollJointRule`, `RagdollPartSpec`, `RagdollShapeKind`), `LoadRecipeFromLuaString` / `LoadRecipeFromLuaFile`, and shipped `config/ragdoll_humanoid.lua`.
 

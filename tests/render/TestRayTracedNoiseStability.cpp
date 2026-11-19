@@ -22,22 +22,24 @@
 //      without isolated ray debris, and moving the caster updates immediately on
 //      the first frame without temporal history ghost trails.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <cstdint>
 #include <expected>
 #include <string_view>
@@ -80,81 +82,73 @@ struct RayTracedNoiseStabilityTestSuite {
         });
     }
 
-    static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
-                aa.state.mode        = mode;
-            });
+    static void SetAA(ZHLN::COM::IEngine& engine, ZHLN::AAMode mode) {
+        auto& reg = *engine.Entities();
+        for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+            engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
-        engine.Graphics().SetAntiAliasing(ZHLN::AAState {.mode = mode});
+        engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
-    static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
-        auto&      reg      = ZHLN::EngineAccess::RegistryOf(engine);
-        const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings.empty()) {
-            return;
-        }
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [enableRTR](auto& pp) {
-            pp.fullBright        = 0;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = enableRTR;
-            pp.giMode            = 0;
-            pp.giIntensity       = 0.0f;
-            pp.vignetteIntensity = 0.0f;
-            pp.ambientExposure   = 3.0f;
-            pp.skyZenith         = JPH::Vec4(0.001f, 0.002f, 0.006f, 1.0f);
-            pp.skyHorizon        = JPH::Vec4(0.004f, 0.006f, 0.012f, 1.0f);
-            pp.skyGround         = JPH::Vec4(0.001f, 0.001f, 0.002f, 1.0f);
+    static void SetRayTracedShadows(ZHLN::COM::IEngine& engine, int enableRTR) {
+        engine.Graphics()->PatchSettings([enableRTR](auto& gfx) {
+            gfx.environment.fullBright       = 0;
+            gfx.post.enableSSR               = 0;
+            gfx.rayTracing.enableReflections = enableRTR != 0;
+            gfx.post.mode                    = 0;
+            gfx.post.giIntensity             = 0.0f;
+            gfx.post.vignetteIntensity       = 0.0f;
+            gfx.environment.ambientExposure  = 3.0f;
+            gfx.environment.skyZenith = {0.001f, 0.002f, 0.006f, 1.0f};
+            gfx.environment.skyHorizon = {0.004f, 0.006f, 0.012f, 1.0f};
+            gfx.environment.skyGround = {0.001f, 0.001f, 0.002f, 1.0f};
         });
     }
 
     // Rough floor + raking sun from +Z so contact seams project directly toward
     // the camera on the floor. Every material stays rough (>= 0.70 > 0.40) and
     // SSR is off, isolating pc.enableRTR to TraceSunContactShadow in lighting.slang.
-    static auto BuildContactBaseScene(ZHLN::Engine& engine, ZHLN::Material& outBoxMat) -> bool {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    static auto BuildContactBaseScene(ZHLN::COM::IEngine& engine, ZHLN::Material& outBoxMat) -> bool {
+        auto& reg = *engine.Entities();
 
         auto floorMat =
-            engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
+            engine.Graphics()->CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
         auto boxMat =
-            engine.Graphics().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}});
+            engine.Graphics()->CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}});
         if (!floorMat || !boxMat) {
             return false;
         }
         outBoxMat = *boxMat;
 
-        ZHLN::PrefabFactory::CreatePlane(
-            engine, 120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat}
-        );
+        engine.Assets()->SpawnPlane(120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat});
 
-        const ZHLN::Entity sunEnt = reg.Create();
-        reg.Add(
+        const ZHLN::Entity sunEnt = reg.Spawn();
+        reg.AttachMany(
             sunEnt,
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 50.0f, 40.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({40.0f, 0.0f, 0.0f})},
+            ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{40.0f, 0.0f, 0.0f}})},
             ZHLN::Components::LightComponent {
                 .type      = ZHLN::LightType::Sun,
-                .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                .color     = ZHLN::FVec3{1.0f, 1.0f, 1.0f},
                 .intensity = 120.0f,
-                .direction = JPH::Vec3(0.0f, 0.45f, 0.89f).Normalized()
+                .direction = ZHLN::FVec3{0.0f, 0.45f, 0.89f}.Normalized()
             }
         );
 
-        const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>();
-        if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+        const bool camOk = reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+            auto& cam = c.camera;
+            cam.position = {0.0f, 4.5f, 22.0f};
+            cam.yaw      = ZHLN::DegF{-90.0f};
+            cam.pitch    = ZHLN::DegF{-22.0f};
+            cam.fov      = ZHLN::DegF{60.0f};
+        });
+        if (!ZHLN::Test::ExpectTrue(camOk)) {
             return false;
         }
-        ZHLN::Camera& cam = camComp->camera;
-        cam.position = JPH::Vec3(0.0f, 4.5f, 22.0f);
-        cam.yaw      = -90.0f;
-        cam.pitch    = -22.0f;
-        cam.fov      = 60.0f;
         return true;
     }
 
-    static void TickFrames(ZHLN::Engine& engine, uint32_t frames) {
+    static void TickFrames(ZHLN::COM::IEngine& engine, uint32_t frames) {
         constexpr float dt = 1.0f / 60.0f;
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
@@ -162,11 +156,11 @@ struct RayTracedNoiseStabilityTestSuite {
         }
     }
 
-    static RgbImage Capture(ZHLN::Engine& engine, std::string_view name) {
+    static RgbImage Capture(ZHLN::COM::IEngine& engine, std::string_view name) {
         return ZHLN::Test::Headless::Capture(engine, name);
     }
 
-    static RgbImage SettleAndCapture(ZHLN::Engine& engine, std::string_view name) {
+    static RgbImage SettleAndCapture(ZHLN::COM::IEngine& engine, std::string_view name) {
         TickFrames(engine, 2);
         return Capture(engine, name);
     }
@@ -179,7 +173,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->Graphics().Info().rayTracingSupported) {
+            if (!engine->Graphics()->Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; RT contact shadow check is not applicable.");
                 return {};
             }
@@ -192,14 +186,10 @@ struct RayTracedNoiseStabilityTestSuite {
             // Low grounded curb (12 cm tall) + thin suspended contact bar (1.6 cm
             // thick at y = 0.18m, t ~ 0.4m < 1.2m along L_sun) right inside the
             // CSM normal/depth-bias Peter-Panning zone.
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {4.0f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}
-            );
-            ZHLN::PrefabFactory::CreateBox(
-                *engine, {4.0f, 0.008f, 0.012f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.18, 16.5}, .createPhysics = false, .materialOverride = boxMat}
-            );
+            engine->Assets()->SpawnBox({4.0f, 0.06f, 0.25f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat});
+            engine->Assets()->SpawnBox({4.0f, 0.008f, 0.012f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.18, 16.5}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
@@ -239,7 +229,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->Graphics().Info().rayTracingSupported) {
+            if (!engine->Graphics()->Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; 3.0m cutoff check is not applicable.");
                 return {};
             }
@@ -251,15 +241,12 @@ struct RayTracedNoiseStabilityTestSuite {
 
             // Raised caster at y = 12.0m (bottom at y = 9.0m -> ray distance from
             // floor along L_sun is ~20m >> 3.0m), projecting onto z ~ -6..+4 in view.
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
-            if (const auto camComp = reg.GetSingleton<ZHLN::Components::CameraComponent>(); camComp.has_value()) {
-                camComp->camera.position = JPH::Vec3(0.0f, 10.0f, 30.0f);
-                camComp->camera.pitch    = -18.0f;
-            }
-            const ZHLN::Entity highCaster = ZHLN::PrefabFactory::CreateBox(
-                *engine, {3.0f, 3.0f, 3.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 12.0, 22.0}, .createPhysics = false, .materialOverride = boxMat}
-            );
+            engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                c.camera.position = {0.0f, 10.0f, 30.0f};
+                c.camera.pitch    = ZHLN::DegF{-18.0f};
+            });
+            const ZHLN::Entity highCaster = engine->Assets()->SpawnBox({3.0f, 3.0f, 3.0f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 12.0, 22.0}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
@@ -269,8 +256,8 @@ struct RayTracedNoiseStabilityTestSuite {
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RgbImage on = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_contact_far_on.ppm");
 
-            ZHLN::DespawnEntity(*engine, highCaster);
-            engine->ProcessPendingDestroy();
+            engine->Entities()->Despawn(highCaster);
+            engine;
             RgbImage clear = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_contact_far_clear.ppm");
 
             if (!(ZHLN::Test::ExpectTrue(off.Valid()) && ZHLN::Test::ExpectTrue(on.Valid()) && ZHLN::Test::ExpectTrue(clear.Valid()))) {
@@ -301,7 +288,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->Graphics().Info().rayTracingSupported) {
+            if (!engine->Graphics()->Info().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris/motion check is not applicable.");
                 return {};
             }
@@ -311,10 +298,8 @@ struct RayTracedNoiseStabilityTestSuite {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
 
-            const ZHLN::Entity curb = ZHLN::PrefabFactory::CreateBox(
-                *engine, {2.2f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-2.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}
-            );
+            const ZHLN::Entity curb = engine->Assets()->SpawnBox({2.2f, 0.06f, 0.25f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
@@ -344,7 +329,7 @@ struct RayTracedNoiseStabilityTestSuite {
             // Teleport the contact curb sideways (+4.0m) and capture the VERY NEXT
             // rendered frame vs a settled frame 3 ticks later: without temporal
             // shadow history, frame 1 at the new position must already be settled.
-            ZHLN::EngineAccess::RegistryOf(*engine).Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = JPH::Vec3(2.0f, 0.06f, 15.0f); });
+            engine->Entities()->Patch<ZHLN::Components::TransformComponent>(curb, [](auto& tr) { tr.position = {2.0f, 0.06f, 15.0f}; });
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage movedImmediate = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_contact_moved_immediate.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 3);

@@ -3,25 +3,27 @@
 //
 // extensions/editor/GUIEditor.cpp
 //
-// Native editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
-// for the design notes; this file is where the reflection iteration lives, so
-// that the transpiler fallback (scripts/transpile_reflection.py, which rewrites
-// reflection calls by translation-unit source offset) sees and flattens it.
+// COM editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
+// for the design notes; this file is where the reflection iteration lives.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <UI/GUI.hpp>
 #include <Zahlen/Input/Input.hpp>
+#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <cstdint>
 #include <editor/GUIEditor.hpp>
 #include <span>
@@ -32,7 +34,6 @@
 namespace ZHLN::Editor {
 
 namespace {
-
 namespace GUI = ZHLN::GUI;
 using Comp    = ZHLN::Components;
 
@@ -61,10 +62,10 @@ consteval auto MakeComponentKind() -> ComponentKind {
 
     return ComponentKind {// The same spelling the registry registers the component under, so the
                           // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
-                          .name   = ZHLN::ECS::BoxedName<C>(),
-                          .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
-                          .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
-                          .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
+                          .name   = ZHLN::Reflect::TypeName<C>(),
+                          .has    = [](const ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity) != nullptr; },
+                          .add    = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { reg.Attach<C>(entity, C {}); },
+                          .remove = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { reg.Detach<C>(entity); }
     };
 }
 
@@ -74,19 +75,14 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
 }
 
 // The components the editor can add -- the same set, in the same order, as the
-// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
-// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
-// static type, which the transpiler fallback requires (see the invariant note
-// in DrawInspectorPanel), and a table-driven version would make that type
-// dependent and flatten to zero rows.
-constexpr auto kComponentKinds =
-    MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent, Comp::PostProcessSettingsComponent>();
+// sections DrawInspectorPanel draws below.
+constexpr auto kComponentKinds = MakeComponentKinds<Comp::NameComponent, Comp::TransformComponent, Comp::PBRComponent, Comp::LightComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
 // has to know which subtree is chrome. Walk HierarchyComponent upward
 // from `e`; anything that reaches `editorRoot` is the editor's own.
 // Bounded so a corrupted parent cycle cannot hang the frame.
-[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot) -> bool {
+[[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::COM::IEntities& reg, ZHLN::Entity editorRoot) -> bool {
     if (editorRoot == ZHLN::Entity::Null()) {
         return false;
     }
@@ -157,28 +153,28 @@ constexpr auto kComponentKinds =
             std::array<char, 64> buf {};
             auto                 sv = ZHLN::FormatTo(buf, "{}: Texture({})", name, static_cast<uint64_t>(field));
             gui.Text(sv, 12.0f, {0.7f, 0.7f, 0.7f, 1.0f});
-        } else if constexpr (std::is_same_v<FT, JPH::Vec4>) {
-            float v[4] = {field.GetX(), field.GetY(), field.GetZ(), field.GetW()};
+        } else if constexpr (std::is_same_v<FT, FVec4>) {
+            float v[4] = {field.x, field.y, field.z, field.w};
             for (int axis = 0; axis < 4; ++axis) {
                 std::array<char, 136> axisIdBuf {};
                 auto                  axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZW"[axis]);
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
-            field.SetX(v[0]);
-            field.SetY(v[1]);
-            field.SetZ(v[2]);
-            field.SetW(v[3]);
-        } else if constexpr (std::is_same_v<FT, JPH::Vec3>) {
-            float v[3] = {field.GetX(), field.GetY(), field.GetZ()};
+            field.x = v[0];
+            field.y = v[1];
+            field.z = v[2];
+            field.w = v[3];
+        } else if constexpr (std::is_same_v<FT, FVec3>) {
+            float v[3] = {field.x, field.y, field.z};
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 136> axisIdBuf {};
                 auto                  axisLabel = ZHLN::FormatTo(axisIdBuf, "{} {}", name, "XYZ"[axis]);
                 gui.Slider(axisLabel, v[axis], -10000.0f, 10000.0f);
             }
-            field = JPH::Vec3(v[0], v[1], v[2]);
-        } else if constexpr (std::is_same_v<FT, JPH::Quat>) {
-            const JPH::Vec3 euler   = ZHLN::Math::QuatToEulerDegrees(field);
-            float           deg[3]  = {euler.GetX(), euler.GetY(), euler.GetZ()};
+            field = {v[0], v[1], v[2]};
+        } else if constexpr (std::is_same_v<FT, Quat>) {
+            const auto      euler   = field.EulerAnglesDegrees();
+            float           deg[3]  = {euler.value.x, euler.value.y, euler.value.z};
             bool            changed = false;
             for (int axis = 0; axis < 3; ++axis) {
                 std::array<char, 96> axisLabelBuf {};
@@ -189,7 +185,7 @@ constexpr auto kComponentKinds =
                     changed = true;
             }
             if (changed) {
-                field = ZHLN::Math::EulerDegreesToQuat({deg[0], deg[1], deg[2]});
+                field = Quat::FromEulerDegrees({{deg[0], deg[1], deg[2]}});
             }
         } else if constexpr (std::is_same_v<FT, ZHLN::String256> || std::is_same_v<FT, ZHLN::String64>) {
             // rowId rather than name: two components in the same section can
@@ -209,8 +205,8 @@ auto ComponentKinds() noexcept -> std::span<const ComponentKind> {
     return kComponentKinds;
 }
 
-auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Entity {
-    const ZHLN::Entity entity = reg.Create();
+auto CreateEntity(ZHLN::COM::IEntities& reg, std::string_view name) -> ZHLN::Entity {
+    const ZHLN::Entity entity = reg.CreateEntity();
 
     std::array<char, 64>   nameBuf {};
     const std::string_view label = name.empty() ? ZHLN::FormatTo(nameBuf, "Entity {}", entity.index) : name;
@@ -219,17 +215,22 @@ auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name) -> ZHLN::Enti
     // TransformSystem::ResolveTransforms to add on first tick: an entity the
     // editor just made should be whole immediately, so inspecting or serialising
     // it on the same frame does not depend on a system having run.
-    const JPH::Mat44 local = JPH::Mat44::sIdentity();
+    const auto local = Mat4x4::Identity();
 
-    reg.Add(entity, Comp::NameComponent {.name = ZHLN::String64 {label}});
-    reg.Add(entity, Comp::TransformComponent {});
-    reg.Add(entity, Comp::WorldTransformComponent {.world = local, .previous = local});
+    if (entity == Entity::Null())
+        return entity;
+    if (!reg.Attach(entity, Comp::NameComponent {.name = String64 {label}}) || !reg.Attach(entity, Comp::TransformComponent {}) ||
+        !reg.Attach(entity, Comp::WorldTransformComponent {.world = local, .previous = local}) ||
+        !reg.Attach(entity, Comp::SceneSourceComponent {.shape = Scene::ShapeKind::Empty})) {
+        reg.Despawn(entity);
+        return Entity::Null();
+    }
 
     return entity;
 }
 
-void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
-    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
+void DestroySelected(ZHLN::COM::IEngine& engine, State& state) noexcept {
+    auto&              reg    = *engine.Entities();
     const ZHLN::Entity victim = state.selectedEntity;
 
     // Cleared first: if the handle turns out to be stale the editor must not be
@@ -239,7 +240,7 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
     if (victim == ZHLN::Entity::Null() || !reg.IsAlive(victim)) {
         return;
     }
-    ZHLN::DespawnEntity(engine, victim);
+    reg.Despawn(victim);
 }
 
 // ============================================================================
@@ -247,7 +248,7 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 // ============================================================================
 //
 // The mode is a small state machine over raw input LEVELS, edge-detected
-// against EditorState::transformPrevInput: InputStateComponent carries key
+// against State::transformPrevInput: InputState carries key
 // levels, not presses, exactly like the host's Ctrl+S handling.
 //
 // All manipulation math is camera-ray based (the same unproject
@@ -256,12 +257,9 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 
 namespace {
 
-auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) noexcept -> TransformInput {
-    if (!input) {
-        return TransformInput::None;
-    }
+auto ReadTransformInput(const ZHLN::COM::HostInputInfo& input) noexcept -> TransformInput {
     TransformInput bits = TransformInput::None;
-    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
+    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input.IsKeyDown(k); };
     if (key(ZHLN::KeyCode::G))
         bits |= TransformInput::G;
     if (key(ZHLN::KeyCode::R))
@@ -280,88 +278,91 @@ auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) 
         bits |= TransformInput::Esc;
     if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl))
         bits |= TransformInput::Ctrl;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)))
+    if (input.IsMouseButtonDown(ZHLN::MouseButton::Left))
         bits |= TransformInput::LMB;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))
+    if (input.IsMouseButtonDown(ZHLN::MouseButton::Right))
         bits |= TransformInput::RMB;
     return bits;
 }
 
-auto CameraForward(const Camera& camera) noexcept -> JPH::Vec3 {
-    const float yaw   = JPH::DegreesToRadians(camera.yaw);
-    const float pitch = JPH::DegreesToRadians(camera.pitch);
-    return JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
+auto CameraForward(const Camera& camera) noexcept -> FVec3 {
+    const float yaw   = camera.yaw.ToRadians().value;
+    const float pitch = camera.pitch.ToRadians().value;
+    return FVec3 {std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)}.Normalized();
 }
 
 // Unprojects the mouse exactly like the host's picking ray: same NDC
 // convention, same inverse view-projection.
-auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, JPH::Vec3& origin, JPH::Vec3& dir) noexcept -> bool {
+struct EditorRay {
+    FVec3 origin {};
+    FVec3 dir {};
+};
+
+[[nodiscard]] auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp) noexcept -> std::optional<EditorRay> {
     const float w = static_cast<float>(vp.width);
     const float h = static_cast<float>(vp.height);
     if (w <= 0.0f || h <= 0.0f) {
-        return false;
+        return std::nullopt;
     }
-    // Vulkan Y-down clip space with the viewport's row 0 at the top: the top
-    // pixel of the scene rectangle is NDC y == -1. The scene is rasterized by
-    // a fixed-function viewport into [vp.x, vp.y, vp.width, vp.height], so the
-    // window-space mouse must be made rectangle-relative first -- exactly the
-    // transform the viewport does in reverse.
-    const float ndcX   = (2.0f * (mx - static_cast<float>(vp.x))) / w - 1.0f;
-    const float ndcY   = (2.0f * (my - static_cast<float>(vp.y))) / h - 1.0f;
-    const float aspect = w / h;
 
-    const JPH::Mat44 invVP = (camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix()).Inversed();
-    const JPH::Vec4  nearW = invVP * JPH::Vec4(ndcX, ndcY, 0.0f, 1.0f);
-    const JPH::Vec4  farW  = invVP * JPH::Vec4(ndcX, ndcY, 1.0f, 1.0f);
-    if (nearW.GetW() <= 0.0f || farW.GetW() <= 0.0f) {
-        return false;
+    const float ndcX = ((mx - static_cast<float>(vp.x)) / w) * 2.0f - 1.0f;
+    const float ndcY = ((my - static_cast<float>(vp.y)) / h) * 2.0f - 1.0f;
+
+    const Mat4x4 invVP = (camera.GetProjectionMatrix(w / h) * camera.GetViewMatrix()).Inversed();
+    // Reverse-Z: near is z = 1, far is z = 0.
+    const FVec4 nearH = invVP * FVec4 {ndcX, ndcY, 1.0f, 1.0f};
+    const FVec4 farH  = invVP * FVec4 {ndcX, ndcY, 0.0f, 1.0f};
+    if (std::fabs(nearH.w) < 1e-6f || std::fabs(farH.w) < 1e-6f) {
+        return std::nullopt;
     }
-    origin               = JPH::Vec3(nearW.GetX() / nearW.GetW(), nearW.GetY() / nearW.GetW(), nearW.GetZ() / nearW.GetW());
-    const JPH::Vec3 farP = JPH::Vec3(farW.GetX() / farW.GetW(), farW.GetY() / farW.GetW(), farW.GetZ() / farW.GetW());
-    dir                  = (farP - origin).Normalized();
-    return true;
+    const FVec3 nearP  = FVec3 {nearH.x, nearH.y, nearH.z} / nearH.w;
+    const FVec3 farP   = FVec3 {farH.x, farH.y, farH.z} / farH.w;
+    const FVec3 d      = farP - nearP;
+    const float lenSq  = d.LengthSquared();
+    if (lenSq < 1e-12f) {
+        return std::nullopt;
+    }
+    return EditorRay {.origin = nearP, .dir = d / std::sqrt(lenSq)};
 }
 
-auto RayPlane(const JPH::Vec3& origin, const JPH::Vec3& dir, const JPH::Vec3& normal, const JPH::Vec3& planePoint, JPH::Vec3& hit) noexcept -> bool {
-    const float d = dir.Dot(normal);
+[[nodiscard]] auto RayPlane(const FVec3& origin, const FVec3& dir, const FVec3& normal, const FVec3& planePoint) noexcept -> std::optional<FVec3> {
+    const float d = Dot(dir, normal);
     if (std::fabs(d) < 1e-6f) {
-        return false;
+        return std::nullopt;
     }
-    const float t = (planePoint - origin).Dot(normal) / d;
-    hit           = origin + dir * t;
-    return true;
+    const float t = Dot(planePoint - origin, normal) / d;
+    return origin + dir * t;
 }
 
-auto WorldToScreen(const Camera& camera, const SceneViewport& r, const JPH::Vec3& world, float& sx, float& sy) noexcept -> bool {
+[[nodiscard]] auto WorldToScreen(const Camera& camera, const SceneViewport& r, const FVec3& world) noexcept -> std::optional<FVec2> {
     const float w = static_cast<float>(r.width);
     const float h = static_cast<float>(r.height);
     if (w <= 0.0f || h <= 0.0f) {
-        return false;
+        return std::nullopt;
     }
-    const float      aspect = w / h;
-    const JPH::Mat44 vp     = camera.GetProjectionMatrix(aspect) * camera.GetViewMatrix();
-    const JPH::Vec4  clip   = vp * JPH::Vec4(world.GetX(), world.GetY(), world.GetZ(), 1.0f);
-    if (clip.GetW() <= 0.0f) {
-        return false;
+    const FVec4 clip = (camera.GetProjectionMatrix(w / h) * camera.GetViewMatrix()) * FVec4 {world.x, world.y, world.z, 1.0f};
+    if (clip.w <= 1e-6f) {
+        return std::nullopt;
     }
     // NDC -> window pixels inside the scene rectangle (see MouseRay).
-    sx = (clip.GetX() / clip.GetW() + 1.0f) * 0.5f * w + static_cast<float>(r.x);
-    sy = (clip.GetY() / clip.GetW() + 1.0f) * 0.5f * h + static_cast<float>(r.y);
-    return true;
+    return FVec2 {
+        (clip.x / clip.w + 1.0f) * 0.5f * w + static_cast<float>(r.x),
+        (clip.y / clip.w + 1.0f) * 0.5f * h + static_cast<float>(r.y),
+    };
 }
 
-auto AxisVector(EditorState::TransformAxis axis) noexcept -> JPH::Vec3 {
+auto AxisVector(State::TransformAxis axis) noexcept -> FVec3 {
     switch (axis) {
-        case EditorState::TransformAxis::X:
-            return JPH::Vec3::sAxisX();
-        case EditorState::TransformAxis::Y:
-            return JPH::Vec3::sAxisY();
-        case EditorState::TransformAxis::Z:
-            return JPH::Vec3::sAxisZ();
-        case EditorState::TransformAxis::None:
+        case State::TransformAxis::X:
+            return FVec3::UnitX();
+        case State::TransformAxis::Y:
+            return FVec3::UnitY();
+        case State::TransformAxis::Z:
+            return FVec3::UnitZ();
+        case State::TransformAxis::None:
             break;
     }
-    return JPH::Vec3::sZero();
+    return FVec3::Zero();
 }
 
 } // namespace
@@ -372,8 +373,14 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
     return kSpawnShapeNames;
 }
 
-void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput) noexcept {
-    const auto input = reg.GetSingleton<Comp::InputStateComponent>();
+void UpdateTransformMode(
+    ZHLN::COM::IEntities&           reg,
+    const ZHLN::COM::HostInputInfo& input,
+    State&                    state,
+    const Camera&                   camera,
+    const SceneViewport&            viewport,
+    bool                            uiOwnsInput
+) noexcept {
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
         // held when the field lost focus is not seen as a fresh press.
@@ -382,44 +389,39 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
     }
     const TransformInput level   = ReadTransformInput(input);
     const TransformInput pressed = level & ~state.transformPrevInput;
-    const float          mx      = input ? input->mouseX : -1.0f;
-    const float          my      = input ? input->mouseY : -1.0f;
+    const float          mx      = input.mouseX;
+    const float          my      = input.mouseY;
 
-    if (state.transformMode == EditorState::TransformMode::None) {
+    if (state.transformMode == State::TransformMode::None) {
         // Enter a mode only on a live selection. Plain S starts Scale, but a
         // Ctrl+S is the save chord and must never grab the object.
-        EditorState::TransformMode mode = EditorState::TransformMode::None;
-        if (input && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
+        State::TransformMode mode = State::TransformMode::None;
+        if (state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
             if ((pressed & TransformInput::G) != TransformInput::None) {
-                mode = EditorState::TransformMode::Move;
+                mode = State::TransformMode::Move;
             } else if ((pressed & TransformInput::R) != TransformInput::None) {
-                mode = EditorState::TransformMode::Rotate;
+                mode = State::TransformMode::Rotate;
             } else if ((pressed & TransformInput::S) != TransformInput::None && (level & TransformInput::Ctrl) == TransformInput::None) {
-                mode = EditorState::TransformMode::Scale;
+                mode = State::TransformMode::Scale;
             }
         }
-        if (mode != EditorState::TransformMode::None) {
+        if (mode != State::TransformMode::None) {
             const auto t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
             if (t) {
                 state.transformMode          = mode;
-                state.transformAxis          = EditorState::TransformAxis::None;
+                state.transformAxis          = State::TransformAxis::None;
                 state.transformEntity        = state.selectedEntity;
                 state.transformStartPosition = t->position;
                 state.transformStartRotation = t->rotation;
                 state.transformStartScale    = t->scale;
 
                 state.transformPlaneNormal = CameraForward(camera);
-                JPH::Vec3 origin {}, dir {};
-                if (!MouseRay(camera, mx, my, viewport, origin, dir) ||
-                    !RayPlane(origin, dir, state.transformPlaneNormal, t->position, state.transformAnchor)) {
-                    state.transformAnchor = t->position;
-                }
+                const auto ray    = MouseRay(camera, mx, my, viewport);
+                const auto anchor = ray ? RayPlane(ray->origin, ray->dir, state.transformPlaneNormal, t->position) : std::nullopt;
+                state.transformAnchor = anchor.value_or(t->position);
 
-                float ox = 0.0f, oy = 0.0f;
-                if (!WorldToScreen(camera, viewport, t->position, ox, oy)) {
-                    ox = mx;
-                    oy = my;
-                }
+                const auto screen = WorldToScreen(camera, viewport, t->position).value_or(FVec2 {mx, my});
+                const float ox = screen.x, oy = screen.y;
                 state.transformStartAngle = std::atan2(my - oy, mx - ox);
                 state.transformStartDist  = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
             }
@@ -427,45 +429,44 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
     } else {
         const ZHLN::Entity e = state.transformEntity;
         if (!reg.IsAlive(e)) {
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else if ((pressed & (TransformInput::Esc | TransformInput::RMB)) != TransformInput::None) {
             // Cancel: write the captures back, drop the mode.
             reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
                 t.position = state.transformStartPosition;
-                t.rotation = state.transformStartRotation;
+                t.rotation = {state.transformStartRotation.x, state.transformStartRotation.y, state.transformStartRotation.z, state.transformStartRotation.w};
                 t.scale    = state.transformStartScale;
             });
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else if ((pressed & (TransformInput::Enter | TransformInput::LMB)) != TransformInput::None) {
             // Confirm: the live transform stands.
-            state.transformMode = EditorState::TransformMode::None;
+            state.transformMode = State::TransformMode::None;
         } else {
             if ((pressed & TransformInput::X) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::X) ? EditorState::TransformAxis::None : EditorState::TransformAxis::X;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::X) ? State::TransformAxis::None : State::TransformAxis::X;
             } else if ((pressed & TransformInput::Y) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Y) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Y;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::Y) ? State::TransformAxis::None : State::TransformAxis::Y;
             } else if ((pressed & TransformInput::Z) != TransformInput::None) {
-                state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Z) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Z;
+                state.transformAxis = (state.transformAxis == State::TransformAxis::Z) ? State::TransformAxis::None : State::TransformAxis::Z;
             }
 
             switch (state.transformMode) {
-                case EditorState::TransformMode::Move: {
-                    JPH::Vec3 origin {}, dir {}, hit {};
-                    if (MouseRay(camera, mx, my, viewport, origin, dir) &&
-                        RayPlane(origin, dir, state.transformPlaneNormal, state.transformStartPosition, hit)) {
-                        JPH::Vec3 delta = hit - state.transformAnchor;
-                        if (state.transformAxis != EditorState::TransformAxis::None) {
-                            const JPH::Vec3 axis = AxisVector(state.transformAxis);
-                            delta                = axis * delta.Dot(axis);
+                case State::TransformMode::Move: {
+                    const auto ray = MouseRay(camera, mx, my, viewport);
+                    if (const auto hit = ray ? RayPlane(ray->origin, ray->dir, state.transformPlaneNormal, state.transformStartPosition) : std::nullopt) {
+                        FVec3 delta = *hit - state.transformAnchor;
+                        if (state.transformAxis != State::TransformAxis::None) {
+                            const FVec3 axis = AxisVector(state.transformAxis);
+                            delta                = axis * Dot(delta, axis);
                         }
-                        const JPH::Vec3 newPos = state.transformStartPosition + delta;
+                        const FVec3 newPos = state.transformStartPosition + delta;
                         reg.Patch<Comp::TransformComponent>(e, [&newPos](Comp::TransformComponent& t) -> void { t.position = newPos; });
                     }
                     break;
                 }
-                case EditorState::TransformMode::Rotate: {
-                    float ox = 0.0f, oy = 0.0f;
-                    if (WorldToScreen(camera, viewport, state.transformStartPosition, ox, oy)) {
+                case State::TransformMode::Rotate: {
+                    if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
+                        const float ox = screen->x, oy = screen->y;
                         // Screen pixels are y-down; the viewer thinks y-up, so
                         // the seen angle negates the pixel dy. Dragging counter-
                         // clockwise as seen must turn counter-clockwise: the
@@ -473,45 +474,47 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
                         // camera forward), making a positive seen delta a
                         // positive right-handed turn about it.
                         const float     angle  = std::atan2(oy - my, mx - ox);
-                        const JPH::Vec3 axis   = (state.transformAxis != EditorState::TransformAxis::None) ? AxisVector(state.transformAxis) :
+                        const FVec3 axis   = (state.transformAxis != State::TransformAxis::None) ? AxisVector(state.transformAxis) :
                                                                                                              state.transformPlaneNormal * -1.0f;
-                        const JPH::Quat turn   = JPH::Quat::sRotation(axis, angle - state.transformStartAngle);
-                        const JPH::Quat newRot = turn * state.transformStartRotation;
-                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void { t.rotation = newRot; });
+                        const Quat      turn   = Quat::FromAxisAngle(axis, RadF {angle - state.transformStartAngle});
+                        const Quat      newRot = turn * state.transformStartRotation;
+                        reg.Patch<Comp::TransformComponent>(e, [&newRot](Comp::TransformComponent& t) -> void {
+                            t.rotation = {newRot.x, newRot.y, newRot.z, newRot.w};
+                        });
                     }
                     break;
                 }
-                case EditorState::TransformMode::Scale: {
-                    float ox = 0.0f, oy = 0.0f;
-                    if (WorldToScreen(camera, viewport, state.transformStartPosition, ox, oy)) {
+                case State::TransformMode::Scale: {
+                    if (const auto screen = WorldToScreen(camera, viewport, state.transformStartPosition)) {
+                        const float ox = screen->x, oy = screen->y;
                         // Screen-space distance ratio, like Blender's uniform
                         // scale: pull away from the object and it grows.
                         const float     dist   = std::max(std::hypot(mx - ox, my - oy), 1e-3f);
                         const float     factor = std::max(dist / state.transformStartDist, 1e-3f);
-                        const JPH::Vec3 start  = state.transformStartScale;
-                        JPH::Vec3       next   = start * factor;
-                        if (state.transformAxis != EditorState::TransformAxis::None) {
+                        const FVec3 start  = state.transformStartScale;
+                        FVec3       next   = start * factor;
+                        if (state.transformAxis != State::TransformAxis::None) {
                             next               = start;
-                            const float scaled = (state.transformAxis == EditorState::TransformAxis::X) ? start.GetX() * factor :
-                                                 (state.transformAxis == EditorState::TransformAxis::Y) ? start.GetY() * factor :
-                                                                                                          start.GetZ() * factor;
-                            if (state.transformAxis == EditorState::TransformAxis::X) {
-                                next = JPH::Vec3(scaled, start.GetY(), start.GetZ());
-                            } else if (state.transformAxis == EditorState::TransformAxis::Y) {
-                                next = JPH::Vec3(start.GetX(), scaled, start.GetZ());
+                            const float scaled = (state.transformAxis == State::TransformAxis::X) ? start.x * factor :
+                                                 (state.transformAxis == State::TransformAxis::Y) ? start.y * factor :
+                                                                                                          start.z * factor;
+                            if (state.transformAxis == State::TransformAxis::X) {
+                                next = {scaled, start.y, start.z};
+                            } else if (state.transformAxis == State::TransformAxis::Y) {
+                                next = {start.x, scaled, start.z};
                             } else {
-                                next = JPH::Vec3(start.GetX(), start.GetY(), scaled);
+                                next = {start.x, start.y, scaled};
                             }
                         }
                         // A flipped or zero scale would turn the mesh inside
                         // out or collapse it; the mouse can get arbitrarily
                         // close to the projected center.
-                        next = JPH::Vec3(std::max(next.GetX(), 1e-4f), std::max(next.GetY(), 1e-4f), std::max(next.GetZ(), 1e-4f));
+                        next = {std::max(next.x, 1e-4f), std::max(next.y, 1e-4f), std::max(next.z, 1e-4f)};
                         reg.Patch<Comp::TransformComponent>(e, [&next](Comp::TransformComponent& t) -> void { t.scale = next; });
                     }
                     break;
                 }
-                case EditorState::TransformMode::None:
+                case State::TransformMode::None:
                     break;
             }
         }
@@ -520,8 +523,8 @@ void UpdateTransformMode(ZHLN::ECS::Registry& reg, EditorState& state, const Cam
     state.transformPrevInput = level;
 }
 
-void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& state, std::string_view id) {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::COM::IEngine& engine, State& state, std::string_view id) {
+    auto& reg = *engine.Entities();
     struct Row {
         ZHLN::Entity entity;
         uint32_t     depth;
@@ -533,7 +536,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     // parent walks; sibling order is the entity index so the list is
     // deterministic without a private UI layout stamp.
     std::vector<Row> rows;
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<Comp::NameComponent>()) {
+    for (const ZHLN::Entity e: reg.EntitiesWith<Comp::NameComponent>()) {
         if (IsEditorEntity(e, reg, state.editorRoot)) {
             continue;
         }
@@ -586,14 +589,14 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
 
     // The running modal transform gets a visible affordance, so the keybinds
     // are not invisible state.
-    if (state.transformMode != EditorState::TransformMode::None) {
+    if (state.transformMode != State::TransformMode::None) {
         std::array<char, 96>   modeBuf {};
-        const std::string_view modeName = state.transformMode == EditorState::TransformMode::Move   ? "Move" :
-                                          state.transformMode == EditorState::TransformMode::Rotate ? "Rotate" :
+        const std::string_view modeName = state.transformMode == State::TransformMode::Move   ? "Move" :
+                                          state.transformMode == State::TransformMode::Rotate ? "Rotate" :
                                                                                                       "Scale";
-        const std::string_view axisName = state.transformAxis == EditorState::TransformAxis::X ? "X" :
-                                          state.transformAxis == EditorState::TransformAxis::Y ? "Y" :
-                                          state.transformAxis == EditorState::TransformAxis::Z ? "Z" :
+        const std::string_view axisName = state.transformAxis == State::TransformAxis::X ? "X" :
+                                          state.transformAxis == State::TransformAxis::Y ? "Y" :
+                                          state.transformAxis == State::TransformAxis::Z ? "Z" :
                                                                                                  "free";
         gui.Text(ZHLN::FormatTo(modeBuf, "{} [{}] - LMB/Enter confirm, Esc/RMB cancel", modeName, axisName), 12.0f, {0.9f, 0.8f, 0.4f, 1.0f});
     }
@@ -608,7 +611,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
         }
 
         bool      isSelected = (state.selectedEntity == row.entity);
-        JPH::Vec4 color      = isSelected ? JPH::Vec4(0.20f, 0.35f, 0.55f, 0.9f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.7f);
+        FVec4 color      = isSelected ? FVec4{0.20f, 0.35f, 0.55f, 0.9f} : FVec4{0.10f, 0.12f, 0.16f, 0.7f};
 
         // Indent by depth
         if (row.depth > 0) {
@@ -627,7 +630,7 @@ void DrawHierarchyPanel(GUI::Frame& gui, ZHLN::Engine& engine, EditorState& stat
     gui.EndColumn();
 }
 
-void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& state, std::string_view id) {
+void DrawInspectorPanel(GUI::Frame& gui, ZHLN::COM::IEntities& reg, State& state, std::string_view id) {
     gui.BeginColumn(4.0f);
     gui.Text(id, 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
@@ -642,15 +645,10 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
     gui.Text(std::string_view(ZHLN::FormatTo(headerBuf, "Entity {}", sel.index)), 13.0f);
 
     // One collapsing section per editable component.
-    //
-    // Invariant: The call's object expression must have a CONCRETE static
-    // type. The transpiler fallback extracts the field list from the object's
-    // type, so a call inside a template with a dependent T would flatten to
-    // zero rows.
     const auto section = [&](std::string_view sectionId, std::string_view title, auto comp, auto&& reflect) -> void {
         if (!comp)
             return;
-        using CompT = typename decltype(comp)::value_type;
+        using CompT = std::remove_cv_t<std::remove_pointer_t<decltype(comp)>>;
         if (gui.BeginCollapsingHeader(title, true)) {
             CompT local = *comp;
             reflect(local, MakeRowSink(gui, sectionId));
@@ -662,7 +660,7 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
             // patch below, which would otherwise write the stale copy back.
             std::array<char, 64> removeBuf {};
             if (gui.Button(ZHLN::FormatTo(removeBuf, "Remove {}", title), {0.40f, 0.16f, 0.16f, 0.90f})) {
-                reg.Remove<CompT>(sel);
+                reg.Detach<CompT>(sel);
                 gui.EndCollapsingHeader();
                 return;
             }
@@ -684,9 +682,8 @@ void DrawInspectorPanel(GUI::Frame& gui, ZHLN::ECS::Registry& reg, EditorState& 
     section("light", "Light", reg.Get<Comp::LightComponent>(sel), [](Comp::LightComponent& c, auto&& sink) -> void {
         ZHLN::Reflect::ForEachFieldWithName(c, sink);
     });
-    section("postprocess", "Post Process", reg.Get<Comp::PostProcessSettingsComponent>(sel), [](Comp::PostProcessSettingsComponent& c, auto&& sink) -> void {
-        ZHLN::Reflect::ForEachFieldWithName(c, sink);
-    });
+    // No post-process section: those values are the graphics device's, not a
+    // property of the selected entity. They belong in a settings panel.
 
     // --- Add Component ------------------------------------------------------
     //

@@ -5,15 +5,23 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 class PhysicsContext;
 
-class ZHLN_API VisualInterpolationSystem {
+class VisualInterpolationSystem {
   public:
-    static void Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
-                       ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept;
+    static void Update(
+        ECS::Query<
+            const Components::PhysicsComponent,
+            Components::TransformComponent&,
+            const Components::CharacterMotorComponent,
+            const Components::CharacterMotorStateComponent,
+            const Components::RagdollComponent> query,
+        ECS::Res<PhysicsContext>                physics,
+        FrameAlpha                              alpha
+    ) noexcept;
 };
 
 }

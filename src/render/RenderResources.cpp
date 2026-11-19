@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/GpuPack.hpp"
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include "render/RenderInternal.hpp"
 #include "render/Resources.hpp"
 #include "Zahlen/Core/AssetID.hpp"
@@ -18,7 +21,6 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -313,14 +315,14 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
             if (static_cast<uint32_t>(quad.facing) != alignment) {
                 continue;
             }
-            const JPH::Vec3 position = quad.position;
-            const JPH::Vec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? JPH::Vec3(quad.velocity) : JPH::Vec3::sZero();
+            const FVec3 position = quad.position;
+            const FVec3 velocity = (quad.facing == ParticleAlignment::VelocityStretched) ? FVec3{quad.velocity} : FVec3::Zero();
 
             Particle packed {};
-            packed.position = ZHLN::Float4(JPH::Vec4(position, 1.0f));
-            packed.velocity = ZHLN::Float4(JPH::Vec4(velocity, 0.0f));
+            packed.position = ZHLN::FVec4{FVec4{position, 1.0f}};
+            packed.velocity = ZHLN::FVec4{FVec4{velocity, 0.0f}};
             packed.color    = quad.color;
-            packed.params   = ZHLN::Float4(0.0f, 0.0f, quad.size, quad.rotation);
+            packed.params = {0.0f, 0.0f, quad.size, quad.rotation};
             _impl->billboardStaging.push_back(packed);
         }
 
@@ -497,6 +499,18 @@ void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
 }
 
 auto RenderContext::GetViewport() const noexcept -> ViewportRect {
+    // Camera projection precedes the first BeginFrame, which lazily allocates
+    // sceneColor. Use the actual target extent until those graph resources
+    // exist; otherwise the first camera frame silently keeps identity matrices.
+    const auto& extent = _impl->graphResources.sceneColor.extent;
+    if (extent.width == 0 || extent.height == 0) {
+        const auto fb = _impl->presentationTarget.GetFramebufferExtent();
+        if (_impl->viewportW <= 1 || _impl->viewportH <= 1)
+            return {.x = 0, .y = 0, .width = fb.width, .height = fb.height};
+        const auto x = std::min(_impl->viewportX, fb.width);
+        const auto y = std::min(_impl->viewportY, fb.height);
+        return {.x = x, .y = y, .width = std::min(_impl->viewportW, fb.width - x), .height = std::min(_impl->viewportH, fb.height - y)};
+    }
     const VkViewport vp = _impl->EffectiveViewport();
     return ViewportRect {
         .x      = static_cast<uint32_t>(vp.x),
@@ -657,6 +671,8 @@ auto RenderContext::CreateTexture(std::string_view name, std::span<const std::by
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
+    if (name.empty())
+        return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
     return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
 }
 
@@ -801,8 +817,10 @@ auto RebuildSkinnedBLAS(
         scratchMesh.blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh.blas.Get())};
     }
 
-    auto scratchBufOpt =
-        Vk::Buffer::Create(allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
+    auto scratchBufOpt = Vk::Buffer::Create(
+        allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly,
+        ctx.AccelerationStructureScratchAlignment()
+    );
     if (!scratchBufOpt) {
         if (creatingBlas) {
             scratchMesh.blas = {};
@@ -854,15 +872,15 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
         .vertexCount   = nativeMesh->vertexCount,
         .indexCount    = 0
     };
-    Draw(material, debugMesh, {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f});
+    Draw(material, debugMesh, {.transform = Mat4x4::Identity(), .prevTransform = Mat4x4::Identity(), .cullRadius = 10000.0f});
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat44> matrices) {
+void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) {
     if (matrices.empty()) {
         return;
     }
     auto& buffer = _impl->frames.CurrentJointBuffer();
-    if (offset > buffer.Size() / sizeof(JPH::Mat44) || matrices.size() > buffer.Size() / sizeof(JPH::Mat44) - offset) {
+    if (offset > buffer.Size() / sizeof(Mat4x4) || matrices.size() > buffer.Size() / sizeof(Mat4x4) - offset) {
         ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
         return;
     }
@@ -870,15 +888,14 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::M
     if (!mapped) {
         return;
     }
-    std::memcpy(mapped->As<JPH::Mat44>() + offset, matrices.data(), matrices.size_bytes());
+    std::memcpy(mapped->As<Mat4x4>() + offset, matrices.data(), matrices.size_bytes());
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
     const uint32_t offset   = _impl->nextMorphDeltaIndex;
     const size_t   capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
     if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
-        ZHLN::Assert(false, "morph deltas must fit in the buffer as complete float4s");
-        return offset;
+        return UINT32_MAX;
     }
     if (!deltas.empty()) {
         auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator);
@@ -900,7 +917,6 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 
     return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
-        impl->settings.qualityPreset      = impl->settings.DetectPreset();
     });
 }
 
@@ -919,8 +935,9 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
         }
     }
 
-    incoming.qualityPreset = incoming.DetectPreset();
-    settings               = incoming;
+    // Stored exactly as given. Which tier this is, if any, is the caller's
+    // determination -- the renderer does not re-derive it.
+    settings = incoming;
 
     if (settings.qualityPreset != previousTier) {
         ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
@@ -975,8 +992,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     }
     Vk::AccelerationStructure blas = std::move(*blasResult);
 
-    auto scratchRes =
-        Vk::Buffer::Create(impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
+    auto scratchRes = Vk::Buffer::Create(
+        impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly,
+        impl.ctx.AccelerationStructureScratchAlignment()
+    );
     if (!scratchRes) {
         return std::unexpected(scratchRes.error());
     }

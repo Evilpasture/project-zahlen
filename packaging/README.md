@@ -58,17 +58,19 @@ side and are never overwritten.
 
 | Component / config suffix | Installed target | Requires |
 |---|---|---|
-| Engine | Engine, Jolt | distro runtime libraries |
+| Engine | Engine (`libzahlen_engine.so`) | distro runtime libraries |
 | CommandLine | CommandLine | system C++ runtime |
+| Image | Image | system C++ runtime |
 | Signal | Signal | Engine |
+| Screenshot | Screenshot + `libzahlen_plugin_screenshot.so` | Engine, Image |
 | HostRunner | HostRunner | Engine, CommandLine, Signal |
-| Application | Application | Engine, CommandLine, HostRunner |
-| UISchema | UISchema | Engine |
+| Application | Application | Engine, CommandLine, HostRunner, Screenshot |
+| UI | UI (`GUI::Context`, `HostUI`, embedded default font) | Engine |
+| UISchema | UISchema | Engine, UI |
 | Serialization | Serialization | Engine, UISchema, system simdjson |
 | GLTF | GLTF | Engine, Serialization |
-| Screenshot | Screenshot | Engine |
 | Netpbm | Netpbm (header-only) | Engine |
-| FreeCam | FreeCam | Engine |
+| FreeCam | FreeCam + `libzahlen_plugin_freecam.so` | Engine |
 | Camera | Camera | Engine, FreeCam |
 | CharacterController | CharacterController | Engine, FreeCam |
 | SkeletalAnimation | SkeletalAnimation | Engine |
@@ -203,30 +205,48 @@ Link and compose what the application uses:
 ```cpp
 #include <Zahlen/App.hpp>
 #include <CharacterController/CharacterController.hpp>
-// Also find_package(ZahlenCharacterController) and link its target.
-// application.Install([](ZHLN::Engine& e) { ZHLN::Character::Install(e); });
+// Also find_package(ZahlenCharacterController) and link Zahlen::CharacterController.
+// Compose ZHLN::Character::Layer over ZHLN::COM::IEngine& via ZHLN::App::AddLayer.
 ```
 
-`WithDefaultModules` remains source-compatible but the base default pass is
-empty. Existing games which relied on implicit fonts, terrain, interaction,
-cameras, animation or authoring tools must explicitly install those systems.
+Applications that rely on fonts, terrain, interaction, cameras, animation or
+authoring tools register those layers explicitly.
 
 ## ABI and profiles
 
-Each config checks the compiler family, the tree's minimum GCC (`ZHLN_GCC_MIN`,
-16.1.1), architecture, dual ABI, debug-container mode, Release configuration and
-an explicit sanitizer profile. It does **not** pin a compiler patch version or a
-`__GLIBCXX__` header date: GCC point releases keep the libstdc++ ABI, and an
-older runtime is rejected by the linker/loader with the precise missing
-`GLIBCXX_x.y.z` symbol. A shared fingerprint includes the engine revision,
-compiler flags, Jolt public ABI definitions/options and the annotation setting;
-mixing fingerprints is rejected even when package versions match, and so is
-mixing packages from two toolchain ids.
+`ZahlenEngine` ships a **single** shared library (`libzahlen_engine.so`) and the
+stripped public COM/Core headers; `ZahlenCooker` ships `bin/zcook`. Every
+optional extension and plugin (`Application`, `HostRunner`, `UI`,
+`CommandLine`, `Signal`, `Image`, `GLTF`, `Scene`, `Serialization`, `Fonts`,
+`UISchema`, `Screenshot`, `Netpbm`, `FreeCam`, `Camera`, `CharacterController`,
+`AnimationControls`, `Animation`, `Terrain`, `VFX`, `Widgets`, `Console`,
+`Editor`, `Benchmark`, `BenchmarkViewer`, `Scripting`, `Lua`) ships as a
+relocatable **source/header package** under `share/zahlen/src/<pkg>` — zero
+prebuilt `.a` archives and zero compiler-specific module BMIs. `ZahlenFreeCam`
+and `ZahlenScreenshot` additionally ship dynamically loadable `COM::IAppLayer`
+shared libraries (`lib/zahlen/plugins/libzahlen_plugin_{freecam,screenshot}.so`,
+exporting only `ZHLN::COM::CreateAppLayer`) for `App::LoadPlugin`,
+`App::TryLoadPlugin`, and `--plugin`. Consumers compile
+those sources with their own compiler release, flags, and build type (`Debug`,
+`RelWithDebInfo`, or `Release`) directly against the single Release
+`libzahlen_engine.so`.
 
-Jolt is bundled in Engine with its own public usage requirements, not resolved
-against an arbitrary system Jolt. A toolchain is tied to the engine revision and
-compiler family that built it; it is not a compiler distribution or a promise of
-ABI stability across revisions.
+Jolt Physics, Vulkan/volk/VMA, miniaudio, meshoptimizer, SPIRV-Reflect,
+and vendored GLFW/zstd archives are completely sealed inside
+`libzahlen_engine.so` via hidden visibility presets, `-Wl,--exclude-libs,ALL`,
+and the linker export allowlist (`cmake/zahlen_engine.map`), audited by
+`configure/check_engine_exports.py`; no `libJolt*` library, header, compile
+definition, or third-party symbol is installed or leaked to consumers.
+`libzahlen_engine.so` does not embed or interpose a custom allocator (first-party
+in-tree host executables link `mimalloc` directly on non-Apple, non-sanitizer
+builds, while SDK consumers own their process allocator).
+
+Each config checks the compiler family, architecture, libstdc++ dual-ABI switch
+(`_GLIBCXX_USE_CXX11_ABI`), absence of `_GLIBCXX_DEBUG`, an explicit sanitizer
+profile, and compiles `cmake/probes/pr125280-static-member.cpp` under
+`-std=c++26 -freflection`. It does **not** pin a compiler patch version, git
+commit hash, `__GLIBCXX__` release date, or consumer `CMAKE_BUILD_TYPE`; COM
+input chains verify struct layouts at runtime via `LayoutHash`.
 
 Sanitized consumers pass `-DZahlen_SANITIZER_PROFILE=asan-ubsan`; ASan/UBSan
 compile and link requirements propagate and there is no automatic switch from a
@@ -257,7 +277,7 @@ search with the directory **containing** `data/`.
 
 There is deliberately no Data package. What would have been in one is either a
 build input or the sandbox's own scene: shaders are `#embed`ded into the
-renderer, the default font is `#embed`ded in `src/gui/FontLoader.cpp`, and
+renderer, the default font is `#embed`ded in the optional `ZahlenUI` package (`extensions/UI/FontLoader.cpp`), and
 `Kernel.cpp` only warns when no pack is present. Shipping it also made every
 toolchain package depend on the asset pipeline, because the install rule copied a
 `cook_assets` artifact -- which is why `--component ZahlenData` could fail with a
@@ -283,7 +303,7 @@ re-executes itself as an unprivileged user before doing any of it:
    source files and prefab scene; no engine application source is copied.
 7. Build the standalone consumer against the store only, with no `LD_LIBRARY_PATH`
    and no reference to the engine checkout in the generated build files. Its
-   `main.cpp` calls the public `PrefabFactory::CreateBox` API.
+   `main.cpp` calls the public `COM::IAssetLibrary::SpawnBox` API.
 8. Put the pack the consumer cooked where the engine looks for it, require the
    render log to report that it was mounted, force Lavapipe, run eight warm-up
    ticks, then one measured tick and capture.

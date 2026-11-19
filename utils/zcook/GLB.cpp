@@ -5,13 +5,14 @@
 //
 // Emits a cookable scene from Compiler::IRManifest as a self-contained glTF
 // 2.0 binary container. The document model (GLBModel.hpp) is the schema and
-// ZHLN::ReflectJSON::SerializeJSON writes it -- no JSON is built by hand.
+// ZHLN::ReflectJSON::Serialize writes it -- no JSON is built by hand.
 // The PNG half of the BIN chunk is stb_image_write; the container framing
 // (magic, chunk headers, padding) is the one binary shape the layer above
 // must stay hand-assembled.
 #include "GLB.hpp"
 #include "GLBModel.hpp"
 #include "Transform.hpp"
+#include <Image/Image.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <json/JSONSchema.hpp>
 #include <map>
 #include <optional>
 #include <span>
@@ -27,11 +29,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-
-#include <json/JSONSchema.hpp>
 
 namespace ZHLN::GLB {
 
@@ -111,19 +108,9 @@ inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
     return {x, y, z, w};
 }
 
-// stb_image_write appends through a context pointer; this is the only
-// result sink the emitter needs (BIN chunk bytes, and the baked .ztex copy).
 std::vector<uint8_t> CreatePNGBytes(std::span<const uint32_t> rgbaPixels, uint32_t width, uint32_t height) {
-    std::vector<uint8_t> pngBytes;
-    auto                 append = [](void* ctx, void* data, int size) {
-        auto*       out       = static_cast<std::vector<uint8_t>*>(ctx);
-        const auto* bytes     = static_cast<const uint8_t*>(data);
-        out->insert(out->end(), bytes, bytes + size);
-    };
-    if (stbi_write_png_to_func(append, &pngBytes, static_cast<int>(width), static_cast<int>(height), 4, rgbaPixels.data(), static_cast<int>(width * 4)) == 0) {
-        return {};
-    }
-    return pngBytes;
+    auto encoded = Image::EncodePNGToMemory({reinterpret_cast<const uint8_t*>(rgbaPixels.data()), rgbaPixels.size_bytes()}, width, height);
+    return encoded ? std::move(*encoded) : std::vector<uint8_t> {};
 }
 
 } // namespace
@@ -1016,7 +1003,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, std::string_view levelFolder,
     doc.scenes.push_back(GlbScene {.nodes = {rootNodeIndices.begin(), rootNodeIndices.end()}});
     doc.buffers.push_back(GlbBuffer {.byteLength = static_cast<uint32_t>(binBuffer.size())});
 
-    std::string json = ZHLN::ReflectJSON::SerializeJSON(doc, 2, {.omitEmpty = true});
+    std::string json = ZHLN::ReflectJSON::Serialize(doc, 2, {.omitEmpty = true});
 
     while (json.length() % 4 != 0)
         json += ' ';

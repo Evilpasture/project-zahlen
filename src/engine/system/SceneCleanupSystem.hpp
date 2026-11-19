@@ -5,10 +5,13 @@
 namespace ZHLN {
 
 class Engine;
+namespace ECS {
+class Registry;
+}
 
 struct SceneCleanupSystem {
-    static void ProcessPending(Engine& engine);
-    static void ClearAll(Engine& engine);
+    static void ProcessPending(Engine& engine, ECS::Registry& registry);
+    static void ClearAll(Engine& engine, ECS::Registry& registry);
 };
 
 }

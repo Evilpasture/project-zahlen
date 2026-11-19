@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
+#include <engine/AssetManager.hpp>
+#include <render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <cmath>
 #include <cstddef>
@@ -97,6 +97,7 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
     // The old RenderContext's buffer pool is being destroyed. Do not pass its
     // IDs to the replacement renderer even if it reuses the same slots.
     _prefabCache.ForEach([](ModelPrefab& prefab) {
+        prefab.gpuResourcesReady = false;
         for (auto& part: prefab.parts) {
             part.mesh                            = {};
             part.defaultMaterial.pipeline        = PipelineID::Invalid;
@@ -106,7 +107,38 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
     _renderContext = nullptr;
 }
 
+auto AssetManager::CacheCollisionMesh(CollisionAssetID id, Physics::MeshGeometry geometry) -> bool {
+    if (id == CollisionAssetID::Invalid || geometry.vertices.size() < 3 || geometry.indices.size() < 3 ||
+        geometry.indices.size() % 3 != 0 || geometry.vertices.size() > UINT32_MAX || geometry.indices.size() > UINT32_MAX) return false;
+    for (const auto& v: geometry.vertices) {
+        if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z)) return false;
+    }
+    bool anyTriangle = false;
+    for (size_t i = 0; i < geometry.indices.size(); i += 3) {
+        const auto a = geometry.indices[i], b = geometry.indices[i + 1], c = geometry.indices[i + 2];
+        if (a >= geometry.vertices.size() || b >= geometry.vertices.size() || c >= geometry.vertices.size()) return false;
+        anyTriangle |= a != b && b != c && a != c;
+    }
+    if (!anyTriangle) return false;
+    auto snapshot = std::make_shared<const Physics::MeshGeometry>(std::move(geometry));
+    ZHLN::MutexGuard guard(_collisionMutex);
+    const auto rawID = static_cast<uint64_t>(id);
+    if (!_collisionMeshes.With(rawID, [&](auto& current) { current = snapshot; })) {
+        _collisionMeshes.Insert(rawID, std::make_unique<std::shared_ptr<const Physics::MeshGeometry>>(std::move(snapshot)));
+    }
+    return true;
+}
+
+auto AssetManager::FindCollisionMesh(CollisionAssetID id) const noexcept -> std::shared_ptr<const Physics::MeshGeometry> {
+    if (id == CollisionAssetID::Invalid) return {};
+    return _collisionMeshes.With(static_cast<uint64_t>(id), [](const auto& current) { return current; }).value_or(nullptr);
+}
+
 void AssetManager::ClearCache() noexcept {
+    {
+        ZHLN::MutexGuard guard(_collisionMutex);
+        _collisionMeshes.Clear();
+    }
     ReleaseCachedMeshBuffers();
     _prefabCache.Clear();
     _environmentImages.Clear();
@@ -114,33 +146,6 @@ void AssetManager::ClearCache() noexcept {
 
 uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
     return _prefabCache.GetAll(outPrefabs, maxCount);
-}
-
-auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&> {
-    GUI::BakedFontAsset* found = BorrowCachedFont(hash);
-    return found != nullptr ? ZHLN::Optional<GUI::BakedFontAsset&> {*found} : ZHLN::Optional<GUI::BakedFontAsset&> {std::nullopt};
-}
-
-auto AssetManager::BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset* {
-    GUI::BakedFontAsset* found = nullptr;
-    _fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
-    return found;
-}
-
-void AssetManager::CacheFont(uint64_t hash, GUI::BakedFontAsset* font) {
-    _fontCache.Insert(hash, font);
-}
-
-void AssetManager::CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font) {
-    _fontCache.Insert(hash, std::move(font));
-}
-
-void AssetManager::ClearFontCache() noexcept {
-    _fontCache.Clear();
-}
-
-uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount) {
-    return _fontCache.GetAll(outFonts, maxCount);
 }
 
 auto AssetManager::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
@@ -191,6 +196,23 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
             .contentHash  = image.contentHash,
         };
     });
+}
+
+auto AssetManager::ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>> {
+    AssetLoadRequest req {};
+    req.assetID = HashAssetPath(path);
+    auto& self = const_cast<AssetManager&>(*this);
+    if (!self.LoadSync(req)) {
+        return std::nullopt;
+    }
+    if ((req.outData == nullptr) || (req.outSize == 0)) {
+        self.FreeMemory(req);
+        return std::nullopt;
+    }
+    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
+    std::vector<uint8_t> out(bytes, bytes + req.outSize);
+    self.FreeMemory(req);
+    return out;
 }
 
 } // namespace ZHLN

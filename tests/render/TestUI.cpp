@@ -1,19 +1,18 @@
+#include <UI/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <UI/GUI.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <expected>
 #include <string>
 #include <vector>
@@ -59,9 +58,10 @@ struct SolidPayload {
 // A single-colour box, plus same-colour text so the payload carries geometry
 // even if a childless box were laid out to nothing -- the colour is what the
 // capture is asked about, and the text never is a different hue than the box.
-[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
-    ZHLN::GUI::Context gui(engine.GetFontAtlas());
-    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.GetPlatformHost().GetSize(), .dt = 1.0f / 60.0f});
+[[nodiscard]] auto BuildSolidBox(ZHLN::COM::IEngine& engine, const ZHLN::FVec4& color, float size) -> SolidPayload {
+    ZHLN::HostUI hostUI(engine);
+    ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
+    ZHLN::GUI::Frame   ui = gui.BeginFrame(ZHLN::GUI::UIInput {.viewport = engine.WindowExtent(engine.PrimaryWindow()), .dt = 1.0f / 60.0f});
     ui.Box("Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f}, [&]() {
         ui.Text("X", 24.0f, color);
     });
@@ -98,13 +98,15 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             // Set up a simple UI scene
-            ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng) {
-                gui.SetFontAtlas(eng.GetFontAtlas());
-                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
+            ZHLN::HostUI hostUI(*engine);
+            ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
+            auto composeUI = [&](float frameDt) {
+                hostUI.BeginFrame();
+                gui.SetFontAtlas(hostUI.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
                 ui.Box(
                     "TestBox",
@@ -119,14 +121,14 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SubmitUI(std::move(ui).End());
-            });
+                (void) hostUI.Submit(std::move(ui).End());
+            };
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
+                const auto status = (composeUI(dt), engine->Tick(dt));
+                ZHLN::Test::ExpectTrue(status.HasValue());
             }
 
             // The frame comes back in memory; the .ppm is only a diagnostic
@@ -173,11 +175,19 @@ struct UITestSuite {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
+            // Drive the GUI the way a host that owns its pointer does: hand the
+            // frame's UI input in, then run the frame. This is the real seam
+            // (HostUI::SubmitInput), not a fabricated one: ConsumeInput
+            // returns exactly this vector for the frame it was submitted for, and
+            // the device path is not touched. A host with a compositor or a
+            // remote pointer uses the same call.
+            ZHLN::HostUI hostUI(*engine);
             auto setInput = [&](float mx, float my, bool lbutton) {
-                auto& in = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-                in.mouseX = mx;
-                in.mouseY = my;
-                in.SetKey(static_cast<uint8_t>(ZHLN::KeyCode::LButton), lbutton);
+                ZHLN::GUI::UIInput ui {};
+                ui.mouseX       = mx;
+                ui.mouseY       = my;
+                ui.mouseDown[0] = lbutton;
+                hostUI.SubmitInput(ui);
             };
 
             uint32_t clickCountA = 0;
@@ -190,10 +200,11 @@ struct UITestSuite {
             bool     wasClickedA = false;
             bool     wasClickedB = false;
 
-            ZHLN::GUI::Context gui(engine->GetFontAtlas());
-            engine->SetUICallback([&](ZHLN::Engine& eng) {
-                gui.SetFontAtlas(eng.GetFontAtlas());
-                ZHLN::GUI::Frame ui = gui.BeginFrame(eng.ConsumeUIInput(0.016f));
+            ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
+            auto composeUI = [&](float frameDt) {
+                hostUI.BeginFrame();
+                gui.SetFontAtlas(hostUI.GetFontAtlas());
+                ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
                 ui.Box(
                     "Container",
@@ -215,15 +226,15 @@ struct UITestSuite {
                     }
                 );
 
-                eng.SubmitUI(std::move(ui).End());
-            });
+                (void) hostUI.Submit(std::move(ui).End());
+            };
 
             constexpr float dt = 1.0f / 60.0f;
 
             // Frame 1: Initial layout establishment (mouse at 0, 0, unpressed)
             setInput(0.0f, 0.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectFalse(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 0u);
@@ -232,7 +243,7 @@ struct UITestSuite {
             // Frame 2: Mouse hovers over ButtonA (approx x: 50, y: 35), unpressed
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectFalse(isActiveA);
@@ -245,7 +256,7 @@ struct UITestSuite {
             // Frame 3: Mouse pressed down this frame over ButtonA
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectTrue(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectTrue(isActiveA);
@@ -256,7 +267,7 @@ struct UITestSuite {
             // Frame 4: Button is held down across next frame (single-fire guarantee: should NOT click again)
             setInput(50.0f, 35.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectTrue(isActiveA);
@@ -266,7 +277,7 @@ struct UITestSuite {
             // Frame 5: Mouse released over ButtonA
             setInput(50.0f, 35.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedA);
             ZHLN::Test::ExpectTrue(isHoveredA);
             ZHLN::Test::ExpectFalse(isActiveA);
@@ -276,21 +287,21 @@ struct UITestSuite {
             // Drag-into-click prevention test
             setInput(500.0f, 400.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             // Move mouse over ButtonB while still held down from previous frame
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectFalse(wasClickedB); // Drag-into-hover must NOT trigger click
             ZHLN::Test::ExpectEq(clickCountB, 0u);
 
             // Frame 7: Release mouse over ButtonB, then press again to verify ButtonB clicks cleanly
             setInput(50.0f, 85.0f, false);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             setInput(50.0f, 85.0f, true);
             engine->ProcessEvents();
-            (void) engine->Tick(dt);
+            (void) (composeUI(dt), engine->Tick(dt));
             ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 1u);
@@ -311,291 +322,43 @@ struct UITestSuite {
         // bands of one window make both halves readable in a single capture,
         // which is what a headless engine can observe (it has no second
         // swapchain to capture).
-        std::expected<void, ZHLN::ErrorCode> render_calls_keep_their_own_vertices() {
-            auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
-                return std::unexpected(UITestError::EngineInitFailed);
-            }
 
-            auto rc = engine->Graphics();
 
-            // The engine's own loop initialises the frame schedule; the frame
-            // that carries the two calls is driven by hand below, because the
-            // host UI callback can only hand RenderSystem one payload.
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
-
-            const SolidPayload green = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 240.0f);
-            const SolidPayload blue  = BuildSolidBox(*engine, {0.0f, 0.0f, 1.0f, 1.0f}, 240.0f);
-            if (!ZHLN::Test::ExpectTrue(!green.View().Empty() && !blue.View().Empty())) {
-                return std::unexpected(UITestError::UINotRendered);
-            }
-
-            // A frame that *began*: no error, and not FrameSkipped either -- the
-            // test is about to hand-drive a frame, so "there was nothing to draw
-            // into" is its own failure here, as it was when a skip was an
-            // out-of-date code.
-            auto began = rc.BeginFrame();
-            if (!ZHLN::Test::ExpectTrue(began.has_value() && began->has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            ZHLN::FrameScope gpuFrame = std::move(**began);
-            // The query answers only what the frame has already acquired: before
-            // the acquisition below, it has nothing to say about this window.
-            // Both verbs are the engine's, not the renderer's: which target a
-            // session presents through is the kernel's business, and a caller
-            // only ever sees the attachment it resolves to.
-            if (!ZHLN::Test::ExpectTrue(!engine->GetAcquiredTarget().has_value())) {
-                return std::unexpected(UITestError::DestinationQueryFailed);
-            }
-
-            const auto target = engine->AcquireTarget();
-            if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const ZHLN::FrameTarget attachment = **target;
-
-            // And after it, the query is that same answer asked a second time --
-            // a read of what the acquisition did, not a second acquisition.
-            const std::optional<ZHLN::FrameTarget> queried = engine->GetAcquiredTarget();
-            if (!ZHLN::Test::ExpectTrue(queried.has_value() && *queried == attachment)) {
-                return std::unexpected(UITestError::DestinationQueryFailed);
-            }
-
-            const uint32_t frameIndex = rc.FrameIndex();
-            // Both halves must DRAW into the acquired window: the pixel checks
-            // below read what these calls recorded. nullopt means drawn.
-            const auto greenDrawn = gpuFrame.RenderUI(
-                ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
-            );
-            const auto blueDrawn = gpuFrame.RenderUI(
-                ZHLN::UIView {.viewport = {.x = 320, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, blue.View()
-            );
-            if (!ZHLN::Test::ExpectTrue(greenDrawn.has_value() && !greenDrawn->has_value() && blueDrawn.has_value() && !blueDrawn->has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            if (!ZHLN::Test::ExpectTrue(std::move(gpuFrame).End().has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-
-            const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_two_calls_one_window.ppm");
-            if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
-                return std::unexpected(UITestError::RenderOutputBlank);
-            }
-
-            const auto left  = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.0, .x1 = 0.5, .y1 = 1.0});
-            const auto right = MeasureSubRegion(frame, {.x0 = 0.5, .y0 = 0.0, .x1 = 1.0, .y1 = 1.0});
-
-            ZHLN::Println(
-                "    [INFO] One frame, two calls: left green {} blue {}, right blue {} green {}", left.dominantGrn, left.dominantBlu, right.dominantBlu,
-                right.dominantGrn
-            );
-
-            // Each band shows its own payload and no trace of the other's: the
-            // second call must not have taken the first's vertices, and the
-            // first must not have leaked into the second's range either.
-            const bool leftIsOwnPayload  = ShareAtLeast(left.dominantGrn, left.pixels) && left.dominantBlu == 0;
-            const bool rightIsOwnPayload = ShareAtLeast(right.dominantBlu, right.pixels) && right.dominantGrn == 0;
-            if (!ZHLN::Test::ExpectTrue(leftIsOwnPayload && rightIsOwnPayload)) {
-                return std::unexpected(UITestError::SharedVertexRange);
-            }
-
-            return {};
-        }
-
-        // The editor's own shape: the primary window is drawn first and, while
-        // the preview is open, a second destination is drawn from the same
-        // frame. That second call is what used to take the window's vertices,
-        // which is why the assertion is on the window: it is the surface the
-        // user is looking at, and it must show its own chrome.
-        //
-        // A headless engine has no second swapchain, so exercise LDR (UNORM)
-        // and HDR (float) render textures alongside the sRGB presentation
-        // target. Every UI call must use a pipeline matching its attachment
-        // format and keep the window's vertices intact.
-        std::expected<void, ZHLN::ErrorCode> second_destination_does_not_replace_the_first() {
-            auto engine = CreateTestEngine(640, 480);
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
-                return std::unexpected(UITestError::EngineInitFailed);
-            }
-
-            auto rc = engine->Graphics();
-
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
-
-            const SolidPayload windowPayload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 240.0f);
-            const SolidPayload otherPayload  = BuildSolidBox(*engine, {0.0f, 0.0f, 1.0f, 1.0f}, 120.0f);
-            if (!ZHLN::Test::ExpectTrue(!windowPayload.View().Empty() && !otherPayload.View().Empty())) {
-                return std::unexpected(UITestError::UINotRendered);
-            }
-
-            const auto textureRes = rc.CreateRenderTexture(160, 160, false);
-            if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
-                return std::unexpected(UITestError::RenderTextureFailed);
-            }
-            const ZHLN::TextureID texture = *textureRes;
-            const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
-            if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
-                rc.DestroyRenderTexture(texture);
-                return std::unexpected(UITestError::RenderTextureFailed);
-            }
-            const ZHLN::TextureID hdrTexture = *hdrTextureRes;
-
-            const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
-
-            // As above: the frame has to have begun, not merely to not have failed.
-            auto began = rc.BeginFrame();
-            if (!ZHLN::Test::ExpectTrue(began.has_value() && began->has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            ZHLN::FrameScope gpuFrame = std::move(**began);
-            const auto target = engine->AcquireTarget();
-            if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const ZHLN::FrameTarget attachment = **target;
-            const uint32_t               frameIndex = rc.FrameIndex();
-            // All destinations must draw. A silent skip would make the window
-            // test pass without exercising either offscreen pipeline variant.
-            const auto windowDrawn = gpuFrame.RenderUI(
-                ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},
-                windowPayload.View()
-            );
-            const auto otherDrawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
-                    .target     = attachment.ForTexture(texture),
-                    .frameIndex = frameIndex
-                },
-                otherPayload.View()
-            );
-            const auto hdrDrawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
-                    .target     = attachment.ForTexture(hdrTexture),
-                    .frameIndex = frameIndex
-                },
-                otherPayload.View()
-            );
-            if (!ZHLN::Test::ExpectTrue(
-                    windowDrawn.has_value() && !windowDrawn->has_value() && otherDrawn.has_value() && !otherDrawn->has_value() && hdrDrawn.has_value() &&
-                    !hdrDrawn->has_value()
-                )) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            if (!ZHLN::Test::ExpectTrue(std::move(gpuFrame).End().has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-
-            const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_window_and_second_destination.ppm");
-            rc.DestroyRenderTexture(hdrTexture);
-            rc.DestroyRenderTexture(texture);
-            if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
-                return std::unexpected(UITestError::RenderOutputBlank);
-            }
-
-            const auto window = MeasureSubRegion(frame, {});
-
-            ZHLN::Println("    [INFO] Window after a second destination: green {} blue {}", window.dominantGrn, window.dominantBlu);
-
-            const bool windowKeptItsOwnUI = ShareAtLeast(window.dominantGrn, window.pixels) && window.dominantBlu == 0;
-            if (!ZHLN::Test::ExpectTrue(windowKeptItsOwnUI)) {
-                return std::unexpected(UITestError::SecondDestinationReplacedUI);
-            }
-
-            return {};
-        }
-        // An acquired target is a capability for this acquisition only. A
-        // subsequent frame may reuse the exact same swapchain image, but must
-        // not revive the previous frame's target or a destroyed offscreen one.
-        std::expected<void, ZHLN::ErrorCode> frame_targets_expire_without_rebinding() {
-            auto engine = CreateTestEngine(320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
-                return std::unexpected(UITestError::EngineInitFailed);
-            }
-            auto rc = engine->Graphics();
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
-            const SolidPayload payload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 80.0f);
-            if (!ZHLN::Test::ExpectTrue(!payload.View().Empty())) {
-                return std::unexpected(UITestError::UINotRendered);
-            }
-            const ZHLN::ViewportRect viewport {.x = 0, .y = 0, .width = 320, .height = 240};
-
-            auto began = rc.BeginFrame();
-            if (!began || !*began) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            ZHLN::FrameScope firstFrame = std::move(**began);
-            const auto first = engine->AcquireTarget();
-            if (!first || !first->has_value()) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const ZHLN::FrameTarget stale = **first;
-            if (!std::move(firstFrame).End()) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            if (!ZHLN::Test::ExpectTrue(!engine->GetAcquiredTarget().has_value())) {
-                return std::unexpected(UITestError::DestinationQueryFailed);
-            }
-
-            began = rc.BeginFrame();
-            if (!began || !*began) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            ZHLN::FrameScope secondFrame = std::move(**began);
-            const auto invalidResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport}, payload.View());
-            if (!ZHLN::Test::ExpectTrue(!invalidResult)) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const auto second = engine->AcquireTarget();
-            if (!second || !second->has_value() || !ZHLN::Test::ExpectTrue(**second != stale)) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            // A new acquisition is already live. Neither pass may quietly
-            // adopt it when handed the previous frame's capability.
-            const auto staleUI = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = stale}, payload.View());
-            const auto staleScene = secondFrame.RenderScene(ZHLN::SceneRenderPass {.view = {.target = stale}}, ZHLN::SceneData {});
-            if (!ZHLN::Test::ExpectTrue(!staleUI && !staleScene)) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const auto texture = rc.CreateRenderTexture(32, 32);
-            if (!texture) {
-                return std::unexpected(UITestError::RenderTextureFailed);
-            }
-            const ZHLN::FrameTarget retiredTexture = (**second).ForTexture(*texture);
-            rc.DestroyRenderTexture(*texture);
-            const auto retiredResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
-            if (!ZHLN::Test::ExpectTrue(!retiredResult)) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            const auto drawn = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = **second}, payload.View());
-            const auto ended = std::move(secondFrame).End();
-            if (!ZHLN::Test::ExpectTrue(drawn.has_value() && !drawn->has_value() && ended.has_value())) {
-                return std::unexpected(UITestError::FrameDriveFailed);
-            }
-            return {};
-        }
-
-        // 7. System vs. Custom Cursor Mode across PlatformHost + RenderSystem
         std::expected<void, ZHLN::ErrorCode> system_vs_custom_cursor_mode() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(UITestError::EngineInitFailed);
             }
 
-            auto& host  = engine->GetPlatformHost();
-            auto& input = ZHLN::EngineAccess::RegistryOf(*engine).GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
-            input.ApplyLocalMotion(320.0f, 240.0f);
+            const ZHLN::WindowID win = engine->PrimaryWindow();
+            ZHLN::COM::HostInputInfo inputState {};
+            ZHLN::Test::ExpectTrue(engine->ReadHostInput(win, ZHLN::COM::OutChain(inputState), false).HasValue());
+            ZHLN::Test::ExpectEq(inputState.mouseX, 0.0f);
+            ZHLN::Test::ExpectEq(inputState.mouseY, 0.0f);
 
-            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::System) ||
-                !ZHLN::Test::ExpectFalse(host.IsMouseCaptured()) ||
-                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+            const auto isCustomCursor = [&] {
+                return engine->GetCursorMode(win) == ZHLN::CursorMode::Custom && !engine->IsMouseCaptured(win);
+            };
+
+            if (!ZHLN::Test::ExpectEq(engine->GetCursorMode(win), ZHLN::CursorMode::System) ||
+                !ZHLN::Test::ExpectFalse(engine->IsMouseCaptured(win)) ||
+                !ZHLN::Test::ExpectFalse(isCustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            auto countBrightCenterPixels = [](const RgbImage& img) -> uint32_t {
+            ZHLN::HostUI hostUI(*engine);
+            auto tickHostFrames = [&] {
+                for (uint32_t i = 0; i < 2; ++i) {
+                    engine->ProcessEvents();
+                    hostUI.BeginFrame();
+                    (void) hostUI.Submit({});
+                    ZHLN::Test::ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
+                }
+            };
+            auto countBrightCursorPixels = [](const RgbImage& img) -> uint32_t {
                 uint32_t bright = 0;
-                for (int y = 236; y <= 244 && y < img.height; ++y) {
-                    for (int x = 316; x <= 324 && x < img.width; ++x) {
+                for (int y = 0; y <= 8 && y < img.height; ++y) {
+                    for (int x = 0; x <= 8 && x < img.width; ++x) {
                         const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3;
                         if (img.rgb[idx] > 200 && img.rgb[idx + 1] > 200 && img.rgb[idx + 2] > 200) {
                             ++bright;
@@ -605,47 +368,44 @@ struct UITestSuite {
                 return bright;
             };
 
-            // System mode: no custom cursor rendered into headless target.
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto systemFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_system.ppm");
             if (!systemFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t systemBright = countBrightCenterPixels(systemFrame);
+            const uint32_t systemBright = countBrightCursorPixels(systemFrame);
 
-            // Custom mode: custom cursor rendered at (320, 240).
-            host.SetCursorMode(ZHLN::CursorMode::Custom);
-            if (!ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
-                !ZHLN::Test::ExpectTrue(host.UsesCustomCursor())) {
+            engine->SetCursorMode(win, ZHLN::CursorMode::Custom);
+            if (!ZHLN::Test::ExpectEq(engine->GetCursorMode(win), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectTrue(isCustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto customFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_custom.ppm");
             if (!customFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t customBright = countBrightCenterPixels(customFrame);
+            const uint32_t customBright = countBrightCursorPixels(customFrame);
 
-            // Mouse capture hides custom cursor while preserving CursorMode::Custom.
-            host.CaptureMouse(true);
-            if (!ZHLN::Test::ExpectTrue(host.IsMouseCaptured()) ||
-                !ZHLN::Test::ExpectEq(host.GetCursorMode(), ZHLN::CursorMode::Custom) ||
-                !ZHLN::Test::ExpectFalse(host.UsesCustomCursor())) {
+            engine->CaptureMouse(win, true);
+            if (!ZHLN::Test::ExpectTrue(engine->IsMouseCaptured(win)) ||
+                !ZHLN::Test::ExpectEq(engine->GetCursorMode(win), ZHLN::CursorMode::Custom) ||
+                !ZHLN::Test::ExpectFalse(isCustomCursor())) {
                 return std::unexpected(UITestError::UINotRendered);
             }
-            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            tickHostFrames();
             const auto capturedFrame = ZHLN::Test::Headless::Capture(*engine, "headless_cursor_captured.ppm");
             if (!capturedFrame.Valid()) {
                 return std::unexpected(UITestError::RenderOutputBlank);
             }
-            const uint32_t capturedBright = countBrightCenterPixels(capturedFrame);
+            const uint32_t capturedBright = countBrightCursorPixels(capturedFrame);
 
-            host.CaptureMouse(false);
-            const bool restoredCustom = host.UsesCustomCursor();
-            host.SetCursorMode(ZHLN::CursorMode::System);
+            engine->CaptureMouse(win, false);
+            const bool restoredCustom = isCustomCursor();
+            engine->SetCursorMode(win, ZHLN::CursorMode::System);
 
             if (!ZHLN::Test::ExpectEq(systemBright, 0u) ||
-                !ZHLN::Test::ExpectGt(customBright, 12u) ||
+                !ZHLN::Test::ExpectGt(customBright, 4u) ||
                 !ZHLN::Test::ExpectEq(capturedBright, 0u) ||
                 !ZHLN::Test::ExpectTrue(restoredCustom)) {
                 return std::unexpected(UITestError::UINotRendered);

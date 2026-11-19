@@ -111,7 +111,7 @@ auto WriteAtomic(const fs::path& path, std::string_view bytes) -> std::expected<
 // ---------------------------------------------------------------------------
 // Construction and layout
 // ---------------------------------------------------------------------------
-Store::Store(Env env, bool force): m_env(std::move(env)), m_force(force) {
+Store::Store(Env env, bool /*force*/): m_env(std::move(env)) {
 }
 
 fs::path Store::StoreDir() const {

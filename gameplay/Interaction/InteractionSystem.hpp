@@ -4,77 +4,61 @@
 #pragma once
 
 #include "InteractionComponents.hpp"
-#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
 
-namespace ZHLN {
-class Engine;
-class PhysicsContext;
-class AudioContext;
+namespace ZHLN::COM {
+struct IActionContext;
+struct IAudioDevice;
+struct IEngine;
+struct IEntities;
+struct ISimulation;
+} // namespace ZHLN::COM
 
-namespace Interaction {
+namespace ZHLN::Interaction {
 
-// E-key proximity interaction: trigger volumes detect the player, doors
-// open/toggle on use or touch, buttons depress, pickups enter container,
-// and usables dispatch their script hash.
-class InteractionSystem {
-  public:
-    static void Update(
-        ECS::Query<
-            const Character::MovementComponent,
-            const Components::TransformComponent,
-            TriggerComponent&,
-            const Components::InputStateComponent,
-            PickupComponent&,
-            const ItemBaseComponent,
-            ContainerComponent&,
-            const Components::PhysicsComponent,
-            const Components::MeshComponent,
-            const UsableComponent,
-            DoorComponent&,
-            ButtonComponent&>           query,
-        ECS::Registry&                  registry,
-        ZHLN::Optional<PhysicsContext&> physics,
-        ZHLN::Optional<AudioContext&>   audio
-    );
+struct UseIntent {
+    bool use        = false;
+    bool wasUseDown = false;
+
+    [[nodiscard]] constexpr auto JustPressed() const noexcept -> bool {
+        return use && !wasUseDown;
+    }
 };
 
-// Simulates linear (sliding) and angular (rotating) door movement,
-// progress animation, return delay timers, physics sync, and output firing.
-class DoorMovementSystem {
+// Host-side E-key proximity and trigger volume interaction over COM::IEntities.
+class ZHLN_STATIC_API InteractionSystem {
   public:
-    static void Update(
-        ECS::Query<DoorComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-        ECS::Registry&                                                                                                                   registry,
-        FrameDt                                                                                                                          dt,
-        ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
-        ZHLN::Optional<AudioContext&>                                                                                                    audio
-    );
+    using UseIntent = Interaction::UseIntent;
+
+    static void Update(COM::IEntities& entities, UseIntent useIntent = {}, COM::ISimulation* physics = nullptr,
+                       COM::IAudioDevice* audio = nullptr);
 };
 
-// Simulates button press depression, return animation, wait timers, and output firing.
-class ButtonMovementSystem {
+// Linear (sliding) and angular (rotating) door movement over COM::IEntities.
+class ZHLN_STATIC_API DoorMovementSystem {
   public:
-    static void Update(
-        ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
-        ECS::Registry&                                                                                                                   registry,
-        FrameDt                                                                                                                          dt,
-        ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
-        ZHLN::Optional<AudioContext&>                                                                                                    audio
-    );
+    static void Update(COM::IEntities& entities, float dt, COM::ISimulation* physics = nullptr,
+                       COM::IAudioDevice* audio = nullptr);
 };
 
-// Composition-root entry point: registers the interaction components with
-// the engine's registry and contributes InteractionSystem, DoorMovementSystem,
-// and ButtonMovementSystem to the update graph.
-// The module as a value: what the host installs, and what a host that wants to
-// report a placement failure installs itself instead of calling Install.
-auto Describe() -> Module;
+// Button depression, wait timer, return animation and output firing over COM::IEntities.
+class ZHLN_STATIC_API ButtonMovementSystem {
+  public:
+    static void Update(COM::IEntities& entities, float dt, COM::ISimulation* physics = nullptr,
+                       COM::IAudioDevice* audio = nullptr);
+};
 
-void Install(Engine& engine);
+ZHLN_STATIC_API void Step(COM::IEngine& engine, float dt, bool& wasUseDown);
 
-} // namespace Interaction
-} // namespace ZHLN
+struct Layer {
+    bool wasUseDown = false;
+
+    void Tick(COM::IEngine& engine, float dt) {
+        Step(engine, dt, wasUseDown);
+    }
+    void Stop(COM::IEngine&) noexcept {
+        wasUseDown = false;
+    }
+};
+
+} // namespace ZHLN::Interaction

@@ -34,6 +34,7 @@
         "ZHLN_BUILD_TOOL",
         "ZHLN_Clamp",
         "ZHLN_COMPILER_FLAGS",
+        "ZHLN_EXPORT",
         "ZHLN_GIT_COMMIT_HASH",
         "ZHLN_HAS_ZSTD",
         "ZHLN_LINKER_NAME",

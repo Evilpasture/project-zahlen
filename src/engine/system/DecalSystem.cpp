@@ -4,19 +4,19 @@
 #include "DecalSystem.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <render/Render.hpp>
+#include <ecs/ECS.hpp>
 
 namespace ZHLN {
 
 void DecalSystem::Update(ECS::Query<const Components::DecalComponent, const Components::WorldTransformComponent> decals,
                          ECS::ResMut<RenderContext> render) {
     decals.ForEach([&](Entity, const auto& decal, const auto& worldTrans) {
-        JPH::Mat44 worldMat = worldTrans.world;
+        const auto& worldMat = worldTrans.world;
         render->DrawDecal(
             {.transform    = worldMat,
-             .invTransform = worldMat.Inversed(),
+             .invTransform = Inverse(worldMat),
              .albedoMap    = decal.albedoMap,
              .normalMap    = decal.normalMap,
              .roughness    = decal.roughness,

@@ -32,7 +32,7 @@ wrapper: ACES Hill with the historical 1/0.6 exposure boost. The interactive
 viewer's default is PBR Neutral, but its fidelity wrapper explicitly overrides
 that setting. Specifically:
 
-* **No extra authored lights.** `InitializeDefaultScene` spawns no authored
+* **No extra authored lights.** `Engine::Create` spawns no authored
   `LightComponent`. Prefab virtual point lights are disabled; the harness
   destroys any authored lights that exist. With no cooked sun, the unauthored
   180-intensity fill is suppressed while an environment is set. A single

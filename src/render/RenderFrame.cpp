@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/RenderInternal.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 #include "Zahlen/Math/Math3D.hpp"
 #include "Zahlen/Core/Profiler.hpp"
 #include "vulkan/diagnostics/GpuProfiler.hpp"
@@ -13,7 +14,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/SceneData.hpp>
+#include <render/SceneData.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -26,11 +27,11 @@
 
 namespace ZHLN {
 
-RenderFrame::RenderFrame(Renderer& renderer, uint32_t inFlight) noexcept:
-    Slice(renderer.frames, inFlight), renderer(renderer), inFlight(inFlight), graphResources(renderer.graphResources), settings(renderer.settings),
-    state(renderer.frameState), viewProj(renderer.current_view_proj), unjitteredViewProj(renderer.unjittered_view_proj), view(renderer.view_matrix),
-    shadowProjView(renderer.shadowProjView), uniforms(renderer.currentUniforms), dt(renderer.currentDt), viewport(renderer.EffectiveViewport()),
-    meshShading(renderer.MeshShadingActive()), activeLineVertexCount(renderer.activeLineVertexCount) {
+RenderFrame::RenderFrame(Renderer& owner, uint32_t frameInFlight) noexcept:
+    Slice(owner.frames, frameInFlight), renderer(owner), inFlight(frameInFlight), graphResources(owner.graphResources), settings(owner.settings),
+    state(owner.frameState), viewProj(owner.current_view_proj), unjitteredViewProj(owner.unjittered_view_proj), view(owner.view_matrix),
+    shadowProjView(owner.shadowProjView), uniforms(owner.currentUniforms), dt(owner.currentDt), viewport(owner.EffectiveViewport()),
+    meshShading(owner.MeshShadingActive()), activeLineVertexCount(owner.activeLineVertexCount) {
 }
 
 auto RenderFrame::ActiveDepthTarget() noexcept -> Vk::RenderTarget<Vk::Format::D32_SFloat_S8_UInt>& {
@@ -153,11 +154,17 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> BatchRe
         }
     }
 
+    auto postSkinStage  = Vk::BarrierStage::Vertex;
+    auto postSkinAccess = Vk::BarrierAccess::ShaderRead;
+    if (ctx.RayTracingSupported()) {
+        postSkinStage  = postSkinStage | Vk::BarrierStage::AccelerationStructureBuild;
+        postSkinAccess = postSkinAccess | Vk::BarrierAccess::AccelerationStructureRead;
+    }
     Vk::MemoryBarrier {
         Vk::BarrierStage::Compute,
         Vk::BarrierAccess::ShaderWrite,
-        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
-        Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead,
+        postSkinStage,
+        postSkinAccess,
     }
         .Record(cmd);
 
@@ -226,7 +233,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
                 VkTransformMatrixKHR m;
                 for (int row = 0; row < 3; ++row) {
                     for (int col = 0; col < 4; ++col) {
-                        m.matrix[row][col] = t.column[col][row];
+                        m.matrix[row][col] = t[static_cast<size_t>(row), static_cast<size_t>(col)];
                     }
                 }
                 return m;
@@ -267,17 +274,17 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
 }
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
-    const JPH::Mat44 proj       = view.projMatrix;
-    const JPH::Mat44 viewMatrix = view.viewMatrix;
-    const JPH::Mat44 unjittered = proj * viewMatrix;
+    const Mat4x4 proj       = view.projMatrix;
+    const Mat4x4 viewMatrix = view.viewMatrix;
+    const Mat4x4 unjittered = proj * viewMatrix;
 
     current_view_proj    = view.viewProjMatrix;
     unjittered_view_proj = unjittered;
 
     currentUniforms.viewProj           = view.viewProjMatrix;
     currentUniforms.unjitteredViewProj = unjittered;
-    currentUniforms.invViewProj        = unjittered.Inversed();
-    currentUniforms.camPos             = JPH::Float4 {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
+    currentUniforms.invViewProj        = Inverse(unjittered);
+    currentUniforms.camPos             = {view.worldPosition.x, view.worldPosition.y, view.worldPosition.z, view.time};
     if (view.frameIndex != 0) {
         currentUniforms.frameIndex = view.frameIndex;
     }
@@ -289,8 +296,8 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     auto* gpu               = mapped->As<FrameUniforms>();
     gpu->viewProj           = view.viewProjMatrix;
     gpu->unjitteredViewProj = unjittered;
-    gpu->invViewProj        = unjittered.Inversed();
-    gpu->invProj            = proj.Inversed();
+    gpu->invViewProj        = Inverse(unjittered);
+    gpu->invProj            = Inverse(proj);
     gpu->camPos             = currentUniforms.camPos;
     gpu->frameIndex         = currentUniforms.frameIndex;
 }
@@ -652,6 +659,33 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     resolved->drawn                          = true;
     _impl->diagnostics.warnedUnwrittenTarget = false;
     return std::nullopt;
+}
+
+void RenderContext::SubmitUI(WindowID window, const UIDrawData& data, bool append) {
+    if (!append) std::erase_if(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
+    if (data.Empty() || data.positions.size() != data.surfaces.size()) return;
+    for (const auto& batch: data.batches) {
+        if (batch.vertexStart > data.positions.size() || batch.vertexCount > data.positions.size() - batch.vertexStart) return;
+    }
+    _impl->submittedUI.push_back({window, {data.batches.begin(), data.batches.end()},
+                                 {data.positions.begin(), data.positions.end()}, {data.surfaces.begin(), data.surfaces.end()}});
+}
+bool RenderContext::HasSubmittedUI(WindowID window) const noexcept {
+    return std::ranges::any_of(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
+}
+void RenderContext::ClearSubmittedUI() noexcept { _impl->submittedUI.clear(); }
+auto RenderContext::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
+    for (const auto& data: _impl->submittedUI) {
+        if (data.window != window) continue;
+        const auto drawn = RenderUI(UIView {.viewport = {}, .target = target, .frameIndex = GetFrameIndex()},
+                                    UIDrawData {.batches = data.batches, .positions = data.positions, .surfaces = data.surfaces});
+        if (!drawn) return std::unexpected(drawn.error());
+    }
+    return std::optional<FrameSkipped> {};
+}
+auto FrameScope::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
+    if (_rc == nullptr) return std::optional<FrameSkipped> {};
+    return _rc->RenderSubmittedUI(window, target);
 }
 
 auto RenderContext::RenderUI(const UIView& view, UIDrawData uiData) noexcept -> FrameOutcome<FrameSkipped> {

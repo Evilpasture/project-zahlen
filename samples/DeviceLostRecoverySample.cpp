@@ -3,57 +3,31 @@
 
 // samples/DeviceLostRecoverySample.cpp
 //
-// Interactive host for VK_KHR_device_fault dumps and Engine::HandleDeviceLost
-// recovery. The scene is a handful of PrefabFactory primitives.
-// ProvokeDeviceLost is armed by:
-//   - F9 in a windowed session
-//   - Signal::Quit (Ctrl+\) or Signal::User1 (`kill -USR1 <pid>`) on POSIX
-//   - ZHLN_PROVOKE_DEVICE_LOST_FRAME=<n>
-// Tick's Present step then:
-//   1. dumps fault reports (KHR reports API, EXT fallback)
-//   2. tears down and recreates RenderContext
-//   3. RebuildVulkanResources (core GPU caches + font atlas)
-//   4. runs DeviceLostCallbacks so this sample can re-upload the arena
-//
-// Discrete GPUs hang via hang_gpu.slang (MMU store at 0x100) until the OS
-// TDR loses the device; VK_KHR_device_fault dumps the report.
-// CPU Vulkan (llvmpipe) has no TDR: the hang shader would SIGSEGV a host
-// worker, so the sample calls HandleDeviceLost() directly instead.
-// Ctrl+C / SIGINT still quits (engine crash handler).
-//
-//   ./build/samples/DeviceLostRecoverySample
-//   ./build/samples/DeviceLostRecoverySample --headless
-//   ZHLN_PROVOKE_DEVICE_LOST_FRAME=60 ./build/samples/DeviceLostRecoverySample --headless
+// Exercises synchronous graphics device recreation and device-lost callback recovery over COM.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/ConfigCli.hpp>
+#include <FreeCam/FreeCam.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Signal/SignalManager.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Core/Reflection/Annotations.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <FreeCam/FreeCam.hpp>
 
-#if defined(ZHLN_HAS_FONTS)
-#include <Fonts/Fonts.hpp>
-#endif
-
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Vec3.h>
-#include <Jolt/Math/Vec4.h>
-
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
@@ -61,6 +35,9 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 std::atomic<bool> g_ProvokeRequested {false};
 
@@ -76,13 +53,13 @@ void InstallProvokeSignal() {
     ZHLN::SignalManager::RegisterSafeHandler<HandleProvoke {}>(ZHLN::Signal::Quit);
 }
 
-inline constexpr float     kAmbientExposure = 10.0f;
-inline constexpr float     kSunIntensity    = 28.0f;
-inline const JPH::Vec3     kSunPosition {25.0f, 60.0f, 25.0f};
-inline const JPH::Vec3     kSunColor {1.00f, 0.96f, 0.90f};
-inline const JPH::Vec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
-inline const JPH::Vec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
-inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
+inline constexpr float kAmbientExposure = 10.0f;
+inline constexpr float kSunIntensity    = 28.0f;
+inline const FVec3     kSunPosition {25.0f, 60.0f, 25.0f};
+inline const FVec3     kSunColor {1.00f, 0.96f, 0.90f};
+inline const FVec4     kSkyZenith {0.25f, 0.55f, 0.95f, 1.0f};
+inline const FVec4     kSkyHorizon {0.70f, 0.85f, 1.00f, 1.0f};
+inline const FVec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
 
 [[nodiscard]] auto EnvironmentU32(const char* name) -> uint32_t {
     const char* value = std::getenv(name);
@@ -94,92 +71,77 @@ inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
     return end != value ? parsed : 0;
 }
 
-void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
-    for (ZHLN::Entity entity: entities) {
-        if (ZHLN::EngineAccess::RegistryOf(engine).IsAlive(entity)) {
-            ZHLN::DespawnEntity(engine, entity);
+void ClearArena(ZHLN::COM::IEngine& engine, std::span<const ZHLN::Entity> entities) {
+    auto& ents = *engine.Entities();
+    for (ZHLN::Entity entity : entities) {
+        if (ents.IsAlive(entity)) {
+            ents.Despawn(entity);
         }
     }
 }
 
-[[nodiscard]] auto BuildArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> previous = {}) -> std::vector<ZHLN::Entity> {
+[[nodiscard]] auto BuildArena(ZHLN::COM::IEngine& engine, std::span<const ZHLN::Entity> previous = {}) -> std::vector<ZHLN::Entity> {
     ClearArena(engine, previous);
     std::vector<ZHLN::Entity> entities;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& ents   = *engine.Entities();
+    auto& assets = *engine.Assets();
 
-    for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) -> auto {
-            pp.ambientExposure = kAmbientExposure;
-            pp.skyZenith       = kSkyZenith;
-            pp.skyHorizon      = kSkyHorizon;
-            pp.skyGround       = kSkyGround;
-        });
-    }
+    ZHLN::GraphicsSettings gfx      = engine.Graphics()->Settings();
+    gfx.environment.ambientExposure = kAmbientExposure;
+    gfx.environment.skyZenith       = kSkyZenith;
+    gfx.environment.skyHorizon      = kSkyHorizon;
+    gfx.environment.skyGround       = kSkyGround;
+    engine.Graphics()->ApplySettings(gfx);
 
-    entities.push_back(
-        ZHLN::PrefabFactory::CreatePlane(
-            engine, 24.0f, {0.32f, 0.34f, 0.38f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
-        )
-    );
+    auto pushSpawned = [&](ZHLN::Entity entity) {
+        if (entity != ZHLN::Entity::Null()) entities.push_back(entity);
+    };
 
-    entities.push_back(
-        ZHLN::PrefabFactory::CreateBox(
-            engine, {1.5f, 1.5f, 1.5f},
-            ZHLN::PrefabFactory::SpawnParams {
-                .position = {-3.0, 1.5, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.35f, .color = {0.85f, 0.35f, 0.20f, 1.0f}
-            }
-        )
-    );
-    entities.push_back(
-        ZHLN::PrefabFactory::CreateSphere(
-            engine, 1.25f,
-            ZHLN::PrefabFactory::SpawnParams {
-                .position        = {3.0, 1.25, 0.0},
-                .createPhysics   = true,
-                .isStaticPhysics = true,
-                .roughness       = 0.20f,
-                .metallic        = 0.80f,
-                .color           = {0.20f, 0.55f, 0.85f, 1.0f}
-            }
-        )
-    );
-    entities.push_back(
-        ZHLN::PrefabFactory::CreateCylinder(
-            engine, 0.70f, 3.0f,
-            ZHLN::PrefabFactory::SpawnParams {
-                .position = {0.0, 1.5, -4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.45f, .color = {0.30f, 0.70f, 0.40f, 1.0f}
-            }
-        )
-    );
-    entities.push_back(ZHLN::PrefabFactory::CreateCone(
-        engine, 1.10f, 2.4f,
-        ZHLN::PrefabFactory::SpawnParams {
-            .position = {0.0, 1.2, 4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.40f, .color = {0.90f, 0.75f, 0.20f, 1.0f}
-        }
-    ));
+    pushSpawned(assets.SpawnPlane(24.0f, {0.32f, 0.34f, 0.38f, 1.0f}, {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}));
+    pushSpawned(assets.SpawnBox({1.5f, 1.5f, 1.5f}, {.position = {-3.0, 1.5, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.35f, .color = {0.85f, 0.35f, 0.20f, 1.0f}}));
+    pushSpawned(assets.SpawnSphere(1.25f, {.position = {3.0, 1.25, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.20f, .metallic = 0.80f, .color = {0.20f, 0.55f, 0.85f, 1.0f}}));
+    pushSpawned(assets.SpawnCylinder(0.70f, 3.0f, {.position = {0.0, 1.5, -4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.45f, .color = {0.30f, 0.70f, 0.40f, 1.0f}}));
+    pushSpawned(assets.SpawnCone(1.10f, 2.4f, {.position = {0.0, 1.2, 4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.40f, .color = {0.90f, 0.75f, 0.20f, 1.0f}}));
 
-    entities.push_back(registry.Create(
-        ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
+    entities.push_back(ents.Spawn(
+        ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")},
+        ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
-            .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = JPH::Vec3(0.45f, 1.00f, 0.30f).Normalized()
+            .type      = ZHLN::LightType::Sun,
+            .color     = kSunColor,
+            .intensity = kSunIntensity,
+            .direction = FVec3(0.45f, 1.00f, 0.30f).Normalized(),
         }
     ));
     return entities;
 }
 
+struct RecoveryContext {
+    ZHLN::COM::IEngine*       engine     = nullptr;
+    std::vector<ZHLN::Entity> arena      = {};
+    uint32_t                  recoveries = 0;
+    bool                      rebuildDue = false;
+};
+
+void OnDeviceLost(void* userdata) noexcept {
+    auto* ctx = static_cast<RecoveryContext*>(userdata);
+    if (ctx == nullptr) return;
+    ++ctx->recoveries;
+    ctx->rebuildDue = true;
+}
+
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+    ZHLN::Platform::Init();
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
         .appName = "Zahlen :: Device Lost Recovery",
-        .enableFallbackScene = false,
     };
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
+        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
@@ -187,54 +149,37 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     ZHLN::SetLogLevel(engineConfig.logLevel);
-
-    // Crash diagnostics keep their state in a caller-owned struct; static
-    // storage duration is required because its address is copied into the
-    // signal handler slots. See <Signal/CrashHandler.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
     ZHLN::TaskSystem::Scope taskScope;
-    auto engineRes = ZHLN::Engine::Create(engineConfig);
+
+    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
+    auto engine = std::move(*engineRes);
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->FocusWindow(engine->PrimaryWindow());
     }
-#if defined(ZHLN_HAS_FONTS)
-    // The composition root's default bake (see app/main.cpp): the vendored
-    // JetBrains Mono NF, installed before the scene boots so the atlas the
-    // engine builds at InitializeDefaultScene comes from it. Without the fonts
-    // extra -- or without the checkout's resources -- core's embedded bake is
-    // what the font-atlas rebuild below exercises.
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
+    ZHLN::FreeCam::Attach(*engine->Entities());
+
+    RecoveryContext ctx {.engine = engine.Get(), .arena = BuildArena(*engine)};
+    uint64_t callbackToken = 0;
+    if (const auto reg = engine->AddDeviceLostCallback(&OnDeviceLost, &ctx); reg.HasValue()) {
+        callbackToken = reg.value;
     }
-#endif
-    ZHLN::FreeCam::Install(*engine);
-    engine->InitializeDefaultScene();
-
-    std::vector<ZHLN::Entity> arena = BuildArena(*engine);
-
-    uint32_t recoveries = 0;
-    engine->AddDeviceLostCallback([&](ZHLN::Engine& recovered) -> void {
-        ++recoveries;
-        ZHLN::Log("[Sample] Device-lost callback #{} (subscribers={}). Re-uploading arena.", recoveries, recovered.DeviceLostCallbackCount());
-        arena = BuildArena(recovered, arena);
-    });
 
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
+    const auto     info             = engine->Graphics()->Info();
     ZHLN::Log(
-        "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {}.", ZHLN::GetPID(),
-        engineConfig.headless ? "headless" : "windowed", engine->Graphics().Info().gpuName,
-        engine->Graphics().Info().deviceType == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
+        "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {} triggers RecreateGraphicsDevice.",
+        ZHLN::GetPID(), engineConfig.headless ? "headless" : "windowed", std::string_view(info.gpuName), ZHLN::GetPID()
     );
     if (autoProvokeFrame != 0) {
-        ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
+        ZHLN::Log("[DeviceLostRecoverySample] Will RecreateGraphicsDevice on frame {}.", autoProvokeFrame);
     }
 
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
@@ -243,50 +188,43 @@ auto main(int argc, char* argv[]) -> int {
 
     while (engine->IsRunning()) {
         const float dt = clock.Tick();
-        ZHLN::CheckForCrashes(crashState, engine.get());
+        ZHLN::CheckForCrashes(crashState, engine.Get());
         engine->ProcessEvents();
 
-        auto& registry = ZHLN::EngineAccess::RegistryOf(*engine);
-        bool  f9Down   = false;
-        for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::InputStateComponent>()) {
-            registry.Patch<ZHLN::Components::InputStateComponent>(e, [&](auto& st) -> auto {
-                f9Down = f9Down || st.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F9));
-                if (st.needsResize) {
-                    engine->Graphics().SetResolution(st.newSize);
-                    st.needsResize = false;
-                }
-            });
+        if (engine->Actions()->KeyPressed(ZHLN::KeyCode::Escape, ZHLN::kPrimarySeat)) {
+            engine->RequestClose();
+            break;
         }
 
+        const bool f9Down    = engine->Actions()->KeyDown(ZHLN::KeyCode::F9, ZHLN::kPrimarySeat);
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
-        const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
+        const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->CurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
-            auto rc = engine->Graphics();
-            const auto info = rc.Info();
-            if (info.deviceType == ZHLN::PhysicalDeviceType::CPU) {
-                // llvmpipe has no TDR: the hang shader is a host SIGSEGV on a
-                // worker, and the crash handler then deadlocks waiting for Main.
-                ZHLN::Log(
-                    "[Sample] CPU Vulkan device '{}' — simulating device-lost recovery (frame {}).", info.gpuName, engine->GetCurrentFrame()
-                );
-                if (auto lost = engine->HandleDeviceLost(); !lost) {
-                    ZHLN::Log("[Sample] Recovery failed: {}", lost.error());
-                    engine->GetPlatformHost().Close();
-                    break;
-                }
-            } else {
-                ZHLN::Log("[Sample] Provoking GPU abort via OpAbortKHR (frame {}).", engine->GetCurrentFrame());
-                engine->ProvokeDeviceLost();
+            ZHLN::Log("[Sample] Recreating graphics device on frame {} (gen={}).", engine->CurrentFrame(), engine->DeviceGeneration());
+            if (auto lost = engine->RecreateGraphicsDevice(); !lost.HasValue()) {
+                ZHLN::LogError("[Sample] Recovery failed: {}", ZHLN::Error(lost.error).Message());
+                engine->RequestClose();
+                break;
             }
             autoProvoked = autoProvoked || autoNow;
         }
         f9WasDown = f9Down;
 
+        if (ctx.rebuildDue) {
+            ctx.rebuildDue = false;
+            ZHLN::Log("[Sample] Device-lost callback #{} (gen={}). Re-uploading arena.", ctx.recoveries, engine->DeviceGeneration());
+            ctx.arena = BuildArena(*engine, ctx.arena);
+        }
+
+        ZHLN::FreeCam::Step(*engine, dt);
         const auto result = engine->Tick(dt);
-        if (!result) {
-            ZHLN::LogError("[DeviceLostRecovery] frame failed: {}", result.error());
+        if (!result.HasValue()) {
+            ZHLN::LogError("[DeviceLostRecovery] frame failed: {}", ZHLN::Error(result.error).Message());
+            engine->RemoveDeviceLostCallback(callbackToken);
             return EXIT_FAILURE;
         }
     }
+
+    engine->RemoveDeviceLostCallback(callbackToken);
     return EXIT_SUCCESS;
 }

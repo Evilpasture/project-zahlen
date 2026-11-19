@@ -6,7 +6,7 @@
 // Internal BMFont parser -- NOT part of the public zahlen_fonts API.
 //
 // The public header <Fonts/Fonts.hpp> exposes only BakedFontSource and
-// InstallBakedFontLoader. Everything that understands BMFont lives here:
+// explicit decode/upload helpers. Everything that understands BMFont lives here:
 // the char record, the parsed descriptor, the error enum and the two
 // functions that turn (descriptor JSON, RGBA page) into core's BakedFontAsset.
 //
@@ -20,7 +20,7 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/GUI/FontLoader.hpp>
+#include <UI/FontLoader.hpp>
 #include <json/JSONSchema.hpp>
 
 #include <cstdint>
@@ -34,7 +34,7 @@ namespace ZHLN::Fonts {
 
 /// Failures of the BMFont descriptor scan. A `.fnt` that does not describe a
 /// bake is data, not a crash.
-enum class FontBMError : uint8_t {
+enum class BMError : uint8_t {
     Malformed  ZHLN_ANNOTATION(ZHLN::Description<"BMFont descriptor is malformed JSON"> {}) = 1,
     MissingMetrics ZHLN_ANNOTATION(ZHLN::Description<"BMFont descriptor lacks info/common/page/char data"> {}) = 2,
     UnsupportedFormat ZHLN_ANNOTATION(ZHLN::Description<"binary BMFont descriptors are not supported (bake JSON)"> {}) = 3,
@@ -43,7 +43,7 @@ enum class FontBMError : uint8_t {
 
 /// One `char` record: where the glyph's coverage sits in the page and how the
 /// pen moves past it.
-struct FontBMChar {
+struct BMChar {
     uint32_t id       = 0;
     float    x        = 0.0f;
     float    y        = 0.0f;
@@ -55,14 +55,14 @@ struct FontBMChar {
 };
 
 /// Parsed BMFont JSON descriptor (the `.fnt` fontbm writes as JSON).
-struct FontBMDescriptor {
+struct BMDescriptor {
     float    fontSize    = 32.0f; // `info size`
     float    baseline    = 0.0f;  // `common base` (top of line box to baseline)
     float    lineHeight  = 0.0f;  // `common lineHeight`
     uint32_t atlasWidth  = 0;     // `common scaleW`
     uint32_t atlasHeight = 0;     // `common scaleH`
     std::string          pageFile; // pages[0], relative to the descriptor
-    std::vector<FontBMChar> chars;
+    std::vector<BMChar> chars;
 };
 
 // --- Reflection types for JSON (the schema is the struct) -------------------
@@ -110,7 +110,7 @@ struct Document {
 } // namespace Json
 
 // Page can be either a string ("sheet.png") or an object {"file":"sheet.png"}.
-// Provide a custom GetJSONValue that handles both, so reflection can parse
+// Provide a custom GetValue that handles both, so reflection can parse
 // pages as vector<Page> regardless of which form fontbm emitted.
 
 } // namespace ZHLN::Fonts
@@ -118,7 +118,7 @@ struct Document {
 namespace ZHLN::ReflectJSON {
 
 template <>
-inline auto GetJSONValue<ZHLN::Fonts::Json::Page>(ValueReader reader, Options options)
+inline auto GetValue<ZHLN::Fonts::Json::Page>(ValueReader reader, Options options)
     -> std::expected<ZHLN::Fonts::Json::Page, ErrorCode> {
     // Try string first: pages: ["sheet.png"]
     if (auto s = reader.GetString(); s.has_value()) {
@@ -139,10 +139,10 @@ namespace ZHLN::Fonts {
 
 /// Scans a BMFont JSON descriptor (fontbm --data-format json). Binary and
 /// legacy text descriptors are rejected.
-[[nodiscard]] auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode>;
+[[nodiscard]] auto ParseBMDescriptor(std::string_view text) -> std::expected<BMDescriptor, ErrorCode>;
 
 /// Composes the core bake from a parsed descriptor and its coverage page.
-[[nodiscard]] auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rgba8)
+[[nodiscard]] auto AssembleBakedFont(const BMDescriptor& desc, std::span<const uint8_t> rgba8)
     -> std::expected<GUI::BakedFontAsset, ErrorCode>;
 
 } // namespace ZHLN::Fonts

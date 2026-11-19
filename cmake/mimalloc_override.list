@@ -1,0 +1,50 @@
+/*
+ * Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Complete ELF dynamic-symbol list for mimalloc-static's MI_OVERRIDE=ON C,
+ * POSIX, glibc, and C++ global allocator interposition entry points
+ * (extern/mimalloc/src/alloc-override.c and alloc-override-new.h).
+ *
+ * Passed via --export-dynamic-symbol-list on first-party in-tree non-Apple,
+ * non-sanitizer host executables (never on libzahlen_engine.so) so the host,
+ * libzahlen_engine.so, and dlopen()-loaded drivers (Vulkan ICDs, Mesa, Wayland,
+ * audio backends) resolve the entire allocator family to one mimalloc heap
+ * without leaking internal mi_* symbols.
+ */
+{
+  malloc;
+  calloc;
+  realloc;
+  free;
+  cfree;
+  aligned_alloc;
+  posix_memalign;
+  _aligned_malloc;
+  memalign;
+  valloc;
+  pvalloc;
+  vfree;
+  reallocarray;
+  reallocf;
+  reallocarr;
+  malloc_size;
+  malloc_good_size;
+  malloc_usable_size;
+  strdup;
+  strndup;
+  __libc_malloc;
+  __libc_calloc;
+  __libc_realloc;
+  __libc_free;
+  __libc_cfree;
+  __libc_memalign;
+  __libc_valloc;
+  __libc_pvalloc;
+  __posix_memalign;
+  _Znw*;
+  _Zna*;
+  _Zdl*;
+  _Zda*;
+  _ZSt15get_new_handlerv;
+};

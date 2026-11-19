@@ -57,14 +57,20 @@ ipch/
 *.gcm
 *.pcm
 
+# --- Kconfig TUI (.config lives in the build dir, but a stray one in the tree
+# --- is still not source) ---
+.config
+.config.old
+*.config.stamp
+
 # --- Dependencies & Environment ---
 .venv/
 env/
 node_modules/
 
-# Local project-light client credentials (the tracked *.env.example is safe).
 /.env
 /project-light.env
+experimental/
 
 # Fidelity test harness data (scripts/run_fidelity.sh clones the Khronos
 # repositories under build/fidelity/ by default — already covered by the build/

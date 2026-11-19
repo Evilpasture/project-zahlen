@@ -15,12 +15,13 @@
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Error.hpp>
-
 #include <cstddef>
 #include <expected>
 #include <functional>
+#include <memory>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -48,13 +49,24 @@ struct ScriptArray {
     std::vector<ScriptVal> elements;
 };
 
+struct BoxedPathStep {
+    std::string         property;
+    size_t              index = SIZE_MAX;
+    std::vector<size_t> nestedIndices;
+};
+
 struct BoxedObject {
     std::string_view typeName;
     Entity           ownerEntity  = Entity::Null();
-    std::string_view compName;
-    std::string_view propName;
+    std::string      compName;
+    std::string      propName;
     size_t           elementIndex = SIZE_MAX;
     void*            rawPtr       = nullptr;
+    // Host-only provenance. Entity boxes hold no cached component pointer;
+    // each use re-resolves this complete property/index path through COM.
+    std::vector<BoxedPathStep> path;
+    const void*                componentOwner = nullptr;
+    std::shared_ptr<void>      retainedOwner;
 };
 
 using ScriptValVariant = std::variant<std::monostate, double, bool, std::string, BoxedObject, ScriptArray>;
@@ -70,6 +82,24 @@ struct ScriptVal: ScriptValVariant {
 template <typename T, typename = void>
 struct ScriptValueTrait {
     static constexpr bool specialized = false;
+};
+
+// FixedString is POD at the boundary but a string in host reflection. Refuse
+// truncation on assignment instead of silently modifying the requested value.
+template <size_t N>
+struct ScriptValueTrait<FixedString<N>> {
+    static constexpr bool specialized = true;
+    static auto           To(const FixedString<N>& value) -> ScriptVal {
+        return std::string(std::string_view(value));
+    }
+    static auto From(const ScriptVal& value) -> std::expected<FixedString<N>, ErrorCode> {
+        const auto* text = std::get_if<std::string>(&value);
+        if (!text)
+            return std::unexpected(ScriptError::TypeMismatch);
+        if (text->size() >= N)
+            return std::unexpected(ScriptError::ArityMismatch);
+        return FixedString<N>(std::string_view(*text));
+    }
 };
 
 // ----------------------------------------------------------------------------
@@ -140,12 +170,22 @@ auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
     } else if constexpr (std::ranges::input_range<Decayed> && !std::is_same_v<Decayed, std::string>) {
         if (const auto* arr = std::get_if<ScriptArray>(&sval)) {
             Decayed container;
-            using ElementType = typename Decayed::value_type;
+            using ElementType = std::ranges::range_value_t<Decayed>;
 
             if constexpr (requires { container.reserve(arr->elements.size()); }) {
                 container.reserve(arr->elements.size());
             }
 
+            if constexpr (!requires(ElementType value) { container.push_back(value); } &&
+                          !requires(ElementType value) { container.insert(container.end(), value); }) {
+                if constexpr (std::ranges::sized_range<Decayed>) {
+                    if (std::ranges::size(container) != arr->elements.size())
+                        return std::unexpected(ScriptError::TypeMismatch);
+                } else {
+                    return std::unexpected(ScriptError::UnsupportedConversion);
+                }
+            }
+            auto output = std::ranges::begin(container);
             for (const auto& elemVal: arr->elements) {
                 auto converted = FromScriptVal<ElementType>(elemVal);
                 if (!converted) {
@@ -155,6 +195,11 @@ auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
                     container.push_back(std::move(converted.value()));
                 } else if constexpr (requires { container.insert(container.end(), std::move(converted.value())); }) {
                     container.insert(container.end(), std::move(converted.value()));
+                } else if constexpr (requires { *output = std::move(converted.value()); ++output; }) {
+                    *output = std::move(converted.value());
+                    ++output;
+                } else {
+                    return std::unexpected(ScriptError::UnsupportedConversion);
                 }
             }
             return container;
@@ -256,8 +301,8 @@ class ScriptBinder {
             };
 
             using DecayedField = std::decay_t<FieldT>;
-            if constexpr (std::ranges::random_access_range<DecayedField> && !std::is_same_v<DecayedField, std::string>) {
-                using ElementType = typename DecayedField::value_type;
+            if constexpr (std::ranges::random_access_range<DecayedField> && std::ranges::sized_range<DecayedField> && !std::is_same_v<DecayedField, std::string>) {
+                using ElementType = std::ranges::range_value_t<DecayedField>;
 
                 prop.get_element_at = [const_getter](const void* inst, size_t index) -> std::expected<ScriptVal, ErrorCode> {
                     const auto* typedInst = static_cast<const CurrentT*>(static_cast<const ClassT*>(inst));
@@ -267,10 +312,10 @@ class ScriptBinder {
                     }
 
                     if constexpr (std::is_same_v<ElementType, bool>) {
-                        bool boolVal = container[index];
+                        bool boolVal = *(std::ranges::begin(container) + index);
                         return ToScriptVal(boolVal);
                     } else {
-                        return ToScriptVal(container[index]);
+                        return ToScriptVal(*(std::ranges::begin(container) + index));
                     }
                 };
 
@@ -284,7 +329,7 @@ class ScriptBinder {
                     if (!converted) {
                         return std::unexpected(converted.error());
                     }
-                    container[index] = std::move(converted.value());
+                    *(std::ranges::begin(container) + index) = std::move(converted.value());
                     return {};
                 };
             }

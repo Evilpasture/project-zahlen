@@ -129,6 +129,10 @@ def include_is_internal(include: str, source: Path) -> bool:
         return False
     if include == "TestsFramework.hpp" or include.endswith("/TestsFramework.hpp"):
         return False
+    # A public-looking namespace does not make a build-tree internal header
+    # public. Check this before accepting the broad Zahlen/ prefix.
+    if include.startswith("Zahlen/Engine/Internal/"):
+        return True
     if include.startswith(PUBLIC_PREFIXES):
         return False
     if looks_internal_prefix(include):

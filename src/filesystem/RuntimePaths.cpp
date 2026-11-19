@@ -59,7 +59,23 @@ constexpr std::string_view kAppDirName = (isMac || isWindows) ? "Zahlen" : "zahl
     return true;
 }
 
-[[nodiscard]] auto ExecutableDir() -> std::filesystem::path {
+[[nodiscard]] auto ResourceDir() -> std::filesystem::path {
+    const auto exe = ExecutableDir();
+    if constexpr (isMac) {
+        if (!exe.empty() && (exe.filename() == "MacOS") && (exe.parent_path().filename() == "Contents")) {
+            std::error_code ec;
+            const auto      resources = exe.parent_path() / "Resources";
+            if (std::filesystem::is_directory(resources, ec) && !ec) {
+                return resources;
+            }
+        }
+    }
+    return exe;
+}
+
+}
+
+auto ExecutableDir() -> std::filesystem::path {
 #if defined(__APPLE__)
     uint32_t probe = 0;
     _NSGetExecutablePath(nullptr, &probe);
@@ -89,33 +105,23 @@ constexpr std::string_view kAppDirName = (isMac || isWindows) ? "Zahlen" : "zahl
     return std::filesystem::path(buffer).parent_path();
 #elif defined(__linux__)
     std::string buffer(4096, '\0');
-    const auto  written = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
-    if (written <= 0) {
-        return {};
+    for (;;) {
+        const auto written = ::readlink("/proc/self/exe", buffer.data(), buffer.size());
+        if (written <= 0) {
+            return {};
+        }
+        if (static_cast<size_t>(written) < buffer.size()) {
+            buffer.resize(static_cast<size_t>(written));
+            break;
+        }
+        buffer.resize(buffer.size() * 2);
     }
-    buffer.resize(static_cast<size_t>(written));
     std::error_code ec;
     const auto      canonical = std::filesystem::weakly_canonical(std::filesystem::path(buffer), ec);
     return (ec ? std::filesystem::path(buffer) : canonical).parent_path();
 #else
     return {};
 #endif
-}
-
-[[nodiscard]] auto ResourceDir() -> std::filesystem::path {
-    const auto exe = ExecutableDir();
-    if constexpr (isMac) {
-        if (!exe.empty() && (exe.filename() == "MacOS") && (exe.parent_path().filename() == "Contents")) {
-            std::error_code ec;
-            const auto      resources = exe.parent_path() / "Resources";
-            if (std::filesystem::is_directory(resources, ec) && !ec) {
-                return resources;
-            }
-        }
-    }
-    return exe;
-}
-
 }
 
 auto IsDevTree() -> bool {

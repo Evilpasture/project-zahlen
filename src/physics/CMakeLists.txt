@@ -30,16 +30,18 @@ set_target_properties(zahlen_physics PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
+# zahlen_threading is an OBJECT library linked directly into zahlen_engine;
+# naming it here would embed duplicate copies of its objects in libzahlen_physics.a.
 target_link_libraries(zahlen_physics
     PRIVATE
         Jolt
-        zahlen_threading
 )
 
 target_include_directories(zahlen_physics
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -51,9 +53,6 @@ target_compile_definitions(zahlen_physics PRIVATE
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
 
-target_compile_definitions(zahlen_physics PUBLIC
-    JPH_DEBUG_RENDERER
-)
 
 target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 

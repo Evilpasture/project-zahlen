@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // ============================================================================
-// NetworkClient — TCP handshake + framed stream, UDP realtime channel.
+// Client — TCP handshake + framed stream, UDP realtime channel.
 //
 //   Connect:    non-blocking TCP connect (socket-backed timeout), ClientHello
 //               frame, waits for the ServerWelcome that announces the UDP
@@ -20,7 +20,9 @@ module;
 
 #include <Socket/Socket.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
@@ -122,7 +124,7 @@ auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire
     uint8_t chunk[4096];
     while (stream.Size() < 4) {
         if (!WaitForSocket(socket, false, timeoutMs)) {
-            return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "timed out waiting for the frame header"));
+            return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame, "timed out waiting for the frame header"));
         }
         const RecvResult received = RecvSome(socket, std::span<uint8_t>(chunk));
         switch (received.status) {
@@ -136,9 +138,9 @@ auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire
             case RecvStatus::Blocked:
                 break;
             case RecvStatus::Closed:
-                return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "connection closed mid-frame"));
+                return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame, "connection closed mid-frame"));
             case RecvStatus::Failed:
-                return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame,
+                return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame,
                                                          std::format("socket error {} while reading the frame header", received.nativeCode)));
         }
     }
@@ -150,7 +152,7 @@ auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire
 
     while (stream.Size() < 4 + static_cast<size_t>(*length)) {
         if (!WaitForSocket(socket, false, timeoutMs)) {
-            return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "timed out waiting for the frame body"));
+            return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame, "timed out waiting for the frame body"));
         }
         const RecvResult received = RecvSome(socket, std::span<uint8_t>(chunk));
         switch (received.status) {
@@ -164,9 +166,9 @@ auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire
             case RecvStatus::Blocked:
                 break;
             case RecvStatus::Closed:
-                return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame, "connection closed mid-frame"));
+                return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame, "connection closed mid-frame"));
             case RecvStatus::Failed:
-                return std::unexpected(Wire::MakeFailure(Wire::WireError::InvalidFrame,
+                return std::unexpected(Wire::MakeFailure(Wire::Error::InvalidFrame,
                                                          std::format("socket error {} while reading the frame body", received.nativeCode)));
         }
     }
@@ -182,7 +184,7 @@ auto RecvExactFrame(Socket& socket, Wire::Buffer& stream, int timeoutMs) -> Wire
 // Impl
 // ============================================================================
 
-struct NetworkClient::Impl {
+struct Client::Impl {
     Socket tcpSocket;
     Socket udpSocket;
     bool         isConnected     = false;
@@ -220,7 +222,7 @@ struct NetworkClient::Impl {
     // One message in, one batch out: the type it applied, or the miss that
     // stopped it. The caller merges these into the poll's ledger, so a message
     // that fails no longer decides for every message behind it.
-    auto ApplyMessage(Engine& engine, const MessageEnvelope& envelope, Channel channel) -> MessageBatch {
+    auto ApplyMessage(COM::IEntities& entities, const MessageEnvelope& envelope, Channel channel) -> MessageBatch {
         MessageBatch applied;
         const auto   record = [&applied, &envelope, channel](const std::expected<void, ErrorCode>& outcome) {
             if (outcome) {
@@ -231,10 +233,10 @@ struct NetworkClient::Impl {
         };
         switch (envelope.type) {
             case MessageType::InitialSnapshot:
-                record(replicator->ApplyInitialObjects(engine, envelope.payload));
+                record(replicator->ApplyInitialObjects(entities, envelope.payload));
                 break;
             case MessageType::PhysicsBatch:
-                record(replicator->ApplyPhysicsBatch(engine, envelope.payload));
+                record(replicator->ApplyPhysicsBatch(entities, envelope.payload));
                 break;
             case MessageType::ClientHello:
             case MessageType::ServerWelcome:
@@ -250,7 +252,7 @@ struct NetworkClient::Impl {
     // failure -- the socket is closed, nothing after it can be trusted -- so the
     // error comes back as the return value. What each individual message did is
     // the ledger's business.
-    auto PumpTcp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
+    auto PumpTcp(COM::IEntities& entities, MessageBatch& ledger) -> ErrorCode {
         uint8_t chunk[RECV_CHUNK_BYTES];
         while (true) {
             const RecvResult received = RecvSome(tcpSocket, std::span<uint8_t>(chunk));
@@ -259,7 +261,7 @@ struct NetworkClient::Impl {
                 if (!appended) {
                     Log("Net: {} — closing stream", appended.error().Format());
                     CloseSockets();
-                    return ErrorCode(NetworkError::InvalidPayload);
+                    return ErrorCode(Error::InvalidPayload);
                 }
                 if (received.bytes < sizeof chunk) {
                     break; // socket buffer likely drained
@@ -268,11 +270,11 @@ struct NetworkClient::Impl {
             }
             if (received.status == RecvStatus::Closed) {
                 CloseSockets();
-                return ErrorCode(NetworkError::ServerDisconnected);
+                return ErrorCode(Error::ServerDisconnected);
             }
             if (received.status == RecvStatus::Failed) {
                 CloseSockets();
-                return ErrorCode(NetworkError::SocketError);
+                return ErrorCode(Error::SocketError);
             }
             break; // blocked
         }
@@ -283,7 +285,7 @@ struct NetworkClient::Impl {
             if (!length) {
                 Log("Net: {} — closing stream", length.error().Format());
                 CloseSockets();
-                return ErrorCode(NetworkError::InvalidPayload);
+                return ErrorCode(Error::InvalidPayload);
             }
             if (tcpStream.Size() < 4 + static_cast<size_t>(*length)) {
                 break; // incomplete frame, wait for more bytes
@@ -293,21 +295,21 @@ struct NetworkClient::Impl {
             if (!payload) {
                 Log("Net: {} — closing stream", payload.error().Format());
                 CloseSockets();
-                return ErrorCode(NetworkError::InvalidPayload);
+                return ErrorCode(Error::InvalidPayload);
             }
             auto envelope = DecodeEnvelope(*payload);
             if (!envelope) {
                 ledger.EmplaceError(
-                    MessageMiss {.channel = Channel::Tcp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = envelope.error().Format()}
+                    MessageMiss {.channel = Channel::Tcp, .error = ErrorCode(Error::InvalidPayload), .detail = envelope.error().Format()}
                 );
                 continue;
             }
-            ledger.Merge(ApplyMessage(engine, *envelope, Channel::Tcp));
+            ledger.Merge(ApplyMessage(entities, *envelope, Channel::Tcp));
         }
         return {};
     }
 
-    auto PumpUdp(Engine& engine, MessageBatch& ledger) -> ErrorCode {
+    auto PumpUdp(COM::IEntities& entities, MessageBatch& ledger) -> ErrorCode {
         if (!udpSocket.IsOpen()) {
             return {};
         }
@@ -316,7 +318,7 @@ struct NetworkClient::Impl {
             const RecvResult received = RecvSome(udpSocket, std::span<uint8_t>(datagram));
             if (received.status != RecvStatus::Data) {
                 if (received.status == RecvStatus::Failed) {
-                    return ErrorCode(NetworkError::SocketError);
+                    return ErrorCode(Error::SocketError);
                 }
                 break; // blocked or "closed": nothing more to read
             }
@@ -324,14 +326,14 @@ struct NetworkClient::Impl {
             auto payload = DecodeDatagram({datagram, received.bytes});
             if (!payload) {
                 ledger.EmplaceError(
-                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = payload.error().Format()}
+                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(Error::InvalidPayload), .detail = payload.error().Format()}
                 );
                 continue; // datagrams are self-contained; keep draining
             }
             auto envelope = DecodeEnvelope(*payload);
             if (!envelope) {
                 ledger.EmplaceError(
-                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(NetworkError::InvalidPayload), .detail = envelope.error().Format()}
+                    MessageMiss {.channel = Channel::Udp, .error = ErrorCode(Error::InvalidPayload), .detail = envelope.error().Format()}
                 );
                 continue;
             }
@@ -340,7 +342,7 @@ struct NetworkClient::Impl {
             // quietly promoted to a message the stream is meant to carry.
             if (envelope->type == MessageType::PhysicsBatch) {
                 isRealtimeReady = true;
-                ledger.Merge(ApplyMessage(engine, *envelope, Channel::Udp));
+                ledger.Merge(ApplyMessage(entities, *envelope, Channel::Udp));
             }
         }
         return {};
@@ -348,22 +350,22 @@ struct NetworkClient::Impl {
 };
 
 // ============================================================================
-// NetworkClient
+// Client
 // ============================================================================
 
-NetworkClient::NetworkClient(): _impl(std::make_unique<Impl>()) {
+Client::Client(): _impl(std::make_unique<Impl>()) {
 }
-NetworkClient::~NetworkClient()                                           = default;
-NetworkClient::NetworkClient(NetworkClient&&) noexcept                    = default;
-auto NetworkClient::operator=(NetworkClient&&) noexcept -> NetworkClient& = default;
+Client::~Client()                                           = default;
+Client::Client(Client&&) noexcept                    = default;
+auto Client::operator=(Client&&) noexcept -> Client& = default;
 
-auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
+auto Client::Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
     -> std::expected<void, ErrorCode> {
     _impl->CloseSockets();
 
     auto endpoints = ResolveSocketEndpoints(host, port, SocketAddressFamily::IPv4, SocketType::Stream);
     if (!endpoints) {
-        return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
+        return std::unexpected(ErrorCode(Error::ConnectionFailed));
     }
 
     Socket tcp;
@@ -387,7 +389,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
         break;
     }
     if (!connected) {
-        return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
+        return std::unexpected(ErrorCode(Error::ConnectionFailed));
     }
 
     _impl->tcpSocket     = std::move(tcp);
@@ -403,17 +405,17 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
         if (frame) {
             if (!SendAll(_impl->tcpSocket, *frame, HANDSHAKE_TIMEOUT_MS)) {
                 _impl->CloseSockets();
-                return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
+                return std::unexpected(ErrorCode(Error::ConnectionFailed));
             }
         } else {
             Log("Net: failed to frame ClientHello — {}", frame.error().Format());
             _impl->CloseSockets();
-            return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
+            return std::unexpected(ErrorCode(Error::HandshakeFailed));
         }
     } else {
         Log("Net: failed to encode ClientHello — {}", encodedHello.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
+        return std::unexpected(ErrorCode(Error::HandshakeFailed));
     }
 
     Wire::Buffer handshakeStream {MAX_STREAM_FRAME_BYTES};
@@ -421,26 +423,26 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     if (!welcomeFrame) {
         Log("Net: no ServerWelcome — {}", welcomeFrame.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::HandshakeTimeout));
+        return std::unexpected(ErrorCode(Error::HandshakeTimeout));
     }
     auto welcome = DecodeServerWelcome(*welcomeFrame);
     if (!welcome) {
         Log("Net: bad ServerWelcome — {}", welcome.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
+        return std::unexpected(ErrorCode(Error::HandshakeFailed));
     }
 
     // --- UDP: realtime channel -----------------------------------------------
     auto openedUdp = OpenSocket(SocketType::Datagram, _impl->serverAddress.family);
     if (!openedUdp) {
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(Error::SocketError));
     }
     Socket udp = std::move(*openedUdp);
     auto   nonblocking = udp.SetNonBlocking(true);
     if (!nonblocking) {
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(Error::SocketError));
     }
 
     SocketEndpoint udpAddress = _impl->serverAddress;
@@ -448,7 +450,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     auto udpConnection = udp.Connect(udpAddress, std::chrono::milliseconds(HANDSHAKE_TIMEOUT_MS));
     if (!udpConnection) {
         _impl->CloseSockets();
-        return std::unexpected(ErrorCode(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(Error::SocketError));
     }
 
     _impl->udpSocket       = std::move(udp);
@@ -457,11 +459,11 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     return {};
 }
 
-void NetworkClient::Disconnect() noexcept {
+void Client::Disconnect() noexcept {
     _impl->CloseSockets();
 }
 
-auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode> {
+auto Client::PollEvents(COM::IEntities& entities) noexcept -> std::expected<void, ErrorCode> {
     if (!_impl->isConnected || !_impl->tcpSocket.IsOpen()) {
         return {};
     }
@@ -471,8 +473,8 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
     // promises; what changed is that the failures behind the first are no longer
     // thrown away with it.
     MessageBatch    applied;
-    const ErrorCode tcpFailure = _impl->PumpTcp(engine, applied);
-    const ErrorCode udpFailure = _impl->PumpUdp(engine, applied);
+    const ErrorCode tcpFailure = _impl->PumpTcp(entities, applied);
+    const ErrorCode udpFailure = _impl->PumpUdp(entities, applied);
 
     applied.ForEachError([](const MessageMiss& miss) {
         const char* carrier = miss.channel == Channel::Udp ? "datagram" : "stream frame";
@@ -495,7 +497,15 @@ auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, E
     return {};
 }
 
-void NetworkClient::SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept {
+auto Client::PollEvents(COM::IEngine& engine) noexcept -> std::expected<void, ErrorCode> {
+    auto* entities = engine.Entities();
+    if (!entities) {
+        return std::unexpected(ErrorCode(Error::ReplicationFailed));
+    }
+    return PollEvents(*entities);
+}
+
+void Client::SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept {
     if (!_impl->isConnected || !_impl->udpSocket.IsOpen()) {
         return;
     }
@@ -541,11 +551,11 @@ void NetworkClient::SendInputs(bool forward, bool backward, bool left, bool righ
     }
 }
 
-bool NetworkClient::IsConnected() const noexcept {
+bool Client::IsConnected() const noexcept {
     return _impl->isConnected;
 }
 
-bool NetworkClient::IsRealtimeReady() const noexcept {
+bool Client::IsRealtimeReady() const noexcept {
     return _impl->isRealtimeReady;
 }
 

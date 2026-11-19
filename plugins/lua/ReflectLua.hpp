@@ -81,12 +81,12 @@ namespace ReflectLua {
 // Opt-in trait for aggregate coordinate/color structs (e.g. JPH::Float2/3/4)
 // so Lua authors can write either `{ 1.0, 2.0, 3.0 }` or `{ x = 1.0, y = 2.0, z = 3.0 }`.
 template <typename T>
-struct LuaVector : std::false_type {};
+struct Vector : std::false_type {};
 
 // Customization point for non-aggregate value types with private/SIMD storage
-// (e.g. JPH::Vec3, JPH::Vec4, JPH::Quat in SceneLua.hpp).
+// (e.g. FVec3, FVec4, Quat in SceneLua.hpp).
 template <typename T>
-struct LuaValueTrait {
+struct ValueTrait {
     static constexpr bool specialized = false;
 };
 
@@ -95,17 +95,17 @@ class Builder;
 
 // Sandboxed RAII LuaJIT VM used for state evaluation, pure reducer calls, or
 // isolated host adapters (such as ProjectLight's DataModelBindings).
-class ZHLN_STATIC_API LuaVm {
+class ZHLN_STATIC_API Vm {
   public:
-    LuaVm() noexcept;
-    ~LuaVm();
+    Vm() noexcept;
+    ~Vm();
 
-    LuaVm(const LuaVm&)                    = delete;
-    auto operator=(const LuaVm&) -> LuaVm& = delete;
-    LuaVm(LuaVm&& other) noexcept;
-    auto operator=(LuaVm&& other) noexcept -> LuaVm&;
+    Vm(const Vm&)                    = delete;
+    auto operator=(const Vm&) -> Vm& = delete;
+    Vm(Vm&& other) noexcept;
+    auto operator=(Vm&& other) noexcept -> Vm&;
 
-    [[nodiscard]] static auto Create(LuaBudget budget = {}) noexcept -> std::expected<LuaVm, ErrorCode>;
+    [[nodiscard]] static auto Create(LuaBudget budget = {}) noexcept -> std::expected<Vm, ErrorCode>;
 
     [[nodiscard]] auto IsValid() const noexcept -> bool;
     [[nodiscard]] auto Budget() const noexcept -> const LuaBudget&;
@@ -144,7 +144,7 @@ class ZHLN_STATIC_API LuaVm {
     std::unique_ptr<Impl> _impl;
 };
 
-// Non-owning view of a value on an active LuaVm stack frame.
+// Non-owning view of a value on an active Vm stack frame.
 // Keeps <lua.h> completely private to ReflectLua.cpp.
 class ZHLN_STATIC_API Value {
   public:
@@ -167,7 +167,7 @@ class ZHLN_STATIC_API Value {
 
     // Table operations. A Lua table `{ 10, 20, 30 }` is a pure sequence when all
     // keys are contiguous integers `1..N`; mixed tables report `IsSequence() == false`.
-    [[nodiscard]] auto IsSequence(size_t& outLength) const noexcept -> bool;
+    [[nodiscard]] auto SequenceLength() const noexcept -> std::optional<size_t>;
     [[nodiscard]] auto GetTableStringKeys() const -> std::expected<std::vector<std::string>, ErrorCode>;
 
     // Calls `visit(childValue)` with the looked-up key or 1-based array element pushed on the stack,
@@ -220,7 +220,7 @@ class ZHLN_STATIC_API Builder {
     lua_State* _state = nullptr;
 };
 
-[[nodiscard]] ZHLN_STATIC_API auto ReadLuaFileText(const std::filesystem::path& path) noexcept
+[[nodiscard]] ZHLN_STATIC_API auto ReadFileText(const std::filesystem::path& path) noexcept
     -> std::expected<std::string, ErrorCode>;
 
 namespace TemplatedDetail {
@@ -258,7 +258,7 @@ namespace TemplatedDetail {
                             std::is_same_v<T, ZHLN::Optional<typename T::value_type>>);
 
     template <typename T>
-    concept VectorLike = LuaVector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
+    concept VectorLike = Vector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
     inline auto EqualAsciiIgnoreCase(std::string_view a, std::string_view b) noexcept -> bool {
         if (a.size() != b.size()) {
@@ -294,6 +294,9 @@ namespace TemplatedDetail {
     auto PatchObject(T& target, Value table) -> std::expected<void, ErrorCode>;
 
     template <typename T>
+    auto PatchVector(T& target, Value table) -> std::expected<void, ErrorCode>;
+
+    template <typename T>
     auto ReadInto(T& dst, Value reader) -> std::expected<void, ErrorCode> {
         using Decayed = std::remove_cvref_t<T>;
 
@@ -312,10 +315,11 @@ namespace TemplatedDetail {
             dst[str->size()] = '\0';
             return {};
         } else if constexpr (std::is_bounded_array_v<std::remove_reference_t<T>>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             using RawArr          = std::remove_reference_t<T>;
             using ElemT           = std::remove_extent_t<RawArr>;
             constexpr size_t kCap = std::extent_v<RawArr>;
@@ -336,8 +340,8 @@ namespace TemplatedDetail {
                 }
             }
             return {};
-        } else if constexpr (LuaValueTrait<Decayed>::specialized) {
-            auto parsed = LuaValueTrait<Decayed>::Read(reader);
+        } else if constexpr (ValueTrait<Decayed>::specialized) {
+            auto parsed = ValueTrait<Decayed>::Read(reader);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -430,41 +434,7 @@ namespace TemplatedDetail {
             dst = std::move(inner);
             return {};
         } else if constexpr (VectorLike<Decayed>) {
-            if (!reader.IsTable()) {
-                return std::unexpected(LuaError::TypeMismatch);
-            }
-            constexpr size_t kArity = ZHLN::Reflect::FieldCount<Decayed>();
-            size_t           seqLen = 0;
-            if (reader.IsSequence(seqLen)) {
-                if (seqLen > kArity) {
-                    ZHLN::Log("[Lua] array of {} elements exceeds {}[{}] at '{}'", seqLen, ZHLN::Reflect::TypeName<Decayed>(), kArity, reader.Path());
-                    return std::unexpected(LuaError::OutOfRange);
-                }
-                std::optional<ErrorCode> err;
-                size_t                   index = 0;
-                ZHLN::Reflect::ForEachField(dst, [&](auto& comp) -> void {
-                    const size_t at = index++;
-                    if (err || at >= seqLen) {
-                        return;
-                    }
-                    using CompT = std::remove_cvref_t<decltype(comp)>;
-                    struct ElemCtx {
-                        CompT* dstComp;
-                    } ctx {&comp};
-                    auto elemRes = reader.WithElement(at, &ctx, [](const void* rawCtx, Value elem) -> std::expected<void, ErrorCode> {
-                        const auto* c = static_cast<const ElemCtx*>(rawCtx);
-                        return ReadInto(*c->dstComp, elem);
-                    });
-                    if (!elemRes) {
-                        err = elemRes.error();
-                    }
-                });
-                if (err) {
-                    return std::unexpected(*err);
-                }
-                return {};
-            }
-            return PatchObject(dst, reader);
+            return PatchVector(dst, reader);
         } else if constexpr (MapLike<Decayed>) {
             if (!reader.IsTable()) {
                 return std::unexpected(LuaError::TypeMismatch);
@@ -492,10 +462,11 @@ namespace TemplatedDetail {
             dst = std::move(out);
             return {};
         } else if constexpr (FixedStdArray<Decayed>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             constexpr size_t kCap = std::tuple_size<Decayed>::value;
             if (seqLen > kCap) {
                 ZHLN::Log("[Lua] array of {} elements exceeds array[{}] at '{}'", seqLen, kCap, reader.Path());
@@ -516,10 +487,11 @@ namespace TemplatedDetail {
             }
             return {};
         } else if constexpr (std::ranges::range<Decayed>) {
-            size_t seqLen = 0;
-            if (!reader.IsSequence(seqLen)) {
+            const auto seqLenOpt = reader.SequenceLength();
+            if (!seqLenOpt) {
                 return std::unexpected(LuaError::TypeMismatch);
             }
+            const size_t seqLen = *seqLenOpt;
             Decayed container;
             if constexpr (requires { container.reserve(seqLen); }) {
                 container.reserve(seqLen);
@@ -545,6 +517,52 @@ namespace TemplatedDetail {
             return PatchObject(dst, reader);
         } else {
             return std::unexpected(LuaError::TypeMismatch);
+        }
+    }
+
+    // Value traits construct a fresh value, which is right for evaluation but
+    // loses untouched coordinates during a patch. Patch vector fields against
+    // their existing value and commit only after every supplied lane succeeds.
+    template <typename T>
+    auto PatchVector(T& target, Value table) -> std::expected<void, ErrorCode> {
+        if (!table.IsTable()) return std::unexpected(LuaError::TypeMismatch);
+
+        T staging = target;
+        const auto seqLenOpt = table.SequenceLength();
+            if (!seqLenOpt) {
+            if (auto res = PatchObject(staging, table); !res) return std::unexpected(res.error());
+        } else {
+            const size_t seqLen = *seqLenOpt;
+            constexpr size_t kArity = ZHLN::Reflect::FieldCount<T>();
+            if (seqLen > kArity) {
+                ZHLN::Log("[Lua] array of {} elements exceeds {}[{}] at '{}'", seqLen, ZHLN::Reflect::TypeName<T>(), kArity, table.Path());
+                return std::unexpected(LuaError::OutOfRange);
+            }
+            std::optional<ErrorCode> err;
+            size_t index = 0;
+            ZHLN::Reflect::ForEachField(staging, [&](auto& comp) -> void {
+                const size_t at = index++;
+                if (err || at >= seqLen) return;
+                using CompT = std::remove_cvref_t<decltype(comp)>;
+                struct ElemCtx { CompT* dstComp; } ctx {&comp};
+                auto result = table.WithElement(at, &ctx, [](const void* rawCtx, Value elem) -> std::expected<void, ErrorCode> {
+                    const auto* c = static_cast<const ElemCtx*>(rawCtx);
+                    return ReadInto(*c->dstComp, elem);
+                });
+                if (!result) err = result.error();
+            });
+            if (err) return std::unexpected(*err);
+        }
+        target = std::move(staging);
+        return {};
+    }
+
+    template <typename T>
+    auto PatchField(T& target, Value value) -> std::expected<void, ErrorCode> {
+        if constexpr (VectorLike<std::remove_cvref_t<T>>) {
+            return PatchVector(target, value);
+        } else {
+            return ReadInto(target, value);
         }
     }
 
@@ -585,7 +603,7 @@ namespace TemplatedDetail {
 
             auto res = table.WithKey(fieldName, &ctx, [](const void* rawCtx, Value child) -> std::expected<void, ErrorCode> {
                 const auto* c = static_cast<const FieldCtx*>(rawCtx);
-                return ReadInto(*c->ptr, child);
+                return PatchField(*c->ptr, child);
             });
             if (!res) {
                 ZHLN::Log("[Lua] field '{}' of {} rejected value", fieldName, ZHLN::Reflect::TypeName<T>());
@@ -616,8 +634,8 @@ namespace TemplatedDetail {
 
         if constexpr (FixedCharArray<T>) {
             builder.PushString(std::string_view(value));
-        } else if constexpr (LuaValueTrait<Decayed>::specialized) {
-            LuaValueTrait<Decayed>::Push(builder, value);
+        } else if constexpr (ValueTrait<Decayed>::specialized) {
+            ValueTrait<Decayed>::Push(builder, value);
         } else if constexpr (std::is_same_v<Decayed, bool>) {
             builder.PushBool(value);
         } else if constexpr (StringLike<Decayed>) {
@@ -682,7 +700,7 @@ namespace TemplatedDetail {
 template <typename T>
 [[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", LuaBudget budget = {})
     -> std::expected<void, ErrorCode> {
-    auto vm = LuaVm::Create(budget);
+    auto vm = Vm::Create(budget);
     if (!vm) {
         return std::unexpected(vm.error());
     }
@@ -693,14 +711,14 @@ template <typename T>
 
     return vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
         const auto* c = static_cast<const PatchCtx*>(rawCtx);
-        return TemplatedDetail::ReadInto(*c->targetPtr, root);
+        return TemplatedDetail::PatchField(*c->targetPtr, root);
     });
 }
 
 template <typename T>
 [[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {})
     -> std::expected<void, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+    auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }
@@ -712,7 +730,18 @@ template <typename T>
 [[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {})
     -> std::expected<T, ErrorCode> {
     T out {};
-    if (auto res = ApplyPatchString(out, chunk, chunkName, budget); !res) {
+    if constexpr (TemplatedDetail::VectorLike<std::remove_cvref_t<T>> && ValueTrait<std::remove_cvref_t<T>>::specialized) {
+        // A value conversion constructs a vector according to its trait;
+        // unlike patching, it must not treat a short sequence as an update.
+        auto vm = Vm::Create(budget);
+        if (!vm) return std::unexpected(vm.error());
+        struct ValueCtx { T* target; } ctx {&out};
+        auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
+            const auto* c = static_cast<const ValueCtx*>(rawCtx);
+            return TemplatedDetail::ReadInto(*c->target, root);
+        });
+        if (!res) return std::unexpected(res.error());
+    } else if (auto res = ApplyPatchString(out, chunk, chunkName, budget); !res) {
         return std::unexpected(res.error());
     }
     return out;
@@ -720,11 +749,10 @@ template <typename T>
 
 template <typename T>
 [[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {}) -> std::expected<T, ErrorCode> {
-    T out {};
-    if (auto res = ApplyPatchFile(out, path, budget); !res) {
-        return std::unexpected(res.error());
-    }
-    return out;
+    auto source = ReadFileText(path);
+    if (!source) return std::unexpected(source.error());
+    const std::string chunkName = "@" + path.generic_string();
+    return EvaluateString<T>(*source, chunkName, budget);
 }
 
 // Evaluates a pure Lua function `return function(arg1, arg2, ...) -> table`
@@ -737,7 +765,7 @@ template <typename T, typename... InArgs>
     LuaBudget        budget,
     const InArgs&... inputs
 ) -> std::expected<void, ErrorCode> {
-    auto vm = LuaVm::Create(budget);
+    auto vm = Vm::Create(budget);
     if (!vm) {
         return std::unexpected(vm.error());
     }
@@ -783,7 +811,7 @@ template <typename OutT, typename... InArgs>
 template <typename OutT, typename... InArgs>
 [[nodiscard]] auto EvaluateCallFile(const std::filesystem::path& path, LuaBudget budget, const InArgs&... inputs)
     -> std::expected<OutT, ErrorCode> {
-    auto source = ReadLuaFileText(path);
+    auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }

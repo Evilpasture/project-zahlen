@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <BSP/BSPGeometry.hpp>
-#include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/SourceVFS.hpp>
 #include <BSP/VMTParser.hpp>
+#include <BSP/VMTLighting.hpp>
 #include <BSP/VTFDecoder.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
@@ -31,8 +31,8 @@ auto Fail() -> std::expected<void, ZHLN::ErrorCode> {
     return std::unexpected(MaterialsTestError::ExpectationFailed);
 }
 
-auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
-    ZHLN::BSP::BSPMap map;
+auto BuildSyntheticMap() -> ZHLN::BSP::Map {
+    ZHLN::BSP::Map map;
     map.version = 20;
 
     // Submodel 0: World
@@ -93,7 +93,7 @@ auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
     map.faces.push_back(face);
 
     // Entity 0: worldspawn
-    ZHLN::BSP::BSPEntity ent;
+    ZHLN::BSP::Entity ent;
     ent.keys.push_back({"classname", "worldspawn"});
     map.entities.push_back(ent);
 
@@ -408,7 +408,7 @@ struct BSPMaterialsTestSuite {
 
             ZHLN::Test::ExpectFalse(imported.parts.empty());
             if (imported.parts.empty()) {
-                return std::unexpected(ZHLN::BSP::BSPError::MalformedLump);
+                return std::unexpected(ZHLN::BSP::Error::MalformedLump);
             }
 
             const auto& part = imported.parts[0];
@@ -674,9 +674,9 @@ struct BSPMaterialsTestSuite {
                 }
                 const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
                 if (!ZHLN::Test::ExpectInRange(emission.strength, 0.549f, 0.551f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetX(), 0.999f, 1.001f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetY(), 0.999f, 1.001f) ||
-                    !ZHLN::Test::ExpectInRange(emission.tint.GetZ(), 0.999f, 1.001f)) {
+                    !ZHLN::Test::ExpectInRange(emission.tint.x, 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.y, 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.z, 0.999f, 1.001f)) {
                     return Fail();
                 }
 

@@ -108,10 +108,10 @@ class ZHLN_API VirtualFileSystem {
     [[nodiscard]] auto ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t;
 
   private:
-    void ExecuteLoad(LoadRequest* req);
-    auto LoadFromDirectories(LoadRequest& req) const -> bool;
-    void IndexDirectoryTreeLocked(const std::filesystem::path& mountRoot) const;
-    void RebuildDirectoryIndexLocked() const;
+    [[gnu::visibility("hidden")]] void ExecuteLoad(LoadRequest* req);
+    [[gnu::visibility("hidden")]] auto LoadFromDirectories(LoadRequest& req) const -> bool;
+    [[gnu::visibility("hidden")]] void IndexDirectoryTreeLocked(const std::filesystem::path& mountRoot) const;
+    [[gnu::visibility("hidden")]] void RebuildDirectoryIndexLocked() const;
 
     mutable ZHLN::Mutex                      _catalogMutex;
     HashMap<uint64_t, CatalogEntry>          _catalog;

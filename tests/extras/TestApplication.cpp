@@ -5,7 +5,6 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/App.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/KernelApp.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <array>
 #include <concepts>
@@ -26,7 +25,7 @@ namespace ZHLN::Test {
 namespace {
 struct MoveOnlyFrameLogic {
     std::unique_ptr<int> counter;
-    void operator()(Engine&, float) { ++*counter; }
+    void operator()(COM::IEngine&, float) { ++*counter; }
 };
 static_assert(!std::copy_constructible<MoveOnlyFrameLogic>);
 static_assert(requires { App().Run(std::declval<MoveOnlyFrameLogic>()); });
@@ -59,42 +58,43 @@ struct RichLaunchOptions {
     String64       server {"localhost"};
     QualitySetting quality ZHLN_ANNOTATION(Description<"Quality preset"> {}, = CliShort<'q'> {}) = QualitySetting::Low;
 };
-struct StartOnlyLayer { void Start(Engine&) {} };
-struct TickOnlyLayer { void Tick(Engine&, float) {} };
-struct UIOnlyLayer {
-    bool* called = nullptr;
-    void UI(Engine&) { if (called) *called = true; }
+struct StartOnlyLayer { void Start(COM::IEngine&) {} };
+struct TickOnlyLayer { void Tick(COM::IEngine&, float) {} };
+struct LegacyStopOnlyLayer {
+    void UI(COM::IEngine&) {}
+};
+struct BeforeRenderOnlyLayer {
+    void BeforeRender(COM::IEngine&, float) {}
 };
 struct StopOnlyLayer {
     bool* called = nullptr;
-    void Stop(Engine&) { if (called) *called = true; }
+    void Stop(COM::IEngine&) { if (called) *called = true; }
 };
-struct NotALayer { void Update(Engine&) {} };
+struct NotALayer { void Update(COM::IEngine&) {} };
 struct MoveOnlyLayer {
     std::unique_ptr<int> value;
     bool* called = nullptr;
-    void Start(Engine&) { *called = true; }
-    void Tick(Engine&, float) { *called = true; }
-    void UI(Engine&) { *called = true; }
-    void Stop(Engine&) { *called = true; }
+    void Start(COM::IEngine&) { *called = true; }
+    void Tick(COM::IEngine&, float) { *called = true; }
+    void Stop(COM::IEngine&) { *called = true; }
 };
 static_assert(AppLayer<StartOnlyLayer>);
 static_assert(AppLayer<TickOnlyLayer>);
-static_assert(AppLayer<UIOnlyLayer>);
+static_assert(!AppLayer<LegacyStopOnlyLayer>); // UI is no longer coupled to AppLayer
+static_assert(AppLayer<BeforeRenderOnlyLayer>);
 static_assert(AppLayer<StopOnlyLayer>);
 static_assert(AppLayer<MoveOnlyLayer>);
 static_assert(!AppLayer<NotALayer>);
 static_assert(!std::copy_constructible<MoveOnlyLayer>);
 template <typename T>
-concept HasApplicationOnUI = requires(T& app, Engine::UICallback callback) { app.OnUI(std::move(callback)); };
-static_assert(!HasApplicationOnUI<Application>); // application UI only comes from layers
-static_assert(std::copy_constructible<Application>); // reflected keys and owned layers survive copies
+concept HasApplicationOnUI = requires(T& app, std::function<void(COM::IEngine&, WindowID)> callback) { app.OnUI(std::move(callback)); };
+static_assert(!HasApplicationOnUI<App>);
+static_assert(std::copy_constructible<App>); // reflected keys, plugin requests, and layers survive copies
 static_assert(std::same_as<decltype(App().Run()), AppRunResult>);
-static_assert(std::same_as<decltype(KernelApp().Run()), AppRunResult>);
 
 // Exercise CLI success without creating a GPU/Engine: --help follows the
 // tokens under test, while failures stop before reaching it.
-auto RunConfigCli(Application& app, std::initializer_list<std::string_view> tokens, bool appendHelp = false) -> AppRunResult {
+auto RunConfigCli(const App& app, std::initializer_list<std::string_view> tokens, bool appendHelp = false) -> AppRunResult {
     std::vector<std::string> strings;
     strings.reserve(tokens.size() + 2);
     strings.emplace_back("test-application");
@@ -130,7 +130,7 @@ void test_app_help_exits_without_running_gameplay() {
     char option[]  = "--help";
     char* args[]   = {program, option};
     bool  ran      = false;
-    ExpectExit(App().Run(2, args, [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
+    ExpectExit(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran);
 }
 
@@ -154,9 +154,9 @@ void test_app_rejects_removed_tool_mode_flags_without_starting_engine() {
     char bench[]   = "--benchmark";
     char* args[]   = {program, editor};
     bool  ran      = false;
-    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
+    ExpectError(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), CommandLineError::UnknownArgument);
     args[1] = bench;
-    ExpectError(App().Run(2, args, [&](Engine&) { ran = true; }), CommandLineError::UnknownArgument);
+    ExpectError(App().Run(2, args, [&](COM::IEngine&) { ran = true; }), CommandLineError::UnknownArgument);
     Expect(!ran);
 }
 
@@ -176,8 +176,8 @@ void test_app_preparation_preserves_typed_failure_and_skips_cli_early_exits() {
         Expect(!installed && !started);
         return std::unexpected(PreparationFailure::Refused);
     });
-    app.Install([&](Engine&) { installed = true; });
-    app.OnStart([&](Engine&) { started = true; });
+    app.Install([&](COM::IEngine&) { installed = true; });
+    app.OnStart([&](COM::IEngine&) { started = true; });
 
     ExpectError(RunConfigCli(app, {"--scene=ready"}), PreparationFailure::Refused);
     Expect(prepared && cliActions == 1 && !installed && !started);
@@ -204,8 +204,8 @@ void test_app_rejects_invalid_args_before_engine_creation() {
     ExpectError(App().Run(2, args), CommandLineError::UnknownArgument);
     ExpectError(App().Run(-1, args), AppError::InvalidArguments);
     ExpectError(App().Run(1, nullptr), AppError::InvalidArguments);
-    ExpectError(App().Run(-1, args, [](Engine&) {}), AppError::InvalidArguments);
-    ExpectError(App().Run(1, nullptr, [](Engine&) {}), AppError::InvalidArguments);
+    ExpectError(App().Run(-1, args, [](COM::IEngine&) {}), AppError::InvalidArguments);
+    ExpectError(App().Run(1, nullptr, [](COM::IEngine&) {}), AppError::InvalidArguments);
 }
 
 void test_app_custom_flags_bulk_registration_and_help_via_span() {
@@ -251,7 +251,7 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
     char dry[]     = "--dry-run";
     char help[]    = "--help";
     char* args[]   = {program, stage, number, dry, help};
-    ExpectExit(app.Run(std::span<char* const>(args), [&](Engine&) { ran = true; }), AppExitReason::CliHelpRequested);
+    ExpectExit(app.Run(std::span<char* const>(args), [&](COM::IEngine&) { ran = true; }), AppExitReason::CliHelpRequested);
     Expect(!ran); // --help exits before Engine::Create
     Expect(level == "ruins");
     Expect(seed == 19);
@@ -264,7 +264,7 @@ void test_app_custom_flags_bulk_registration_and_help_via_span() {
 
 void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
     LaunchOptions options;
-    Application app;
+    App app;
     {
         auto source = App();
         source.WithConfig(options);
@@ -313,7 +313,7 @@ void test_reflected_cli_config_keeps_owned_keys_and_validates_atomically() {
 
 void test_reflected_config_supports_bool_floats_text_and_enum_choices() {
     RichLaunchOptions options;
-    Application       app;
+    App               app;
     {
         auto source = App();
         source.WithConfig(options);
@@ -435,7 +435,7 @@ void test_layered_application_help_does_not_invoke_any_layer_phase() {
     char* args[]   = {program, help};
     ExpectExit(
         App().AddLayer(MoveOnlyLayer {.value = std::make_unique<int>(1), .called = &called})
-            .AddLayer(UIOnlyLayer {.called = &called})
+            .AddLayer(StopOnlyLayer {.called = &called})
             .AddLayer(StopOnlyLayer {.called = &called})
             .Run(2, args),
         AppExitReason::CliHelpRequested
@@ -443,22 +443,6 @@ void test_layered_application_help_does_not_invoke_any_layer_phase() {
     Expect(!called); // early CLI exits never reach Start, Tick, UI or Stop
 }
 
-void test_kernel_app_early_cli_exits_and_validates_c_arguments() {
-    char program[] = "test-kernel-app";
-    char help[]    = "--help";
-    char* args[]   = {program, help};
-    ExpectExit(KernelApp().Named("Test Kernel Tool").Run(2, args), AppExitReason::CliHelpRequested);
-    ExpectError(KernelApp().Run(-1, args), AppError::InvalidArguments);
-    ExpectError(KernelApp().Run(1, nullptr), AppError::InvalidArguments);
-
-    char version[] = "--version";
-    char* versionArgs[] = {program, version};
-    ExpectExit(KernelApp().Run(2, versionArgs), AppExitReason::CliVersionRequested);
-
-    char invalid[] = "--not-a-kernel-option";
-    char* badArgs[] = {program, invalid};
-    ExpectError(KernelApp().Run(2, badArgs), CommandLineError::UnknownArgument);
-}
 
 void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
     FramePacer uncapped;
@@ -474,6 +458,111 @@ void test_frame_pacer_prefers_display_timing_only_when_it_meets_cap() {
     Expect(capped.SelectDelta(0.003f, 0.001f) == 0.003f);
     Expect(capped.SelectDelta(0.003f, 0.020f) == 0.020f);
     capped.EndFrame(FramePacer::BeginFrame(), 0.020f); // already display-paced: no sleep
+}
+
+void test_layer_tick_precedes_update_and_stops_on_host_error() {
+    struct HostLayer {
+        std::vector<std::string_view>* calls;
+        void Start(COM::IEngine&) { calls->push_back("start"); }
+        void Tick(COM::IEngine& engine, float) {
+            ExpectEq(engine.CurrentFrame(), uint64_t {0});
+            Expect(engine.SubmitUI(engine.PrimaryWindow(), COM::UISubmitInfo {}).HasValue());
+            calls->push_back("tick");
+        }
+        void Stop(COM::IEngine&) { calls->push_back("stop"); }
+    };
+    std::vector<std::string_view> calls;
+    auto app = App().Title("HostLifecycle").Resolution(96, 64).Validation(false).Headless(true).LogLevel(LogLevel::Quiet);
+    app.AddLayer(HostLayer {&calls});
+    const auto result = app.Run([&](COM::IEngine&, float) -> std::expected<void, ErrorCode> {
+        calls.push_back("update");
+        return std::unexpected(PreparationFailure::Refused);
+    });
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
+    Expect(calls == std::vector<std::string_view> {"start", "tick", "update", "stop"});
+}
+
+void test_layer_tick_errors_stop_entered_layers_in_reverse() {
+    struct Layer {
+        int               id;
+        std::vector<int>* calls;
+        void Start(COM::IEngine&) { calls->push_back(id); }
+        auto Tick(COM::IEngine& engine, float) -> std::expected<void, ErrorCode> {
+            ExpectEq(engine.CurrentFrame(), uint64_t {0});
+            calls->push_back(10 + id);
+            return std::unexpected(PreparationFailure::Refused);
+        }
+        void Stop(COM::IEngine& engine) {
+            Expect(engine.SubmitUI(engine.PrimaryWindow(), COM::UISubmitInfo {}).HasValue());
+            calls->push_back(-id);
+        }
+    };
+    std::vector<int> calls;
+    const auto result = App()
+                            .Title("HostTickFailure")
+                            .Resolution(96, 64)
+                            .Validation(false)
+                            .Headless(true)
+                            .LogLevel(LogLevel::Quiet)
+                            .AddLayer(Layer {1, &calls})
+                            .AddLayer(Layer {2, &calls})
+                            .Run();
+    Expect(!result.has_value());
+    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
+    Expect(calls == std::vector<int> {1, 2, 11, -2, -1});
+}
+
+void test_application_max_frames_frame_limit_cli_and_after_tick() {
+    ExpectError(RunConfigCli(App(), {"--frames=bad"}), CommandLineError::InvalidValue);
+    ExpectError(RunConfigCli(App(), {"--frames=-1"}), CommandLineError::InvalidValue);
+    ExpectError(RunConfigCli(App(), {"--frames"}), CommandLineError::MissingValue);
+    ExpectError(
+        RunConfigCli(
+            App().AddCliOption(
+                CliFlag {.key = "--frames", .action = [](std::string_view) -> std::expected<void, CommandLineError> { return {}; }}
+            ),
+            {"--help"}
+        ),
+        CommandLineError::DuplicateFlag
+    );
+
+    struct PostLayer {
+        std::vector<std::string>* events;
+        void Tick(COM::IEngine& engine, float) {
+            events->push_back("tick@" + std::to_string(engine.CurrentFrame()));
+        }
+        void BeforeRender(COM::IEngine& engine, float) {
+            events->push_back("before@" + std::to_string(engine.CurrentFrame()));
+        }
+        void AfterTick(COM::IEngine& engine) {
+            events->push_back("after@" + std::to_string(engine.CurrentFrame()));
+        }
+        void Stop(COM::IEngine& engine) {
+            events->push_back("stop@" + std::to_string(engine.CurrentFrame()));
+        }
+    };
+
+    std::vector<std::string> events;
+    auto app = App(EngineConfig {
+        .appName        = "AppMaxFrames",
+        .width          = 64,
+        .height         = 48,
+        .vsync          = false,
+        .validationMode = ValidationMode::Off,
+        .headless       = true,
+        .logLevel       = LogLevel::Quiet,
+    });
+    app.MaxFrames(4).AddLayer(PostLayer {&events}).AfterTick([&](COM::IEngine& engine) {
+        events.push_back("appAfter@" + std::to_string(engine.CurrentFrame()));
+    });
+    ExpectExit(RunConfigCli(app, {"--frames=2"}), AppExitReason::UserClosed);
+    const std::vector<std::string> expected {
+        "tick@0", "before@0", "after@1", "appAfter@1",
+        "tick@1", "before@1", "after@2", "appAfter@2",
+        "stop@2",
+    };
+    Expect(events == expected);
 }
 
 } // namespace ZHLN::Test

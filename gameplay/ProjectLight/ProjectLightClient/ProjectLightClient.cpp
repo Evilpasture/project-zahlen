@@ -2,25 +2,21 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
 #include <ProjectLightClient/LightProtocol.hpp>
 
 #include <CharacterController/CharacterComponents.hpp>
-#include <Zahlen/Audio/Audio.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAudioDevice.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <Jolt/Physics/Body/BodyInterface.h>
-#include <Jolt/Physics/PhysicsSystem.h>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 
 #include <algorithm>
 #include <array>
@@ -31,6 +27,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <string>
 #include <string_view>
@@ -328,66 +325,6 @@ auto ReadPropertyName(
     return PropertyChannelName(channel);
 }
 
-struct InstalledSession {
-    std::unordered_map<Engine*, ClientSession*> sessions;
-};
-
-InstalledSession& InstalledSessions() {
-    static InstalledSession installed;
-    return installed;
-}
-
-void LightClientPrePhysicsStep(Engine& engine, float dt, FrameContext&) {
-    auto& installed = InstalledSessions().sessions;
-    auto found = installed.find(&engine);
-    if (found != installed.end() && found->second != nullptr) found->second->PrePhysicsTick(engine, dt);
-}
-
-void LightClientPostPhysicsStep(Engine& engine, float dt, FrameContext&) {
-    auto& installed = InstalledSessions().sessions;
-    auto found = installed.find(&engine);
-    if (found != installed.end() && found->second != nullptr) found->second->PostPhysicsTick(engine, dt);
-}
-
-void LightClientSceneCleanup(Engine& engine, bool all) {
-    if (!all) return;
-    auto& installed = InstalledSessions().sessions;
-    auto found = installed.find(&engine);
-    if (found != installed.end() && found->second != nullptr) found->second->ResetSceneBindings(engine);
-}
-
-void LightClientEngineTeardown(Engine& engine) {
-    auto& installed = InstalledSessions().sessions;
-    auto found = installed.find(&engine);
-    if (found == installed.end()) return;
-    if (found->second != nullptr) found->second->OnEngineTeardown(engine);
-    installed.erase(found);
-}
-
-// The client's two frame steps, declared.
-//
-// Polling sits after hot-reload dispatch so the frame that receives a snapshot
-// is the frame that can act on it, and the send sits after the physics step so
-// what leaves is the state the physics just settled on. Both used to be
-// inserted by a callback whose fallback appended them at the end of the frame
-// when their anchor was missing -- a network poll after present, which is a
-// whole frame of latency and a silent one.
-constexpr ModuleStep kFrameSteps[] = {
-    {
-        .phase     = FramePhase::Input,
-        .name      = "ProjectLightNetworkPoll",
-        .run       = &LightClientPrePhysicsStep,
-        .placement = StepPlacement::After,
-        .anchor    = "StateAndShaderReload",
-    },
-    {
-        .phase     = FramePhase::Physics,
-        .name      = "ProjectLightNetworkSend",
-        .run       = &LightClientPostPhysicsStep,
-        .placement = StepPlacement::After,
-        .anchor    = "PhysicsSystem",
-    },
-};
 
 } // namespace
 
@@ -665,8 +602,8 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.hasPhysicsSample = false;
             object.transformDirty = true;
         } else if (property == "Rotation") {
-            object.rotationEulerDeg = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg);
-            object.rotationQuat     = Math::EulerDegreesToQuat(object.rotationEulerDeg).Normalized();
+            object.rotationEulerDeg.value = value.AsVec3(VEC3_SCALE, object.rotationEulerDeg.value);
+            object.rotationQuat     = Quat::FromEulerDegrees(object.rotationEulerDeg).Normalized();
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
             object.transformDirty = true;
@@ -823,13 +760,13 @@ void ClientSession::ApplyPhysicsUpdates(const MsgPackValue& physicsUpdates) {
 
         const auto& data = value.arrayVal;
         auto scaled = [](const MsgPackValue& component) { return component.AsFloat() / VEC3_SCALE; };
-        const JPH::Vec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
-        const JPH::Quat rotation = JPH::Quat(scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])).Normalized();
+        const FVec3 position(scaled(data[0]), scaled(data[1]), scaled(data[2]));
+        const Quat rotation = Quat{scaled(data[3]), scaled(data[4]), scaled(data[5]), scaled(data[6])}.Normalized();
         object->physicsHistory.Push(NetworkTransformSample {.position = position, .rotation = rotation, .receivedAt = receivedAt});
         object->position = position;
         object->rotationQuat = rotation;
-        object->rotationEulerDeg = Math::QuatToEulerDegrees(object->rotationQuat);
-        object->linearVelocity   = JPH::Vec3(scaled(data[7]), scaled(data[8]), scaled(data[9]));
+        object->rotationEulerDeg = object->rotationQuat.EulerAnglesDegrees();
+        object->linearVelocity = {scaled(data[7]), scaled(data[8]), scaled(data[9])};
         object->hasPhysicsSample = true;
         object->transformDirty = true;
     }
@@ -843,10 +780,8 @@ void ClientSession::ApplyControllerState(const MsgPackValue& packet) {
 
     NetworkTransformHistory& history = m_playerControllerStates[userId];
     history.Push(NetworkTransformSample {
-        .position = JPH::Vec3(state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()),
-        .rotation = JPH::Quat(
-            state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()
-        ).Normalized(),
+        .position = FVec3{state.arrayVal[0].AsFloat(), state.arrayVal[1].AsFloat(), state.arrayVal[2].AsFloat()},
+        .rotation = Quat{state.arrayVal[3].AsFloat(), state.arrayVal[4].AsFloat(), state.arrayVal[5].AsFloat(), state.arrayVal[6].AsFloat()}.Normalized(),
         .receivedAt = std::chrono::steady_clock::now()
     });
 }
@@ -1002,7 +937,7 @@ auto ClientSession::HandlePacket(const MsgPackValue& packet) -> bool {
 // Network event pump
 // ============================================================================
 
-void ClientSession::PollNetwork(Engine& engine) {
+void ClientSession::PollNetwork(COM::IEngine& engine) {
     if (!m_connected) return;
     const auto now = std::chrono::steady_clock::now();
     if (!m_networkPollStarted) {
@@ -1226,7 +1161,7 @@ void ClientSession::PollNetwork(Engine& engine) {
     (void)engine;
 }
 
-void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
+void ClientSession::PrePhysicsTick(COM::IEngine& engine, float dt) {
     if (!m_connected) return;
     m_time += std::clamp(dt, 0.0f, 0.25f);
     PollNetwork(engine);
@@ -1244,21 +1179,30 @@ void ClientSession::PrePhysicsTick(Engine& engine, float dt) {
 // Outbound state, and the view the scene half reads
 // ============================================================================
 
-void ClientSession::SendRealtimeFrame(Engine& engine) {
+void ClientSession::SendRealtimeFrame(COM::IEngine& engine) {
     if (!m_connected || !m_snapshotComplete) return;
-    auto& registry = ZHLN::EngineAccess::RegistryOf(engine);
-    auto input = registry.GetSingleton<Components::InputStateComponent>();
-    m_lastControls = {};
-    // No main camera entity means no view to report; the zeroed controls above stand.
-    if (const auto cameraComp = registry.GetSingleton<Components::CameraComponent>()) {
-        m_lastControls.yaw = cameraComp->camera.yaw;
+    auto&       entities = *engine.Entities();
+    const auto* actions  = engine.Actions();
+    m_lastControls       = {};
+    const auto cameras   = entities.EntitiesWith<Components::MainCameraTagComponent>();
+    if (cameras.size() > 0) {
+        if (const auto* cameraComp = entities.Get<Components::CameraComponent>(cameras[0])) {
+            m_lastControls.yaw = cameraComp->camera.yaw.value;
+        }
+    } else {
+        const auto allCams = entities.EntitiesWith<Components::CameraComponent>();
+        if (allCams.size() > 0) {
+            if (const auto* cameraComp = entities.Get<Components::CameraComponent>(allCams[0])) {
+                m_lastControls.yaw = cameraComp->camera.yaw.value;
+            }
+        }
     }
-    if (input) {
-        m_lastControls.forward  = input->IsKeyDown(static_cast<uint8_t>(KeyCode::W));
-        m_lastControls.backward = input->IsKeyDown(static_cast<uint8_t>(KeyCode::S));
-        m_lastControls.left     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::A));
-        m_lastControls.right    = input->IsKeyDown(static_cast<uint8_t>(KeyCode::D));
-        m_lastControls.jump     = input->IsKeyDown(static_cast<uint8_t>(KeyCode::Space));
+    if (actions != nullptr) {
+        m_lastControls.forward  = actions->KeyDown(KeyCode::W, kPrimarySeat);
+        m_lastControls.backward = actions->KeyDown(KeyCode::S, kPrimarySeat);
+        m_lastControls.left     = actions->KeyDown(KeyCode::A, kPrimarySeat);
+        m_lastControls.right    = actions->KeyDown(KeyCode::D, kPrimarySeat);
+        m_lastControls.jump     = actions->KeyDown(KeyCode::Space, kPrimarySeat);
     }
 
     MsgPackValue inputs = MsgPackValue::Map();
@@ -1271,17 +1215,17 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
+    auto& physics = *engine.Simulation();
     if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyID::Null()) {
-        auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
-        const auto movement = registry.Get<Character::MovementComponent>(m_localController);
-        if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState && bodyState->valid) {
-            const auto& state = *bodyState;
-            const JPH::Quat rotation = movement ? movement->orientation.Normalized() : static_cast<JPH::Quat>(state.currentRotation).Normalized();
-            const JPH::Vec3 velocity = physics.GetCharacterVelocity(m_localControllerBody);
+        const auto movement = entities.Get<Character::MovementComponent>(m_localController);
+        if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState.HasValue() && bodyState.value.valid) {
+            const auto& state    = bodyState.value;
+            const Quat  rotation = (movement != nullptr ? movement->orientation : Quat {state.currentRotation}).Normalized();
+            const auto velocity = physics.CharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
-                rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW(),
-                velocity.GetX(), velocity.GetY(), velocity.GetZ()
+                rotation.x, rotation.y, rotation.z, rotation.w,
+                velocity.x, velocity.y, velocity.z
             }));
             HumanoidState humanoidState = HumanoidState::Idle;
             if (movement) {
@@ -1292,7 +1236,6 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         }
     }
 
-    auto& physics = ZHLN::EngineAccess::PhysicsOf(engine);
     for (auto& [uid, object]: m_objects) {
         if (m_localPlayerUid == 0 || object.removalPending || !IsPartClass(object.className)
             || object.networkOwnerUid != m_localPlayerUid) continue;
@@ -1300,15 +1243,16 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         bool haveState = false;
         if (IsLocalCharacterPart(uid)) {
             haveState = true;
-        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && registry.IsAlive(entity)) {
-            const auto body = registry.Get<Components::PhysicsComponent>(entity);
-            if (body) {
-                if (const auto bodyState = physics.BodyState(body->physicsID); bodyState && bodyState->valid) {
-                    const auto& snapshot = *bodyState;
-                    transform.position = snapshot.currentPosition;
-                    transform.rotation = snapshot.currentRotation;
-                    const JPH::BodyID bodyID = Physics::GetBodyID(physics.GetInternalWorld(), body->physicsID);
-                    if (!bodyID.IsInvalid()) transform.linearVelocity = physics.GetInternalSystem().GetBodyInterface().GetLinearVelocity(bodyID);
+        } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && entities.IsAlive(entity)) {
+            const auto body = entities.Get<Components::PhysicsComponent>(entity);
+            if (body != nullptr) {
+                if (const auto bodyState = physics.BodyState(body->physicsID); bodyState.HasValue() && bodyState.value.valid) {
+                    const auto& snapshot = bodyState.value;
+                    transform.position   = snapshot.currentPosition.Cast<float>();
+                    transform.rotation   = Quat {snapshot.currentRotation};
+                    if (const auto vel = physics.BodyLinearVelocity(body->physicsID); vel.HasValue()) {
+                        transform.linearVelocity = vel.value;
+                    }
                     haveState = true;
                 }
             }
@@ -1320,7 +1264,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
         // this pose instead of snapping back to an old remote sample.
         object.position = transform.position;
         object.rotationQuat = transform.rotation.Normalized();
-        object.rotationEulerDeg = Math::QuatToEulerDegrees(object.rotationQuat);
+        object.rotationEulerDeg = object.rotationQuat.EulerAnglesDegrees();
         object.linearVelocity   = transform.linearVelocity;
         object.renderPosition   = object.position;
         object.renderRotation   = object.rotationQuat;
@@ -1329,9 +1273,9 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
 
         MsgPackValue key = MsgPackValue::UInt(uid);
         MsgPackValue value = FloatArray({
-            transform.position.GetX(), transform.position.GetY(), transform.position.GetZ(),
-            transform.rotation.GetX(), transform.rotation.GetY(), transform.rotation.GetZ(), transform.rotation.GetW(),
-            transform.linearVelocity.GetX(), transform.linearVelocity.GetY(), transform.linearVelocity.GetZ()
+            transform.position.x, transform.position.y, transform.position.z,
+            transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w,
+            transform.linearVelocity.x, transform.linearVelocity.y, transform.linearVelocity.z
         });
         ownedTransforms.mapVal.emplace_back(std::move(key), std::move(value));
     }
@@ -1343,7 +1287,7 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
     (void)SendRealtimePacket(packet);
 }
 
-void ClientSession::PostPhysicsTick(Engine& engine, float dt) {
+void ClientSession::PostPhysicsTick(COM::IEngine& engine, float dt) {
     if (!m_connected) return;
     auto scene = MirrorState();
     m_mirror.UpdateLocalCharacterParts(engine, scene, dt);
@@ -1353,24 +1297,24 @@ void ClientSession::PostPhysicsTick(Engine& engine, float dt) {
     SendRealtimeFrame(engine);
 }
 
-void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
+void ClientSession::ResetSceneBindings(COM::IEngine& engine) noexcept {
     for (auto& [uid, object]: m_objects) {
         (void)uid;
         if (object.audioID != VoiceID::Invalid) {
-            engine.Audio().StopVoice(object.audioID);
+            engine.Audio()->StopVoice(object.audioID, 0.0f);
             object.audioID = VoiceID::Invalid;
         }
         // The whole scene is going away, so every binding in it is stale by
         // definition; the mirror keeps its records and re-spawns from them.
         object.materialId = InvalidMaterialID;
         object.hasPhysicsBody = false;
-        object.spawnedSize = JPH::Vec3::sZero();
+        object.spawnedSize = FVec3::Zero();
         object.visualDirty = true;
         object.transformDirty = true;
     }
     m_index.Clear();
     if (m_localControllerBody != Physics::BodyID::Null()) {
-        engine.Physics().DestroyBody(m_localControllerBody);
+        engine.Simulation()->DestroyBody(m_localControllerBody);
         m_localControllerBody = Physics::BodyID::Null();
     }
     m_localController = Entity::Null();
@@ -1378,31 +1322,9 @@ void ClientSession::ResetSceneBindings(Engine& engine) noexcept {
     m_playerControllerStates.clear();
 }
 
-void ClientSession::OnEngineTeardown(Engine& engine) noexcept {
+void ClientSession::OnEngineTeardown(COM::IEngine& engine) noexcept {
     Disconnect();
     ResetSceneBindings(engine);
-}
-
-auto DescribeClient() -> Module {
-    return Module{
-        .name               = "ProjectLightClient",
-        .registerComponents = &RegisterReplicationComponents,
-        .frameSteps         = kFrameSteps,
-        .sceneCleanup       = &LightClientSceneCleanup,
-        .teardown           = &LightClientEngineTeardown,
-    };
-}
-
-void InstallClient(Engine& engine, ClientSession& session) {
-    // The session is process state the engine is not allowed to own (it is the
-    // application's, and it outlives the engine on the editor's restart path),
-    // so the binding is registered here and the module's hooks look it up.
-    InstalledSessions().sessions[&engine] = &session;
-    if (auto installed = engine.InstallModule(DescribeClient()); !installed) {
-        LogError("[ProjectLight][lifecycle] module install failed: {}", ToString(installed.error()));
-        return;
-    }
-    Log("[ProjectLight][lifecycle] client frame polling, scene-cleanup, and teardown hooks installed.");
 }
 
 } // namespace ZHLN::ProjectLight

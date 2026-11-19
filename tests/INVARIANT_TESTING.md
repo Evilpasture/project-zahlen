@@ -134,7 +134,7 @@ second one into ctest.
 
 ### Procedural in-memory GLBs (fast, precise)
 
-`TestGLTFImport.cpp` never commits a GLB: `MakeGlb()` + `SerializeJSON()`
+`TestGLTFImport.cpp` never commits a GLB: `MakeGlb()` + `Serialize()`
 synthesize conformant documents (emissive-strength, anisotropy + sampler
 wraps, sheen/UV-transform, transmission, unlit, negative-scale) and check
 the importer against an independent cgltf parse. `TestTextureTransforms`

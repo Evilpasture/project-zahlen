@@ -28,7 +28,6 @@ return function(hw)
         },
         post = {
             enableSSR = (not hasRT and isDiscrete) and 1 or 0,
-            enableRTR = hasRT and 1 or 0,
         },
         shadows = {
             resolution = hasRT and 4096 or (isDiscrete and 2048 or 1024),

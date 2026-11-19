@@ -19,18 +19,18 @@
 // The subject is a saturated red material under fullBright, so the mask is a
 // colour test and every background/tone-map concern cancels out.
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <cmath>
@@ -118,27 +118,25 @@ struct BBox {
     return leaked;
 }
 
-void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+void DisableJitterVignetteAndTargetDrive(ZHLN::COM::IEngine& engine) {
+    auto& reg = *engine.Entities();
+    for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives the main camera through the registry; the target-orbit lerp
-        // would fight it. AA off so the static scene is actually static. The
-        // rig component is an extras component (extensions/Camera); removing it
-        // is inert when no sibling suite installed the rig, and when the rig
-        // is present its frame step re-seeds the boot default -- a Null
-        // target that takes no drive anyway.
-        reg.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
+        // would fight it. The rig component is an extras component
+        // (extensions/Camera); removing it is inert when no sibling suite
+        // installed the rig, and when the rig is present its frame step
+        // re-seeds the boot default -- a Null target that takes no drive anyway.
+        reg.Detach<ZHLN::CameraRig::TargetComponent>(camEnt);
     }
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.bloomStrength     = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-        });
-    }
+    // AA off so the static scene is actually static.
+    engine.Graphics()->PatchSettings([](auto& gfx) {
+        gfx.antiAliasing.mode            = ZHLN::AAMode::None;
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.bloomStrength           = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+    });
 }
 
 } // namespace
@@ -155,46 +153,62 @@ struct ViewportSubregionTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> pooled_scene_reset_restores_graphics_settings() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Settings Reset", 320, 240);
+            if (!engine.Valid()) {
+                return std::unexpected(ViewportSubregionError::EngineInitFailed);
+            }
+            engine->Graphics()->PatchSettings([](auto& gfx) {
+                gfx.environment.fullBright = 1;
+                gfx.environment.ambientExposure = 7.0f;
+                gfx.post.exposure = 3.0f;
+                gfx.antiAliasing.mode = ZHLN::AAMode::None;
+            });
+            ZHLN::Test::ExpectFalse(engine->Graphics()->Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            ZHLN::Test::Headless::ResetScene(*engine);
+            ZHLN::Test::ExpectTrue(engine->Graphics()->Settings().ConfigEquals(ZHLN::GraphicsSettings {}));
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> scene_stays_in_its_band_and_keeps_aspect() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Viewport Subregion", 960, 540);
             if (!engine.Valid()) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
-            auto rc = engine->Graphics();
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
 
             // The engine is pooled across suites; whatever band this test
             // leaves set must not leak into the next suite's captures.
             struct ViewportRestore {
-                ZHLN::RenderContext&                rc;
-                ZHLN::RenderContext::ViewportRect   full;
+                ZHLN::COM::IGraphicsDevice& rc;
+                ZHLN::ViewportRect   full;
                 ~ViewportRestore() { rc.SetViewport(full); }
             } restore {rc, rc.Viewport()};
 
-            DisableJitterVignetteAndTargetDrive(reg);
+            DisableJitterVignetteAndTargetDrive(*engine);
 
-            if (!ZHLN::Test::ExpectTrue(!reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty())) {
+            if (!ZHLN::Test::ExpectTrue(!reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty())) {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);
             }
 
-            const auto camComp = ZHLN::EngineAccess::RegistryOf(*engine).GetSingleton<ZHLN::Components::CameraComponent>();
-            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
+                auto& cam = c.camera;
+                cam.position = {0.0f, 0.0f, 4.0f};
+                cam.yaw      = ZHLN::DegF{-90.0f};
+                cam.pitch    = ZHLN::DegF{0.0f};
+            });
+            if (!ZHLN::Test::ExpectTrue(camOk)) {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
-            ZHLN::Camera& cam = camComp->camera;
-            cam.position = {0.0f, 0.0f, 4.0f};
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
 
             auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             if (!matRes) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
-            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
-                *engine, JPH::Vec3::sReplicate(0.5f),
-                ZHLN::PrefabFactory::SpawnParams {.position = JPH::Vec3::sZero(), .createPhysics = false, .materialOverride = *matRes}
-            );
+            const ZHLN::Entity box = engine->Assets()->SpawnBox(ZHLN::FVec3::Splat(0.5f),
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 
             // The engine is pooled across suites; force one target recreate so
@@ -210,17 +224,18 @@ struct ViewportSubregionTestSuite {
             const Band     bandB {160, 640};
 
             auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<RgbImage, ZHLN::ErrorCode> {
-                rc.SetViewport(ZHLN::RenderContext::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
+                rc.SetViewport(ZHLN::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
-                const auto captured = rc.CaptureFrame();
-                if (!captured) {
+                ZHLN::Screenshot::CaptureBuffer capBuf;
+                const auto captured = capBuf.Read(rc, ZHLN::Extent2D {.width = 960u, .height = H});
+                if (!captured.has_value() || *captured == nullptr) {
                     return std::unexpected(ViewportSubregionError::CaptureFailed);
                 }
-                const RgbImage image = ZHLN::Test::Headless::ToRgbImage(*captured);
+                const RgbImage image = ZHLN::Test::Headless::ToRgbImage(**captured);
                 if (!image.Valid()) {
                     return std::unexpected(ViewportSubregionError::RenderOutputBlank);
                 }
-                (void) ZHLN::Test::Image::WritePPM(ppmPath, image);
+                ZHLN::Test::Image::WritePPM(ppmPath, image);
                 return image;
             };
 

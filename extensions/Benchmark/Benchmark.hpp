@@ -5,8 +5,8 @@
 //
 // The headless half of the logic benchmark (zahlen_benchmark).
 //
-// What it times is a standalone ZHLN::World -- the ECS registry and the Jolt
-// PhysicsContext behind it -- stepped at a fixed timestep, plus the per-entity
+// What it times is a standalone engine-owned COM logic world, stepped at a
+// fixed timestep, plus the per-entity
 // transform sync a game loop would run over the bodies physics just wrote.
 // Nothing here names the Engine, a render header, a window or Clay: the target
 // this header belongs to links zahlen_engine and nothing else, so a CI job, a
@@ -21,10 +21,10 @@
 // LuaJIT runtime under Lua/) and extensions/net are the same shape.
 #pragma once
 
-#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Engine/World.hpp>
+#include <Zahlen/Engine/Clock.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -42,7 +42,7 @@ namespace ZHLN::Bench {
 // one Step() cost the engine: the two differ by however much the host spent
 // between calls. Both are worth having -- a host that stars at 2000 ticks/s
 // and reaches 900 is either looking at the engine or at its own frame.
-struct BenchmarkMetrics {
+struct Metrics {
     uint64_t totalTicks          = 0;
     double   totalTimeSec        = 0.0;
     float    lastTickTimeMs      = 0.0f;
@@ -98,7 +98,7 @@ class ZHLN_STATIC_API LogicBenchmark {
     // that wants the same workload back calls it with the same count.
     void Reset();
 
-    [[nodiscard]] const BenchmarkMetrics& GetMetrics() const noexcept;
+    [[nodiscard]] const Metrics& GetMetrics() const noexcept;
 
     // Oldest first, at most kHistoryCapacity samples: one float per tick, the
     // same number that went into lastTickTimeMs.
@@ -106,22 +106,22 @@ class ZHLN_STATIC_API LogicBenchmark {
 
     [[nodiscard]] auto HasWorld() const noexcept -> bool;
 
-    // The world this benchmark owns, for a host that wants to look at what it
-    // stepped. Only valid between a successful Initialize() and Reset(), which
-    // is what HasWorld() answers without the precondition.
-    [[nodiscard]] auto GetWorld() noexcept -> World&;
+    // Borrowed COM world, null before Initialize()/after Reset(). Use Query or
+    // Ref to retain it independently. No native World/registry access.
+    [[nodiscard]] auto GetWorld() noexcept -> COM::ILogicWorld*;
 
   private:
     // The static slab the workload lands on, and the per-run bookkeeping the
     // spawn ceiling needs. Defined in Benchmark.cpp.
     auto SpawnFloor() -> void;
 
-    std::unique_ptr<World> m_world;
+    COM::Ref<COM::ILogicWorld> m_world;
+    std::vector<Entity>        m_entities;
     // The run clock: wall time since the object was constructed, so Initialize
     // seeds m_runStartSeconds from it and totalTimeSec is the difference.
     Clock              m_clock;
     double             m_runStartSeconds = 0.0;
-    BenchmarkMetrics   m_metrics {};
+    Metrics   m_metrics {};
     std::vector<float> m_history;
 
     // Live bodies the benchmark itself created: the floor plus every dynamic

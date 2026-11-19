@@ -1,0 +1,26 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#pragma once
+
+#include <Zahlen/Math/Vec4.hpp>
+#include <UI/GUI.hpp>
+#include <Zahlen/Render/Vertex.hpp>
+#include <Zahlen/GUI/Font.hpp>
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+namespace ZHLN::GUI {
+
+auto AppendTextVertices(
+    VertexPosition*  outPos,
+    VertexSurface*   outSurface,
+    const FontAtlas& font,
+    std::string_view text,
+    float            x,
+    float            y,
+    float            scale,
+    const FVec4& color
+) -> uint32_t;
+}

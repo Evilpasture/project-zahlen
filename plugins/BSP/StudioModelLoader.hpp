@@ -3,14 +3,12 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include "BSPGeometry.hpp"
 #include "StudioModelTypes.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Vertex.hpp>
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -30,8 +28,8 @@ struct StudioMeshPart {
     std::vector<VertexSkin>         skinWeights;
     std::vector<uint32_t>           indices;
 
-    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMin {0.0f, 0.0f, 0.0f};
+    FVec3 boundsMax {0.0f, 0.0f, 0.0f};
 
     [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
         return static_cast<uint32_t>(positions.size());
@@ -42,7 +40,7 @@ struct StudioMeshPart {
 };
 
 struct StudioPhysicsConvex {
-    std::vector<JPH::Vec3> vertices;
+    std::vector<FVec3> vertices;
 };
 
 struct StudioPhysicsSolid {
@@ -53,8 +51,8 @@ struct StudioModelData {
     std::string                     name;
     int32_t                         version = 0;
     int32_t                         checksum = 0;
-    JPH::Float3                     hullMin {0.0f, 0.0f, 0.0f};
-    JPH::Float3                     hullMax {0.0f, 0.0f, 0.0f};
+    FVec3                          hullMin {0.0f, 0.0f, 0.0f};
+    FVec3                          hullMax {0.0f, 0.0f, 0.0f};
     std::vector<std::string>        textureSearchPaths; // cdtextures
     std::vector<std::string>        textureNames;       // textures
     std::vector<std::string>        materialNames;      // combined search paths for each texture index

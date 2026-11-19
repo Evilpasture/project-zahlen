@@ -169,12 +169,86 @@ inline constexpr bool EnableEnumFlags<KeyModifiers> = true;
 
 // --- Multi-Seat & Device Identity --------------------------------------------
 
-using PlayerSeat = uint8_t;
+inline constexpr size_t kMaxPlayerSeats = 4;
+inline constexpr size_t kMaxGamepads    = 4;
 
-inline constexpr PlayerSeat kPrimarySeat    = 0;
-inline constexpr PlayerSeat kUnassignedSeat = 0xFF;
-inline constexpr size_t     kMaxPlayerSeats = 4;
-inline constexpr size_t     kMaxGamepads    = 4;
+struct PlayerSeat {
+    uint8_t value = 0;
+
+    constexpr PlayerSeat() noexcept = default;
+    constexpr explicit PlayerSeat(uint8_t v) noexcept : value(v) {}
+
+    [[nodiscard]] constexpr auto IsValid() const noexcept -> bool {
+        return value < kMaxPlayerSeats;
+    }
+    [[nodiscard]] constexpr auto Index() const noexcept -> size_t {
+        return static_cast<size_t>(value);
+    }
+
+    constexpr auto operator==(const PlayerSeat&) const noexcept -> bool = default;
+};
+
+struct GamepadSlot {
+    uint8_t value = 0;
+
+    constexpr GamepadSlot() noexcept = default;
+    constexpr explicit GamepadSlot(uint8_t v) noexcept : value(v) {}
+
+    [[nodiscard]] constexpr auto IsValid() const noexcept -> bool {
+        return value < kMaxGamepads;
+    }
+    [[nodiscard]] constexpr auto Index() const noexcept -> size_t {
+        return static_cast<size_t>(value);
+    }
+
+    constexpr auto operator==(const GamepadSlot&) const noexcept -> bool = default;
+};
+
+inline constexpr PlayerSeat  kPrimarySeat        {0};
+inline constexpr PlayerSeat  kUnassignedSeat     {0xFF};
+inline constexpr GamepadSlot kInvalidGamepadSlot {0xFF};
+
+inline constexpr uint8_t kAllSeatsMaskBits = static_cast<uint8_t>((1U << kMaxPlayerSeats) - 1U);
+
+struct SeatMask {
+    uint8_t bits = 0;
+
+    constexpr SeatMask() noexcept = default;
+    constexpr explicit SeatMask(uint8_t b) noexcept : bits(static_cast<uint8_t>(b & kAllSeatsMaskBits)) {}
+
+    [[nodiscard]] static constexpr auto All() noexcept -> SeatMask {
+        return SeatMask {kAllSeatsMaskBits};
+    }
+    [[nodiscard]] static constexpr auto None() noexcept -> SeatMask {
+        return SeatMask {0};
+    }
+    [[nodiscard]] static constexpr auto FromSeat(PlayerSeat seat) noexcept -> SeatMask {
+        return seat.IsValid() ? SeatMask {static_cast<uint8_t>(1U << seat.value)} : None();
+    }
+
+    [[nodiscard]] constexpr auto Contains(PlayerSeat seat) const noexcept -> bool {
+        return seat.IsValid() && ((bits & (1U << seat.value)) != 0U);
+    }
+    constexpr void Set(PlayerSeat seat) noexcept {
+        if (seat.IsValid()) {
+            bits = static_cast<uint8_t>(bits | (1U << seat.value));
+        }
+    }
+    constexpr void Clear(PlayerSeat seat) noexcept {
+        if (seat.IsValid()) {
+            bits = static_cast<uint8_t>(bits & ~(1U << seat.value));
+        }
+    }
+
+    constexpr auto operator==(const SeatMask&) const noexcept -> bool = default;
+};
+
+struct UiCaptureState {
+    bool keyboard = false;
+    bool mouse    = false;
+
+    constexpr auto operator==(const UiCaptureState&) const noexcept -> bool = default;
+};
 
 enum class InputDeviceKind : uint8_t {
     KeyboardMouse = 0,
@@ -183,13 +257,13 @@ enum class InputDeviceKind : uint8_t {
 
 struct InputDeviceID {
     InputDeviceKind kind = InputDeviceKind::KeyboardMouse;
-    uint8_t         slot = 0;
+    GamepadSlot     slot {};
 
-    [[nodiscard]] static constexpr auto KeyboardMouse(uint8_t deviceSlot = 0) noexcept -> InputDeviceID {
+    [[nodiscard]] static constexpr auto KeyboardMouse(GamepadSlot deviceSlot = GamepadSlot {0}) noexcept -> InputDeviceID {
         return InputDeviceID {.kind = InputDeviceKind::KeyboardMouse, .slot = deviceSlot};
     }
 
-    [[nodiscard]] static constexpr auto Gamepad(uint8_t gamepadSlot) noexcept -> InputDeviceID {
+    [[nodiscard]] static constexpr auto Gamepad(GamepadSlot gamepadSlot) noexcept -> InputDeviceID {
         return InputDeviceID {.kind = InputDeviceKind::Gamepad, .slot = gamepadSlot};
     }
 
@@ -344,9 +418,23 @@ struct StickSample {
     return StickSample {.x = dirX * curved, .y = dirY * curved, .magnitude = curved};
 }
 
-struct GamepadRawSample {
+struct GamepadHardwareSample {
     std::array<bool, kGamepadButtonCount> buttons {};
     std::array<float, kGamepadAxisCount>  axes {};
+
+    constexpr void SetButton(GamepadButton button, bool down) noexcept {
+        const size_t idx = EnumIndex(button);
+        if (idx < kGamepadButtonCount) {
+            buttons[idx] = down;
+        }
+    }
+
+    constexpr void SetAxis(GamepadAxis axis, float value) noexcept {
+        const size_t idx = EnumIndex(axis);
+        if (idx < kGamepadAxisCount) {
+            axes[idx] = value;
+        }
+    }
 };
 
 struct GamepadState {
@@ -359,12 +447,12 @@ struct GamepadState {
     std::bitset<kGamepadButtonCount> pressedButtons {};
     std::bitset<kGamepadButtonCount> releasedButtons {};
 
-    std::array<float, kGamepadAxisCount> rawAxes {};
+    std::array<float, kGamepadAxisCount> hardwareAxes {};
 
-    uint8_t triggersDown         = 0;
-    uint8_t prevTriggersDown     = 0;
-    uint8_t pressedTriggersMask  = 0;
-    uint8_t releasedTriggersMask = 0;
+    EnumBitMask<GamepadAxis> triggersDown {};
+    EnumBitMask<GamepadAxis> prevTriggersDown {};
+    EnumBitMask<GamepadAxis> pressedTriggersMask {};
+    EnumBitMask<GamepadAxis> releasedTriggersMask {};
 
     DeadzoneConfig leftStickDeadzone {};
     DeadzoneConfig rightStickDeadzone {};
@@ -372,12 +460,12 @@ struct GamepadState {
     float          triggerButtonThreshold = 0.50f;
 
     void BeginFrame() noexcept {
-        prevButtonsDown      = buttonsDown;
+        prevButtonsDown = buttonsDown;
         pressedButtons.reset();
         releasedButtons.reset();
-        prevTriggersDown     = triggersDown;
-        pressedTriggersMask  = 0;
-        releasedTriggersMask = 0;
+        prevTriggersDown = triggersDown;
+        pressedTriggersMask.Reset();
+        releasedTriggersMask.Reset();
     }
 
     void ResetTransientState() noexcept {
@@ -385,15 +473,15 @@ struct GamepadState {
         prevButtonsDown.reset();
         pressedButtons.reset();
         releasedButtons.reset();
-        rawAxes.fill(0.0f);
-        triggersDown         = 0;
-        prevTriggersDown     = 0;
-        pressedTriggersMask  = 0;
-        releasedTriggersMask = 0;
+        hardwareAxes.fill(0.0f);
+        triggersDown.Reset();
+        prevTriggersDown.Reset();
+        pressedTriggersMask.Reset();
+        releasedTriggersMask.Reset();
     }
 
     void SetButton(GamepadButton button, bool down) noexcept {
-        const auto idx = static_cast<size_t>(button);
+        const size_t idx = EnumIndex(button);
         if (idx >= kGamepadButtonCount) {
             return;
         }
@@ -407,32 +495,31 @@ struct GamepadState {
     }
 
     void SetAxis(GamepadAxis axis, float value) noexcept {
-        const auto idx = static_cast<size_t>(axis);
+        const size_t idx = EnumIndex(axis);
         if (idx >= kGamepadAxisCount) {
             return;
         }
         if (axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger) {
             const float clamped = std::clamp(value, 0.0f, 1.0f);
-            rawAxes[idx]        = clamped;
-            const uint8_t bit   = (axis == GamepadAxis::LeftTrigger) ? (1U << 0U) : (1U << 1U);
-            const bool    down  = ApplyTriggerDeadzone(clamped, triggerDeadzone) >= triggerButtonThreshold;
-            const bool    was   = (triggersDown & bit) != 0;
+            hardwareAxes[idx]        = clamped;
+            const bool down     = ApplyTriggerDeadzone(clamped, triggerDeadzone) >= triggerButtonThreshold;
+            const bool was      = triggersDown.Contains(axis);
             if (down && !was) {
-                pressedTriggersMask |= bit;
+                pressedTriggersMask.Set(axis);
             } else if (!down && was) {
-                releasedTriggersMask |= bit;
+                releasedTriggersMask.Set(axis);
             }
             if (down) {
-                triggersDown |= bit;
+                triggersDown.Set(axis);
             } else {
-                triggersDown = static_cast<uint8_t>(triggersDown & ~bit);
+                triggersDown.Clear(axis);
             }
         } else {
-            rawAxes[idx] = std::clamp(value, -1.0f, 1.0f);
+            hardwareAxes[idx] = std::clamp(value, -1.0f, 1.0f);
         }
     }
 
-    void ApplySample(const GamepadRawSample& sample) noexcept {
+    void ApplySample(const GamepadHardwareSample& sample) noexcept {
         for (size_t i = 0; i < kGamepadButtonCount; ++i) {
             SetButton(static_cast<GamepadButton>(i), sample.buttons[i]);
         }
@@ -442,12 +529,12 @@ struct GamepadState {
     }
 
     [[nodiscard]] auto IsButtonDown(GamepadButton button) const noexcept -> bool {
-        const auto idx = static_cast<size_t>(button);
+        const size_t idx = EnumIndex(button);
         return connected && idx < kGamepadButtonCount && buttonsDown.test(idx);
     }
 
     [[nodiscard]] auto IsButtonPressed(GamepadButton button) const noexcept -> bool {
-        const auto idx = static_cast<size_t>(button);
+        const size_t idx = EnumIndex(button);
         if (!connected || idx >= kGamepadButtonCount) {
             return false;
         }
@@ -455,45 +542,43 @@ struct GamepadState {
     }
 
     [[nodiscard]] auto IsButtonHeld(GamepadButton button) const noexcept -> bool {
-        const auto idx = static_cast<size_t>(button);
+        const size_t idx = EnumIndex(button);
         return connected && idx < kGamepadButtonCount && buttonsDown.test(idx) && prevButtonsDown.test(idx) && !pressedButtons.test(idx);
     }
 
     [[nodiscard]] auto IsButtonReleased(GamepadButton button) const noexcept -> bool {
-        const auto idx = static_cast<size_t>(button);
+        const size_t idx = EnumIndex(button);
         if (!connected || idx >= kGamepadButtonCount) {
             return false;
         }
         return releasedButtons.test(idx) || (!buttonsDown.test(idx) && prevButtonsDown.test(idx));
     }
 
-    [[nodiscard]] auto RawAxis(GamepadAxis axis) const noexcept -> float {
-        const auto idx = static_cast<size_t>(axis);
-        return (connected && idx < kGamepadAxisCount) ? rawAxes[idx] : 0.0f;
+    [[nodiscard]] auto HardwareAxis(GamepadAxis axis) const noexcept -> float {
+        const size_t idx = EnumIndex(axis);
+        return (connected && idx < kGamepadAxisCount) ? hardwareAxes[idx] : 0.0f;
     }
 
     [[nodiscard]] auto LeftStick() const noexcept -> StickSample {
         if (!connected) {
             return {};
         }
-        return ApplyStickDeadzone(rawAxes[static_cast<size_t>(GamepadAxis::LeftX)], rawAxes[static_cast<size_t>(GamepadAxis::LeftY)], leftStickDeadzone);
+        return ApplyStickDeadzone(hardwareAxes[EnumIndex(GamepadAxis::LeftX)], hardwareAxes[EnumIndex(GamepadAxis::LeftY)], leftStickDeadzone);
     }
 
     [[nodiscard]] auto RightStick() const noexcept -> StickSample {
         if (!connected) {
             return {};
         }
-        return ApplyStickDeadzone(
-            rawAxes[static_cast<size_t>(GamepadAxis::RightX)], rawAxes[static_cast<size_t>(GamepadAxis::RightY)], rightStickDeadzone
-        );
+        return ApplyStickDeadzone(hardwareAxes[EnumIndex(GamepadAxis::RightX)], hardwareAxes[EnumIndex(GamepadAxis::RightY)], rightStickDeadzone);
     }
 
     [[nodiscard]] auto LeftTrigger() const noexcept -> float {
-        return connected ? ApplyTriggerDeadzone(rawAxes[static_cast<size_t>(GamepadAxis::LeftTrigger)], triggerDeadzone) : 0.0f;
+        return connected ? ApplyTriggerDeadzone(hardwareAxes[EnumIndex(GamepadAxis::LeftTrigger)], triggerDeadzone) : 0.0f;
     }
 
     [[nodiscard]] auto RightTrigger() const noexcept -> float {
-        return connected ? ApplyTriggerDeadzone(rawAxes[static_cast<size_t>(GamepadAxis::RightTrigger)], triggerDeadzone) : 0.0f;
+        return connected ? ApplyTriggerDeadzone(hardwareAxes[EnumIndex(GamepadAxis::RightTrigger)], triggerDeadzone) : 0.0f;
     }
 
     [[nodiscard]] auto Axis(GamepadAxis axis) const noexcept -> float {
@@ -518,38 +603,21 @@ struct GamepadState {
     }
 
     [[nodiscard]] auto IsTriggerDown(GamepadAxis axis) const noexcept -> bool {
-        if (!connected) {
-            return false;
-        }
-        if (axis == GamepadAxis::LeftTrigger) {
-            return (triggersDown & (1U << 0U)) != 0;
-        }
-        if (axis == GamepadAxis::RightTrigger) {
-            return (triggersDown & (1U << 1U)) != 0;
-        }
-        return false;
+        return connected && (axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger) && triggersDown.Contains(axis);
     }
 
     [[nodiscard]] auto IsTriggerPressed(GamepadAxis axis) const noexcept -> bool {
-        if (!connected) {
+        if (!connected || (axis != GamepadAxis::LeftTrigger && axis != GamepadAxis::RightTrigger)) {
             return false;
         }
-        const uint8_t bit = (axis == GamepadAxis::LeftTrigger) ? (1U << 0U) : ((axis == GamepadAxis::RightTrigger) ? (1U << 1U) : 0U);
-        if (bit == 0U) {
-            return false;
-        }
-        return (pressedTriggersMask & bit) != 0 || (((triggersDown & bit) != 0) && ((prevTriggersDown & bit) == 0));
+        return pressedTriggersMask.Contains(axis) || (triggersDown.Contains(axis) && !prevTriggersDown.Contains(axis));
     }
 
     [[nodiscard]] auto IsTriggerReleased(GamepadAxis axis) const noexcept -> bool {
-        if (!connected) {
+        if (!connected || (axis != GamepadAxis::LeftTrigger && axis != GamepadAxis::RightTrigger)) {
             return false;
         }
-        const uint8_t bit = (axis == GamepadAxis::LeftTrigger) ? (1U << 0U) : ((axis == GamepadAxis::RightTrigger) ? (1U << 1U) : 0U);
-        if (bit == 0U) {
-            return false;
-        }
-        return (releasedTriggersMask & bit) != 0 || (((triggersDown & bit) == 0) && ((prevTriggersDown & bit) != 0));
+        return releasedTriggersMask.Contains(axis) || (!triggersDown.Contains(axis) && prevTriggersDown.Contains(axis));
     }
 
     [[nodiscard]] auto HasAnyActivity() const noexcept -> bool {
@@ -578,18 +646,225 @@ struct GamepadRumble {
 };
 
 struct GamepadConnectionEvent {
-    uint8_t    gamepadSlot  = 0;
+    GamepadSlot gamepadSlot {};
     PlayerSeat assignedSeat = kUnassignedSeat;
     bool       connected    = false;
     String32   name {};
 };
 
+struct InputState {
+    PlayerSeat seat = kPrimarySeat;
+
+    std::bitset<kKeyCodeCount> keys {};
+    std::bitset<kKeyCodeCount> prevKeys {};
+    std::bitset<kKeyCodeCount> pressedKeys {};
+    std::bitset<kKeyCodeCount> releasedKeys {};
+
+    float mouseX      = 0.0f;
+    float mouseY      = 0.0f;
+    float mouseDeltaX = 0.0f;
+    float mouseDeltaY = 0.0f;
+    float mouseWheel  = 0.0f;
+
+    float lastX      = 0.0f;
+    float lastY      = 0.0f;
+    bool  firstMouse = true;
+
+    void BeginFrame() noexcept {
+        prevKeys = keys;
+        pressedKeys.reset();
+        releasedKeys.reset();
+        ResetDeltas();
+    }
+
+    void SetKey(KeyCode key, bool down) noexcept {
+        const size_t idx = EnumIndex(key);
+        if (key == KeyCode::Unknown || idx >= keys.size()) {
+            return;
+        }
+        const bool wasDown = keys.test(idx);
+        if (down && !wasDown) {
+            pressedKeys.set(idx);
+        } else if (!down && wasDown) {
+            releasedKeys.set(idx);
+        }
+        keys.set(idx, down);
+    }
+
+    void SetMouseButton(MouseButton button, bool down) noexcept {
+        SetKey(ToKeyCode(button), down);
+    }
+
+    void ApplyLocalMotion(float x, float y) noexcept {
+        mouseX = x;
+        mouseY = y;
+        if (firstMouse) {
+            lastX      = x;
+            lastY      = y;
+            firstMouse = false;
+        }
+        mouseDeltaX += (x - lastX);
+        mouseDeltaY += (y - lastY);
+        lastX = x;
+        lastY = y;
+    }
+
+    void ApplyRelativeMotion(float x, float y, float dx, float dy) noexcept {
+        mouseX     = x;
+        mouseY     = y;
+        lastX      = x;
+        lastY      = y;
+        firstMouse = false;
+        mouseDeltaX += dx;
+        mouseDeltaY += dy;
+    }
+
+    void ApplyWheel(float delta) noexcept {
+        mouseWheel += delta;
+    }
+
+    struct QueuedInput {
+        uint32_t codepoint = 0;
+        KeyCode  key       = KeyCode::Unknown;
+        bool     isChar    = false;
+    };
+    static constexpr size_t                  kMaxQueuedInput = 64;
+    std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
+    size_t                                   queuedInputCount = 0;
+
+    void QueueChar(uint32_t codepoint) noexcept {
+        if (queuedInputCount < kMaxQueuedInput) {
+            queuedInput[queuedInputCount++] = QueuedInput {.codepoint = codepoint, .isChar = true};
+        }
+    }
+
+    void QueueKeyPress(KeyCode key) noexcept {
+        if (queuedInputCount < kMaxQueuedInput) {
+            queuedInput[queuedInputCount++] = QueuedInput {.key = key, .isChar = false};
+        }
+    }
+
+    void ClearQueuedInput() noexcept {
+        queuedInputCount = 0;
+    }
+
+    void ResetDeltas() noexcept {
+        mouseDeltaX = 0.0f;
+        mouseDeltaY = 0.0f;
+        mouseWheel  = 0.0f;
+    }
+
+    // --- Physical Key Level & Edge Queries -----------------------------------
+    // InputState is pure physical input. Pass UiCaptureState to apply UI
+    // gating without duplicating queries; omit it (default) for physical.
+
+    [[nodiscard]] bool IsKeyDown(KeyCode key, UiCaptureState uiCapture = {}) const noexcept {
+        if (uiCapture.keyboard) {
+            return false;
+        }
+        const size_t idx = EnumIndex(key);
+        return key != KeyCode::Unknown && idx < keys.size() && keys.test(idx);
+    }
+
+    [[nodiscard]] bool IsKeyPressed(KeyCode key, UiCaptureState uiCapture = {}) const noexcept {
+        if (uiCapture.keyboard) {
+            return false;
+        }
+        const size_t idx = EnumIndex(key);
+        if (key == KeyCode::Unknown || idx >= keys.size()) {
+            return false;
+        }
+        return pressedKeys.test(idx) || (keys.test(idx) && !prevKeys.test(idx));
+    }
+
+    [[nodiscard]] bool IsKeyHeld(KeyCode key, UiCaptureState uiCapture = {}) const noexcept {
+        if (uiCapture.keyboard) {
+            return false;
+        }
+        const size_t idx = EnumIndex(key);
+        return key != KeyCode::Unknown && idx < keys.size() && keys.test(idx) && prevKeys.test(idx) && !pressedKeys.test(idx);
+    }
+
+    [[nodiscard]] bool IsKeyReleased(KeyCode key, UiCaptureState uiCapture = {}) const noexcept {
+        if (uiCapture.keyboard) {
+            return false;
+        }
+        const size_t idx = EnumIndex(key);
+        if (key == KeyCode::Unknown || idx >= keys.size()) {
+            return false;
+        }
+        return releasedKeys.test(idx) || (!keys.test(idx) && prevKeys.test(idx));
+    }
+
+    // --- Physical Mouse Button Level & Edge Queries --------------------------
+
+    [[nodiscard]] bool IsMouseButtonDown(MouseButton button, UiCaptureState uiCapture = {}) const noexcept {
+        return IsKeyDown(ToKeyCode(button), uiCapture);
+    }
+
+    [[nodiscard]] bool IsMouseButtonPressed(MouseButton button, UiCaptureState uiCapture = {}) const noexcept {
+        return IsKeyPressed(ToKeyCode(button), uiCapture);
+    }
+
+    [[nodiscard]] bool IsMouseButtonHeld(MouseButton button, UiCaptureState uiCapture = {}) const noexcept {
+        return IsKeyHeld(ToKeyCode(button), uiCapture);
+    }
+
+    [[nodiscard]] bool IsMouseButtonReleased(MouseButton button, UiCaptureState uiCapture = {}) const noexcept {
+        return IsKeyReleased(ToKeyCode(button), uiCapture);
+    }
+
+    // --- Physical Modifiers --------------------------------------------------
+
+    [[nodiscard]] auto Modifiers(UiCaptureState uiCapture = {}) const noexcept -> KeyModifiers {
+        if (uiCapture.keyboard) {
+            return KeyModifiers::None;
+        }
+        KeyModifiers mods = KeyModifiers::None;
+        if (IsKeyDown(KeyCode::LShift) || IsKeyDown(KeyCode::RShift)) {
+            mods |= KeyModifiers::Shift;
+        }
+        if (IsKeyDown(KeyCode::LControl) || IsKeyDown(KeyCode::RControl)) {
+            mods |= KeyModifiers::Ctrl;
+        }
+        if (IsKeyDown(KeyCode::LAlt) || IsKeyDown(KeyCode::RAlt)) {
+            mods |= KeyModifiers::Alt;
+        }
+        if (IsKeyDown(KeyCode::LSuper) || IsKeyDown(KeyCode::RSuper)) {
+            mods |= KeyModifiers::Super;
+        }
+        return mods;
+    }
+
+    [[nodiscard]] auto HasModifiers(KeyModifiers required, bool exact = true, UiCaptureState uiCapture = {}) const noexcept -> bool {
+        const KeyModifiers current = Modifiers(uiCapture);
+        return exact ? (current == required) : ((current & required) == required);
+    }
+
+    [[nodiscard]] float GetMouseDeltaX(UiCaptureState uiCapture = {}) const noexcept {
+        return uiCapture.mouse ? 0.0f : mouseDeltaX;
+    }
+
+    [[nodiscard]] float GetMouseDeltaY(UiCaptureState uiCapture = {}) const noexcept {
+        return uiCapture.mouse ? 0.0f : mouseDeltaY;
+    }
+
+    [[nodiscard]] float GetMouseWheel(UiCaptureState uiCapture = {}) const noexcept {
+        return uiCapture.mouse ? 0.0f : mouseWheel;
+    }
+};
+
+static_assert(std::is_trivially_copyable_v<PlayerSeat>);
+static_assert(std::is_trivially_copyable_v<GamepadSlot>);
+static_assert(std::is_trivially_copyable_v<SeatMask>);
+static_assert(std::is_trivially_copyable_v<UiCaptureState>);
 static_assert(std::is_trivially_copyable_v<InputDeviceID>);
 static_assert(std::is_trivially_copyable_v<DeadzoneConfig>);
 static_assert(std::is_trivially_copyable_v<StickSample>);
-static_assert(std::is_trivially_copyable_v<GamepadRawSample>);
+static_assert(std::is_trivially_copyable_v<GamepadHardwareSample>);
 static_assert(std::is_trivially_copyable_v<GamepadState>);
 static_assert(std::is_trivially_copyable_v<GamepadRumble>);
 static_assert(std::is_trivially_copyable_v<GamepadConnectionEvent>);
+static_assert(std::is_trivially_copyable_v<InputState>);
 
 } // namespace ZHLN

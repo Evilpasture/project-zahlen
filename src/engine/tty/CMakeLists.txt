@@ -6,8 +6,7 @@ set(RAW_TTY_SOURCES
     TTYBackend.cpp
 )
 
-zahlen_transpile_sources(TTY_SOURCES ${RAW_TTY_SOURCES})
-target_sources(zahlen_engine PRIVATE ${TTY_SOURCES})
+target_sources(zahlen_engine PRIVATE ${RAW_TTY_SOURCES})
 
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

@@ -1,15 +1,13 @@
 # Installed interfaces for Zahlen engine packages, independent of the OS package
-# manager. Nothing here needs privileges: the payload installs into whatever
-# prefix the caller owns, and `zpkg` (utils/zpkg) is what governs the per-user
-# store under ${XDG_DATA_HOME}/zahlen. The only OS-packaged piece is /usr/bin/zpkg.
+# manager. ZahlenEngine ships the single shared library (libzahlen_engine.so)
+# and the stripped public COM/Core headers; all optional extensions and plugins
+# ship as relocatable source/header packages compiled by the consumer's own
+# toolchain against Zahlen::Engine (zero prebuilt .a archives, zero Jolt leaks).
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Toolchain packaging supports Linux only")
 endif()
-
-# The existing engine is shared; optional packages are static. Native exports
-# preserve their PRIVATE dependencies as LINK_ONLY, including Serialization.
 if(ZHLN_USE_CUSTOM_LIBCXX)
     message(FATAL_ERROR "Toolchain packaging requires the system libstdc++ toolchain")
 endif()
@@ -22,47 +20,44 @@ endif()
 if(TARGET zahlen_serialization)
     find_package(simdjson CONFIG REQUIRED)
 endif()
+
 set(ZHLN_TOOLCHAIN_PROFILE release)
 if(USE_SANITIZERS)
     set(ZHLN_TOOLCHAIN_PROFILE asan-ubsan)
 endif()
-# Capture the standard-library ABI selected by this toolchain, not merely its
-# compiler brand (Clang can use either libc++ or libstdc++).
+
+# Verify libstdc++ dual-ABI setting and forbid debug containers. Deliberately
+# ignore __GLIBCXX__ release date, exact compiler patch version, and git commit
+# hash so packages travel across Linux distros that meet the glibc/GLIBCXX floor.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/toolchain-stl.cpp" "#include <string>\n")
 separate_arguments(_toolchain_flags NATIVE_COMMAND "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
 execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${_toolchain_flags} -dM -E -x c++
     "${CMAKE_CURRENT_BINARY_DIR}/toolchain-stl.cpp"
     OUTPUT_VARIABLE _toolchain_macros COMMAND_ERROR_IS_FATAL ANY)
-foreach(macro __GLIBCXX__ _GLIBCXX_USE_CXX11_ABI)
-    if(NOT _toolchain_macros MATCHES "#define ${macro} ([0-9]+)")
-        message(FATAL_ERROR "Toolchain packaging requires libstdc++ (${macro} missing)")
-    endif()
-    set(ZHLN_TOOLCHAIN_${macro} "${CMAKE_MATCH_1}")
-endforeach()
+if(NOT _toolchain_macros MATCHES "#define _GLIBCXX_USE_CXX11_ABI ([0-9]+)")
+    message(FATAL_ERROR "Toolchain packaging requires libstdc++ (_GLIBCXX_USE_CXX11_ABI missing)")
+endif()
+set(ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI "${CMAKE_MATCH_1}")
 if(_toolchain_macros MATCHES "#define _GLIBCXX_DEBUG[ \t\r\n]")
     message(FATAL_ERROR "Toolchain packaging does not support libstdc++ debug containers")
 endif()
-get_target_property(_toolchain_jolt_defs Jolt INTERFACE_COMPILE_DEFINITIONS)
-get_target_property(_toolchain_jolt_options Jolt INTERFACE_COMPILE_OPTIONS)
-# Commit identity intentionally makes toolchain upgrades atomic, even before a
-# stable ABI exists: a new commit is a new toolchain, never an in-place upgrade.
-set(ZHLN_TOOLCHAIN_ABI "${PROJECT_VERSION}-${ZHLN_GIT_HASH}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}-${CMAKE_SYSTEM_PROCESSOR}-${ZHLN_TOOLCHAIN_PROFILE}")
 
-string(SHA256 ZHLN_TOOLCHAIN_ABI "${ZHLN_TOOLCHAIN_ABI};${CMAKE_CXX_FLAGS};${CMAKE_CXX_FLAGS_RELEASE};${_toolchain_jolt_defs};${_toolchain_jolt_options};${ZHLN_NO_ANNOTATION_EXTRACT};${ZHLN_DEV_MODE};${ZHLN_BUILD_RENDER};${ZHLN_TOOLCHAIN___GLIBCXX__};${ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI}")
-
-# The human-facing, filesystem-safe toolchain id. It names the store directory,
-# the artifact files and the `${prefix}` that zpkg reports. It is derived from
-# exactly the inputs hashed above, so an id can never describe two ABIs.
-string(TOLOWER "${PROJECT_VERSION}-${ZHLN_GIT_HASH}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}-${CMAKE_SYSTEM_PROCESSOR}-${ZHLN_TOOLCHAIN_PROFILE}"
+# Stable cross-distro ABI identity: project version + compiler family + CPU +
+# sanitizer profile + binary-affecting engine switches (no compiler patch
+# version, no git hash, no __GLIBCXX__ date, no Jolt flags).
+string(TOLOWER "${PROJECT_VERSION}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_SYSTEM_PROCESSOR}-${ZHLN_TOOLCHAIN_PROFILE}"
     ZHLN_TOOLCHAIN_ID)
-set(ZHLN_TOOLCHAIN_METADATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/toolchain")
+string(SHA256 ZHLN_TOOLCHAIN_ABI
+    "${ZHLN_TOOLCHAIN_ID};cxx11_abi=${ZHLN_TOOLCHAIN__GLIBCXX_USE_CXX11_ABI};no_annot=${ZHLN_NO_ANNOTATION_EXTRACT};dev_in_pkg=${ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES};render=${ZHLN_BUILD_RENDER}")
 
-# Shipped inside every package, so an archive identifies itself no matter what
-# it was renamed to on disk. zpkg reads this before it extracts anything.
+set(ZHLN_TOOLCHAIN_METADATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/toolchain")
+file(MAKE_DIRECTORY "${ZHLN_TOOLCHAIN_METADATA_DIR}")
+
+# Shipped inside every package; commit and compiler_version stay recorded as
+# provenance metadata without locking the ABI hash or package id.
 file(WRITE "${ZHLN_TOOLCHAIN_METADATA_DIR}/toolchain.json"
     "{\"format\":1,\"id\":\"${ZHLN_TOOLCHAIN_ID}\",\"version\":\"${PROJECT_VERSION}\",\"commit\":\"${ZHLN_GIT_HASH}\",\"compiler\":\"${CMAKE_CXX_COMPILER_ID}\",\"compiler_version\":\"${CMAKE_CXX_COMPILER_VERSION}\",\"processor\":\"${CMAKE_SYSTEM_PROCESSOR}\",\"profile\":\"${ZHLN_TOOLCHAIN_PROFILE}\",\"abi\":\"${ZHLN_TOOLCHAIN_ABI}\"}\n")
 
-# Make existing include roots relocatable without changing in-tree behavior.
 function(zhln_toolchain_interface target)
     foreach(prop INCLUDE_DIRECTORIES INTERFACE_INCLUDE_DIRECTORIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
         get_target_property(dirs ${target} ${prop})
@@ -81,7 +76,6 @@ function(zhln_toolchain_interface target)
             set_property(TARGET ${target} PROPERTY ${prop} "${new_dirs}")
         endif()
     endforeach()
-    # Diagnostics are build policy, never a consumer link dependency.
     get_target_property(build_links ${target} LINK_LIBRARIES)
     if(build_links)
         string(REPLACE "zahlen_warnings" "$<BUILD_LOCAL_INTERFACE:zahlen_warnings>" build_links "${build_links}")
@@ -96,11 +90,6 @@ function(zhln_toolchain_interface target)
     target_compile_features(${target} INTERFACE cxx_std_26)
 endfunction()
 
-# Machine-readable metadata for zpkg, written here because this file is the only
-# place that knows a component's package name, its exported targets and its
-# declared dependencies. The old split-package recipe hand-copied that graph into
-# a shell array, and the copy drifted from the CMake one. Now there is one
-# source and the archives carry it.
 function(zhln_toolchain_manifest package component)
     cmake_parse_arguments(M "" "" "REQUIRES;PROVIDES" ${ARGN})
     file(MAKE_DIRECTORY "${ZHLN_TOOLCHAIN_METADATA_DIR}/manifests")
@@ -114,70 +103,67 @@ function(zhln_toolchain_manifest package component)
     endif()
     file(WRITE "${ZHLN_TOOLCHAIN_METADATA_DIR}/manifests/${package}.json"
         "{\"format\":1,\"package\":\"${package}\",\"component\":\"${component}\",\"toolchain\":\"${ZHLN_TOOLCHAIN_ID}\",\"profile\":\"${ZHLN_TOOLCHAIN_PROFILE}\",\"requires\":[${_requires}],\"provides\":[${_provides}]}\n")
-    # Every package carries the toolchain descriptor so an archive identifies
-    # itself wherever it ends up. zpkg refuses a toolchain it cannot name.
     install(FILES "${ZHLN_TOOLCHAIN_METADATA_DIR}/toolchain.json"
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen COMPONENT Zahlen${component})
     install(FILES "${ZHLN_TOOLCHAIN_METADATA_DIR}/manifests/${package}.json"
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/manifests COMPONENT Zahlen${component})
 endfunction()
 
-# One export set and install component per package. Dependencies are explicit;
-# CMake itself checks that every linked non-imported target is exported.
-function(zhln_toolchain_package name)
+function(_zhln_write_package_config name depends)
+    set(ZHLN_TOOLCHAIN_DEPENDENCIES "")
+    foreach(dep IN LISTS depends)
+        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES "find_dependency(Zahlen${dep} ${PROJECT_VERSION} CONFIG)\n")
+    endforeach()
+    if(name STREQUAL "Serialization")
+        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES "find_dependency(simdjson CONFIG)\n")
+    endif()
+    if(name STREQUAL "Lua")
+        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES [=[
+if(NOT TARGET LuaJIT)
+    find_library(_zahlen_luajit NAMES luajit-5.1 luajit REQUIRED)
+    find_path(_zahlen_luajit_inc NAMES lua.hpp PATH_SUFFIXES luajit-2.1 luajit-2.0 REQUIRED)
+    add_library(LuaJIT INTERFACE IMPORTED)
+    set_property(TARGET LuaJIT PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_zahlen_luajit_inc}")
+    set_property(TARGET LuaJIT PROPERTY INTERFACE_LINK_LIBRARIES "${_zahlen_luajit};${CMAKE_DL_LIBS};m")
+endif()
+]=])
+    endif()
+    set(dest ${CMAKE_INSTALL_LIBDIR}/cmake/Zahlen${name})
+    set(ZHLN_TOOLCHAIN_PACKAGE ${name})
+    configure_package_config_file(${PROJECT_SOURCE_DIR}/cmake/toolchain/PackageConfig.cmake.in
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/Zahlen${name}Config.cmake
+        INSTALL_DESTINATION ${dest})
+    write_basic_package_version_file(${ZHLN_TOOLCHAIN_METADATA_DIR}/Zahlen${name}ConfigVersion.cmake
+        VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+    install(FILES
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/Zahlen${name}Config.cmake
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/Zahlen${name}ConfigVersion.cmake
+        DESTINATION ${dest} COMPONENT Zahlen${name})
+endfunction()
+
+# Binary shared-library package (used SOLELY for ZahlenEngine -> libzahlen_engine.so).
+function(zhln_toolchain_binary_package name)
     cmake_parse_arguments(P "" "" "TARGETS;DEPENDS;HEADERS" ${ARGN})
     list(GET P_TARGETS 0 first_target)
     if(NOT TARGET ${first_target})
         return()
-    endif()
-    set(ZHLN_TOOLCHAIN_DEPENDENCIES "")
-    foreach(dep IN LISTS P_DEPENDS)
-        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES "find_dependency(Zahlen${dep} ${PROJECT_VERSION} EXACT CONFIG)\n")
-    endforeach()
-    if(name STREQUAL "Serialization")
-        string(APPEND ZHLN_TOOLCHAIN_DEPENDENCIES "find_dependency(simdjson CONFIG)\n")
     endif()
     foreach(target IN LISTS P_TARGETS)
         zhln_toolchain_interface(${target})
         set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN")
         install(TARGETS ${target} EXPORT Zahlen${name}Targets
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Zahlen${name}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Zahlen${name}
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Zahlen${name}
-            FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/zahlen/modules
-                COMPONENT Zahlen${name})
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Zahlen${name})
     endforeach()
     foreach(dir IN LISTS P_HEADERS)
-        set(header_dest "${CMAKE_INSTALL_INCLUDEDIR}")
-        if(NOT dir STREQUAL "include" AND NOT dir STREQUAL "app/include")
-            get_filename_component(leaf "${dir}" NAME)
-            string(APPEND header_dest "/${leaf}")
-        endif()
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/${dir}/"
-            DESTINATION ${header_dest} COMPONENT Zahlen${name}
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT Zahlen${name}
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inl")
     endforeach()
-    set(dest ${CMAKE_INSTALL_LIBDIR}/cmake/Zahlen${name})
-    set(ZHLN_TOOLCHAIN_PACKAGE ${name})
-    configure_package_config_file(${PROJECT_SOURCE_DIR}/cmake/toolchain/PackageConfig.cmake.in
-        ${CMAKE_CURRENT_BINARY_DIR}/toolchain/Zahlen${name}Config.cmake
-        INSTALL_DESTINATION ${dest})
-    write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/toolchain/Zahlen${name}ConfigVersion.cmake
-        VERSION ${PROJECT_VERSION} COMPATIBILITY ExactVersion)
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/toolchain/Zahlen${name}Config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/toolchain/Zahlen${name}ConfigVersion.cmake
-        DESTINATION ${dest} COMPONENT Zahlen${name})
+    _zhln_write_package_config("${name}" "${P_DEPENDS}")
     install(EXPORT Zahlen${name}Targets NAMESPACE Zahlen::
-        DESTINATION ${dest} COMPONENT Zahlen${name}
-        CXX_MODULES_DIRECTORY cxx-modules)
-    # The manifest states the dependency graph once. zpkg reads it from the
-    # archive, so nothing else has to keep a second copy of it.
-    string(TOLOWER "${name}" _package_leaf)
-    set(_requires "")
-    foreach(dep IN LISTS P_DEPENDS)
-        string(TOLOWER "${dep}" _dep_leaf)
-        list(APPEND _requires "zahlen-${_dep_leaf}")
-    endforeach()
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Zahlen${name} COMPONENT Zahlen${name})
+    string(TOLOWER "${name}" _pkg_leaf)
     set(_provides "")
     foreach(target IN LISTS P_TARGETS)
         get_target_property(_export_name ${target} EXPORT_NAME)
@@ -186,104 +172,473 @@ function(zhln_toolchain_package name)
         endif()
         list(APPEND _provides "Zahlen::${_export_name}")
     endforeach()
-    zhln_toolchain_manifest("zahlen-${_package_leaf}" "${name}"
+    zhln_toolchain_manifest("zahlen-${_pkg_leaf}" "${name}" PROVIDES ${_provides})
+endfunction()
+
+# Source/header package for optional COM extensions and plugins. Ships ZERO .a
+# archives: consumer toolchains compile the installed sources directly against
+# Zahlen::Engine using their own compiler version, flags, and build type.
+function(zhln_toolchain_source_package name)
+    cmake_parse_arguments(P "ENABLE_C;NO_REFLECTION" "CHECK_TARGET;EXPORT_NAME;ALIAS_NAME"
+        "DEPENDS;HEADER_DIRS;HEADER_FILES;HEADER_DEST;SOURCES;MODULES;PUBLIC_LINKS;PRIVATE_LINKS;PRIVATE_DEFS;VENDORED_HEADERS" ${ARGN})
+    if(P_CHECK_TARGET AND NOT TARGET ${P_CHECK_TARGET})
+        return()
+    endif()
+    if(NOT P_EXPORT_NAME)
+        set(P_EXPORT_NAME "${name}")
+    endif()
+    string(TOLOWER "${name}" _pkg_leaf)
+    set(_src_rel "${CMAKE_INSTALL_DATADIR}/zahlen/src/${_pkg_leaf}")
+
+    # Install public headers (and track leaf subdirs so sibling #include "Foo.hpp" resolves)
+    set(_priv_inc_subdirs "")
+    foreach(dir IN LISTS P_HEADER_DIRS)
+        set(_hdest "${CMAKE_INSTALL_INCLUDEDIR}")
+        if(NOT dir STREQUAL "include" AND NOT dir STREQUAL "app/include")
+            get_filename_component(_leaf "${dir}" NAME)
+            string(APPEND _hdest "/${_leaf}")
+            list(APPEND _priv_inc_subdirs "${_leaf}")
+        endif()
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/${dir}/"
+            DESTINATION "${_hdest}" COMPONENT Zahlen${name}
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inl")
+    endforeach()
+    if(P_HEADER_FILES)
+        set(_fdest "${CMAKE_INSTALL_INCLUDEDIR}")
+        if(P_HEADER_DEST)
+            string(APPEND _fdest "/${P_HEADER_DEST}")
+            list(APPEND _priv_inc_subdirs "${P_HEADER_DEST}")
+        endif()
+        set(_abs_hfiles "")
+        foreach(hf IN LISTS P_HEADER_FILES)
+            list(APPEND _abs_hfiles "${PROJECT_SOURCE_DIR}/${hf}")
+        endforeach()
+        install(FILES ${_abs_hfiles} DESTINATION "${_fdest}" COMPONENT Zahlen${name})
+    endif()
+
+    # Install optional private vendored single-header dependencies (e.g. stb, cgltf)
+    set(_has_vendored FALSE)
+    if(P_VENDORED_HEADERS)
+        set(_has_vendored TRUE)
+        set(_abs_vfiles "")
+        foreach(vf IN LISTS P_VENDORED_HEADERS)
+            list(APPEND _abs_vfiles "${PROJECT_SOURCE_DIR}/${vf}")
+        endforeach()
+        install(FILES ${_abs_vfiles} DESTINATION "${_src_rel}/vendor" COMPONENT Zahlen${name})
+    endif()
+
+    # Install implementation sources & C++20/26 module units
+    set(_rel_sources "")
+    foreach(sf IN LISTS P_SOURCES)
+        get_filename_component(_sname "${sf}" NAME)
+        install(FILES "${PROJECT_SOURCE_DIR}/${sf}" DESTINATION "${_src_rel}" COMPONENT Zahlen${name})
+        list(APPEND _rel_sources "\${_zhln_src_dir}/${_sname}")
+    endforeach()
+    set(_rel_modules "")
+    foreach(mf IN LISTS P_MODULES)
+        get_filename_component(_mname "${mf}" NAME)
+        install(FILES "${PROJECT_SOURCE_DIR}/${mf}" DESTINATION "${_src_rel}" COMPONENT Zahlen${name})
+        list(APPEND _rel_modules "\${_zhln_src_dir}/${_mname}")
+    endforeach()
+
+    # Generate relocatable Zahlen<Name>Targets.cmake
+    set(_tname "zahlen_pkg_${_pkg_leaf}")
+    set(_script "# Generated source-package target for Zahlen::${P_EXPORT_NAME} (no prebuilt .a)\n")
+    string(APPEND _script "if(NOT TARGET Zahlen::${P_EXPORT_NAME})\n")
+    string(APPEND _script "  get_filename_component(_zhln_pkg_prefix \"\${CMAKE_CURRENT_LIST_DIR}/../../..\" ABSOLUTE)\n")
+    string(APPEND _script "  set(_zhln_inc_dir \"\${_zhln_pkg_prefix}/${CMAKE_INSTALL_INCLUDEDIR}\")\n")
+    if(P_ENABLE_C)
+        string(APPEND _script "  enable_language(C)\n")
+    endif()
+    if(_rel_sources OR _rel_modules)
+        string(APPEND _script "  set(_zhln_src_dir \"\${_zhln_pkg_prefix}/${_src_rel}\")\n")
+        string(APPEND _script "  add_library(${_tname} STATIC EXCLUDE_FROM_ALL ${_rel_sources})\n")
+        string(APPEND _script "  set_target_properties(${_tname} PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON)\n")
+        if(P_ENABLE_C)
+            string(APPEND _script "  set_target_properties(${_tname} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)\n")
+        endif()
+        if(_rel_modules)
+            string(APPEND _script "  target_sources(${_tname} PUBLIC FILE_SET CXX_MODULES TYPE CXX_MODULES BASE_DIRS \"\${_zhln_src_dir}\" FILES ${_rel_modules})\n")
+        endif()
+        string(APPEND _script "  target_include_directories(${_tname} SYSTEM PUBLIC \"\${_zhln_inc_dir}\")\n")
+        list(REMOVE_DUPLICATES _priv_inc_subdirs)
+        foreach(_sub IN LISTS _priv_inc_subdirs)
+            string(APPEND _script "  target_include_directories(${_tname} PRIVATE \"\${_zhln_inc_dir}/${_sub}\")\n")
+        endforeach()
+        if(_has_vendored)
+            string(APPEND _script "  target_include_directories(${_tname} SYSTEM PRIVATE \"\${_zhln_src_dir}/vendor\")\n")
+            string(APPEND _script "  target_compile_options(${_tname} PRIVATE \"--embed-dir=\${_zhln_src_dir}/vendor\")\n")
+        endif()
+        string(APPEND _script "  target_compile_features(${_tname} PUBLIC cxx_std_26)\n")
+        string(APPEND _script "  target_compile_options(${_tname} PUBLIC \"\$<\$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>\")\n")
+        if(NOT P_NO_REFLECTION AND NOT ZHLN_TOOLCHAIN_REFLECTION_FLAGS STREQUAL "")
+            string(APPEND _script "  target_compile_options(${_tname} PUBLIC \"\$<\$<COMPILE_LANGUAGE:CXX>:${ZHLN_TOOLCHAIN_REFLECTION_FLAGS}>\")\n")
+        endif()
+        if(P_PUBLIC_LINKS)
+            string(APPEND _script "  target_link_libraries(${_tname} PUBLIC ${P_PUBLIC_LINKS})\n")
+        endif()
+        if(USE_SANITIZERS AND NOT P_PUBLIC_LINKS)
+            string(APPEND _script "  target_compile_options(${_tname} PUBLIC -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)\n")
+            string(APPEND _script "  target_link_options(${_tname} PUBLIC -fsanitize=address,undefined -fno-sanitize=vptr)\n")
+            string(APPEND _script "  target_compile_definitions(${_tname} PUBLIC __ASAN_ENABLED__ ZHLN_SANITIZER_BUILD=1)\n")
+        endif()
+        if(P_PRIVATE_LINKS)
+            string(APPEND _script "  target_link_libraries(${_tname} PRIVATE ${P_PRIVATE_LINKS})\n")
+        endif()
+        if(P_PRIVATE_DEFS)
+            string(APPEND _script "  target_compile_definitions(${_tname} PRIVATE ${P_PRIVATE_DEFS})\n")
+        endif()
+        string(APPEND _script "  add_library(Zahlen::${P_EXPORT_NAME} ALIAS ${_tname})\n")
+        if(P_ALIAS_NAME)
+            string(APPEND _script "  add_library(Zahlen::${P_ALIAS_NAME} ALIAS ${_tname})\n")
+        endif()
+        string(APPEND _script "  unset(_zhln_src_dir)\n")
+    else()
+        # Pure header-only package
+        string(APPEND _script "  add_library(${_tname} INTERFACE)\n")
+        string(APPEND _script "  target_include_directories(${_tname} SYSTEM INTERFACE \"\${_zhln_inc_dir}\")\n")
+        string(APPEND _script "  target_compile_features(${_tname} INTERFACE cxx_std_26)\n")
+        if(NOT P_NO_REFLECTION AND NOT ZHLN_TOOLCHAIN_REFLECTION_FLAGS STREQUAL "")
+            string(APPEND _script "  target_compile_options(${_tname} INTERFACE \"\$<\$<COMPILE_LANGUAGE:CXX>:${ZHLN_TOOLCHAIN_REFLECTION_FLAGS}>\")\n")
+        endif()
+        if(P_PUBLIC_LINKS)
+            string(APPEND _script "  target_link_libraries(${_tname} INTERFACE ${P_PUBLIC_LINKS})\n")
+        endif()
+        string(APPEND _script "  add_library(Zahlen::${P_EXPORT_NAME} ALIAS ${_tname})\n")
+        if(P_ALIAS_NAME)
+            string(APPEND _script "  add_library(Zahlen::${P_ALIAS_NAME} ALIAS ${_tname})\n")
+        endif()
+    endif()
+    string(APPEND _script "  unset(_zhln_inc_dir)\n  unset(_zhln_pkg_prefix)\nendif()\n")
+
+    set(_targets_file "${ZHLN_TOOLCHAIN_METADATA_DIR}/Zahlen${name}Targets.cmake")
+    file(WRITE "${_targets_file}" "${_script}")
+    _zhln_write_package_config("${name}" "${P_DEPENDS}")
+    install(FILES "${_targets_file}"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Zahlen${name}" COMPONENT Zahlen${name})
+
+    set(_requires "")
+    foreach(dep IN LISTS P_DEPENDS)
+        string(TOLOWER "${dep}" _dep_leaf)
+        list(APPEND _requires "zahlen-${_dep_leaf}")
+    endforeach()
+    set(_provides "Zahlen::${P_EXPORT_NAME}")
+    if(P_ALIAS_NAME)
+        list(APPEND _provides "Zahlen::${P_ALIAS_NAME}")
+    endif()
+    zhln_toolchain_manifest("zahlen-${_pkg_leaf}" "${name}"
         REQUIRES ${_requires} PROVIDES ${_provides})
 endfunction()
 
-# Public installed names, including helper libraries needed by static consumers.
-foreach(pair "engine;Engine" "application;Application" "host_runner;HostRunner"
-        "command_line;CommandLine" "signal;Signal" "gltf;GLTF"
-        "netpbm;Netpbm" "screenshot;Screenshot" "serialization;Serialization" "ui_schema;UISchema"
-        "animation;Animation" "skeletal_animation;SkeletalAnimation"
-        "character_controller;CharacterController" "camera;Camera" "freecam;FreeCam")
-    list(GET pair 0 internal)
-    list(GET pair 1 public)
-    if(TARGET zahlen_${internal})
-        set_target_properties(zahlen_${internal} PROPERTIES EXPORT_NAME ${public})
-    endif()
-endforeach()
-set_target_properties(Jolt PROPERTIES EXPORT_NAME Jolt)
+# --- 1. Core shared-library package: libzahlen_engine.so ONLY ---------------
+set_target_properties(zahlen_engine PROPERTIES EXPORT_NAME Engine)
 if(USE_SANITIZERS)
     target_compile_options(zahlen_engine INTERFACE -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
     target_link_options(zahlen_engine INTERFACE -fsanitize=address,undefined -fno-sanitize=vptr)
     target_compile_definitions(zahlen_engine INTERFACE __ASAN_ENABLED__ ZHLN_SANITIZER_BUILD=1)
 endif()
-if(ZHLN_DEV_MODE)
+if(ZHLN_DEV_MODE AND ZHLN_DEV_MODE_IN_INSTALLED_PACKAGES)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_DEV_MODE)
 endif()
 if(ZHLN_NO_ANNOTATION_EXTRACT)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
-zhln_toolchain_package(Engine TARGETS zahlen_engine Jolt HEADERS include)
-# The sanitizer option hooks must be linked into the consumer's executable:
-# libasan's weak stubs shadow anything defined inside libzahlen_engine.so, and
-# an exported INTERFACE source cannot carry a relocatable path, so the object is
-# installed next to the toolchain and ZahlenEngineConfig.cmake attaches it. The rules
-# are already compiled into this object; there is no runtime file to find.
+zhln_toolchain_binary_package(Engine TARGETS zahlen_engine HEADERS include)
 if(TARGET zahlen_sanitizer_options)
     install(FILES $<TARGET_OBJECTS:zahlen_sanitizer_options>
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen
         RENAME zahlen_sanitizer_options.o
         COMPONENT ZahlenEngine)
 endif()
-# Jolt's headers must retain their Jolt/ prefix.
-install(DIRECTORY extern/JoltPhysics/Jolt DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT ZahlenEngine FILES_MATCHING PATTERN "*.h" PATTERN "*.inl")
-zhln_toolchain_package(CommandLine TARGETS zahlen_command_line HEADERS extensions/CommandLine)
-zhln_toolchain_package(Signal TARGETS zahlen_signal DEPENDS Engine HEADERS extensions/Signal)
-zhln_toolchain_package(HostRunner TARGETS zahlen_host_runner DEPENDS Engine CommandLine Signal)
-zhln_toolchain_package(Application TARGETS zahlen_application DEPENDS Engine CommandLine HostRunner)
-install(FILES app/include/Zahlen/HostRunner.hpp app/include/Zahlen/KernelApp.hpp
-    app/include/Zahlen/AppOutcome.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
-    COMPONENT ZahlenHostRunner)
-install(FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp
-    app/include/Zahlen/Zahlen.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen
-    COMPONENT ZahlenApplication)
-zhln_toolchain_package(Netpbm TARGETS zahlen_netpbm DEPENDS Engine HEADERS plugins/netpbm)
-zhln_toolchain_package(Screenshot TARGETS zahlen_screenshot DEPENDS Engine HEADERS extensions/Screenshot)
-zhln_toolchain_package(UISchema TARGETS zahlen_ui_schema DEPENDS Engine HEADERS extensions/UI)
-# UISchema is a HEADER dependency of toml/UITOML.hpp, not a link in the
-# exported interface: the installed extensions/UI/*.hpp must exist for a
-# consumer to compile that header, so the package still declares it.
-zhln_toolchain_package(Serialization TARGETS zahlen_serialization DEPENDS Engine UISchema HEADERS plugins/json plugins/toml)
-zhln_toolchain_package(GLTF TARGETS zahlen_gltf DEPENDS Engine Serialization HEADERS plugins/glTF)
-zhln_toolchain_package(FreeCam TARGETS zahlen_freecam DEPENDS Engine HEADERS extensions/FreeCam)
-zhln_toolchain_package(Camera TARGETS zahlen_camera DEPENDS Engine HEADERS extensions/Camera)
-zhln_toolchain_package(CharacterController TARGETS zahlen_character_controller DEPENDS Engine HEADERS extensions/CharacterController)
-zhln_toolchain_package(SkeletalAnimation TARGETS zahlen_skeletal_animation DEPENDS Engine HEADERS extensions/Animation)
-zhln_toolchain_package(Animation TARGETS zahlen_animation DEPENDS Engine SkeletalAnimation CharacterController Camera FreeCam)
-# Serialization is a PRIVATE link of the plugin, which the export rewrites to
-# $<LINK_ONLY:...>; the exported interface still names Zahlen::Serialization, so
-# the package has to declare it or the consumer's find_package() fails on it.
-zhln_toolchain_package(Fonts TARGETS zahlen_fonts DEPENDS Engine Serialization HEADERS plugins/Fonts)
-# A font package with no font in it leaves the consumer back on the compiled-in
-# 32 px raster, which is exactly the state this package exists to end: the plugin
-# owns the fontbm .fnt + atlas path, and these 50 KB are what it feeds. The
-# vendored faces are licence-clean and already in the tree, so they travel with
-# the code that parses them.
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/fonts/JetBrainsMonoNerdFontRegular
-    COMPONENT ZahlenFonts)
 
-# --- Tools, not content ----------------------------------------------------
-# There is deliberately no Data package. What used to be one was the sandbox's
-# cooked pack plus the whole resources/ tree, and a consumer needs neither: the
-# renderer #embeds its shaders (ShaderCompilation.cmake), src/gui/FontLoader.cpp
-# #embeds the default font, and Kernel.cpp only logs a warning when
-# data/base.pak is absent. A pack belongs to whoever owns the scene -- this
-# repository cooks one for its own samples, and an application cooks its own.
-#
-# Shipping it also coupled every toolchain build to the asset pipeline: the
-# install rule copied a custom-target artifact, so
-# `cmake --install --component ZahlenData` could not stand on its own and failed
-# with a COPY_FILE error from generated install code whenever the cooker had not
-# run in that tree.
-#
-# What a consumer does need is the tool that makes content, so zcook ships
-# instead, with the one engine script the cook graph names -- it is required even
-# in a Blender-free graph. zcook links the engine, hence $ORIGIN/../lib rather
-# than the $ORIGIN the libraries use, and a relative rpath because the store
-# relocates.
+# --- 2. Host shell & standalone utilities (source/header packages) ----------
+zhln_toolchain_source_package(CommandLine
+    CHECK_TARGET zahlen_command_line
+    HEADER_DIRS extensions/CommandLine
+    SOURCES extensions/CommandLine/CommandLine.cpp
+    PUBLIC_LINKS Zahlen::Engine
+    DEPENDS Engine)
+
+zhln_toolchain_source_package(Image
+    CHECK_TARGET zahlen_image
+    NO_REFLECTION
+    HEADER_DIRS extensions/Image
+    SOURCES extensions/Image/Image.cpp
+    VENDORED_HEADERS extern/stb/stb_image.h extern/stb/stb_image_write.h)
+
+zhln_toolchain_source_package(Signal
+    CHECK_TARGET zahlen_signal
+    DEPENDS Engine
+    HEADER_DIRS extensions/Signal
+    SOURCES extensions/Signal/SignalManager.cpp
+            extensions/Signal/StackSymbolizer.cpp
+            extensions/Signal/WorkerCrashReports.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(Screenshot
+    CHECK_TARGET zahlen_screenshot
+    DEPENDS Engine Image
+    HEADER_DIRS extensions/Screenshot
+    SOURCES extensions/Screenshot/Screenshot.cpp
+    PUBLIC_LINKS Zahlen::Engine
+    PRIVATE_LINKS Zahlen::Image)
+if(TARGET zahlen_plugin_screenshot)
+    set_target_properties(zahlen_plugin_screenshot PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
+    install(TARGETS zahlen_plugin_screenshot
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenScreenshot
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenScreenshot)
+endif()
+
+zhln_toolchain_source_package(HostRunner
+    CHECK_TARGET zahlen_host_runner
+    DEPENDS Engine CommandLine Signal
+    HEADER_FILES app/include/Zahlen/HostRunner.hpp app/include/Zahlen/AppOutcome.hpp
+    HEADER_DEST Zahlen
+    SOURCES app/HostRunner.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::CommandLine
+    PRIVATE_LINKS Zahlen::Signal)
+
+zhln_toolchain_source_package(Application
+    CHECK_TARGET zahlen_application
+    DEPENDS Engine CommandLine HostRunner Screenshot
+    HEADER_FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp app/include/Zahlen/Zahlen.hpp
+    HEADER_DEST Zahlen
+    SOURCES app/Application.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::CommandLine Zahlen::HostRunner
+    PRIVATE_LINKS Zahlen::Screenshot)
+
+# --- 3. Plugins, UI & serialization (source/header packages) ----------------
+zhln_toolchain_source_package(Netpbm
+    CHECK_TARGET zahlen_netpbm
+    DEPENDS Engine
+    HEADER_DIRS plugins/netpbm
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(UI
+    CHECK_TARGET zahlen_ui
+    DEPENDS Engine
+    HEADER_FILES extensions/UI/FontLoader.hpp
+                 extensions/UI/GUI.hpp
+                 extensions/UI/HostUI.hpp
+                 extensions/UI/Text.hpp
+                 extensions/UI/TextBuffer.hpp
+    HEADER_DEST UI
+    SOURCES extensions/UI/FontLoader.cpp
+            extensions/UI/GUIContext.cpp
+            extensions/UI/HostUI.cpp
+            extensions/UI/Text.cpp
+    VENDORED_HEADERS extern/clay/clay.h resources/fonts/DefaultFont.zfont
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(UISchema
+    CHECK_TARGET zahlen_ui_schema
+    DEPENDS Engine UI
+    HEADER_FILES extensions/UI/UITree.hpp
+    HEADER_DEST UI
+    SOURCES extensions/UI/UITree.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
+
+zhln_toolchain_source_package(Scene
+    CHECK_TARGET zahlen_scene
+    DEPENDS Engine
+    HEADER_DIRS plugins/Scene
+    SOURCES plugins/Scene/Scene.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(Serialization
+    CHECK_TARGET zahlen_serialization
+    DEPENDS Engine UISchema Scene
+    HEADER_DIRS plugins/json plugins/toml
+    SOURCES plugins/json/JSON.cpp plugins/toml/TOML.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::Scene
+    PRIVATE_LINKS simdjson::simdjson)
+
+zhln_toolchain_source_package(GLTF
+    CHECK_TARGET zahlen_gltf_assets
+    ENABLE_C
+    EXPORT_NAME GLTF
+    ALIAS_NAME GLTFAssets
+    DEPENDS Engine Serialization Image
+    HEADER_DIRS plugins/glTF
+    SOURCES plugins/glTF/GLTFDocument.cpp
+            plugins/glTF/GLTFAssets.cpp
+            plugins/glTF/TangentGenerator.cpp
+            plugins/glTF/cgltf_impl.c
+    VENDORED_HEADERS extern/cgltf/cgltf.h
+    PUBLIC_LINKS Zahlen::Engine
+    PRIVATE_LINKS Zahlen::Serialization Zahlen::Image)
+
+zhln_toolchain_source_package(Fonts
+    CHECK_TARGET zahlen_fonts
+    DEPENDS Engine UI Serialization Image
+    HEADER_DIRS plugins/Fonts
+    SOURCES plugins/Fonts/Fonts.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI
+    PRIVATE_LINKS Zahlen::Image Zahlen::Serialization)
+if(TARGET zahlen_fonts)
+    install(DIRECTORY ${PROJECT_SOURCE_DIR}/resources/fonts/JetBrainsMonoNerdFontRegular/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/fonts/JetBrainsMonoNerdFontRegular
+        COMPONENT ZahlenFonts)
+endif()
+
+zhln_toolchain_source_package(Lua
+    CHECK_TARGET zahlen_lua
+    DEPENDS Engine Scene
+    HEADER_DIRS plugins/lua
+    SOURCES plugins/lua/ReflectLua.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::Scene
+    PRIVATE_LINKS LuaJIT)
+
+# --- 4. Optional COM extensions (source/header packages) --------------------
+zhln_toolchain_source_package(Widgets
+    CHECK_TARGET zahlen_widgets
+    DEPENDS Engine UI
+    HEADER_DIRS extensions/Widget
+    SOURCES extensions/Widget/BarStrip.cpp extensions/Widget/HoverCard.cpp extensions/Widget/TextFit.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
+
+zhln_toolchain_source_package(Benchmark
+    CHECK_TARGET zahlen_benchmark
+    DEPENDS Engine
+    HEADER_FILES extensions/Benchmark/Benchmark.hpp
+    HEADER_DEST Benchmark
+    SOURCES extensions/Benchmark/Benchmark.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(BenchmarkViewer
+    CHECK_TARGET zahlen_benchmark_viewer
+    DEPENDS Engine UI Benchmark Widgets
+    HEADER_FILES extensions/Benchmark/Viewer/BenchmarkViewer.hpp
+                 extensions/Benchmark/Viewer/FrameTelemetry.hpp
+                 extensions/Benchmark/Viewer/SystemProbe.hpp
+                 extensions/Benchmark/Viewer/SystemTelemetry.hpp
+    HEADER_DEST Benchmark/Viewer
+    SOURCES extensions/Benchmark/Viewer/BenchmarkViewer.cpp
+            extensions/Benchmark/Viewer/FrameTelemetry.cpp
+            extensions/Benchmark/Viewer/SystemTelemetry.cpp
+            extensions/Benchmark/Viewer/SystemProbeLinux.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI Zahlen::Benchmark Zahlen::Widgets)
+
+zhln_toolchain_source_package(Scripting
+    CHECK_TARGET zahlen_scripting
+    DEPENDS Engine
+    HEADER_DIRS extensions/Scripting
+    SOURCES extensions/Scripting/ScriptECSBridge.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+if(TARGET zahlen_lua)
+    zhln_toolchain_source_package(Console
+        CHECK_TARGET zahlen_console
+        DEPENDS Engine Scripting Lua
+        HEADER_DIRS extensions/Console
+        SOURCES extensions/Console/Console.cpp extensions/Console/ConsoleDebugger.cpp extensions/Console/SymbolResolver.cpp
+        PUBLIC_LINKS Zahlen::Engine Zahlen::Scripting
+        PRIVATE_LINKS Zahlen::Lua
+        PRIVATE_DEFS ZHLN_CONSOLE_HAS_LUA=1)
+else()
+    zhln_toolchain_source_package(Console
+        CHECK_TARGET zahlen_console
+        DEPENDS Engine Scripting
+        HEADER_DIRS extensions/Console
+        SOURCES extensions/Console/Console.cpp extensions/Console/ConsoleDebugger.cpp extensions/Console/SymbolResolver.cpp
+        PUBLIC_LINKS Zahlen::Engine Zahlen::Scripting)
+endif()
+
+zhln_toolchain_source_package(Editor
+    CHECK_TARGET zahlen_editor
+    DEPENDS Engine UI
+    HEADER_FILES extensions/editor/GUIEditor.hpp
+    HEADER_DEST editor
+    SOURCES extensions/editor/GUIEditor.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::UI)
+
+zhln_toolchain_source_package(Terrain
+    CHECK_TARGET zahlen_terrain
+    DEPENDS Engine
+    HEADER_FILES extensions/Terrain/Terrain.hpp
+                 extensions/Terrain/TerrainGeometry.hpp
+                 extensions/Terrain/TerrainComponents.hpp
+    HEADER_DEST Terrain
+    SOURCES extensions/Terrain/TerrainGeometry.cpp extensions/Terrain/Terrain.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(VFX
+    CHECK_TARGET zahlen_vfx
+    DEPENDS Engine
+    HEADER_FILES extensions/VFX/CombatFX.hpp
+                 extensions/VFX/Lightning.hpp
+                 extensions/VFX/LightningGeometry.hpp
+                 extensions/VFX/Explosion.hpp
+                 extensions/VFX/ExplosionPolicy.hpp
+    HEADER_DEST VFX
+    SOURCES extensions/VFX/CombatFXLifecycle.cpp
+            extensions/VFX/LightningGeometry.cpp
+            extensions/VFX/Lightning.cpp
+            extensions/VFX/Explosion.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(FreeCam
+    CHECK_TARGET zahlen_freecam
+    DEPENDS Engine
+    HEADER_DIRS extensions/FreeCam
+    SOURCES extensions/FreeCam/FreeCam.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+if(TARGET zahlen_plugin_freecam)
+    set_target_properties(zahlen_plugin_freecam PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
+    install(TARGETS zahlen_plugin_freecam
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenFreeCam
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenFreeCam)
+endif()
+
+zhln_toolchain_source_package(Camera
+    CHECK_TARGET zahlen_camera
+    DEPENDS Engine
+    HEADER_DIRS extensions/Camera
+    SOURCES extensions/Camera/TargetCamera.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(CharacterController
+    CHECK_TARGET zahlen_character_controller
+    DEPENDS Engine
+    HEADER_DIRS extensions/CharacterController
+    SOURCES extensions/CharacterController/CharacterController.cpp
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(AnimationControls
+    CHECK_TARGET zahlen_animation_controls
+    DEPENDS Engine
+    HEADER_FILES extensions/Animation/Animator.hpp
+                 extensions/Animation/AnimationID.hpp
+                 extensions/Animation/Components.hpp
+                 extensions/Animation/IK.hpp
+                 extensions/Animation/IKControls.hpp
+    HEADER_DEST Animation
+    SOURCES extensions/Animation/Animator.cpp
+    MODULES extensions/Animation/Animator.cppm
+    PUBLIC_LINKS Zahlen::Engine)
+
+zhln_toolchain_source_package(Animation
+    CHECK_TARGET zahlen_animation
+    DEPENDS Engine AnimationControls CharacterController Camera FreeCam
+    HEADER_DIRS extensions/Animation
+    SOURCES extensions/Animation/TwoBoneIK.cpp
+            extensions/Animation/Context.cpp
+            extensions/Animation/AnimationSystem.cpp
+            extensions/Animation/LocomotionLifecycle.cpp
+            extensions/Animation/ProceduralAnimation.cpp
+            extensions/Animation/ProceduralGait.cpp
+            extensions/Animation/ProceduralItemHandling.cpp
+            extensions/Animation/ProceduralSecondaryPhysics.cpp
+    MODULES extensions/Animation/Rig.cppm
+            extensions/Animation/Locomotion.cppm
+            extensions/Animation/ProceduralAnimation.cppm
+    PUBLIC_LINKS Zahlen::Engine
+                 Zahlen::AnimationControls
+                 Zahlen::CharacterController
+                 Zahlen::Camera
+                 Zahlen::FreeCam)
+
+# --- 5. Offline cooker tool -------------------------------------------------
 if(TARGET zcook)
     set_target_properties(zcook PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     install(TARGETS zcook RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ZahlenCooker)

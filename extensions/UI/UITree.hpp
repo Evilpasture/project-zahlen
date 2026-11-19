@@ -14,7 +14,7 @@
 //   * ActionRegistry  -- "editor.save_scene" -> a typed event on an ECS bus
 //   * PropertyStore   -- "camera.speed"      -> the float a Slider edits
 //
-// UINode is the description. It is format-free, the same way Scene::Scene is:
+// UINode is the description. It is format-free, the same way Scene::Document is:
 // plugins/toml can walk it later without this header knowing a parser exists.
 // RenderUITree is the walk that turns one description into one frame of
 // Context calls. FindNodeById / InsertChild / RemoveNodeById are the mutations
@@ -22,20 +22,18 @@
 //
 // Lives in extensions/UI/ (zahlen_ui_schema), not core: this is the document
 // schema behind the UI editor and the TOML round-trip, not the immediate-mode
-// substrate. Core keeps src/gui/ -- the Clay wrapper, TextEdit and the font
+// substrate over extensions/UI/ (zahlen_ui) -- the Clay wrapper, TextEdit and the font
 // rasterizer -- and this layer builds on GUI::Context through its public API.
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-#include <Jolt/Math/Float4.h>
-// clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
+#include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Reflection/CanonicalName.hpp>
+#include <source_location>
+#include <UI/GUI.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,8 +53,8 @@ enum class TreeMode : uint8_t { Preview = 0, Design };
 struct NodeBox {
     Sizing      width        = {};
     Sizing      height       = {};
-    ZHLN::Float4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
-    ZHLN::Float4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 color        = {0.0f, 0.0f, 0.0f, 0.0f};
+    ZHLN::FVec4 cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f};
     float       padding      = 0.0f;
     float       gap          = 0.0f;
     Direction   direction    = Direction::Column;
@@ -84,7 +82,7 @@ struct UINode {
 
     NodeBox     box {};
     float       fontSize  = 16.0f;
-    ZHLN::Float4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
+    ZHLN::FVec4 textColor = {1.0f, 1.0f, 1.0f, 1.0f};
     float       minVal    = 0.0f;
     float       maxVal    = 1.0f;
 
@@ -95,19 +93,148 @@ struct UINode {
 // `id`, or Bind a strongly-typed event instead:
 //
 //   actions.Bind("inventory.use_potion", UseItemEvent { .itemId = 42, .target = player });
-//   bus.Drain<UseItemEvent>([](const UseItemEvent& e) { ... });
+//   queue.Drain<UseItemEvent>([](const UseItemEvent& e) { ... });
 struct UiActionEvent {
     std::string id;
 };
 
+// Lightweight host-owned typed event sink for UI actions. Keeps UI documents
+// completely independent of engine-internal ECS types while preserving typed
+// zero-std::function event dispatch.
+class ZHLN_STATIC_API ActionQueue {
+  public:
+    ActionQueue() = default;
+    ~ActionQueue() { Clear(); }
+
+    ActionQueue(const ActionQueue&)                    = delete;
+    auto operator=(const ActionQueue&) -> ActionQueue& = delete;
+    ActionQueue(ActionQueue&& other) noexcept : _channels(std::move(other._channels)) {}
+    auto operator=(ActionQueue&& other) noexcept -> ActionQueue& {
+        if (this != &other) {
+            Clear();
+            _channels = std::move(other._channels);
+        }
+        return *this;
+    }
+
+    template <typename T>
+    void Push(T event) {
+        EnsureChannel<T>().push_back(std::move(event));
+    }
+
+    template <typename T>
+    [[nodiscard]] auto View() const noexcept -> std::span<const T> {
+        if (const auto* vec = FindChannel<T>()) {
+            return *vec;
+        }
+        return {};
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Count() const noexcept -> size_t {
+        return View<T>().size();
+    }
+
+    template <typename T>
+    [[nodiscard]] auto Empty() const noexcept -> bool {
+        return View<T>().empty();
+    }
+
+    template <typename T, typename Fn>
+    auto Drain(Fn&& fn) -> size_t {
+        auto* vec = FindChannel<T>();
+        if (vec == nullptr || vec->empty()) {
+            return 0;
+        }
+        std::vector<T> batch;
+        batch.swap(*vec);
+        for (const T& item : batch) {
+            fn(item);
+        }
+        return batch.size();
+    }
+
+    void ClearEvents() noexcept {
+        for (auto& ch : _channels) {
+            if (ch.storage != nullptr && ch.clear != nullptr) {
+                ch.clear(ch.storage);
+            }
+        }
+    }
+
+    void Clear() noexcept {
+        for (auto& ch : _channels) {
+            if (ch.storage != nullptr && ch.destroy != nullptr) {
+                ch.destroy(ch.storage);
+            }
+        }
+        _channels.clear();
+    }
+
+  private:
+    struct Channel {
+        uint32_t hash                      = 0;
+        void*    storage                   = nullptr;
+        void (*clear)(void*) noexcept      = nullptr;
+        void (*destroy)(void*) noexcept    = nullptr;
+    };
+
+    template <typename T>
+    static consteval auto TypeHash() noexcept -> uint32_t {
+        if constexpr (requires { Reflect::CanonicalTypeName<T>(); }) {
+            return Hash32(Reflect::CanonicalTypeName<T>());
+        } else {
+            return Hash32(std::source_location::current().function_name());
+        }
+    }
+
+    template <typename T>
+    [[nodiscard]] auto FindChannel() const noexcept -> const std::vector<T>* {
+        constexpr uint32_t h = TypeHash<T>();
+        for (const auto& ch : _channels) {
+            if (ch.hash == h) {
+                return static_cast<const std::vector<T>*>(ch.storage);
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename T>
+    [[nodiscard]] auto FindChannel() noexcept -> std::vector<T>* {
+        constexpr uint32_t h = TypeHash<T>();
+        for (auto& ch : _channels) {
+            if (ch.hash == h) {
+                return static_cast<std::vector<T>*>(ch.storage);
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename T>
+    auto EnsureChannel() -> std::vector<T>& {
+        if (auto* existing = FindChannel<T>()) {
+            return *existing;
+        }
+        auto* vec = new std::vector<T>();
+        _channels.push_back(Channel {
+            .hash    = TypeHash<T>(),
+            .storage = vec,
+            .clear   = [](void* p) noexcept { static_cast<std::vector<T>*>(p)->clear(); },
+            .destroy = [](void* p) noexcept { delete static_cast<std::vector<T>*>(p); },
+        });
+        return *vec;
+    }
+
+    std::vector<Channel> _channels;
+};
+
 // Name -> event prototype. The document stores the identifier; Bind copies a
-// typed event that Invoke pushes onto an ECS::EventBus. Missing ids are a
-// no-op, not an error: a document can name an action this host has not
-// installed. No std::function -- gameplay reacts by draining the bus.
+// typed event that Invoke pushes onto an ActionQueue. Missing ids are a no-op,
+// not an error: a document can name an action this host has not installed.
 class ZHLN_STATIC_API ActionRegistry {
   public:
     ActionRegistry() = default;
-    explicit ActionRegistry(ECS::EventBus& bus) noexcept: _bus(&bus) {}
+    explicit ActionRegistry(ActionQueue& queue) noexcept : _queue(&queue) {}
     ~ActionRegistry();
 
     ActionRegistry(const ActionRegistry&)                    = delete;
@@ -115,26 +242,26 @@ class ZHLN_STATIC_API ActionRegistry {
     ActionRegistry(ActionRegistry&& other) noexcept;
     auto operator=(ActionRegistry&& other) noexcept -> ActionRegistry&;
 
-    void SetEventBus(ECS::EventBus& bus) noexcept {
-        _bus = &bus;
+    void SetQueue(ActionQueue& queue) noexcept {
+        _queue = &queue;
     }
 
     // Invoke pushes UiActionEvent { id }.
     void Bind(std::string_view id);
 
-    // Invoke copies @p event onto the bus.
+    // Invoke copies @p event onto the queue.
     template <typename T>
     void Bind(std::string_view id, T event) {
         BindErased(
             id,
             new T(std::move(event)),
-            [](ECS::EventBus& bus, const void* p) -> void { bus.Push(*static_cast<const T*>(p)); },
+            [](ActionQueue& queue, const void* p) -> void { queue.Push(*static_cast<const T*>(p)); },
             [](void* p) -> void { delete static_cast<T*>(p); }
         );
     }
 
     void Unbind(std::string_view id);
-    // True when a bound event was pushed. False for missing ids or no bus.
+    // True when a bound event was pushed. False for missing ids or no queue.
     [[nodiscard]] auto Invoke(std::string_view id) const -> bool;
     [[nodiscard]] auto Contains(std::string_view id) const -> bool;
     void               Clear();
@@ -143,14 +270,14 @@ class ZHLN_STATIC_API ActionRegistry {
     struct Entry {
         std::string id;
         void*       payload = nullptr;
-        void (*emit)(ECS::EventBus&, const void*) = nullptr;
-        void (*destroy)(void*)                    = nullptr;
+        void (*emit)(ActionQueue&, const void*) = nullptr;
+        void (*destroy)(void*)                  = nullptr;
     };
 
-    void BindErased(std::string_view id, void* payload, void (*emit)(ECS::EventBus&, const void*), void (*destroy)(void*));
+    void BindErased(std::string_view id, void* payload, void (*emit)(ActionQueue&, const void*), void (*destroy)(void*));
     void DestroyEntry(Entry& entry) noexcept;
 
-    ECS::EventBus*     _bus = nullptr;
+    ActionQueue*       _queue = nullptr;
     std::vector<Entry> _entries;
 };
 
@@ -203,7 +330,7 @@ struct RenderUITreeResult {
 // EndFrame. @p properties is non-const because bound
 // widgets write back; pass a dummy store when the tree has no bindings.
 // @p selectedId is tinted in Design mode so a builder can see the selection.
-[[nodiscard]] ZHLN_STATIC_API auto RenderUITree(
+ZHLN_STATIC_API auto RenderUITree(
     Frame&                gui,
     const UINode&         root,
     const ActionRegistry& actions,

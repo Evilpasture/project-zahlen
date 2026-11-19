@@ -99,9 +99,9 @@ namespace ZHLN::Wire::Compression {
     if (CompressBound(raw.size()) > maxOutput) {
         return std::unexpected(
             Failure {
-                .code    = ZHLN::ErrorCode(WireError::CompressionFailed),
+                .code    = ZHLN::ErrorCode(Error::CompressionFailed),
                 .details = ZHLN::Reflect::FormatEnumMessage(
-                    WireError::CompressionFailed, std::format("input of {} byte(s) exceeds the {} byte output limit", raw.size(), maxOutput)
+                    Error::CompressionFailed, std::format("input of {} byte(s) exceeds the {} byte output limit", raw.size(), maxOutput)
                 )
             }
         );
@@ -207,8 +207,8 @@ namespace ZHLN::Wire::Compression {
             if (position >= compressed.size()) {
                 return std::unexpected(
                     Failure {
-                        .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
-                        .details = ZHLN::Reflect::FormatEnumMessage(WireError::DecompressionFailed, "truncated length extension")
+                        .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
+                        .details = ZHLN::Reflect::FormatEnumMessage(Error::DecompressionFailed, "truncated length extension")
                     }
                 );
             }
@@ -237,9 +237,9 @@ namespace ZHLN::Wire::Compression {
         if (literalLength > compressed.size() - position) {
             return std::unexpected(
                 Failure {
-                    .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
+                    .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
                     .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("literal run of {} byte(s) at input offset {} overruns the block", literalLength, position)
+                        Error::DecompressionFailed, std::format("literal run of {} byte(s) at input offset {} overruns the block", literalLength, position)
                     )
                 }
             );
@@ -247,9 +247,9 @@ namespace ZHLN::Wire::Compression {
         if (!fits(literalLength)) {
             return std::unexpected(
                 Failure {
-                    .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
+                    .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
                     .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
+                        Error::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
                     )
                 }
             );
@@ -265,8 +265,8 @@ namespace ZHLN::Wire::Compression {
         if (compressed.size() - position < 2) {
             return std::unexpected(
                 Failure {
-                    .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
-                    .details = ZHLN::Reflect::FormatEnumMessage(WireError::DecompressionFailed, "truncated match offset")
+                    .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
+                    .details = ZHLN::Reflect::FormatEnumMessage(Error::DecompressionFailed, "truncated match offset")
                 }
             );
         }
@@ -275,9 +275,9 @@ namespace ZHLN::Wire::Compression {
         if (offset == 0 || offset > out.size()) {
             return std::unexpected(
                 Failure {
-                    .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
+                    .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
                     .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("back-reference offset {} is out of range ({} byte(s) produced so far)", offset, out.size())
+                        Error::DecompressionFailed, std::format("back-reference offset {} is out of range ({} byte(s) produced so far)", offset, out.size())
                     )
                 }
             );
@@ -294,9 +294,9 @@ namespace ZHLN::Wire::Compression {
         if (!fits(matchLength)) {
             return std::unexpected(
                 Failure {
-                    .code    = ZHLN::ErrorCode(WireError::DecompressionFailed),
+                    .code    = ZHLN::ErrorCode(Error::DecompressionFailed),
                     .details = ZHLN::Reflect::FormatEnumMessage(
-                        WireError::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
+                        Error::DecompressionFailed, std::format("decompressed size would exceed the {} byte limit", maxDecompressed)
                     )
                 }
             );

@@ -34,7 +34,7 @@ values are explicitly byte-ordered below — the format is host-independent.
 | Type        | Encoding |
 |-------------|----------|
 | `JPH::Vec3` | three zigzag varints of `int32`: `round(component * 256)` (1/256 m resolution, ±8,388,607 m). Non-finite components are rejected. |
-| `JPH::Quat` | four zigzag varints of `int16`: `round(component * 32767)` of the **sign-canonical** representative (`w >= 0`). Decoders must renormalize. |
+| `ZHLN::Quat` | four zigzag varints of `int16`: `round(component * 32767)` of the **sign-canonical** representative (`w >= 0`). Decoders must renormalize. |
 
 ### Annotations that matter on the wire
 

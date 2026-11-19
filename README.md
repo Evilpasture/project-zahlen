@@ -20,7 +20,7 @@ This project's renderer proudly has zero:
 Besides that, it's kinda like Bevy but C++26 and Vulkan.
 
 ## Build Requirements
-* **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later). At this point, if you have a modern compiler I assume you know what you're doing.
+* **C++26 Compiler with -freflection**: Supporting C++26 standard features. The build does not ask your compiler its version; it hands it `cmake/probes/pr125280-static-member.cpp` and keeps going if that compiles. GCC 16.2 passes. A `releases/gcc-16` build from before 2026-05-13 does not, and reports the same version as one that does. At this point, if you have a modern compiler I assume you know what you're doing.
 
 ## Build Instructions
 
@@ -33,6 +33,36 @@ has Blender, or `-DZHLN_HAS_BLENDER=ON` to make a missing Blender a configure er
 For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
 
 Run scripts/build.sh and fix every error you go along the way if you're missing dependencies.
+
+### Configuring the build (TUI)
+
+`ccmake` is not the only way to browse the options. The tree carries a
+[Kconfiglib](https://github.com/ulfalizer/Kconfiglib) menu for the `ZHLN_*`
+switches, wired in as a preset:
+
+```sh
+pip install -r scripts/requirements-menuconfig.txt    # once; optional
+./scripts/menuconfig.sh                                # menu, then configure
+```
+
+That is the whole procedure: the script opens the menu and, when it exits,
+configures the same build directory from the `.config` it wrote. Pass a
+directory to work somewhere other than `build/menuconfig`, or `--no-configure`
+to stop after writing the file.
+
+An already-configured directory is reconfigured with whatever generator it
+already has; a fresh one uses Ninja (override with `MENUCONFIG_GENERATOR`), which
+is what the presets use. `cmake --preset menuconfig` is the same thing in preset
+form.
+
+The menu itself is `scripts/menuconfig_mconf.py`, a curses front end
+over Kconfiglib that draws the same screen as the kernel's `make menuconfig`:
+the path in the backtitle, arrow-key instructions, a bordered entry list,
+`<Select> < Exit > < Help > < Save > < Load >`, and help in its own box under
+`<Help>`. Precedence is: an explicit `-D` wins, then
+an edited `.config`, then the `option()` default in the CMake files. The menu
+module (`cmake/Kconfig.cmake`) is inert unless `ZHLN_KCACHE_CONFIG` points at a
+file, so nothing changes for a tree configured by hand, by CI or by an IDE.
 
 ### Runtime Directories
 
@@ -99,9 +129,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_subdirectory(extern/zahlen)
 add_executable(my_game src/main.cpp)
 target_link_libraries(my_game PRIVATE zahlen_application)
-target_compile_definitions(my_game PRIVATE JPH_DOUBLE_PRECISION)
 zahlen_enable_reflection(my_game)
-zahlen_add_runtime_dlls(my_game) # Windows: stage engine/Jolt DLLs beside the game
+zahlen_add_runtime_dlls(my_game) # Windows: stage engine DLL beside the game
 ```
 
 The engine requires C++26 static reflection (see Build Requirements). For an
@@ -114,18 +143,18 @@ Link the reusable application layer (`target_link_libraries(my_game PRIVATE zahl
 
 ```cpp
 #include <Zahlen/App.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <cstdlib>
 
 int main(int argc, char* argv[]) {
     const auto result = ZHLN::App()
-        .OnStart([](ZHLN::Engine& engine) {
-            // Persistent entities are created ONCE, after the default scene exists.
-            (void) ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(1.0f, 1.0f, 1.0f));
+        .OnStart([](ZHLN::COM::IEngine& engine) {
+            // Persistent entities are created ONCE, after initialization.
+            engine.Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f});
         })
-        .Run(argc, argv, [](ZHLN::Engine& engine, float dt) {
+        .Run(argc, argv, [](ZHLN::COM::IEngine& engine, float dt) {
             // Input has been pumped; this runs once each frame before engine.Tick(dt).
-            // Put input/gameplay updates here, not a new CreateBox every frame.
+            // Put input/gameplay updates here, not a new SpawnBox every frame.
             (void) engine;
             (void) dt;
         });
@@ -133,7 +162,7 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-`App().Run([](ZHLN::Engine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(Engine&, float dt)` form gets the exact delta passed to `Tick`. `App().Run()` without a callback is for games composed entirely from ECS systems and installed modules. The CLI path takes `std::span<char* const>` (with or without a gameplay callback); the `Run(argc, argv, ...)` overloads shown above validate C-style arguments and adapt them to that span. Standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
+`App().Run([](ZHLN::COM::IEngine& engine) { /* per-frame code */ })` also works when you don't need command-line flags. The `(COM::IEngine&, float dt)` form gets the exact delta passed to `Tick`. `App().Run()` without a callback is for games composed entirely from ECS systems and installed modules. The CLI path takes `std::span<char* const>` (with or without a gameplay callback); the `Run(argc, argv, ...)` overloads shown above validate C-style arguments and adapt them to that span. Standard engine flags such as `--headless`, `--vsync` and `--fps-limit` work; `--help`, `--version` and `--print-graph` exit before engine creation.
 
 Games can register their own flags before running, without pre-filtering argv:
 
@@ -150,10 +179,10 @@ app.AddCliOption(
     },
     "-l"
 );
-app.Install([&](ZHLN::Engine& engine) {
-    // The exact config used to create the engine is available on all Run paths.
-    auto config = engine.Service<ZHLN::EngineConfig>();
-    if (config) { /* use config->headless, config->vsync, and level here */ }
+app.Install([&](ZHLN::COM::IEngine& engine) {
+    // Configure capabilities and host subsystems before OnStart runs.
+    (void) engine;
+    (void) level;
 });
 const auto result = app.Run(argc, argv); // --level=courtyard and -l courtyard both work
 return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
@@ -161,7 +190,7 @@ return result ? EXIT_SUCCESS : EXIT_FAILURE; // in main() only
 
 `Run` returns `ZHLN::AppRunResult` (`std::expected<AppExitReason, ErrorCode>`), not an OS status. Successful reasons distinguish `UserClosed` (including an application-requested primary-window close), `CliHelpRequested`, `CliVersionRequested`, and `CliGraphRequested`. CLI errors keep the exact `CommandLineError` (e.g. `result.error().Is(CommandLineError::InvalidValue)`), and engine creation errors preserve the underlying `ErrorCode`. `AppError::InvalidArguments`, `SceneInitFailed`, and `FrameTickFailed` cover failures that have no lower-level error code. Only executable `main()` translates the result to `EXIT_SUCCESS` or `EXIT_FAILURE`. `KernelApp` uses the same result type and preserves Kernel/render/device-recovery error codes. Typed results allow embedding and precise assertions; process-wide platform/task/signal ownership still requires callers to coordinate simultaneous runs.
 
-`.AddCliOption(ZHLN::CliFlag{...})` and `.WithCliOptions(std::span<const ZHLN::CliFlag>)` are also available. Actions run during parsing, return `CommandLineError` on failure, and may borrow application state during synchronous `Run`. The generic `zahlen_command_line` parser knows nothing about the engine. In `zahlen_application` (and `zahlen_host_runner` for Kernel-only tools), `ParseEngineConfig` reflects `EngineConfig`, adds host-only `--print-graph` / `--debug-attach`, and then adds game flags. Help and version are generic parser stops. There is no engine CLI preset or raw argv service. Installers, gameplay systems and `OnStart` can read `Engine::Service<EngineConfig>()` or `ECS::Res<EngineConfig>` on **both** CLI and no-CLI runs.
+`.AddCliOption(ZHLN::CliFlag{...})` and `.WithCliOptions(std::span<const ZHLN::CliFlag>)` are also available. Actions run during parsing, return `CommandLineError` on failure, and may borrow application state during synchronous `Run`. The generic `zahlen_command_line` parser knows nothing about the engine. In `zahlen_application` (and `zahlen_host_runner` for Kernel-only tools), `ParseEngineConfig` reflects `EngineConfig`, adds host-only `--print-graph` / `--debug-attach`, and then adds game flags. Help and version are generic parser stops. There is no engine CLI preset or raw argv service. All installers, layers, and `OnStart`/`Tick` callbacks receive `ZHLN::COM::IEngine&` across the narrow COM ABI boundary (Jolt, Vulkan, Clay, and internal engine state stay sealed inside `libzahlen_engine.so`).
 
 `.WithConfig(launch)` binds reflected fields to flags, converting `godMode` to `--god-mode` (and `fpsLimit` to `--fps-limit`). It supports non-bool integrals, `bool`, `float`, `double`, `std::string`, `ZHLN::FixedString<N>` (including `String32` / `String64` / `String128` / `String256`), and enums. For example:
 
@@ -185,11 +214,11 @@ A bare bool flag sets `true`; `--god-mode=off` / `--god-mode=false` set `false` 
 
 For applications that must validate settings or acquire resources before an engine exists, `.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> { /* prepare */ return {}; })` runs after successful CLI parsing (but not for help/version/graph early exits) and before process/engine creation. A failure is returned unchanged as a typed `AppRunResult` error. For example, the optional ProjectLight client uses it to validate its launch settings and connect only after CLI validation, without creating an engine on failure.
 
-Games may also use `.AddLayer(layer)` for a move-only or copyable object implementing any of `Start(Engine&)`, `Tick(Engine&, float)`, `UI(Engine&)`, and `Stop(Engine&)`; UI-only and Stop-only layers are valid. Layers are owned by the application. `Start` runs after scene creation, `Tick` runs after events but before an optional per-frame `Run(callback)`, and `UI` runs in registration order in the Engine's UI frame phase. Once scene initialization succeeds, `Stop` runs in reverse registration order with the Engine still alive, on normal closure or frame failure (but not on CLI early exits or failed initialization). Dispatch uses function pointers, not virtual methods; state is allocated once per layer. The sandbox registers `SandboxGame` as a layer instead of storing its update in a capturing callback.
+Games compose behavior through `.AddLayer(layer)` (for any copyable or move-only type implementing a subset of `Start(COM::IEngine&)`, `Tick(COM::IEngine&, float)`, `BeforeRender(COM::IEngine&, float)`, `AfterTick(COM::IEngine&[, float])`, and `Stop(COM::IEngine&)`) and through COM plugins implementing `COM::IAppLayer` (`<Zahlen/COM/IPlugin.hpp>`) registered in-process with `.AddPlugin(ref)` or loaded dynamically from shared libraries via `.LoadPlugin("name"[, configChain])`, `.TryLoadPlugin("name"[, configChain])`, or the repeatable `--plugin <name|path>` CLI flag. Once initialization succeeds, `Stop` / `OnStop` run in reverse registration order with `IEngine` still alive, and plugin `COM::Ref<COM::IAppLayer>` handles are released before `dlclose`/`FreeLibrary`. Built-in `--frames <N>` and `--capture <path.png>` work on every `App` binary without linking extra host helpers.
 
-The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. `--cubes=<0..64>` (`-c`) selects the initial box count and `--seed=<integer>` reproducibly jitters their positions; both appear in `zahlen --help`. **R** resets the view; **Esc** quits. When extras are built, FreeCam provides WASD movement, right-mouse look and Shift sprint. The sandbox needs no scene-document parser or optional-extension `#ifdef`s; the optional CharacterController module is installed by `App` but this fly-camera demo does not spawn a character. Move larger projects into their own `GameSession` and ECS systems rather than growing `main.cpp` indefinitely.
+The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawns a physics ground and falling boxes, lights them with a sun and moving point light, fires impulse-driven cubes with **F**, and plays a short procedural sound. `--cubes=<0..64>` (`-c`) selects the initial box count and `--seed=<integer>` reproducibly jitters their positions; both appear in `zahlen --help`. **R** resets the view; **Esc** quits. It calls `.TryLoadPlugin("freecam")` with zero `#ifdef`s: when `libzahlen_plugin_freecam` is built or installed alongside the executable, WASD movement, right-mouse look, and Shift sprint activate automatically; when absent (e.g. `ZHLN_BUILD_EXTRAS=OFF`), the sandbox still builds and runs unchanged. `zahlen_cube` (`app/cube.cpp`) is the minimal rotating-cube sample on the same unified `ZHLN::App` surface.
 
-`App` owns the outer frame loop: the shared `ProcessScope` initializes Platform/TaskSystem, then App creates an Engine, installs the available baked default font and CharacterController, target camera, Interaction, Terrain, Animation/IK, FreeCam and RagdollAuthoring, builds the scene, polls events, calls your game logic, then `Engine::Tick(dt)` and tears down in order. CMake generates the ordered default-module calls from targets actually present in the build; `app/Application.cpp` contains no optional-module preprocessor guards. `Kernel::ProcessEvents` handles primary renderer resizing and `Engine::ProcessEvents` consumes the corresponding ECS input notification before gameplay; there is no resize/skip branch in App's loop. `FramePacer` owns App's optional FPS cap. It does **not** install the scene-host diagnostic fallback (which would replace a compiled game's scene). A `ZHLN_BUILD_EXTRAS=OFF` build uses just Core. Override the preset with `.WithDefaultModules(false)`, add project modules with `.Install([](ZHLN::Engine& engine) { /* install */ })` before the first scene, implement `UI(Engine&)` on each layer that draws an overlay, and pass `ZHLN::EngineConfig{...}` to `App(config)` for launch settings. `.OnStart(...)` and `.Install(...)` are application methods, not config delegates. `Engine::Run` remains available for bespoke hosts; its fourth `EventPoller` argument is an explicit low-level frame seam.
+`App` (`<Zahlen/App.hpp>`) is the single application builder over the COM boundary (`Zahlen::Engine` / `libzahlen_engine.so`): `COM::CreateEngine` initializes platform, scheduler, Vulkan, Jolt, and audio internally, then `App` runs `OnStart` and layer `Start`, pumps events and frame pacing (`FramePacer`), dispatches layer `Tick` and `BeforeRender`, calls `engine.Tick(dt)` and `AfterTick`, handles optional `--capture` PNG readback, and tears down layers in reverse order before releasing the engine. Immediate-mode Clay UI and `HostUI` live in the optional `extensions/UI/` extension (`zahlen_ui` / `Zahlen::UI`), keeping `libzahlen_engine.so` and `ZHLN::App` completely decoupled from Clay and font baking; UI-enabled tools construct their own `HostUI(engine)` and submit POD draw batches via `IEngine::SubmitUI`.
 
 ### Standalone tools (with `ZHLN_BUILD_EXTRAS=ON`)
 
@@ -199,7 +228,7 @@ The default `zahlen` binary (`app/main.cpp`) is a compiled C++ sandbox: it spawn
 | `zahlen-editor` | `utils/editor/main.cpp` | World editor with its own paused-simulation loop; `--scene <file.toml|file.lua>` imports a document, Ctrl+S saves `scene.toml` |
 | `zahlen-benchmark` | `utils/benchmark/main.cpp` | Headless logic workload; tune with `ZHLN_BENCH_ENTITIES` and `ZHLN_BENCH_TICKS` |
 | `zahlen-scene-host` | `utils/scene/main.cpp` | Scene/document and file-watcher integration; `--scene` and `--graphics-config` (Lua when available), optional Discord presence and a diagnostic scene when no document is selected |
-| `zahlen_ui_editor` | `app/UIEditor.cpp` | Separate UI-tree editor using the Kernel-only `KernelApp` runner |
+| `zahlen_ui_editor` | `app/UIEditor.cpp` | Dual-window UI-tree editor running on `ZHLN::App` with explicit `HostUI` ownership |
 
 Kernel-only tools can link `zahlen_host_runner` and use `<Zahlen/KernelApp.hpp>` rather than creating a 3D/ECS Engine. `KernelApp().Named("Tool").Input(receiver).OnStart(...).OnInputFrame(...).OnUpdate(...).OnRender(...).OnDeviceRestored(...).OnShutdown(...).Run(argc, argv)` owns CLI early exits, `ProcessScope`, input pumping, frame acquisition/presentation, device-loss recovery, and pacing. The UI-tree editor supplies only its document, two-window UI, and font-atlas rebuild policy; Engine games still use `App` and the Engine's own frame graph.
 
@@ -213,7 +242,7 @@ Should work on macOS too if you manage to compile it, but you need a CPU rasteri
 ## System & Platform Dependencies
 
 The project is primarily developed on Linux and macOS and Windows.
-You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
+You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC yourself -- new enough to carry the fix for GCC PR c++/125280, which the configure step checks by compiling it rather than by trusting a version number.
 
 The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
 However, precompiled headers are buggy due to unknown internal compiler errors. scripts/build.sh --p2996 should handle some of the work as long as you have your build ready.

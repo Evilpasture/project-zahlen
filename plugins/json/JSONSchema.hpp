@@ -7,9 +7,9 @@
 //
 // The serialisation / schema layer for JSON. Two halves:
 //
-//   * Runtime, reflection-driven: GetJSONValue, ParseObject, Parse and
+//   * Runtime, reflection-driven: GetValue, ParseObject, Parse and
 //     Parse read a document (plugins/json/JSON.hpp -- simdjson behind an
-//     opaque handle) into any reflected type, and ReflectJSON::SerializeJSON
+//     opaque handle) into any reflected type, and ReflectJSON::Serialize
 //     writes one back out. Field names come from the declarations themselves,
 //     so the type is the schema: same contract as plugins/toml/TOML.hpp.
 //
@@ -41,7 +41,7 @@ namespace ReflectJSON {
 // Shared option block for the reflection-driven read and write halves.
 //
 // omitEmpty models glTF's "optional by omission" convention on both sides:
-//   * SerializeJSON skips a disengaged std::optional (or an empty map/range)
+//   * Serialize skips a disengaged std::optional (or an empty map/range)
 //     member entirely instead of writing null / [].
 //   * Parse/ParseObject treat a missing member key as "leave the default"
 //     (a disengaged optional, an empty container) instead of MissingField.
@@ -58,7 +58,7 @@ template <typename T>
 auto ParseObject(ValueReader reader, Options options = {}) -> std::expected<T, ErrorCode>;
 
 template <typename FieldType>
-auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<FieldType, ErrorCode> {
+auto GetValue(ValueReader reader, Options options = {}) -> std::expected<FieldType, ErrorCode> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, int> || std::is_same_v<Decayed, int32_t>) {
@@ -98,7 +98,7 @@ auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<Fie
         if (reader.IsNull()) {
             return Decayed {};
         }
-        auto parsed = GetJSONValue<typename Decayed::value_type>(reader, options);
+        auto parsed = GetValue<typename Decayed::value_type>(reader, options);
         if (!parsed) {
             return std::unexpected(parsed.error());
         }
@@ -129,7 +129,7 @@ auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<Fie
             if (!field) {
                 return std::unexpected(field.error());
             }
-            auto parsed = GetJSONValue<MappedType>(*field, options);
+            auto parsed = GetValue<MappedType>(*field, options);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -145,7 +145,7 @@ auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<Fie
             if (!elemReader) {
                 return std::unexpected(elemReader.error());
             }
-            auto parsed_item = GetJSONValue<ElementType>(*elemReader, options);
+            auto parsed_item = GetValue<ElementType>(*elemReader, options);
             if (!parsed_item) {
                 return std::unexpected(parsed_item.error());
             }
@@ -180,7 +180,7 @@ auto ParseObject(ValueReader reader, Options options) -> std::expected<T, ErrorC
             return;
         }
 
-        auto value_res = GetJSONValue<FieldType>(*keyReader, options);
+        auto value_res = GetValue<FieldType>(*keyReader, options);
         if (!value_res) {
             err = value_res.error();
             return;
@@ -222,7 +222,7 @@ auto ParseOrPanic(std::string_view jsonString, Options options = {}) -> T {
 // Reflection-Driven JSON Serialisation
 //
 //   Player p {"Hero", 9999, true};
-//   std::string json = ZHLN::ReflectJSON::SerializeJSON(p);
+//   std::string json = ZHLN::ReflectJSON::Serialize(p);
 //   // {"name":"Hero","score":9999,"isAlive":true}
 //
 // Field names come from the declarations themselves (the same
@@ -345,7 +345,7 @@ namespace TemplatedDetail {
         } else if constexpr (requires { typename Decayed::key_type; typename Decayed::mapped_type; }) {
             // Maps: JSON objects. Key order is the container's (std::map: sorted).
             static_assert(std::is_convertible_v<const typename Decayed::key_type&, std::string_view>,
-                          "SerializeJSON: map keys must be string-like (JSON object keys are strings)");
+                          "Serialize: map keys must be string-like (JSON object keys are strings)");
             const bool pretty = indent > 0;
             out += pretty ? "{\n" : "{";
             if (pretty) {
@@ -388,7 +388,7 @@ namespace TemplatedDetail {
             out += ']';
         } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
             // Reflected structs: field names are the JSON keys, matching
-            // ParseObject/GetJSONValue on the read side.
+            // ParseObject/GetValue on the read side.
             const bool pretty = indent > 0;
             out += pretty ? "{\n" : "{";
             if (pretty) {
@@ -413,14 +413,14 @@ namespace TemplatedDetail {
             }
             out += '}';
         } else {
-            static_assert(!sizeof(Decayed), "SerializeJSON: unsupported field type (see the supported set in json/JSONSchema.hpp)");
+            static_assert(!sizeof(Decayed), "Serialize: unsupported field type (see the supported set in json/JSONSchema.hpp)");
         }
     }
 
 } // namespace TemplatedDetail
 
 template <typename T>
-[[nodiscard]] auto SerializeJSON(const T& value, size_t indent = 0, Options options = {}) -> std::string {
+[[nodiscard]] auto Serialize(const T& value, size_t indent = 0, Options options = {}) -> std::string {
     std::string out;
     out.reserve(256);
     TemplatedDetail::AppendJSONValue(out, value, indent, 0, options.omitEmpty);

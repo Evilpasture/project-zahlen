@@ -44,10 +44,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# Benchmark.cpp reaches Components.hpp, whose key bitset is sized by
-# Reflect::EnumCount<KeyCode>(): without the reflection flags that count is 0
-# and every component after it moves, which is a silent wrong-offset read
-# rather than a build error. Same reason Terrain and Camera carry this.
+# Reflection is a whole-program ABI contract across targets that share ECS
+# component registration and reflected type names with zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

@@ -87,7 +87,7 @@ endif()
 #
 # 0xc0000135 is the loader saying it could not find a DLL the image imports. For
 # zcook that is libzahlen_engine.dll (in build/, beside the zcook a project that
-# shares the cooked-asset cache reaches through the stable symlink), libJolt.dll
+# shares the cooked-asset cache reaches through the stable symlink)
 # (build/extern/JoltPhysics/Build/, a directory nothing searches), and the
 # toolchain's own runtime -- libstdc++-6.dll, libgcc_s_seh-1.dll,
 # libwinpthread-1.dll and libzstd.dll -- which MSYS2 keeps in the compiler's own
@@ -126,7 +126,6 @@ if(WIN32)
     # in a subdirectory of the build tree and so has no loader path either.
     list(APPEND ZHLN_RUNTIME_DLL_DIRS
         "$<TARGET_FILE_DIR:zahlen_engine>"
-        "$<TARGET_FILE_DIR:Jolt>"
     )
 
     # The toolchain's runtime, from the directory the compiler itself is in -- the

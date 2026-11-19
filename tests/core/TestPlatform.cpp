@@ -5,11 +5,16 @@
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <system_error>
 
 namespace {
 
@@ -125,7 +130,7 @@ struct PlatformTestSuite {
             const TickFn tick     = lib.Symbol<TickFn>("GetTickCount");
             ZHLN::Test::ExpectTrue(tick != nullptr);
             if (tick != nullptr) {
-                (void) tick();
+                tick();
             }
 #else
             static constexpr const char* const names[] = {
@@ -147,6 +152,121 @@ struct PlatformTestSuite {
             ZHLN::Test::ExpectTrue(lib.GetSymbol("zahlen_no_such_symbol_xyz") == nullptr);
             lib.Close();
             ZHLN::Test::ExpectFalse(lib.IsOpen());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> shared_library_naming_and_search_path() {
+            ZHLN::Test::ExpectFalse(ZHLN::SharedLibrary::kSuffix.empty());
+            ZHLN::Test::ExpectEq(ZHLN::SharedLibrary::kSuffix.front(), '.');
+            ZHLN::Test::ExpectTrue(
+                ZHLN::SharedLibrary::kEnvPathSeparator == ':' ||
+                ZHLN::SharedLibrary::kEnvPathSeparator == ';'
+            );
+
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::HasLibraryExtension("libfoo.so"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::HasLibraryExtension("libfoo.dylib"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::HasLibraryExtension("FOO.DLL"));
+            ZHLN::Test::ExpectFalse(ZHLN::SharedLibrary::HasLibraryExtension("freecam"));
+            ZHLN::Test::ExpectFalse(ZHLN::SharedLibrary::HasLibraryExtension("libfoo.a"));
+
+            ZHLN::Test::ExpectFalse(ZHLN::SharedLibrary::IsExplicitPath("freecam"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::IsExplicitPath("plugins/freecam"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::IsExplicitPath("plugins\\freecam"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::IsExplicitPath("libzahlen_plugin_freecam.so"));
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::IsExplicitPath("zahlen_plugin_freecam.dll"));
+
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::FormatFileNames("").empty());
+            const auto formatted = ZHLN::SharedLibrary::FormatFileNames("zahlen_plugin_freecam");
+            ZHLN::Test::ExpectFalse(formatted.empty());
+            for (const auto& name: formatted) {
+                ZHLN::Test::ExpectTrue(name.ends_with(ZHLN::SharedLibrary::kSuffix));
+                ZHLN::Test::ExpectTrue(name.find("zahlen_plugin_freecam") != std::string::npos);
+            }
+
+            const std::string sep(1, ZHLN::SharedLibrary::kEnvPathSeparator);
+            const auto        split = ZHLN::SharedLibrary::SplitSearchPath(
+                sep + "/alpha/plugins" + sep + sep + "/beta/plugins" + sep
+            );
+            if (ZHLN::Test::ExpectEq(split.size(), static_cast<size_t>(2))) {
+                ZHLN::Test::ExpectEq(split[0].generic_string(), std::string {"/alpha/plugins"});
+                ZHLN::Test::ExpectEq(split[1].generic_string(), std::string {"/beta/plugins"});
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> executable_and_module_directory_lookup() {
+            const auto exeDir = ZHLN::FS::Paths::ExecutableDir();
+            ZHLN::Test::ExpectFalse(exeDir.empty());
+            ZHLN::Test::ExpectTrue(std::filesystem::is_directory(exeDir));
+
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::ModulePath(nullptr).empty());
+            ZHLN::Test::ExpectTrue(ZHLN::SharedLibrary::ModuleDirectory(nullptr).empty());
+
+            static constexpr int kLocalAnchor = 42;
+            const auto           localDir     = ZHLN::SharedLibrary::ModuleDirectory(&kLocalAnchor);
+            ZHLN::Test::ExpectFalse(localDir.empty());
+            ZHLN::Test::ExpectTrue(std::filesystem::is_directory(localDir));
+
+            const auto runtimePath = ZHLN::SharedLibrary::RuntimeModulePath();
+            const auto runtimeDir  = ZHLN::SharedLibrary::RuntimeModuleDirectory();
+            ZHLN::Test::ExpectFalse(runtimePath.empty());
+            ZHLN::Test::ExpectEq(runtimePath.parent_path().string(), runtimeDir.string());
+            ZHLN::Test::ExpectTrue(std::filesystem::is_directory(runtimeDir));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> open_plugin_distinguishes_not_found_and_load_failed() {
+            ZHLN::Test::TempDir   scratch;
+            std::error_code       ec;
+            const auto            envDir    = scratch.Path() / "env";
+            const auto            searchDir = scratch.Path() / "search";
+            ZHLN::Test::ExpectTrue(std::filesystem::create_directories(envDir, ec));
+            ZHLN::Test::ExpectTrue(std::filesystem::create_directories(searchDir, ec));
+
+            ZHLN::SharedLibrary         lib;
+            std::filesystem::path       resolved;
+            const std::filesystem::path dirs[] = {searchDir};
+
+            ZHLN::Test::ExpectTrue(
+                lib.OpenPlugin(
+                    "definitely_missing_plugin_xyz",
+                    ZHLN::PluginSearchOptions {
+                        .envPath           = envDir.string(),
+                        .searchDirs        = dirs,
+                        .allowSystemSearch = false,
+                    },
+                    &resolved
+                ) == ZHLN::SharedLibraryOpenStatus::NotFound
+            );
+            ZHLN::Test::ExpectFalse(lib.IsOpen());
+            ZHLN::Test::ExpectTrue(resolved.empty());
+
+            const auto names = ZHLN::SharedLibrary::FormatFileNames("zahlen_plugin_bogus");
+            if (!ZHLN::Test::ExpectFalse(names.empty())) {
+                return {};
+            }
+            // Directory matching a candidate plugin name must be skipped cleanly.
+            ZHLN::Test::ExpectTrue(std::filesystem::create_directories(envDir / names.front(), ec));
+
+            // Invalid regular file in searchDirs must report LoadFailed with its path.
+            const auto badFile = searchDir / names.front();
+            {
+                std::ofstream out(badFile, std::ios::binary);
+                out << "not a valid shared library";
+            }
+            ZHLN::Test::ExpectTrue(
+                lib.OpenPlugin(
+                    "bogus",
+                    ZHLN::PluginSearchOptions {
+                        .envPath           = envDir.string(),
+                        .searchDirs        = dirs,
+                        .allowSystemSearch = false,
+                    },
+                    &resolved
+                ) == ZHLN::SharedLibraryOpenStatus::LoadFailed
+            );
+            ZHLN::Test::ExpectFalse(lib.IsOpen());
+            ZHLN::Test::ExpectEq(resolved.string(), badFile.string());
             return {};
         }
     };

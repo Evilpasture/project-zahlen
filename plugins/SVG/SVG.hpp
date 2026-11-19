@@ -18,7 +18,7 @@
 // in SVG.cpp, which is also what keeps a resvg upgrade from recompiling the
 // world.
 //
-// Everything returns std::expected<T, ZHLN::ErrorCode> with SVGError codes; nothing
+// Everything returns std::expected<T, ZHLN::ErrorCode> with Error codes; nothing
 // throws (the tree builds -fno-exceptions) and nothing aborts -- resvg asserts
 // on a NULL options pointer, a NULL tree and a zero-sized pixmap, so this layer
 // is what refuses to hand it one.
@@ -62,7 +62,7 @@ namespace ZHLN::SVG {
 // mistyped scale factor would otherwise ask std::vector for terabytes.
 inline constexpr uint64_t kMaxRasterPixels = 268435456ULL;
 
-enum class SVGError : uint8_t {
+enum class Error : uint8_t {
     NotUTF8 = 1,           // A path, an id or the document text was not valid UTF-8.
     SVGZUnsupported,       // A .svgz document, and this resvg was built without SVGZ decoding.
     FileOpenFailed,        // No such file, or no read permission.
@@ -230,7 +230,7 @@ struct Options {
 
     // Font files loaded into the database ahead of parsing. One that cannot be
     // read fails the Rasterizer -- IsValid() is false and the first load
-    // through it returns SVGError::FontLoadFailed -- rather than silently
+    // through it returns Error::FontLoadFailed -- rather than silently
     // rendering that text in a fallback face.
     std::vector<std::string> fontFiles;
 };
@@ -308,7 +308,7 @@ class Document {
     // node's geometry box and its stroke box but not the filter-inclusive box
     // it crops by, so a filtered node would come out offset by the difference.
     //
-    // Fails with SVGError::NodeNotFound when the id is absent, not renderable,
+    // Fails with Error::NodeNotFound when the id is absent, not renderable,
     // or has a zero bounding box.
     [[nodiscard]] auto RenderNode(
         std::string_view id,

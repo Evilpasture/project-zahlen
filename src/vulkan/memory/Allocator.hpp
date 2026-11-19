@@ -5,8 +5,10 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
+#include <Zahlen/Core/EnumFlags.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <span>
+#include <utility>
 
 #include "vulkan/memory/ImageView.hpp"
 #include "vulkan/execution/Barriers.hpp"
@@ -214,39 +216,32 @@ struct ImageConfig {
 };
 
 [[nodiscard]] constexpr auto ToVk(BufferUsage usage) noexcept -> VkBufferUsageFlags {
-    return static_cast<VkBufferUsageFlags>(usage);
+    return std::to_underlying(usage);
 }
 [[nodiscard]] constexpr auto ToVk(ImageUsage usage) noexcept -> VkImageUsageFlags {
-    return static_cast<VkImageUsageFlags>(usage);
+    return std::to_underlying(usage);
 }
 
-[[nodiscard]] constexpr auto operator|(BufferUsage a, BufferUsage b) noexcept -> BufferUsage {
-    return static_cast<BufferUsage>(ToVk(a) | ToVk(b));
-}
-constexpr auto operator|=(BufferUsage& a, BufferUsage b) noexcept -> BufferUsage& {
-    a = a | b;
-    return a;
-}
-[[nodiscard]] constexpr auto operator&(BufferUsage a, BufferUsage b) noexcept -> BufferUsage {
-    return static_cast<BufferUsage>(ToVk(a) & ToVk(b));
-}
-[[nodiscard]] constexpr auto Has(BufferUsage flags, BufferUsage bits) noexcept -> bool {
-    return (ToVk(flags) & ToVk(bits)) != 0;
-}
+} // namespace ZHLN::Vk
 
-[[nodiscard]] constexpr auto operator|(ImageUsage a, ImageUsage b) noexcept -> ImageUsage {
-    return static_cast<ImageUsage>(ToVk(a) | ToVk(b));
-}
-constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
-    a = a | b;
-    return a;
-}
-[[nodiscard]] constexpr auto operator&(ImageUsage a, ImageUsage b) noexcept -> ImageUsage {
-    return static_cast<ImageUsage>(ToVk(a) & ToVk(b));
-}
-[[nodiscard]] constexpr auto Has(ImageUsage flags, ImageUsage bits) noexcept -> bool {
-    return (ToVk(flags) & ToVk(bits)) != 0;
-}
+namespace ZHLN {
+template <>
+inline constexpr bool EnableEnumFlags<Vk::BufferUsage> = true;
+template <>
+inline constexpr bool EnableEnumFlags<Vk::ImageUsage> = true;
+} // namespace ZHLN
+
+namespace ZHLN::Vk {
+
+using ZHLN::HasAnyFlags;
+using ZHLN::HasFlag;
+using ZHLN::operator|;
+using ZHLN::operator&;
+using ZHLN::operator^;
+using ZHLN::operator~;
+using ZHLN::operator|=;
+using ZHLN::operator&=;
+using ZHLN::operator^=;
 
 class Buffer {
   public:

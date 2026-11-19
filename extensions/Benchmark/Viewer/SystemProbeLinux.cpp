@@ -36,7 +36,6 @@
 //
 // Neither path is required: a machine with no GPU counters reports CPU numbers
 // and a reason, which is what the panel draws.
-#if defined(__linux__)
 
 #include "SystemProbe.hpp"
 #include <Zahlen/Core/SharedLibrary.hpp>
@@ -344,8 +343,8 @@ struct ProcStat {
 // One card under /sys/class/drm that answers at least one of the counters.
 struct DrmCard {
     fs::path path; // .../cardN/device
-    uint32_t vendor  = 0;
-    bool     bootVga = false;
+    uint32_t vendor   = 0;
+    bool     bootVga  = false;
     bool     hasUsage = false;
     bool     hasClock = false;
 };
@@ -355,7 +354,7 @@ struct DrmCard {
 // empty list is the other answer: the directory is there and no card in it
 // exposes a counter.
 [[nodiscard]] auto ReadDrmCards() -> std::optional<std::vector<DrmCard>> {
-    std::error_code ec;
+    std::error_code        ec;
     fs::directory_iterator directory {fs::path(kDrmRoot), ec};
     if (ec) {
         return std::nullopt;
@@ -469,11 +468,11 @@ struct GpuReading {
 // machine with no NVIDIA driver at all -- the common case -- is told apart from a
 // driver that is there and half-broken.
 enum class NvmlFailure : uint8_t {
-    DriverLibraryMissing ZHLN_ANNOTATION(ZHLN::Description<"the NVIDIA driver library is not installed"> {})       = 1,
+    DriverLibraryMissing ZHLN_ANNOTATION(ZHLN::Description<"the NVIDIA driver library is not installed"> {})            = 1,
     EntryPointsMissing   ZHLN_ANNOTATION(ZHLN::Description<"the driver library is loaded but missing entry points"> {}) = 2,
-    InitFailed           ZHLN_ANNOTATION(ZHLN::Description<"the driver refused to initialize"> {})                   = 3,
-    NoDevices            ZHLN_ANNOTATION(ZHLN::Description<"the driver reports no devices"> {})                      = 4,
-    NoDevice       ZHLN_ANNOTATION(ZHLN::Description<"no device could be opened"> {})                          = 5,
+    InitFailed           ZHLN_ANNOTATION(ZHLN::Description<"the driver refused to initialize"> {})                      = 3,
+    NoDevices            ZHLN_ANNOTATION(ZHLN::Description<"the driver reports no devices"> {})                         = 4,
+    NoDevice             ZHLN_ANNOTATION(ZHLN::Description<"no device could be opened"> {})                             = 5,
 };
 
 // The NVIDIA driver, bound at runtime. A machine with no NVML fails at the first
@@ -823,10 +822,10 @@ class LinuxProbe final: public SystemProbe {
 
     // procfs state: the previous read, the core count it fixed, and the fallback
     // frequency table, read once when cpufreq is missing.
-    ProcStat                           _previous;
-    std::optional<std::vector<float>>  _cpuInfoMHz;
-    size_t                             _cores       = 0;
-    bool                               _cpufreqLive = false;
+    ProcStat                          _previous;
+    std::optional<std::vector<float>> _cpuInfoMHz;
+    size_t                            _cores       = 0;
+    bool                              _cpufreqLive = false;
 
     // GPU state: one source or the other, never both.
     std::unique_ptr<NvmlProbe> _nvml;
@@ -844,5 +843,3 @@ auto MakeSystemProbe(std::string_view gpuNameHint) -> std::unique_ptr<SystemProb
 }
 
 } // namespace ZHLN::Bench::Platform
-
-#endif // __linux__

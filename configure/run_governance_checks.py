@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIGURE_DIR = ROOT / "configure"
 
 GOVERNED_ROOTS = (
+    "cmake",
     "include",
     "src",
     "plugins",
@@ -62,6 +63,8 @@ GOVERNED_SUFFIXES = frozenset({
     ".cppm",
     ".ixx",
     ".cmake",
+    ".map",
+    ".list",
 })
 SKIP_DIRS = frozenset({".git", "build", "target", "__pycache__", ".cache", "node_modules"})
 
@@ -81,6 +84,9 @@ HISTORICAL_PYTHON_ORDER: tuple[str, ...] = (
     "check_module_linkage.py",
     "check_error_ordinals.py",
     "check_handle_taxonomy.py",
+    "check_capability_boundary.py",
+    "check_image_boundary.py",
+    "check_engine_exports.py",
 )
 # Longest-pole checks scheduled first to minimize parallel tail latency.
 SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
@@ -96,10 +102,13 @@ SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
     "check_subsystem_boundaries.py",
     "check_pimpl_encapsulation.py",
     "check_handle_taxonomy.py",
+    "check_capability_boundary.py",
+    "check_image_boundary.py",
+    "check_engine_exports.py",
 )
 PERL_CHECK = "check_include_provenance.pl"
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 
 
 def _scan_dir_stats(directory: Path, rel_prefix: str, entries: list[str]) -> None:
@@ -148,6 +157,10 @@ def compute_tree_digest() -> str:
     hasher.update("".join(cfg_entries).encode())
 
     tree_entries: list[str] = []
+    root_cmake = ROOT / "CMakeLists.txt"
+    if root_cmake.is_file():
+        st = root_cmake.stat()
+        tree_entries.append(f"CMakeLists.txt\0{st.st_mtime_ns}\0{st.st_size}\n")
     for root_name in GOVERNED_ROOTS:
         root_path = ROOT / root_name
         if root_path.is_dir():

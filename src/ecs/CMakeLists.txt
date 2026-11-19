@@ -18,6 +18,7 @@ target_include_directories(zahlen_ecs
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -26,4 +27,4 @@ target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
 # Signature-driven graph resolution includes SystemContext.hpp, whose public
 # frame callbacks and visible lists use Jolt types. Give this target the same
 # Jolt usage requirements (headers and ABI definitions) as other consumers.
-target_link_libraries(zahlen_ecs PRIVATE Jolt zahlen_warnings)
+target_link_libraries(zahlen_ecs PRIVATE zahlen_warnings)

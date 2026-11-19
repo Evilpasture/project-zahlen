@@ -4,26 +4,19 @@
 #pragma once
 
 #include <Zahlen/Common.h>
-#include <Zahlen/Engine/Frame.hpp>
-#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
+class PhysicsContext;
+namespace ECS { class EntityCommandBuffer; }
 
-class Engine;
-
-namespace ECS {
-class Registry;
-}
-
-void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z);
-
-class ZHLN_API PhysicsSystem {
+class PhysicsSystem {
   public:
-    static constexpr float TargetDt = kFixedStepDt;
+    using ImpulseQuery = ECS::Query<const Components::ImpulseCommand, const Components::PhysicsComponent>;
 
-    // Engine::Tick has already drained the clock; the physics step just runs
-    // the number of fixed steps it was handed.
-    static void Update(Engine& engine, uint32_t fixedSteps) noexcept;
+    // The frame owner plays these removals before stepping the physics world.
+    static void CommitImpulses(ImpulseQuery query, ECS::EntityCommandBuffer& commands, ECS::ResMut<PhysicsContext> physics);
 };
 
 }

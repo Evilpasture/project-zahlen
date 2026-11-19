@@ -33,7 +33,7 @@ namespace ZHLN::BSP {
 // `imported.lights` exactly like authored point lights.
 struct BakeField {
     AmbientTerm              ambient {};
-    std::vector<BspPointLight> vpls {};
+    std::vector<PointLight> vpls {};
     bool                     hasBake = false;
 
     // Bookkeeping for harness runs and console reporting; zero-cost to the
@@ -48,7 +48,7 @@ struct BakeField {
 // duplicating the axis rules. `vplWeight` damps bake VPLs against the map's
 // real lights + DDGI (the bake's direct image is already carried live),
 // mirroring EmissiveLightFor's fixtureDamping convention.
-[[nodiscard]] auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vplBudget, float vplWeight)
+[[nodiscard]] auto BuildBakeField(const Map& map, const ImportOptions& options, uint32_t vplBudget, float vplWeight)
     -> BakeField;
 
 } // namespace ZHLN::BSP

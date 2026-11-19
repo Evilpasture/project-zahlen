@@ -6,11 +6,9 @@
 # (zahlen_alife).
 #
 # The plainest target in gameplay/: no module interfaces, no third-party
-# dependency, no serializer. It is simulation over Jolt vectors and the ECS
-# component model -- it names no renderer type, no asset-pipeline type and no
-# document type of its own. (Core's <Zahlen/Engine/Engine.hpp> does pull in
-# <Zahlen/Render/Render.hpp>, so the engine link below is unavoidable; what is true is
-# that nothing in this directory asks for any of it.) Splitting it out is what
+# dependency, no serializer. It is simulation over Zahlen math vectors and the
+# COM IEntities component boundary -- it names no renderer type, no asset-pipeline
+# type and no document type of its own. Splitting it out is what
 # lets a headless simulation harness link the simulator without dragging a glTF
 # importer and a JSON parser into the link line.
 #
@@ -37,8 +35,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_sources(${TARGET_NAME} PRIVATE ${ZHLN_ALIFE_SOURCES})
 
-# Core is a public dependency: Simulator.hpp and Graph.hpp name ZHLN::Engine and
-# ZHLN::Entity, and Simulator.cpp registers systems with the ECS, so a consumer
+# Core is a public dependency: Simulator.hpp and Graph.hpp name COM::IEntities and
+# ZHLN::Entity, so a consumer
 # needs core's include path and its symbols rather than just this archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine

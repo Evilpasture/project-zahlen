@@ -4,17 +4,15 @@
 #pragma once
 #include <Zahlen/Common.h>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
-class Engine;
-class ZHLN_API LODSystem {
+class LODSystem {
   public:
     using LODQuery = ECS::Query<
         Components::LODComponent&, Components::MeshComponent&, const Components::CameraComponent,
         const Components::WorldTransformComponent, const Components::TransformComponent>;
 
     static void GraphUpdate(LODQuery query);
-    static void Update(Engine& engine);
 };
 }

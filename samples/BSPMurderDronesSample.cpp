@@ -1,99 +1,71 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// samples/BSPMurderDronesSample.cpp
-//
-// Standalone sample demonstrating Source Engine world ingestion in Zahlen:
-// loads import/engine_assets/maps/gm_murder_drones.bsp, resolves VMT/VTF materials,
-// runtime BSP lights, static prop StudioModels (.mdl/.vvd/.vtx/.phy),
-// interactive entities (doors, buttons, triggers), and spawns the player at
-// info_player_start as a first-person character controller.
-// V swaps that eye for the extensions/FreeCam fly camera while the character
-// waits where it stood, so the map can be looked at from the outside.
-//
-// The character is a procedural one: ProceduralAnimationSample's rig logic,
-// driven by resources/assets/UziProc.glb (ZHLN_PROCEDURAL_RIG overrides it)
-// through ZHLN.ProceduralAnimation. The rig is loaded before the
-// CharacterVirtual is created, so the hull is fitted to the imported mesh
-// envelope -- Locomotion::EstimateCharacterBounds + FitDualShapeToBounds, the
-// same pair that sample uses, which is also what puts the body's model origin
-// at the feet. T hands the view to that sample's third-person orbit rig and
-// back; first person keeps the free look and hides the head/hair through the
-// extension's palette mask.
-//
-// Usage:
-//   ./build/p2996/samples/BSPMurderDronesSample
-//   ./build/p2996/samples/BSPMurderDronesSample import/engine_assets/maps/gm_murder_drones.bsp
-
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/EngineState.hpp>
-#include <Zahlen/Engine/Capabilities/AssetLibrary.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Animation/Context.hpp>
+#include <Animation/Components.hpp>
+#include <Animation/PrefabRig.hpp>
+#include <Animation/ProceduralMath.hpp>
+#include <BSP/BSPAssets.hpp>
 #include <BSP/BSPGeometry.hpp>
-#include <BSP/BSPImporter.hpp>
+#include <BSP/BSPLighting.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
+#include <BSP/SourceAsset.hpp>
+#include <BSP/SourceVFS.hpp>
+#include <BSP/StudioModelAssets.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Camera/TargetCamera.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <CharacterController/CharacterController.hpp>
-#include <Zahlen/ConfigCli.hpp>
+#include <CommandLine/CommandLine.hpp>
 #include <FreeCam/FreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
+#include <Interaction/InteractionComponents.hpp>
 #include <Interaction/InteractionSystem.hpp>
+#include <Scene/Scene.hpp>
 #include <Signal/CrashHandler.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Common.h>
-#include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IActionContext.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/ConfigCli.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/FramePlan.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
+#include <UI/GUI.hpp>
+#include <UI/HostUI.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <Zahlen/Render/Meshlet.hpp>
-#include <Zahlen/Engine/ModelPrefab.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/RenderIDs.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Geometry2D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Transform.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Engine/Scene.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/GUI.hpp>
-#include <Zahlen/Physics/Physics.hpp>
-#include <glTF/GLTFImporter.hpp>
+#include <glTF/GLTFAssets.hpp>
+#include <glTF/GLTFDocument.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
 #endif
 
-// Optional outer-layer modules, grouped like ProceduralAnimationSample.cpp's.
-// ZHLN.Locomotion supplies the bounds/hull helpers this sample fits its
-// CharacterVirtual with, ZHLN.ProceduralAnimation the rig evaluator that drives
-// the imported character.
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
-
-// clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Vec3.h>
-
-// clang-format off
-#include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/PhysicsSystem.h>
-#include <Jolt/Physics/Collision/ContactListener.h>
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-// clang-format on
 
 #include <algorithm>
 #include <array>
@@ -102,17 +74,24 @@ import ZHLN.ProceduralAnimation;
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
-#include <mutex>
+#include <iterator>
+#include <memory>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec3;
+using ZHLN::FVec4;
 
 inline constexpr std::string_view kDefaultMapPath   = "import/engine_assets/maps/gm_murder_drones.bsp";
 inline constexpr std::string_view kDefaultAssetRoot = "import/engine_assets";
@@ -143,39 +122,6 @@ inline constexpr std::string_view kFallbackRigPath = "ProceduralAnimationBaseRig
     return out;
 }
 
-[[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {
-    if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
-    }
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(nodeIndex)].localTransform;
-    int32_t    parent    = prefab.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
-    for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
-        transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
-        parent    = prefab.nodes[static_cast<size_t>(parent)].parentIndex;
-    }
-    return transform;
-}
-
-void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3& outMax) {
-    outMin = JPH::Vec3(1e9f, 1e9f, 1e9f);
-    outMax = JPH::Vec3(-1e9f, -1e9f, -1e9f);
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        const JPH::Mat44 model = NodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const JPH::Vec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
-        const JPH::Vec3  extent      = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
-                                       (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
-        outMin                       = JPH::Vec3::sMin(outMin, center - extent);
-        outMax                       = JPH::Vec3::sMax(outMax, center + extent);
-    }
-    if (prefab.parts.empty()) {
-        outMin = JPH::Vec3(-10.0f, -10.0f, -10.0f);
-        outMax = JPH::Vec3(10.0f, 10.0f, 10.0f);
-    }
-}
 
 // --- Captured mouse, crosshair, crosshair pick ----------------------------------
 
@@ -195,8 +141,8 @@ inline constexpr float kPickDistance       = 400.0f; // m, ray length
 struct CrosshairPick {
     bool         hasHit    = false;
     std::string  label     = "world brush"; // entity name, or BSP world geometry
-    JPH::Vec3    position  = JPH::Vec3::sZero();
-    JPH::Vec3    normal    = JPH::Vec3::sAxisY();
+    FVec3    position  = FVec3::Zero();
+    FVec3    normal    = FVec3::UnitY();
     float        distance  = 0.0f;
     uint32_t     bodyIndex = 0;
     ZHLN::Entity entity    = ZHLN::Entity::Null();
@@ -206,13 +152,13 @@ CrosshairPick g_pick;
 
 // The captured mouse. Window::CaptureMouse is GLFW_CURSOR_DISABLED: the cursor
 // is hidden and the window is handed raw deltas, so looking around no longer
-// needs a button held down. InputStateComponent keeps reporting motion either
+// needs a button held down. InputState keeps reporting motion either
 // way -- this flag is only what stops the look code from *gating* on RMB.
 //
-// Note the trap this does NOT trip: InputStateComponent::wantCaptureMouse also
-// suppresses every delta and button read, but it is an editor concept
-// (app/main.cpp) and Engine::ProcessEvents clears it for any host with a real
-// window, so a sample never sees it set.
+// Note the trap this does NOT trip: UI capture state in InputContext also
+// suppresses every delta and button read when gating is applied, but it is
+// an editor concept (app/main.cpp) and Engine::ProcessEvents clears it for
+// any host with a real window, so a sample never sees it set.
 bool g_mouseCaptured = false;
 
 // The frame's dt, for the UI callback's BeginFrame. The sample's own loop owns
@@ -232,26 +178,26 @@ float g_frameDt = 0.0f;
 // viewer a local of main(), inside that scope; static storage is exactly what
 // that rule forbids. It is attached lazily, on the first frame it draws, so a
 // session that never presses F3 never builds the benchmark's world.
-ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
+ZHLN::Bench::Viewer* g_benchmarkViewer = nullptr;
 
-void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
+void SetMouseCaptured(ZHLN::COM::IEngine& engine, bool captured) {
     g_mouseCaptured = captured;
-    engine.GetPlatformHost().CaptureMouse(captured);
+    engine.CaptureMouse(engine.PrimaryWindow(), captured);
 }
 
 // Camera::GetViewMatrix builds its direction inline and exposes no accessor.
 // Same formula, so the ray and the view can never disagree about "forward".
-[[nodiscard]] auto CameraForward(const ZHLN::Camera& cam) -> JPH::Vec3 {
-    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
-    return JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+[[nodiscard]] auto CameraForward(const ZHLN::Camera& cam) -> FVec3 {
+    const float yawRad   = cam.yaw.ToRadians().value;
+    const float pitchRad = cam.pitch.ToRadians().value;
+    return FVec3{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad), std::sin(yawRad) * std::cos(pitchRad)}.Normalized();
 }
 
 // A readable label for whatever the crosshair is over. Prefers the Source
 // classname/targetname the interaction layer dispatches on, then the ECS name,
 // then the raw entity id -- the same ladder InteractionSystem's own debug aid
 // uses, so a name here means the same thing it means there.
-[[nodiscard]] auto PickLabel(const ZHLN::ECS::Registry& reg, ZHLN::Entity e) -> std::string {
+[[nodiscard]] auto PickLabel(ZHLN::COM::IEntities& reg, ZHLN::Entity e) -> std::string {
     if (const auto meta = reg.Get<ZHLN::Interaction::BSPEntityMetadataComponent>(e)) {
         if (!meta->className.empty()) {
             return std::string(meta->className.c_str()) + (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
@@ -268,11 +214,11 @@ void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
 // literally what you would bump into. PhysicsContext::Raycast returns an empty
 // result while the world is stepping, which is why this runs after Tick rather
 // than from inside a frame step.
-void UpdateCrosshairPick(ZHLN::Engine& engine) {
+void UpdateCrosshairPick(ZHLN::COM::IEngine& engine) {
     g_pick = CrosshairPick {};
 
-    auto&              reg    = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    auto&              reg    = *engine.Entities();
+    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
     if (camEnt == ZHLN::Entity::Null()) {
         return;
     }
@@ -283,22 +229,21 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
         return;
     }
 
-    const JPH::Vec3 dir = CameraForward(cc->camera);
-    if (dir.LengthSq() < 1e-6f) {
+    const FVec3 dir = CameraForward(cc->camera);
+    if (dir.LengthSquared() < 1e-6f) {
         return;
     }
 
     // The player is a CharacterVirtual, not a Jolt body, so it is not
     // in the broadphase and cannot be hit -- no ignore handle is needed.
-    const ZHLN::Physics::RaycastResult hit = engine.Physics().Raycast(cc->camera.position, dir, kPickDistance);
+    const ZHLN::Physics::RaycastResult hit = engine.Simulation()->Raycast(cc->camera.position.Cast<double>(), dir, kPickDistance, ZHLN::Physics::BodyID{});
     if (!hit.hasHit) {
         return;
     }
 
     g_pick.hasHit = true;
-    // RaycastResult::position is Double3 (world space) and this struct is Vec3
-    // (local space): widen to RVec3 first, then narrow to the local spelling.
-    g_pick.position  = static_cast<JPH::Vec3>(static_cast<JPH::RVec3>(hit.position));
+    // The physics hit is double precision; the HUD stores float coordinates.
+    g_pick.position  = hit.position.Cast<float>();
     g_pick.normal    = hit.normal;
     g_pick.distance  = hit.fraction * kPickDistance;
     g_pick.bodyIndex = hit.bodyID.index;
@@ -308,7 +253,7 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
     // (it unpacks Jolt's user data and checks the generation), so the mapping
     // is a direct handle comparison. GetEntitiesWith returns a span, not a
     // vector, so this walk allocates nothing.
-    for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+    for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::PhysicsComponent>()) {
         const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
         if (!phys || phys->physicsID == ZHLN::Physics::BodyID::Null()) {
             continue;
@@ -322,28 +267,27 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
 }
 
 // The crosshair and its readout. Registered as the sample's UI callback, which
-// the engine's HostUICallback step invokes in FramePhase::UI every frame.
+// the host loop invokes explicitly before Engine::Tick.
 //
-// SetPendingUIData is not optional: RenderSystem draws whatever
-// Engine::GetPendingUIData() returns and nothing else fills it in, so a callback
-// that builds a Context and forgets this call renders nothing at all.
-void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
-    hudGui.SetFontAtlas(engine.GetFontAtlas());
-    ZHLN::GUI::Frame ui = hudGui.BeginFrame(engine.ConsumeUIInput(g_frameDt));
+// The host submits copied draw streams explicitly through GraphicsDevice.
 
-    const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
+void DrawCrosshairHUD(ZHLN::COM::IEngine& engine, ZHLN::GUI::Context& hudGui, ZHLN::HostUI& hostUI) {
+    hudGui.SetFontAtlas(hostUI.GetFontAtlas());
+    ZHLN::GUI::Frame ui = hudGui.BeginFrame(hostUI.ConsumeInput(g_frameDt));
+
+    const ZHLN::Extent2D viewport = engine.WindowExtent(engine.PrimaryWindow());
     const float          cx       = static_cast<float>(viewport.width) * 0.5f;
     const float          cy       = static_cast<float>(viewport.height) * 0.5f;
     const float          half     = kCrosshairThickness * 0.5f;
 
     // Pale arms, hot dot: the dot is the one pixel that matters, and it is the
     // pixel the ray comes from.
-    const JPH::Vec4 armInk {0.82f, 0.92f, 1.00f, 0.85f};
-    const JPH::Vec4 dotInk {1.00f, 0.78f, 0.28f, 1.00f};
+    const FVec4 armInk {0.82f, 0.92f, 1.00f, 0.85f};
+    const FVec4 dotInk {1.00f, 0.78f, 0.28f, 1.00f};
 
     // A Box with no children still renders -- Clay draws the element's
     // background colour, and BeginBox/EndBox is the whole contract.
-    auto quad = [&ui](std::string_view id, float x, float y, float w, float h, const JPH::Vec4& color) -> void {
+    auto quad = [&ui](std::string_view id, float x, float y, float w, float h, const FVec4& color) -> void {
         ui.BeginBox(
             id, ZHLN::GUI::BoxConfig {
                     .width  = {.fixed = w},
@@ -371,7 +315,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     // advertises an action which pressing E cannot perform.
     std::string_view prompt;
     if (g_pick.entity != ZHLN::Entity::Null() && g_pick.distance <= 2.5f) {
-        auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+        auto& reg = *engine.Entities();
         if (const auto door = reg.Get<ZHLN::Interaction::DoorComponent>(g_pick.entity)) {
             if ((door->flags & ZHLN::Interaction::DoorFlags::Locked) != ZHLN::Interaction::DoorFlags::None) {
                 prompt = "Locked";
@@ -413,7 +357,7 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     // The benchmark and telemetry panels, when F3 / F4 have shown them. They are
     // second authors of this same frame, not a second frame: they append their
     // boxes to the layout the crosshair above already opened, and the
-    // SetPendingUIData below publishes all of it.
+    // The host compositor below submits all of it.
     //
     // The viewer ticks here -- once per engine frame, whichever frame step calls
     // it, which is why it is safe beside the loop's own F4 handling -- so its
@@ -423,11 +367,11 @@ void DrawCrosshairHUD(ZHLN::Engine& engine, ZHLN::GUI::Context& hudGui) {
     if (g_benchmarkViewer != nullptr) {
         g_benchmarkViewer->Tick(engine);
         if (g_benchmarkViewer->IsVisible() || g_benchmarkViewer->IsTelemetryVisible()) {
-            g_benchmarkViewer->DrawPanels(ui, engine);
+            g_benchmarkViewer->SetFontAtlas(&hostUI.GetFontAtlas()); g_benchmarkViewer->DrawPanels(ui, engine);
         }
     }
 
-    engine.SubmitUI(std::move(ui).End());
+    (void)hostUI.Submit(std::move(ui).End());
 }
 
 // --- First-person rig -----------------------------------------------------------
@@ -448,8 +392,7 @@ inline constexpr float kLookSensitivity = 0.12f;
 inline constexpr float kFlySpeedMeters = 8.0f;
 
 // One sample process, one main camera and one player: the rig state is
-// file-static for the same reason the controller extension keeps its
-// PlayerInputSystem static inside its frame steps.
+// file-static for the lifetime of this sample.
 ZHLN::Entity g_player = ZHLN::Entity::Null();
 
 // The player's glTF rig is spawned outside the BSP importer, so its parts get no
@@ -457,14 +400,14 @@ ZHLN::Entity g_player = ZHLN::Entity::Null();
 // leaf cube at the player's position and write it onto the rig parts, so the
 // character follows the lighting of the room it stands in.
 std::vector<ZHLN::Entity>       g_playerRigParts;
-const ZHLN::BSP::BSPMap*        g_rigCubeMap = nullptr;
+const ZHLN::BSP::Map*        g_rigCubeMap = nullptr;
 ZHLN::BSP::ImportOptions        g_rigImportOpts {};
 
-void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
+void UpdatePlayerRigAmbientCube(ZHLN::COM::IEngine& engine) {
     if (g_rigCubeMap == nullptr || g_player == ZHLN::Entity::Null() || g_playerRigParts.empty()) {
         return;
     }
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
     if (!reg.IsAlive(g_player)) {
         return;
     }
@@ -473,27 +416,26 @@ void UpdatePlayerRigAmbientCube(ZHLN::Engine& engine) {
         return;
     }
     // Inverse of ConvertPosition (Source -> engine): engine = (x*s, z*s, -y*s).
-    const JPH::Vec3 e = JPH::Mat44(world->world).GetTranslation();
+    const FVec3 e = world->world.Column(3).XYZ();
     const float     s = g_rigImportOpts.unitScale;
-    const std::array<float, 3> src = {e.GetX() / s, -e.GetZ() / s, e.GetY() / s};
+    const std::array<float, 3> src = {e.x / s, -e.z / s, e.y / s};
 
-    std::array<std::array<float, 3>, 6> cube {};
-    if (!ZHLN::BSP::SampleLeafAmbientCube(*g_rigCubeMap, src, cube)) {
+    const auto cubeOpt = ZHLN::BSP::SampleLeafAmbientCube(*g_rigCubeMap, src);
+    if (!cubeOpt) {
         return;
     }
-    std::array<ZHLN::Float4, 6> engineCube {};
+    std::array<ZHLN::FVec4, 6> engineCube {};
     for (size_t f = 0; f < 6; ++f) {
         const float k = g_rigImportOpts.propAmbientCubeScale;
-        engineCube[f] = {cube[f][0] * k, cube[f][1] * k, cube[f][2] * k, 1.0f};
+        engineCube[f] = {(*cubeOpt)[f][0] * k, (*cubeOpt)[f][1] * k, (*cubeOpt)[f][2] * k, 1.0f};
     }
     for (ZHLN::Entity part: g_playerRigParts) {
         if (!reg.IsAlive(part)) {
             continue;
         }
-        if (!reg.Get<ZHLN::Components::AmbientCubeComponent>(part)) {
-            reg.Add<ZHLN::Components::AmbientCubeComponent>(part);
+        if (!reg.Patch<ZHLN::Components::AmbientCubeComponent>(part, [&](auto& c) { c.cube = engineCube; })) {
+            reg.AttachMany(part, ZHLN::Components::AmbientCubeComponent {.cube = engineCube});
         }
-        reg.Patch<ZHLN::Components::AmbientCubeComponent>(part, [&](auto& c) { c.cube = engineCube; });
     }
 }
 
@@ -551,7 +493,7 @@ struct ProceduralViewState {
 
 ProceduralViewState g_view;
 
-[[nodiscard]] bool EnvironmentFlag(const char* name) {
+[[maybe_unused]] bool EnvironmentFlag(const char* name) {
     const char* value = std::getenv(name);
     if (value == nullptr || value[0] == '\0') {
         return false;
@@ -560,7 +502,7 @@ ProceduralViewState g_view;
     return text != "0" && text != "false" && text != "FALSE" && text != "off" && text != "OFF";
 }
 
-[[nodiscard]] float EnvironmentFloat(const char* name, float fallback) {
+[[maybe_unused]] float EnvironmentFloat(const char* name, float fallback) {
     const char* value = std::getenv(name);
     if (value == nullptr || value[0] == '\0') {
         return fallback;
@@ -602,7 +544,7 @@ ProceduralViewState g_view;
            value == "cap" || value.find("glasses") != std::string_view::npos || value.find("goggles") != std::string_view::npos;
 }
 
-[[nodiscard]] bool IsNodeUnder(const ZHLN::ModelPrefab& prefab, int32_t node, int32_t ancestor) {
+[[nodiscard]] bool IsNodeUnder(const ZHLN::GLTF::Document& prefab, int32_t node, int32_t ancestor) {
     for (size_t depth = 0; depth < prefab.nodes.size() && node >= 0 && node < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
         if (node == ancestor) {
             return true;
@@ -612,11 +554,11 @@ ProceduralViewState g_view;
     return false;
 }
 
-[[nodiscard]] JPH::Mat44 GetPrefabNodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t node) {
+[[nodiscard]] ZHLN::Mat4x4 GetPrefabNodeModelTransform(const ZHLN::GLTF::Document& prefab, int32_t node) {
     if (node < 0 || node >= static_cast<int32_t>(prefab.nodes.size())) {
-        return JPH::Mat44::sIdentity();
+        return ZHLN::Mat4x4::Identity();
     }
-    JPH::Mat44 transform = prefab.nodes[static_cast<size_t>(node)].localTransform;
+    ZHLN::Mat4x4 transform = prefab.nodes[static_cast<size_t>(node)].localTransform;
     int32_t    parent    = prefab.nodes[static_cast<size_t>(node)].parentIndex;
     for (size_t depth = 0; depth < prefab.nodes.size() && parent >= 0 && parent < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
         transform = prefab.nodes[static_cast<size_t>(parent)].localTransform * transform;
@@ -625,7 +567,7 @@ ProceduralViewState g_view;
     return transform;
 }
 
-[[nodiscard]] bool HasHeadVisualAncestor(const ZHLN::ModelPrefab& prefab, int32_t node) {
+[[nodiscard]] bool HasHeadVisualAncestor(const ZHLN::GLTF::Document& prefab, int32_t node) {
     for (size_t depth = 0; depth < prefab.nodes.size() && node >= 0 && node < static_cast<int32_t>(prefab.nodes.size()); ++depth) {
         if (IsHeadVisualName(std::string_view(prefab.nodes[static_cast<size_t>(node)].name))) {
             return true;
@@ -635,7 +577,7 @@ ProceduralViewState g_view;
     return false;
 }
 
-[[nodiscard]] bool IsHeadDominatedSkin(const ZHLN::ModelPrefab& prefab, int32_t skeletonIndex) {
+[[nodiscard]] bool IsHeadDominatedSkin(const ZHLN::GLTF::Document& prefab, int32_t skeletonIndex) {
     if (skeletonIndex < 0 || skeletonIndex >= static_cast<int32_t>(prefab.skeletons.size())) {
         return false;
     }
@@ -690,26 +632,27 @@ ProceduralViewState g_view;
 // of the draw is the only mechanism that removes it, which is why a part this
 // test misses stays visible even when its joints look head-driven.
 [[nodiscard]] bool
-    IsCompactHeadAccessory(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition, JPH::Vec3Arg neckPosition, float headScale) {
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        if (part.nodeIndex != nodeIndex) {
+    IsCompactHeadAccessory(const ZHLN::GLTF::Document& prefab, int32_t nodeIndex, FVec3 headPosition, FVec3 neckPosition, float headScale) {
+    for (const auto& part: prefab.parts) {
+        if (part.nodeIndex != nodeIndex || part.primitive >= prefab.primitives.size()) {
             continue;
         }
-        const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  halfExtent = (localMax - localMin) * 0.5f;
-        const JPH::Vec3  center     = model.Multiply3x3((localMin + localMax) * 0.5f) + model.GetTranslation();
-        const float      radius     = model.Multiply3x3(halfExtent).Length();
+        const auto& prim = prefab.primitives[part.primitive];
+        const ZHLN::Mat4x4 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex);
+        const FVec3 localMin = prim.localMin;
+        const FVec3 localMax = prim.localMax;
+        const FVec3  halfExtent = (localMax - localMin) * 0.5f;
+        const FVec3  center     = ZHLN::TransformPoint(model, (localMin + localMax) * 0.5f);
+        const float      radius     = ZHLN::TransformVector(model, halfExtent).Length();
         // 3.5 head radii covers a beanie, its rim and a visor shell; a torso
         // piece fails the cap before proximity is even considered.
         if (radius > headScale * 3.5f) {
             continue;
         }
-        const JPH::Vec3 delta          = center - headPosition;
-        const float     planarDistance = std::sqrt((delta.GetX() * delta.GetX()) + (delta.GetZ() * delta.GetZ()));
-        if (planarDistance <= headScale * 1.8f && delta.GetY() >= (neckPosition.GetY() - headPosition.GetY()) - headScale * 0.25f &&
-            delta.GetY() <= headScale * 2.5f) {
+        const FVec3 delta          = center - headPosition;
+        const float     planarDistance = std::sqrt((delta.x * delta.x) + (delta.z * delta.z));
+        if (planarDistance <= headScale * 1.8f && delta.y >= (neckPosition.y - headPosition.y) - headScale * 0.25f &&
+            delta.y <= headScale * 2.5f) {
             return true;
         }
     }
@@ -725,26 +668,27 @@ ProceduralViewState g_view;
 // a DEF-Neck-to-DEF-Head distance of 0.07 m, which is why the compact-accessory
 // cap rejects it.
 [[nodiscard]] bool
-    IsHeadRestingPart(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition, JPH::Vec3Arg neckPosition, float headScale) {
-    for (const ZHLN::ModelPart& part: prefab.parts) {
-        if (part.nodeIndex != nodeIndex) {
+    IsHeadRestingPart(const ZHLN::GLTF::Document& prefab, int32_t nodeIndex, FVec3 headPosition, FVec3 neckPosition, float headScale) {
+    for (const auto& part: prefab.parts) {
+        if (part.nodeIndex != nodeIndex || part.primitive >= prefab.primitives.size()) {
             continue;
         }
-        const JPH::Mat44 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
-        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
-        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
-        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
-        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
-        const JPH::Vec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
+        const auto& prim = prefab.primitives[part.primitive];
+        const ZHLN::Mat4x4 model = GetPrefabNodeModelTransform(prefab, part.nodeIndex);
+        const FVec3 localMin = prim.localMin;
+        const FVec3 localMax = prim.localMax;
+        const FVec3  localCenter = (localMin + localMax) * 0.5f;
+        const FVec3  halfExtent  = (localMax - localMin) * 0.5f;
+        const FVec3  center      = ZHLN::TransformPoint(model, localCenter);
         // Column-absolute form of the same box transform ComputeBounds uses: the
         // half extent of an axis-aligned box under a rotation.
-        const JPH::Vec3 extent = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
-                                 (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
-        if (center.GetY() - extent.GetY() < neckPosition.GetY() - headScale * 0.35f) {
+        const FVec3 extent = (model.Column(0).XYZ() * halfExtent.x).Abs() + (model.Column(1).XYZ() * halfExtent.y).Abs() +
+                                 (model.Column(2).XYZ() * halfExtent.z).Abs();
+        if (center.y - extent.y < neckPosition.y - headScale * 0.35f) {
             continue;
         }
         const float reach = headScale * 1.8f;
-        if (std::abs(center.GetX() - headPosition.GetX()) > reach + extent.GetX() || std::abs(center.GetZ() - headPosition.GetZ()) > reach + extent.GetZ()) {
+        if (std::abs(center.x - headPosition.x) > reach + extent.x || std::abs(center.z - headPosition.z) > reach + extent.z) {
             continue;
         }
         return true;
@@ -753,8 +697,8 @@ ProceduralViewState g_view;
 }
 
 void CollectFirstPersonHeadMeshes(
-    ZHLN::ECS::Registry&          registry,
-    const ZHLN::ModelPrefab&      prefab,
+    ZHLN::COM::IEntities&                registry,
+    const ZHLN::GLTF::Document&   prefab,
     std::span<const ZHLN::Entity> visualParts,
     ProceduralViewState&          state
 ) {
@@ -770,8 +714,8 @@ void CollectFirstPersonHeadMeshes(
             neckNode = static_cast<int32_t>(node);
         }
     }
-    const JPH::Vec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).GetTranslation();
-    const JPH::Vec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).GetTranslation();
+    const FVec3 headPosition = GetPrefabNodeModelTransform(prefab, headNode).Column(3).XYZ();
+    const FVec3 neckPosition = GetPrefabNodeModelTransform(prefab, neckNode).Column(3).XYZ();
     const float     headScale    = headNode >= 0 && neckNode >= 0 ? std::max((headPosition - neckPosition).Length(), 0.06f) : 0.12f;
 
     state.headMeshes.clear();
@@ -793,11 +737,11 @@ void CollectFirstPersonHeadMeshes(
 }
 
 /** Turns the sample's first-person head/hair hiding on or off for the collected parts. */
-void SetHeadMeshesHidden(ZHLN::ECS::Registry& registry, const ProceduralViewState& state, bool hidden) {
+void SetHeadMeshesHidden(ZHLN::COM::IEntities& registry, const ProceduralViewState& state, bool hidden) {
     for (const HiddenHeadMesh& headMesh: state.headMeshes) {
-        if (auto mesh = registry.Get<ZHLN::Components::MeshComponent>(headMesh.entity)) {
-            mesh->flags = hidden ? headMesh.originalFlags | ZHLN::DrawFlags::Hidden : headMesh.originalFlags;
-        }
+        registry.Patch<ZHLN::Components::MeshComponent>(headMesh.entity, [&](auto& mesh) {
+            mesh.flags = hidden ? headMesh.originalFlags | ZHLN::DrawFlags::Hidden : headMesh.originalFlags;
+        });
     }
 }
 
@@ -812,14 +756,16 @@ void SetHeadMeshesHidden(ZHLN::ECS::Registry& registry, const ProceduralViewStat
  * against; the prefab's own container root is despawned.
  */
 auto AttachCharacterRig(
-    ZHLN::Engine&                      engine,
+    ZHLN::COM::IEngine&                      engine,
     ZHLN::Entity                       player,
     std::string_view                   glbPath,
-    ZHLN::Optional<ZHLN::ModelPrefab&> prefab,
+    const std::optional<ZHLN::GLTF::Document>& prefab,
+    const std::optional<ZHLN::Animation::PrefabRig>& rigInfo,
+    uint64_t prefabHash,
     ProceduralViewState&               viewState,
     float                              characterHeight
 ) -> void {
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
 
     ZHLN::ProceduralLocomotionComponent locomotion {
         .strideLength = 1.40f,
@@ -828,7 +774,7 @@ auto AttachCharacterRig(
     };
     ZHLN::HairStrandsComponent      hair {};
     ZHLN::ProceduralLookAtComponent lookAt {
-        .targetWorldPos = JPH::Vec3(0.0f, 2.0f, 4.0f),
+        .targetWorldPos = FVec3(0.0f, 2.0f, 4.0f),
         .weight         = 0.85f,
         .maxAngleDeg    = 70.0f,
     };
@@ -864,7 +810,7 @@ auto AttachCharacterRig(
     // sample keeps Source-style free look, which the layer's bounded
     // head-relative look would replace.
     ZHLN::FirstPersonVisibilityComponent firstPerson {};
-    firstPerson.eyeOffsetModel = JPH::Vec3(0.0f, std::clamp(characterHeight * 0.045f, 0.04f, 0.11f), std::clamp(characterHeight * 0.040f, 0.04f, 0.10f));
+    firstPerson.eyeOffsetModel = FVec3(0.0f, std::clamp(characterHeight * 0.045f, 0.04f, 0.11f), std::clamp(characterHeight * 0.040f, 0.04f, 0.10f));
     firstPerson.fov            = 75.0f;
     firstPerson.nearPlane      = 0.03f;
     firstPerson.enabled        = viewState.firstPerson;
@@ -898,15 +844,15 @@ auto AttachCharacterRig(
     if (prefab) {
         ZHLN::Log("[BSPSample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
-        int32_t idleTrack = ZHLN::FindAnimationTrack(*prefab, "idle");
+        int32_t idleTrack = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "idle") : -1;
         if (idleTrack < 0 && !prefab->animations.empty()) {
             idleTrack = 0;
         }
-        const int32_t walkTrack = ZHLN::FindAnimationTrack(*prefab, "walk");
-        const int32_t runTrack  = ZHLN::FindAnimationTrack(*prefab, "run");
+        const int32_t walkTrack = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "walk") : -1;
+        const int32_t runTrack  = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "run") : -1;
         if (idleTrack >= 0) {
             const auto& clip = prefab->animations[static_cast<size_t>(idleTrack)];
-            ZHLN::Log("[BSPSample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, clip.name, clip.duration, clip.channels.size());
+            ZHLN::Log("[BSPSample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
             ZHLN::Log("[BSPSample] Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
             ZHLN::LogWarning("[BSPSample] '{}' contains no authored animation track; bind pose will be shown.", glbPath);
@@ -918,11 +864,8 @@ auto AttachCharacterRig(
         // total number spawned even when the caller's output span is smaller.
         const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
         std::vector<ZHLN::Entity> parts(outputCapacity);
-        const uint32_t            count = ZHLN::PrefabFactory::InstantiatePrefab(
-            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .isAnimated = true}, parts.data(),
-            static_cast<uint32_t>(parts.size())
-        );
-        const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
+        parts = engine.Assets()->Instantiate(prefabHash, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .isAnimated = true});
+        const auto writtenCount = static_cast<uint32_t>(parts.size());
 
         // Re-parent every returned visual mesh part directly under the player
         // entity. Emissive VPLs have no hierarchy and are safely ignored by
@@ -941,15 +884,15 @@ auto AttachCharacterRig(
 
         // Clean up the redundant prefab container root (parts[0]).
         if (writtenCount > 0) {
-            ZHLN::DespawnEntity(engine, parts[0]);
+            reg.Despawn(parts[0]);
         }
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap
         // discovery on the evaluator's first frame.
-        reg.Add(
+        reg.AttachMany(
             player,
-            ZHLN::Components::AnimatorComponent {
-                .prefabAsset     = ZHLN::HashAssetPath(std::string_view(prefab->virtualPath)),
+            ZHLN::Animation::AnimatorComponent {
+                .prefabAsset     = prefabHash,
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
             },
@@ -967,7 +910,7 @@ auto AttachCharacterRig(
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
 
-        reg.Add(
+        reg.AttachMany(
             player, std::move(proceduralRig), std::move(locomotion), std::move(hair), std::move(lookAt),
             animationConfig, std::move(firstPerson)
         );
@@ -991,15 +934,16 @@ auto AttachCharacterRig(
  * hidden" can never disagree -- SetHeadMeshesHidden is idempotent, and calling
  * this twice with the same value is harmless.
  */
-void SetFirstPersonView(ZHLN::Engine& engine, bool enabled) {
-    if (g_player == ZHLN::Entity::Null() || !ZHLN::EngineAccess::RegistryOf(engine).IsAlive(g_player)) {
+void SetFirstPersonView(ZHLN::COM::IEngine& engine, bool enabled) {
+    auto& entities = *engine.Entities();
+    if (g_player == ZHLN::Entity::Null() || !entities.IsAlive(g_player)) {
         return;
     }
-    ZHLN::EngineAccess::RegistryOf(engine).Patch<ZHLN::FirstPersonVisibilityComponent>(g_player, [enabled](auto& firstPerson) -> auto {
+    entities.Patch<ZHLN::FirstPersonVisibilityComponent>(g_player, [enabled](auto& firstPerson) -> auto {
         firstPerson.enabled           = enabled;
         firstPerson.cameraInitialized = false;
     });
-    SetHeadMeshesHidden(ZHLN::EngineAccess::RegistryOf(engine), g_view, enabled);
+    SetHeadMeshesHidden(entities, g_view, enabled);
 }
 
 /**
@@ -1012,12 +956,12 @@ void SetFirstPersonView(ZHLN::Engine& engine, bool enabled) {
  * (extensions/Camera) tracks the character, the head is visible again, and the
  * autonomous look-at layer is restored so the rig's gaze follows the aim.
  */
-void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
-    if (g_player == ZHLN::Entity::Null() || !ZHLN::EngineAccess::RegistryOf(engine).IsAlive(g_player)) {
+void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
+    auto& registry = *engine.Entities();
+    if (g_player == ZHLN::Entity::Null() || !registry.IsAlive(g_player)) {
         return;
     }
-    auto&              registry = ZHLN::EngineAccess::RegistryOf(engine);
-    const ZHLN::Entity camEnt   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    const ZHLN::Entity camEnt   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
     if (camEnt == ZHLN::Entity::Null()) {
         return;
     }
@@ -1026,28 +970,28 @@ void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
         // Back to the eye camera: the orbit rig goes away, and the look the
         // orbit was driving becomes this frame's first-person look so the view
         // does not snap.
-        registry.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
+        registry.Detach<ZHLN::CameraRig::TargetComponent>(camEnt);
     } else {
         // The orbit starts behind the character looking the way the camera
         // already is -- from the fly cam, the first-person eye or another orbit,
         // so the switch never snaps the view. The rig's yaw/pitch are what the
         // Camera component resolves to, which is why the camera is the source.
         const auto                                   camera    = registry.Get<ZHLN::Components::CameraComponent>(camEnt);
-        const float                                  seedYaw   = camera ? camera->camera.yaw : g_view.yaw;
-        const float                                  seedPitch = camera ? camera->camera.pitch : kOrbitPitch;
-        const ZHLN::CameraRig::TargetCameraComponent orbit {
+        const float                                  seedYaw   = camera ? camera->camera.yaw.value : g_view.yaw;
+        const float                                  seedPitch = camera ? camera->camera.pitch.value : kOrbitPitch;
+        const ZHLN::CameraRig::TargetComponent orbit {
             .target         = g_player,
             .distance       = kOrbitDistance,
             .targetDistance = kOrbitDistance,
             .yaw            = seedYaw,
             .pitch          = seedPitch,
-            .targetOffset   = JPH::Vec3(0.0f, 1.30f, 0.0f),
+            .targetOffset   = FVec3(0.0f, 1.30f, 0.0f),
             .stiffness      = kOrbitStiffness,
             .fov            = kOrbitFov,
             .targetFov      = kOrbitFov,
         };
-        if (!registry.Patch<ZHLN::CameraRig::TargetCameraComponent>(camEnt, [&](auto& rig) -> auto { rig = orbit; })) {
-            registry.Add(camEnt, orbit);
+        if (!registry.Patch<ZHLN::CameraRig::TargetComponent>(camEnt, [&](auto& rig) -> auto { rig = orbit; })) {
+            registry.Attach(camEnt, orbit);
         }
     }
 
@@ -1062,15 +1006,15 @@ void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
     // The look-at orbit is suspended while first person holds the camera
     // (ProceduralAnimationSample's rule) and restored on the way back.
     if (firstPerson) {
-        if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(g_player)) {
-            g_view.lookAtWeight = lookAt->weight;
+        registry.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [](auto& lookAt) {
+            g_view.lookAtWeight = lookAt.weight;
             g_view.lookAtSaved  = true;
-            lookAt->weight      = 0.0f;
-        }
+            lookAt.weight       = 0.0f;
+        });
     } else if (g_view.lookAtSaved) {
-        if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(g_player)) {
-            lookAt->weight = g_view.lookAtWeight;
-        }
+        registry.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [](auto& lookAt) {
+            lookAt.weight = g_view.lookAtWeight;
+        });
         g_view.lookAtSaved = false;
     }
 
@@ -1082,12 +1026,12 @@ void ApplyProceduralView(ZHLN::Engine& engine, bool firstPerson) {
 }
 
 /** Adopts whatever is currently driving the camera as the sample's own look. */
-void SyncViewLookFromCamera(ZHLN::ECS::Registry& registry, ZHLN::Entity camEnt) {
+void SyncViewLookFromCamera(ZHLN::COM::IEntities& registry, ZHLN::Entity camEnt) {
     if (const auto camera = registry.Get<ZHLN::Components::CameraComponent>(camEnt); camera) {
-        g_view.yaw = camera->camera.yaw;
+        g_view.yaw = camera->camera.yaw.value;
         // The first-person clamp is far wider than anything the sample can
         // produce on its own, so a clamped fly-cam pose is adopted as-is.
-        g_view.pitch = std::clamp(camera->camera.pitch, -89.0f, 89.0f);
+        g_view.pitch = std::clamp(camera->camera.pitch.value, -89.0f, 89.0f);
     }
     g_freeCamOwnedLook = false;
 }
@@ -1105,16 +1049,16 @@ void SyncViewLookFromCamera(ZHLN::ECS::Registry& registry, ZHLN::Entity camEnt) 
 // Simulation phase, and this step has to put the player's own look back before
 // the matrices are projected -- otherwise the view would sit wherever the body
 // happens to be facing.
-void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /*ctx*/) {
+void FirstPersonCameraStep(ZHLN::COM::IEngine& engine) {
     if (g_player == ZHLN::Entity::Null()) {
         return;
     }
-    auto& reg = ZHLN::EngineAccess::RegistryOf(engine);
+    auto& reg = *engine.Entities();
     if (!reg.IsAlive(g_player)) {
         g_player = ZHLN::Entity::Null();
         return;
     }
-    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
     if (camEnt == ZHLN::Entity::Null()) {
         return;
     }
@@ -1128,8 +1072,8 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     // either, since both drive yaw/pitch themselves. A boot component with no
     // target is the rig's re-seed, not an active orbit, which is why the check
     // is on the target rather than on the component's presence.
-    const auto orbitCamera = reg.Get<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
-    if (reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt) || (orbitCamera && reg.IsAlive(orbitCamera->target))) {
+    const auto orbitCamera = reg.Get<ZHLN::CameraRig::TargetComponent>(camEnt);
+    if (reg.Get<ZHLN::FreeCam::TagComponent>(camEnt) || (orbitCamera && reg.IsAlive(orbitCamera->target))) {
         // Whatever is driving the camera also owns the pose, so this step stands
         // down entirely. The fly cam needs more than this step's silence, though:
         // the procedural first-person layer writes the same Camera from the
@@ -1156,11 +1100,11 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     if (!trans) {
         return;
     }
-    JPH::Vec3 eyeOffsetModel(0.0f, kEyeHeightMeters, 0.0f);
+    FVec3 eyeOffsetModel(0.0f, kEyeHeightMeters, 0.0f);
     if (const auto firstPerson = reg.Get<ZHLN::FirstPersonVisibilityComponent>(g_player); firstPerson && firstPerson->cameraInitialized) {
         eyeOffsetModel = firstPerson->smoothedEyeModel;
     }
-    const JPH::Vec3 eyePos = JPH::Vec3(trans->position) + JPH::Quat(trans->rotation) * eyeOffsetModel;
+    const FVec3 eyePos = trans->position + trans->rotation * eyeOffsetModel;
 
     // Camera-relative turning, applied to the ECS rotation rather than to
     // Character::MovementComponent::orientation: the controller SLEPs that
@@ -1173,23 +1117,23 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     // movement subsystem reads the resulting root rotation for its local-space
     // velocity and gait.
     {
-        const float     yawRadians = JPH::DegreesToRadians(g_view.yaw);
-        const JPH::Vec3 viewFlat(JPH::Cos(yawRadians), 0.0f, JPH::Sin(yawRadians));
-        const JPH::Vec3 facing = JPH::Quat(trans->rotation) * JPH::Vec3::sAxisZ();
-        const JPH::Vec3 facingFlat(facing.GetX(), 0.0f, facing.GetZ());
-        if (facingFlat.LengthSq() > 1.0e-6f) {
-            const JPH::Vec3 facingUnit   = facingFlat.Normalized();
-            const float     angleDegrees = JPH::RadiansToDegrees(std::acos(std::clamp(facingUnit.Dot(viewFlat), -1.0f, 1.0f)));
+        const float     yawRadians = ((std::numbers::pi_v<float> / 180.0f) * g_view.yaw);
+        const FVec3 viewFlat(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
+        const FVec3 facing = trans->rotation * FVec3::UnitZ();
+        const FVec3 facingFlat(facing.x, 0.0f, facing.z);
+        if (facingFlat.LengthSquared() > 1.0e-6f) {
+            const FVec3 facingUnit   = facingFlat.Normalized();
+            const float     angleDegrees = ((180.0f / std::numbers::pi_v<float>) * std::acos(std::clamp(Dot(facingUnit, viewFlat), -1.0f, 1.0f)));
             if (angleDegrees > kBodyFacingThresholdDegrees) {
                 // g_frameDt is the loop's own dt, refreshed once per frame -- the same value the HUD and every step got.
                 const float     turnTowards = (1.0f - std::exp(-kBodyFacingSlewSpeed * std::max(g_frameDt, 1.0e-4f))) * std::min(angleDegrees, 60.0f);
-                const float     turnSign    = facingUnit.Cross(viewFlat).GetY() < 0.0f ? -1.0f : 1.0f;
-                const JPH::Quat target      = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), JPH::DegreesToRadians(turnSign * turnTowards)) * trans->rotation;
-                reg.Patch<ZHLN::Components::TransformComponent>(g_player, [&](auto& t) -> auto { t.rotation = target.Normalized(); });
-                if (auto move = reg.Get<ZHLN::Character::MovementComponent>(g_player); move) {
-                    move->orientation     = target.Normalized();
-                    move->prevOrientation = target.Normalized();
-                }
+                const float     turnSign    = Cross(facingUnit, viewFlat).y < 0.0f ? -1.0f : 1.0f;
+                const ZHLN::Quat target = (ZHLN::Quat::FromAxisAngle(FVec3::UnitY(), ZHLN::DegF {turnSign * turnTowards}.ToRadians()) * trans->rotation).Normalized();
+                reg.Patch<ZHLN::Components::TransformComponent>(g_player, [&](auto& t) -> auto { t.rotation = target; });
+                reg.Patch<ZHLN::Character::MovementComponent>(g_player, [&](auto& move) {
+                    move.orientation     = target;
+                    move.prevOrientation = target;
+                });
             }
         }
     }
@@ -1197,13 +1141,14 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [&](auto& cc) -> auto {
         // Captured mouse: look every frame, no button. Uncaptured: keep the
         // RMB drag so a host that never captures still works exactly as before.
-        if (const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-            input && (g_mouseCaptured || input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))) {
-            g_view.yaw += input->GetMouseDeltaX() * kLookSensitivity;
-            g_view.pitch = std::clamp(g_view.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
+        const auto& input = *engine.Actions();
+        if (g_mouseCaptured || input.MouseButtonDown(ZHLN::MouseButton::Right, ZHLN::kPrimarySeat)) {
+            const ZHLN::Axis2DValue look = input.MouseDelta(ZHLN::kPrimarySeat);
+            g_view.yaw += look.x * kLookSensitivity;
+            g_view.pitch = std::clamp(g_view.pitch - (look.y * kLookSensitivity), -89.0f, 89.0f);
         }
-        cc.camera.yaw      = g_view.yaw;
-        cc.camera.pitch    = g_view.pitch;
+        cc.camera.yaw      = ZHLN::DegF{g_view.yaw};
+        cc.camera.pitch    = ZHLN::DegF{g_view.pitch};
         cc.camera.position = eyePos;
     });
 }
@@ -1216,15 +1161,6 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
 // has the engine and inserts the step itself, and a missing anchor comes back
 // as an error it has to deal with instead of a step silently appended after
 // present.
-constexpr ZHLN::ModuleStep kFirstPersonCameraStep[] = {
-    {
-        .phase     = ZHLN::FramePhase::Camera,
-        .name      = "FirstPersonCamera",
-        .run       = &FirstPersonCameraStep,
-        .placement = ZHLN::StepPlacement::Before,
-        .anchor    = "CameraSystems",
-    },
-};
 
 void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("==================================================================");
@@ -1261,121 +1197,35 @@ void PrintControlsBanner(std::string_view mapPath) {
 // grinding on the catcher can never flood stdout.
 inline constexpr float kVoidCatcherDropMeters = 15.0f;
 
-class VoidCatcherContactListener final: public JPH::ContactListener {
-  public:
-    struct PropInfo {
-        std::string display;
-    };
-    struct PendingLog {
-        std::string display;
-        JPH::Vec3   fellPoint {0.0f, 0.0f, 0.0f};
-        bool        hadSurfaceTouch = false;
-        JPH::Vec3   surfaceTouch {0.0f, 0.0f, 0.0f};
-    };
+struct VoidPropTracker {
+    float                                    thresholdY = -1000.0f;
+    std::unordered_set<uint32_t>             reported;
+    bool                                     armed = false;
 
-    VoidCatcherContactListener(JPH::ContactListener* inner, JPH::BodyID catcher, std::unordered_map<uint32_t, PropInfo> props):
-        _inner(inner), _catcher(catcher), _props(std::move(props)) {
+    void Arm(const FVec3& boundsMin) {
+        thresholdY = boundsMin.y - kVoidCatcherDropMeters;
+        reported.clear();
+        armed = true;
     }
 
-    [[nodiscard]] auto Inner() const noexcept -> JPH::ContactListener* {
-        return _inner;
-    }
-
-    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg baseOffset, const JPH::CollideShapeResult& result)
-        -> JPH::ValidateResult override {
-        return _inner != nullptr ? _inner->OnContactValidate(b1, b2, baseOffset, result) : JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
-    }
-
-    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override {
-        Record(b1, b2, manifold);
-        // The engine's listener never sees the debug catcher: gameplay must
-        // not react to a diagnostic sensor.
-        if (_inner != nullptr && !InvolvesCatcher(b1, b2)) {
-            _inner->OnContactAdded(b1, b2, manifold, settings);
+    void Poll(ZHLN::COM::IEntities& reg) {
+        if (!armed) return;
+        for (const ZHLN::Entity e : reg.EntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+            if (reported.contains(e.index)) continue;
+            const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
+            if (!phys || phys->isStatic || e == g_player) continue;
+            const auto tr = reg.Get<ZHLN::Components::TransformComponent>(e);
+            if (!tr || tr->position.y > thresholdY) continue;
+            reported.insert(e.index);
+            ZHLN::Log(
+                "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}).",
+                PickLabel(reg, e), tr->position.x, tr->position.y, tr->position.z
+            );
         }
     }
-
-    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override {
-        Record(b1, b2, manifold);
-        if (_inner != nullptr && !InvolvesCatcher(b1, b2)) {
-            _inner->OnContactPersisted(b1, b2, manifold, settings);
-        }
-    }
-
-    void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
-        if (_inner != nullptr) {
-            _inner->OnContactRemoved(pair);
-        }
-    }
-
-    // Drained once per frame from the main thread.
-    auto TakePendingLogs() -> std::vector<PendingLog> {
-        const std::lock_guard   lock(_mutex);
-        std::vector<PendingLog> out;
-        out.swap(_pending);
-        return out;
-    }
-
-  private:
-    [[nodiscard]] auto InvolvesCatcher(const JPH::Body& b1, const JPH::Body& b2) const -> bool {
-        return b1.GetID() == _catcher || b2.GetID() == _catcher;
-    }
-
-    void Record(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold) {
-        const bool catcher1 = b1.GetID() == _catcher;
-        const bool catcher2 = b2.GetID() == _catcher;
-
-        const std::lock_guard lock(_mutex);
-        if (catcher1 || catcher2) {
-            const JPH::BodyID propId = catcher1 ? b2.GetID() : b1.GetID();
-            const auto        propIt = _props.find(propId.GetIndexAndSequenceNumber());
-            // Not a tracked prop, or this prop was already logged: the set
-            // insertion is the once-per-entity gate.
-            if (propIt == _props.end() || !_logged.insert(propId.GetIndexAndSequenceNumber()).second) {
-                return;
-            }
-            PendingLog entry;
-            entry.display         = propIt->second.display;
-            entry.fellPoint       = manifold.mRelativeContactPointsOn1.empty() ? JPH::Vec3(manifold.mBaseOffset) :
-                                                                                 JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
-            const auto touchIt    = _lastTouch.find(propId.GetIndexAndSequenceNumber());
-            entry.hadSurfaceTouch = touchIt != _lastTouch.end();
-            if (entry.hadSurfaceTouch) {
-                entry.surfaceTouch = touchIt->second;
-            }
-            _pending.push_back(std::move(entry));
-            return;
-        }
-
-        // Real-surface contact: remember where, so a later void fall can name
-        // the visible plane the prop slipped through.
-        JPH::Vec3 point(manifold.mBaseOffset);
-        if (!manifold.mRelativeContactPointsOn1.empty()) {
-            point = JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
-        }
-        const uint32_t k1 = b1.GetID().GetIndexAndSequenceNumber();
-        const uint32_t k2 = b2.GetID().GetIndexAndSequenceNumber();
-        if (_props.count(k1) != 0) {
-            _lastTouch[k1] = point;
-        }
-        if (_props.count(k2) != 0) {
-            _lastTouch[k2] = point;
-        }
-    }
-
-    JPH::ContactListener*                   _inner;
-    JPH::BodyID                             _catcher;
-    std::unordered_map<uint32_t, PropInfo>  _props;
-    std::mutex                              _mutex;
-    std::unordered_set<uint32_t>            _logged;
-    std::unordered_map<uint32_t, JPH::Vec3> _lastTouch;
-    std::vector<PendingLog>                 _pending;
 };
 
-// File-static like g_player: Jolt owns the listener pointer from install until
-// the teardown after the frame loop, and the loop drains it every frame.
-VoidCatcherContactListener* g_voidListener = nullptr;
-JPH::BodyID                 g_voidCatcher {};
+VoidPropTracker g_voidTracker {};
 
 } // namespace
 
@@ -1383,7 +1233,6 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::EngineConfig engineConfig {
         .physics = {.maxBodies = 16384, .maxBodyPairs = 32768, .maxContactConstraints = 16384},
         .appName = "Zahlen :: gm_murder_drones",
-        .enableFallbackScene = false,
     };
     std::filesystem::path mapPath = kDefaultMapPath;
 
@@ -1414,7 +1263,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig, skyboxHandlers);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", optionsRes.error());
+        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
@@ -1462,9 +1311,9 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Loaded BSP file ({} KiB)", bspBytes.size() / 1024U);
 
     // 3. Parse BSP headers & lumps
-    auto bspMapExp = ZHLN::BSP::ParseBsp(bspBytes);
+    auto bspMapExp = ZHLN::BSP::Parse(bspBytes);
     if (!bspMapExp) {
-        ZHLN::LogError("[BSPSample] Failed to parse BSP: {}", bspMapExp.error());
+        ZHLN::LogError("[BSPSample] Failed to parse BSP: {}", ZHLN::Error(bspMapExp.error()).Message());
         return EXIT_FAILURE;
     }
     const auto& bspMap = *bspMapExp;
@@ -1476,524 +1325,277 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     // 4. Initialize Engine
-    auto engineRes = ZHLN::Engine::Create(engineConfig);
+    ZHLN::Platform::Init();
+    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("[BSPSample] Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("[BSPSample] Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
+    auto engine = std::move(*engineRes);
+    const ZHLN::WindowID primary = engine->PrimaryWindow();
     if (!engineConfig.headless) {
-        engine->GetPlatformHost().Focus();
+        engine->FocusWindow(primary);
     }
 
-    // Install systems. The character controller comes first: it registers the
-    // external-writes anchor for Character::MovementComponent, and the
-    // interaction layer reads that component to find the player.
-    ZHLN::Character::Install(*engine);
-    ZHLN::Interaction::Install(*engine);
-
-    // The V toggle reuses the fly camera extension instead of a second
-    // hand-rolled one: FreeCamTag on the main camera is the switch both halves
-    // already read -- its Camera-phase step drives the pose, and the controller
-    // extension's PlayerIntent step freezes the character while the tag is on.
-    // Install before InitializeDefaultScene, like the two above.
-    ZHLN::FreeCam::Install(*engine);
-
-    // The T toggle's third-person rig, same reasoning: TargetCameraComponent on
-    // the main camera is what its Camera-phase step orbits around. Installed
-    // with the others so the boot scene build already sees the step; its step
-    // skips a component without a live target, which is what leaves the sample
-    // booting in first person.
-    ZHLN::CameraRig::Install(*engine);
-
-    // The first-person view is sample-local glue on top: a Camera-phase frame
-    // step that pins the view to the character's evaluated eye. It is installed
-    // as a module of this sample's own making -- the engine has no seam a host
-    // reaches through any more, so the sample composes what it wants and reads
-    // the placement error if the anchor is gone.
-    if (auto installed = engine->InstallModule(
-            ZHLN::Module {
-                .name       = "BSPMurderDronesFirstPerson",
-                .frameSteps = kFirstPersonCameraStep,
-            }
-        );
-        !installed) {
-        ZHLN::LogError("[BSPSample] first-person camera step not placed: {}", ZHLN::ToString(installed.error()));
-    }
-
-#if defined(ZHLN_HAS_FONTS)
-    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::LogWarning("[BSPSample] Font asset failed to load ({}), using embedded default.", fontID.error());
-    }
-#endif
-
-    engine->InitializeDefaultScene();
-
-    // The procedural rig: an optional engine extension, registered after the
-    // scene exists so its evaluator enters the update graph ahead of the core
-    // ArticulationSystem, exactly as ProceduralAnimationSample does it. The
-    // glTF device-lost handler keeps the imported rig's GPU resources alive
-    // across a device reset.
-    ZHLN::ProceduralAnimation::Register(*engine);
-    ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-
-    // Flying is opt-in here. FreeCam's step seeds the boot camera with its tag
-    // unless that camera carries the opt-out marker, so Detach once the main
-    // camera exists and the sample boots on the character instead of in the air.
-    ZHLN::FreeCam::Detach(*engine);
-
-    // Captured mouse and the crosshair HUD. Both are no-ops under --headless,
-    // where there is no window to capture and nothing to draw into.
+    ZHLN::FreeCam::Detach(*engine->Entities());
     if (!engineConfig.headless) {
         SetMouseCaptured(*engine, true);
         ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
-    ZHLN::GUI::Context hudGui;
-    engine->SetUICallback([&hudGui](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng, hudGui); });
 
-    // 5. Import BSP into ModelPrefab
+    ZHLN::GUI::Context hudGui;
+    ZHLN::HostUI       hostUI(*engine);
+#if defined(ZHLN_HAS_FONTS)
+    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
+        ZHLN::LogWarning("[BSPSample] Font asset failed to load ({}), using embedded default.", ZHLN::Error(fontAsset.error()).Message());
+    } else {
+        hostUI.SetBakedFont(std::move(*fontAsset));
+    }
+#endif
+
+    ZHLN::Bench::Viewer benchmarkViewer;
+    benchmarkViewer.Attach(*engine);
+    g_benchmarkViewer = &benchmarkViewer;
+
+    // 5. Prepare & upload BSP world + brush submodels + static props over COM
     ZHLN::BSP::ImportOptions importOpts {
         .convertCoordinates   = true,
-        .unitScale            = 0.0254f, // Convert inches to meters
+        .unitScale            = 0.0254f,
         .includeDisplacements = true,
         .importSkybox         = importSkybox,
         .gatherLights         = true,
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
         .ambientOcclusion     = false,
-        // Source's compiled VRAD atlas is the static-world baseline. The old
-        // VPL reconstruction remains deliberately off: it duplicates the bake
-        // and burns the clustered/RTGI budget this sample is meant to relieve.
         .useVradLightmaps     = true,
         .ingestVradBake       = false,
     };
 
     const std::string virtualPath = mapPath.string();
-    ZHLN::Log("[BSPSample] Importing BSP geometry and resolving materials...");
     g_rigImportOpts = importOpts;
-    auto prefabOpt  = ZHLN::BSP::LoadBSPPrefabFromMemory(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspBytes, virtualPath, importOpts);
-    if (!prefabOpt) {
-        ZHLN::LogError("[BSPSample] Failed to import BSP prefab for '{}'", virtualPath);
+    g_rigCubeMap    = &bspMap;
+    ZHLN::Log("[BSPSample] Preparing and uploading BSP assets...");
+
+    std::vector<ZHLN::TextureID> ownedTextures;
+    const auto rawBspBytes = std::as_bytes(std::span(bspBytes));
+    ZHLN::BSP::SourceVFS vfs(*engine->Assets());
+    if (!assetRoot.empty()) vfs.AddSearchPath(assetRoot.string());
+    auto prepared = ZHLN::BSP::DecodeAssets(rawBspBytes, std::move(vfs), virtualPath, importOpts);
+    if (!prepared || prepared->prefabs.empty()) {
+        ZHLN::LogError("[BSPSample] Failed to prepare BSP assets for '{}'", virtualPath);
         return EXIT_FAILURE;
     }
-    const auto& prefab = *prefabOpt;
-    ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)", prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
-    // 5b. Preload static prop models referenced by the map into AssetManager
-    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), bspMap, importOpts);
+    uint64_t worldPrefabHash = 0;
+    for (size_t i = 0; i < prepared->prefabs.size(); ++i) {
+        auto uploaded = ZHLN::BSP::UploadAsset(*engine->Assets(), *engine->Graphics(), prepared->source, prepared->prefabs[i], {.import = importOpts, .buildBLAS = true});
+        if (!uploaded) {
+            if (i == 0) {
+                ZHLN::LogError("[BSPSample] Failed to upload world BSP asset: {}", ZHLN::Error(uploaded.error()).Message());
+                return EXIT_FAILURE;
+            }
+            continue;
+        }
+        if (i == 0) worldPrefabHash = uploaded->hash;
+        if (uploaded->hash != ZHLN::InvalidAssetID) {
+            ownedTextures.insert(ownedTextures.end(), uploaded->textures.begin(), uploaded->textures.end());
+        }
+    }
+
+    size_t preloadedProps = 0;
+    for (const std::string& propModel : prepared->studioModels) {
+        if (auto propAsset = ZHLN::BSP::LoadStudioAsset(*engine->Assets(), *engine->Graphics(), prepared->source, propModel, {.import = importOpts, .buildBLAS = true})) {
+            ++preloadedProps;
+            if (propAsset->hash != ZHLN::InvalidAssetID) {
+                ownedTextures.insert(ownedTextures.end(), propAsset->textures.begin(), propAsset->textures.end());
+            }
+        }
+    }
     ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
-    ZHLN::Log("[BSPSample] Translating BSP entities and static props to Scene...");
-    const ZHLN::Scene::Scene sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
-    ZHLN::Log("[BSPSample] Scene description ready: {} entity(ies), {} light(s)", sceneDesc.entities.size(), sceneDesc.lights.size());
-
+    const ZHLN::Scene::Document sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
     auto instanceExp = ZHLN::Scene::Instantiate(*engine, sceneDesc);
     if (!instanceExp) {
-        ZHLN::LogError("[BSPSample] Failed to instantiate scene: {}", instanceExp.error());
+        ZHLN::LogError("[BSPSample] Failed to instantiate scene: {}", ZHLN::Error(instanceExp.error()).Message());
         return EXIT_FAILURE;
     }
     const auto& instance = *instanceExp;
-    ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights", instance.entities.size(), instance.lights.size());
 
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
-    ZHLN::Interaction::InitializeBSPEntities(ZHLN::EngineAccess::RegistryOf(*engine), bspMap, instance, importOpts);
-    ZHLN::Log("[BSPSample] Interactive entity components attached and wired.");
+    ZHLN::Interaction::InitializeBSPEntities(*engine, bspMap, instance, importOpts);
 
-    // 8. Spawn the character at info_player_start
-    //
-    // A CharacterVirtual body fitted to the imported rig replaces the free-cam,
-    // plus the controller extension's MovementComponent/InputComponent pair. The
-    // extension's substep hooks integrate WASD intent, sprint, gravity and
-    // jumping; its PlayerIntent step resolves that intent against the camera
-    // yaw; and the interaction layer finds the player through the
-    // MovementComponent.
-    const bool hasPlayerStart = std::any_of(bspMap.entities.begin(), bspMap.entities.end(), [](const ZHLN::BSP::BSPEntity& ent) {
+    const bool hasPlayerStart = std::any_of(bspMap.entities.begin(), bspMap.entities.end(), [](const ZHLN::BSP::Entity& ent) {
         return ent.Find("classname") == "info_player_start";
     });
 
-    JPH::Vec3 boundsMin;
-    JPH::Vec3 boundsMax;
-    ComputeBounds(prefab, boundsMin, boundsMax);
-    const JPH::Vec3 mapCenter = (boundsMin + boundsMax) * 0.5f;
-    const float     mapRadius = std::max((boundsMax - boundsMin).Length() * 0.5f, 10.0f);
+    FVec3 boundsMin {-50.0f, -10.0f, -50.0f};
+    FVec3 boundsMax {50.0f, 50.0f, 50.0f};
+    { ZHLN::COM::PrefabBoundsInfo b{}; if (engine->Assets()->GetPrefabBounds(worldPrefabHash, ZHLN::COM::OutChain(b)).HasValue() && b.hasParts) { boundsMin = b.min; boundsMax = b.max; } }
+    const float mapRadius = std::max((boundsMax - boundsMin).Length() * 0.5f, 10.0f);
+    g_voidTracker.Arm(boundsMin);
 
-    ZHLN::Log(
-        "[BSPSample] Map bounds: min=({:.1f}, {:.1f}, {:.1f}), max=({:.1f}, {:.1f}, {:.1f}), radius={:.1f} m", boundsMin.GetX(), boundsMin.GetY(),
-        boundsMin.GetZ(), boundsMax.GetX(), boundsMax.GetY(), boundsMax.GetZ(), mapRadius
-    );
+    // 8. Load procedural character rig
+    const char*            rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
+    const std::string_view rigName     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) : kDefaultRigPath;
+    std::string_view       rigPath     = rigName;
 
-    // 7b. Void-fall diagnostic: an invisible sensor slab one fixed drop below
-    // the map bounds, plus a contact listener chained in front of the engine's
-    // own. Dynamic props that touch the slab fell through whatever visible
-    // geometry was above them; each is logged exactly once (see
-    // VoidCatcherContactListener). Static props and brush bodies can never
-    // reach it, and the player is a CharacterVirtual, not a Jolt body.
-    {
-        auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
-        auto& reg     = ZHLN::EngineAccess::RegistryOf(*engine);
-
-        std::unordered_map<uint32_t, VoidCatcherContactListener::PropInfo> propBodies;
-        for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
-            const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
-            if (!phys || phys->isStatic || phys->physicsID == ZHLN::Physics::BodyID::Null()) {
-                continue;
-            }
-            const auto source = reg.Get<ZHLN::Components::SceneSourceComponent>(e);
-            if (!source || !std::string_view(source->source.c_str()).ends_with(".mdl")) {
-                continue; // world brush geometry, doors, buttons: not props
-            }
-            const auto        name                     = reg.Get<ZHLN::Components::NameComponent>(e);
-            std::string       display                  = (name && name->name.c_str()[0] != '\0') ? name->name.c_str() : source->source.c_str();
-            const JPH::BodyID id                       = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsID);
-            propBodies[id.GetIndexAndSequenceNumber()] = VoidCatcherContactListener::PropInfo {std::move(display)};
+    std::optional<ZHLN::GLTF::Document>       rigDoc;
+    ZHLN::GLTF::Asset                         rigAsset {};
+    std::optional<ZHLN::Animation::PrefabRig> rigInfo;
+    auto tryLoadRig = [&](std::string_view candidate) -> bool {
+        auto d = ZHLN::GLTF::Read(candidate, {}, engine->Assets());
+        if (!d) return false;
+        auto u = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *d);
+        if (!u) return false;
+        rigDoc   = std::move(*d);
+        rigAsset = std::move(*u);
+        rigInfo  = ZHLN::Animation::LoadPrefabRig(*engine->Assets(), rigAsset.hash);
+        if (rigAsset.ownsResources) {
+            ownedTextures.insert(ownedTextures.end(), rigAsset.textures.begin(), rigAsset.textures.end());
         }
-
-        JPH::PhysicsSystem& system = physics.GetInternalSystem();
-        const JPH::Vec3     center = (boundsMin + boundsMax) * 0.5f;
-        const JPH::Vec3     extent = (boundsMax - boundsMin) * 0.5f + JPH::Vec3::sReplicate(50.0f);
-
-        JPH::BodyCreationSettings catcherSettings;
-        catcherSettings.SetShape(new JPH::BoxShape(JPH::Vec3(extent.GetX(), 0.5f, extent.GetZ())));
-        catcherSettings.mPosition    = JPH::RVec3(center.GetX(), boundsMin.GetY() - kVoidCatcherDropMeters, center.GetZ());
-        catcherSettings.mRotation    = JPH::Quat::sIdentity();
-        catcherSettings.mMotionType  = JPH::EMotionType::Static;
-        catcherSettings.mObjectLayer = static_cast<JPH::ObjectLayer>(ZHLN::Layers::ID::NON_MOVING);
-        catcherSettings.mIsSensor    = true;
-        g_voidCatcher                = system.GetBodyInterface().CreateAndAddBody(catcherSettings, JPH::EActivation::DontActivate);
-
-        g_voidListener = new VoidCatcherContactListener(system.GetContactListener(), g_voidCatcher, std::move(propBodies));
-        system.SetContactListener(g_voidListener);
-        ZHLN::Log("[BSPSample] Void catcher armed {:.0f} m below the map: props that slip through visible geometry are logged once.", kVoidCatcherDropMeters);
+        return true;
+    };
+    if (!tryLoadRig(rigName) && rigName != kFallbackRigPath) {
+        if (tryLoadRig(kFallbackRigPath)) rigPath = kFallbackRigPath;
     }
 
-    // 8b. Load the procedural rig before the CharacterVirtual exists, so the
-    // hull can be fitted to the imported mesh envelope instead of assuming a
-    // fixed human size -- the order ProceduralAnimationSample documents.
-    // GLTF::LoadGLBPrefab resolves the name under resources/assets/ and caches
-    // the prefab, after which PrefabFactory::LoadModelPrefab finds it without
-    // core knowing a parser exists.
-    const char*                        rigOverride = std::getenv("ZHLN_PROCEDURAL_RIG");
-    const std::string_view             rigName     = rigOverride != nullptr && rigOverride[0] != '\0' ? std::string_view(rigOverride) : kDefaultRigPath;
-    ZHLN::Optional<ZHLN::ModelPrefab&> rigPrefab   = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), rigName);
-    std::string_view                   rigPath     = rigName;
-    if (!rigPrefab && rigName != kFallbackRigPath) {
-        // UziProc.glb is an LFS object, so a checkout without the payload sees a
-        // pointer file that cgltf refuses. The reference rig is committed
-        // outright; try it before giving up on GLBs.
-        ZHLN::LogWarning("[BSPSample] Could not load '{}' (an unpulled Git LFS pointer?). Trying '{}'.", rigName, kFallbackRigPath);
-        rigPrefab = ZHLN::GLTF::LoadGLBPrefab(ZHLN::EngineAccess::RenderOf(*engine), ZHLN::EngineAccess::AssetsOf(*engine), kFallbackRigPath);
-        rigPath   = kFallbackRigPath;
-    }
-    if (rigPrefab) {
-        ZHLN::Log("[BSPSample] Using procedural rig '{}'. Set ZHLN_PROCEDURAL_RIG to override.", rigPath);
-    } else {
-        ZHLN::LogWarning("[BSPSample] No usable rig GLB under resources/assets/; using the in-memory procedural rig.");
-    }
-
-    // Same two helpers ProceduralAnimationSample fits its hull with: every
-    // mesh-part AABB transformed through the imported node hierarchy, unioned,
-    // and turned into the lifter sphere plus torso bumper. Invalid or empty
-    // bounds retain Locomotion's standard fallback config.
-    ZHLN::Locomotion::CharacterBoundsEstimate rigBounds {};
-    if (rigPrefab) {
-        rigBounds = ZHLN::Locomotion::EstimateCharacterBounds(*rigPrefab);
-    }
+    const ZHLN::Locomotion::PrefabBounds rigBounds =
+        rigInfo ? ZHLN::Locomotion::MeasurePrefabBounds(*rigInfo) : ZHLN::Locomotion::PrefabBounds {};
     const ZHLN::Physics::DualShapeConfig playerHull      = ZHLN::Locomotion::FitDualShapeToBounds(rigBounds);
-    const float                          characterHeight = rigBounds.valid ? std::max(rigBounds.Size().GetY(), 0.30f) : kEyeHeightMeters;
-    if (rigBounds.valid) {
-        const JPH::Vec3 size = rigBounds.Size();
-        ZHLN::Log(
-            "[BSPSample] Estimated rig bounds min=({}, {}, {}), max=({}, {}, {}), size=({}, {}, {}).", rigBounds.min.x, rigBounds.min.y, rigBounds.min.z,
-            rigBounds.max.x, rigBounds.max.y, rigBounds.max.z, size.GetX(), size.GetY(), size.GetZ()
-        );
-    }
-    ZHLN::Log(
-        "[BSPSample] Character hull: lifter radius={}, bumper radius XZ={}, bumper radius Y={}, total height={} (origin at the feet).", playerHull.lifterRadius,
-        playerHull.bumperRadiusXZ, playerHull.bumperRadiusY, playerHull.GetBumperOffsetY() + playerHull.bumperRadiusY
-    );
+    const float                          characterHeight = rigBounds.valid ? std::max(rigBounds.GetSize().y, 0.30f) : kEyeHeightMeters;
 
     {
-        auto& reg     = ZHLN::EngineAccess::RegistryOf(*engine);
-        auto& physics = ZHLN::EngineAccess::PhysicsOf(*engine);
+        auto& reg = *engine->Entities();
+        const FVec3 spawnFeet {sceneDesc.camera.position};
+        const FVec3 spawnCenter = spawnFeet + FVec3(0.0f, 0.05f, 0.0f);
 
-        // DescribeScene already converted the first info_player_start into
-        // scene.camera (or kept the authored default when the map has none).
-        // Source stores the origin at the feet, and so does the fitted dual
-        // shape -- its lifter sphere sits one radius above the body origin --
-        // which is what makes the imported rig's model space and the physics
-        // body agree without an offset. The capsule centre convention this
-        // sample used before would have floated the rig half a hull up.
-        //
-        // The shape is authored here (a gameplay decision) and handed to the
-        // generic core API; the supporting volume keeps the whole lower lifter
-        // sphere in contact with the ground, exactly like Locomotion's spawner.
-        const JPH::Vec3 spawnFeet {sceneDesc.camera.position};
-        const JPH::Vec3 spawnCenter = spawnFeet + JPH::Vec3(0.0f, 0.05f, 0.0f);
-
-        const ZHLN::Physics::CharacterParams characterParams {
-            .shape            = ZHLN::Physics::CreateDualShape(playerHull),
-            .maxSlopeAngle    = JPH::DegreesToRadians(50.0f),
-            .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -playerHull.GetLifterOffsetY()),
-        };
-        const ZHLN::Physics::BodyID playerBody = physics.CreateCharacter(spawnCenter, characterParams);
-        if (playerBody == ZHLN::Physics::BodyID::Null()) {
+        const auto bodyRes = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = spawnCenter.Cast<double>(), .maxSlopeRadians = (std::numbers::pi_v<float> / 180.0f) * 50.0f}, playerHull));
+        if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
             ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
+        const ZHLN::Physics::BodyID playerBody = bodyRes.value;
 
-        const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(spawnCenter, {0.0f, 0.0f, 0.0f, 1.0f});
-        g_player                     = reg.Create(
-            ZHLN::Components::PlayerTagComponent {}, ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
-            ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+        const ZHLN::Mat4x4 playerWorld = ZHLN::ComposeTransform(spawnCenter, ZHLN::Quat::Identity(), FVec3::One());
+        g_player = reg.Spawn(
+            ZHLN::Components::PlayerTagComponent {},
+            ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
+            ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
-            ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}, ZHLN::Character::InputComponent {},
+            ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false},
+            ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
         );
+        ZHLN::Character::Attach(reg, g_player, {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters});
 
-        // Scene::Instantiate already aimed the camera with the info_player_start
-        // yaw/pitch; first person takes those angles as its own look state (the
-        // procedural first-person layer rewrites Camera.yaw/pitch every frame)
-        // and wants a wider lens with a closer near plane for Source interiors.
-        const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
         if (camEnt != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [](auto& cc) -> auto {
-                // g_view is file-static, so the sample's own look state can be
-                // seeded right here instead of round-tripping through a capture.
-                g_view.yaw      = cc.camera.yaw;
-                g_view.pitch    = cc.camera.pitch;
-                cc.camera.fov   = 75.0f;
+            reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [](auto& cc) {
+                g_view.yaw      = cc.camera.yaw.value;
+                g_view.pitch    = cc.camera.pitch.value;
+                cc.camera.fov   = ZHLN::DegF{75.0f};
                 cc.camera.nearZ = 0.03f;
             });
         }
 
-        // 8c. Attach the already-loaded rig to the player entity. The visual
-        // parts hang directly off the player, which is the origin the evaluator
-        // publishes its model-space pose against.
-        AttachCharacterRig(*engine, g_player, rigPath, rigPrefab, g_view, characterHeight);
-        // The rig starts in first person: hide the parts the palette mask cannot
-        // reach (head-only skins, head-parented attachments) right away.
+        AttachCharacterRig(*engine, g_player, rigPath, rigDoc, rigInfo, rigAsset.hash, g_view, characterHeight);
         ApplyProceduralView(*engine, g_view.firstPerson);
 
         ZHLN::Log(
             "[BSPSample] Spawned procedural character ({}) at ({:.2f}, {:.2f}, {:.2f})",
-            hasPlayerStart ? "info_player_start" : "no info_player_start, fallback view position", spawnCenter.GetX(), spawnCenter.GetY(), spawnCenter.GetZ()
+            hasPlayerStart ? "info_player_start" : "fallback view position", spawnCenter.x, spawnCenter.y, spawnCenter.z
         );
     }
 
     // 9. Lighting & Post-Processing Setup
     {
-        auto&              reg      = ZHLN::EngineAccess::RegistryOf(*engine);
-        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
-        if (settings != ZHLN::Entity::Null()) {
-            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& p) {
-                p.exposure        = 0.18f;
-                p.tonemapper      = 1;
-                p.ambientExposure = 1.2f;
-                p.giMode          = 0; // No screen-space AO/GI over baked diffuse.
-                p.enableSSR       = 0;
-                // The native VRAD atlas is the static world-lighting source.
-                // Keep the Source-fidelity baseline free of RTR/RTGI work;
-                // dynamic-light experiments can opt these features back in.
-                p.enableRTR = 0;
-            });
-            const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
-            reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::SMAA; });
-
-            // VRAD already contains the static direct/indirect transport.
-            // Until the later stencil-mask stage selectively re-enables RT for
-            // dynamic receivers, do not trace shadows, reflections or diffuse
-            // GI for this Source baseline.
-            const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
-            if (rtSettings == ZHLN::Entity::Null()) {
-                reg.Create(ZHLN::Components::RayTracingSettingsComponent {
-                    .config = {.enableReflections = false, .enableShadows = false, .enableDiffuseGI = false, .denoiserPasses = 0}
-                });
-            } else {
-                reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) {
-                    rt.config.enableReflections = false;
-                    rt.config.enableShadows     = false;
-                    rt.config.enableDiffuseGI   = false;
-                    rt.config.denoiserPasses    = 0;
-                });
-            }
-            reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
-                s.shadowWidth      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
-                s.shadowResolution = 2048;
-            });
-        }
-
-        // Add ambient sun fill if the map does not have light_environment
-        bool hasSun = false;
-        for (const auto& ent: bspMap.entities) {
-            if (ent.Find("classname") == "light_environment") {
-                hasSun = true;
-                break;
-            }
-        }
-
-        if (!hasSun) {
-            const JPH::Vec3  sunPos = mapCenter + JPH::Vec3(mapRadius * 1.5f, mapRadius * 2.5f, mapRadius * 1.0f);
-            const JPH::Mat44 world  = ZHLN::Math::CreateTransform(sunPos, {0.0f, 0.0f, 0.0f, 1.0f});
-            reg.Create(
-                ZHLN::Components::NameComponent {.name = ZHLN::String64("WorldSun")},
-                ZHLN::Components::TransformComponent {.position = sunPos, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
-                ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
-                ZHLN::Components::LightComponent {
-                    .type  = ZHLN::LightType::Sun,
-                    .color = JPH::Vec3(0.95f, 0.96f, 1.00f),
-                    // A dim fill keeps the level navigable when it has no
-                    // authored light_environment; the runtime BSP lights and
-                    // RTGI provide the remaining illumination.
-                    .intensity = 3.0f,
-                    .direction = JPH::Vec3(-0.4f, 0.85f, -0.35f).Normalized(),
-                }
-            );
-        }
+        ZHLN::GraphicsSettings gfx       = engine->Graphics()->Settings();
+        gfx.post.exposure                = 0.18f;
+        gfx.post.tonemapper              = 1;
+        gfx.environment.ambientExposure  = 1.2f;
+        gfx.post.mode                    = 0;
+        gfx.post.enableSSR               = 0;
+        gfx.antiAliasing.mode            = ZHLN::AAMode::SMAA;
+        gfx.rayTracing.enableReflections = false;
+        gfx.rayTracing.enableShadows     = false;
+        gfx.rayTracing.enableDiffuseGI   = false;
+        gfx.rayTracing.denoiserPasses    = 0;
+        gfx.shadows.width                = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
+        gfx.shadows.resolution           = 2048;
+        engine->Graphics()->ApplySettings(gfx);
     }
 
-    PrintControlsBanner(mapPath.string());
+    PrintControlsBanner(virtualPath);
 
-    // The benchmark panel's owner. Declared here, inside the TaskSystem scope
-    // and after the engine, so it is torn down before the scheduler retires --
-    // see the pointer's declaration at the top of this file.
-    ZHLN::Bench::BenchmarkViewer benchmarkViewer;
-    g_benchmarkViewer = &benchmarkViewer;
-
-    // 10. Frame Loop
-    //
-    // The free-camera toggle lives here rather than in a frame step: it is a
-    // one-shot key edge, and the level it edges against is the input singleton
-    // this loop already reads for the resize. Attaching the FreeCam tag (Attach)
-    // or dropping it (Detach) is the whole mode switch -- FreeCamSystem drives
-    // the pose while it is on, FirstPersonCameraStep yields to it, and the
-    // controller extension freezes the character's intent off the same flag.
+    ZHLN::ProceduralAnimation::Layer procAnimLayer {};
+    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     bool freeCamKeyWasDown   = false;
     bool captureKeyWasDown   = false;
-    bool pickKeyWasDown      = false;
-    bool viewKeyWasDown      = false;
     bool benchKeyWasDown     = false;
     bool telemetryKeyWasDown = false;
+    bool pickKeyWasDown      = false;
+    bool viewKeyWasDown      = false;
 
-    ZHLN::Clock clock({.maxDeltaTime = 0.05f});
     while (engine->IsRunning()) {
-        ZHLN::CheckForCrashes(crashState, engine.get());
-        engine->ProcessEvents();
         const float dt = clock.Tick();
         g_frameDt      = dt;
+        ZHLN::CheckForCrashes(crashState, engine.Get());
+        engine->ProcessEvents();
 
-        // Hoisted out of the block that used to own it: the free-camera, mouse
-        // capture and crosshair-pick toggles all read the same singleton, and
-        // they are three separate blocks now.
-        auto&      reg   = ZHLN::EngineAccess::RegistryOf(*engine);
-        const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-        if (input && input->needsResize) {
-            engine->Graphics().SetResolution(input->newSize);
-            input->needsResize = false;
-            continue;
+        auto&       reg   = *engine->Entities();
+        const auto& input = *engine->Actions();
+        if (input.KeyPressed(ZHLN::KeyCode::Escape, ZHLN::kPrimarySeat)) {
+            engine->RequestClose();
+            break;
         }
 
         {
-            // Raw, like the other samples' edge detection: no console or text
-            // field in this sample captures the keyboard.
-            const bool freeCamKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+            const bool freeCamKeyDown = input.KeyDown(ZHLN::KeyCode::V, ZHLN::kPrimarySeat);
             if (freeCamKeyDown && !freeCamKeyWasDown) {
-                const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-                bool               flying = false;
-                if (camEnt != ZHLN::Entity::Null()) {
-                    flying = static_cast<bool>(reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt));
-                }
+                const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
+                const bool flying = camEnt != ZHLN::Entity::Null() && static_cast<bool>(reg.Get<ZHLN::FreeCam::TagComponent>(camEnt));
                 if (flying) {
-                    // Detach drops the tag and leaves the opt-out marker behind,
-                    // so FreeCamSystem stops driving the camera and this frame's
-                    // FirstPersonCamera step pins the view back onto the character.
-                    ZHLN::FreeCam::Detach(*engine);
-                    // Attach stands the procedural first-person layer down so it
-                    // cannot overwrite the fly camera. Restore the character's
-                    // pre-flight view mode now; otherwise cameraInitialized stays
-                    // false and FirstPersonCameraStep uses the generic 1.62 m
-                    // fallback instead of the rig's evaluated eye offset.
+                    ZHLN::FreeCam::Detach(reg);
                     SetFirstPersonView(*engine, g_view.firstPerson);
-                    ZHLN::Log("[BSPSample] Free camera off: view returns to the character.");
                 } else {
-                    // The camera is still on the eye from last frame, so the
-                    // flight starts where the player's head was. The fly cam
-                    // brings its own bindings -- Space/E up, Q down -- and E
-                    // still interacts with whatever the character, not the camera,
-                    // is standing next to.
-                    // lookRequiresButton = false: the mouse is captured, so
-                    // there is no cursor to drag and the deltas arrive anyway.
-                    ZHLN::FreeCam::Attach(*engine, kFlySpeedMeters, /*lookRequiresButton=*/false);
-                    // The fly cam owns the pose until V comes back: the first
-                    // frame after that toggle adopts the pose it stopped at, and
-                    // the procedural layer stops writing the camera meanwhile.
+                    ZHLN::FreeCam::Attach(reg, kFlySpeedMeters, /*lookRequiresButton=*/false);
                     g_freeCamOwnedLook = true;
                     SetFirstPersonView(*engine, false);
-                    ZHLN::Log("[BSPSample] Free camera on: WASD fly, Space/E up, Q down, Left Shift fast. The character waits where you left it.");
                 }
             }
             freeCamKeyWasDown = freeCamKeyDown;
         }
-
-        // Capture toggle. Raw edge, like the free-camera toggle above: no
-        // console or text field in this sample captures the keyboard, and M is
-        // bound to nothing else (WASD, Q, E, Space, Shift, V, Escape and F are
-        // taken).
         {
-            const bool captureKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::M));
+            const bool captureKeyDown = input.KeyDown(ZHLN::KeyCode::M, ZHLN::kPrimarySeat);
             if (captureKeyDown && !captureKeyWasDown) {
                 SetMouseCaptured(*engine, !g_mouseCaptured);
-                ZHLN::Log(
-                    "[BSPSample] Mouse {}: {}.", g_mouseCaptured ? "captured" : "released",
-                    g_mouseCaptured ? "move to look, no button held" : "the cursor is back; M re-captures"
-                );
             }
             captureKeyWasDown = captureKeyDown;
         }
-
-        // F3 shows the logic benchmark panel. Edge-detected like the toggles
-        // around it, and the same raw key level: nothing in this sample
-        // captures the keyboard. The panel owns its own buttons -- start/stop,
-        // step, reset, add bodies -- so this is the whole binding.
         {
-            const bool benchKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F3));
+            const bool benchKeyDown = input.KeyDown(ZHLN::KeyCode::F3, ZHLN::kPrimarySeat);
             if (benchKeyDown && !benchKeyWasDown && g_benchmarkViewer != nullptr) {
                 g_benchmarkViewer->ToggleVisible();
-                ZHLN::Log(
-                    "[BSPSample] Logic benchmark panel {} (the benchmark's world is the panel's own; this map is untouched).",
-                    g_benchmarkViewer->IsVisible() ? "on" : "off"
-                );
             }
             benchKeyWasDown = benchKeyDown;
         }
-
-        // F4 shows the frame telemetry panel: the host's own frames -- average
-        // FPS, the 1% and 0.1% frame-time lows -- above the GPU stage and CPU
-        // scope timings the engine's profiler records every frame. The panel
-        // owns its own buttons (capture, clear), so this is the whole binding.
         {
-            const bool telemetryKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F4));
+            const bool telemetryKeyDown = input.KeyDown(ZHLN::KeyCode::F4, ZHLN::kPrimarySeat);
             if (telemetryKeyDown && !telemetryKeyWasDown && g_benchmarkViewer != nullptr) {
                 g_benchmarkViewer->ToggleTelemetryVisible();
-                ZHLN::Log("[BSPSample] Frame telemetry panel {}.", g_benchmarkViewer->IsTelemetryVisible() ? "on" : "off");
             }
             telemetryKeyWasDown = telemetryKeyDown;
         }
-
-        // F dumps what the crosshair is over. This is the diagnostic the sample
-        // exists to give: entity name, distance, hit position and surface
-        // normal, which is enough to tell a brush face from a prop hull from a
-        // displacement without attaching a debugger.
         {
-            const bool pickKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F));
+            const bool pickKeyDown = input.KeyDown(ZHLN::KeyCode::F, ZHLN::kPrimarySeat);
             if (pickKeyDown && !pickKeyWasDown) {
                 if (g_pick.hasHit) {
                     ZHLN::Log(
-                        "[BSPSample] CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal "
-                        "({:.2f}, {:.2f}, {:.2f})  body {}",
-                        g_pick.label, g_pick.distance, g_pick.position.GetX(), g_pick.position.GetY(), g_pick.position.GetZ(), g_pick.normal.GetX(),
-                        g_pick.normal.GetY(), g_pick.normal.GetZ(), g_pick.bodyIndex
+                        "[BSPSample] CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal ({:.2f}, {:.2f}, {:.2f})  body {}",
+                        g_pick.label, g_pick.distance, g_pick.position.x, g_pick.position.y, g_pick.position.z,
+                        g_pick.normal.x, g_pick.normal.y, g_pick.normal.z, g_pick.bodyIndex
                     );
                 } else {
                     ZHLN::Log("[BSPSample] CROSSHAIR no hit within {:.1f} m.", kPickDistance);
@@ -2001,71 +1603,57 @@ auto main(int argc, char* argv[]) -> int {
             }
             pickKeyWasDown = pickKeyDown;
         }
-
-        // T swaps the character's view: the sample's own first-person eye with
-        // the imported head hidden, or ProceduralAnimationSample's third-person
-        // orbit around the rig. The switch is a component swap on the main
-        // camera and the player, so it takes effect inside the next Tick.
         {
-            const bool viewKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::T));
+            const bool viewKeyDown = input.KeyDown(ZHLN::KeyCode::T, ZHLN::kPrimarySeat);
             if (viewKeyDown && !viewKeyWasDown) {
                 ApplyProceduralView(*engine, !g_view.firstPerson);
             }
             viewKeyWasDown = viewKeyDown;
         }
 
-        // Autonomous look-at aim: the head follows where the player is looking
-        // rather than a fixed point, which is what makes the sway visible in the
-        // third-person view. The angle is one frame old -- the camera this frame
-        // renders with is projected after the update graph, in the Camera phase.
         if (const auto cameraComp = reg.GetSingleton<ZHLN::Components::CameraComponent>(); cameraComp) {
-            const JPH::Vec3 aim = cameraComp->camera.position + CameraForward(cameraComp->camera) * kLookAtDistance;
-            reg.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [&aim](auto& lookAt) -> auto { lookAt.targetWorldPos = aim; });
+            const FVec3 aim = cameraComp->camera.position + CameraForward(cameraComp->camera) * kLookAtDistance;
+            reg.Patch<ZHLN::ProceduralLookAtComponent>(g_player, [&aim](auto& lookAt) { lookAt.targetWorldPos = aim; });
         }
 
-        if (auto tick = engine->Tick(dt); !tick) {
-            ZHLN::LogError("[BSPMurderDrones] frame failed: {}", tick.error());
-            return EXIT_FAILURE;
-        }
-        UpdatePlayerRigAmbientCube(*engine);
-
-        // Crosshair pick. After Tick, so the camera pose the ray uses is the
-        // one this frame just rendered with -- a frame step in Phase::UI would
-        // read the previous frame's pose, and the point of the ray is to agree
-        // with what is on screen.
-        UpdateCrosshairPick(*engine);
-
-        // Void-fall diagnostic drain: at most one line per prop per run, so a
-        // prop grinding on the catcher can never flood stdout.
-        if (g_voidListener != nullptr) {
-            for (const auto& entry: g_voidListener->TakePendingLogs()) {
-                if (entry.hadSurfaceTouch) {
-                    ZHLN::Log(
-                        "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); last surface contact at "
-                        "({:.2f}, {:.2f}, {:.2f}) -- it fell through visible geometry.",
-                        entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ(), entry.surfaceTouch.GetX(),
-                        entry.surfaceTouch.GetY(), entry.surfaceTouch.GetZ()
-                    );
-                } else {
-                    ZHLN::Log(
-                        "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); no surface contact was "
-                        "recorded before the fall.",
-                        entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ()
-                    );
-                }
+        ZHLN::Character::Step(*engine, dt);
+        { static bool wasUseDown = false; ZHLN::Interaction::Step(*engine, dt, wasUseDown); }
+        procAnimLayer.Tick(*engine, dt);
+        {
+            const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
+            if (camEnt != ZHLN::Entity::Null() && reg.Get<ZHLN::FreeCam::TagComponent>(camEnt)) {
+                ZHLN::FreeCam::Step(*engine, dt);
+            } else {
+                ZHLN::CameraRig::Step(*engine, dt);
+                FirstPersonCameraStep(*engine);
             }
         }
+
+        benchmarkViewer.Tick(*engine);
+        if (!engineConfig.headless) {
+            hostUI.BeginFrame();
+            const auto ext = engine->WindowExtent(primary);
+            if (ext.width > 0 && ext.height > 0) {
+                DrawCrosshairHUD(*engine, hudGui, hostUI);
+            }
+        }
+
+        if (auto tick = engine->Tick(dt); !tick.HasValue()) {
+            ZHLN::LogError("[BSPMurderDrones] frame failed: {}", ZHLN::Error(tick.error).Message());
+            break;
+        }
+        UpdatePlayerRigAmbientCube(*engine);
+        UpdateCrosshairPick(*engine);
+        g_voidTracker.Poll(reg);
     }
 
-    if (g_voidListener != nullptr) {
-        JPH::PhysicsSystem& system = ZHLN::EngineAccess::PhysicsOf(*engine).GetInternalSystem();
-        system.SetContactListener(g_voidListener->Inner());
-        system.GetBodyInterface().RemoveBody(g_voidCatcher);
-        system.GetBodyInterface().DestroyBody(g_voidCatcher);
-        delete g_voidListener;
-        g_voidListener = nullptr;
+    g_benchmarkViewer = nullptr;
+    g_rigCubeMap      = nullptr;
+    procAnimLayer.Stop(*engine);
+    engine->ClearScene();
+    for (ZHLN::TextureID tex : ownedTextures) {
+        if (tex != ZHLN::TextureID::Invalid) engine->Graphics()->UnloadTexture(tex);
     }
-
     ZHLN::Log("[BSPSample] Exiting cleanly.");
     return EXIT_SUCCESS;
 }

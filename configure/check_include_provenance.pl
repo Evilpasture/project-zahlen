@@ -50,7 +50,7 @@ use File::Basename qw(basename dirname);
 
 my $ROOT = dirname(dirname(abs_path($0)));
 
-my @SOURCE_ROOTS = qw(include src plugins extensions gameplay modules utils scripts tests samples app);
+my @SOURCE_ROOTS = qw(include src plugins extensions gameplay utils scripts tests samples app);
 my %SOURCE_SUFFIXES = map { $_ => 1 }
     qw(.h .hh .hpp .hxx .inl .ipp .c .cc .cpp .cxx .ixx .cppm);
 my %HEADER_SUFFIXES = map { $_ => 1 } qw(.h .hh .hpp .hxx .inl .ipp);
@@ -73,7 +73,28 @@ my %FIRST_PARTY = (
     InvalidMaterialID => ['include/Zahlen/Core/AssetID.hpp'],
     HashAssetID      => ['include/Zahlen/Core/AssetID.hpp'],
     EnableEnumFlags  => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumBitMask      => ['include/Zahlen/Core/EnumFlags.hpp'],
     EnumFlag         => ['include/Zahlen/Core/EnumFlags.hpp'],
+    EnumIndex        => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasAnyFlags      => ['include/Zahlen/Core/EnumFlags.hpp'],
+    HasFlag          => ['include/Zahlen/Core/EnumFlags.hpp'],
+    # Native math values
+    FVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    DVec2 => ['include/Zahlen/Math/Vec2.hpp'],
+    FVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    DVec3 => ['include/Zahlen/Math/Vec3.hpp'],
+    FVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    DVec4 => ['include/Zahlen/Math/Vec4.hpp'],
+    Mat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    Mat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat3 => ['include/Zahlen/Math/Matrix.hpp'],
+    DMat4x4 => ['include/Zahlen/Math/Matrix.hpp'],
+    DegF => ['include/Zahlen/Math/Angles.hpp'],
+    DegD => ['include/Zahlen/Math/Angles.hpp'],
+    RadF => ['include/Zahlen/Math/Angles.hpp'],
+    RadD => ['include/Zahlen/Math/Angles.hpp'],
+    EulerDegrees => ['include/Zahlen/Math/EulerAngles.hpp'],
+    EulerRadians => ['include/Zahlen/Math/EulerAngles.hpp'],
     # Geometry
     Extent2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
     Offset2D         => ['include/Zahlen/Math/Geometry2D.hpp'],
@@ -146,18 +167,65 @@ my %FIRST_PARTY = (
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],
     LogLevel         => ['include/Zahlen/Core/LogLevel.hpp'],
-    FrameError       => ['include/Zahlen/Engine/FramePlan.hpp'],
+    FrameError       => ['src/engine/FramePlan.hpp'],
     IObject          => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceID      => ['include/Zahlen/Core/COM/IObject.hpp'],
     InterfaceIdOf    => ['include/Zahlen/Core/COM/IObject.hpp'],
-    Implements       => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Implements'     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::Option'         => ['include/Zahlen/Core/COM/Types.hpp'],
+    ChainInNode                 => ['include/Zahlen/Core/COM/Chain.hpp'],
+    ChainOutNode                => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::COM::InChain'        => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::COM::OutChain'       => ['include/Zahlen/Core/COM/Chain.hpp'],
+    DispatchInChain             => ['include/Zahlen/Core/COM/Chain.hpp'],
+    DispatchOutChain            => ['include/Zahlen/Core/COM/Chain.hpp'],
+    'ZHLN::Reflect::LayoutHash' => ['include/Zahlen/Core/Reflection/LayoutHash.hpp'],
+    'ZHLN::Reflect::FunctionTraits'          => ['include/Zahlen/Core/Reflection/Callable.hpp'],
+    'ZHLN::Reflect::EntityToken'             => ['include/Zahlen/Core/Reflection/Entity.hpp'],
+    'ZHLN::Reflect::EntityTokenOf'           => ['include/Zahlen/Core/Reflection/Entity.hpp'],
+    'ZHLN::Reflect::DescribeEntity'          => ['include/Zahlen/Core/Reflection/Entity.hpp'],
+    'ZHLN::Reflect::ForEachEnclosingScope'   => ['include/Zahlen/Core/Reflection/Entity.hpp'],
+    'ZHLN::Reflect::ForEachTemplateArgument' => ['include/Zahlen/Core/Reflection/Entity.hpp'],
+    'ZHLN::COM::MangleFunction'              => ['include/Zahlen/Core/COM/ItaniumMangle.hpp'],
+    'ZHLN::COM::ResolveSymbol'               => ['include/Zahlen/Core/COM/ItaniumMangle.hpp'],
+    SharedLibrary                            => ['include/Zahlen/Core/SharedLibrary.hpp'],
+    SharedLibraryBind                        => ['include/Zahlen/Core/SharedLibrary.hpp'],
+    SharedLibraryOpenStatus                  => ['include/Zahlen/Core/SharedLibrary.hpp'],
+    PluginSearchOptions                      => ['include/Zahlen/Core/SharedLibrary.hpp'],
+    'FS::Paths::ExecutableDir'               => ['include/Zahlen/FileSystem/Paths.hpp'],
+    'Paths::ExecutableDir'                   => ['include/Zahlen/FileSystem/Paths.hpp'],
+    FunctionTypeCompliant                    => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    AuditFunctionABI                         => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    'ZHLN::COM::AppConfig'       => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::WindowConfig'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::RenderConfig'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::DiagnosticsInfo' => ['include/Zahlen/COM/EngineFactory.hpp'],
     QualifiedTypeName     => ['include/Zahlen/Core/Reflection/Core.hpp'],
     MethodSignature       => ['include/Zahlen/Core/Reflection/Class.hpp'],
     ForEachMethodSignature => ['include/Zahlen/Core/Reflection/Class.hpp'],
-    ComInterfaceLayoutCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComParameterCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComReturnCompliant    => ['include/Zahlen/Core/COM/Reflect.hpp'],
-    ComParameterAudit     => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    InterfaceLayoutCompliant => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ParameterCompliant       => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ReturnCompliant          => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    ParameterAudit           => ['include/Zahlen/Core/COM/Reflect.hpp'],
+    IEngine          => ['include/Zahlen/COM/IEngine.hpp'],
+    IGraphicsDevice  => ['include/Zahlen/COM/IGraphicsDevice.hpp'],
+    IEntities        => ['include/Zahlen/COM/IEntities.hpp'],
+    'ZHLN::COM::Component' => ['include/Zahlen/COM/IEntities.hpp'],
+    # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
+    # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every
+    # call to it -- including the unqualified ones a `using` makes possible.
+    'ZHLN::COM::CreateEngine'    => ['include/Zahlen/COM/EngineFactory.hpp'],
+    'ZHLN::COM::CreateEngineRef' => ['include/Zahlen/COM/EngineFactory.hpp'],
+    # Qualified for the same reason: Simulation, Audio, Assets and Actions are
+    # ordinary words elsewhere in this tree, and PrefabInfo is the kind of name
+    # a tool or importer invents independently.
+    'ZHLN::COM::ISimulation'         => ['include/Zahlen/COM/ISimulation.hpp'],
+    'ZHLN::COM::IAudioDevice'        => ['include/Zahlen/COM/IAudioDevice.hpp'],
+    'ZHLN::COM::IAssetLibrary'       => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::IActionContext'      => ['include/Zahlen/COM/IActionContext.hpp'],
+    'ZHLN::COM::IState'              => ['include/Zahlen/COM/IState.hpp'],
+    'ZHLN::COM::PrefabInfo'          => ['include/Zahlen/COM/IAssetLibrary.hpp'],
+    'ZHLN::COM::EnvironmentImageInfo' => ['include/Zahlen/COM/IAssetLibrary.hpp'],
     ParseCli           => ['extensions/CommandLine/CommandLine.hpp'],
     CliFlag           => ['extensions/CommandLine/CommandLine.hpp'],
     ConfigCli         => ['app/include/Zahlen/ConfigCli.hpp'],
@@ -195,7 +263,7 @@ my %STANDARD = (
 
 # A file that re-exports instead of using: it is not compiled on its own and
 # its own include list is not the thing under test.
-my %SKIP_PATHS = map { $_ => 1 } ('modules/zahlen.cppm');
+my %SKIP_PATHS = ();
 
 # Trees whose headers are umbrella-dependent on purpose: src/vulkan's leaf
 # headers carry a #error demanding the umbrella, include nothing themselves,
@@ -208,7 +276,7 @@ my @SKIP_PREFIXES = ('src/vulkan/');
 # be found by looking for the names that exist, so a leftover
 # `#include "Types.hpp"` resolves nowhere and is indistinguishable from an
 # external header by spelling alone.
-my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp');
+my %RETIRED_HEADERS = map { $_ => 1 } ('Types.hpp', 'COMTypes.hpp', 'ExplosionHost.hpp', 'LightningHost.hpp', 'TerrainHost.hpp', 'AnimationContext.hpp', 'CrashState.hpp', 'CrashObservers.hpp', 'Pair.hpp', 'NativeSurfaceInternal.hpp', 'ValueTypes.hpp');
 
 # Every tracked name in one alternation, so a file is scanned once for all of
 # them rather than once per symbol. Longest first: with word boundaries a
@@ -384,7 +452,7 @@ my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
     my ($suffix) = /(\.[^.]*)$/;
     defined $suffix && $HEADER_SUFFIXES{lc $suffix};
 } keys %tree_files));
-my $CACHE_SCHEMA = 2;
+my $CACHE_SCHEMA = 4;
 
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
 

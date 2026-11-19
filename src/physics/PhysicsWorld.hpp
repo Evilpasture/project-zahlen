@@ -18,7 +18,7 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <cstddef>
 #include <cstdint>

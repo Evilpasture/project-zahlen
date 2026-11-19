@@ -4,11 +4,12 @@
 #pragma once
 #include "presentation/PresentationTarget.hpp"
 #include <GLFW/glfw3.h>
-#include <Zahlen/Window/Window.hpp>
+#include <window/Window.hpp>
 #include <string>
 
 namespace ZHLN {
 struct Window::Impl {
+    WindowID                           id               = WindowID::Invalid;
     GLFWwindow*                        handle           = nullptr;
     WindowInputReceiver                receiver         = {};
     CursorMode                         cursorMode       = CursorMode::System;

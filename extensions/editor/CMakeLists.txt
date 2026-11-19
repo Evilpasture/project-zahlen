@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/editor -- the native world editor (Hierarchy + Inspector).
+# extensions/editor -- COM world-editor panels (Hierarchy + Inspector).
 #
-# A separate STATIC target, not part of the zahlen_extras aggregate: the composition
+# A separate STATIC target -- not folded into a shared aggregate: the composition
 # root links it only when present, and a host that does not want the editor
 # is not forced to compile it. Public headers are included as
 # <editor/GUIEditor.hpp>.
@@ -23,6 +23,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_ui
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

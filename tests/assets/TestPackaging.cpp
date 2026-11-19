@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Engine/AssetManager.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
+#include <Zahlen/Render/CookedFormats.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <expected>
 

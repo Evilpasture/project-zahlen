@@ -3,8 +3,8 @@
 
 # cmake/ZTest.cmake
 #
-# Native `ztest` test orchestrator, zero-boilerplate C++26 namespace collection
-# wrappers, and build-time manifest generation. Replaces CTest across the
+# Zero-boilerplate C++26 namespace collection wrappers, worker registration and
+# the build-time manifest the `ztest` orchestrator reads. Replaces CTest across the
 # repository without CMake globbing: explicit source lists are wrapped via
 # `zahlen_wrap_ztest_sources(...)` into idempotent `file(CONFIGURE)` epilogue TUs
 # that reflect `namespace ZHLN::Test` (`test_*` free functions + primary-TU suite
@@ -13,27 +13,10 @@
 
 include_guard(GLOBAL)
 
-add_executable(ztest
-    "${PROJECT_SOURCE_DIR}/utils/ztest/main.cpp"
-    "${PROJECT_SOURCE_DIR}/utils/ztest/DebuggerReplay.cpp"
-)
-set_target_properties(ztest PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
-zahlen_set_bin_output(ztest)
-target_link_libraries(ztest PRIVATE zahlen_command_line zahlen_signal)
-zahlen_enable_reflection(ztest)
-if(USE_SANITIZERS)
-    zahlen_install_sanitizer_runtime(ztest)
-endif()
-if(TARGET zahlen_warnings)
-    target_link_libraries(ztest PRIVATE zahlen_warnings)
-endif()
-if(WIN32)
-    target_compile_definitions(ztest PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-endif()
+# The ztest executable itself is utils/ztest/CMakeLists.txt. This module owns the
+# contract around it: source wrapping, worker registration and the manifest the
+# runner reads.
+add_subdirectory("${PROJECT_SOURCE_DIR}/utils/ztest" "${CMAKE_BINARY_DIR}/utils/ztest")
 
 set_property(GLOBAL PROPERTY ZHLN_ZTEST_MANIFEST_LINES "")
 
@@ -63,7 +46,7 @@ set_property(GLOBAL APPEND PROPERTY ZHLN_ZTEST_MANIFEST_LINES
 # Wraps explicit test C++ translation units with a tiny generated epilogue TU
 # that includes the original source file by absolute path and instantiates
 # `ZHLN::Test::AutoCollectFile<AbsPath, RelPath>`. Entry-point and helper TUs
-# (`TestsMain.cpp`, `Run*Tests.cpp`, `ImageWriteImpl.cpp`) pass through
+# (`TestsMain.cpp`, `Run*Tests.cpp`) pass through
 # unchanged. Uses `file(CONFIGURE)` so wrapper mtimes stay untouched across
 # reconfigures and Ninja header/source `.d` dependency tracking remains exact.
 function(zahlen_wrap_ztest_sources OUT_SOURCES OUT_REL_FILES)
@@ -74,7 +57,6 @@ function(zahlen_wrap_ztest_sources OUT_SOURCES OUT_REL_FILES)
         get_filename_component(_fname "${_src}" NAME)
         get_filename_component(_ext "${_src}" LAST_EXT)
         if(_fname STREQUAL "TestsMain.cpp"
-           OR _fname STREQUAL "ImageWriteImpl.cpp"
            OR _fname MATCHES "^Run.*Tests\\.cpp$"
            OR NOT (_ext STREQUAL ".cpp" OR _ext STREQUAL ".cxx" OR _ext STREQUAL ".cc"))
             list(APPEND _wrapped "${_src}")
@@ -131,6 +113,12 @@ function(zahlen_register_ztest_target TARGET_NAME)
     endif()
     if(NOT ZTEST_TIMEOUT)
         set(ZTEST_TIMEOUT 120)
+    endif()
+    # Match TestsFramework.hpp's sanitizer slowdown factor on the orchestrator
+    # watchdog (covers both -DUSE_SANITIZERS=ON and manual -fsanitize=* builds).
+    set(_zhln_ztest_flags "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS}")
+    if((USE_SANITIZERS OR _zhln_ztest_flags MATCHES "(^|[ ;])-fsanitize=") AND ZTEST_TIMEOUT GREATER 0)
+        math(EXPR ZTEST_TIMEOUT "${ZTEST_TIMEOUT} * 3")
     endif()
     if(NOT ZTEST_WORKING_DIRECTORY)
         set(ZTEST_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

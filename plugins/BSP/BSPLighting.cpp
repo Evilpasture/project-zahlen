@@ -4,10 +4,12 @@
 // plugins/BSP/BSPLighting.cpp
 //
 // See BSPLighting.hpp for the rule list. Everything here is deterministic and
-// engine-free: given the same BSPMap and ImportOptions it produces the same
+// engine-free: given the same Map and ImportOptions it produces the same
 // lights, which is what makes the diagnostics trustworthy.
 
 #include "BSPLighting.hpp"
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -68,18 +70,21 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     return haystack.find(target) != std::string::npos;
 }
 
-[[nodiscard]] auto KeyFloat(const BSPEntity& entity, std::string_view key, float fallback) noexcept -> float {
+[[nodiscard]] auto KeyFloat(const Entity& entity, std::string_view key, float fallback) noexcept -> float {
     return entity.FindFloat(key).value_or(fallback);
 }
 
 // Source parses "0" and "" the same way for floats, so a present-but-zero
 // override has to stay distinguishable from an absent one.
-[[nodiscard]] auto KeyFloatPresent(const BSPEntity& entity, std::string_view key, float& out) noexcept -> bool {
-    if (const auto value = entity.FindFloat(key)) {
-        out = *value;
-        return true;
+[[nodiscard]] auto KeyFloatPresent(const Entity& entity, std::string_view key) noexcept -> std::optional<float> {
+    const auto v = entity.Find(key);
+    if (v.empty()) {
+        return std::nullopt;
     }
-    return false;
+    float out = 0.0f;
+    const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
+    (void)ptr;
+    return ec == std::errc {} ? std::optional<float> {out} : std::nullopt;
 }
 
 // The luminance the renderer itself uses for light-importance sorting, so the
@@ -114,16 +119,16 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 
 // Source's angle triple -> unit direction, in Source's Z-up space with pitch
 // positive down.
-[[nodiscard]] auto AngleDirection(std::array<float, 3> angles) noexcept -> JPH::Vec3 {
-    const float pitch = angles[0] * (kPi / 180.0f);
-    const float yaw   = angles[1] * (kPi / 180.0f);
-    const float cp    = std::cos(pitch);
-    return JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+[[nodiscard]] auto AngleDirection(std::array<float, 3> angles) noexcept -> FVec3 {
+    const auto pitch = DegF{angles[0]}.ToRadians();
+    const auto yaw = DegF{angles[1]}.ToRadians();
+    const float cp    = Cos(pitch);
+    return {cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
 }
 
 // The pitch/yaw pair, honouring `pitch` as an override for `angles`' X lane
 // (Hammer writes both for light_spot and point_spotlight).
-[[nodiscard]] auto EntityAngles(const BSPEntity& entity) noexcept -> std::array<float, 3> {
+[[nodiscard]] auto EntityAngles(const Entity& entity) noexcept -> std::array<float, 3> {
     auto angles = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
     if (const auto pitch = entity.FindFloat("pitch")) {
         angles[0] = *pitch;
@@ -171,7 +176,7 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 // not at the origin.
 // `rendercolor` + `renderamt` (+ `HDRColorScale`): the CS:GO / GMod spelling
 // used by point_spotlight, env_projectedtexture and the *_dynamic family.
-auto ParseRenderColorValue(const BSPEntity& entity) noexcept -> SourceLightValue {
+auto ParseRenderColorValue(const Entity& entity) noexcept -> SourceLightValue {
     SourceLightValue out;
     // `rendercolor` is colour255; `lightcolor` is colour32. Both carry the RGB
     // in the first three lanes.
@@ -221,23 +226,23 @@ auto ClassifyLightEntity(std::string_view className) noexcept -> LightEntityKind
 // Attenuation
 // ---------------------------------------------------------------------------
 
-auto ParseSourceAttenuation(const BSPEntity& entity) noexcept -> SourceAttenuation {
+auto ParseSourceAttenuation(const Entity& entity) noexcept -> SourceAttenuation {
     SourceAttenuation atten;
     atten.constant  = KeyFloat(entity, "_constant_attn", 0.0f);
     atten.linear    = KeyFloat(entity, "_linear_attn", 0.0f);
     atten.quadratic = KeyFloat(entity, "_quadratic_attn", 1.0f);
 
     float value = 0.0f;
-    if (KeyFloatPresent(entity, "_fifty_percent_distance", value)) {
+    if (((value = KeyFloatPresent(entity, "_fifty_percent_distance").value_or(value)), KeyFloatPresent(entity, "_fifty_percent_distance").has_value())) {
         atten.fiftyPercentDistance = value;
     }
     // `_distance` and the legacy `_falloff` are the zero-percent distance under
     // two other names; the newest spelling wins.
-    if (KeyFloatPresent(entity, "_zero_percent_distance", value)) {
+    if (((value = KeyFloatPresent(entity, "_zero_percent_distance").value_or(value)), KeyFloatPresent(entity, "_zero_percent_distance").has_value())) {
         atten.zeroPercentDistance = value;
-    } else if (KeyFloatPresent(entity, "_distance", value)) {
+    } else if (((value = KeyFloatPresent(entity, "_distance").value_or(value)), KeyFloatPresent(entity, "_distance").has_value())) {
         atten.zeroPercentDistance = value;
-    } else if (KeyFloatPresent(entity, "_falloff", value)) {
+    } else if (((value = KeyFloatPresent(entity, "_falloff").value_or(value)), KeyFloatPresent(entity, "_falloff").has_value())) {
         atten.zeroPercentDistance = value;
     }
 
@@ -288,7 +293,7 @@ auto AttenuationRangeMetres(const SourceAttenuation& atten, float engineIntensit
 // Light values
 // ---------------------------------------------------------------------------
 
-auto ParseSourceLightValue(const BSPEntity& entity) noexcept -> SourceLightValue {
+auto ParseSourceLightValue(const Entity& entity) noexcept -> SourceLightValue {
     SourceLightValue out;
 
     std::string_view text = entity.Find("_light");
@@ -328,8 +333,8 @@ auto ParseSourceLightValue(const BSPEntity& entity) noexcept -> SourceLightValue
 // Ambient
 // ---------------------------------------------------------------------------
 
-auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm {
-    for (const BSPEntity& entity: map.entities) {
+auto ReadEnvironmentAmbient(const Map& map) noexcept -> AmbientTerm {
+    for (const Entity& entity: map.entities) {
         if (entity.Find("classname") != "light_environment") {
             continue;
         }
@@ -345,15 +350,15 @@ auto ReadEnvironmentAmbient(const BSPMap& map) noexcept -> AmbientTerm {
             (void) ParseFloats(text, rgba);
         }
         const float scale = std::max(entity.FindFloat("_AmbientScaleHDR").value_or(1.0f), 0.0f);
-        out.color     = JPH::Vec3(std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f));
+        out.color = {std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f)};
         out.intensity = std::max(rgba[3], 0.0f) * scale;
         return out; // one light_environment per map; the first one wins
     }
     return {};
 }
 
-auto EnvironmentSunDirection(const BSPMap& map) noexcept -> JPH::Vec3 {
-    for (const BSPEntity& entity: map.entities) {
+auto EnvironmentSunDirection(const Map& map) noexcept -> FVec3 {
+    for (const Entity& entity: map.entities) {
         if (entity.Find("classname") != "light_environment") {
             continue;
         }
@@ -362,7 +367,7 @@ auto EnvironmentSunDirection(const BSPMap& map) noexcept -> JPH::Vec3 {
     // No light_environment at all: fall back to a 45-degree elevation sun from
     // the +X/+Y quadrant rather than returning a zero vector, which the engine
     // would normalise into NaN and silently delete the directional term.
-    return JPH::Vec3(0.5f, 0.5f, 1.0f).Normalized();
+    return FVec3{0.5f, 0.5f, 1.0f}.Normalized();
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +419,7 @@ auto IsEmissiveMaterialName(std::string_view materialName) noexcept -> bool {
 
 // `$selfillumtint` / `$color2` / `$color`, all of which Source spells as
 // "[r g b]" 0-1 or "{r g b}" 0-255.
-auto VmtTint(const VMTMaterial& vmt) noexcept -> JPH::Vec3 {
+auto VmtTint(const VMTMaterial& vmt) noexcept -> FVec3 {
     for (const std::string_view key: {"$selfillumtint", "$color2", "$color"}) {
         const auto found = vmt.Find(key);
         if (!found || found->empty()) {
@@ -423,10 +428,10 @@ auto VmtTint(const VMTMaterial& vmt) noexcept -> JPH::Vec3 {
         std::array<float, 4> rgb {1.0f, 1.0f, 1.0f, 1.0f};
         if (ParseFloats(*found, rgb) == 3) {
             const float divisor = (found->front() == '{') ? 255.0f : 1.0f;
-            return JPH::Vec3(std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f));
+            return FVec3{std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f)};
         }
     }
-    return JPH::Vec3::sReplicate(1.0f);
+    return FVec3::Splat(1.0f);
 }
 
 auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma, const VMTMaterial* vmt, bool noLightFlag) noexcept -> EmissiveMaterialProbe {
@@ -503,7 +508,7 @@ auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma
     out.isEmissive = strength > 0.01f;
     out.strength   = out.isEmissive ? std::clamp(strength, 0.0f, 1.0f) : 0.0f;
     if (Rec709Luma(out.tint) <= 0.0f) {
-        out.tint = JPH::Vec3::sReplicate(1.0f);
+        out.tint = FVec3::Splat(1.0f);
     }
     return out;
 }
@@ -514,9 +519,9 @@ auto ProbeEmissiveMaterial(std::string_view materialName, float reflectivityLuma
 
 // Fills the shared position/direction/cone/range fields and applies the
 // calibration. Returns false when the light should not be emitted at all.
-auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEntityKind kind, const SourceLightValue& value, bool useRenderColor)
-    -> std::optional<BspPointLight> {
-    BspPointLight light;
+auto BuildLight(const Entity& entity, const ImportOptions& options, LightEntityKind kind, const SourceLightValue& value, bool useRenderColor)
+    -> std::optional<PointLight> {
+    PointLight light;
     light.type      = (kind == LightEntityKind::Sun) ? LightType::Sun : ((kind == LightEntityKind::Spot) ? LightType::Spot : LightType::Point);
     light.name      = std::string(entity.Find("targetname"));
     light.className = std::string(entity.Find("classname"));
@@ -525,12 +530,10 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
     }
 
     const auto originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-    light.position       = ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
+    light.position       = ConvertPosition(options, FVec3{originArr[0], originArr[1], originArr[2]});
 
     // Colour: Source stores 0-255 bytes; the engine wants linear 0-1.
-    light.color = JPH::Vec3(
-        std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)
-    );
+    light.color = {std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)};
 
     // Brightness: the point/spot constant, the sun constant for the
     // directional term. A light with no brightness lane at all (legacy
@@ -580,7 +583,7 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
             // atan(width / 2 / length).
             const float width  = KeyFloat(entity, "spotlightwidth", kSpotlightDefaultWidthInches);
             const float length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
-            outerDegrees       = std::atan(std::max(width, 0.0f) * 0.5f / length) * (180.0f / kPi);
+            outerDegrees       = RadF{std::atan(std::max(width, 0.0f) * 0.5f / length)}.ToDegrees().value;
         } else if (light.className == "env_projectedtexture") {
             outerDegrees = KeyFloat(entity, "lightfov", KeyFloat(entity, "fov", kProjectedTextureDefaultFovDegrees));
         } else {
@@ -594,8 +597,8 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
             innerDegrees = outerDegrees * (2.0f / 3.0f);
         }
         innerDegrees           = std::clamp(innerDegrees, 0.0f, outerDegrees);
-        light.outerConeRadians = std::clamp(outerDegrees, 1.0f, 179.0f) * (kPi / 180.0f);
-        light.innerConeRadians = std::clamp(innerDegrees, 0.0f, outerDegrees) * (kPi / 180.0f);
+        light.outerConeRadians = DegF{std::clamp(outerDegrees, 1.0f, 179.0f)}.ToRadians().value;
+        light.innerConeRadians = DegF{std::clamp(innerDegrees, 0.0f, outerDegrees)}.ToRadians().value;
     }
 
     // Range from Source's attenuation window.
@@ -616,9 +619,9 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
     return light;
 }
 
-auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std::vector<BspPointLight> {
-    std::vector<BspPointLight> out;
-    for (const BSPEntity& entity: map.entities) {
+auto GatherEntityLights(const Map& map, const ImportOptions& options) -> std::vector<PointLight> {
+    std::vector<PointLight> out;
+    for (const Entity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         const LightEntityKind  kind      = ClassifyLightEntity(className);
         if (kind == LightEntityKind::NotALight) {
@@ -646,7 +649,7 @@ auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std:
             // m_Radius = spotlightlength.
             const SourceLightValue value = ParseRenderColorValue(entity);
             if (auto light = BuildLight(entity, options, kind, value, true)) {
-                const JPH::Vec3 dir    = light->direction;
+                const FVec3 dir    = light->direction;
                 const float     length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
                 light->position        = light->position + dir * (length * options.unitScale);
                 light->radius          = std::max(length * options.unitScale, 0.05f);
@@ -681,7 +684,7 @@ auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std:
 // Emissive surface assembly
 // ---------------------------------------------------------------------------
 
-auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights)
+auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const PointLight> entityLights, float unitScale, uint32_t maxLights)
     -> std::vector<EmissiveSurface> {
     const float cellMetres      = std::max(kEmissiveClusterCellInches * unitScale, 0.1f);
     const float fixtureMetres   = std::max(kEmissiveFixtureRadiusInches * unitScale, 0.1f);
@@ -701,9 +704,9 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         std::string material;
         float       areaSquareInches = 0.0f;
         float       areaSquareMetres = 0.0f;
-        JPH::Vec3   weighted {0.0f, 0.0f, 0.0f};
-        JPH::Vec3   weightedNormal {0.0f, 0.0f, 0.0f};
-        JPH::Vec3   color {0.0f, 0.0f, 0.0f};
+        FVec3   weighted {0.0f, 0.0f, 0.0f};
+        FVec3   weightedNormal {0.0f, 0.0f, 0.0f};
+        FVec3   color {0.0f, 0.0f, 0.0f};
         float       strength         = 0.0f;
         float       reflectivityLuma = -1.0f;
         bool        noLightFlag      = false;
@@ -714,9 +717,9 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     buckets.reserve(surfaces.size());
     cells.reserve(surfaces.size());
     for (const EmissiveSurface& surface: surfaces) {
-        const int64_t        cx         = static_cast<int64_t>(std::floor(surface.position.GetX() / cellMetres));
-        const int64_t        cy         = static_cast<int64_t>(std::floor(surface.position.GetY() / cellMetres));
-        const int64_t        cz         = static_cast<int64_t>(std::floor(surface.position.GetZ() / cellMetres));
+        const int64_t        cx         = static_cast<int64_t>(std::floor(surface.position.x / cellMetres));
+        const int64_t        cy         = static_cast<int64_t>(std::floor(surface.position.y / cellMetres));
+        const int64_t        cz         = static_cast<int64_t>(std::floor(surface.position.z / cellMetres));
         const std::string    key        = surface.materialName + "@" + std::to_string(cx) + "_" + std::to_string(cy) + "_" + std::to_string(cz);
         std::vector<size_t>& candidates = cells[key];
 
@@ -730,14 +733,14 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
             // Compare against the group's running centroid, not its first face:
             // a housing's sheets are consecutive and overlap each other, so the
             // centroid tracks the fixture as it grows.
-            const JPH::Vec3 centroid = existing.weighted * (1.0f / existing.areaSquareMetres);
-            const float     distSq   = (centroid - surface.position).LengthSq();
+            const FVec3 centroid = existing.weighted * (1.0f / existing.areaSquareMetres);
+            const float     distSq   = (centroid - surface.position).LengthSquared();
             if (distSq >= bestDistSq) {
                 continue;
             }
-            const JPH::Vec3 normal =
-                (existing.weightedNormal.LengthSq() > 1e-8f) ? existing.weightedNormal.Normalized() : JPH::Vec3::sAxisY();
-            if (normal.Dot(surface.normal) < kEmissiveFixtureCoplanarCos) {
+            const FVec3 normal =
+                (existing.weightedNormal.LengthSquared() > 1e-8f) ? existing.weightedNormal.Normalized() : FVec3::UnitY();
+            if (Dot(normal, surface.normal) < kEmissiveFixtureCoplanarCos) {
                 continue;
             }
             bestDistSq = distSq;
@@ -774,7 +777,7 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         surface.areaSquareMetres = bucket.areaSquareMetres;
         surface.areaSquareInches = bucket.areaSquareInches;
         surface.position         = bucket.weighted * invArea;
-        surface.normal           = (bucket.weightedNormal.LengthSq() > 1e-8f) ? bucket.weightedNormal.Normalized() : JPH::Vec3::sAxisY();
+        surface.normal           = (bucket.weightedNormal.LengthSquared() > 1e-8f) ? bucket.weightedNormal.Normalized() : FVec3::UnitY();
         surface.color            = bucket.color * invArea;
         surface.reflectivityLuma = bucket.reflectivityLuma;
         surface.noLightFlag      = bucket.noLightFlag;
@@ -792,11 +795,11 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     //    housing of that light, and its emission is already accounted for.
     for (EmissiveSurface& surface: out) {
         float bestSq = fixtureMetresSq;
-        for (const BspPointLight& light: entityLights) {
+        for (const PointLight& light: entityLights) {
             if (light.type == LightType::Sun) {
                 continue;
             }
-            const float distSq = (light.position - surface.position).LengthSq();
+            const float distSq = (light.position - surface.position).LengthSquared();
             bestSq             = std::min(bestSq, distSq);
         }
         if (bestSq < fixtureMetresSq) {
@@ -822,8 +825,8 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
     return out;
 }
 
-auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> BspPointLight {
-    BspPointLight light;
+auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& options) -> PointLight {
+    PointLight light;
     light.name      = "Glow_" + surface.materialName;
     light.className = "info_emissive_proxy";
     light.type      = LightType::Point;
@@ -867,12 +870,12 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 // Diagnostics / guarantee
 // ---------------------------------------------------------------------------
 
-auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const BSPMap& map)
+auto AuditLighting(std::span<const PointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const Map& map)
     -> LightingDiagnostics {
     LightingDiagnostics out;
     uint32_t            offered   = 0;
     uint32_t            beamCones = 0;
-    for (const BSPEntity& entity: map.entities) {
+    for (const Entity& entity: map.entities) {
         const LightEntityKind kind = ClassifyLightEntity(entity.Find("classname"));
         if (kind == LightEntityKind::NotALight) {
             continue;
@@ -886,7 +889,7 @@ auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const 
     // after this pass has already harvested the entities, so counting the whole
     // vector here would make "offered - dropped" go negative and wrap.
     uint32_t entityEmitted = 0;
-    for (const BspPointLight& light: entityLights) {
+    for (const PointLight& light: entityLights) {
         if (!light.fromEmissive) {
             ++entityEmitted;
         }
@@ -905,13 +908,13 @@ auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const 
         }
         out.totalEmissiveIntensity += EmissiveLightFor(surface, ImportOptions {}).intensity;
     }
-    for (const BspPointLight& light: entityLights) {
+    for (const PointLight& light: entityLights) {
         out.totalEntityIntensity += light.intensity;
     }
     return out;
 }
 
-auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const ImportOptions& options, LightingDiagnostics& diagnostics) -> bool {
+auto EnforceLightingFloor(ImportedMapData& data, const Map& map, const ImportOptions& options, LightingDiagnostics& diagnostics) -> bool {
     if (!options.enforceLightingFloor) {
         return false;
     }
@@ -927,7 +930,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     if (ambientIrradiance <= kAmbientFloorRadiance) {
         const float hueLuma    = Rec709Luma(data.ambient.color);
         const float hueScale   = (hueLuma > 1e-4f) ? (0.34f / hueLuma) : 0.0f;
-        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : JPH::Vec3(0.30f, 0.34f, 0.42f);
+        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : FVec3{0.30f, 0.34f, 0.42f};
         data.ambient.intensity = kAmbientFloorRadiance * kAmbientBrightnessLadder / 0.34f;
         data.ambient.authored  = true;
         intervened             = true;
@@ -939,20 +942,20 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     const bool hasLights   = !data.lights.empty();
     const bool hasEmissive = !data.emissive.empty();
     if (!hasLights && !hasEmissive) {
-        BspPointLight fill;
+        PointLight fill;
         fill.name         = "map_fill_light";
         fill.className    = "info_fill_light";
         fill.fromEmissive = true;
         fill.type         = LightType::Point;
-        fill.color        = JPH::Vec3(0.85f, 0.88f, 1.0f);
+        fill.color = {0.85f, 0.88f, 1.0f};
         fill.intensity    = kFillLightIntensity;
         fill.range        = kFillLightRangeMetres;
         fill.startsOn     = true;
         if (!map.models.empty()) {
             const DModel&   world = map.models.front();
-            const JPH::Vec3 mins(world.mins[0], world.mins[1], world.mins[2]);
-            const JPH::Vec3 maxs(world.maxs[0], world.maxs[1], world.maxs[2]);
-            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + JPH::Vec3(0.0f, 0.0f, (maxs.GetZ() - mins.GetZ()) * 0.25f));
+            const FVec3 mins{world.mins[0], world.mins[1], world.mins[2]};
+            const FVec3 maxs{world.maxs[0], world.maxs[1], world.maxs[2]};
+            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + FVec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.25f});
         }
         data.lights.push_back(std::move(fill));
         intervened = true;
@@ -966,7 +969,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     //    black and the whole map reads as an interior. Lift the sun itself: the
     //    renderer derives the environment sun's intensity from the ambient
     //    exposure, so a brightened sun carries the sky with it.
-    auto sunIt = std::find_if(data.lights.begin(), data.lights.end(), [](const BspPointLight& light) { return light.type == LightType::Sun; });
+    auto sunIt = std::find_if(data.lights.begin(), data.lights.end(), [](const PointLight& light) { return light.type == LightType::Sun; });
     if (sunIt != data.lights.end() && sunIt->intensity < kSunFloorIntensity) {
         sunIt->intensity = kSunFloorIntensity;
         intervened       = true;

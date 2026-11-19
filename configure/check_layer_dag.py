@@ -224,7 +224,7 @@ def main() -> int:
         print(
             "Invert it: have the lower layer name a capability it owns -- a registry entry, "
             "an event, an interface -- and let the gameplay layer implement it. "
-            "Zahlen/gui/FontLoader.hpp and Zahlen/Engine/GameModule.hpp are the worked examples.",
+            "Zahlen/COM/IPlugin.hpp is the worked example for optional runtime extensions.",
             file=sys.stderr,
         )
         return 1

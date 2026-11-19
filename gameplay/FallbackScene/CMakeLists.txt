@@ -1,15 +1,7 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# gameplay/FallbackScene -- the scene host's compiled-in diagnostic scene (zahlen_fallback_scene).
-#
-# Optional no-document scene and popup UI; neither the game nor Core installs
-# this module by default. Core keeps what this composes -- Scene::Instantiate,
-# the frame-scheduler extension seam, the enableFallbackScene config flag and
-# the teardown-hook list -- and a host
-# that wants no fallback simply never calls Install.
-#
-# Public headers are reached as <FallbackScene/...>.
+# Host-owned diagnostic scene content and immediate UI. No native Module.
 
 set(TARGET_NAME zahlen_fallback_scene)
 
@@ -29,11 +21,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Core is a public dependency: the preset instantiates through Scene, drives
-# the immediate-mode GUI, reads InputStateComponent and subscribes engine
-# teardown.
 target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+    zahlen_engine zahlen_scene zahlen_ui
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC
@@ -43,10 +32,8 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
     ZHLN_TARGET_TRIPLE="${ZHLN_TARGET_TRIPLE}"
 )
 
-# FallbackScene.cpp reaches Components.hpp, whose key bitset is sized by
-# Reflect::EnumCount<KeyCode>(). Reflection is not a per-target feature --
-# without the flags that count is 0 instead of 72 and any component after it
-# moves, a silent wrong-offset read.
+# Reflection is a whole-program ABI contract across targets that share ECS
+# component registration and reflected type names with zahlen_engine.
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()

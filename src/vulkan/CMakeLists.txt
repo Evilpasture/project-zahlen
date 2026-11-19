@@ -32,7 +32,29 @@ add_library(
   diagnostics/Raytracing.cpp
   diagnostics/GPUAddressTracker.cpp
   diagnostics/GPUDiagnostics.cpp)
-set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# Volk's dispatch table is per-image by design, but its loader entry points
+# (volkInitialize, volkLoad*) have default visibility. This archive is linked
+# into libzahlen_engine.so *and*, through the extras targets, into executables
+# that also link that .so -- and in that topology the executable's copy of the
+# entry points preempts the engine's, so the loader fills the executable's
+# table while the engine's stays NULL and the first vk* call jumps to 0x0.
+#
+# Hiding the whole archive at compile time binds every reference intra-image:
+# each image initializes and uses its own table. This used to be a `local:`
+# list of glob patterns in a linker version script, which was both ELF-only
+# and leaky -- `vma*` never matched the mangled `_ZN13VmaJsonWriter...`
+# spellings, so ~960 C++ symbols escaped it. A visibility preset is the
+# compiler's own answer, it covers mangled names it has never been told about,
+# and it applies on Mach-O and PE too.
+#
+# Nothing render-side needs to escape: diagnostics are owned by Vk::Instance
+# and published through RenderContext, never through renderer symbols.
+set_target_properties(
+  zahlen_vulkan PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  C_VISIBILITY_PRESET hidden
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON)
 
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 
@@ -92,7 +114,12 @@ target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
 # Rendering.hpp as a precompiled header, for speed only: every header in this tree
 # includes what it uses, so a build without PCH (ZHLN_ENABLE_PCH=OFF) compiles the
 # same sources with nothing force-included.
-if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+# GCC only, for the reason the root CMakeLists gives for zahlen_engine's PCH:
+# clang-p2996's ASTReader crashes deserializing P2996 reflection expressions out
+# of a PCH, and Rendering.hpp is a far larger AST than Math3D.hpp. This used to
+# match "GNU|Clang", so the one compiler the rule exists for was the one it let
+# through -- and the resulting crash looked like a corruption, not a config.
+if(ZHLN_ENABLE_PCH AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_precompile_headers(
       zahlen_vulkan PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")

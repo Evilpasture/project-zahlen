@@ -11,7 +11,7 @@ skinned meshes, debug line lists and CSG stencil draws keep working unchanged.
 ## 1. End-to-end data flow
 
 ```
- zcook / GLTFImporter          Meshlet.hpp                     GPU
+ zcook / GLTFAssets            Meshlet.hpp                     GPU
  ─────────────────────         ────────────────────────        ───
  meshoptimizer                 meshletAddress ────────────► GPUMeshlet[]   (64B)
    buildMeshlets       ──►     meshletVertexAddress ──────► uint32_t[]     (unique verts)

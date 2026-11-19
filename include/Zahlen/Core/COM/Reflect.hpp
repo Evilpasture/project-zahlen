@@ -31,7 +31,7 @@ namespace ZHLN::COM {
 struct ImplementationTag {};
 
 template <typename T>
-concept ComInterface = std::is_base_of_v<IObject, T> &&
+concept Interface = std::is_base_of_v<IObject, T> &&
                        !std::is_same_v<T, IObject> &&
                        !std::is_base_of_v<ImplementationTag, T>;
 
@@ -41,7 +41,7 @@ concept ComInterface = std::is_base_of_v<IObject, T> &&
 template <typename T, typename F>
 constexpr void ForEachInterfaceBase(F&& f) {
     Reflect::ForEachBase<T>([&]<typename Base>() -> auto {
-        if constexpr (ComInterface<Base>) {
+        if constexpr (Interface<Base>) {
             f.template operator()<Base>();
         }
         if constexpr (!std::is_same_v<Base, IObject> && std::is_class_v<Base>) {
@@ -59,7 +59,7 @@ constexpr void ForEachInterfaceBase(F&& f) {
 // rejected: the boundary cannot express how long the referent stays alive,
 // which is exactly what refcounting a pointer is for.
 template <typename Return>
-[[nodiscard]] consteval bool ComReturnCompliant() noexcept {
+[[nodiscard]] consteval bool ReturnCompliant() noexcept {
     if constexpr (std::is_void_v<Return> || std::is_pointer_v<Return>) {
         return true;
     } else {
@@ -74,7 +74,7 @@ template <typename Return>
 // std::string is not trivially copyable, so its layout and its allocator
 // would have to match on both sides.
 template <typename Parameter>
-[[nodiscard]] consteval bool ComParameterCompliant() noexcept {
+[[nodiscard]] consteval bool ParameterCompliant() noexcept {
     using Bare = std::remove_cvref_t<Parameter>;
     if constexpr (std::is_pointer_v<Bare>) {
         return true;
@@ -84,49 +84,96 @@ template <typename Parameter>
 }
 
 template <typename ParameterPack>
-struct ComParameterAudit;
+struct ParameterAudit;
 
 template <typename... Parameters>
-struct ComParameterAudit<std::tuple<Parameters...>> {
-    static constexpr bool kCompliant = (... && ComParameterCompliant<Parameters>());
+struct ParameterAudit<std::tuple<Parameters...>> {
+    static constexpr bool kCompliant = (... && ParameterCompliant<Parameters>());
 };
 
 // A method that takes std::string by value is noexcept and returns void, so
 // auditing the return type alone would pass it. Parameters are half the
 // signature and half the ABI.
 template <typename Signature>
-[[nodiscard]] consteval bool ComMethodCompliant() noexcept {
+[[nodiscard]] consteval bool MethodCompliant() noexcept {
     if constexpr (!Signature::IsNoexcept) {
         return false;
-    } else if constexpr (!ComReturnCompliant<typename Signature::ReturnType>()) {
+    } else if constexpr (!ReturnCompliant<typename Signature::ReturnType>()) {
         return false;
     } else {
-        return ComParameterAudit<typename Signature::ParameterTypes>::kCompliant;
+        return ParameterAudit<typename Signature::ParameterTypes>::kCompliant;
     }
 }
 
 // The layout half of the audit, usable on any type so a violating
 // interface can be rejected at compile time without deriving from IObject.
-template <typename Interface>
-[[nodiscard]] consteval bool ComInterfaceLayoutCompliant() noexcept {
-    if constexpr (std::has_virtual_destructor_v<Interface>) {
+//
+// Only the virtual members are audited, because only they are the wire. A
+// virtual is a vtable slot: the library's code and the consumer's code must
+// agree on its signature byte for byte, and neither recompiles the other.
+// A non-virtual member of an interface is the opposite -- it is compiled in
+// the consumer's own translation unit from this header, calls the vtable for
+// anything it needs from the library, and its parameters and return value
+// never leave that translation unit. Auditing it would forbid the consumer
+// from using std::optional, std::vector or std::string in code the library
+// never sees, which is a restriction the ABI does not ask for. Member
+// templates were already skipped for exactly this reason; this makes the rule
+// consistent instead of accidental.
+//
+// What this trusts rather than checks: a non-virtual member declared here must
+// be *defined* here. A non-virtual member left to be defined inside the shared
+// library would be a cross-boundary symbol that no longer passes under the
+// audit's eye.
+template <typename Iface>
+[[nodiscard]] consteval bool InterfaceLayoutCompliant() noexcept {
+    if constexpr (std::has_virtual_destructor_v<Iface>) {
         return false;
     }
 
     bool compliant = true;
-    Reflect::ForEachMethodSignature<Interface>([&]<typename Signature>() -> auto {
-        if constexpr (!ComMethodCompliant<Signature>()) {
+    Reflect::ForEachVirtualMethodSignature<Iface>([&]<typename Signature>() -> auto {
+        if constexpr (!MethodCompliant<Signature>()) {
             compliant = false;
         }
     });
     return compliant;
 }
 
-template <typename Interface>
+template <typename Iface>
 [[nodiscard]] consteval bool AuditInterfaceABI() noexcept {
-    static_assert(std::is_base_of_v<IObject, Interface>, "A COM interface must derive from IObject.");
-    static_assert(!std::has_virtual_destructor_v<Interface>, "A COM interface must not have a virtual destructor.");
-    return ComInterfaceLayoutCompliant<Interface>();
+    static_assert(std::is_base_of_v<IObject, Iface>, "A COM interface must derive from IObject.");
+    static_assert(!std::has_virtual_destructor_v<Iface>, "A COM interface must not have a virtual destructor.");
+    return InterfaceLayoutCompliant<Iface>();
+}
+
+template <typename FnPtr>
+struct FunctionTypeAudit {
+    static constexpr bool kCompliant = false;
+};
+
+template <typename Return, typename... Parameters>
+struct FunctionTypeAudit<Return (*)(Parameters...) noexcept> {
+    static constexpr bool kCompliant =
+        MethodCompliant<Reflect::MethodSignature<Return, true, Parameters...>>();
+};
+
+// Free/static COM entry-point audit (factories, plugin entry points). Applies
+// the same noexcept + return + parameter wire rules as virtual interface slots;
+// throwing, C-variadic, and non-function-pointer types evaluate to false.
+template <typename FnPtr>
+[[nodiscard]] consteval bool FunctionTypeCompliant() noexcept {
+    return FunctionTypeAudit<std::remove_cv_t<FnPtr>>::kCompliant;
+}
+
+template <auto Fn>
+    requires (std::is_pointer_v<decltype(Fn)> && std::is_function_v<std::remove_pointer_t<decltype(Fn)>>)
+[[nodiscard]] consteval bool AuditFunctionABI() noexcept {
+    using FnPtr = decltype(Fn);
+    static_assert(
+        !std::is_same_v<std::integral_constant<FnPtr, Fn>, std::integral_constant<FnPtr, nullptr>>,
+        "AuditFunctionABI requires a non-null function pointer."
+    );
+    return FunctionTypeCompliant<FnPtr>();
 }
 
 template <typename Derived, typename... Interfaces>

@@ -1,3 +1,4 @@
+#include <UI/HostUI.hpp>
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -6,10 +7,9 @@
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //
-// It runs on a Kernel alone -- windows, GPU, audio, assets -- with explicit
-// GUI::Context + GUI::UIInput state per window. No World, no ECS::Registry, no
-// physics, no camera, no frame scheduler: the document is a UINode tree and
-// the chrome is immediate-mode Clay, so nothing here needs a simulation.
+// The host owns GUI::Context + GUI::UIInput state per window. It drives the
+// COM engine without accessing a World, registry, renderer or native window.
+// The document is a UINode tree; both windows submit ordinary copied UI data.
 //
 //   Left   Hierarchy  -- one row per node id; click selects a container
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
@@ -26,27 +26,19 @@
 // string that FindNodeById / InsertChild / RemoveNodeById already speak.
 
 #include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Engine/Kernel.hpp>
-#include <Zahlen/KernelApp.hpp>
+#include <Zahlen/App.hpp>
+#include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/ValueTypes.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Render/View.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Widget/TextFit.hpp>
-#include <Zahlen/Window/Window.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
-#include <Zahlen/GUI/GUI.hpp>
+#include <UI/GUI.hpp>
 #include <UI/UITree.hpp>
-#if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
-#endif
-#if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -62,6 +54,8 @@
 #include <vector>
 
 namespace {
+
+using ZHLN::FVec4;
 
 namespace GUI = ZHLN::GUI;
 
@@ -160,98 +154,9 @@ void SnapSlider(GUI::Frame& gui, std::string_view label, float& value, float min
 
 enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 
-struct WindowUIInputCollector {
-    static constexpr size_t kQueueCap = 64;
-
-    ZHLN::Components::InputStateComponent state {};
-    std::array<ZHLN::KeyCode, kQueueCap>  pressedKeys {};
-    std::array<uint32_t, kQueueCap>       charStream {};
-    std::array<ZHLN::KeyCode, kQueueCap>  latchedKeys {};
-    std::array<uint32_t, kQueueCap>       latchedChars {};
-    size_t                                pressedCount = 0;
-    size_t                                charCount    = 0;
-    float                                 scrollDelta  = 0.0f;
-
-    [[nodiscard]] auto MakeReceiver() noexcept -> ZHLN::WindowInputReceiver {
-        return ZHLN::WindowInputReceiver {
-            .userdata = this,
-            .onKey =
-                [](void* ud, ZHLN::KeyCode key, bool pressed) -> void {
-                    auto* self = static_cast<WindowUIInputCollector*>(ud);
-                    self->state.SetKey(static_cast<uint8_t>(key), pressed);
-                    if (pressed && self->pressedCount < kQueueCap) {
-                        self->pressedKeys[self->pressedCount++] = key;
-                    }
-                },
-            .onMouseMove =
-                [](void* ud, float x, float y) -> void { static_cast<WindowUIInputCollector*>(ud)->state.ApplyLocalMotion(x, y); },
-            .onMouseRelative =
-                [](void* ud, float x, float y, float dx, float dy) -> void {
-                    static_cast<WindowUIInputCollector*>(ud)->state.ApplyRelativeMotion(x, y, dx, dy);
-                },
-            .onMouseScroll =
-                [](void* ud, float delta) -> void {
-                    auto* self = static_cast<WindowUIInputCollector*>(ud);
-                    self->state.ApplyWheel(delta);
-                    self->scrollDelta += delta;
-                },
-            .onChar =
-                [](void* ud, unsigned int codepoint) -> void {
-                    auto* self = static_cast<WindowUIInputCollector*>(ud);
-                    if (self->charCount < kQueueCap) {
-                        self->charStream[self->charCount++] = codepoint;
-                    }
-                },
-        };
-    }
-
-    [[nodiscard]] auto Consume(ZHLN::Extent2D viewport, float dt, GUI::TextEdit::ClipboardSink clipboard = {}) noexcept -> GUI::UIInput {
-        const size_t nKeys  = pressedCount;
-        const size_t nChars = charCount;
-        std::copy_n(pressedKeys.data(), nKeys, latchedKeys.data());
-        std::copy_n(charStream.data(), nChars, latchedChars.data());
-        pressedCount = 0;
-        charCount    = 0;
-
-        ZHLN::KeyModifiers mods = ZHLN::KeyModifiers::None;
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl))) {
-            mods = mods | ZHLN::KeyModifiers::Ctrl;
-        }
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RShift))) {
-            mods = mods | ZHLN::KeyModifiers::Shift;
-        }
-        if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LAlt)) ||
-            state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RAlt))) {
-            mods = mods | ZHLN::KeyModifiers::Alt;
-        }
-
-        const float scroll = scrollDelta;
-        scrollDelta        = 0.0f;
-
-        return GUI::UIInput {
-            .viewport    = viewport,
-            .dt          = dt,
-            .mouseX      = state.mouseX,
-            .mouseY      = state.mouseY,
-            .mouseScroll = scroll,
-            .mouseDown   = {
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)),
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)),
-                state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::MButton)),
-            },
-            .modifiers       = mods,
-            .pressedKeys     = std::span<const ZHLN::KeyCode>(latchedKeys.data(), nKeys),
-            .characterStream = std::span<const uint32_t>(latchedChars.data(), nChars),
-            .clipboard       = clipboard,
-        };
-    }
-};
-
 struct Session {
     GUI::UINode                   tree;
-    ZHLN::ECS::EventBus           events;
+    GUI::ActionQueue              events;
     GUI::ActionRegistry           actions;
     GUI::PropertyStore            properties;
     std::string                   selectedId;
@@ -265,11 +170,16 @@ struct Session {
     bool                          confirmWasDown = false;
     float                         dt                   = 0.016f;
     bool                          openPreviewRequested = false;
-    ZHLN::Optional<ZHLN::Window&> previewWindow; // kernel-owned; see Kernel::AddWindow
+    // Only the id is held. The Window is engine-owned and looked up per use
+    // (Engine::WindowFor): a host must not keep a Window& across a frame, and a
+    // preview window that was closed underneath it would leave a dangling one.
+    ZHLN::WindowID                previewID = ZHLN::WindowID::Invalid;
     GUI::Context                  editorGui;
     GUI::Context                  previewGui;
-    WindowUIInputCollector        editorInput;
-    WindowUIInputCollector        previewInput;
+    GUI::UIInput                 editorInput {};
+    bool editorCaptureKeyboard = false;
+    ZHLN::HostUI* hostUI = nullptr; // borrowed from EditorLayer, not engine-owned
+    GUI::UIInput                 previewInput {};
     GUI::PropertyStore            previewProperties; // runtime instance; Design keeps `properties`
 
     // The font the chrome draws with, for measuring a row against its panel
@@ -293,7 +203,7 @@ struct Session {
 };
 
 void BindHostActions(Session& session) {
-    session.actions.SetEventBus(session.events);
+    session.actions.SetQueue(session.events);
     session.actions.Bind("editor.save_scene", GUI::UiActionEvent {.id = "editor.save_scene"});
     session.properties.SetFloat("camera.speed", 4.5f);
     session.properties.SetBool("post.enableSSR", false);
@@ -338,7 +248,7 @@ void DrawHierarchyRow(GUI::Frame& gui, Session& session, const GUI::UINode& node
         hierId,
         GUI::BoxConfig {
             .width   = {.grow = 1.0f},
-            .color   = selected ? JPH::Vec4 {0.20f, 0.35f, 0.55f, 0.95f} : JPH::Vec4 {0.10f, 0.12f, 0.16f, 0.80f},
+            .color   = selected ? FVec4 {0.20f, 0.35f, 0.55f, 0.95f} : FVec4 {0.10f, 0.12f, 0.16f, 0.80f},
             .padding = 4.0f,
         },
         [&]() {
@@ -415,7 +325,7 @@ void DrawHierarchy(GUI::Frame& gui, Session& session) {
     return {};
 }
 
-void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::Float4& value, float minVal, float maxVal, float step) {
+void DrawFloat4(GUI::Frame& gui, std::string_view prefix, ZHLN::FVec4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);
@@ -605,19 +515,15 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent& state, bool uiOwnsKeyboard) {
-    const float mx = state.mouseX;
-    const float my = state.mouseY;
-    const bool controlDown =
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
-    const bool gDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::G));
-    const bool sDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
-    const bool rDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::R));
-    const bool confirmDown =
-        state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Enter)) ||
-        state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
-    const bool cancelDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::COM::HostInputInfo& state, bool uiOwnsKeyboard) {
+    const float mx          = state.mouseX;
+    const float my          = state.mouseY;
+    const bool  controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
+    const bool  gDown       = state.IsKeyDown(ZHLN::KeyCode::G);
+    const bool  sDown       = state.IsKeyDown(ZHLN::KeyCode::S);
+    const bool  rDown       = state.IsKeyDown(ZHLN::KeyCode::R);
+    const bool  confirmDown = state.IsKeyDown(ZHLN::KeyCode::Enter) || state.IsMouseButtonDown(ZHLN::MouseButton::Left);
+    const bool  cancelDown  = state.IsKeyDown(ZHLN::KeyCode::Escape);
 
     if (session.xform != XformMode::None) {
         ApplyXform(session, mx, my);
@@ -649,30 +555,16 @@ void UpdateCanvasXform(const GUI::Context& gui, Session& session, const ZHLN::Co
     session.confirmWasDown = confirmDown;
 }
 
-#if defined(ZHLN_HAS_UI_TOML)
 void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
-#endif
 
-[[nodiscard]] auto MakeHostClipboard(ZHLN::PlatformHost& host) noexcept -> GUI::TextEdit::ClipboardSink {
-    return GUI::TextEdit::ClipboardSink {
-        .userdata = &host,
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
-    };
-}
-
-void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
-    if (!session.previewWindow) {
-        return;
-    }
-    const ZHLN::Extent2D previewSize = session.previewWindow->GetSize();
-    if (previewSize.width == 0 || previewSize.height == 0) {
-        return;
-    }
+// Explicit host composition: both windows submit copied geometry before Tick.
+auto DrawPreview(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Result<void> {
+    const auto previewSize = engine.WindowExtent(session.previewID);
+    if (!previewSize.width || !previewSize.height) return {};
     session.previewGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.previewGui.BeginFrame(
-        session.previewInput.Consume(previewSize, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+        session.previewInput = session.hostUI->ConsumeInput(session.dt, session.previewID)
     );
     gui.Box(
         "PreviewRoot",
@@ -684,75 +576,54 @@ void DrawPreview(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFr
             .direction = GUI::Direction::Column,
         },
         [&]() {
-            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
+            GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    auto&                  rc               = kernel.GetRenderContext();
-    const ZHLN::UIDrawData uiData           = std::move(gui).End();
-    const bool             drawCustomCursor = session.previewWindow->UsesCustomCursor();
-    if (!uiData.Empty() || drawCustomCursor) {
-        const auto target = kernel.AcquireTarget(*session.previewWindow);
-        if (!target) {
-            ZHLN::Log("[UIEditor] Preview window acquisition failed: {}", target.error());
-            return;
-        }
-        if (!target->has_value()) {
-            return;
-        }
-        if (!uiData.Empty()) {
-            if (const auto drawn = gpuFrame.RenderUI(
-                    ZHLN::UIView {
-                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                        .target     = **target,
-                        .frameIndex = rc.GetFrameIndex(),
-                    },
-                    uiData
-                );
-                !drawn) {
-                ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
-            }
-        }
-        if (drawCustomCursor) {
-            const float cursorX = previewSize.width > 0
-                                      ? std::clamp(session.previewInput.state.mouseX, 0.0f, static_cast<float>(previewSize.width - 1))
-                                      : session.previewInput.state.mouseX;
-            const float cursorY = previewSize.height > 0
-                                      ? std::clamp(session.previewInput.state.mouseY, 0.0f, static_cast<float>(previewSize.height - 1))
-                                      : session.previewInput.state.mouseY;
-            const ZHLN::CustomCursor cursor(cursorX, cursorY);
-            if (const auto drawn = gpuFrame.RenderUI(
-                    ZHLN::UIView {
-                        .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                        .target     = **target,
-                        .frameIndex = rc.GetFrameIndex(),
-                    },
-                    cursor.DrawData()
-                );
-                !drawn) {
-                ZHLN::Log("[UIEditor] Preview custom cursor draw failed: {}", drawn.error());
-            }
-        }
+    const ZHLN::UIDrawData uiData = std::move(gui).End();
+    return session.hostUI->Submit(uiData, session.previewID);
+}
+
+[[nodiscard]] auto PreviewIsRunning(ZHLN::COM::IEngine& engine, const Session& session) -> bool {
+    if (session.previewID == ZHLN::WindowID::Invalid) {
+        return false;
+    }
+    return engine.IsWindowRunning(session.previewID);
+}
+
+void StopPreview(ZHLN::COM::IEngine& engine, Session& session) {
+    if (session.previewID != ZHLN::WindowID::Invalid) {
+        engine.RemoveWindow(session.previewID);
+        session.previewID = ZHLN::WindowID::Invalid;
     }
 }
 
-[[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
-    return session.previewWindow && session.previewWindow->IsRunning();
-}
+void StopPreview(ZHLN::COM::IEngine& engine, Session& session);
+void OpenPreview(ZHLN::COM::IEngine& engine, Session& session);
 
-void StopPreview(ZHLN::Kernel& kernel, Session& session) {
-    if (!session.previewWindow) {
-        return;
+// Once per frame, before the engine's Tick: the editor's clock, the preview
+// window's life, and actions queued by the previous host UI composition.
+void UpdateEditor(ZHLN::COM::IEngine& engine, Session& session, float dt) {
+    session.dt = dt;
+    if (session.previewID != ZHLN::WindowID::Invalid && !PreviewIsRunning(engine, session)) {
+        StopPreview(engine, session);
     }
-    kernel.RemoveWindow(*session.previewWindow);
-    session.previewWindow.reset();
+    if (session.openPreviewRequested) {
+        session.openPreviewRequested = false;
+        OpenPreview(engine, session);
+    }
+    session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
+        if (event.id == "editor.save_scene") {
+            ZHLN::Log("[UIEditor] editor.save_scene");
+        }
+    });
 }
 
-void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
-    if (PreviewIsRunning(session)) {
+void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
+    if (PreviewIsRunning(engine, session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
-    StopPreview(kernel, session);
+    StopPreview(engine, session);
     session.previewProperties = session.properties;
     session.previewInput      = {};
     session.previewGui        = GUI::Context(session.fontAtlas);
@@ -760,17 +631,18 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
     // The preview window is an ordinary destination: the editor draws its 2D
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, session.previewInput.MakeReceiver());
-    if (!session.previewWindow) {
+    const auto previewWindow = engine.AddWindow(ZHLN::COM::WindowCreateInfo {.title = "UI Preview", .width = 800, .height = 600});
+    if (!previewWindow.HasValue()) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
+    session.previewID = previewWindow.value;
+
     ZHLN::Log("[UIEditor] Preview window open");
 }
 
-#if defined(ZHLN_HAS_UI_TOML)
 void SaveTree(const GUI::UINode& tree, std::string_view path) {
-    const std::string text = ZHLN::ReflectTOML::SerializeTOML(tree);
+    const std::string text = ZHLN::ReflectTOML::Serialize(tree);
     std::ofstream     out {std::string {path}, std::ios::binary | std::ios::trunc};
     if (!out) {
         ZHLN::Log("[UIEditor] could not open '{}' for writing", path);
@@ -801,35 +673,35 @@ void LoadTree(Session& session, std::string_view path) {
     session.selectedId = RootPath(session.tree);
     ZHLN::Log("[UIEditor] loaded '{}'", path);
 }
-#endif
 
-void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFrame) {
-    auto&      state          = session.editorInput.state;
-    const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || state.wantCaptureKeyboard;
+// Builds this window's UI and publishes it. The render step draws whatever is
+// published for a window into that window's acquired target, which is why this
+// does not touch a FrameScope: it runs in the UI phase, before any frame is
+// acquired.
+auto SubmitEditorUI(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Result<void> {
+    ZHLN::COM::HostInputInfo state;
+    (void)engine.ReadHostInput(engine.PrimaryWindow(), ZHLN::COM::OutChain(state), false);
+    const bool uiOwnsKeyboard = session.editorGui.IsTextInputFocused() || session.editorCaptureKeyboard;
 
     const bool xformWasActive = session.xform != XformMode::None;
     UpdateCanvasXform(session.editorGui, session, state, uiOwnsKeyboard);
 
-    const bool escDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+    const bool escDown = state.IsKeyDown(ZHLN::KeyCode::Escape);
     if (escDown && !session.escWasDown && !uiOwnsKeyboard && !xformWasActive) {
         session.selectedId.clear();
     }
     session.escWasDown = escDown;
 
-#if defined(ZHLN_HAS_UI_TOML)
-    const bool controlDown = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-                             state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
-    const bool saveDown = controlDown && state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool controlDown = state.IsKeyDown(ZHLN::KeyCode::LControl) || state.IsKeyDown(ZHLN::KeyCode::RControl);
+    const bool saveDown    = controlDown && state.IsKeyDown(ZHLN::KeyCode::S);
     if (saveDown && !session.saveWasDown && !uiOwnsKeyboard) {
         SaveTree(session.tree, kDocumentPath);
     }
     session.saveWasDown = saveDown;
-#endif
 
-    const ZHLN::Extent2D size = kernel.GetPlatformHost().GetSize();
     session.editorGui.SetFontAtlas(session.fontAtlas);
     GUI::Frame gui = session.editorGui.BeginFrame(
-        session.editorInput.Consume(size, session.dt, MakeHostClipboard(kernel.GetPlatformHost()))
+        session.editorInput = session.hostUI->ConsumeInput(session.dt)
     );
     gui.Box(
         "UIEditorWorkspace",
@@ -880,7 +752,7 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
                             if (gui.Button("Preview", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 session.openPreviewRequested = true;
                             }
-                            if (PreviewIsRunning(session)) {
+                            if (PreviewIsRunning(engine, session)) {
                                 gui.Text("Preview window open", 12.0f, {0.55f, 0.75f, 0.55f, 1.0f});
                             }
                             if (session.xform == XformMode::Grab) {
@@ -892,14 +764,12 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
                             } else {
                                 gui.Text("G grab   S scale   R rotate", 12.0f, {0.5f, 0.55f, 0.6f, 1.0f});
                             }
-#if defined(ZHLN_HAS_UI_TOML)
                             if (gui.Button("Save", {0.16f, 0.30f, 0.20f, 0.95f})) {
                                 SaveTree(session.tree, kDocumentPath);
                             }
                             if (gui.Button("Load", {0.16f, 0.24f, 0.36f, 0.95f})) {
                                 LoadTree(session, kDocumentPath);
                             }
-#endif
                         }
                     );
 
@@ -938,55 +808,13 @@ void DrawFrame(ZHLN::Kernel& kernel, Session& session, ZHLN::FrameScope& gpuFram
             );
         }
     );
-    auto&                  rc     = kernel.GetRenderContext();
-    const ZHLN::UIDrawData uiData = std::move(gui).End();
-    session.editorInput.state.wantCaptureMouse    = uiData.wantsCaptureMouse;
-    session.editorInput.state.wantCaptureKeyboard = uiData.wantsCaptureKeyboard;
-    const bool drawCustomCursor                   = kernel.GetPlatformHost().UsesCustomCursor();
-    if (uiData.Empty() && !drawCustomCursor) {
-        return;
+    ZHLN::UIDrawData uiData = std::move(gui).End();
+    session.editorCaptureKeyboard = uiData.wantsCaptureKeyboard;
+    if (uiData.Empty()) {
+        return {};
     }
-    // Pure 2D frame: the editor draws into this frame's acquired window target.
-    const auto target = kernel.AcquireTarget();
-    if (!target) {
-        ZHLN::Log("[UIEditor] Window acquisition failed: {}", target.error());
-        return;
-    }
-    if (!target->has_value()) {
-        return;
-    }
-    if (!uiData.Empty()) {
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                    .target     = **target,
-                    .frameIndex = rc.GetFrameIndex(),
-                },
-                uiData
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
-        }
-    }
+    return session.hostUI->Submit(std::move(uiData));
 
-    if (drawCustomCursor) {
-        const float cursorX =
-            size.width > 0 ? std::clamp(session.editorInput.state.mouseX, 0.0f, static_cast<float>(size.width - 1)) : session.editorInput.state.mouseX;
-        const float cursorY =
-            size.height > 0 ? std::clamp(session.editorInput.state.mouseY, 0.0f, static_cast<float>(size.height - 1)) : session.editorInput.state.mouseY;
-        const ZHLN::CustomCursor cursor(cursorX, cursorY);
-        if (const auto drawn = gpuFrame.RenderUI(
-                ZHLN::UIView {
-                    .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                    .target     = **target,
-                    .frameIndex = rc.GetFrameIndex(),
-                },
-                cursor.DrawData()
-            );
-            !drawn) {
-            ZHLN::Log("[UIEditor] Custom cursor draw failed: {}", drawn.error());
-        }
-    }
 }
 
 } // namespace
@@ -997,63 +825,42 @@ auto main(int argc, char* argv[]) -> int {
     session.selectedId = "panel";
     BindHostActions(session);
 
-    ZHLN::AssetID activeFontAssetID = ZHLN::GUI::kDefaultFontAssetID;
-    auto rebuildFonts = [&](ZHLN::Kernel& kernel) {
-        // The restored renderer is a new device; never reuse its predecessor's
-        // FontAtlas handles, and do not hold a RenderContext reference across
-        // Kernel::HandleDeviceLost.
-        session.fontAtlas = ZHLN::PrefabFactory::CreateFontAtlas(
-            kernel.GetRenderContext(), kernel.GetAssetManager(), activeFontAssetID
-        );
-        session.editorGui.SetFontAtlas(session.fontAtlas);
-        session.previewGui.SetFontAtlas(session.fontAtlas);
-    };
+    struct EditorLayer {
+        Session*                      session = nullptr;
+        std::unique_ptr<ZHLN::HostUI> ui;
 
-    const auto result = ZHLN::KernelApp()
-        .Named("Zahlen UI Editor")
-        .Input(session.editorInput.MakeReceiver())
-        .OnStart([&](ZHLN::Kernel& kernel) {
-            // Fonts are assets, not a renderer-owned outline parser. Prime the
-            // baked fallback before creating the application's two GUI atlases.
-#if defined(ZHLN_HAS_FONTS)
-            if (auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel.GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource())) {
-                activeFontAssetID = *fontAssetID;
+        void Start(ZHLN::COM::IEngine& engine) {
+            ui              = std::make_unique<ZHLN::HostUI>(engine);
+            session->hostUI = ui.get();
+            auto baked      = ZHLN::Fonts::LoadBakedFont(engine.Assets(), ZHLN::Fonts::VendoredDefaultFontSource());
+            if (baked) {
+                ui->SetBakedFont(std::move(*baked));
             } else {
-                ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
+                ZHLN::LogWarning("Font load failed ({}); using embedded default.", baked.error());
             }
-#endif
-            ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel.GetAssetManager());
-            rebuildFonts(kernel);
-        })
-        .OnInputFrame([&](ZHLN::Kernel&, float) {
-            session.previewInput.state.BeginFrame();
-            session.editorInput.state.BeginFrame();
-        })
-        .OnUpdate([&](ZHLN::Kernel& kernel, float dt) {
-            session.dt = dt;
-            if (session.previewWindow && !session.previewWindow->IsRunning()) {
-                StopPreview(kernel, session);
+        }
+        auto Tick(ZHLN::COM::IEngine& engine, float dt) -> std::expected<void, ZHLN::ErrorCode> {
+            ui->BeginFrame();
+            UpdateEditor(engine, *session, dt);
+            session->fontAtlas = ui->GetFontAtlas();
+            session->editorGui.SetFontAtlas(session->fontAtlas);
+            session->previewGui.SetFontAtlas(session->fontAtlas);
+            const auto submitted = SubmitEditorUI(engine, *session);
+            if (!submitted.HasValue()) return std::unexpected(submitted.error);
+            if (PreviewIsRunning(engine, *session)) {
+                const auto preview = DrawPreview(engine, *session);
+                if (!preview.HasValue()) return std::unexpected(preview.error);
             }
-            if (session.openPreviewRequested) {
-                session.openPreviewRequested = false;
-                OpenPreview(kernel, session);
-            }
-        })
-        .OnRender([&](ZHLN::Kernel& kernel, ZHLN::FrameScope& gpuFrame) {
-            DrawFrame(kernel, session, gpuFrame);
-            if (session.previewWindow) {
-                DrawPreview(kernel, session, gpuFrame);
-            }
-        })
-        .OnDeviceRestored([&](ZHLN::Kernel& kernel) { rebuildFonts(kernel); })
-        .OnFrameEnd([&](ZHLN::Kernel&) {
-            session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
-                if (event.id == "editor.save_scene") {
-                    ZHLN::Log("[UIEditor] editor.save_scene");
-                }
-            });
-        })
-        .OnShutdown([&](ZHLN::Kernel& kernel) { StopPreview(kernel, session); })
-        .Run(argc, argv);
-    return result ? EXIT_SUCCESS : EXIT_FAILURE;
+            return {};
+        }
+        void Stop(ZHLN::COM::IEngine& engine) {
+            StopPreview(engine, *session);
+            session->hostUI = nullptr;
+            ui.reset();
+        }
+    };
+    return ZHLN::App()
+        .Title("Zahlen UI Editor")
+        .AddLayer(EditorLayer {.session = &session})
+        .Main(argc, argv);
 }

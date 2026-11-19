@@ -228,19 +228,19 @@ struct JSONTestSuite {
             };
 
             // Default: every member is present; disengaged optional is null.
-            const std::string defaultJson = ZHLN::ReflectJSON::SerializeJSON(emptyDoc);
+            const std::string defaultJson = ZHLN::ReflectJSON::Serialize(emptyDoc);
             ZHLN::Test::ExpectTrue(defaultJson.find("\"mesh\":null") != std::string::npos);
             ZHLN::Test::ExpectTrue(defaultJson.find("\"min\":[]") != std::string::npos);
 
             // omitEmpty: absent keys are not written at all.
-            const std::string omittedJson = ZHLN::ReflectJSON::SerializeJSON(emptyDoc, 0, {.omitEmpty = true});
+            const std::string omittedJson = ZHLN::ReflectJSON::Serialize(emptyDoc, 0, {.omitEmpty = true});
             ZHLN::Test::ExpectTrue(omittedJson.find("\"mesh\"") == std::string::npos);
             ZHLN::Test::ExpectTrue(omittedJson.find("\"min\"") == std::string::npos);
             ZHLN::Test::ExpectTrue(omittedJson.find("\"extensionsUsed\"") == std::string::npos);
             ZHLN::Test::ExpectTrue(omittedJson.find("\"assetVersion\":\"2.0\"") != std::string::npos);
 
             // Engaged values are neither omitted nor corrupted.
-            const std::string fullJson = ZHLN::ReflectJSON::SerializeJSON(fullDoc, 0, {.omitEmpty = true});
+            const std::string fullJson = ZHLN::ReflectJSON::Serialize(fullDoc, 0, {.omitEmpty = true});
             ZHLN::Test::ExpectTrue(fullJson.find("\"mesh\":3") != std::string::npos);
             ZHLN::Test::ExpectTrue(fullJson.find("\"min\":[1,2,3]") != std::string::npos);
             ZHLN::Test::ExpectTrue(fullJson.find("\"extensionsUsed\":[\"KHR_lights_punctual\"]") != std::string::npos);

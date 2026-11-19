@@ -241,10 +241,7 @@ void RunManifestMode(std::string_view manifestPath) {
     Validate(manifest, manifestPath);
 
     if (!NamesEnumerators()) {
-        Fail(
-            "this build cannot name enumerators: the compiler has no reflection and this file was not transpiled. "
-            "zahlen_transpile_sources is what makes a reflection-free build work"
-        );
+        Fail("this build cannot name enumerators: it was compiled without C++26 reflection");
     }
 
     // ONE compile per module: reflection and SPIR-V from the same linked

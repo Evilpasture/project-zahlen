@@ -155,6 +155,7 @@ RUN cmake -B build -S . -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=ON \
     -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
+    -DZHLN_DEV_MODE=OFF \
     -DUSE_SANITIZERS=${ZHLN_USE_SANITIZERS} \
     -DZHLN_IN_DOCKER=ON \
     -DZHLN_HAS_BLENDER=OFF \
@@ -196,7 +197,6 @@ RUN set -eu; \
 RUN mkdir -p /workspace/dist/data && \
     cp /workspace/build/bin/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
-    find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
     cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
     if [ -d /workspace/build/scripts ]; then \
     cp -rL /workspace/build/scripts /workspace/dist/scripts; \
@@ -212,6 +212,7 @@ RUN mkdir -p /workspace/dist/data && \
 # failing test is reported without ever blocking the build job.
 FROM builder AS test
 
+ENV ZHLN_TEST_TIMEOUT=120
 RUN ./build/bin/ztest --test-dir build -V
 
 

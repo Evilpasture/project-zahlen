@@ -47,7 +47,7 @@
 // still call the context directly -- the widgets do not own the panel.
 //
 // Lives in extensions/Widget/ (zahlen_widgets) rather than in core: core keeps
-// src/gui/, the immediate-mode substrate (the Clay wrapper, TextEdit, the font
+// extensions/UI/ (zahlen_ui), the immediate-mode substrate (the Clay wrapper, TextEdit, the font
 // rasterizer), and this layer builds on GUI::Context through its public API.
 // The namespace is ZHLN::GUI::Widget, so a widget reads as part of the GUI
 // family the way <UI/UITree.hpp> does.

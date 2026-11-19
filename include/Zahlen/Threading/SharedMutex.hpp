@@ -83,10 +83,12 @@ class SharedMutex {
 
     ZHLN::Atomic<uint32_t> _state {0};
 
-    [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
-    [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
-    [[gnu::cold, gnu::noinline]] void LockSharedSlow() noexcept;
-    [[gnu::cold, gnu::noinline]] void UnlockSharedSlow() noexcept;
+    // Reached from the inline fast paths, so every consumer's objects call
+    // them and the definitions have to be exported.
+    [[gnu::cold, gnu::noinline]] ZHLN_API void LockSlow() noexcept;
+    [[gnu::cold, gnu::noinline]] ZHLN_API void UnlockSlow() noexcept;
+    [[gnu::cold, gnu::noinline]] ZHLN_API void LockSharedSlow() noexcept;
+    [[gnu::cold, gnu::noinline]] ZHLN_API void UnlockSharedSlow() noexcept;
 };
 
 static_assert(sizeof(SharedMutex) == sizeof(uint32_t));

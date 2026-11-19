@@ -33,10 +33,12 @@ add_library(${TARGET_NAME} STATIC
     BenchmarkViewer.cpp
     FrameTelemetry.cpp
     SystemTelemetry.cpp
-    SystemProbeLinux.cpp
-    SystemProbeUnavailable.cpp
 )
 
+target_sources(${TARGET_NAME} PRIVATE
+    $<$<PLATFORM_ID:Linux>:SystemProbeLinux.cpp>
+    $<$<NOT:$<PLATFORM_ID:Linux>>:SystemProbeUnavailable.cpp>
+)
 # The two probe files are alternatives chosen by the platform, not by the build
 # system: exactly one of them is non-empty after preprocessing and the other
 # compiles to nothing. SystemProbeLinux.cpp defines the factory only under
@@ -65,6 +67,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_benchmark
     zahlen_engine
+    zahlen_ui
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE

@@ -3,11 +3,13 @@
 
 # cmake/ReflectionConfig.cmake
 #
-# C++26 static reflection (-freflection / P2996): what the compiler supports,
-# the fallback transpiler for compilers that do not, and the per-target flag
-# helpers the root CMakeLists applies. Reflection is not a per-target feature --
-# it changes struct layout -- so the helpers are deliberately centralised here
-# and applied from the root's REFLECTION FLAGS PROPAGATION section.
+# C++26 static reflection (-freflection / P2996): what the compiler supports and
+# the per-target flag helpers the root CMakeLists applies. There is no fallback
+# transpiler; a compiler without -freflection is a configure error.
+#
+# Reflection is not a per-target feature -- it changes struct layout -- so the
+# helpers are deliberately centralised here and applied from the root's
+# REFLECTION FLAGS PROPAGATION section.
 
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CompilerFlagProbe)
@@ -30,60 +32,10 @@ if(COMPILER_HAS_REFLECTION)
         endif()
     endif()
 else()
-    if(NOT ZHLN_HAS_PYTHON)
-        message(FATAL_ERROR
-            "C++26 static reflection (-freflection) is not supported by ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}), "
-            "and Python 3 was not found (ZHLN_HAS_PYTHON=OFF) to run the fallback reflection transpiler "
-            "(scripts/transpile_reflection.py). Configure with a -freflection compiler (GCC 16+ or clang-p2996) "
-            "or install Python 3.")
-    endif()
-    message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
+    message(FATAL_ERROR
+        "C++26 static reflection (-freflection) is required, but ${CMAKE_CXX_COMPILER_ID} "
+        "(${CMAKE_CXX_COMPILER}) does not support it. Use GCC 16+ or a clang-p2996 fork.")
 endif()
-
-# --- FALLBACK TRANSPILER (compilers without -freflection) ---
-set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/transpile_reflection.py")
-
-function(zahlen_transpile_sources OUT_SOURCES_VAR)
-    if(COMPILER_HAS_REFLECTION)
-        # Native support: Return sources untouched
-        set(${OUT_SOURCES_VAR} ${ARGN} PARENT_SCOPE)
-        return()
-    endif()
-
-    set(PROCESSED_SRCS "")
-    set(ORIG_SOURCE_DIRS "")
-
-    foreach(SRC IN LISTS ARGN)
-        get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
-        get_filename_component(ABS_DIR "${ABS_SRC}" DIRECTORY)
-        list(APPEND ORIG_SOURCE_DIRS "${ABS_DIR}")
-
-        file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
-        set(OUT_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
-        get_filename_component(OUT_DIR "${OUT_SRC}" DIRECTORY)
-
-        file(MAKE_DIRECTORY "${OUT_DIR}")
-
-        # At build time, run the Python transpiler using the compilation database
-        add_custom_command(
-            OUTPUT "${OUT_SRC}"
-            COMMAND Python3::Interpreter "${ZHLN_TRANSPILER_SCRIPT}"
-                    --input "${ABS_SRC}"
-                    --output "${OUT_SRC}"
-                    --compdb "${CMAKE_BINARY_DIR}"
-            DEPENDS "${ABS_SRC}" "${ZHLN_TRANSPILER_SCRIPT}"
-            COMMENT "Flattening Reflection in ${REL_SRC}..."
-            VERBATIM
-        )
-        list(APPEND PROCESSED_SRCS "${OUT_SRC}")
-    endforeach()
-
-    # Register original source directories so transpiled files in build/ can locate relative headers
-    list(REMOVE_DUPLICATES ORIG_SOURCE_DIRS)
-    include_directories(${ORIG_SOURCE_DIRS})
-
-    set(${OUT_SOURCES_VAR} ${PROCESSED_SRCS} PARENT_SCOPE)
-endfunction()
 
 # --- PER-TARGET REFLECTION FLAGS & CUSTOM LIBC++ ---
 # --- the custom libc++ ------------------------------------------------------
@@ -235,11 +187,19 @@ function(zahlen_configure_custom_libcxx)
         endif()
     endif()
 
-    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>")
+    # OBJCXX is in this list because on Apple the root enables OBJCXX for Jolt's
+    # Metal backend, and a language left out here compiles against the SDK's
+    # libc++/libc++abi headers while the C++ half of the same process links the
+    # branch runtime -- the standard-library-ABI mismatch that aborts inside
+    # malloc/std::locale. It is one build either way, so it is one runtime.
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>"
+        "$<$<COMPILE_LANGUAGE:OBJCXX>:-stdlib=libc++>")
     # Link-time search and run-time lookup are separate requirements.
     link_directories(BEFORE "${_runtime_dir}")
     add_link_options(
         "$<$<LINK_LANGUAGE:CXX>:-stdlib=libc++>"
+        "$<$<LINK_LANGUAGE:OBJCXX>:-stdlib=libc++>"
         "-Wl,-rpath,${_runtime_dir}")
     link_libraries(c++ c++abi)
     if(NOT APPLE)
@@ -291,7 +251,27 @@ function(zahlen_enable_reflection TARGET_NAME)
             # target is handed that define back while losing a PRIVATE flag.
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()
-        target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
+        # PUBLIC, not PRIVATE, and for the same reason the flags above are.
+        #
+        # This define is not a duplicate of the compiler's own: GCC 16 defines
+        # __cpp_impl_reflection from -freflection alone, while clang-p2996 forks
+        # do not, and every reflection header in this tree keys off it
+        # (ZHLN_REFLECTION_AVAILABLE in Core/Reflection/Core.hpp). A consumer
+        # that receives -freflection but not the define compiles a *different*
+        # ReflectionAvailable, so LayoutHash<T>() takes its sizeof/alignof-only
+        # path and every reflected type hashes to something the engine will
+        # never compute -- a silent wrong-offset read, not a link error.
+        #
+        # The synthetic BMI target described above is the second reason: it
+        # re-applies a provider's preprocessor options but drops a PRIVATE
+        # compile *definition*, so a PRIVATE define here would leave the
+        # consumer's module units on the other side of the #if.
+        #
+        # Where the compiler already supplies the value this is redundant, not
+        # harmful: a command-line -D is accepted alongside a predefined macro
+        # with the same name and value (verified with GCC 16.2: no diagnostic
+        # under this project's -Wall -Wextra -Wpedantic -Wundef -Werror set).
+        target_compile_definitions(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
     endif()
     zahlen_use_custom_libcxx(${TARGET_NAME})
 endfunction()

@@ -74,15 +74,15 @@ enum class PresenceError : uint8_t {
 // socket I/O on the caller's thread. Keep the client within the TaskSystem
 // lifetime. Application IDs and presence are supplied by the embedding
 // application rather than compiled into this library.
-class DiscordPresenceClient {
+class PresenceClient {
   public:
-    explicit DiscordPresenceClient(std::string applicationId);
-    ~DiscordPresenceClient() noexcept;
+    explicit PresenceClient(std::string applicationId);
+    ~PresenceClient() noexcept;
 
-    DiscordPresenceClient(const DiscordPresenceClient&) = delete;
-    auto operator=(const DiscordPresenceClient&) -> DiscordPresenceClient& = delete;
-    DiscordPresenceClient(DiscordPresenceClient&&) = delete;
-    auto operator=(DiscordPresenceClient&&) -> DiscordPresenceClient& = delete;
+    PresenceClient(const PresenceClient&) = delete;
+    auto operator=(const PresenceClient&) -> PresenceClient& = delete;
+    PresenceClient(PresenceClient&&) = delete;
+    auto operator=(PresenceClient&&) -> PresenceClient& = delete;
 
     [[nodiscard]] auto Start() noexcept -> std::expected<void, PresenceError>;
     void SetActivity(RichPresence activity) noexcept;

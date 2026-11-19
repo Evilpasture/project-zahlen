@@ -41,7 +41,7 @@ Volk's dispatch tables are process-global in this build. The supported Engine pa
 
 ### One dispatch table per image
 
-Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_vulkan`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the RHI's symbols (`volk*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time; the separate `ZHLN_*` rule continues to hide internal engine C-prefix symbols. Consequences:
+Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_vulkan`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `zahlen_vulkan` is therefore built with `C_VISIBILITY_PRESET hidden` / `CXX_VISIBILITY_PRESET hidden`, so every symbol in the archive binds intra-image in whichever binary links it. This replaced a linker version script that listed `volk*`, `vma*` and hand-written mangled globs: the script was ELF-only and leaked ~960 C++ symbols (`_ZN13VmaJsonWriter...` is not matched by `vma*`), whereas the compiler hides mangled names it was never told about. Consequences:
 
 * The engine `.so` always initializes and dispatches through **its own** table, regardless of what an executable embeds.
 * An executable-embedded copy has its own table, initialized on demand via Volk — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
@@ -382,14 +382,9 @@ const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/
 const auto       specInfos = spec.Infos(std::span {variants}); // fixed-size array of specialization infos
 ```
 
-The walk is a line at the call site, and that is load-bearing. A build without
-`-freflection` compiles these sources through `zahlen_transpile_sources`, which
-rewrites a `ForEachFieldInfo` call it can see into the per-field calls it stands
-for; hidden inside this type's own constructor body the call would compile
-against the no-op stand-in and the map would come out empty -- not a build
-error, just every variant silently keeping the shader's `= 1` default. The
-infos point at `variants` and at the object's own entry table, so both have to
-outlive the pipeline build they are handed to, as the arrays they replace did.
+The infos point at `variants` and at the object's own entry table, so both have
+to outlive the pipeline build they are handed to, as the arrays they replace
+did.
 
 An entry whose id a module does not declare is ignored by the driver, so a
 module with fewer constants than `T` has fields is fine: the NoRT modules of

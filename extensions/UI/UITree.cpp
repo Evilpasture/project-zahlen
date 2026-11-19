@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <UI/UITree.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <cstddef>
 #include <utility>
@@ -21,8 +22,8 @@ ActionRegistry::~ActionRegistry() {
     Clear();
 }
 
-ActionRegistry::ActionRegistry(ActionRegistry&& other) noexcept: _bus(other._bus), _entries(std::move(other._entries)) {
-    other._bus = nullptr;
+ActionRegistry::ActionRegistry(ActionRegistry&& other) noexcept: _queue(other._queue), _entries(std::move(other._entries)) {
+    other._queue = nullptr;
 }
 
 auto ActionRegistry::operator=(ActionRegistry&& other) noexcept -> ActionRegistry& {
@@ -30,13 +31,13 @@ auto ActionRegistry::operator=(ActionRegistry&& other) noexcept -> ActionRegistr
         return *this;
     }
     Clear();
-    _bus          = other._bus;
+    _queue          = other._queue;
     _entries      = std::move(other._entries);
-    other._bus    = nullptr;
+    other._queue    = nullptr;
     return *this;
 }
 
-void ActionRegistry::BindErased(std::string_view id, void* payload, void (*emit)(ECS::EventBus&, const void*), void (*destroy)(void*)) {
+void ActionRegistry::BindErased(std::string_view id, void* payload, void (*emit)(ActionQueue&, const void*), void (*destroy)(void*)) {
     if (id.empty() || payload == nullptr || emit == nullptr || destroy == nullptr) {
         if (payload != nullptr && destroy != nullptr) {
             destroy(payload);
@@ -73,12 +74,12 @@ void ActionRegistry::Unbind(std::string_view id) {
 }
 
 auto ActionRegistry::Invoke(std::string_view id) const -> bool {
-    if (id.empty() || _bus == nullptr) {
+    if (id.empty() || _queue == nullptr) {
         return false;
     }
     for (const auto& entry: _entries) {
         if (entry.id == id && entry.emit != nullptr && entry.payload != nullptr) {
-            entry.emit(*_bus, entry.payload);
+            entry.emit(*_queue, entry.payload);
             return true;
         }
     }
@@ -257,7 +258,7 @@ namespace {
 }
 
 void ApplySelectionTint(BoxConfig& cfg) {
-    cfg.color = static_cast<JPH::Vec4>(cfg.color) + JPH::Vec4(0.15f, 0.25f, 0.40f, 0.25f);
+    cfg.color = cfg.color + FVec4{0.15f, 0.25f, 0.40f, 0.25f};
 }
 
 void NoteDesignClick(Frame& gui, std::string_view id, TreeMode mode, RenderUITreeResult& result) {

@@ -391,7 +391,6 @@ class Store {
         -> std::expected<void, Fail>;
     auto                               VerifySource(const fs::path& archive, const InstallOptions& options) -> std::expected<void, Fail>;
     Env                                m_env;
-    bool                               m_force;
     mutable std::optional<std::string> m_activeCache;
 };
 

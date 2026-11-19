@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Math/Vec3.hpp>
 #include "render/GpuLayout.hpp"
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <cstdint>
 #include <span>
@@ -14,8 +15,8 @@ namespace ZHLN {
 
 class ShadowAtlas {
   public:
-    static constexpr uint32_t kSize       = 4096;
-    static constexpr uint32_t kMaxTiles   = 512;
+    static constexpr uint32_t kSize     = 4096;
+    static constexpr uint32_t kMaxTiles = 512;
 
     static constexpr uint32_t kMaxLights  = 64;
     static constexpr uint32_t kMinTile    = 128;
@@ -27,7 +28,7 @@ class ShadowAtlas {
         int32_t    lightIndex = -1;
         uint32_t   faceCount  = 1;
         uint32_t   tile       = kMinTile;
-        JPH::Mat44 faces[kPointFaces] {};
+        Mat4x4 faces[kPointFaces] {};
     };
 
     struct Grant {
@@ -49,9 +50,15 @@ class ShadowAtlas {
 
     void EndFrame() noexcept;
 
-    [[nodiscard]] auto Tiles() noexcept -> std::span<ShadowTile> { return std::span {_tiles.data(), _tiles.size()}; }
-    [[nodiscard]] auto TileCount() const noexcept -> uint32_t { return static_cast<uint32_t>(_tiles.size()); }
-    [[nodiscard]] auto Placements() const noexcept -> std::span<const Placement> { return _placements; }
+    [[nodiscard]] auto Tiles() noexcept -> std::span<ShadowTile> {
+        return std::span {_tiles.data(), _tiles.size()};
+    }
+    [[nodiscard]] auto TileCount() const noexcept -> uint32_t {
+        return static_cast<uint32_t>(_tiles.size());
+    }
+    [[nodiscard]] auto Placements() const noexcept -> std::span<const Placement> {
+        return _placements;
+    }
 
     struct TileRect {
         uint32_t x    = 0;
@@ -61,11 +68,11 @@ class ShadowAtlas {
     [[nodiscard]] static auto TileRectOf(const ShadowTile& tile) noexcept -> TileRect;
 
     [[nodiscard]] static auto FaceCount(bool isPoint, float outerConeRadians) noexcept -> uint32_t;
-    [[nodiscard]] static auto MakeFaceMatrices(
-        const JPH::Vec3& position, const JPH::Vec3& direction, float range, bool isPoint, float outerConeRadians, JPH::Mat44* out
-    ) noexcept -> uint32_t;
+    [[nodiscard]] static auto
+        MakeFaceMatrices(const FVec3& position, const FVec3& direction, float range, bool isPoint, float outerConeRadians, Mat4x4* out) noexcept
+        -> uint32_t;
 
-    [[nodiscard]] static auto MakeLightKey(LightType type, const JPH::Vec3& position, float intensity, float range) noexcept -> uint64_t;
+    [[nodiscard]] static auto MakeLightKey(LightType type, const FVec3& position, float intensity, float range) noexcept -> uint64_t;
 
     [[nodiscard]] static auto TileForDistance(float distance) noexcept -> uint32_t;
 
@@ -76,21 +83,21 @@ class ShadowAtlas {
         uint32_t cursor = 0;
     };
     struct CacheEntry {
-        uint64_t   key       = 0;
-        uint32_t   faceCount = 0;
-        uint32_t   tile      = 0;
-        uint32_t   x         = 0;
-        uint32_t   y         = 0;
-        JPH::Mat44 faces[kPointFaces] {};
-        bool       seen = false;
+        uint64_t                            key       = 0;
+        uint32_t                            faceCount = 0;
+        uint32_t                            tile      = 0;
+        uint32_t                            x         = 0;
+        uint32_t                            y         = 0;
+        std::array<Mat4x4, kPointFaces> faces {};
+        bool                                seen = false;
     };
 
     [[nodiscard]] auto Place(uint32_t faceCount, uint32_t tile, uint32_t& outX, uint32_t& outY) noexcept -> bool;
 
-    ZHLN::Array<Shelf>       _shelves;
-    ZHLN::Array<CacheEntry>  _cache;
-    ZHLN::Array<ShadowTile>  _tiles;
-    ZHLN::Array<Placement>   _placements;
+    ZHLN::Array<Shelf>      _shelves;
+    ZHLN::Array<CacheEntry> _cache;
+    ZHLN::Array<ShadowTile> _tiles;
+    ZHLN::Array<Placement>  _placements;
 };
 
-}
+} // namespace ZHLN

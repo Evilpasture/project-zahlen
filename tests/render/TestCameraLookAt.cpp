@@ -1,20 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/PrefabFactory.hpp>
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <cmath>
 #include <cstdint>
@@ -33,19 +32,14 @@ enum class CameraLookAtError : uint8_t {
 
 namespace {
 
-void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
-    for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
-    }
-    auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-    if (!settings.empty()) {
-        reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings[0], [](auto& pp) {
-            pp.fullBright        = 1;
-            pp.vignetteIntensity = 0.0f;
-            pp.enableSSR         = 0;
-            pp.enableRTR         = 0;
-        });
-    }
+void DisableJitterAndVignette(ZHLN::COM::IEngine& engine) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
+        gfx.antiAliasing.mode            = ZHLN::AAMode::None;
+        gfx.environment.fullBright       = 1;
+        gfx.post.vignetteIntensity       = 0.0f;
+        gfx.post.enableSSR               = 0;
+        gfx.rayTracing.enableReflections = false;
+    });
 }
 
 } // namespace
@@ -78,9 +72,9 @@ struct CameraLookAtTestSuite {
             // scene rebuilds so the contributed frame step takes its place).
             ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
 
-            auto& reg = ZHLN::EngineAccess::RegistryOf(*engine);
-            auto rc = engine->Graphics();
-            DisableJitterAndVignette(reg);
+            auto& reg = *engine->Entities();
+            auto& rc = *engine->Graphics();
+            DisableJitterAndVignette(*engine);
 
             auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
@@ -89,18 +83,14 @@ struct CameraLookAtTestSuite {
             }
 
             // Default camera looks toward the origin. Put the subject well off that axis.
-            const ZHLN::Entity target = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}
-            );
-            const ZHLN::Entity decoy = ZHLN::PrefabFactory::CreateBox(
-                *engine, {0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}
-            );
+            const ZHLN::Entity target = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes});
+            const ZHLN::Entity decoy = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 
-            auto cameras  = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
+            auto cameras  = reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!ZHLN::Test::ExpectTrue(!cameras.empty())) {
                 return std::unexpected(CameraLookAtError::NoCameraFound);
             }
@@ -108,15 +98,15 @@ struct CameraLookAtTestSuite {
             // The rig component is authored explicitly (the frame step only
             // re-seeds the boot camera's defaults when the component is
             // missing, so this survives the first tick).
-            reg.Add(
+            reg.AttachMany(
                 cameras[0],
-                ZHLN::CameraRig::TargetCameraComponent {
+                ZHLN::CameraRig::TargetComponent {
                     .target              = target,
                     .distance            = 5.0f,
                     .targetDistance      = 5.0f,
                     .yaw                 = -90.0f,
                     .pitch               = 0.0f,
-                    .targetOffset        = JPH::Vec3::sZero(),
+                    .targetOffset        = ZHLN::FVec3::Zero(),
                     .stiffness           = 0.0f,
                     .vignetteIntensity   = 0.0f,
                     .fov                 = 45.0f,
@@ -126,11 +116,7 @@ struct CameraLookAtTestSuite {
             );
 
             constexpr float dt = 1.0f / 60.0f;
-            for (uint32_t frame = 0; frame < 8; ++frame) {
-                engine->ProcessEvents();
-                const auto status = engine->Tick(dt);
-                ZHLN::Test::ExpectTrue(status.has_value());
-            }
+            ZHLN::Test::Headless::TickFrames(*engine, 8, dt);
 
             // In memory: the .ppm mirror is written for inspection only, so a
             // failing run still leaves a picture behind.

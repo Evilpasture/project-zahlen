@@ -1,14 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
-#include <Zahlen/Engine/Capabilities/AudioEngine.hpp>
-#include <Zahlen/Engine/Capabilities/Simulation.hpp>
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
-#include <Zahlen/Engine/SceneResources.hpp>
-#include <Zahlen/Audio/Audio.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <audio/Audio.hpp>
+#include <engine/SceneResources.hpp>
+#include <physics/Physics.hpp>
+#include <render/RenderContext.hpp>
+#include <span>
 #include <utility>
 
 namespace ZHLN::SceneResources {
@@ -30,20 +27,12 @@ void Release(RenderContext& render, Components::OwnedMeshComponent& component) {
     component.meshAsset = InvalidAssetID;
 }
 
-void Release(GraphicsDevice graphics, Components::OwnedMeshComponent& component) {
-    if (component.meshAsset != InvalidAssetID) {
-        graphics.UnregisterMesh(component.meshAsset);
-    }
-    graphics.DestroyMesh(std::exchange(component.mesh, Mesh {}));
-    component.meshAsset = InvalidAssetID;
-}
-
 void Release(Engine& engine, Components::PhysicsComponent& component) {
-    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
+    Release(engine.Physics(), component);
 }
 
 void Release(Engine& engine, Components::RagdollComponent& component) {
-    Release(ZHLN::EngineAccess::PhysicsOf(engine), component);
+    Release(engine.Physics(), component);
 }
 
 void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
@@ -51,15 +40,15 @@ void Release(AudioContext& audio, Components::AudioSourceComponent& component) {
 }
 
 void Release(Engine& engine, Components::AudioSourceComponent& component) {
-    Release(ZHLN::EngineAccess::AudioOf(engine), component);
+    Release(engine.Audio(), component);
 }
 
 void Release(Engine& engine, Components::OwnedMeshComponent& component) {
-    Release(engine.Graphics(), component);
+    Release(engine.Render(), component);
 }
 
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
-    engine.Graphics().DestroyBuffer(std::exchange(component.skinnedScratch, BufferID::Invalid));
+    engine.Render().DestroyBuffer(std::exchange(component.skinnedScratch, BufferID::Invalid));
     component.scratchVertexCount = 0;
 }
 

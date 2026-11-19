@@ -49,8 +49,7 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
     if (!sync.Valid()) {
         return std::unexpected(PresentationError::SyncCreationFailed);
     }
-    auto createdPools =
-        CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
+    auto createdPools = CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
     if (!createdPools) [[unlikely]] {
         return std::unexpected(createdPools.error());
     }
@@ -72,7 +71,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D render_extent = {.width = width, .height = height};
-        auto hct_res = RenderTarget<HeadlessColorTag>::Create(
+        auto             hct_res       = RenderTarget<HeadlessColorTag>::Create(
             *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
         );
         if (!hct_res) {
@@ -223,7 +222,7 @@ auto SwapchainPresenter::Present(
             .pSwapchains        = &swapchain.Get().handle,
             .pImageIndices      = &imageIndex,
         };
-        const VkResult result = vkQueuePresentKHR(presentQueue, &info);
+        const auto result = vkQueuePresentKHR(presentQueue, &info);
         if (result == VK_SUCCESS) {
             return {};
         }
@@ -233,11 +232,23 @@ auto SwapchainPresenter::Present(
         return std::unexpected(ToError(result));
     };
     auto presented = present_frame(present_id);
+
+    /*
+     * Extra context: On October 19, 2026, an NVIDIA developer forum issue was submitted with a 200-line C reproducer: "Vulkan: present fence never signaled
+     * when vkQueuePresentKHR returns VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT (615.78.08, Wayland and X11)" On driver 615.78.08, whenever vkQueuePresentKHR
+     * returns VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT, the internal driver synchronization structures for that swapchain present slot corrupt: the presentation
+     * synchronization primitives never signal, hanging games and applications (this famously hit DXVK 3.x and Proton under Wayland as well).
+     */
+
+    // If the timing queue overflows, DO NOT re-submit the consumed present_sem!
+    // Instead, drain past timings, increase queue size or fall back gracefully for future frames.
     if (!presented && present_id != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {
         if (_ctx != nullptr) {
             _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
         }
-        presented = present_frame(nullptr);
+        // Spec: The present operation was enqueued and semaphores consumed;
+        // treat the frame as presented (or skip without re-queuing the semaphore).
+        presented = PresentSuboptimal {};
     }
     if (!presented) {
         return std::unexpected(presented.error());

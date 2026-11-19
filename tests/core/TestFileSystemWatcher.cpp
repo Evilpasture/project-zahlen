@@ -106,7 +106,7 @@ struct FileSystemWatcherTestSuite {
                 }
                 ZHLN::Test::ExpectTrue(events[2].action == ZHLN::FS::FileWatchAction::Deleted);
 
-                static_cast<void>(watcher.Unwatch(handle));
+                watcher.Unwatch(handle);
                 {
                     std::ofstream stream {file};
                     stream << "unobserved";

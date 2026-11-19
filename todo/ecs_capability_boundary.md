@@ -2,12 +2,12 @@
 
 ## Status
 
-Patch 7 removed `Engine::GetRegistry()` from the public SDK surface and added
+Patch 7 removed `Engine::GetRegistry()` from the public API surface and added
 the `Entities` capability facade, `Commands()` and the read-only `Steps()` view.
 In-tree code that still needs arbitrary `ECS::Registry` operations reaches it
 through the build-tree-only `EngineAccess::RegistryOf` seam. That is a boundary
 change, **not** the end state: the raw registry is still visible to roughly 300
-in-tree call sites even though an SDK consumer can no longer name it.
+in-tree call sites even though an API consumer can no longer name it.
 
 This roadmap is Option 3 from the patch 7 review -- the full semantic rewrite.
 It is deliberately staged: converting a system to signature-driven queries

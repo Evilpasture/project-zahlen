@@ -643,7 +643,7 @@ struct SVGTestSuite {
             const auto missing = document->RenderNode("nope", 32, 16);
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::SVG::SVGError::NodeNotFound));
+                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::SVG::Error::NodeNotFound));
             }
             ZHLN::Test::ExpectFalse(document->RenderNode("", 32, 16).has_value());
 
@@ -659,7 +659,7 @@ struct SVGTestSuite {
                 const auto absent = logo->RenderNode("no_such_layer", 64, 64);
                 ZHLN::Test::ExpectFalse(absent.has_value());
                 if (!absent) {
-                    ZHLN::Test::ExpectTrue(absent.error().Is(ZHLN::SVG::SVGError::NodeNotFound));
+                    ZHLN::Test::ExpectTrue(absent.error().Is(ZHLN::SVG::Error::NodeNotFound));
                 }
             }
             return {};
@@ -695,7 +695,7 @@ struct SVGTestSuite {
             const auto zero = document->Render(0, 16);
             ZHLN::Test::ExpectFalse(zero.has_value());
             if (!zero) {
-                ZHLN::Test::ExpectTrue(zero.error().Is(ZHLN::SVG::SVGError::InvalidDimensions));
+                ZHLN::Test::ExpectTrue(zero.error().Is(ZHLN::SVG::Error::InvalidDimensions));
             }
             ZHLN::Test::ExpectFalse(document->Render(16, 0).has_value());
             ZHLN::Test::ExpectFalse(document->RenderAtScale(0.0f).has_value());
@@ -706,7 +706,7 @@ struct SVGTestSuite {
             const auto huge = document->Render(20000, 20000);
             ZHLN::Test::ExpectFalse(huge.has_value());
             if (!huge) {
-                ZHLN::Test::ExpectTrue(huge.error().Is(ZHLN::SVG::SVGError::RasterTooLarge));
+                ZHLN::Test::ExpectTrue(huge.error().Is(ZHLN::SVG::Error::RasterTooLarge));
             }
 
             // A scale that cannot be a pixmap size, including NaN and infinity.
@@ -714,20 +714,20 @@ struct SVGTestSuite {
             return {};
         }
 
-        // --- 12. resvg's failures arrive as SVGError, not as an abort ---
+        // --- 12. resvg's failures arrive as Error, not as an abort ---
         std::expected<void, ZHLN::ErrorCode> bad_input_is_an_error_not_a_crash() {
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadString(kNotSvg).has_value());
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadString("").has_value());
 
             // Half of the artwork: usvg parses a document to the end before it
             // renders any of it, so a truncated one is an error rather than a
-            // partial tree that happens to draw. Which SVGError it is depends on
+            // partial tree that happens to draw. Which Error it is depends on
             // where the cut lands in resvg's parser, so the assertion is on the
             // category, and the code is printed for whoever is reading the log.
             const auto truncated = ZHLN::SVG::LoadString(kLogo.substr(0, kLogo.size() / 2));
             ZHLN::Test::ExpectFalse(truncated.has_value());
             if (!truncated) {
-                ZHLN::Test::ExpectTrue(truncated.error().Is<ZHLN::SVG::SVGError>());
+                ZHLN::Test::ExpectTrue(truncated.error().Is<ZHLN::SVG::Error>());
                 ZHLN::Println("    [SVG] {} bytes of {} -> {}", kLogo.size() / 2, kLogo.size(), ZHLN::Error(truncated.error()).Message());
             }
 
@@ -736,7 +736,7 @@ struct SVGTestSuite {
             const auto empty = ZHLN::SVG::LoadData(std::span<const uint8_t> {});
             ZHLN::Test::ExpectFalse(empty.has_value());
             if (!empty) {
-                ZHLN::Test::ExpectTrue(empty.error().Is<ZHLN::SVG::SVGError>());
+                ZHLN::Test::ExpectTrue(empty.error().Is<ZHLN::SVG::Error>());
             }
 
             // The one place the suite insists on a specific code rather than on
@@ -746,7 +746,7 @@ struct SVGTestSuite {
             const auto missing = ZHLN::SVG::LoadFile("/nonexistent/zhln_svg_no_such_file.svg");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::SVG::SVGError::FileOpenFailed));
+                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::SVG::Error::FileOpenFailed));
             }
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadFile("").has_value());
 
@@ -754,11 +754,11 @@ struct SVGTestSuite {
             // sits at the far end of resvg_error -- so this is the second half
             // of the check the missing file above starts: a header behind its
             // library turns it into a code no constant names. Every failure in
-            // this test is an SVGError, which is what makes Error::Message()
+            // this test is an Error, which is what makes Error::Message()
             // print something useful about it.
             const auto garbage = ZHLN::SVG::LoadString(kNotSvg);
             if (!garbage) {
-                ZHLN::Test::ExpectTrue(garbage.error().Is(ZHLN::SVG::SVGError::ParsingFailed));
+                ZHLN::Test::ExpectTrue(garbage.error().Is(ZHLN::SVG::Error::ParsingFailed));
                 ZHLN::Test::ExpectFalse(ZHLN::Error(garbage.error()).Message().empty());
                 ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, ZHLN::Error(garbage.error()).Message());
             }
@@ -813,7 +813,7 @@ struct SVGTestSuite {
                 const auto refused = withBrokenFonts.LoadString(kLogo);
                 ZHLN::Test::ExpectFalse(refused.has_value());
                 if (!refused) {
-                    ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::SVG::SVGError::FontLoadFailed));
+                    ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::SVG::Error::FontLoadFailed));
                 }
             } else {
                 ZHLN::Test::ExpectTrue(withBrokenFonts.LoadString(kLogo).has_value());
@@ -832,7 +832,7 @@ struct SVGTestSuite {
             const auto invalid = nothing.Render(8, 8);
             ZHLN::Test::ExpectFalse(invalid.has_value());
             if (!invalid) {
-                ZHLN::Test::ExpectTrue(invalid.error().Is(ZHLN::SVG::SVGError::InvalidDocument));
+                ZHLN::Test::ExpectTrue(invalid.error().Is(ZHLN::SVG::Error::InvalidDocument));
             }
 
             ZHLN::SVG::Document document;

@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/ECS/Entity.hpp>
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Core/Reference.h>
-#include <Jolt/Math/Double3.h>
-#include <Jolt/Math/Float3.h>
-#include <Jolt/Math/Float4.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec3.h>
+
 #include <Zahlen/Core/Reflection/Utilities.hpp>
+#include <Zahlen/ECS/Entity.hpp>
+#include <Zahlen/Math/Quat.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <format>
 
 namespace ZHLN::Reflect {
@@ -25,58 +20,38 @@ struct CustomFormatter<ZHLN::Entity> {
 };
 
 template <>
-struct CustomFormatter<JPH::Vec3> {
-    static void format(const JPH::Vec3& v, std::string& out) {
-        out += std::format("({}, {}, {})", v.GetX(), v.GetY(), v.GetZ());
-    }
-};
-
-template <>
-struct CustomFormatter<JPH::DVec3> {
-    static void format(const JPH::DVec3& v, std::string& out) {
-        out += std::format("({}, {}, {})", v.GetX(), v.GetY(), v.GetZ());
-    }
-};
-
-// The value-based spellings the public API takes. A rotation formats as its
-// four lanes, which is the only reading that does not imply a maths type.
-template <>
-struct CustomFormatter<JPH::Float3> {
-    static void format(const JPH::Float3& v, std::string& out) {
+struct CustomFormatter<FVec3> {
+    static void format(const FVec3& v, std::string& out) {
         out += std::format("({}, {}, {})", v.x, v.y, v.z);
     }
 };
 
 template <>
-struct CustomFormatter<JPH::Float4> {
-    static void format(const JPH::Float4& v, std::string& out) {
+struct CustomFormatter<DVec3> {
+    static void format(const DVec3& v, std::string& out) {
+        out += std::format("({}, {}, {})", v.x, v.y, v.z);
+    }
+};
+
+template <>
+struct CustomFormatter<FVec4> {
+    static void format(const FVec4& v, std::string& out) {
         out += std::format("({}, {}, {}, {})", v.x, v.y, v.z, v.w);
     }
 };
 
 template <>
-struct CustomFormatter<JPH::Double3> {
-    static void format(const JPH::Double3& v, std::string& out) {
-        out += std::format("({}, {}, {})", v.x, v.y, v.z);
+struct CustomFormatter<DVec4> {
+    static void format(const DVec4& v, std::string& out) {
+        out += std::format("({}, {}, {}, {})", v.x, v.y, v.z, v.w);
     }
 };
 
 template <>
-struct CustomFormatter<JPH::Quat> {
-    static void format(const JPH::Quat& q, std::string& out) {
-        out += std::format("({}, {}, {}, {})", q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+struct CustomFormatter<ZHLN::Quat> {
+    static void format(const ZHLN::Quat& q, std::string& out) {
+        out += std::format("({}, {}, {}, {})", q.x, q.y, q.z, q.w);
     }
 };
 
-template <typename T>
-struct CustomFormatter<JPH::Ref<T>> {
-    static void format(const JPH::Ref<T>& val, std::string& out) {
-        if (val.GetPtr() != nullptr) {
-            out += "JPH::Ref(active)";
-        } else {
-            out += "JPH::Ref(null)";
-        }
-    }
-};
-
-}
+} // namespace ZHLN::Reflect

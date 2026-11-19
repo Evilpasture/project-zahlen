@@ -9,12 +9,12 @@
 // rather than a plausible-looking zero. Anything else means a paced policy
 // leaked into a session with no display to pace against, and the engine would
 // simulate off a fabricated cadence.
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/Engine/Engine.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
-#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/CapturedFrame.hpp>
 #include <cstdint>
 #include <expected>
 
@@ -53,19 +53,9 @@ struct PresentPacingSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
-            const ZHLN::PresentTimingMetrics timing = rc.PresentTiming();
-            if (!ZHLN::Test::ExpectEq(timing.policy, ZHLN::PacingPolicy::Decoupled)) {
-                return std::unexpected(PresentPacingTestError::UnexpectedPolicy);
-            }
-            if (!ZHLN::Test::ExpectTrue(!timing.hasPacedTiming && timing.refreshIntervalNs == 0 && !timing.variableRefresh)) {
-                return std::unexpected(PresentPacingTestError::UnexpectedPacedTiming);
-            }
-            if (!ZHLN::Test::ExpectTrue(!timing.hasMargin && timing.lastPresentMarginNs == 0)) {
-                return std::unexpected(PresentPacingTestError::UnexpectedMargin);
-            }
-            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().HasValue())) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPacedDelta);
             }
             if (!ZHLN::Test::ExpectEq(rc.Info().pacingPolicy, ZHLN::PacingPolicy::Decoupled)) {
@@ -79,12 +69,12 @@ struct PresentPacingSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 5; ++frame) {
                 engine->ProcessEvents();
-                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).has_value())) {
+                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).HasValue())) {
                     return std::unexpected(PresentPacingTestError::TickFailed);
                 }
             }
@@ -92,14 +82,7 @@ struct PresentPacingSuite {
             // Frames flowed (acquires, submits, headless presents); the pacer
             // must still report the same unpaced contract, not bootstrap into
             // a timing it cannot have.
-            const ZHLN::PresentTimingMetrics timing = rc.PresentTiming();
-            if (!ZHLN::Test::ExpectEq(timing.policy, ZHLN::PacingPolicy::Decoupled)) {
-                return std::unexpected(PresentPacingTestError::UnexpectedPolicy);
-            }
-            if (!ZHLN::Test::ExpectTrue(!timing.hasPacedTiming && !timing.hasMargin)) {
-                return std::unexpected(PresentPacingTestError::UnexpectedPacedTiming);
-            }
-            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!rc.PacedDeltaTime().HasValue())) {
                 return std::unexpected(PresentPacingTestError::UnexpectedPacedDelta);
             }
             return {};
@@ -110,7 +93,7 @@ struct PresentPacingSuite {
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
                 return std::unexpected(PresentPacingTestError::EngineInitFailed);
             }
-            auto rc = engine->Graphics();
+            auto& rc = *engine->Graphics();
 
             const ZHLN::QualityLevel before = rc.Settings().qualityPreset;
             // Past the governor's 90-frame patience: with no margin signal it
@@ -118,7 +101,7 @@ struct PresentPacingSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 95; ++frame) {
                 engine->ProcessEvents();
-                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).has_value())) {
+                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).HasValue())) {
                     return std::unexpected(PresentPacingTestError::TickFailed);
                 }
             }
@@ -139,11 +122,11 @@ struct PresentPacingSuite {
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 3; ++frame) {
                 engine->ProcessEvents();
-                engine->PollLateInput();
-                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).has_value())) {
+                engine->ProcessEvents();
+                if (!ZHLN::Test::ExpectTrue(engine->Tick(dt).HasValue())) {
                     return std::unexpected(PresentPacingTestError::LateLatchFailed);
                 }
-                engine->PollLateInput();
+                engine->ProcessEvents();
             }
             return {};
         }

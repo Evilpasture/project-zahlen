@@ -11,6 +11,13 @@
 .text
 .p2align 4
 .global CSYM(ZHLN_Switch)
+/* Internal to this image: a copy embedded in a consumer executable must never
+   preempt the one the engine calls. PE binds intra-image already. */
+#if defined(OS_APPLE)
+.private_extern CSYM(ZHLN_Switch)
+#elif !defined(OS_WIN)
+.hidden CSYM(ZHLN_Switch)
+#endif
 
 CSYM(ZHLN_Switch):
 #if defined(ARCH_X64)
@@ -132,6 +139,13 @@ CSYM(ZHLN_Switch):
 // ZHLN_TrampolineAsm
 // ----------------------------------------------------------------------------
 .global CSYM(ZHLN_TrampolineAsm)
+/* Internal to this image: a copy embedded in a consumer executable must never
+   preempt the one the engine calls. PE binds intra-image already. */
+#if defined(OS_APPLE)
+.private_extern CSYM(ZHLN_TrampolineAsm)
+#elif !defined(OS_WIN)
+.hidden CSYM(ZHLN_TrampolineAsm)
+#endif
 .p2align 4
 
 CSYM(ZHLN_TrampolineAsm):

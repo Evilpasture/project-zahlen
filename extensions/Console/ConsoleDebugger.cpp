@@ -21,21 +21,19 @@
 #pragma GCC optimize("no-inline")
 #endif
 
-#include <Zahlen/Engine/Internal/EngineAccess.hpp>
 #include "ConsoleDebugger.hpp"
 #include "SymbolResolver.hpp"
-
 #include <Console/Console.hpp>
 #include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptBinderRegistry.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Engine/Engine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 
 #if defined(ZHLN_CONSOLE_HAS_LUA)
+#include <lua/LuaValueTypes.hpp>
 #include <lua/ReflectLua.hpp>
-#include <lua/SceneLua.hpp>
 #endif
 
 #include <charconv>
@@ -111,7 +109,7 @@ namespace {
     auto ParseEntity(std::string_view sv) -> std::optional<Entity> {
         uint64_t raw   = 0;
         auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), raw);
-        if (ec == std::errc()) {
+        if (ec == std::errc() && ptr == sv.data() + sv.size()) {
             return Entity::Unpack(raw);
         }
         return std::nullopt;
@@ -123,7 +121,7 @@ namespace {
         }
         uintptr_t addr = 0;
         auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), addr, 16);
-        if (ec == std::errc()) {
+        if (ec == std::errc() && ptr == sv.data() + sv.size()) {
             return addr;
         }
         return std::nullopt;
@@ -151,18 +149,25 @@ namespace {
 
 } // namespace
 
-void ConsoleDebugger::Execute(Engine& engine, GameConsole& console, std::string_view commandLine) {
-    Execute(ZHLN::EngineAccess::RegistryOf(engine), console, commandLine);
+void ConsoleDebugger::Execute(COM::IEngine& engine, GameConsole& console, std::string_view commandLine) {
+    Execute(*engine.Entities(), console, commandLine);
 }
 
-void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::string_view commandLine) {
+void ConsoleDebugger::Execute(COM::IEntities& entities, GameConsole& console, std::string_view commandLine) {
+    RegisterCoreScriptTypes();
+    ScriptComponentAccess access(entities);
+    access.RegisterManifest<Components>(true);
+    Execute(std::move(access), console, commandLine);
+}
+
+void ConsoleDebugger::Execute(ScriptComponentAccess inspection, GameConsole& console, std::string_view commandLine) {
     auto tokens = Tokenize(commandLine);
     if (tokens.empty()) {
         return;
     }
 
     std::string_view cmd = tokens[0];
-    ScriptECSBridge  bridge(reg);
+    ScriptECSBridge  bridge(inspection);
 
     // ========================================================================
     // 1. HELP
@@ -228,13 +233,13 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
             return;
         }
         auto ent = ParseEntity(tokens[1]);
-        if (!ent || !reg.IsAlive(*ent)) {
+        if (!ent || !inspection.IsAlive(*ent)) {
             console.Log(std::format("Invalid or dead entity: {}", tokens[1]), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
 
         std::string dump;
-        reg.DebugDumpEntity(*ent, dump);
+        inspection.Dump(*ent, dump);
         console.Log(std::format("Entity {}:", ent->Pack()), {.r = 0.3f, .g = 0.85f, .b = 1.0f, .a = 1.0f});
         std::istringstream stream(dump);
         std::string        line;
@@ -255,7 +260,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
             return;
         }
         auto ent = ParseEntity(tokens[1]);
-        if (!ent || !reg.IsAlive(*ent)) {
+        if (!ent || !inspection.IsAlive(*ent)) {
             console.Log("Entity not found.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
@@ -299,7 +304,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
             return;
         }
         auto ent = ParseEntity(tokens[1]);
-        if (!ent || !reg.IsAlive(*ent)) {
+        if (!ent || !inspection.IsAlive(*ent)) {
             console.Log("Entity not found.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
@@ -323,7 +328,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         } else {
             double       d  = 0.0;
             auto [p, ec]    = std::from_chars(rawVal.data(), rawVal.data() + rawVal.size(), d);
-            if (ec == std::errc()) {
+            if (ec == std::errc() && p == rawVal.data() + rawVal.size()) {
                 valToSet = d;
             } else {
                 valToSet = std::string(rawVal);
@@ -350,18 +355,21 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
             return;
         }
         auto ent = ParseEntity(tokens[1]);
-        if (!ent || !reg.IsAlive(*ent)) {
+        if (!ent || !inspection.IsAlive(*ent)) {
             console.Log("Entity not found.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
 
         const std::string_view compName = tokens[2];
-        const uint32_t         familyID = ECS::Registry::GetFamilyIDFromName(compName);
-        if (familyID == 0xFFFFFFFF) {
+        if (!inspection.IsRegistered(compName)) {
             console.Log(std::format("Component '{}' is not registered.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
-        void* compPtr = reg.GetRawByFamily(*ent, familyID);
+        if (!inspection.CanWrite(compName)) {
+            console.Log("Resource-owning components are read-only; use the owning COM capability.");
+            return;
+        }
+        void* compPtr = inspection.Component(*ent, compName);
         if (compPtr == nullptr) {
             console.Log(std::format("Entity {} does not own '{}'.", ent->Pack(), compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
@@ -428,8 +436,8 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         }
 
         bool found = false;
-        for (Entity e: reg.GetEntitiesWith<Components::NameComponent>()) {
-            if (const auto nameComp = reg.Get<Components::NameComponent>(e)) {
+        for (Entity e: inspection.EntitiesWith<Components::NameComponent>()) {
+            if (const auto nameComp = inspection.Read<Components::NameComponent>(e)) {
                 if (std::string_view(nameComp->name) == tokens[1]) {
                     console.Log(std::format("Found Entity: {} (ID: {})", nameComp->name.c_str(), e.Pack()), {.r = 0.3f, .g = 1.0f, .b = 0.3f, .a = 1.0f});
                     found = true;

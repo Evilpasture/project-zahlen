@@ -18,36 +18,39 @@ enum class UITreeTestError : uint8_t {
     TreeMutationFailed   ZHLN_ANNOTATION(ZHLN::Description<"FindNodeById / InsertChild / RemoveNodeById did not mutate the tree as specified."> {}),
 };
 
+namespace ZHLN::TestUITreeEvents {
+struct SaveEvent {
+    int add = 1;
+};
+} // namespace ZHLN::TestUITreeEvents
+
 namespace {
 
 struct UITreeTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> action_registry_bind_invoke_and_missing_ids() {
-            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionQueue       bus;
             ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            struct SaveEvent {
-                int add = 1;
-            };
-            actions.Bind("editor.save_scene", SaveEvent {.add = 1});
+            actions.Bind("editor.save_scene", ZHLN::TestUITreeEvents::SaveEvent {.add = 1});
 
             ZHLN::Test::ExpectTrue(actions.Contains("editor.save_scene"));
             ZHLN::Test::ExpectFalse(actions.Contains("editor.open_scene"));
             ZHLN::Test::ExpectFalse(actions.Contains(""));
 
             ZHLN::Test::ExpectTrue(actions.Invoke("editor.save_scene"));
-            bus.Drain<SaveEvent>([&](const SaveEvent& e) { saves += e.add; });
+            bus.Drain<ZHLN::TestUITreeEvents::SaveEvent>([&](const ZHLN::TestUITreeEvents::SaveEvent& e) { saves += e.add; });
             ZHLN::Test::ExpectEq(saves, 1);
 
             // A document can name an action this host has not installed.
             ZHLN::Test::ExpectFalse(actions.Invoke("editor.open_scene"));
             ZHLN::Test::ExpectFalse(actions.Invoke(""));
             ZHLN::Test::ExpectEq(saves, 1);
-            ZHLN::Test::ExpectTrue(bus.View<SaveEvent>().empty());
+            ZHLN::Test::ExpectTrue(bus.View<ZHLN::TestUITreeEvents::SaveEvent>().empty());
 
-            actions.Bind("editor.save_scene", SaveEvent {.add = 10});
+            actions.Bind("editor.save_scene", ZHLN::TestUITreeEvents::SaveEvent {.add = 10});
             ZHLN::Test::ExpectTrue(actions.Invoke("editor.save_scene"));
-            bus.Drain<SaveEvent>([&](const SaveEvent& e) { saves += e.add; });
+            bus.Drain<ZHLN::TestUITreeEvents::SaveEvent>([&](const ZHLN::TestUITreeEvents::SaveEvent& e) { saves += e.add; });
             ZHLN::Test::ExpectEq(saves, 11);
 
             actions.Unbind("editor.save_scene");
@@ -105,17 +108,16 @@ struct UITreeTestSuite {
                 .bindProperty = "post.enableSSR",
             });
 
-            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionQueue       bus;
             ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            struct SaveEvent {};
-            actions.Bind("editor.save_scene", SaveEvent {});
+            actions.Bind("editor.save_scene", ZHLN::TestUITreeEvents::SaveEvent {});
 
             ZHLN::GUI::PropertyStore properties;
             properties.SetBool("post.enableSSR", true);
 
             const auto result = ZHLN::GUI::RenderUITree(frame, root, actions, properties);
-            bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
+            bus.Drain<ZHLN::TestUITreeEvents::SaveEvent>([&](const ZHLN::TestUITreeEvents::SaveEvent&) { ++saves; });
 
             // The walk's other half is the payload: a tree of four visible
             // widgets has to hand back the geometry a renderer would draw, and
@@ -198,11 +200,10 @@ struct UITreeTestSuite {
                 .onClickAction = "editor.save_scene",
             });
 
-            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionQueue       bus;
             ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            struct SaveEvent {};
-            actions.Bind("editor.save_scene", SaveEvent {});
+            actions.Bind("editor.save_scene", ZHLN::TestUITreeEvents::SaveEvent {});
             ZHLN::GUI::PropertyStore properties;
 
             const auto result =
@@ -214,7 +215,7 @@ struct UITreeTestSuite {
             if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.surfaces.size())) {
                 return std::unexpected(UITreeTestError::RenderWalkFailed);
             }
-            bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
+            bus.Drain<ZHLN::TestUITreeEvents::SaveEvent>([&](const ZHLN::TestUITreeEvents::SaveEvent&) { ++saves; });
 
             ZHLN::Test::ExpectFalse(result.actionInvoked);
             ZHLN::Test::ExpectEq(saves, 0);

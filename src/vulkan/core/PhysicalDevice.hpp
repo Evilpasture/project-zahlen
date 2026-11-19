@@ -47,5 +47,6 @@ struct MeshShaderLimits {
 
 [[nodiscard]] auto QueryMeshShaderLimits(VkPhysicalDevice physical) noexcept -> MeshShaderLimits;
 [[nodiscard]] auto MeshShaderLimitsSufficient(const MeshShaderLimits& limits) noexcept -> bool;
+[[nodiscard]] auto QueryAccelerationStructureScratchAlignment(VkPhysicalDevice physical) noexcept -> VkDeviceSize;
 
 } // namespace ZHLN::Vk

@@ -8,7 +8,7 @@
 # here is this directory's translation unit.
 #
 #   TOML.hpp       reflection-driven TOML read and write
-#   SceneTOML.hpp  Jolt vector bindings; what makes a core ZHLN::Scene::Scene a
+#   SceneTOML.hpp  Jolt vector bindings; what makes a core ZHLN::Scene::Document a
 #                  document. The world editor's Ctrl+S path uses it directly
 #                  (utils/editor/main.cpp); utils/scene/SceneDocument.cpp reads it.
 #   UITOML.hpp     the same for GUI::UINode (app/UIEditor.cpp, ZHLN_HAS_UI_TOML).
@@ -18,7 +18,7 @@
 # header names GUI::UINode in its signatures, but UINode is a plain aggregate, so
 # only the include root is needed -- this directory publishes extensions/ itself.
 # The schema implementation (zahlen_ui_schema) is not linked into
-# zahlen_serialization, and zahlen_gui is not needed to compile or link this.
+# zahlen_serialization, and zahlen_ui is not needed to compile or link this.
 
 set(ZHLN_TOML_SOURCES
     TOML.cpp

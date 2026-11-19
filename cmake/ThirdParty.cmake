@@ -8,6 +8,19 @@
 # includes this once, before the core subsystems, so the vendor cache variables
 # below are settled before any vendor CMakeLists runs.
 
+# --- Homebrew prefix (Apple) ------------------------------------------------
+#
+# First statement in the file, because it has to be: everything below searches
+# for a package, a header or a library, and a prefix path appended after those
+# searches only helps the *next* configure. Apple Silicon installs under
+# /opt/homebrew and Intel under /usr/local; /opt/homebrew/lib is also put on the
+# linker path here rather than at the bottom of the file, where
+# link_directories() would arrive after the targets that needed it were created.
+if(APPLE)
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+    link_directories(/opt/homebrew/lib)
+endif()
+
 # --- Vulkan-Headers ---
 # Vulkan-Headers is header-only; the renderer needs no Vulkan SDK or loader.
 # Prefer a compatible system copy on Unix, but the renderer's Vulkan 1.4 and
@@ -146,16 +159,29 @@ if(ZHLN_BUILD_RENDER AND NOT ZHLN_HAS_VULKAN_HEADERS)
 endif()
 
 # --- mimalloc ---
-if(APPLE)
-    set(MI_OVERRIDE OFF CACHE BOOL "" FORCE) # Avoid macOS zone interposition bugs
+# Linked exclusively into first-party in-tree host executables on non-Apple,
+# non-sanitizer builds (see src/engine/CMakeLists.txt) rather than embedded into
+# libzahlen_engine.so: keeps the engine DSO free of mi_* and allocator-override
+# exports, avoids split-heap frees for external/dlopen consumers, and leaves
+# ASan/LSan/TSan/UBSan malloc interceptors unshadowed.
+set(ZHLN_ENABLE_MIMALLOC TRUE)
+if(APPLE OR USE_SANITIZERS)
+    set(ZHLN_ENABLE_MIMALLOC FALSE)
 else()
-    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)  # Stable on Linux and Windows
+    set(_zhln_sanitizer_flag_probe
+        "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS}")
+    if(_zhln_sanitizer_flag_probe MATCHES "(^|[ 	])-fsanitize=")
+        set(ZHLN_ENABLE_MIMALLOC FALSE)
+    endif()
+    unset(_zhln_sanitizer_flag_probe)
 endif()
-
-set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
-set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
-set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
+if(ZHLN_ENABLE_MIMALLOC)
+    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+    set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
+endif()
 
 # --- Apple SDK Blocks support for C sources ---
 # CoreAudio/AudioToolbox headers expose Blocks declarations. Miniaudio's
@@ -451,7 +477,16 @@ else()
             message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
         endif()
     endif()
-    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw EXCLUDE_FROM_ALL SYSTEM)
+    set_target_properties(glfw PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        OBJC_VISIBILITY_PRESET hidden
+    )
     target_compile_definitions(glfw INTERFACE GLFW_INCLUDE_NONE)
 
     # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
@@ -584,10 +619,13 @@ int main(void) {
     endif()
 endif()
 
-# Force the debug renderer to compile globally, even in Release configurations
-add_compile_definitions(JPH_DEBUG_RENDERER)
-
-set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
+# Jolt is strictly an engine implementation detail: compile it as a private
+# -fPIC archive with hidden symbol visibility so libzahlen_engine.so is the
+# single shared library and exports zero JPH::* symbols or JPH_* defines.
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE ON CACHE BOOL "Enable Jolt debug renderer" FORCE)
+set(DEBUG_RENDERER_IN_DISTRIBUTION ON CACHE BOOL "Enable Jolt debug renderer" FORCE)
+set(JPH_BUILD_SHARED_LIBS OFF CACHE BOOL "Build Jolt as static library" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "Do not install Jolt" FORCE)
 
 # --- Jolt Vulkan compute shader compiler ---
 # Jolt compiles its own compute shaders (Jolt/Shaders/*.hlsl -> *.spv) with dxc.
@@ -613,7 +651,12 @@ option(ZHLN_JOLT_SLANG_FALLBACK
     "Compile Jolt's Vulkan compute shaders with zshader/libslang when no dxc/glslc exists" ON)
 if(ZHLN_BUILD_RENDER)
     find_package(Vulkan QUIET)
+    # find_package(Vulkan) leaves Vulkan_GLSLC_EXECUTABLE as the literal
+    # "Vulkan_GLSLC_EXECUTABLE-NOTFOUND" when glslc is absent. CMake's if()
+    # already treats a -NOTFOUND value as false, but name it explicitly so
+    # the fallback below cannot be skipped by a string comparison.
     if(Vulkan_FOUND AND (NOT Vulkan_GLSLC_EXECUTABLE
+       OR Vulkan_GLSLC_EXECUTABLE STREQUAL "Vulkan_GLSLC_EXECUTABLE-NOTFOUND"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_SOURCE_DIR}/cmake/JoltDxcShim.sh"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "${CMAKE_BINARY_DIR}/jolt-dxc-shim"
        OR Vulkan_GLSLC_EXECUTABLE STREQUAL "$<TARGET_FILE:zshader>"))
@@ -629,59 +672,29 @@ if(ZHLN_BUILD_RENDER)
                 "Jolt Vulkan compute: no dxc and no glslc found, compiling its HLSL shaders with zshader's dxc-compat mode (libslang). "
                 "Set ZHLN_JOLT_SLANG_FALLBACK=OFF to require dxc.")
         else()
-            message(WARNING
+            # A warning here only defers the failure to build time, where
+            # every .spv rule execs the *-NOTFOUND string and exits 127.
+            # Fail at configure time instead, with the fix attached.
+            message(FATAL_ERROR
                 "Jolt's Vulkan compute shaders are compiled with dxc, and neither glslc nor dxc was found (Vulkan_GLSLC_EXECUTABLE is "
-                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), leave "
-                "ZHLN_JOLT_SLANG_FALLBACK=ON to compile them with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build "
-                "without Jolt's Vulkan compute backend."
+                "\"${Vulkan_GLSLC_EXECUTABLE}\"). Install directx-shader-compiler (dxc) or shaderc (glslc), set "
+                "ZHLN_JOLT_SLANG_FALLBACK=ON (Advanced menu: \"Fall back to Slang for Jolt shader compilation\") to compile them "
+                "with zshader/libslang, or configure with -DJPH_USE_VK=OFF to build without Jolt's Vulkan compute backend."
             )
         endif()
     endif()
 endif()
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/JoltPhysics/Build EXCLUDE_FROM_ALL SYSTEM)
 
-# Force Jolt to export all symbols
-target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
 set_target_properties(Jolt PROPERTIES
-    CXX_VISIBILITY_PRESET default
-    C_VISIBILITY_PRESET default
-    VISIBILITY_INLINES_HIDDEN OFF
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    OBJC_VISIBILITY_PRESET hidden
+    OBJCXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
-
-# --- Jolt's usage requirements, without its archive ------------------------
-#
-# include/Zahlen/Engine/Engine.hpp, include/Zahlen/ECS/Components.hpp,
-# include/Zahlen/Audio/Audio.hpp and src/gui/GUI.hpp include <Jolt/Jolt.h>, so
-# consumers of those headers need Jolt's include directories and its ABI
-# defines (JPH_DOUBLE_PRECISION, JPH_OBJECT_LAYER_BITS, JPH_SHARED_LIBRARY, the
-# JPH_USE_* feature set). They do not need libJolt.so on their own link line:
-# Jolt is SHARED, so libzahlen_engine.so records it as a DT_NEEDED entry and
-# every consumer resolves JPH::* through the engine.
-#
-# Naming Jolt PUBLIC on the engine and the static subsystems is what produced
-# the noise. CMake propagates a static library's PUBLIC/PRIVATE dependencies
-# verbatim to the final link of every dependent, so Jolt ended up on the command
-# line of all 18 executables -- after libzahlen_engine.so, which already defines
-# the same symbols. mold reports that as "Unused direct dependencies:
-# libJolt.so", and it is also why -Wl,--no-as-needed was needed to stop the
-# as-needed culling from dropping it.
-#
-# The properties are copied explicitly rather than taken by INTERFACE-linking
-# Jolt, because an INTERFACE library's INTERFACE_LINK_LIBRARIES propagate as
-# link items too -- that reintroduces exactly the entry this removes. Property
-# copies evaluate at generate time, so Jolt's $<BUILD_INTERFACE:> include dirs
-# and configuration-conditioned defines arrive intact.
-add_library(zahlen_jolt_headers INTERFACE)
-target_include_directories(zahlen_jolt_headers SYSTEM INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_INCLUDE_DIRECTORIES>)
-target_compile_definitions(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_DEFINITIONS>)
-target_compile_options(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_OPTIONS>)
-target_compile_features(zahlen_jolt_headers INTERFACE
-    $<TARGET_PROPERTY:Jolt,INTERFACE_COMPILE_FEATURES>)
 
 if(ZHLN_BUILD_RENDER)
     # --- VulkanMemoryAllocator ---
@@ -695,7 +708,11 @@ set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
-set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(meshoptimizer PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
 
 if(ZHLN_BUILD_RENDER)
     # --- SPIRV-Reflect (vendored at extern/SPIRV-Reflect) ---
@@ -720,7 +737,16 @@ if(ZHLN_BUILD_RENDER)
         C_STANDARD_REQUIRED ON
         C_EXTENSIONS OFF
         POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
+    if(USE_SANITIZERS)
+        # Upstream spirv_reflect.c calls memcpy(dst, NULL, 0) when a called
+        # SPIR-V helper accesses zero variables (spirv_reflect.c:3802), tripping
+        # glibc's nonnull attribute check under UBSan on a zero-length copy.
+        target_compile_options(spirv-reflect-static PRIVATE -fno-sanitize=nonnull-attribute)
+    endif()
 endif()
 
 # --- simdjson ---
@@ -842,11 +868,12 @@ if(NOT ZSTD_LIBRARY)
     message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
 endif()
 
-if(APPLE)
-    # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-    link_directories(/opt/homebrew/lib)
-endif()
+# Homebrew's prefix is appended to the search path at the TOP of this file, not
+# here. It used to be at the bottom, after every find_package/find_path/
+# find_library in the file had already run -- so on Apple nothing Homebrew
+# installs under /opt/homebrew (or /usr/local on Intel) was found by the
+# un-HINTed searches above it, and link_directories() there could not reach a
+# target created before this point either. See "Homebrew prefix" at the top.
 
 # libseat and libevdev are loaded at runtime by src/engine/tty (SharedLibrary).
 # They are not link-time or configure-time dependencies: a machine without the

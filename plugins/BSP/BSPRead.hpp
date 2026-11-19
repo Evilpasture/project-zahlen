@@ -34,7 +34,7 @@
 
 namespace ZHLN::BSP {
 
-enum class BSPError : uint8_t {
+enum class Error : uint8_t {
     FileTooSmall       ZHLN_ANNOTATION(ZHLN::Description<"File too small for a BSP header"> {}) = 1,
     InvalidIdent       ZHLN_ANNOTATION(ZHLN::Description<"Not a valid VBSP image (bad magic)"> {}),
     UnsupportedVersion ZHLN_ANNOTATION(ZHLN::Description<"Unsupported BSP version (mainline 19-21 only)"> {}),
@@ -55,13 +55,26 @@ class ByteReader {
     }
 
     template <typename T>
-    auto Read(T& out) noexcept -> bool {
+        requires(!std::is_array_v<T>)
+    [[nodiscard]] auto Read() noexcept -> std::optional<T> {
         static_assert(std::is_trivially_copyable_v<T>);
         if (_cursor + sizeof(T) > _bytes.size()) {
-            return false;
+            return std::nullopt;
         }
+        T out {};
         std::memcpy(&out, _bytes.data() + _cursor, sizeof(T));
         _cursor += sizeof(T);
+        return out;
+    }
+
+    [[nodiscard]] auto ReadBytes(void* dst, size_t count) noexcept -> bool {
+        if (_cursor + count > _bytes.size()) {
+            return false;
+        }
+        if (count > 0) {
+            std::memcpy(dst, _bytes.data() + _cursor, count);
+            _cursor += count;
+        }
         return true;
     }
 
@@ -88,27 +101,36 @@ class ByteReader {
 // Field-wise read of one packed on-disk struct (or one scalar element, as the
 // surfedge lump is an array of int32). Returns false on a short read.
 template <typename T>
-auto ReadStruct(ByteReader& in, T& out) -> bool {
+[[nodiscard]] auto ReadStruct(ByteReader& in) -> std::optional<std::remove_cvref_t<T>> {
     using U = std::remove_cvref_t<T>;
     static_assert(std::is_trivially_copyable_v<U>, "on-disk data is trivially copyable");
     if constexpr (std::is_aggregate_v<U>) {
+        if constexpr (Reflect::FieldCount<U>() == 0) {
+            return in.Read<U>();
+        }
+        U    out {};
         bool ok = true;
         Reflect::ForEachField(out, [&](auto& member) {
-            if (ok) {
-                ok = in.Read(member);
+            if (!ok) {
+                return;
+            }
+            using M = std::remove_cvref_t<decltype(member)>;
+            if constexpr (std::is_array_v<M>) {
+                ok = in.ReadBytes(&member, sizeof(M));
+            } else if (const auto v = in.Read<M>()) {
+                member = *v;
+            } else {
+                ok = false;
             }
         });
-        if constexpr (Reflect::FieldCount<U>() == 0) {
-            return in.Read(out);
-        }
-        return ok;
+        return ok ? std::optional<U> {out} : std::nullopt;
     } else {
-        return in.Read(out);
+        return in.Read<U>();
     }
 }
 
 // One entity from LUMP_ENTITIES: an ordered key/value list, Source style.
-struct BSPEntity {
+struct Entity {
     std::vector<std::pair<std::string, std::string>> keys;
 
     [[nodiscard]] auto Find(std::string_view key) const noexcept -> std::string_view;
@@ -148,10 +170,10 @@ struct StaticProp {
 // The parsed map: every lump the importer needs, plus the entity list and
 // resolved material names. Raw lump spans stay valid only while the caller's
 // file bytes live; the struct vectors are owned copies.
-struct BSPMap {
+struct Map {
     int32_t version = 0;
 
-    std::vector<BSPEntity> entities;
+    std::vector<Entity> entities;
 
     std::vector<DPlane>      planes;
     std::vector<DVertex>     vertices;
@@ -189,9 +211,11 @@ struct BSPMap {
 // positions are the leaf bounds scaled by the 0..255 xyz bytes. Values are linear
 // radiance, decoded like DecodeVradLuxel (c * 2^e), so they are on the same scale
 // as the lightmaps. Returns false if the leaf has no samples.
-inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>& p, std::array<std::array<float, 3>, 6>& out) -> bool {
+using AmbientCube = std::array<std::array<float, 3>, 6>;
+
+[[nodiscard]] inline auto SampleLeafAmbientCube(const Map& map, const std::array<float, 3>& p) -> std::optional<AmbientCube> {
     if (map.nodes.empty() || map.leafs.empty()) {
-        return false;
+        return std::nullopt;
     }
     int32_t node = 0;
     while (node >= 0) {
@@ -202,7 +226,7 @@ inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>&
     }
     size_t leafIdx = static_cast<size_t>(-node - 1);
     if (leafIdx >= map.leafs.size() || leafIdx >= map.leafAmbientIndex.size()) {
-        return false;
+        return std::nullopt;
     }
     // About half of all leaves have no ambient samples of their own (corridors,
     // thin spaces, leaves VRAD did not bake). Props there would otherwise stay
@@ -229,7 +253,7 @@ inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>&
             }
         }
         if (fallback == static_cast<size_t>(-1)) {
-            return false;
+            return std::nullopt;
         }
         leafIdx = fallback;
     }
@@ -256,25 +280,26 @@ inline auto SampleLeafAmbientCube(const BSPMap& map, const std::array<float, 3>&
         }
     }
     if (chosen == static_cast<size_t>(-1)) {
-        return false;
+        return std::nullopt;
     }
     const DLeafAmbientLighting& best = map.leafAmbientSamples[chosen];
+    AmbientCube out {};
     for (size_t f = 0; f < 6; ++f) {
         const float scale = std::ldexp(1.0f, static_cast<int>(best.cube[f].exponent));
         out[f]            = {static_cast<float>(best.cube[f].r) * scale, static_cast<float>(best.cube[f].g) * scale, static_cast<float>(best.cube[f].b) * scale};
     }
-    return true;
+    return out;
 }
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,
 // lump bounds) and on every struct read; empty lumps are legal and common.
-[[nodiscard]] auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCode>;
+[[nodiscard]] auto Parse(std::span<const std::byte> bytes) -> std::expected<Map, ErrorCode>;
 
 // LUMP_ENTITIES text -> entities.
-[[nodiscard]] auto ParseEntities(std::string_view text) -> std::vector<BSPEntity>;
+[[nodiscard]] auto ParseEntities(std::string_view text) -> std::vector<Entity>;
 
 // LUMP_GAMELUMP (Lump 35) directory and static prop ('sprp') parsing.
-[[nodiscard]] auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, BSPMap& map)
+[[nodiscard]] auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, Map& map)
     -> std::expected<void, ErrorCode>;
 
 } // namespace ZHLN::BSP

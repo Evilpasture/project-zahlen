@@ -235,28 +235,6 @@ constexpr void ForEachNamespaceClass(F&& f) {
     };
 }
 
-#else
-
-template <
-    typename ScopeAnchor                            = void,
-    ZHLN::StringLiteral SourceFile                  = "",
-    auto                IdentifierFilter            = AcceptAnyIdentifier,
-    bool                RecurseNamedSubnamespaces   = true,
-    bool                IncludeUnnamedSubnamespaces = true,
-    typename F>
-constexpr void ForEachNamespaceFunction(F&&) {
-}
-
-template <
-    typename ScopeAnchor                            = void,
-    ZHLN::StringLiteral SourceFile                  = "",
-    auto                IdentifierFilter            = AcceptAnyIdentifier,
-    bool                RecurseNamedSubnamespaces   = true,
-    bool                IncludeUnnamedSubnamespaces = true,
-    typename F>
-constexpr void ForEachNamespaceClass(F&&) {
-}
-
 #endif
 
 } // namespace ZHLN::Reflect

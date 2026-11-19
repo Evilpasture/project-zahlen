@@ -38,9 +38,9 @@ struct RenderPassOf<Name, Vk::TypeList<Usages...>>: Vk::RenderPass<Name, Usages.
 // with Reflect::StringToEnum<Stage>; a name the enum does not carry runs with
 // no query and no row, silently. Every templated pass asserts its name here so
 // a renamed instantiation fails to compile instead of disappearing from the
-// profiler. The no-reflection fallback of StringToEnum always misses, so the
-// check is native-reflection only.
+// profiler. Reflection is a hard requirement, so ReflectionAvailable is always
+// true here and the name must resolve.
 template <Vk::ResourceName Name>
-inline constexpr bool kNameProfilesAsStage = Reflect::ReflectionAvailable || Reflect::StringToEnum<Stage>(Name.string_view()).has_value();
+inline constexpr bool kNameProfilesAsStage = Reflect::StringToEnum<Stage>(Name.string_view()).has_value();
 
 } // namespace ZHLN::Passes::TemplatedDetail

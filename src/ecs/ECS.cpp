@@ -1,10 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <ecs/ECS.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 #include <cstring>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 namespace ZHLN::ECS {
 
@@ -13,7 +17,13 @@ namespace {
 ZHLN::Mutex                         s_FamilyMutex {};
 uint32_t                            s_TypeCounter = 0;
 HashMap<uint32_t, uint32_t>         s_HashToDense;
+// Node-based storage keeps references stable across insertions and rehashes.
+// The map and per-registry type metadata both refer to these owned strings.
+std::unordered_set<std::string>     s_FamilyNames;
 HashMap<std::string_view, uint32_t> s_NameToFamilyID;
+// Process-global schema for byte-only families. A second registry may allocate
+// its own storage only for a family that was explicitly registered dynamic.
+std::unordered_map<uint32_t, std::pair<size_t, size_t>> s_DynamicFamilyLayouts;
 
 // Keep the old allocation sizes as well as their resource: a memory_resource
 // requires the exact size and alignment supplied at allocation on deallocation.
@@ -40,7 +50,16 @@ auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
 }
 
 void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    ZHLN::Lock(s_FamilyMutex, [&] -> void { s_NameToFamilyID.Insert(name, id); });
+    InternAndMapNameToFamilyID(name, id);
+}
+
+auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) noexcept -> std::string_view {
+    return ZHLN::Lock(s_FamilyMutex, [&] -> std::string_view {
+        const auto entry = s_FamilyNames.emplace(name).first;
+        const std::string_view stableName = *entry;
+        s_NameToFamilyID.Insert(stableName, id);
+        return stableName;
+    });
 }
 
 auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
@@ -356,33 +375,69 @@ void Registry::Clear() {
 }
 
 auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t {
-    uint32_t id = GetFamilyIDFromName(name);
-    if (id != 0xFFFFFFFF) {
-        // A registered C++ family must never be converted into unconstructed
-        // script storage. AddDynamic below also enforces this at insertion.
-        if (id < _compCapacity && _components[id] != nullptr && !_typeInfo[id].isDynamic) {
-            return 0xFFFFFFFF;
-        }
-        return id;
-    }
-    ZHLN::Lock(sync.shadowLock, [&] -> void {
-        id = ComponentFamily::ResolveDenseID(HashTypeName(name));
+    return ZHLN::Lock(sync.shadowLock, [&] -> uint32_t {
+        const uint32_t id = ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
+            uint32_t family = 0xFFFFFFFFu;
+            bool     fresh  = false;
+            if (const auto named = s_NameToFamilyID.Find(name))
+                family = *named;
+            else if (const auto hashed = s_HashToDense.Find(HashTypeName(name)))
+                family = *hashed;
+            else {
+                family = s_TypeCounter++;
+                s_HashToDense.Insert(HashTypeName(name), family);
+                fresh = true;
+            }
+            const auto found = s_DynamicFamilyLayouts.find(family);
+            if (found != s_DynamicFamilyLayouts.end()) {
+                if (found->second != std::pair {size, alignment})
+                    return 0xFFFFFFFFu;
+            } else {
+                // Both a known name and a known typed hash are protected: a
+                // spelling alias must not convert a C++ family to raw storage.
+                if (!fresh)
+                    return 0xFFFFFFFFu;
+                s_DynamicFamilyLayouts.emplace(family, std::pair {size, alignment});
+            }
+            name = *s_FamilyNames.emplace(name).first;
+            s_NameToFamilyID.Insert(name, family);
+            return family;
+        });
+        if (id == 0xFFFFFFFFu)
+            return id;
         EnsureComponentCapacity(id);
         if (_components[id] != nullptr) {
-            id = 0xFFFFFFFF;
-            return;
+            // Family names are process-global; storage is per registry. Never
+            // reinterpret a typed family, or an existing incompatible layout.
+            if (!_typeInfo[id].isDynamic || _typeInfo[id].size != size || _typeInfo[id].alignment != alignment)
+                return 0xFFFFFFFFu;
+            return id;
         }
-        MapNameToFamilyID(name, id);
         _components[id] = CreateSparseSet(size, alignment);
-        _typeInfo[id] = {
+        _typeInfo[id]   = {
             .name      = name,
             .size      = size,
             .alignment = alignment,
             .debugDump = [](const void*, std::string& out) -> void { out += "{}"; },
             .isDynamic = true,
         };
+        return id;
     });
-    return id;
+}
+
+auto Registry::RemoveDynamic(Entity entity, uint32_t familyID) -> bool {
+    return ZHLN::Lock(sync.shadowLock, [&] -> bool {
+        // Same guards as AddDynamic: never touch a typed family's storage,
+        // whose components were constructed and may own resources.
+        if (familyID >= _compCapacity || _components[familyID] == nullptr || !_typeInfo[familyID].isDynamic) {
+            return false;
+        }
+        if (!_components[familyID]->Contains(entity)) {
+            return false;
+        }
+        _components[familyID]->Remove(entity);
+        return true;
+    });
 }
 
 auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {

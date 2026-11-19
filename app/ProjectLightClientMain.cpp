@@ -4,13 +4,12 @@
 // Optional project-light client composition root. This intentionally has a
 // separate entrypoint from app/main.cpp, keeping the default `zahlen` binary
 // deterministic and free of client CLI/configuration code.
-#include <ProjectLightClient/ClientConfig.hpp>
-#include <ProjectLightClient/LightProtocol.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
+#include <ProjectLightClient/ClientConfig.hpp>
+#include <ProjectLightClient/LightProtocol.hpp>
 #include <Zahlen/App.hpp>
 #include <Zahlen/Error.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -100,18 +99,12 @@ int main(int argc, char* argv[]) {
     }
 
     ZHLN::ProjectLight::ClientSession session; // outlives Engine and its teardown hooks
-    auto app = ZHLN::App(ZHLN::EngineConfig {.appName = "Project Light Client"});
-    app.WithDefaultModules(false)
-        .BeforeEngineCreate([&] { return PrepareClient(*settings, session); })
-        .Install([&session](ZHLN::Engine& engine) {
-            ZHLN::Character::Install(engine);
-            ZHLN::CameraRig::Install(engine);
-            ZHLN::ProjectLight::InstallClient(engine, session);
-        });
-
-    // App handles the CLI once, returning help/version/graph before PrepareClient
-    // opens a socket. It owns process/crash handling, the Engine and frame loop.
-    const auto result = app.Run(std::span<char* const>(filteredArgPointers));
+    const auto result = ZHLN::App({.appName = "Project Light Client"})
+                            .BeforeEngineCreate([&] { return PrepareClient(*settings, session); })
+                            .AddLayer(ZHLN::ProjectLight::Layer {.session = &session})
+                            .AddLayer(ZHLN::Character::Layer {})
+                            .AddLayer(ZHLN::CameraRig::Layer {})
+                            .Run(std::span<char* const>(filteredArgPointers));
     if (!result) {
         if (result.error().Is<ZHLN::CommandLineError>()) {
             PrintConfigError(std::format("invalid command line ({}); use --help for engine options", result.error().ToError().Message()));

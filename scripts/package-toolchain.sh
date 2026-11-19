@@ -12,7 +12,7 @@
 #   usage: scripts/package-toolchain.sh <out-dir> [build-dir]
 #
 # Layout it writes:
-#   <out>/packages/  the 17 zahlen-<component>-<id>.tar.gz archives, SHA256SUMS,
+#   <out>/packages/  the 30 zahlen-<component>-<id>.tar.gz archives, SHA256SUMS,
 #                    SHA256SUMS.ed25519, index.json(+.ed25519), the public key,
 #                    toolchain.json  <- this directory is what `zpkg install`
 #                    is pointed at, and it must contain nothing but packages:
@@ -63,8 +63,9 @@ mkdir -p "${pkgs}" "${tools}"
 # One package per install component. The list is the set of components that
 # carry an installed export; a component that does not exist is a hard error,
 # because a silently missing package is a release that cannot install.
-components=(Engine CommandLine Signal HostRunner Application UISchema Serialization GLTF
-    Screenshot Netpbm FreeCam Camera CharacterController SkeletalAnimation Animation Cooker Fonts)
+components=(Engine CommandLine Image Signal Screenshot HostRunner Application Netpbm UI
+    UISchema Scene Serialization GLTF Fonts Lua Widgets Benchmark BenchmarkViewer Scripting
+    Console Editor Terrain VFX FreeCam Camera CharacterController AnimationControls Animation Cooker)
 
 # ---------------------------------------------------------------------------
 # Debug information does not ship in the packages.

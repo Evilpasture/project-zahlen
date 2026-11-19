@@ -5,7 +5,6 @@
 #pragma once
 
 #include <Zahlen/FileSystem/VFS.hpp>
-#include <Zahlen/FileSystem/AssetCache.hpp>
 #include <Zahlen/FileSystem/MappedFile.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>

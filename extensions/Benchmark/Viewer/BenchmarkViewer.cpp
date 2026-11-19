@@ -2,17 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/Benchmark/Viewer/BenchmarkViewer.cpp
-#include <Zahlen/Engine/Capabilities/GraphicsDevice.hpp>
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
-#include <Zahlen/Engine/Clock.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Window/PlatformHost.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/GUI/UIData.hpp>
 #include <Widget/BarStrip.hpp>
 #include <Widget/HoverCard.hpp>
 #include <Widget/TextFit.hpp>
+#include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Engine/Clock.hpp>
+#include <Zahlen/GUI/UIData.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -151,36 +149,36 @@ using ZHLN::GUI::Widget::FitsWidth;
 }
 
 // Ink. Muted enough to sit over a running scene, opaque enough to read.
-const JPH::Vec4 kPanelInk   = {0.05f, 0.06f, 0.09f, 0.92f};
-const JPH::Vec4 kChartInk   = {0.02f, 0.03f, 0.05f, 0.85f};
-const JPH::Vec4 kTitleInk   = {0.92f, 0.96f, 1.00f, 1.00f};
-const JPH::Vec4 kBodyInk    = {0.78f, 0.84f, 0.92f, 1.00f};
-const JPH::Vec4 kFastBarInk = {0.35f, 0.82f, 0.55f, 1.00f};
-const JPH::Vec4 kSlowBarInk = {1.00f, 0.55f, 0.30f, 1.00f};
+const FVec4 kPanelInk   = {0.05f, 0.06f, 0.09f, 0.92f};
+const FVec4 kChartInk   = {0.02f, 0.03f, 0.05f, 0.85f};
+const FVec4 kTitleInk   = {0.92f, 0.96f, 1.00f, 1.00f};
+const FVec4 kBodyInk    = {0.78f, 0.84f, 0.92f, 1.00f};
+const FVec4 kFastBarInk = {0.35f, 0.82f, 0.55f, 1.00f};
+const FVec4 kSlowBarInk = {1.00f, 0.55f, 0.30f, 1.00f};
 
 // The telemetry table: a GPU stage's sparkline, a CPU scope's, and the dimmer
 // body ink a CPU scope's name is drawn in.
-const JPH::Vec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
-const JPH::Vec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
-const JPH::Vec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
+const FVec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
+const FVec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
+const FVec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
 
 // A stage row the profiler has stopped hearing from: dimmer than the body ink,
 // so a frozen number reads as a number that is not about now.
-const JPH::Vec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
+const FVec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
 
 // The machine section: a core cell's history bar, and the red a core at its
 // ceiling is drawn in.
-const JPH::Vec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
-const JPH::Vec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
+const FVec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
+const FVec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
 
 // A hovered line's card: a shade apart from the panel it floats over, so it
 // reads as a card on top of the panel rather than as more panel.
-const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
+const FVec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 
 // The colour a usage reading is drawn in: a level, not a duration, so the same
 // value is always the same colour wherever it appears (a core cell, the
 // machine-wide line, the GPU line).
-[[nodiscard]] auto LoadInk(float percent) -> JPH::Vec4 {
+[[nodiscard]] auto LoadInk(float percent) -> FVec4 {
     if (percent >= kCoreLoadHot) {
         return kHotInk;
     }
@@ -190,7 +188,7 @@ const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 // A core cell's history bars read by the same ramp as its percentage, and the
 // bars before the core's first sample are an absence rather than a reading --
 // which is the one thing a bar strip cannot decide for itself, so it asks.
-[[nodiscard]] auto CoreBarInk(void* /*user*/, [[maybe_unused]] size_t bar, float value, bool absent) -> JPH::Vec4 {
+[[nodiscard]] auto CoreBarInk(void* /*user*/, [[maybe_unused]] size_t bar, float value, bool absent) -> FVec4 {
     return absent ? kChartInk : LoadInk(value);
 }
 
@@ -199,13 +197,13 @@ const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
 // top. The ramp is the bar's share of the scale the strip is drawing with, which
 // the caller passes by pointer -- the policy is told a bar's value, and the scale
 // is the caller's own number.
-[[nodiscard]] auto TickBarInk(void* user, [[maybe_unused]] size_t bar, float value, [[maybe_unused]] bool absent) -> JPH::Vec4 {
+[[nodiscard]] auto TickBarInk(void* user, [[maybe_unused]] size_t bar, float value, [[maybe_unused]] bool absent) -> FVec4 {
     const float peak = *static_cast<const float*>(user);
     const float fill = peak > 0.0f ? std::clamp(value / peak, 0.0f, 1.0f) : 0.0f;
-    return JPH::Vec4 {
-        kFastBarInk.GetX() + ((kSlowBarInk.GetX() - kFastBarInk.GetX()) * fill),
-        kFastBarInk.GetY() + ((kSlowBarInk.GetY() - kFastBarInk.GetY()) * fill),
-        kFastBarInk.GetZ() + ((kSlowBarInk.GetZ() - kFastBarInk.GetZ()) * fill),
+    return FVec4 {
+        kFastBarInk.x + ((kSlowBarInk.x - kFastBarInk.x) * fill),
+        kFastBarInk.y + ((kSlowBarInk.y - kFastBarInk.y) * fill),
+        kFastBarInk.z + ((kSlowBarInk.z - kFastBarInk.z) * fill),
         1.0f
     };
 }
@@ -257,7 +255,7 @@ inline constexpr float kChartScaleLows    = 1.5f;
 // drawn the moment it is decided sits under every row below it, which is the bug
 // the ordering exists to prevent.
 
-struct BenchmarkViewer::Impl {
+struct Viewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
 
     // The viewer's own monotonic clock (`maxDeltaTime = 0.25f`), with built-in
@@ -309,7 +307,7 @@ struct BenchmarkViewer::Impl {
     float      telemetryWidth   = kTelemetryWidthDefault;
     float      telemetryContent = kTelemetryWidthDefault - (kPanelPadding * 2.0f);
 
-    void BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu);
+    void BuildTableStyles(ZHLN::COM::IEngine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu);
 
     // The per-character advance at another size, from the one the table measured
     // off the atlas: a line measured at the wrong size is a line that either
@@ -337,10 +335,10 @@ struct BenchmarkViewer::Impl {
         };
     }
 
-    GUI::Context gui;
+    const FontAtlas* atlas = nullptr;
 
     void DrawBenchmarkPanel(GUI::Frame& ui);
-    void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine);
+    void DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine);
 
     // The machine under the frames: CPU usage and clock (machine-wide, then
     // every core as a cell), and the GPU's utilization and clock. Reads the
@@ -362,7 +360,7 @@ struct BenchmarkViewer::Impl {
     }
 };
 
-void BenchmarkViewer::Impl::Advance() noexcept {
+void Viewer::Impl::Advance() noexcept {
     frameClock.SetPaused(!running || benchmark == nullptr);
     frameClock.Tick();
 
@@ -384,16 +382,15 @@ void BenchmarkViewer::Impl::Advance() noexcept {
     }
 }
 
-void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
+void Viewer::Impl::BuildTableStyles(ZHLN::COM::IEngine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu) {
     // The atlas the Context will draw with, so the columns are sized against the
     // font that is actually on screen rather than a guess at its metrics.
-    const ZHLN::FontAtlas& font    = engine.GetFontAtlas();
-    const ZHLN::FontAtlas* atlas   = (font.glyphCount > 0) ? &font : nullptr;
-    const float            advance = AdvancePerChar(atlas, kTableFontSize);
+    const ZHLN::FontAtlas* fontAtlas = atlas;
+    const float            advance   = AdvancePerChar(fontAtlas, kTableFontSize);
 
     // What the screen can give the panel: the window, less the margin it keeps
     // at both edges, less the benchmark panel's half of the left side.
-    const ZHLN::Extent2D viewport  = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D viewport  = engine.WindowExtent(engine.PrimaryWindow());
     const float          available = std::max(240.0f, static_cast<float>(viewport.width) - (kPanelMargin * 3.0f) - kPanelWidth);
 
     // The GPU stages are identifiers: the column is as wide as the longest one,
@@ -426,12 +423,12 @@ void BenchmarkViewer::Impl::BuildTableStyles(ZHLN::Engine& engine, std::span<con
     telemetryWidth   = content + (kPanelPadding * 2.0f);
 }
 
-void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
+void Viewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     if (benchmark == nullptr) {
         return;
     }
 
-    const BenchmarkMetrics&   metrics = benchmark->GetMetrics();
+    const Metrics&   metrics = benchmark->GetMetrics();
     const std::vector<float>& history = benchmark->GetTickHistory();
 
     // Ticks per second over the run, and the last second of history: the two
@@ -518,7 +515,7 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
     );
 }
 
-void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
+void Viewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
     if (samples.empty()) {
         return;
     }
@@ -551,7 +548,7 @@ void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const f
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
+void Viewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix) {
     if (rows.empty()) {
         return;
     }
@@ -567,7 +564,7 @@ void BenchmarkViewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const Fra
     );
 }
 
-void BenchmarkViewer::Impl::DrawStageColumn(
+void Viewer::Impl::DrawStageColumn(
     GUI::Frame&                    ui,
     std::span<const FrameStageRow> rows,
     const TableStyle&              style,
@@ -588,7 +585,7 @@ void BenchmarkViewer::Impl::DrawStageColumn(
     });
 }
 
-void BenchmarkViewer::Impl::DrawStageRow(
+void Viewer::Impl::DrawStageRow(
     GUI::Frame&          ui,
     const FrameStageRow& row,
     const TableStyle&    style,
@@ -604,8 +601,8 @@ void BenchmarkViewer::Impl::DrawStageRow(
     // and its number dimmed, because that number is the last one it had rather
     // than what the frame is paying now (see FrameStageRow::IsStale).
     const bool      stale    = row.IsStale();
-    const JPH::Vec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
-    const JPH::Vec4 valueInk = stale ? kStaleInk : kBodyInk;
+    const FVec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
+    const FVec4 valueInk = stale ? kStaleInk : kBodyInk;
 
     // The row is one hover target, so its card opens wherever on it the pointer
     // is rather than only over its number or its bars. Its id is past the bars'
@@ -675,7 +672,7 @@ void BenchmarkViewer::Impl::DrawStageRow(
     }
 }
 
-void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
+void Viewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
     // Nothing was read, and the reason is the only useful thing left to draw. It
     // is a note, not an error: a machine whose platform exposes no counters is
     // running the frames perfectly well, and the frame numbers above are
@@ -761,7 +758,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
 
         const std::string      all     = std::format("GPU  {}{}", name, readings);
         const float            advance = AdvanceAt(12.0f);
-        const JPH::Vec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
+        const FVec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
         const std::string_view id      = TableId("hw", 0, 2, 0);
 
         ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
@@ -790,7 +787,7 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnap
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
+void Viewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
     if (cores.empty()) {
         return;
     }
@@ -837,7 +834,7 @@ void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Frame& ui, std::span<const CoreTel
     }
 }
 
-void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
+void Viewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
     const std::string_view id = TableId("core", 0, cell, 0);
 
     ui.Box(
@@ -909,7 +906,7 @@ void BenchmarkViewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& co
     }
 }
 
-void BenchmarkViewer::Impl::ToggleCapture() {
+void Viewer::Impl::ToggleCapture() {
     if (telemetry.IsCapturing()) {
         telemetry.StopCapture();
         ZHLN::Log("[Bench] frame telemetry capture stopped: {} frames -> {}", telemetry.CapturedFrames(), telemetry.CapturePath().string());
@@ -924,7 +921,7 @@ void BenchmarkViewer::Impl::ToggleCapture() {
     ZHLN::LogError("[Bench] frame telemetry capture could not open {}", telemetry.CapturePath().string());
 }
 
-void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
+void Viewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     const FrameTelemetrySnapshot&        stats    = telemetry.Snapshot();
     SystemTelemetry&                     system   = telemetry.System();
     const std::span<const float>         chart    = telemetry.ChartSamples();
@@ -938,7 +935,7 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& eng
     // viewport width is what puts this one at the other edge. Its width is what
     // its columns came to -- a floating box that is narrower than its content is
     // not clipped, it spills.
-    const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
+    const ZHLN::Extent2D viewport = engine.WindowExtent(engine.PrimaryWindow());
     const float          rightX   = static_cast<float>(viewport.width) - telemetryWidth - kPanelMargin;
 
     ui.Box(
@@ -1058,52 +1055,20 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& eng
     );
 }
 
-BenchmarkViewer::BenchmarkViewer(): m_impl(std::make_unique<Impl>()) {
+Viewer::Viewer(): m_impl(std::make_unique<Impl>()) {
 }
 
-BenchmarkViewer::~BenchmarkViewer() = default;
+Viewer::~Viewer() = default;
 
-auto BenchmarkViewer::Run(size_t initialEntities) -> std::expected<void, ErrorCode> {
-    // Engine::Run owns the platform, the window, the device and the loop; the
-    // viewer only has to be the thing its UI phase calls. The options are the
-    // defaults (windowed, vsync, validation on) because the CLI is the host's
-    // to parse, not the tool's -- see the header.
-    const ZHLN::EngineConfig runConfig {
-        .appName = "Zahlen Benchmark Viewer",
-    };
-
-    BenchmarkViewer* self = this;
-    ZHLN::Clock      uiClock;
-    m_impl->pendingEntities  = initialEntities;
-    m_impl->visible          = true;
-    m_impl->telemetryVisible = true; // the standalone tool is the window for both panels
-
-    auto ran = ZHLN::Engine::Run(
-        runConfig,
-        [self, &uiClock](ZHLN::Engine& engine) -> void { self->UpdateAndRenderUI(engine, uiClock.Tick()); }
-    );
-
-    // The engine is gone, and with it the scheduler the benchmark's World waits
-    // on at teardown (see the lifetime note in the header). Release the
-    // benchmark here, while that is the only thing left to do, rather than
-    // leaving a World for whoever destroys the viewer afterwards. The viewer is
-    // empty again and a later Attach() re-arms it.
-    m_impl->benchmark.reset();
-    m_impl->frameClock.ResetFixedAccumulator();
-
-    // A capture started from the panel ends with the run: the summary line and
-    // the flush belong to this call, not to whichever destructor comes next.
-    m_impl->telemetry.StopCapture();
-    return ran;
-}
-
-void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
+void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
+    m_impl->frameTicked     = false;
+    m_impl->gpuNameTaken    = false;
     m_impl->pendingEntities = initialEntities;
 
     // The Engine is consulted for exactly one thing: a headless host has no
     // window to draw a panel into, and saying so here is cheaper than drawing
     // into nothing every frame.
-    if (!static_cast<bool>(engine.GetWindow())) {
+    if (engine.WindowExtent(engine.PrimaryWindow()).width == 0) {
         m_impl->visible = false;
     }
 
@@ -1118,8 +1083,8 @@ void BenchmarkViewer::Attach(ZHLN::Engine& engine, size_t initialEntities) {
     ZHLN::Log("[Bench] viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
-void BenchmarkViewer::Tick(ZHLN::Engine& engine) {
-    const uint64_t frameId = engine.GetCurrentFrame();
+void Viewer::Tick(ZHLN::COM::IEngine& engine) {
+    const uint64_t frameId = engine.CurrentFrame();
     if (m_impl->frameTicked && frameId == m_impl->lastFrameId) {
         return; // this engine frame has been ticked already: one frame, one sample
     }
@@ -1135,7 +1100,8 @@ void BenchmarkViewer::Tick(ZHLN::Engine& engine) {
     // actually appears, so a host that ticked before its device was up is still
     // matched on the frame it comes up.
     if (!m_impl->gpuNameTaken) {
-        if (const std::string_view device = engine.Graphics().Info().gpuName; !device.empty()) {
+        const auto graphicsInfo = engine.Graphics()->Info();
+        if (const std::string_view device = graphicsInfo.gpuName; !device.empty()) {
             m_impl->gpuNameTaken = true;
             m_impl->telemetry.SetGpuNameHint(device);
         }
@@ -1156,28 +1122,7 @@ void BenchmarkViewer::Tick(ZHLN::Engine& engine) {
     }
 }
 
-void BenchmarkViewer::UpdateAndRenderUI(ZHLN::Engine& engine, float dt) {
-    if (m_impl->benchmark == nullptr) {
-        Attach(engine, m_impl->pendingEntities);
-    }
-    Tick(engine);
-
-    if (!m_impl->visible && !m_impl->telemetryVisible) {
-        return;
-    }
-
-    m_impl->gui.SetFontAtlas(engine.GetFontAtlas());
-    GUI::Frame ui = m_impl->gui.BeginFrame(engine.ConsumeUIInput(dt));
-    if (m_impl->visible && m_impl->benchmark != nullptr) {
-        m_impl->DrawBenchmarkPanel(ui);
-    }
-    if (m_impl->telemetryVisible) {
-        m_impl->DrawTelemetryPanel(ui, engine);
-    }
-    engine.SubmitUI(std::move(ui).End());
-}
-
-void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
+void Viewer::DrawPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1187,12 +1132,12 @@ void BenchmarkViewer::DrawPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
     }
 }
 
-void BenchmarkViewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::Engine& engine) {
+void Viewer::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     Tick(engine);
     m_impl->DrawTelemetryPanel(ui, engine);
 }
 
-void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::Engine& engine) {
+void Viewer::DrawPanels(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
     if (m_impl->benchmark == nullptr) {
         Attach(engine, m_impl->pendingEntities);
     }
@@ -1206,31 +1151,35 @@ void BenchmarkViewer::DrawPanels(GUI::Frame& ui, ZHLN::Engine& engine) {
     }
 }
 
-void BenchmarkViewer::SetVisible(bool visible) noexcept {
+void Viewer::SetFontAtlas(const FontAtlas* atlas) noexcept {
+    m_impl->atlas = atlas;
+}
+
+void Viewer::SetVisible(bool visible) noexcept {
     m_impl->visible = visible;
 }
 
-auto BenchmarkViewer::IsVisible() const noexcept -> bool {
+auto Viewer::IsVisible() const noexcept -> bool {
     return m_impl->visible;
 }
 
-void BenchmarkViewer::ToggleVisible() noexcept {
+void Viewer::ToggleVisible() noexcept {
     m_impl->visible = !m_impl->visible;
 }
 
-void BenchmarkViewer::SetTelemetryVisible(bool visible) noexcept {
+void Viewer::SetTelemetryVisible(bool visible) noexcept {
     m_impl->telemetryVisible = visible;
 }
 
-auto BenchmarkViewer::IsTelemetryVisible() const noexcept -> bool {
+auto Viewer::IsTelemetryVisible() const noexcept -> bool {
     return m_impl->telemetryVisible;
 }
 
-void BenchmarkViewer::ToggleTelemetryVisible() noexcept {
+void Viewer::ToggleTelemetryVisible() noexcept {
     m_impl->telemetryVisible = !m_impl->telemetryVisible;
 }
 
-void BenchmarkViewer::SetRunning(bool running) noexcept {
+void Viewer::SetRunning(bool running) noexcept {
     if (running && !m_impl->running) {
         m_impl->frameClock.ResetFixedAccumulator();
     }
@@ -1238,23 +1187,23 @@ void BenchmarkViewer::SetRunning(bool running) noexcept {
     m_impl->frameClock.SetPaused(!running);
 }
 
-auto BenchmarkViewer::IsRunning() const noexcept -> bool {
+auto Viewer::IsRunning() const noexcept -> bool {
     return m_impl->running;
 }
 
-auto BenchmarkViewer::GetBenchmark() noexcept -> LogicBenchmark* {
+auto Viewer::GetBenchmark() noexcept -> LogicBenchmark* {
     return m_impl->benchmark.get();
 }
 
-auto BenchmarkViewer::GetBenchmark() const noexcept -> const LogicBenchmark* {
+auto Viewer::GetBenchmark() const noexcept -> const LogicBenchmark* {
     return m_impl->benchmark.get();
 }
 
-auto BenchmarkViewer::GetFrameTelemetry() noexcept -> FrameTelemetry& {
+auto Viewer::GetFrameTelemetry() noexcept -> FrameTelemetry& {
     return m_impl->telemetry;
 }
 
-auto BenchmarkViewer::GetFrameTelemetry() const noexcept -> const FrameTelemetry& {
+auto Viewer::GetFrameTelemetry() const noexcept -> const FrameTelemetry& {
     return m_impl->telemetry;
 }
 

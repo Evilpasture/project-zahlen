@@ -93,39 +93,45 @@ class SkipList {
     // Like AssetCache::With: void visitors get bool, value visitors get
     // std::optional<Ret>. The reader lease covers the whole call in both cases.
     template <typename Fn>
-        requires std::invocable<Fn, const Value&>
-    [[nodiscard]] auto With(const Key& key, Fn&& fn) const noexcept {
-        using Result = std::invoke_result_t<Fn, const Value&>;
+        requires std::invocable<Fn, const Value&> && std::is_void_v<std::invoke_result_t<Fn, const Value&>>
+    auto With(const Key& key, Fn&& fn) const noexcept -> bool {
         const_cast<SkipList*>(this)->EnterReader();
-        if constexpr (std::is_void_v<Result>) {
-            const bool found = WithUnlocked(key, std::forward<Fn>(fn));
-            const_cast<SkipList*>(this)->ExitReader();
-            return found;
-        } else {
-            using Ret = std::remove_cvref_t<Result>;
-            std::optional<Ret> result;
-            WithUnlocked(key, [&](const Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
-            const_cast<SkipList*>(this)->ExitReader();
-            return result;
-        }
+        const bool found = WithUnlocked(key, std::forward<Fn>(fn));
+        const_cast<SkipList*>(this)->ExitReader();
+        return found;
     }
 
     template <typename Fn>
-        requires std::invocable<Fn, Value&>
-    [[nodiscard]] auto With(const Key& key, Fn&& fn) noexcept {
-        using Result = std::invoke_result_t<Fn, Value&>;
+        requires std::invocable<Fn, const Value&> && (!std::is_void_v<std::invoke_result_t<Fn, const Value&>>)
+    [[nodiscard]] auto With(const Key& key, Fn&& fn) const noexcept
+        -> std::optional<std::remove_cvref_t<std::invoke_result_t<Fn, const Value&>>> {
+        using Ret = std::remove_cvref_t<std::invoke_result_t<Fn, const Value&>>;
         const_cast<SkipList*>(this)->EnterReader();
-        if constexpr (std::is_void_v<Result>) {
-            const bool found = WithUnlocked(key, std::forward<Fn>(fn));
-            const_cast<SkipList*>(this)->ExitReader();
-            return found;
-        } else {
-            using Ret = std::remove_cvref_t<Result>;
-            std::optional<Ret> result;
-            WithUnlocked(key, [&](Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
-            const_cast<SkipList*>(this)->ExitReader();
-            return result;
-        }
+        std::optional<Ret> result;
+        WithUnlocked(key, [&](const Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
+        const_cast<SkipList*>(this)->ExitReader();
+        return result;
+    }
+
+    template <typename Fn>
+        requires std::invocable<Fn, Value&> && std::is_void_v<std::invoke_result_t<Fn, Value&>>
+    auto With(const Key& key, Fn&& fn) noexcept -> bool {
+        EnterReader();
+        const bool found = WithUnlocked(key, std::forward<Fn>(fn));
+        ExitReader();
+        return found;
+    }
+
+    template <typename Fn>
+        requires std::invocable<Fn, Value&> && (!std::is_void_v<std::invoke_result_t<Fn, Value&>>)
+    [[nodiscard]] auto With(const Key& key, Fn&& fn) noexcept
+        -> std::optional<std::remove_cvref_t<std::invoke_result_t<Fn, Value&>>> {
+        using Ret = std::remove_cvref_t<std::invoke_result_t<Fn, Value&>>;
+        EnterReader();
+        std::optional<Ret> result;
+        WithUnlocked(key, [&](Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
+        ExitReader();
+        return result;
     }
 
     // Small scalar values leave the lease as a copy; nothing is borrowed.

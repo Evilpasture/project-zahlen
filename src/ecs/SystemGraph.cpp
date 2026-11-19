@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
+#include <ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
 #include <span>
@@ -383,6 +383,15 @@ size_t SystemGraphCore::GetSystemCount() const noexcept {
 
 bool SystemGraphCore::IsEmpty() const noexcept {
     return _nodes.empty();
+}
+
+void SystemGraphCore::ResetLocals() {
+    for (auto& node: _nodes) {
+        node.local.Reinitialize();
+        if (node.ecb != nullptr) {
+            node.ecb->Reset();
+        }
+    }
 }
 
 void SystemGraphCore::Clear() noexcept {

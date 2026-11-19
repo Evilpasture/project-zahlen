@@ -163,7 +163,7 @@ the reason `Take` exists.
 
 ## The subject
 
-Import is `GLTF::LoadGLBPrefabFromMemory(ctx, assetMgr, bytes, virtualPath)`
+Import is `GLTF::LoadGLBPrefabFromMemory(ctx, assetMgr, physics, bytes, virtualPath)`
 followed by `PrefabFactory::InstantiatePrefab`. The virtual path is the
 cache file's filename, so a second run and a device-lost rebuild hit the same
 prefab-cache entry. That is a **separate in-memory cache**: the importer may
@@ -251,15 +251,8 @@ Final values (the ones that matter):
   A turntable subject always lives inside 80 m, so that trades analytic PCSS
   for a noisy ray behind A-Trous. SSR is on by default; S toggles it.
 
-Write-back: `PostProcess/Shadow/RayTracing` on
-`GlobalSettingsTagComponent` singleton, AA on `MainCameraTagComponent`
-singleton. `Registry::Add` replaces, so whole components are built from the
-model. AA is the exception: the main camera owns that component, so tier
-changes use `Patch` for knobs only, with fallback `Add` if absent.
-
-Fidelity governor (`GraphicsSettingsSync.cpp`) steps quality down when present
-margin <2 ms for 90 frames, never up, never touches `Custom`. Studio look
-reports as `Custom`, so governor stays off.
+Write-back: one `GraphicsDevice::ApplySettings` call with the whole model, so
+the renderer sees a single transition rather than a field at a time.
 
 ## Camera
 

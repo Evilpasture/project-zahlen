@@ -16,11 +16,7 @@ if(NOT ZHLN_BUILD_RENDER)
         PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     )
-    target_include_directories(zahlen_render SYSTEM PRIVATE
-        ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
-    )
     target_link_libraries(zahlen_render
-        PUBLIC  zahlen_jolt_headers
         PRIVATE zahlen_presentation
         PRIVATE zahlen_warnings
     )
@@ -93,7 +89,6 @@ set(RAW_RENDER_SOURCES
     passes/simulation/ParticleUpdatePass.cpp
 )
 
-zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})
 
 set_source_files_properties(
     "${ZHLN_SHADER_CATALOG_HEADER}"
@@ -129,34 +124,32 @@ if(NOT ZHLN_SYNTAX_ONLY)
         CXX_EXTENSIONS OFF
     )
     target_compile_options(zahlen_shader_bytecode PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
-    target_link_libraries(zahlen_shader_bytecode PRIVATE zahlen_vulkan Jolt zahlen_warnings)
+    target_link_libraries(zahlen_shader_bytecode PRIVATE zahlen_vulkan zahlen_warnings)
     target_include_directories(zahlen_shader_bytecode PRIVATE
         "${CMAKE_BINARY_DIR}/generated_shaders"
         "${PROJECT_SOURCE_DIR}/src"
-    )
-    target_include_directories(zahlen_shader_bytecode SYSTEM PRIVATE
-        "${PROJECT_SOURCE_DIR}/extern/JoltPhysics"
     )
     add_dependencies(zahlen_shader_bytecode zahlen_shader_catalog)
     set(ZHLN_RENDER_SHADER_BYTECODE_OBJECTS $<TARGET_OBJECTS:zahlen_shader_bytecode>)
 endif()
 
-add_library(zahlen_render STATIC ${RENDER_SOURCES} ${ZHLN_RENDER_SHADER_BYTECODE_OBJECTS})
+add_library(zahlen_render STATIC ${RAW_RENDER_SOURCES} ${ZHLN_RENDER_SHADER_BYTECODE_OBJECTS})
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_features(zahlen_render PUBLIC cxx_std_26)
 set_target_properties(zahlen_render PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
 target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
+# zahlen_threading is an OBJECT library linked directly into zahlen_engine;
+# naming it here would embed duplicate copies of its objects in libzahlen_render.a.
 target_link_libraries(zahlen_render
-    PRIVATE  zahlen_vulkan
-    PUBLIC  zahlen_jolt_headers
+    PRIVATE zahlen_vulkan
     PRIVATE zahlen_presentation
-    PRIVATE zahlen_threading
 )
 
 target_include_directories(zahlen_render
@@ -166,7 +159,6 @@ target_include_directories(zahlen_render
 )
 
 target_include_directories(zahlen_render SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
     ${PROJECT_SOURCE_DIR}/third_party/renderdoc
 )
 

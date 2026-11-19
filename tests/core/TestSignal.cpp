@@ -50,10 +50,8 @@ struct SignalTestSuite {
             static_assert(ZHLN::Reflect::TypeHasAnnotation<ZHLN::SignalSafe, SafeHandler>());
             static_assert(ZHLN::Reflect::FunctionHasAnnotation<ZHLN::SignalSafe, SafeHandler {}>());
             static_assert(ZHLN::AsyncSignalSafeCallable<SafeHandler, const ZHLN::SignalEvent&>);
-            if constexpr (ZHLN::Reflect::ReflectionAvailable) {
-                static_assert(!ZHLN::Reflect::TypeHasAnnotation<ZHLN::SignalSafe, UnsafeHandler>());
-                static_assert(!ZHLN::AsyncSignalSafeCallable<UnsafeHandler, const ZHLN::SignalEvent&>);
-            }
+            static_assert(!ZHLN::Reflect::TypeHasAnnotation<ZHLN::SignalSafe, UnsafeHandler>());
+            static_assert(!ZHLN::AsyncSignalSafeCallable<UnsafeHandler, const ZHLN::SignalEvent&>);
             return {};
         }
 

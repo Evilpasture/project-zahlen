@@ -153,52 +153,48 @@ inline void GpuProfiler<EnumT>::Reset(uint32_t frameIndex) noexcept {
     }
     uint32_t slot = Vk::FrameSlot(frameIndex);
     vkResetQueryPool(_device, _pools[slot], 0, kQueryCount);
-    _recordedMasks[slot] = 0;
+    _recordedMasks[slot].Reset();
 
     if (_statsSupported) {
         vkResetQueryPool(_device, _statsPools[slot], 0, kStageCount);
     }
 
-    _statsBeginMasks[slot] = 0;
-    _statsEndMasks[slot]   = 0;
+    _statsBeginMasks[slot].Reset();
+    _statsEndMasks[slot].Reset();
 }
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
 void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
-    if (!_enabled) {
+    if (!_enabled || !ValidStage(stage)) {
         return;
     }
-    auto     stage_idx = static_cast<uint32_t>(stage);
-    uint32_t query_idx = stage_idx * 2;
 
     const uint32_t slot = Vk::FrameSlot(frameIndex);
-    _recordedMasks[slot] |= (uint64_t {1} << stage_idx);
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
+    _recordedMasks[slot].Set(stage);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], TimestampStartQuery(stage));
 
     if (_statsEnabled) {
-        vkCmdBeginQuery(cmd, _statsPools[slot], stage_idx, 0);
-        _statsBeginMasks[slot] |= (uint64_t {1} << stage_idx);
+        vkCmdBeginQuery(cmd, _statsPools[slot], StatsQuery(stage), 0);
+        _statsBeginMasks[slot].Set(stage);
     }
 }
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
 void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept {
-    if (!_enabled) {
+    if (!_enabled || !ValidStage(stage)) {
         return;
     }
-    auto     stage_idx = static_cast<uint32_t>(stage);
-    uint32_t query_idx = (stage_idx * 2) + 1;
 
     const uint32_t slot = Vk::FrameSlot(frameIndex);
 
-    if (_statsSupported && (_statsBeginMasks[slot] & (uint64_t {1} << stage_idx)) != 0) {
-        vkCmdEndQuery(cmd, _statsPools[slot], stage_idx);
-        _statsEndMasks[slot] |= (uint64_t {1} << stage_idx);
+    if (_statsSupported && _statsBeginMasks[slot].Contains(stage)) {
+        vkCmdEndQuery(cmd, _statsPools[slot], StatsQuery(stage));
+        _statsEndMasks[slot].Set(stage);
     }
 
-    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], TimestampEndQuery(stage));
 }
 
 template <typename EnumT>
@@ -208,35 +204,35 @@ inline void GpuProfiler<EnumT>::RetrieveResults(uint32_t frameIndex, float times
     if (!_enabled) {
         return;
     }
-    uint32_t slot = Vk::FrameSlot(frameIndex);
-    uint64_t mask = _recordedMasks[slot];
-    if (mask == 0) {
+    const uint32_t          slot = Vk::FrameSlot(frameIndex);
+    const EnumBitMask<EnumT> mask = _recordedMasks[slot];
+    if (mask.Empty()) {
         return;
     }
 
     VkQueryPool pool = _pools[slot];
 
-    for (uint32_t i = 0; i < kStageCount; ++i) {
-        if (mask & (uint64_t {1} << i)) {
-            uint32_t                start_idx = i * 2;
-            std::array<uint64_t, 2> stage_results {};
-
-            VkResult res = vkGetQueryPoolResults(
-                _device, pool, start_idx, 2, stage_results.size() * sizeof(uint64_t), stage_results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
-            );
-
-            if (res == VK_SUCCESS) {
-                float duration_ms = 0.0F;
-                if (stage_results[1] >= stage_results[0]) {
-                    duration_ms = static_cast<float>(stage_results[1] - stage_results[0]) * timestampPeriod / 1000000.0F;
-                }
-                auto             stage_enum = static_cast<EnumT>(i);
-                std::string_view name       = Reflect::EnumToString(stage_enum);
-                std::forward<Func>(callback)(name, duration_ms);
-            }
+    Reflect::ForEachEnumerator<EnumT>([&]<EnumT StageVal>() -> void {
+        if (!mask.Contains(StageVal)) {
+            return;
         }
-    }
-    _recordedMasks[slot] = 0;
+
+        std::array<uint64_t, 2> stage_results {};
+        const VkResult          res = vkGetQueryPoolResults(
+            _device, pool, TimestampStartQuery(StageVal), 2,
+            stage_results.size() * sizeof(uint64_t), stage_results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
+        );
+
+        if (res == VK_SUCCESS) {
+            float duration_ms = 0.0F;
+            if (stage_results[1] >= stage_results[0]) {
+                duration_ms = static_cast<float>(stage_results[1] - stage_results[0]) * timestampPeriod / 1000000.0F;
+            }
+            constexpr std::string_view name = Reflect::EnumToString(StageVal);
+            callback(name, duration_ms);
+        }
+    });
+    _recordedMasks[slot].Reset();
 }
 
 template <typename EnumT>
@@ -248,24 +244,26 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
     }
     const uint32_t slot = Vk::FrameSlot(frameIndex);
 
-    const uint64_t completed = _statsBeginMasks[slot] & _statsEndMasks[slot];
-    if (completed == 0) {
+    const EnumBitMask<EnumT> completed = _statsBeginMasks[slot] & _statsEndMasks[slot];
+    if (completed.Empty()) {
         return;
     }
 
     const uint32_t resultCount = static_cast<uint32_t>(std::popcount(_statsBits));
     VkQueryPool    pool        = _statsPools[slot];
 
-    for (uint32_t i = 0; i < kStageCount; ++i) {
-        if ((completed & (uint64_t {1} << i)) == 0) {
-            continue;
+    Reflect::ForEachEnumerator<EnumT>([&]<EnumT StageVal>() -> void {
+        if (!completed.Contains(StageVal)) {
+            return;
         }
 
         std::array<uint64_t, 11> results {};
-        const VkResult           res =
-            vkGetQueryPoolResults(_device, pool, i, 1, results.size() * sizeof(uint64_t), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+        const VkResult           res = vkGetQueryPoolResults(
+            _device, pool, StatsQuery(StageVal), 1,
+            results.size() * sizeof(uint64_t), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT
+        );
         if (res != VK_SUCCESS) {
-            continue;
+            return;
         }
 
         PipelineStats stats {};
@@ -287,11 +285,11 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
         take(VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT, &PipelineStats::taskInvocations);
         take(VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT, &PipelineStats::meshInvocations);
 
-        const auto stageEnum = static_cast<EnumT>(i);
-        std::forward<Func>(callback)(Reflect::EnumToString(stageEnum), stats);
-    }
-    _statsBeginMasks[slot] = 0;
-    _statsEndMasks[slot]   = 0;
+        constexpr std::string_view name = Reflect::EnumToString(StageVal);
+        callback(name, stats);
+    });
+    _statsBeginMasks[slot].Reset();
+    _statsEndMasks[slot].Reset();
 }
 
 template <typename EnumT>

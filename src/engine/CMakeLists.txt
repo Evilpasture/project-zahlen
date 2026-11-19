@@ -18,10 +18,12 @@ set(RAW_ENGINE_SOURCES
     Engine.cpp
     EngineGlobals.cpp
     InputContext.cpp
-    Kernel.cpp
+    KernelSession.cpp
     World.cpp
     VisibilityList.cpp
-    Capabilities.cpp
+    system/CharacterMotorSystem.cpp
+    com/Engine.cpp
+    com/LogicWorld.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp
@@ -31,9 +33,9 @@ set(RAW_ENGINE_SOURCES
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp
-    system/GraphicsSettingsSync.cpp
     system/DecalSystem.cpp
     system/AudioSystem.cpp
+    ArticulationContext.cpp
     system/ArticulationSystem.cpp
     system/CullingSystem.cpp
     system/PhysicsSystem.cpp
@@ -46,11 +48,9 @@ set(RAW_ENGINE_SOURCES
     system/LightingSystem.cpp
     system/EnvironmentSunSystem.cpp
     system/CameraSystem.cpp
-    Scene.cpp
 )
 
-zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
-target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
+target_sources(zahlen_engine PRIVATE ${RAW_ENGINE_SOURCES})
 
 if(USE_SANITIZERS)
     add_library(zahlen_sanitizer_options OBJECT diagnostics/SanitizerOptions.cpp)
@@ -59,7 +59,7 @@ if(USE_SANITIZERS)
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
     )
     # The rules are #embed-ed from the paths exported here, the same way the
-    # default font reaches src/gui/FontLoader.cpp: absolute, so the directive
+    # embedded resources reach consumer targets: absolute, so the directive
     # cannot drift when a file moves, and never a run-time lookup. Only one
     # level of backslash is needed around the quotes -- "PATH=\"${path}\"" reaches
     # the compiler as -DPATH="/abs/path", which is a string literal; the doubled
@@ -81,9 +81,45 @@ if(USE_SANITIZERS)
     target_sources(zahlen_engine INTERFACE
         $<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:$<TARGET_OBJECTS:zahlen_sanitizer_options>>>
     )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        foreach(_zhln_san_hook IN ITEMS
+            __asan_default_options
+            __lsan_default_options
+            __lsan_default_suppressions
+            __ubsan_default_options
+            __ubsan_default_suppressions
+            __tsan_default_options)
+            target_link_options(zahlen_engine INTERFACE
+                "$<BUILD_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:LINKER:--export-dynamic-symbol=${_zhln_san_hook}>>"
+            )
+        endforeach()
+        unset(_zhln_san_hook)
+    endif()
+endif()
+
+# First-party in-tree host executables on non-Apple, non-sanitizer builds link
+# mimalloc directly (BUILD_LOCAL_INTERFACE drops it from installed SDK exports
+# so external consumers keep their own process allocator). On ELF, pulling
+# mi_malloc_size brings in alloc.c.o (which holds every C/POSIX/glibc/C++
+# MI_OVERRIDE=ON wrapper) and --export-dynamic-symbol-list exposes the complete
+# allocator surface so the host, libzahlen_engine.so, and dlopen()-loaded
+# drivers share one mimalloc heap without leaking internal mi_* symbols.
+if(ZHLN_ENABLE_MIMALLOC AND TARGET mimalloc-static)
+    target_link_libraries(zahlen_engine INTERFACE
+        "$<BUILD_LOCAL_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:mimalloc-static>>"
+    )
+    if(UNIX AND NOT APPLE)
+        set(_zhln_mimalloc_override_list "${PROJECT_SOURCE_DIR}/cmake/mimalloc_override.list")
+        target_link_options(zahlen_engine INTERFACE
+            "$<BUILD_LOCAL_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:LINKER:--undefined=mi_malloc_size>>"
+            "$<BUILD_LOCAL_INTERFACE:$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:LINKER:--export-dynamic-symbol-list=${_zhln_mimalloc_override_list}>>"
+        )
+        unset(_zhln_mimalloc_override_list)
+    endif()
 endif()
 
 target_include_directories(zahlen_engine PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system
 )

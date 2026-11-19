@@ -1,6 +1,6 @@
 # CDN cache freshness, integrity, and retention
 
-`CDNManager::Fetch`, `Load`, and `RequestAsset` share the same
+`Manager::Fetch`, `Load`, and `RequestAsset` share the same
 `Remote::DiskCache` and HTTP revalidation path. Existing callers get automatic
 management without invalidation calls, cleanup polling, or a frame-loop hook.
 
@@ -106,7 +106,7 @@ No configuration is required for the defaults. To override them:
 #include <CDN/CDN.hpp>
 #include <chrono>
 
-const ZHLN::CDN::CDNConfig config {
+const ZHLN::CDN::Config config {
     .baseURL = "https://cdn.example.com/assets",
     .cachePolicy = {
         .maxAge = std::chrono::hours(48),
@@ -115,7 +115,7 @@ const ZHLN::CDN::CDNConfig config {
         .revalidateAfter = std::chrono::seconds::zero(), // always check, in any build
     },
 };
-auto cdn = ZHLN::CDN::CDNManager::Create(config);
+auto cdn = ZHLN::CDN::Manager::Create(config);
 ```
 
 `maxAge <= 0` disables body-age expiry; `maxBytes == 0` disables the budget.
@@ -149,7 +149,7 @@ when using `Remote::AsyncAssetFetcher` without the CDN wrapper.
 `Load` and async payloads return owned bytes even when storage fails, the entry
 exceeds the budget, or the server says `no-store`. Async `localCachePath` is
 then empty. `Fetch`, which promises a persisted path, returns
-`CDNError::CacheWrite` instead. The HTTP per-body size limit still applies.
+`Error::CacheWrite` instead. The HTTP per-body size limit still applies.
 
 Returned paths are **cache-owned**, not durable storage: later operations can
 evict them. Use `Load`/the payload's `data`, or copy a file that must outlive

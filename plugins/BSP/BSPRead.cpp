@@ -53,21 +53,23 @@ auto ReadQuotedString(std::string_view& text) noexcept -> std::optional<std::str
 template <typename T>
 auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry) -> std::expected<std::vector<T>, ErrorCode> {
     if (entry.filelen < 0 || entry.fileofs < 0 || static_cast<size_t>(entry.fileofs) + static_cast<size_t>(entry.filelen) > file.size()) {
-        return std::unexpected(BSPError::LumpOutOfBounds);
+        return std::unexpected(Error::LumpOutOfBounds);
     }
     if (entry.filelen == 0) {
         return std::vector<T> {};
     }
     if (entry.filelen % static_cast<int32_t>(sizeof(T)) != 0) {
-        return std::unexpected(BSPError::MalformedLump);
+        return std::unexpected(Error::MalformedLump);
     }
     const size_t   count = static_cast<size_t>(entry.filelen) / sizeof(T);
     std::vector<T> out(count);
     ByteReader     in(file.subspan(static_cast<size_t>(entry.fileofs), static_cast<size_t>(entry.filelen)));
     for (T& element: out) {
-        if (!ReadStruct(in, element)) {
-            return std::unexpected(BSPError::ShortRead);
+        const auto elementOpt = ReadStruct<T>(in);
+        if (!elementOpt) {
+            return std::unexpected(Error::ShortRead);
         }
+        element = *elementOpt;
     }
     return out;
 }
@@ -83,7 +85,7 @@ auto ReadTexNames(
     if (dataEntry.filelen < 0 || tableEntry.filelen < 0 || dataEntry.fileofs < 0 || tableEntry.fileofs < 0 ||
         static_cast<size_t>(dataEntry.fileofs) + static_cast<size_t>(dataEntry.filelen) > file.size() ||
         static_cast<size_t>(tableEntry.fileofs) + static_cast<size_t>(tableEntry.filelen) > file.size()) {
-        return std::unexpected(BSPError::LumpOutOfBounds);
+        return std::unexpected(Error::LumpOutOfBounds);
     }
     const auto dataSpan  = file.subspan(static_cast<size_t>(dataEntry.fileofs), static_cast<size_t>(dataEntry.filelen));
     const auto tableSpan = file.subspan(static_cast<size_t>(tableEntry.fileofs), static_cast<size_t>(tableEntry.filelen));
@@ -106,7 +108,7 @@ auto ReadTexNames(
             }
         }
         if (name.empty()) {
-            return std::unexpected(BSPError::UnresolvedTexData);
+            return std::unexpected(Error::UnresolvedTexData);
         }
         out.push_back(std::move(name));
     }
@@ -115,7 +117,7 @@ auto ReadTexNames(
 
 } // namespace
 
-auto BSPEntity::Find(std::string_view key) const noexcept -> std::string_view {
+auto Entity::Find(std::string_view key) const noexcept -> std::string_view {
     for (const auto& [k, v]: keys) {
         if (k == key) {
             return v;
@@ -124,7 +126,7 @@ auto BSPEntity::Find(std::string_view key) const noexcept -> std::string_view {
     return {};
 }
 
-auto BSPEntity::FindVector(std::string_view key) const noexcept -> std::optional<std::array<float, 3>> {
+auto Entity::FindVector(std::string_view key) const noexcept -> std::optional<std::array<float, 3>> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {
         return std::nullopt;
@@ -148,7 +150,7 @@ auto BSPEntity::FindVector(std::string_view key) const noexcept -> std::optional
     return result;
 }
 
-auto BSPEntity::FindVector(std::string_view key, float out[3]) const noexcept -> bool {
+auto Entity::FindVector(std::string_view key, float out[3]) const noexcept -> bool {
     const auto vec = FindVector(key);
     if (!vec) {
         return false;
@@ -159,7 +161,7 @@ auto BSPEntity::FindVector(std::string_view key, float out[3]) const noexcept ->
     return true;
 }
 
-auto BSPEntity::FindFloat(std::string_view key) const noexcept -> std::optional<float> {
+auto Entity::FindFloat(std::string_view key) const noexcept -> std::optional<float> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {
         return std::nullopt;
@@ -179,7 +181,7 @@ auto BSPEntity::FindFloat(std::string_view key) const noexcept -> std::optional<
     return std::nullopt;
 }
 
-auto BSPEntity::FindUInt(std::string_view key) const noexcept -> std::optional<uint32_t> {
+auto Entity::FindUInt(std::string_view key) const noexcept -> std::optional<uint32_t> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {
         return std::nullopt;
@@ -199,7 +201,7 @@ auto BSPEntity::FindUInt(std::string_view key) const noexcept -> std::optional<u
     return std::nullopt;
 }
 
-auto BSPEntity::FindInt(std::string_view key) const noexcept -> std::optional<int32_t> {
+auto Entity::FindInt(std::string_view key) const noexcept -> std::optional<int32_t> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {
         return std::nullopt;
@@ -219,14 +221,14 @@ auto BSPEntity::FindInt(std::string_view key) const noexcept -> std::optional<in
     return std::nullopt;
 }
 
-auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, BSPMap& map)
+auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, Map& map)
     -> std::expected<void, ErrorCode> {
     if (gameLumpEntry.filelen == 0) {
         return {};
     }
     if (gameLumpEntry.fileofs < 0 || gameLumpEntry.filelen < 0 ||
         static_cast<size_t>(gameLumpEntry.fileofs) + static_cast<size_t>(gameLumpEntry.filelen) > file.size()) {
-        return std::unexpected(BSPError::LumpOutOfBounds);
+        return std::unexpected(Error::LumpOutOfBounds);
     }
     if (gameLumpEntry.filelen < static_cast<int32_t>(sizeof(int32_t))) {
         return {};
@@ -235,19 +237,21 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     const auto gameLumpSpan = file.subspan(static_cast<size_t>(gameLumpEntry.fileofs), static_cast<size_t>(gameLumpEntry.filelen));
     ByteReader reader(gameLumpSpan);
 
-    int32_t lumpCount = 0;
-    if (!reader.Read(lumpCount) || lumpCount < 0) {
-        return std::unexpected(BSPError::MalformedLump);
+    const auto lumpCountOpt = reader.Read<int32_t>();
+    const int32_t lumpCount = lumpCountOpt.value_or(-1);
+    if (!lumpCountOpt || lumpCount < 0) {
+        return std::unexpected(Error::MalformedLump);
     }
 
     map.gameLumps.reserve(static_cast<size_t>(lumpCount));
     const DGameLump* sprpLump = nullptr;
 
     for (int32_t i = 0; i < lumpCount; ++i) {
-        DGameLump gl {};
-        if (!reader.Read(gl)) {
-            return std::unexpected(BSPError::ShortRead);
+        const auto glOpt = reader.Read<DGameLump>();
+        if (!glOpt) {
+            return std::unexpected(Error::ShortRead);
         }
+        const DGameLump& gl = *glOpt;
         map.gameLumps.push_back(gl);
         if (gl.id == kGameLumpStaticProps || gl.id == kGameLumpStaticPropsAlt) {
             sprpLump = &map.gameLumps.back();
@@ -264,7 +268,7 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
         if (static_cast<size_t>(gameLumpEntry.fileofs) + sprpOffset + sprpLen <= file.size()) {
             sprpOffset += static_cast<size_t>(gameLumpEntry.fileofs);
         } else {
-            return std::unexpected(BSPError::LumpOutOfBounds);
+            return std::unexpected(Error::LumpOutOfBounds);
         }
     }
 
@@ -276,24 +280,26 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     ByteReader propReader(sprpSpan);
 
     // 1. Model Dictionary
-    int32_t dictEntries = 0;
-    if (!propReader.Read(dictEntries) || dictEntries < 0) {
+    const auto dictEntriesOpt = propReader.Read<int32_t>();
+    const int32_t dictEntries = dictEntriesOpt.value_or(-1);
+    if (!dictEntriesOpt || dictEntries < 0) {
         return {};
     }
     std::vector<std::string> modelDict;
     modelDict.reserve(static_cast<size_t>(dictEntries));
     for (int32_t i = 0; i < dictEntries; ++i) {
-        char nameBuf[128] {};
-        if (!propReader.Read(nameBuf)) {
+        auto nameBufOpt = propReader.Read<std::array<char, 128>>();
+        if (!nameBufOpt) {
             return {};
         }
-        nameBuf[127] = '\0';
-        modelDict.emplace_back(nameBuf);
+        (*nameBufOpt)[127] = '\0';
+        modelDict.emplace_back(nameBufOpt->data());
     }
 
     // 2. Leaf Array
-    int32_t leafEntries = 0;
-    if (!propReader.Read(leafEntries) || leafEntries < 0) {
+    const auto leafEntriesOpt = propReader.Read<int32_t>();
+    const int32_t leafEntries = leafEntriesOpt.value_or(-1);
+    if (!leafEntriesOpt || leafEntries < 0) {
         return {};
     }
     if (!propReader.Skip(static_cast<size_t>(leafEntries) * sizeof(uint16_t))) {
@@ -301,8 +307,9 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     }
 
     // 3. Static Props
-    int32_t propCount = 0;
-    if (!propReader.Read(propCount) || propCount < 0) {
+    const auto propCountOpt = propReader.Read<int32_t>();
+    const int32_t propCount = propCountOpt.value_or(-1);
+    if (!propCountOpt || propCount < 0) {
         return {};
     }
 
@@ -330,7 +337,7 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     }
 
     if (stride < 56 || propReader.Remaining() < static_cast<size_t>(propCount) * stride) {
-        return std::unexpected(BSPError::ShortRead);
+        return std::unexpected(Error::ShortRead);
     }
 
     map.staticProps.reserve(static_cast<size_t>(propCount));
@@ -342,18 +349,18 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
         float angles[3] {};
         float lightingOrigin[3] {};
 
-        if (!propReader.Read(origin) ||
-            !propReader.Read(angles) ||
-            !propReader.Read(prop.propType) ||
-            !propReader.Read(prop.firstLeaf) ||
-            !propReader.Read(prop.leafCount) ||
-            !propReader.Read(prop.solid) ||
-            !propReader.Read(prop.flags) ||
-            !propReader.Read(prop.skin) ||
-            !propReader.Read(prop.fadeMinDist) ||
-            !propReader.Read(prop.fadeMaxDist) ||
-            !propReader.Read(lightingOrigin)) {
-            return std::unexpected(BSPError::ShortRead);
+        if (!propReader.ReadBytes(&origin, sizeof(origin)) ||
+            !propReader.ReadBytes(&angles, sizeof(angles)) ||
+            !propReader.ReadBytes(&prop.propType, sizeof(prop.propType)) ||
+            !propReader.ReadBytes(&prop.firstLeaf, sizeof(prop.firstLeaf)) ||
+            !propReader.ReadBytes(&prop.leafCount, sizeof(prop.leafCount)) ||
+            !propReader.ReadBytes(&prop.solid, sizeof(prop.solid)) ||
+            !propReader.ReadBytes(&prop.flags, sizeof(prop.flags)) ||
+            !propReader.ReadBytes(&prop.skin, sizeof(prop.skin)) ||
+            !propReader.ReadBytes(&prop.fadeMinDist, sizeof(prop.fadeMinDist)) ||
+            !propReader.ReadBytes(&prop.fadeMaxDist, sizeof(prop.fadeMaxDist)) ||
+            !propReader.ReadBytes(&lightingOrigin, sizeof(lightingOrigin))) {
+            return std::unexpected(Error::ShortRead);
         }
 
         prop.origin         = {origin[0], origin[1], origin[2]};
@@ -393,8 +400,8 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     return {};
 }
 
-auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
-    std::vector<BSPEntity> entities;
+auto ParseEntities(std::string_view text) -> std::vector<Entity> {
+    std::vector<Entity> entities;
 
     while (true) {
         SkipWhitespaceAndComments(text);
@@ -403,7 +410,7 @@ auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
         }
         text.remove_prefix(1);
 
-        BSPEntity entity;
+        Entity entity;
         while (true) {
             SkipWhitespaceAndComments(text);
             if (text.empty()) {
@@ -430,20 +437,21 @@ auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
     return entities;
 }
 
-auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCode> {
+auto Parse(std::span<const std::byte> bytes) -> std::expected<Map, ErrorCode> {
     ByteReader file(bytes);
-    BspHeader  header {};
-    if (!ReadStruct(file, header)) {
-        return std::unexpected(BSPError::FileTooSmall);
+    const auto headerOpt = ReadStruct<Header>(file);
+    if (!headerOpt) {
+        return std::unexpected(Error::FileTooSmall);
     }
+    const Header& header = *headerOpt;
     if (header.ident != kBspIdent) {
-        return std::unexpected(BSPError::InvalidIdent);
+        return std::unexpected(Error::InvalidIdent);
     }
     if (header.version < kBspVersionMin || header.version > kBspVersionMax) {
-        return std::unexpected(BSPError::UnsupportedVersion);
+        return std::unexpected(Error::UnsupportedVersion);
     }
 
-    BSPMap map;
+    Map map;
     map.version = header.version;
 
     const auto lump = [&](Lump id) -> const LumpEntry& { return header.lumps[static_cast<uint32_t>(id)]; };
@@ -452,7 +460,7 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     const LumpEntry& entitiesLump = lump(Lump::Entities);
     if (entitiesLump.filelen > 0) {
         if (entitiesLump.fileofs < 0 || static_cast<size_t>(entitiesLump.fileofs) + static_cast<size_t>(entitiesLump.filelen) > bytes.size()) {
-            return std::unexpected(BSPError::LumpOutOfBounds);
+            return std::unexpected(Error::LumpOutOfBounds);
         }
         const auto textSpan = bytes.subspan(static_cast<size_t>(entitiesLump.fileofs), static_cast<size_t>(entitiesLump.filelen));
         map.entities        = ParseEntities(std::string_view(reinterpret_cast<const char*>(textSpan.data()), textSpan.size()));
@@ -569,7 +577,7 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     const LumpEntry& leafLump = lump(Lump::Leafs);
     if (leafLump.filelen > 0) {
         if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {
-            return std::unexpected(BSPError::LumpOutOfBounds);
+            return std::unexpected(Error::LumpOutOfBounds);
         }
 
         size_t stride = 0;
@@ -584,16 +592,18 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         }
 
         if (stride == 0) {
-            return std::unexpected(BSPError::MalformedLump);
+            return std::unexpected(Error::MalformedLump);
         }
 
         ByteReader   in(bytes.subspan(static_cast<size_t>(leafLump.fileofs), static_cast<size_t>(leafLump.filelen)));
         const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
         map.leafs.resize(count);
         for (DLeaf& leaf: map.leafs) {
-            if (!ReadStruct(in, leaf) || !in.Skip(stride - sizeof(DLeaf))) {
-                return std::unexpected(BSPError::ShortRead);
+            const auto leafOpt = ReadStruct<DLeaf>(in);
+            if (!leafOpt || !in.Skip(stride - sizeof(DLeaf))) {
+                return std::unexpected(Error::ShortRead);
             }
+            leaf = *leafOpt;
         }
     }
 

@@ -7,7 +7,7 @@ This is the offline half of the engine's TTF decoupling: core never rasterises
 fonts at runtime, it only decodes cooked 'FNT0' containers (see
 include/Zahlen/gui/FontLoader.hpp and the CookedFontHeader in
 include/Zahlen/CreativeWorksManager.hpp). The zero-asset standalone build needs
-one such container embedded in the engine (src/gui/FontLoader.cpp #embeds the
+one such container embedded in extensions/UI/FontLoader.cpp (which #embeds the
 file this script writes), and its source data is the public-domain Font8x8
 bitmap table -- not a TTF, so no outline-font parser is involved anywhere in
 core or in its build.

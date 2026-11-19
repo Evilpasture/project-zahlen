@@ -197,7 +197,7 @@ size_t WriteHeader(char* data, size_t size, size_t count, void* userData) noexce
     return line.size();
 }
 
-// libcurl's transfer codes, grouped onto the eight HTTPError reports.
+// libcurl's transfer codes, grouped onto the eight Error reports.
 //
 // Grouped by name, never by value: libcurl promises not to renumber CURLcode,
 // but a name says what it means and a value does not, and the switch is the
@@ -206,7 +206,7 @@ size_t WriteHeader(char* data, size_t size, size_t count, void* userData) noexce
 // named -- HTTP/3, QUIC, the proxy-specific ones -- and arrive in the default,
 // which is the honest bucket for "a failure this build was not written
 // against".
-auto MapCURLError(CURLcode code) noexcept -> HTTPError {
+auto MapCURLError(CURLcode code) noexcept -> Error {
     switch (code) {
         // A handle that could not be created, an option curl refused, or an
         // allocation that failed: the client itself, not the network.
@@ -217,13 +217,13 @@ auto MapCURLError(CURLcode code) noexcept -> HTTPError {
         case CURLE_BAD_FUNCTION_ARGUMENT:
         case CURLE_UNKNOWN_OPTION:
         case CURLE_SETOPT_OPTION_SYNTAX:
-            return HTTPError::InternalError;
+            return Error::InternalError;
 
         // The URL could not be turned into a request at all.
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_URL_MALFORMAT:
         case CURLE_NOT_BUILT_IN:
-            return HTTPError::InvalidURL;
+            return Error::InvalidURL;
 
         // Nothing was ever going to answer, or what answered was not speaking
         // HTTP.
@@ -233,16 +233,16 @@ auto MapCURLError(CURLcode code) noexcept -> HTTPError {
         case CURLE_REMOTE_ACCESS_DENIED:
         case CURLE_WEIRD_SERVER_REPLY:
         case CURLE_GOT_NOTHING:
-            return HTTPError::ConnectionFailed;
+            return Error::ConnectionFailed;
 
         case CURLE_OPERATION_TIMEDOUT:
-            return HTTPError::Timeout;
+            return Error::Timeout;
 
         case CURLE_ABORTED_BY_CALLBACK:
-            return HTTPError::TransferFailed;
+            return Error::TransferFailed;
 
         case CURLE_TOO_MANY_REDIRECTS:
-            return HTTPError::TooManyRedirects;
+            return Error::TooManyRedirects;
 
         // Everything TLS: the handshake, and every way a certificate can be
         // rejected. Kept apart from ConnectionFailed on purpose, because the
@@ -260,10 +260,10 @@ auto MapCURLError(CURLcode code) noexcept -> HTTPError {
         case CURLE_SSL_ENGINE_NOTFOUND:
         case CURLE_SSL_ENGINE_SETFAILED:
         case CURLE_SSL_ENGINE_INITFAILED:
-            return HTTPError::SSLHandshakeFailed;
+            return Error::SSLHandshakeFailed;
 
         default:
-            return HTTPError::TransferFailed;
+            return Error::TransferFailed;
     }
 }
 
@@ -307,22 +307,22 @@ auto CarriesLineBreak(std::string_view text) noexcept -> bool {
 // MalformedRequest, so "the thing you are fetching from is wrong" and "the
 // thing you put in the request is wrong" stay two different answers. @p detail
 // names the field, which is the part an enumerator cannot carry.
-auto RequestFault(const NativeRequest& request) noexcept -> std::optional<std::pair<HTTPError, std::string>> {
+auto RequestFault(const NativeRequest& request) noexcept -> std::optional<std::pair<Error, std::string>> {
     if (request.url.empty()) {
-        return std::pair {HTTPError::InvalidURL, std::string("URL is empty")};
+        return std::pair {Error::InvalidURL, std::string("URL is empty")};
     }
     if (CarriesLineBreak(request.url)) {
-        return std::pair {HTTPError::InvalidURL, std::string("URL carries a CR, LF or NUL")};
+        return std::pair {Error::InvalidURL, std::string("URL carries a CR, LF or NUL")};
     }
     if (!IsToken(request.method)) {
-        return std::pair {HTTPError::MalformedRequest, "method \"" + std::string(request.method) + "\" is not an HTTP token"};
+        return std::pair {Error::MalformedRequest, "method \"" + std::string(request.method) + "\" is not an HTTP token"};
     }
     for (const Header& header: request.headers) {
         if (!IsToken(header.name)) {
-            return std::pair {HTTPError::MalformedRequest, "header name \"" + header.name + "\" is not an HTTP token"};
+            return std::pair {Error::MalformedRequest, "header name \"" + header.name + "\" is not an HTTP token"};
         }
         if (CarriesLineBreak(header.value)) {
-            return std::pair {HTTPError::MalformedRequest, "value of header \"" + header.name + "\" carries a CR, LF or NUL"};
+            return std::pair {Error::MalformedRequest, "value of header \"" + header.name + "\" carries a CR, LF or NUL"};
         }
     }
     return std::nullopt;
@@ -333,7 +333,7 @@ auto RequestFault(const NativeRequest& request) noexcept -> std::optional<std::p
 // CURLE_OK means the transfer completed, whatever the server said about it: a
 // 404 is a completed transfer with statusCode 404. Anything else leaves
 // libcurl's own description of what went wrong in the second pair element, which is the part
-// HTTPError cannot express -- the host that did not resolve, the certificate
+// Error cannot express -- the host that did not resolve, the certificate
 // that did not verify.
 auto Perform(const NativeRequest& request, NativeResponse& response) noexcept -> std::pair<CURLcode, std::string> {
     // The request is expected to have been through RequestFault, which Fetch does
@@ -493,11 +493,11 @@ auto Perform(const NativeRequest& request, NativeResponse& response) noexcept ->
     return {CURLE_OK, {}};
 }
 
-// HTTPError says which kind of thing went wrong; the detail says which host,
+// Error says which kind of thing went wrong; the detail says which host,
 // which field, which certificate. That text has nowhere to live in a
 // std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
 // whoever is debugging a fetch, silent by default.
-void LogFailure(const Request& request, HTTPError failure, std::string_view detail) {
+void LogFailure(const Request& request, Error failure, std::string_view detail) {
     ZHLN::LogError<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, failure, detail);
 }
 

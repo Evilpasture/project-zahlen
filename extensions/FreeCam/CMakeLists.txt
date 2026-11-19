@@ -1,12 +1,7 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/FreeCam -- first-person fly camera (zahlen_freecam).
-#
-# Core's FreeCamTagComponent is a marker. This target owns the speed knobs
-# and the Camera-phase step that writes Camera pose from WASD/RMB.
-#
-# Public headers are reached as <FreeCam/FreeCam.hpp>.
+# First-person fly camera policy, explicitly driven by a COM host.
 
 set(TARGET_NAME zahlen_freecam)
 
@@ -34,3 +29,8 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_freecam freecam FreeCamPlugin.cpp)
+    target_link_libraries(zahlen_plugin_freecam PRIVATE zahlen_freecam)
+endif()

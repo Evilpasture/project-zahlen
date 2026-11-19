@@ -32,6 +32,8 @@ VULKAN_BUILD_MODE_TOKEN_RE = re.compile(r"\b(?:isDev|isDebug|ZHLN_DEV_MODE|ZHLN_
 
 # Explicit internal src/<owner> -> src/<dependency> seam allowlist.
 ALLOWED_INTERNAL_SUBSYSTEM_DEPS: dict[str, frozenset[str]] = {
+    "engine": frozenset({"render", "physics", "audio", "window", "ecs", "filesystem", "presentation"}),
+    "ecs": frozenset({"engine"}),
     "render": frozenset({"vulkan", "presentation"}),
     "window": frozenset({"presentation"}),
 }
@@ -45,12 +47,12 @@ ALLOWED_INTERNAL_HEADER_EXCEPTIONS: frozenset[tuple[str, str, str]] = frozenset(
 # libzahlen_render.a free of zahlen_window and zahlen_filesystem symbol edges.
 FORBIDDEN_RENDER_PUBLIC_INCLUDES: tuple[str, ...] = (
     "Zahlen/FileSystem/",
+    "filesystem/",
     # Current spellings.
     "Zahlen/Window/",
     # Legacy spellings kept alive by the forwarding shims.
-    "Zahlen/Window/Window.hpp",
+    "window/",
     "Zahlen/Window/WindowInput.hpp",
-    "Zahlen/Window/PlatformHost.hpp",
 )
 
 FORBIDDEN_RENDER_CMAKE_TOKENS_RE = re.compile(

@@ -14,8 +14,11 @@
 #include <cstring>
 #include <memory>
 
-extern "C" void ZHLN_Switch(void** old_sp, void* new_sp);
-extern "C" void ZHLN_TrampolineAsm(void);
+// Hidden for the same reason the assembly hides them: these must bind to this
+// image's own copy, never to one preempted out of a consumer executable.
+// Saying so here also lets the compiler call them without a PLT indirection.
+extern "C" [[gnu::visibility("hidden")]] void ZHLN_Switch(void** old_sp, void* new_sp);
+extern "C" [[gnu::visibility("hidden")]] void ZHLN_TrampolineAsm(void);
 
 namespace ZHLN {
 
@@ -41,7 +44,7 @@ struct InitialStackFrame {
 thread_local Fiber  t_mainFiber;
 thread_local Fiber* t_currentFiber = nullptr;
 
-extern "C" void ZHLN_Trampoline() {
+extern "C" [[gnu::visibility("hidden")]] void ZHLN_Trampoline() {
     Fiber* self = t_currentFiber;
     if (self->func != nullptr) {
         self->func(self->arg);

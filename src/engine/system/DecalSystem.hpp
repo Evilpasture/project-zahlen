@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/ECS/SystemParameters.hpp>
+#include <ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 class RenderContext;

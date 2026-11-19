@@ -18,8 +18,11 @@
 #   - check_error_ordinals.py       (no raw ErrorCode ordinal casts outside allowlist)
 #   - check_include_provenance.pl   (direct/transitive header provenance across tracked symbols)
 #   - check_handle_taxonomy.py     (IDs, facades, scopes and owners stay separate; no public *Handle or *Id)
+#   - check_capability_boundary.py (optional layers consume capabilities, not the engine's internal services)
+#   - check_image_boundary.py      (private image codec containment; Core stays codec-free)
+#   - check_engine_exports.py      (hidden visibility, --exclude-libs, ZHLN_API <-> version-script parity, DSO nm audit)
 #
-# configure/run_governance_checks.py runs all 12 checks concurrently across CPU
+# configure/run_governance_checks.py runs all checks concurrently across CPU
 # cores and caches passing tree fingerprints in ${CMAKE_BINARY_DIR}/.zhln_governance_cache.json
 # keyed by (path, mtime_ns, size) of every governed source, CMake file, checker,
 # and allowlist (set ZHLN_GOVERNANCE_CACHE=0 to force a full uncached sweep).

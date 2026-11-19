@@ -35,4 +35,11 @@
 #define ZHLN_STATIC_API [[gnu::visibility("default")]]
 #endif
 
-struct ZHLN_Engine;
+// Entry point exported from a dynamically loaded module (such as a COM plugin)
+// and resolved at runtime via SharedLibrary rather than through an import
+// library. Unlike ZHLN_API, this never becomes __declspec(dllimport).
+#if defined(_WIN32)
+#define ZHLN_EXPORT __declspec(dllexport)
+#else
+#define ZHLN_EXPORT [[gnu::visibility("default")]]
+#endif

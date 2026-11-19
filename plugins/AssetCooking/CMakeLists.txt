@@ -4,7 +4,7 @@
 # Offline/host-side codecs. AssetPipeline defines this target even when the
 # optional runtime layers are disabled: zcook always needs it, and a host may
 # opt in to decoding source environments before registering their pixels.
-zahlen_transpile_sources(ASSET_COOKING_SOURCES EnvironmentPreparation.cpp RadianceDecoder.cpp RadianceEncoder.cpp)
+set(ASSET_COOKING_SOURCES EnvironmentPreparation.cpp RadianceDecoder.cpp RadianceEncoder.cpp)
 
 add_library(zahlen_asset_cooking STATIC ${ASSET_COOKING_SOURCES})
 set_target_properties(zahlen_asset_cooking PROPERTIES
@@ -16,7 +16,7 @@ set_target_properties(zahlen_asset_cooking PROPERTIES
 
 target_include_directories(zahlen_asset_cooking PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
 target_include_directories(zahlen_asset_cooking PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(zahlen_asset_cooking SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
+target_link_libraries(zahlen_asset_cooking PRIVATE zahlen_image)
 # zahlen_filesystem is not linked: it is PRIVATE to zahlen_engine, so its
 # objects are already in libzahlen_engine.so, and RadianceDecoder.cpp only takes
 # a const FS::VirtualFileSystem& -- an ZHLN_API type whose symbols the .so
@@ -28,6 +28,5 @@ target_link_libraries(zahlen_asset_cooking
     PRIVATE zahlen_warnings
 )
 
-# ErrorCode's diagnostic names use the reflection configuration. stb_image's
-# implementation is already compiled into zahlen_engine; do not duplicate it.
+# ErrorCode's diagnostic names use the reflection configuration.
 zahlen_enable_reflection(zahlen_asset_cooking)

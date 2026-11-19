@@ -4,6 +4,7 @@
 // gameplay/ProjectLight/DataModel/DataModel.cpp
 
 #include <DataModel/DataModel.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
@@ -13,7 +14,7 @@
 
 namespace ZHLN::ProjectLight {
 
-struct DataModelState: JPH::RefTarget<DataModelState> {
+struct DataModelState: RefTarget<DataModelState> {
     InstanceId nextID = 1;
     bool        ownerAlive = true;
     // The local root has a stable internal alias even while its protocol ID
@@ -31,8 +32,8 @@ consteval auto ReflectedClassName() noexcept -> std::string_view {
     return ZHLN::Reflect::TypeName<T>();
 }
 
-auto SameVec3(const JPH::Vec3& lhs, const JPH::Vec3& rhs) noexcept -> bool {
-    return lhs.GetX() == rhs.GetX() && lhs.GetY() == rhs.GetY() && lhs.GetZ() == rhs.GetZ();
+auto SameVec3(const FVec3& lhs, const FVec3& rhs) noexcept -> bool {
+    return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
 auto WithDefaultName(std::string name, std::string_view fallback) -> std::string {
@@ -63,7 +64,7 @@ auto DefaultServiceName(std::string_view className, std::string name) -> std::st
 
 } // namespace
 
-Instance::Instance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot):
+Instance::Instance(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot):
     m_state(state), m_id(id), m_className(std::move(className)), m_name(name.empty() ? m_className : std::move(name)), m_isRoot(isRoot) {
 }
 
@@ -404,7 +405,7 @@ void Instance::DestroyChildren() {
     }
 }
 
-Service::Service(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
+Service::Service(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
     Instance(state, id, std::move(className), std::move(name)) {
 }
 
@@ -421,7 +422,7 @@ auto Service::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<Service>() || Instance::IsA(className);
 }
 
-WorkspaceService::WorkspaceService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+WorkspaceService::WorkspaceService(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Service(state, id, std::string(ReflectedClassName<WorkspaceService>()), WithDefaultName(std::move(name), "Workspace")) {
 }
 
@@ -445,12 +446,12 @@ auto WorkspaceService::SetCurrentCamera(const InstancePtr& camera) -> std::expec
     return {};
 }
 
-PlayersService::PlayersService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+PlayersService::PlayersService(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Service(state, id, std::string(ReflectedClassName<PlayersService>()), WithDefaultName(std::move(name), "Players")) {
 }
 
-auto PlayersService::GetPlayers() const -> std::vector<JPH::Ref<Player>> {
-    std::vector<JPH::Ref<Player>> players;
+auto PlayersService::GetPlayers() const -> std::vector<Ref<Player>> {
+    std::vector<Ref<Player>> players;
     for (const InstancePtr& child: GetChildren()) {
         if (child->ClassName() == ReflectedClassName<Player>()) {
             players.push_back(StaticRefCast<Player>(child));
@@ -459,7 +460,7 @@ auto PlayersService::GetPlayers() const -> std::vector<JPH::Ref<Player>> {
     return players;
 }
 
-auto PlayersService::FindPlayerByUserId(uint64_t userId) const -> JPH::Ref<Player> {
+auto PlayersService::FindPlayerByUserId(uint64_t userId) const -> Ref<Player> {
     for (const auto& player: GetPlayers()) {
         if (player->UserId() == userId) {
             return player;
@@ -468,11 +469,11 @@ auto PlayersService::FindPlayerByUserId(uint64_t userId) const -> JPH::Ref<Playe
     return {};
 }
 
-auto PlayersService::LocalPlayer() const noexcept -> JPH::Ref<Player> {
+auto PlayersService::LocalPlayer() const noexcept -> Ref<Player> {
     return StaticRefCast<Player>(ResolveInstance(m_localPlayerId));
 }
 
-auto PlayersService::SetLocalPlayer(const JPH::Ref<Player>& player) -> std::expected<void, DataModelError> {
+auto PlayersService::SetLocalPlayer(const Ref<Player>& player) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -492,11 +493,11 @@ auto PlayersService::SetLocalPlayer(const JPH::Ref<Player>& player) -> std::expe
     return {};
 }
 
-LightingService::LightingService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+LightingService::LightingService(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Service(state, id, std::string(ReflectedClassName<LightingService>()), WithDefaultName(std::move(name), "Lighting")) {
 }
 
-PhysicsService::PhysicsService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+PhysicsService::PhysicsService(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Service(state, id, std::string(ReflectedClassName<PhysicsService>()), WithDefaultName(std::move(name), "Physics")) {
 }
 
@@ -508,27 +509,27 @@ void PhysicsService::SetServerAuthority(bool value) {
     NotifyChanged("ServerAuthority");
 }
 
-SoundService::SoundService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+SoundService::SoundService(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Service(state, id, std::string(ReflectedClassName<SoundService>()), WithDefaultName(std::move(name), "SoundService")) {
 }
 
-OpaqueService::OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name):
+OpaqueService::OpaqueService(const Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name):
     Service(state, id, std::string(className), DefaultServiceName(className, std::move(name))) {
 }
 
-Folder::Folder(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Folder::Folder(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Folder>()), std::move(name)) {
 }
 
-Model::Model(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Model::Model(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Model>()), std::move(name)) {
 }
 
-auto Model::PrimaryPart() const noexcept -> JPH::Ref<BasePart> {
+auto Model::PrimaryPart() const noexcept -> Ref<BasePart> {
     return StaticRefCast<BasePart>(ResolveInstance(m_primaryPartId));
 }
 
-auto Model::SetPrimaryPart(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError> {
+auto Model::SetPrimaryPart(const Ref<BasePart>& part) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -548,7 +549,7 @@ auto Model::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<Model>() || className == "PVInstance" || Instance::IsA(className);
 }
 
-BasePart::BasePart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
+BasePart::BasePart(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
     Instance(state, id, std::move(className), std::move(name)) {
 }
 
@@ -556,11 +557,11 @@ auto BasePart::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<BasePart>() || className == "PVInstance" || Instance::IsA(className);
 }
 
-auto BasePart::NetworkOwner() const noexcept -> JPH::Ref<Player> {
+auto BasePart::NetworkOwner() const noexcept -> Ref<Player> {
     return StaticRefCast<Player>(ResolveInstance(m_networkOwnerId));
 }
 
-void BasePart::SetPosition(const JPH::Vec3& value) {
+void BasePart::SetPosition(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_position, value)) {
         return;
     }
@@ -568,7 +569,7 @@ void BasePart::SetPosition(const JPH::Vec3& value) {
     NotifyChanged("Position");
 }
 
-void BasePart::SetRotation(const JPH::Vec3& value) {
+void BasePart::SetRotation(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_rotationEuler, value)) {
         return;
     }
@@ -576,7 +577,7 @@ void BasePart::SetRotation(const JPH::Vec3& value) {
     NotifyChanged("Rotation");
 }
 
-void BasePart::SetSize(const JPH::Vec3& value) {
+void BasePart::SetSize(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_size, value)) {
         return;
     }
@@ -584,7 +585,7 @@ void BasePart::SetSize(const JPH::Vec3& value) {
     NotifyChanged("Size");
 }
 
-void BasePart::SetColor(const JPH::Vec3& value) {
+void BasePart::SetColor(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_color, value)) {
         return;
     }
@@ -620,7 +621,7 @@ void BasePart::SetTransparency(float value) {
     NotifyChanged("Transparency");
 }
 
-auto BasePart::SetNetworkOwner(const JPH::Ref<Player>& player) -> std::expected<void, DataModelError> {
+auto BasePart::SetNetworkOwner(const Ref<Player>& player) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -636,7 +637,7 @@ auto BasePart::SetNetworkOwner(const JPH::Ref<Player>& player) -> std::expected<
     return {};
 }
 
-Part::Part(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Part::Part(const Ref<DataModelState>& state, InstanceId id, std::string name):
     BasePart(state, id, std::string(ReflectedClassName<Part>()), std::move(name)) {
 }
 
@@ -700,7 +701,7 @@ void Part::SetRightSurface(PartSurface value) {
     NotifyChanged("RightSurface");
 }
 
-MeshPart::MeshPart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+MeshPart::MeshPart(const Ref<DataModelState>& state, InstanceId id, std::string name):
     BasePart(state, id, std::string(ReflectedClassName<MeshPart>()), std::move(name)) {
 }
 
@@ -716,11 +717,11 @@ void MeshPart::SetMeshId(std::string value) {
     NotifyChanged("MeshId");
 }
 
-SpawnPoint::SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+SpawnPoint::SpawnPoint(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<SpawnPoint>()), std::move(name)) {
 }
 
-void SpawnPoint::SetPosition(const JPH::Vec3& value) {
+void SpawnPoint::SetPosition(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_position, value)) {
         return;
     }
@@ -728,7 +729,7 @@ void SpawnPoint::SetPosition(const JPH::Vec3& value) {
     NotifyChanged("Position");
 }
 
-void SpawnPoint::SetRotation(const JPH::Vec3& value) {
+void SpawnPoint::SetRotation(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_rotation, value)) {
         return;
     }
@@ -736,7 +737,7 @@ void SpawnPoint::SetRotation(const JPH::Vec3& value) {
     NotifyChanged("Rotation");
 }
 
-Decal::Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Decal::Decal(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Decal>()), std::move(name)) {
 }
 
@@ -748,7 +749,7 @@ void Decal::SetTextureID(std::string value) {
     NotifyChanged("TextureId");
 }
 
-void Decal::SetColor(const JPH::Vec3& value) {
+void Decal::SetColor(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_color, value)) {
         return;
     }
@@ -796,7 +797,7 @@ void Decal::SetTransparency(float value) {
     NotifyChanged("Transparency");
 }
 
-Sound::Sound(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Sound::Sound(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Sound>()), std::move(name)) {
 }
 
@@ -844,7 +845,7 @@ void Sound::Stop() {
     SetPlaying(false);
 }
 
-Motor::Motor(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Motor::Motor(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Motor>()), std::move(name)) {
 }
 
@@ -852,11 +853,11 @@ auto Motor::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<Motor>() || className == "Weld" || className == "JointInstance" || Instance::IsA(className);
 }
 
-auto Motor::Part1() const noexcept -> JPH::Ref<BasePart> {
+auto Motor::Part1() const noexcept -> Ref<BasePart> {
     return StaticRefCast<BasePart>(ResolveInstance(m_part1Id));
 }
 
-auto Motor::SetPart1(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError> {
+auto Motor::SetPart1(const Ref<BasePart>& part) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -872,11 +873,11 @@ auto Motor::SetPart1(const JPH::Ref<BasePart>& part) -> std::expected<void, Data
     return {};
 }
 
-auto Motor::Part2() const noexcept -> JPH::Ref<BasePart> {
+auto Motor::Part2() const noexcept -> Ref<BasePart> {
     return StaticRefCast<BasePart>(ResolveInstance(m_part2Id));
 }
 
-auto Motor::SetPart2(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError> {
+auto Motor::SetPart2(const Ref<BasePart>& part) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -892,7 +893,7 @@ auto Motor::SetPart2(const JPH::Ref<BasePart>& part) -> std::expected<void, Data
     return {};
 }
 
-void Motor::SetOffset1(const JPH::Vec3& value) {
+void Motor::SetOffset1(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_offset1, value)) {
         return;
     }
@@ -900,7 +901,7 @@ void Motor::SetOffset1(const JPH::Vec3& value) {
     NotifyChanged("Offset1");
 }
 
-void Motor::SetOffset2(const JPH::Vec3& value) {
+void Motor::SetOffset2(const FVec3& value) {
     if (IsDestroyed() || SameVec3(m_offset2, value)) {
         return;
     }
@@ -932,11 +933,11 @@ void Motor::SetMaxVelocity(float value) {
     NotifyChanged("MaxVelocity");
 }
 
-Humanoid::Humanoid(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Humanoid::Humanoid(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Humanoid>()), std::move(name)) {
 }
 
-auto Humanoid::RootPart() const noexcept -> JPH::Ref<BasePart> {
+auto Humanoid::RootPart() const noexcept -> Ref<BasePart> {
     return StaticRefCast<BasePart>(ResolveInstance(m_rootPartId));
 }
 
@@ -982,7 +983,7 @@ void Humanoid::SetState(HumanoidState value) {
     StateChanged.Fire(oldState, value);
 }
 
-auto Humanoid::SetRootPart(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError> {
+auto Humanoid::SetRootPart(const Ref<BasePart>& part) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -1002,11 +1003,11 @@ auto Humanoid::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<Humanoid>() || Instance::IsA(className);
 }
 
-Player::Player(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):
+Player::Player(const Ref<DataModelState>& state, InstanceId id, std::string name):
     Instance(state, id, std::string(ReflectedClassName<Player>()), std::move(name)) {
 }
 
-auto Player::Character() const noexcept -> JPH::Ref<Model> {
+auto Player::Character() const noexcept -> Ref<Model> {
     return StaticRefCast<Model>(ResolveInstance(m_characterId));
 }
 
@@ -1018,7 +1019,7 @@ void Player::SetUserId(uint64_t value) {
     NotifyChanged("UserId");
 }
 
-auto Player::SetCharacter(const JPH::Ref<Model>& character) -> std::expected<void, DataModelError> {
+auto Player::SetCharacter(const Ref<Model>& character) -> std::expected<void, DataModelError> {
     if (IsDestroyed()) {
         return std::unexpected(DataModelError::DestroyedInstance);
     }
@@ -1038,7 +1039,7 @@ auto Player::IsA(std::string_view className) const noexcept -> bool {
     return className == ReflectedClassName<Player>() || Instance::IsA(className);
 }
 
-OpaqueInstance::OpaqueInstance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
+OpaqueInstance::OpaqueInstance(const Ref<DataModelState>& state, InstanceId id, std::string className, std::string name):
     Instance(state, id, std::move(className), std::move(name)) {
 }
 
@@ -1105,7 +1106,7 @@ auto DataModel::FindById(InstanceId id) const noexcept -> InstancePtr {
     return InstancePtr {*found};
 }
 
-auto DataModel::GetService(std::string_view nameOrClass) const -> JPH::Ref<Service> {
+auto DataModel::GetService(std::string_view nameOrClass) const -> Ref<Service> {
     for (const InstancePtr& child: m_root->GetChildren()) {
         if (!child->IsService()) {
             continue;

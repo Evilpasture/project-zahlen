@@ -11,16 +11,31 @@
 // disagree about. Ordinary Zahlen code keeps using std::string_view, std::span
 // and std::expected -- the conversion lives at the boundary declaration.
 
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
 namespace ZHLN::COM {
+
+// Failures the COM protocol or surface itself produces, distinct from the
+// subsystem ErrorCode categories forwarded from the engine.
+enum class Error : uint8_t {
+    AllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"COM object allocation failed."> {}) = 1,
+    AssetNotCached       ZHLN_ANNOTATION(ZHLN::Description<"Requested asset is not present in the engine cache."> {}) = 2,
+    NullArgument         ZHLN_ANNOTATION(ZHLN::Description<"Required COM pointer or chain node payload is null."> {}) = 3,
+    LayoutMismatch       ZHLN_ANNOTATION(ZHLN::Description<"COM chain node size or reflected layout hash disagrees with the library."> {}) = 4,
+    UnsupportedExtension ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains an unrecognized structure type."> {}) = 5,
+    DuplicateExtension   ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains duplicate structure types or a cycle."> {}) = 6,
+    InvalidArgument      ZHLN_ANNOTATION(ZHLN::Description<"COM descriptor arguments are incomplete or invalid."> {}) = 7,
+};
 
 struct StringView {
     const char* data = nullptr;
@@ -63,6 +78,11 @@ struct Span {
     constexpr Span(Range&& range) noexcept: Span(std::span<T>(std::forward<Range>(range))) {
     }
 
+    [[nodiscard]] constexpr bool empty() const noexcept { return size == 0; }
+    [[nodiscard]] constexpr T& operator[](size_t index) const noexcept { return data[index]; }
+    [[nodiscard]] constexpr T* begin() const noexcept { return data; }
+    [[nodiscard]] constexpr T* end() const noexcept { return data + size; }
+
     [[nodiscard]] constexpr operator std::span<T>() const noexcept {
         return {data, size};
     }
@@ -74,8 +94,59 @@ struct Span {
 
 static_assert(std::is_standard_layout_v<Span<const std::byte>> && std::is_trivially_copyable_v<Span<const std::byte>>);
 
+// Presence as a value, not as a protocol. A `bool` return plus a `T*`
+// out-parameter is a C habit that survives into C++ only because the ABI
+// forbids std::optional: it makes the caller declare storage before it knows
+// whether anything will be put there, it cannot be returned or chained, and
+// it leaves the out-parameter's state on a miss as a thing you have to
+// document rather than a thing the type says. Option<T> is a fixed layout of
+// T plus a flag, so it crosses as an ordinary return value and the ABI audit
+// accepts it on the wire.
+//
+// The conversion to std::optional is the same bargain Result makes with
+// std::expected: the wire type is what the vtable traffics in, the standard
+// type is one implicit conversion away in the caller's own translation unit.
 template <typename T>
-struct Result {
+struct Option {
+    static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
+                  "COM::Option<T> carries T by value across the boundary; T must be a fixed-layout value.");
+
+    T    value {};
+    bool engaged = false;
+
+    constexpr Option() noexcept = default;
+    constexpr Option(T val) noexcept: value(val), engaged(true) {
+    }
+    constexpr Option(std::nullopt_t) noexcept {
+    }
+
+    [[nodiscard]] constexpr bool HasValue() const noexcept {
+        return engaged;
+    }
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
+        return engaged;
+    }
+
+    [[nodiscard]] constexpr T* operator->() noexcept { return &value; }
+    [[nodiscard]] constexpr const T* operator->() const noexcept { return &value; }
+    [[nodiscard]] constexpr T& operator*() noexcept { return value; }
+    [[nodiscard]] constexpr const T& operator*() const noexcept { return value; }
+
+    [[nodiscard]] constexpr T ValueOr(T fallback) const noexcept {
+        return engaged ? value : fallback;
+    }
+
+    [[nodiscard]] constexpr operator std::optional<T>() const noexcept {
+        if (engaged) return value;
+        return std::nullopt;
+    }
+};
+
+static_assert(std::is_standard_layout_v<Option<uint32_t>> && std::is_trivially_copyable_v<Option<uint32_t>>);
+
+template <typename T>
+struct [[nodiscard]] Result {
     static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
                   "COM::Result<T> carries T by value across the boundary; T must be a fixed-layout value.");
 
@@ -98,6 +169,15 @@ struct Result {
         return ok;
     }
 
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
+        return ok;
+    }
+
+    [[nodiscard]] constexpr T* operator->() noexcept { return &value; }
+    [[nodiscard]] constexpr const T* operator->() const noexcept { return &value; }
+    [[nodiscard]] constexpr T& operator*() noexcept { return value; }
+    [[nodiscard]] constexpr const T& operator*() const noexcept { return value; }
+
     [[nodiscard]] constexpr operator std::expected<T, ErrorCode>() const {
         if (ok) return value;
         return std::unexpected(error);
@@ -107,7 +187,7 @@ struct Result {
 static_assert(std::is_standard_layout_v<Result<uint32_t>> && std::is_trivially_copyable_v<Result<uint32_t>>);
 
 template <>
-struct Result<void> {
+struct [[nodiscard]] Result<void> {
     ErrorCode error {};
     bool      ok = true;
 
@@ -121,6 +201,10 @@ struct Result<void> {
     }
 
     [[nodiscard]] constexpr bool HasValue() const noexcept {
+        return ok;
+    }
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept {
         return ok;
     }
 

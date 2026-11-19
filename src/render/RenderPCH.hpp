@@ -13,4 +13,3 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>

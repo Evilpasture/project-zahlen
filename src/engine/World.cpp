@@ -1,19 +1,20 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ArticulationSystem.hpp"
+#include "ArticulationContext.hpp"
 #include "Hierarchy.hpp"
 #include "EngineGlobals.hpp"
+#include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Input/InputContext.hpp>
+#include <engine/EngineServices.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Engine/World.hpp>
-#include <Zahlen/Engine/VisibilityList.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <Zahlen/ECS/EntityCommandBuffer.hpp>
-#include <Zahlen/ECS/EventBus.hpp>
-#include <Zahlen/ECS/SystemGraph.hpp>
-#include <Zahlen/Physics/Physics.hpp>
+#include <engine/World.hpp>
+#include <engine/VisibilityList.hpp>
+#include <ecs/ECS.hpp>
+#include <ecs/EntityCommandBuffer.hpp>
+#include <ecs/EventBus.hpp>
+#include <ecs/SystemGraph.hpp>
+#include <physics/Physics.hpp>
 #include <new>
 #include <utility>
 #include <vector>
@@ -30,13 +31,14 @@ struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
     ECS::EventBus                   eventBus;
-    InputContext                    inputContext;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
-    std::unique_ptr<ArticulationSystem>       articulationSystem;
+    std::unique_ptr<ArticulationContext>       articulationContext;
 
     VisibilityList visibleEntities;
     VisibilityList visibleShadowEntities;
+    CullingStats   cullingStats {};
+    DebugSettings  debugSettings {};
 
     bool joltAcquired = false;
 };
@@ -50,20 +52,14 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
     instance->_impl = std::make_unique<Impl>();
     auto& impl      = *instance->_impl;
 
-    impl.registry.Create(Components::InputStateComponent {});
-
-    // The culling counters are world data (see Components::CullingStatsComponent), so
-    // the world owns them from the moment it exists rather than from whenever a scene
-    // happens to be initialized. Scene resets clear the registry and re-seed them in
-    // InitializeDefaultScene; GetCullingStats() is total either way.
-    impl.registry.Create(Components::CullingStatsComponent {});
+    impl.registry.RegisterAllComponentsIn<Components>();
 
     AcquireJoltRegistration();
     impl.joltAcquired = true;
 
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
-    impl.articulationSystem  = std::make_unique<ArticulationSystem>();
+    impl.articulationContext  = std::make_unique<ArticulationContext>();
 
     return instance;
 }
@@ -75,7 +71,7 @@ World::~World() {
 
     _impl->visibleShadowEntities.Clear();
     _impl->visibleEntities.Clear();
-    _impl->articulationSystem.reset();
+    _impl->articulationContext.reset();
     _impl->mainECB.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
@@ -121,31 +117,25 @@ auto World::GetEventBus() noexcept -> ECS::EventBus& {
 auto World::GetEventBus() const noexcept -> const ECS::EventBus& {
     return _impl->eventBus;
 }
-auto World::GetInput() noexcept -> InputContext& {
-    return _impl->inputContext;
-}
-auto World::GetInput() const noexcept -> const InputContext& {
-    return _impl->inputContext;
+
+auto World::GetArticulationContext() -> ArticulationContext& {
+    return *_impl->articulationContext;
 }
 
-auto World::GetArticulationSystem() -> ArticulationSystem& {
-    return *_impl->articulationSystem;
+auto World::GetCullingStats() noexcept -> CullingStats& {
+    return _impl->cullingStats;
 }
 
-auto World::GetCullingStats() -> CullingStats& {
-    // The culling pass publishes here: its counters are read by the overlay, the
-    // crash dump and the render tests, so they are world data. The rest of the
-    // culler is the pass's own state and stays on the pass.
-    //
-    // Total on purpose. World::Create() creates the singleton and a scene reset
-    // re-seeds it in InitializeDefaultScene, but neither is a precondition a caller
-    // can check: this used to assert on the missing singleton, and ZHLN::Assert is
-    // only a panic in dev builds -- in a ship build it is [[assume(false)]] and the
-    // dereference below it is undefined behaviour. Creating it on first access keeps
-    // the promise the return type makes. A zeroed CullingStats is the honest value
-    // for "no cull has run yet"; it is the same value the render tests assign to
-    // reset the counters.
-    return _impl->registry.GetOrEmplaceSingleton<Components::CullingStatsComponent>().stats;
+auto World::GetCullingStats() const noexcept -> const CullingStats& {
+    return _impl->cullingStats;
+}
+
+auto World::GetDebugSettings() noexcept -> DebugSettings& {
+    return _impl->debugSettings;
+}
+
+auto World::GetDebugSettings() const noexcept -> const DebugSettings& {
+    return _impl->debugSettings;
 }
 
 auto World::VisibleEntitiesForServices() noexcept -> VisibilityList& {

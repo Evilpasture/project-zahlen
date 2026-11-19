@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -64,17 +65,17 @@ struct ChamferedBoxBuilder {
             for (const float sign: {-1.0f, 1.0f}) {
                 const uint32_t u = (axis + 1) % 3;
                 const uint32_t v = (axis + 2) % 3;
-                std::vector<Vec3> corners;
+                std::vector<FVec3> corners;
                 for (const float su: {-1.0f, 1.0f}) {
                     for (const float sv: {-1.0f, 1.0f}) {
-                        Vec3 corner {};
+                        FVec3 corner {};
                         SetAxis(corner, axis, sign * kHalf);
                         SetAxis(corner, u, su * kChamfer);
                         SetAxis(corner, v, sv * kChamfer);
                         corners.push_back(corner);
                     }
                 }
-                Vec3 normal {};
+                FVec3 normal {};
                 SetAxis(normal, axis, sign);
                 emitter.Emit(normal, corners);
             }
@@ -86,17 +87,17 @@ struct ChamferedBoxBuilder {
             const uint32_t t = pair;
             for (const float sa: {-1.0f, 1.0f}) {
                 for (const float sb: {-1.0f, 1.0f}) {
-                    std::vector<Vec3> corners;
+                    std::vector<FVec3> corners;
                     for (const float st: {-1.0f, 1.0f}) {
                         for (uint32_t end = 0; end < 2; ++end) {
-                            Vec3 corner {};
+                            FVec3 corner {};
                             SetAxis(corner, t, st * kChamfer);
                             SetAxis(corner, a, (end == 0) ? sa * kHalf : sa * kChamfer);
                             SetAxis(corner, b, (end == 0) ? sb * kChamfer : sb * kHalf);
                             corners.push_back(corner);
                         }
                     }
-                    Vec3 normal {};
+                    FVec3 normal {};
                     SetAxis(normal, a, sa * kEdge);
                     SetAxis(normal, b, sb * kEdge);
                     emitter.Emit(normal, corners);
@@ -109,7 +110,7 @@ struct ChamferedBoxBuilder {
                 for (const float sz: {-1.0f, 1.0f}) {
                     // One full coordinate per vertex: the cut meets the three
                     // edge chamfers, e.g. (+1,+c,+c), (+c,+1,+c), (+c,+c,+1).
-                    const std::array<Vec3, 3> cornerVerts {{
+                    const std::array<FVec3, 3> cornerVerts {{
                         {sx * kHalf, sy * kChamfer, sz * kChamfer},
                         {sx * kChamfer, sy * kHalf, sz * kChamfer},
                         {sx * kChamfer, sy * kChamfer, sz * kHalf},
@@ -126,31 +127,31 @@ struct ChamferedBoxBuilder {
     }
 
 private:
-    struct Vec3 {
+    struct FVec3 {
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
     };
 
-    static void SetAxis(Vec3& v, uint32_t axis, float value) noexcept {
+    static void SetAxis(FVec3& v, uint32_t axis, float value) noexcept {
         if (axis == 0) v.x = value;
         else if (axis == 1) v.y = value;
         else v.z = value;
     }
 
-    static constexpr auto Sub(Vec3 a, Vec3 b) noexcept -> Vec3 {
+    static constexpr auto Sub(FVec3 a, FVec3 b) noexcept -> FVec3 {
         return {a.x - b.x, a.y - b.y, a.z - b.z};
     }
 
-    static constexpr auto Cross(Vec3 a, Vec3 b) noexcept -> Vec3 {
+    static constexpr auto Cross(FVec3 a, FVec3 b) noexcept -> FVec3 {
         return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
     }
 
-    static constexpr auto Dot(Vec3 a, Vec3 b) noexcept -> float {
+    static constexpr auto Dot(FVec3 a, FVec3 b) noexcept -> float {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
 
-    static auto Normalize(Vec3 v) noexcept -> Vec3 {
+    static auto Normalize(FVec3 v) noexcept -> FVec3 {
         const float length = std::sqrt(Dot(v, v));
         return {v.x / length, v.y / length, v.z / length};
     }
@@ -164,9 +165,9 @@ private:
         // by angle around the normal, so the fan triangulation is
         // counter-clockwise seen from outside whatever order the caller
         // enumerated them in.
-        void Emit(const Vec3& normal, std::span<const Vec3> corners) {
-            Vec3 centroid {};
-            for (const Vec3& corner: corners) {
+        void Emit(const FVec3& normal, std::span<const FVec3> corners) {
+            FVec3 centroid {};
+            for (const FVec3& corner: corners) {
                 centroid.x += corner.x;
                 centroid.y += corner.y;
                 centroid.z += corner.z;
@@ -174,18 +175,18 @@ private:
             const float count = static_cast<float>(corners.size());
             centroid          = {centroid.x / count, centroid.y / count, centroid.z / count};
 
-            const Vec3 helper    = (std::abs(normal.x) < 0.9f) ? Vec3 {1.0f, 0.0f, 0.0f} : Vec3 {0.0f, 1.0f, 0.0f};
-            const Vec3 tangent   = Normalize(Cross(normal, helper));
-            const Vec3 bitangent = Cross(normal, tangent);
+            const FVec3 helper    = (std::abs(normal.x) < 0.9f) ? FVec3 {1.0f, 0.0f, 0.0f} : FVec3 {0.0f, 1.0f, 0.0f};
+            const FVec3 tangent   = Normalize(Cross(normal, helper));
+            const FVec3 bitangent = Cross(normal, tangent);
 
-            std::vector<Vec3> ordered(corners.begin(), corners.end());
+            std::vector<FVec3> ordered(corners.begin(), corners.end());
             for (size_t i = 1; i < ordered.size(); ++i) {
-                const Vec3  key       = ordered[i];
-                const Vec3  keyDelta  = Sub(key, centroid);
+                const FVec3  key       = ordered[i];
+                const FVec3  keyDelta  = Sub(key, centroid);
                 const float keyAngle  = std::atan2(Dot(keyDelta, bitangent), Dot(keyDelta, tangent));
                 size_t      j         = i;
                 while (j > 0) {
-                    const Vec3  prevDelta  = Sub(ordered[j - 1], centroid);
+                    const FVec3  prevDelta  = Sub(ordered[j - 1], centroid);
                     const float prevAngle  = std::atan2(Dot(prevDelta, bitangent), Dot(prevDelta, tangent));
                     if (prevAngle <= keyAngle) break;
                     ordered[j] = ordered[j - 1];
@@ -195,7 +196,7 @@ private:
             }
 
             const uint32_t first = vertexCursor;
-            for (const Vec3& corner: ordered) {
+            for (const FVec3& corner: ordered) {
                 mesh.positions[vertexCursor * 3 + 0] = corner.x;
                 mesh.positions[vertexCursor * 3 + 1] = corner.y;
                 mesh.positions[vertexCursor * 3 + 2] = corner.z;

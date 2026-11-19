@@ -16,7 +16,7 @@
 //     compile time via C++26 static reflection and surface in runtime
 //     diagnostics.
 //
-//   * Annotated, formatted failures: WireError enumerators carry
+//   * Annotated, formatted failures: Error enumerators carry
 //     ZHLN_ANNOTATION(ZHLN::Description<"..."> {}) messages that double as
 //     std::format strings. A Failure records the category, the byte offset,
 //     the wire path ("snapshot.objects[3].position") and the formatted
@@ -67,7 +67,7 @@ export namespace ZHLN::Wire {
 // Error codes — annotated descriptions double as std::format strings
 // ============================================================================
 
-enum class WireError : uint8_t {
+enum class Error : uint8_t {
     Truncated ZHLN_ANNOTATION(ZHLN::Description<"wire stream truncated: needed {} byte(s) at offset {} but only {} remain(s)"> {}) = 1,
     NonCanonicalVarint ZHLN_ANNOTATION(ZHLN::Description<"non-canonical varint at offset {}: trailing zero group (use the shortest encoding)"> {}),
     VarintOverflow ZHLN_ANNOTATION(ZHLN::Description<"varint at offset {} exceeds the 64-bit range"> {}),
@@ -135,9 +135,9 @@ struct Failure {
 template <typename T>
 using Result = std::expected<T, Failure>;
 
-// Builds an annotated Failure for a WireError without Reader/Writer context
+// Builds an annotated Failure for a Error without Reader/Writer context
 // (used by the frame and message-envelope codecs).
-[[nodiscard]] auto MakeFailure(WireError error, auto&&... args) -> Failure {
+[[nodiscard]] auto MakeFailure(Error error, auto&&... args) -> Failure {
     return Failure {.code = ZHLN::ErrorCode(error), .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
 }
 
@@ -237,10 +237,10 @@ class Buffer {
 
     auto AppendByte(uint8_t byte) -> Result<void> {
         if (m_size + 1 > m_maxBytes) {
-            return std::unexpected(FailBuffer(WireError::BufferOverflow, m_maxBytes, 1));
+            return std::unexpected(FailBuffer(Error::BufferOverflow, m_maxBytes, 1));
         }
         if (m_size + 1 > m_capacity && !Grow(m_size + 1)) {
-            return std::unexpected(FailBuffer(WireError::AllocationFailed, m_size + 1));
+            return std::unexpected(FailBuffer(Error::AllocationFailed, m_size + 1));
         }
         m_data[m_size] = byte;
         ++m_size;
@@ -252,10 +252,10 @@ class Buffer {
             return {};
         }
         if (m_size + bytes.size() > m_maxBytes) {
-            return std::unexpected(FailBuffer(WireError::BufferOverflow, m_maxBytes, bytes.size()));
+            return std::unexpected(FailBuffer(Error::BufferOverflow, m_maxBytes, bytes.size()));
         }
         if (m_size + bytes.size() > m_capacity && !Grow(m_size + bytes.size())) {
-            return std::unexpected(FailBuffer(WireError::AllocationFailed, m_size + bytes.size()));
+            return std::unexpected(FailBuffer(Error::AllocationFailed, m_size + bytes.size()));
         }
         std::memcpy(m_data + m_size, bytes.data(), bytes.size());
         m_size += bytes.size();
@@ -263,7 +263,7 @@ class Buffer {
     }
 
   private:
-    [[nodiscard]] auto FailBuffer(WireError error, auto&&... args) const -> Failure {
+    [[nodiscard]] auto FailBuffer(Error error, auto&&... args) const -> Failure {
         return Failure {.code = ZHLN::ErrorCode(error), .offset = m_size, .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
     }
 
@@ -472,7 +472,7 @@ class Writer {
         return m_path;
     }
 
-    [[nodiscard]] auto Fail(WireError error, auto&&... args) const -> Failure {
+    [[nodiscard]] auto Fail(Error error, auto&&... args) const -> Failure {
         return Failure {
             .code    = ZHLN::ErrorCode(error),
             .offset  = m_buffer.Size(),
@@ -537,32 +537,32 @@ class Reader {
         size_t   start = m_pos;
         for (size_t count = 1; count <= 10; ++count) {
             if (m_pos >= m_data.size()) {
-                return std::unexpected(Fail(WireError::Truncated, 1, start, Remaining()));
+                return std::unexpected(Fail(Error::Truncated, 1, start, Remaining()));
             }
             const uint8_t byte = m_data[m_pos];
             ++m_pos;
             const uint64_t payload = static_cast<uint64_t>(byte & 0x7Fu);
             if (shift >= 64 || (shift == 63 && (payload & ~1ull) != 0)) {
-                return std::unexpected(Fail(WireError::VarintOverflow, start));
+                return std::unexpected(Fail(Error::VarintOverflow, start));
             }
             value |= payload << shift;
             if ((byte & 0x80u) == 0) {
                 if (count > 1 && byte == 0) {
                     // A final zero group means a shorter encoding existed;
                     // reject to catch stream desynchronization early.
-                    return std::unexpected(Fail(WireError::NonCanonicalVarint, start));
+                    return std::unexpected(Fail(Error::NonCanonicalVarint, start));
                 }
                 out = value;
                 return {};
             }
             shift += 7;
         }
-        return std::unexpected(Fail(WireError::VarintOverflow, start));
+        return std::unexpected(Fail(Error::VarintOverflow, start));
     }
 
     auto GetByte(uint8_t& out) -> Result<void> {
         if (m_pos >= m_data.size()) {
-            return std::unexpected(Fail(WireError::Truncated, 1, m_pos, Remaining()));
+            return std::unexpected(Fail(Error::Truncated, 1, m_pos, Remaining()));
         }
         out = m_data[m_pos];
         ++m_pos;
@@ -572,7 +572,7 @@ class Reader {
     // Borrows count bytes without copying; advances the cursor.
     auto Take(size_t count) -> Result<std::span<const uint8_t>> {
         if (count > Remaining()) {
-            return std::unexpected(Fail(WireError::Truncated, count, m_pos, Remaining()));
+            return std::unexpected(Fail(Error::Truncated, count, m_pos, Remaining()));
         }
         const std::span<const uint8_t> taken = m_data.subspan(m_pos, count);
         m_pos += count;
@@ -583,7 +583,7 @@ class Reader {
         return m_path;
     }
 
-    [[nodiscard]] auto Fail(WireError error, auto&&... args) const -> Failure {
+    [[nodiscard]] auto Fail(Error error, auto&&... args) const -> Failure {
         return Failure {
             .code    = ZHLN::ErrorCode(error),
             .offset  = m_pos,
@@ -605,9 +605,9 @@ class Reader {
 
 // Specialize for types that need hand-written encoding (e.g. Jolt math):
 //
-//   template <> struct ZHLN::Wire::Codec<JPH::Vec3> {
-//       static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
-//       static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
+//   template <> struct ZHLN::Wire::Codec<FVec3> {
+//       static auto Encode(const FVec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
+//       static auto Decode(FVec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
 //   };
 template <typename T>
 struct Codec;
@@ -915,7 +915,7 @@ auto EncodeValue(const T& value, Writer& writer) -> Result<void> {
             AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
                                               "convert it to a wire-supported type, or build with a reflection-capable compiler."
         );
-        return std::unexpected(writer.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
+        return std::unexpected(writer.Fail(Error::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
     }
 }
 
@@ -936,7 +936,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return res;
         }
         if (byte > 1) {
-            return std::unexpected(reader.Fail(WireError::InvalidBoolean, byte, reader.Position() - 1));
+            return std::unexpected(reader.Fail(Error::InvalidBoolean, byte, reader.Position() - 1));
         }
         out = (byte != 0);
         return {};
@@ -950,7 +950,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             const int64_t decoded = ZigzagDecode(raw);
             if (decoded < static_cast<int64_t>(std::numeric_limits<Type>::min()) || decoded > static_cast<int64_t>(std::numeric_limits<Type>::max())) {
                 return std::unexpected(reader.Fail(
-                    WireError::ValueOutOfRange, decoded, static_cast<long long>(std::numeric_limits<Type>::min()),
+                    Error::ValueOutOfRange, decoded, static_cast<long long>(std::numeric_limits<Type>::min()),
                     static_cast<long long>(std::numeric_limits<Type>::max())
                 ));
             }
@@ -958,7 +958,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         } else {
             using Unsigned = std::make_unsigned_t<Type>;
             if (raw > static_cast<uint64_t>(std::numeric_limits<Unsigned>::max())) {
-                return std::unexpected(reader.Fail(WireError::ValueOutOfRange, raw, 0, static_cast<unsigned long long>(std::numeric_limits<Unsigned>::max())));
+                return std::unexpected(reader.Fail(Error::ValueOutOfRange, raw, 0, static_cast<unsigned long long>(std::numeric_limits<Unsigned>::max())));
             }
             out = static_cast<Type>(static_cast<Unsigned>(raw));
         }
@@ -992,7 +992,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
         }
         if constexpr (ZHLN::Reflect::ReflectionAvailable) {
             if (!ZHLN::Reflect::EnumHasValue<Type>(static_cast<std::underlying_type_t<Type>>(raw))) {
-                return std::unexpected(reader.Fail(WireError::InvalidEnumValue, static_cast<unsigned long long>(raw), ZHLN::Reflect::TypeName<Type>()));
+                return std::unexpected(reader.Fail(Error::InvalidEnumValue, static_cast<unsigned long long>(raw), ZHLN::Reflect::TypeName<Type>()));
             }
         }
         out = static_cast<Type>(raw);
@@ -1004,7 +1004,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return res;
         }
         if (presence > 1) {
-            return std::unexpected(reader.Fail(WireError::InvalidBoolean, presence, reader.Position() - 1));
+            return std::unexpected(reader.Fail(Error::InvalidBoolean, presence, reader.Position() - 1));
         }
         if (presence == 0) {
             out.reset();
@@ -1019,7 +1019,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return lenRes;
         }
         if (length > reader.LimitsRef().maxStringBytes) {
-            return std::unexpected(reader.Fail(WireError::StringTooLong, length, reader.LimitsRef().maxStringBytes));
+            return std::unexpected(reader.Fail(Error::StringTooLong, length, reader.LimitsRef().maxStringBytes));
         }
         const auto bytes = reader.Take(static_cast<size_t>(length));
         if (!bytes) {
@@ -1035,7 +1035,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return lenRes;
         }
         if (length > kCapacity - 1) {
-            return std::unexpected(reader.Fail(WireError::FixedStringOverflow, length, kCapacity, kCapacity - 1));
+            return std::unexpected(reader.Fail(Error::FixedStringOverflow, length, kCapacity, kCapacity - 1));
         }
         const auto bytes = reader.Take(static_cast<size_t>(length));
         if (!bytes) {
@@ -1050,7 +1050,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return lenRes;
         }
         if (length > reader.Remaining()) {
-            return std::unexpected(reader.Fail(WireError::ElementCountExceedsInput, length, reader.Remaining()));
+            return std::unexpected(reader.Fail(Error::ElementCountExceedsInput, length, reader.Remaining()));
         }
         const auto bytes = reader.Take(static_cast<size_t>(length));
         if (!bytes) {
@@ -1065,10 +1065,10 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return lenRes;
         }
         if (count > reader.LimitsRef().maxCollectionElements) {
-            return std::unexpected(reader.Fail(WireError::CollectionTooLarge, count, reader.LimitsRef().maxCollectionElements));
+            return std::unexpected(reader.Fail(Error::CollectionTooLarge, count, reader.LimitsRef().maxCollectionElements));
         }
         if (count > reader.Remaining()) {
-            return std::unexpected(reader.Fail(WireError::ElementCountExceedsInput, count, reader.Remaining()));
+            return std::unexpected(reader.Fail(Error::ElementCountExceedsInput, count, reader.Remaining()));
         }
         out.clear();
         out.reserve(static_cast<size_t>(count));
@@ -1091,12 +1091,12 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             return lenRes;
         }
         if (count > reader.LimitsRef().maxCollectionElements) {
-            return std::unexpected(reader.Fail(WireError::CollectionTooLarge, count, reader.LimitsRef().maxCollectionElements));
+            return std::unexpected(reader.Fail(Error::CollectionTooLarge, count, reader.LimitsRef().maxCollectionElements));
         }
         if (count > reader.Remaining() && !std::is_empty_v<Element>) {
             // Every non-empty element costs at least one wire byte, so a count
             // larger than the remaining input is malformed by construction.
-            return std::unexpected(reader.Fail(WireError::ElementCountExceedsInput, count, reader.Remaining()));
+            return std::unexpected(reader.Fail(Error::ElementCountExceedsInput, count, reader.Remaining()));
         }
         out.clear();
         out.reserve(static_cast<size_t>(count) < 4096 ? static_cast<size_t>(count) : 4096);
@@ -1168,7 +1168,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
             AlwaysFalse<Type>::value, "ZHLN.Wire: type has no wire representation. Add a ZHLN::Wire::Codec<T> specialization, "
                                               "convert it to a wire-supported type, or build with a reflection-capable compiler."
         );
-        return std::unexpected(reader.Fail(WireError::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
+        return std::unexpected(reader.Fail(Error::UnsupportedType, ZHLN::Reflect::TypeName<Type>()));
     }
 }
 
@@ -1274,7 +1274,7 @@ auto DecodeAggregate(T& out, Reader& reader) -> Result<void> {
                             constexpr long double maxValue = ZHLN::Reflect::AnnotationTemplateArgument<Range, member, 1, long double>();
                             const long double current = static_cast<long double>(ZHLN::Reflect::MemberValue<member>(out));
                             if (current < minValue || current > maxValue) {
-                                res = std::unexpected(reader.Fail(WireError::ValueOutOfRange, current, minValue, maxValue));
+                                res = std::unexpected(reader.Fail(Error::ValueOutOfRange, current, minValue, maxValue));
                             }
                         }
                     }
@@ -1331,7 +1331,7 @@ template <typename T>
         return std::unexpected(res.error());
     }
     if (reader.Remaining() != 0) {
-        return std::unexpected(reader.Fail(WireError::TrailingBytes, reader.Remaining(), bytes.size()));
+        return std::unexpected(reader.Fail(Error::TrailingBytes, reader.Remaining(), bytes.size()));
     }
     return out;
 }

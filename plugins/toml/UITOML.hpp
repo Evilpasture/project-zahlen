@@ -15,7 +15,7 @@
 //     #include <toml/UITOML.hpp>
 //
 //     const auto tree = ReflectTOML::Parse<ZHLN::GUI::UINode>(text);
-//     const auto text = ReflectTOML::SerializeTOML(tree);
+//     const auto text = ReflectTOML::Serialize(tree);
 //
 // Kind, Direction and Alignment come out as quoted enumerator names, children
 // as [[children]] tables, and a missing key keeps the field default -- the

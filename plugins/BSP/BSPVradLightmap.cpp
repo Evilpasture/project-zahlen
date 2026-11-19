@@ -69,7 +69,7 @@ auto DecodeVradLuxel(ColorRGBExp32 luxel) noexcept -> std::array<float, 3> {
     };
 }
 
-auto BuildVradLightmapAtlas(const BSPMap& map, uint32_t maxPageSize, uint32_t gutter) -> VradLightmapAtlas {
+auto BuildVradLightmapAtlas(const Map& map, uint32_t maxPageSize, uint32_t gutter) -> VradLightmapAtlas {
     VradLightmapAtlas result;
     result.hdrSource = map.lightingIsHdr;
     result.faceCharts.resize(map.faces.size());

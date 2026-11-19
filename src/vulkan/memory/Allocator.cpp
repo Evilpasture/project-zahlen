@@ -255,7 +255,7 @@ auto Buffer::Create(
     VmaAllocationInfo info      = {};
 
     VkDeviceSize effectiveAlignment = minAlignment;
-    if (Has(usage, BufferUsage::AccelerationStructureStorage | BufferUsage::AccelerationStructureBuildInput)) {
+    if (HasAnyFlags(usage, BufferUsage::AccelerationStructureStorage | BufferUsage::AccelerationStructureBuildInput)) {
         effectiveAlignment = std::max(effectiveAlignment, static_cast<VkDeviceSize>(256));
     }
 

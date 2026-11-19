@@ -23,6 +23,7 @@ enum class DeviceConfigurationError : uint8_t {
 };
 
 [[nodiscard]] bool MeshShaderLimitsSufficient(VkPhysicalDevice physical) noexcept;
+[[nodiscard]] bool RayTracingDriverUsable(VkPhysicalDevice physical) noexcept;
 void ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags requiredOps) noexcept;
 
 template <typename... Ts>

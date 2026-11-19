@@ -1,59 +1,27 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# extensions/CharacterController -- overgrowth-style character locomotion
-# (zahlen_character_controller).
-#
-# WASD intent, camera-relative translation, jump/gravity integration, sprint
-# and yaw slewing over CharacterVirtual bodies: a game controller, not engine
-# substrate. Core keeps PhysicsContext::CreateCharacter and the raw
-# InputStateComponent; this target owns the interpretation.
-#
+# extensions/CharacterController -- COM host character locomotion (zahlen_character_controller).
 # Public headers are reached as <CharacterController/...>.
 
-set(TARGET_NAME zahlen_character_controller)
+add_library(zahlen_character_controller STATIC CharacterController.cpp)
 
-set(ZHLN_CHARACTER_SOURCES
-    CharacterController.cpp
-    CharacterMovement.cpp
-    PlayerInput.cpp
-)
-
-add_library(${TARGET_NAME} STATIC ${ZHLN_CHARACTER_SOURCES})
-
-set_target_properties(${TARGET_NAME} PROPERTIES
+set_target_properties(zahlen_character_controller PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE.
     POSITION_INDEPENDENT_CODE ON
 )
 
-# Core is a public dependency: the controller runs on SystemContext, the ECS,
-# PhysicsContext's character API and the frame/graph extension seams.
-# No zahlen_freecam edge: PlayerInput.cpp reads FreeCam::FreeCamTagComponent,
-# an empty struct with no symbol and no public-header requirement (see
-# extensions/Camera/CMakeLists.txt for the same call).
-target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
+target_link_libraries(zahlen_character_controller
+    PUBLIC zahlen_engine
+    PRIVATE zahlen_warnings
 )
 
-target_include_directories(${TARGET_NAME} PUBLIC
+target_include_directories(zahlen_character_controller PUBLIC
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
-# CharacterComponents.hpp reaches InputStateComponent through Components.hpp,
-# whose key bitset is sized by Reflect::EnumCount<KeyCode>(). Reflection is
-# not a per-target feature -- without the flags that count is 0 instead of 72
-# and mouseX moves four bytes, a silent wrong-offset read.
 if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(${TARGET_NAME})
+    zahlen_enable_reflection(zahlen_character_controller)
 endif()
-
-# Jolt is direct: this library's own objects reference JPH symbols (shapes,
-# settings, factories), so it must be on the link line of whatever consumes
-# them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
-# libJolt.so on all 18 executables -- including the ones that never touch it.
-target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)

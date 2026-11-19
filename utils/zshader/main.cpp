@@ -162,10 +162,7 @@ auto RunCommandLine(int argc, char** argv) -> int {
             Fail("--slang-module, --slang-search, --out-gpu-types and --out-abi-spv are all required together");
         }
         if (!NamesEnumerators()) {
-            Fail(
-                "this build cannot name enumerators: the compiler has no reflection and this file was not transpiled. "
-                "zahlen_transpile_sources is what makes a reflection-free build work"
-            );
+            Fail("this build cannot name enumerators: it was compiled without C++26 reflection");
         }
         RunGpuTypesMode(gpuTypes);
         return 0;

@@ -8,7 +8,13 @@
 #include "Transform.hpp"
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
-#include <Zahlen/Engine/AssetManager.hpp>
+// The cook formats themselves -- CookedMeshHeader, CookedAnimHeader, the pak
+// records -- live in this engine-internal header. zcook is a build-tree tool
+// that links the engine's objects, so it reads them; the header is not exported,
+// which is what keeps them out of the API.
+#include <Zahlen/FileSystem/VFS.hpp>
+#include <Zahlen/Render/CookedFormats.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>

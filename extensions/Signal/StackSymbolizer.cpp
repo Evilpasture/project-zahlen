@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Signal/StackSymbolizer.hpp>
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Platform.hpp>
-
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <cstdlib>
 #include <map>
@@ -17,12 +18,12 @@
 #include <vector>
 
 #if defined(_WIN32)
-    #include <dbghelp.h>
+#include <dbghelp.h>
 #else
-    #include <errno.h>
-    #include <fcntl.h>
-    #include <sys/wait.h>
-    #include <unistd.h>
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace ZHLN {
@@ -341,57 +342,55 @@ auto SymbolizeWorkerFrames(std::span<const WorkerStackFrame> frames, std::string
         byModule[module].push_back(i);
     }
 
-    for (const auto& [module, indices]: byModule) {
-#if defined(_WIN32)
-        // Windows needs dbghelp against the matching .pdb; the module + offset
-        // form is still actionable (`llvm-symbolizer` resolves it by hand).
-        static_cast<void>(module);
-        static_cast<void>(indices);
-#else
-        if (!IsExecutableFile(module)) {
-            continue;
-        }
-        const auto addr2line = ResolveAddr2LineBinary();
-        if (!addr2line.has_value()) {
-            continue;
-        }
-
-        std::vector<std::string> args;
-        args.emplace_back("-a"); // per-address header
-        args.emplace_back("-f"); // function names
-        args.emplace_back("-C"); // demangle
-        args.emplace_back("-i"); // inline frames
-        args.emplace_back("-e");
-        args.push_back(module);
-        for (std::size_t idx: indices) {
-            args.push_back(HexArgument(frames[idx].moduleOffset));
-        }
-
-        const auto output = RunProcessCapture(*addr2line, args);
-        if (!output.has_value()) {
-            continue;
-        }
-
-        const auto resolved = ParseAddr2LineOutput(*output);
-        for (std::size_t k = 0; k < indices.size() && k < resolved.size(); ++k) {
-            const std::size_t target = indices[k];
-            if (resolved[k].empty()) {
+    for (const auto& [mod, indices]: byModule) {
+        if constexpr (isWindows) {
+            // Windows needs dbghelp against the matching .pdb; the module + offset
+            // form is still actionable (`llvm-symbolizer` resolves it by hand).
+        } else {
+            if (!IsExecutableFile(mod)) {
                 continue;
             }
-            const ResolvedLocation& head = resolved[k].front();
-            if (head.function.empty() && head.file.empty()) {
+            const auto addr2line = ResolveAddr2LineBinary();
+            if (!addr2line.has_value()) {
                 continue;
             }
-            rendered[target].primary = "in " + FormatLocation(head);
-            for (std::size_t j = 1; j < resolved[k].size(); ++j) {
-                const ResolvedLocation& inlined = resolved[k][j];
-                if (inlined.function.empty() && inlined.file.empty()) {
+
+            std::vector<std::string> args;
+            args.emplace_back("-a"); // per-address header
+            args.emplace_back("-f"); // function names
+            args.emplace_back("-C"); // demangle
+            args.emplace_back("-i"); // inline frames
+            args.emplace_back("-e");
+            args.push_back(mod);
+            for (std::size_t idx: indices) {
+                args.push_back(HexArgument(frames[idx].moduleOffset));
+            }
+
+            const auto output = RunProcessCapture(*addr2line, args);
+            if (!output.has_value()) {
+                continue;
+            }
+
+            const auto resolved = ParseAddr2LineOutput(*output);
+            for (std::size_t k = 0; k < indices.size() && k < resolved.size(); ++k) {
+                const std::size_t target = indices[k];
+                if (resolved[k].empty()) {
                     continue;
                 }
-                rendered[target].inlined.push_back(FormatLocation(inlined));
+                const ResolvedLocation& head = resolved[k].front();
+                if (head.function.empty() && head.file.empty()) {
+                    continue;
+                }
+                rendered[target].primary = "in " + FormatLocation(head);
+                for (std::size_t j = 1; j < resolved[k].size(); ++j) {
+                    const ResolvedLocation& inlined = resolved[k][j];
+                    if (inlined.function.empty() && inlined.file.empty()) {
+                        continue;
+                    }
+                    rendered[target].inlined.push_back(FormatLocation(inlined));
+                }
             }
         }
-#endif
     }
 
     for (std::size_t i = 0; i < frames.size(); ++i) {

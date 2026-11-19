@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Discord/EngineIntegration.hpp>
 #include <Discord/RichPresence.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
@@ -288,7 +287,7 @@ auto RunRpcServer(const int listener) -> std::expected<void, DiscordTestError> {
         return std::unexpected(DiscordTestError::ServerFailed);
     }
 
-    const std::string errorPayload = ZHLN::ReflectJSON::SerializeJSON(RpcErrorEvent {
+    const std::string errorPayload = ZHLN::ReflectJSON::Serialize(RpcErrorEvent {
         .cmd = "SET_ACTIVITY",
         .evt = "ERROR",
         .data = {.code = 4006, .message = "Not authorized"}
@@ -363,7 +362,7 @@ struct DiscordRpcTestSuite {
         std::expected<void, ZHLN::ErrorCode> client_requires_a_decimal_application_id_before_starting() {
             static_assert(static_cast<uint8_t>(ZHLN::Discord::PresenceError::InvalidApplicationId) == 1);
 
-            ZHLN::Discord::DiscordPresenceClient client("not-a-discord-application-id");
+            ZHLN::Discord::PresenceClient client("not-a-discord-application-id");
             auto started = client.Start();
             if (!ZHLN::Test::ExpectTrue(!started.has_value())) {
                 return std::unexpected(TestError::UnexpectedClientResult);
@@ -375,7 +374,7 @@ struct DiscordRpcTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> client_start_fails_fast_when_background_fiber_capacity_is_exhausted() {
             ZHLN::TaskSystem::Scope taskScope {1, 0, ZHLN::kMinimumFiberStackSize};
-            ZHLN::Discord::DiscordPresenceClient client("123456789012345678");
+            ZHLN::Discord::PresenceClient client("123456789012345678");
             auto started = client.Start();
             if (!ZHLN::Test::ExpectTrue(!started.has_value())) {
                 return std::unexpected(TestError::UnexpectedClientResult);
@@ -431,7 +430,7 @@ struct DiscordRpcTestSuite {
             const ZHLN::TaskSystem::Task serverTask {.func = &RunRpcServerTask, .arg = &server};
             ZHLN::TaskSystem::Dispatch(std::span<const ZHLN::TaskSystem::Task> {&serverTask, 1}, &serverCompletion);
 
-            ZHLN::Discord::DiscordPresenceClient client("123456789012345678");
+            ZHLN::Discord::PresenceClient client("123456789012345678");
             client.SetActivity(ZHLN::Discord::RichPresence {
                 .details = "Loading \"Hanoi\"",
                 .state = "Chapter 4",

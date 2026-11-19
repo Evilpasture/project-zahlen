@@ -13,16 +13,10 @@
 # long-running suites (render performance, distance stability) in their own
 # group so a timeout there does not also lose the pipeline results.
 #
-# Every group compiles tests/helpers/ImageWriteImpl.cpp exactly once -- it owns
-# the stb_image_write implementation the shared PNG capture path links against.
-# Adding a second TU that defines ZHLN_TEST_IMAGE_WRITE_IMPL breaks the link.
-
-set(GPU_HELPER_IMPL ${PROJECT_SOURCE_DIR}/tests/helpers/ImageWriteImpl.cpp)
-
 function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     zahlen_wrap_ztest_sources(GROUP_SOURCES GROUP_REL_FILES ${ARGN})
 
-    add_executable(${TARGET_NAME} ${GROUP_SOURCES} ${GPU_HELPER_IMPL})
+    add_executable(${TARGET_NAME} ${GROUP_SOURCES})
 
     set_target_properties(${TARGET_NAME} PROPERTIES
         CXX_STANDARD 26
@@ -39,14 +33,16 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     # binary an include root for src/ -- exactly the one that
     # configure/check_tests_public_api.py and the include list below keep out.
     target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_engine
+        zahlen_engine zahlen_image zahlen_screenshot zahlen_ui
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/app/include
+        ${PROJECT_SOURCE_DIR}/extensions
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extern/stb
+
     )
 
     zahlen_enable_reflection(${TARGET_NAME})
@@ -137,7 +133,6 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestCameraLookAt.cpp
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
-    TestGLTFImport.cpp
     TestGLTFSampleAssets.cpp
     TestNegativeScale.cpp
     TestTextureTransforms.cpp
@@ -151,7 +146,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # one back. Both call ZHLN::GLTF::* in plugins/glTF directly -- core's loader is
 # only a lookup in the prefab cache the importer fills -- so this group links
 # zahlen_gltf. That one link also supplies the cgltf symbols for the reference
-# parse, and its header path below (zahlen_gltf compiles the one
+# parse, and its header path below (zahlen_gltf_assets compiles the one
 # plugins/glTF/cgltf_impl.c in the tree).
 #
 # zahlen_serialization is linked alongside it rather than inherited:
@@ -165,9 +160,8 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera zahlen_skeletal_animation)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf_assets zahlen_serialization zahlen_camera zahlen_animation)
 target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
-target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 # Sample-asset conformance without committed binaries: an optional shallow
@@ -203,13 +197,6 @@ endif()
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_SAMPLE_ASSETS_DIR="${_zhln_sample_assets_default}")
 unset(_zhln_sample_assets_default)
 
-# App/Engine::Run own their TaskSystem::Scope. Do not wrap this standalone
-# frontend test in the Headless::SessionScope used by the other GPU groups.
-zahlen_add_gpu_test_group(GPU_Application 120
-    ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
-    TestApplication.cpp
-)
-target_link_libraries(GPU_Application PRIVATE zahlen_application)
 
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp

@@ -4,20 +4,24 @@
 #pragma once
 
 #include <Scripting/ScriptBinder.hpp>
+#include <Scripting/ScriptComponentAccess.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/ECS/ECS.hpp>
 
 namespace ZHLN {
 
 class ZHLN_STATIC_API ScriptECSBridge {
   public:
-    explicit ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {
+    explicit ScriptECSBridge(COM::IEntities& entities);
+    explicit ScriptECSBridge(ScriptComponentAccess inspection): m_inspection(std::move(inspection)) {
     }
 
     template <typename Manifest>
     void RegisterComponentManifest() {
         ZHLN::RegisterManifest<Manifest>();
-        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto { m_registry.RegisterComponent<Comp>(ZHLN::Reflect::TypeName<Comp>()); });
+        ZHLN::Reflect::ForEachNestedType<Manifest>([this]<typename Comp>() -> auto {
+            static_assert(COM::Component<Comp>, "COM component manifests require POD roots; keep STL-owning data host-side");
+            m_inspection.Register<Comp>();
+        });
     }
 
     // --- Entity Component Roots ---
@@ -40,7 +44,8 @@ class ZHLN_STATIC_API ScriptECSBridge {
     [[nodiscard]] auto ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode>;
 
   private:
-    ECS::Registry& m_registry;
+    auto                  ResolveValue(ScriptVal& value) const -> std::expected<void, ErrorCode>;
+    ScriptComponentAccess m_inspection;
 };
 
 } // namespace ZHLN

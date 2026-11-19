@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/ECS/ECS.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -385,17 +384,18 @@ struct ZHLN_ANNOTATION(SuiteFixture {}) FreeModuleSuiteCounter {
     uint32_t touches = 0;
 };
 
+struct ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PlainDefaultFixture { bool ready = true; };
+
 void test_free_function_void_return_and_fixture_di(
     FreeModuleSuiteCounter& counter,
     TempDir&                temp,
-    ZHLN::ECS::Registry&    reg,
+    PlainDefaultFixture&    reg,
     const CaseInfo&         info
 ) {
     ++counter.touches;
     Expect(counter.touches) == 1u;
     Expect(std::filesystem::is_directory(temp.Path()));
-    const ZHLN::Entity e = reg.Create();
-    Expect(reg.IsAlive(e));
+    Expect(reg.ready);
     Expect(info.methodName) == std::string_view {"test_free_function_void_return_and_fixture_di"};
     Expect(!info.filePath.empty());
 }

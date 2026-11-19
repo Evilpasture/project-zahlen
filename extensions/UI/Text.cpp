@@ -1,0 +1,121 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "Text.hpp"
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Render/Vertex.hpp>
+#include <Zahlen/GUI/Font.hpp>
+#include <algorithm>
+#include <string>
+
+namespace ZHLN::GUI {
+
+TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept {
+    if (text.empty()) {
+        return {};
+    }
+
+    TextBounds bounds;
+    bounds.minX = 1e9f;
+    bounds.maxX = -1e9f;
+    bounds.minY = 1e9f;
+    bounds.maxY = -1e9f;
+
+    float currentX  = 0.0f;
+    float lineTop   = 0.0f;
+    bool  hasGlyphs = false;
+
+    for (char c: text) {
+        if (c == '\n') {
+            currentX = 0.0f;
+            lineTop += TextLineHeight(font, scale);
+            continue;
+        }
+        if (c == '\r') {
+            continue;
+        }
+        const auto& g = font.GlyphFor(static_cast<uint8_t>(c));
+
+        float x0 = currentX + g.xoff * scale;
+        float x1 = x0 + (g.x1 - g.x0) * scale;
+        float y0 = lineTop + (g.yoff + font.baseline) * scale;
+        float y1 = y0 + (g.y1 - g.y0) * scale;
+
+        bounds.minX = std::min(bounds.minX, x0);
+        bounds.maxX = std::max(bounds.maxX, x1);
+        bounds.minY = std::min(bounds.minY, y0);
+        bounds.maxY = std::max(bounds.maxY, y1);
+
+        currentX += g.xadvance * scale;
+        hasGlyphs = true;
+    }
+
+    if (!hasGlyphs) {
+        return {};
+    }
+
+    return bounds;
+}
+
+uint32_t AppendTextVertices(
+    VertexPosition*  outPos,
+    VertexSurface*   outSurface,
+    const FontAtlas& font,
+    std::string_view text,
+    float            x,
+    float            y,
+    float            scale,
+    const FVec4& color
+) {
+    if (text.empty()) {
+        return 0;
+    }
+
+    float         currentX     = x;
+    float         currentY     = y;
+    float         lineHeight   = TextLineHeight(font, scale);
+    PackedRGBA8   packedColor  = Math::PackColor(color.x, color.y, color.z, color.w);
+
+    uint32_t writtenCount = 0;
+
+    for (char c: text) {
+        if (c == '\n') {
+            currentX = x;
+            currentY += lineHeight;
+            continue;
+        }
+        if (c == '\r') {
+            continue;
+        }
+
+        const auto& g  = font.GlyphFor(static_cast<uint8_t>(c));
+        float       u0 = g.x0 / font.atlasWidth;
+        float       v0 = g.y0 / font.atlasHeight;
+        float       u1 = g.x1 / font.atlasWidth;
+        float       v1 = g.y1 / font.atlasHeight;
+
+        float x0 = currentX + g.xoff * scale;
+        float y0 = currentY + (g.yoff + font.baseline) * scale;
+        float x1 = x0 + (g.x1 - g.x0) * scale;
+        float y1 = y0 + (g.y1 - g.y0) * scale;
+
+        outPos[writtenCount]       = {{x0, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v0), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x0, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x1, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor, .uv1 = {}};
+
+        outPos[writtenCount]       = {{x1, y0, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x0, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor, .uv1 = {}};
+        outPos[writtenCount]       = {{x1, y1, 0.0f}};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v1), .color = packedColor, .uv1 = {}};
+
+        currentX += g.xadvance * scale;
+    }
+    return writtenCount;
+}
+}

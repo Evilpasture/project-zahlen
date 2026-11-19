@@ -4,8 +4,8 @@
 
 #pragma once
 
+#include <Zahlen/Math/Vec3.hpp>
 // clang-format off
-#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <ProjectLightClient/SceneMirror.hpp>
 #include <Socket/Socket.hpp>
@@ -13,7 +13,6 @@
 #include <Replication/ReplicaState.hpp>
 #include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Engine/GameModule.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <array>
 #include <chrono>
@@ -28,9 +27,9 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN {
-class Engine;
-} // namespace ZHLN
+namespace ZHLN::COM {
+struct IEngine;
+} // namespace ZHLN::COM
 
 namespace ZHLN::ProjectLight {
 
@@ -41,7 +40,7 @@ namespace ZHLN::ProjectLight {
 inline constexpr uint8_t FRAME_FLAG_COMPRESSED      = 1u;
 inline constexpr size_t  COMPRESSION_MIN_BYTES      = 1024u;
 inline constexpr size_t  MAX_SAFE_UDP_PAYLOAD_BYTES = 1200u;
-inline constexpr size_t  MAX_STREAM_FRAME_BYTES     = static_cast<const size_t>(128u * 1024u * 1024u);
+inline constexpr size_t  MAX_STREAM_FRAME_BYTES     = static_cast<size_t>(128u * 1024u * 1024u);
 inline constexpr float   VEC3_SCALE                 = 32767.0f;
 inline constexpr float   COLOR3_SCALE               = 255.0f;
 inline constexpr size_t  PROPERTY_CHANNEL_COUNT     = 104u;
@@ -100,7 +99,7 @@ struct MsgPackValue {
     [[nodiscard]] auto AsFloat(float fallback = 0.0f) const noexcept -> float;
     [[nodiscard]] auto AsString(std::string_view fallback = {}) const -> std::string;
     [[nodiscard]] auto AsUid() const noexcept -> uint64_t;
-    [[nodiscard]] auto AsVec3(float integerScale = 1.0f, JPH::Vec3 fallback = JPH::Vec3::sZero()) const noexcept -> JPH::Vec3;
+    [[nodiscard]] auto AsVec3(float integerScale = 1.0f, FVec3 fallback = FVec3::Zero()) const noexcept -> FVec3;
     [[nodiscard]] auto Find(std::string_view key) const noexcept -> const MsgPackValue*;
     [[nodiscard]] auto FindIntKey(int64_t key) const noexcept -> const MsgPackValue*;
     [[nodiscard]] auto FindProperty(uint16_t channel, std::string_view propertyName = {}) const noexcept -> const MsgPackValue*;
@@ -222,11 +221,11 @@ class ClientSession {
 
     // Public packet hook is useful for deterministic, socket-free protocol tests.
     auto HandlePacket(const MsgPackValue& packet) -> bool;
-    void PollNetwork(Engine& engine);
-    void PrePhysicsTick(Engine& engine, float dt);
-    void PostPhysicsTick(Engine& engine, float dt);
-    void ResetSceneBindings(Engine& engine) noexcept;
-    void OnEngineTeardown(Engine& engine) noexcept;
+    void PollNetwork(COM::IEngine& engine);
+    void PrePhysicsTick(COM::IEngine& engine, float dt);
+    void PostPhysicsTick(COM::IEngine& engine, float dt);
+    void ResetSceneBindings(COM::IEngine& engine) noexcept;
+    void OnEngineTeardown(COM::IEngine& engine) noexcept;
 
   private:
     void               ApplySnapshotMap(const MsgPackValue& snapshot);
@@ -246,7 +245,7 @@ class ClientSession {
     // members above stay the owners, the mirror only visits them.
     [[nodiscard]] auto MirrorState() noexcept -> SceneMirrorState;
 
-    void SendRealtimeFrame(Engine& engine);
+    void SendRealtimeFrame(COM::IEngine& engine);
 
     [[nodiscard]] auto SendTcpPacket(const MsgPackValue& packet) -> bool;
     [[nodiscard]] auto SendRealtimePacket(const MsgPackValue& packet) -> bool;
@@ -310,13 +309,21 @@ class ClientSession {
     SceneMirror                                           m_mirror;
 };
 
-// The module as a value: the client's two frame steps, the scene-cleanup pass
-// that rebinds the session after a scene reset, and the engine-teardown hook
-// that detaches it. InstallClient binds the session these hooks look up and then
-// installs this description, so a host that wants the placement error itself
-// reads the log.
-auto DescribeClient() -> Module;
+// App::Application layer hosting a borrowed ClientSession over COM::IEngine.
+struct Layer {
+    ClientSession* session = nullptr;
 
-void InstallClient(Engine& engine, ClientSession& session);
+    void Tick(COM::IEngine& engine, float dt) {
+        if (session != nullptr) session->PrePhysicsTick(engine, dt);
+    }
+
+    void BeforeRender(COM::IEngine& engine, float dt) {
+        if (session != nullptr) session->PostPhysicsTick(engine, dt);
+    }
+
+    void Stop(COM::IEngine& engine) noexcept {
+        if (session != nullptr) session->OnEngineTeardown(engine);
+    }
+};
 
 } // namespace ZHLN::ProjectLight

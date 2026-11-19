@@ -4,12 +4,12 @@
 #pragma once
 
 #include "vulkan/VulkanHeader.hpp"
+#include <Zahlen/Math/Matrix.hpp>
 
 #include "render/FrameResources.hpp"
 #include "render/GpuLayout.hpp"
 #include "render/TargetManager.hpp"
 #include <Zahlen/Render/GraphicsSettings.hpp>
-#include <Zahlen/Math/Math3D.hpp>
 #include <cstdint>
 
 namespace ZHLN {
@@ -85,10 +85,10 @@ struct RenderFrame: FrameResources::Slice {
     /// frame sees them as its own; binding them here keeps that single source of
     /// truth while giving pass code frame language instead of a walk into the
     /// renderer.
-    const JPH::Mat44&    viewProj;
-    const JPH::Mat44&    unjitteredViewProj;
-    const JPH::Mat44&    view;
-    const JPH::Mat44&    shadowProjView;
+    const Mat4x4&    viewProj;
+    const Mat4x4&    unjitteredViewProj;
+    const Mat4x4&    view;
+    const Mat4x4&    shadowProjView;
     const FrameUniforms& uniforms;
     const float&         dt;
 

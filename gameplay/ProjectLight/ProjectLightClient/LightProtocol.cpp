@@ -951,15 +951,15 @@ auto MsgPackValue::AsUid() const noexcept -> uint64_t {
     return 0;
 }
 
-auto MsgPackValue::AsVec3(float integerScale, JPH::Vec3 fallback) const noexcept -> JPH::Vec3 {
+auto MsgPackValue::AsVec3(float integerScale, FVec3 fallback) const noexcept -> FVec3 {
     if (kind != Kind::Array || arrayVal.size() < 3) {
         return fallback;
     }
     const bool  scaled  = arrayVal[0].kind == Kind::Int || arrayVal[0].kind == Kind::UInt;
     const float divisor = (scaled && integerScale != 0.0f) ? integerScale : 1.0f;
-    const float x       = arrayVal[0].AsFloat(fallback.GetX()) / divisor;
-    const float y       = arrayVal[1].AsFloat(fallback.GetY()) / divisor;
-    const float z       = arrayVal[2].AsFloat(fallback.GetZ()) / divisor;
+    const float x       = arrayVal[0].AsFloat(fallback.x) / divisor;
+    const float y       = arrayVal[1].AsFloat(fallback.y) / divisor;
+    const float z       = arrayVal[2].AsFloat(fallback.z) / divisor;
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
         return fallback;
     }

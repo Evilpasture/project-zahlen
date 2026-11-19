@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/Reflection/Callable.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Dynamic.hpp>
@@ -16,6 +17,18 @@
 // ============================================================================
 // Test Enums & Structs
 // ============================================================================
+
+namespace QualifiedNamesTest {
+struct Outer { struct Value {}; };
+namespace Other { struct Value {}; }
+template <typename T> struct TemplateOuter { struct Value {}; };
+}
+
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Outer::Value>() == "QualifiedNamesTest::Outer::Value");
+static_assert(ZHLN::Reflect::ScopedTypeName<const QualifiedNamesTest::Other::Value&>() == "QualifiedNamesTest::Other::Value");
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Outer::Value>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::Other::Value>());
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<int>>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<float>>());
+static_assert(ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<int>::Value>() != ZHLN::Reflect::ScopedTypeName<QualifiedNamesTest::TemplateOuter<float>::Value>());
 
 enum class WeaponType : uint32_t {
     Pistol  ZHLN_ANNOTATION(ZHLN::Description<"Sidearm with high mobility."> {}),
@@ -68,6 +81,16 @@ struct SchemaContainer {
 // ============================================================================
 // Test Suite
 // ============================================================================
+
+namespace ZHLN::TestReflectionFixtures {
+// External hidden function symbol: under GCC 16 with -fsanitize=address,undefined
+// + -fvisibility=hidden (PR c++/71962), evaluating `Fn != nullptr` on an external
+// hidden function pointer in a requires-clause failed constant evaluation.
+#if defined(__GNUC__) && !defined(_WIN32)
+[[gnu::visibility("hidden")]]
+#endif
+void ExternalHiddenSampleFn(int& counter, float scale) noexcept;
+} // namespace ZHLN::TestReflectionFixtures
 
 namespace {
 
@@ -408,7 +431,38 @@ struct ReflectionTestSuite {
 #endif
             return {};
         }
+
+        // --- 8. Callable NTTP Reflection Under Sanitizers + Hidden Visibility ---
+        std::expected<void, ZHLN::ErrorCode> inspect_external_hidden_callable_nttp() {
+            using Meta = ZHLN::Reflect::CallableInspector<&ZHLN::TestReflectionFixtures::ExternalHiddenSampleFn>;
+            static_assert(Meta::Name() == "ExternalHiddenSampleFn");
+
+            size_t paramCount = 0;
+            bool   firstIsRef = false;
+            bool   secondIsFloat = false;
+            Meta::ForEachParameter([&]<typename Param>() {
+                if (paramCount == 0) {
+                    firstIsRef = std::is_same_v<Param, int&>;
+                } else if (paramCount == 1) {
+                    secondIsFloat = std::is_same_v<Param, float>;
+                }
+                ++paramCount;
+            });
+            ZHLN::Test::ExpectTrue(firstIsRef && secondIsFloat);
+            ZHLN::Test::ExpectEq(paramCount, static_cast<size_t>(2));
+
+            int counter = 5;
+            ZHLN::TestReflectionFixtures::ExternalHiddenSampleFn(counter, 3.0f);
+            ZHLN::Test::ExpectEq(counter, 8);
+            return {};
+        }
     };
 };
 
 } // namespace
+
+namespace ZHLN::TestReflectionFixtures {
+void ExternalHiddenSampleFn(int& counter, float scale) noexcept {
+    counter += static_cast<int>(scale);
+}
+} // namespace ZHLN::TestReflectionFixtures

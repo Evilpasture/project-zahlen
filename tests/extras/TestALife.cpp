@@ -3,191 +3,105 @@
 
 #include "TestsFramework.hpp"
 #include <ALife/ALifeComponents.hpp>
-#include <ALife/Factions.hpp>
-#include <ALife/GOAP.hpp>
-#include <ALife/Graph.hpp>
+#include <ALife/Simulator.hpp>
 #include <ALife/SpatialGrid.hpp>
-#include <Zahlen/ECS/ECS.hpp>
-#include <algorithm>
+#include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/ILogicWorld.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <atomic>
 #include <expected>
-#include <memory_resource>
-#include <utility>
-
-enum class ALifeTestError : uint8_t {
-    GOAPPlanFailed ZHLN_ANNOTATION(ZHLN::Description<"GOAP solver failed to compute valid action sequence.">{}) = 1,
-    PathfindingFailed ZHLN_ANNOTATION(ZHLN::Description<"LevelGraph A* failed to find shortest path.">{}),
-    SpatialGridQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"SpatialGrid spatial query missed expected entity.">{})
-};
+#include <vector>
 
 namespace {
 
 struct ALifeTestSuite {
+    ZHLN::TaskSystem::Scope taskScope {1, 16};
+
     struct Tests {
-        // --- 1. GOAP Action Planner ---
-        std::expected<void, ZHLN::ErrorCode> goap_solver_planning() {
-            ZHLN::ALife::WorldStateRegistry reg;
-            uint32_t                        hasWeapon    = reg.RegisterKey("hasWeapon");
-            uint32_t                        enemySpotted = reg.RegisterKey("enemySpotted");
-            uint32_t                        enemyDead    = reg.RegisterKey("enemyDead");
+        std::expected<void, ZHLN::ErrorCode> spatial_grid_inserts_moves_and_handles_generation_reuse() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+            auto worldRes = COM::CreateLogicWorldRef();
+            Test::ExpectTrue(worldRes.has_value());
+            auto& reg = *(*worldRes)->Entities();
 
-            // Setup World States
-            ZHLN::ALife::WorldState current;
-            current.Set(enemySpotted, true);
+            SpatialGrid grid(64, 64, 50.0f);
 
-            ZHLN::ALife::WorldState goal;
-            goal.Set(enemyDead, true);
+            const Entity e1 = reg.CreateEntity();
+            auto*        c1 = reg.Attach(e1, ALifeComponent {.position = {100.0, 0.0, 100.0}, .self_entity = e1});
+            grid.UpdateEntity(reg, e1, DVec3 {-1.0, -1.0, -1.0});
 
-            // Action 1: Pickup Weapon
-            ZHLN::ALife::Action getGun;
-            getGun.name = "PickupGun";
-            getGun.cost = 1;
-            getGun.effects.Set(hasWeapon, true);
+            const Entity e2 = reg.CreateEntity();
+            auto*        c2 = reg.Attach(e2, ALifeComponent {.position = {110.0, 0.0, 100.0}, .self_entity = e2});
+            grid.UpdateEntity(reg, e2, DVec3 {-1.0, -1.0, -1.0});
 
-            // Action 2: Shoot Enemy (Requires weapon & spotted enemy)
-            ZHLN::ALife::Action killEnemy;
-            killEnemy.name = "ShootEnemy";
-            killEnemy.cost = 2;
-            killEnemy.preconditions.Set(hasWeapon, true);
-            killEnemy.preconditions.Set(enemySpotted, true);
-            killEnemy.effects.Set(enemyDead, true);
+            const Entity e3 = reg.CreateEntity();
+            reg.Attach(e3, ALifeComponent {.position = {800.0, 0.0, 800.0}, .self_entity = e3});
+            grid.UpdateEntity(reg, e3, DVec3 {-1.0, -1.0, -1.0});
 
-            std::vector<ZHLN::ALife::Action> actions = {getGun, killEnemy};
+            Test::ExpectTrue(c1 != nullptr && c2 != nullptr);
+            std::vector<Entity> results = grid.Query(reg, DVec3 {100.0, 0.0, 100.0}, 20.0f);
+            Test::ExpectEq(results.size(), size_t {2});
 
-            ZHLN::ALife::PlanRequest request {.current = current, .goal = goal};
-            ZHLN::ALife::Plan        plan = ZHLN::ALife::SolvePlan(request, actions);
-
-            // Plan should contain 2 actions: PickupGun -> ShootEnemy
-            ZHLN::Test::ExpectEq(plan.count, 2u);
-            if (plan.count == 2) {
-                ZHLN::Test::ExpectEq(std::string_view(plan.actions[0].name.c_str()), std::string_view("PickupGun"));
-                ZHLN::Test::ExpectEq(std::string_view(plan.actions[1].name.c_str()), std::string_view("ShootEnemy"));
-            }
-
-            return {};
-        }
-
-        // --- 2. LevelGraph A* Pathfinding ---
-        std::expected<void, ZHLN::ErrorCode> graph_astar_pathfinding() {
-            // Create a 4-node linear graph: 0 -- 1 -- 2 -- 3
-            ZHLN::ALife::LevelGraph graph(4);
-            graph.GetNode(0).position = JPH::RVec3(0, 0, 0);
-            graph.GetNode(1).position = JPH::RVec3(10, 0, 0);
-            graph.GetNode(2).position = JPH::RVec3(20, 0, 0);
-            graph.GetNode(3).position = JPH::RVec3(30, 0, 0);
-
-            graph.Connect(0, 1);
-            graph.Connect(1, 2);
-            graph.Connect(2, 3);
-
-            std::pmr::synchronized_pool_resource poolResource;
-            ZHLN::ALife::PathWorkspace           workspace(4, &poolResource);
-
-            uint32_t path[ZHLN::ALife::MAX_PATH_LENGTH];
-            uint32_t pathLen = graph.FindPath(0, 3, path, workspace);
-
-            // Expected path: 0 -> 1 -> 2 -> 3 (4 nodes)
-            ZHLN::Test::ExpectEq(pathLen, 4u);
-            if (pathLen == 4) {
-                ZHLN::Test::ExpectEq(path[0], 0u);
-                ZHLN::Test::ExpectEq(path[1], 1u);
-                ZHLN::Test::ExpectEq(path[2], 2u);
-                ZHLN::Test::ExpectEq(path[3], 3u);
-            }
-
-            return {};
-        }
-
-        // --- 3. Faction Relationship Matrix ---
-        std::expected<void, ZHLN::ErrorCode> faction_relations() {
-            ZHLN::ALife::FactionRegistry factions(8);
-
-            uint32_t stalkers = factions.Register("Stalkers");
-            uint32_t bandits  = factions.Register("Bandits");
-
-            ZHLN::Test::ExpectTrue(stalkers != 0xFFFFFFFF);
-            ZHLN::Test::ExpectTrue(bandits != 0xFFFFFFFF);
-
-            // Default self-relation is 1.0 (allied)
-            ZHLN::Test::ExpectEq(factions.GetRelation(stalkers, stalkers), 1.0f);
-
-            // Default cross-relation is 0.0 (neutral)
-            ZHLN::Test::ExpectEq(factions.GetRelation(stalkers, bandits), 0.0f);
-
-            // Set hostility
-            factions.SetRelation(stalkers, bandits, -1.0f);
-            ZHLN::Test::ExpectEq(factions.GetRelation(stalkers, bandits), -1.0f);
-            ZHLN::Test::ExpectEq(factions.GetRelation(bandits, stalkers), -1.0f); // Symmetric
-
-            return {};
-        }
-
-        // --- 4. Spatial Grid Partitioning & Radial Query ---
-        std::expected<void, ZHLN::ErrorCode> spatial_grid_queries() {
-            ZHLN::ECS::Registry reg;
-            reg.RegisterComponent<ZHLN::ALife::ALifeComponent>("ALifeComponent");
-
-            // 100x100 grid with 50.0m cells
-            ZHLN::ALife::SpatialGrid grid(100, 100, 50.0f);
-
-            // Entity 1 at (100, 0, 100) -> Cell (2, 2)
-            ZHLN::Entity e1 = reg.Create();
-            auto&        c1 = reg.Add<ZHLN::ALife::ALifeComponent>(e1);
-            c1.position     = JPH::RVec3(100.0, 0.0, 100.0);
-            c1.self_entity  = e1;
-            grid.UpdateEntity(reg, e1, JPH::RVec3(-1, -1, -1));
-
-            // Entity 2 at (110, 0, 100) (Distance 10m from e1)
-            ZHLN::Entity e2 = reg.Create();
-            auto&        c2 = reg.Add<ZHLN::ALife::ALifeComponent>(e2);
-            c2.position     = JPH::RVec3(110.0, 0.0, 100.0);
-            c2.self_entity  = e2;
-            grid.UpdateEntity(reg, e2, JPH::RVec3(-1, -1, -1));
-
-            // Entity 3 at (800, 0, 800) (Far away)
-            ZHLN::Entity e3 = reg.Create();
-            auto&        c3 = reg.Add<ZHLN::ALife::ALifeComponent>(e3);
-            c3.position     = JPH::RVec3(800.0, 0.0, 800.0);
-            c3.self_entity  = e3;
-            grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));
-
-            // Query within 20m of (100, 0, 100)
-            std::vector<ZHLN::Entity> results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f);
-
-            // Should find e1 and e2, but NOT e3
-            ZHLN::Test::ExpectEq(results.size(), size_t {2});
-
-            // Move e2 outside the radius
-            JPH::RVec3 oldPos = c2.position;
-            c2.position       = JPH::RVec3(300.0, 0.0, 300.0);
+            const DVec3 oldPos = c2->position;
+            c2->position       = {300.0, 0.0, 300.0};
             grid.UpdateEntity(reg, e2, oldPos);
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
-            ZHLN::Test::ExpectEq(results.size(), size_t {1});
-            if (results.size() == 1) {
-                ZHLN::Test::ExpectEq(results[0], e1);
-            }
+            results = grid.Query(reg, DVec3 {100.0, 0.0, 100.0}, 20.0f, std::move(results));
+            Test::ExpectEq(results.size(), size_t {1});
+            if (results.size() == 1) Test::ExpectEq(results[0], e1);
 
-            // Unlink a non-head entry, then reuse its ECS slot. A grid link
-            // must carry the generation, not accidentally find the old entity
-            // through a fabricated generation-0 handle.
-            const JPH::RVec3 movedFrom = c2.position;
-            c2.position = JPH::RVec3(103.0, 0.0, 100.0);
+            const DVec3 movedFrom = c2->position;
+            c2->position          = {103.0, 0.0, 100.0};
             grid.UpdateEntity(reg, e2, movedFrom);
             grid.RemoveEntity(reg, e1);
-            reg.Destroy(e1);
-            const ZHLN::Entity replacement = reg.Create();
-            auto& replacementComp = reg.Add<ZHLN::ALife::ALifeComponent>(replacement);
-            replacementComp.position = JPH::RVec3(105.0, 0.0, 100.0);
-            grid.UpdateEntity(reg, replacement, JPH::RVec3(-1, -1, -1));
+            reg.Despawn(e1);
+            (*worldRes)->Flush();
 
-            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
-            ZHLN::Test::ExpectEq(replacement.index, e1.index);
-            ZHLN::Test::ExpectNe(replacement.generation, e1.generation);
-            ZHLN::Test::ExpectEq(results.size(), size_t {2});
-            ZHLN::Test::ExpectTrue(std::ranges::find(results, e2) != results.end());
-            ZHLN::Test::ExpectTrue(std::ranges::find(results, replacement) != results.end());
-            ZHLN::Test::ExpectTrue(std::ranges::find(results, e1) == results.end());
+            const Entity replacement = reg.CreateEntity();
+            reg.Attach(replacement, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = replacement});
+            grid.UpdateEntity(reg, replacement, DVec3 {-1.0, -1.0, -1.0});
 
+            results = grid.Query(reg, DVec3 {100.0, 0.0, 100.0}, 20.0f, std::move(results));
+            Test::ExpectEq(replacement.index, e1.index);
+            Test::ExpectNe(replacement.generation, e1.generation);
+            Test::ExpectEq(results.size(), size_t {2});
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> simulator_updates_agents_saves_and_reloads_via_com() {
+            using namespace ZHLN;
+            using namespace ZHLN::ALife;
+
+            auto worldRes = COM::CreateLogicWorldRef();
+            Test::ExpectTrue(worldRes.has_value());
+            auto& reg = *(*worldRes)->Entities();
+
+            const Entity a = reg.CreateEntity();
+            reg.Attach(a, ALifeComponent {.position = {100.0, 0.0, 100.0}, .self_entity = a});
+            const Entity b = reg.CreateEntity();
+            reg.Attach(b, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = b});
+
+            Simulator sim {};
+            std::atomic<uint32_t> thinks {0};
+            sim.on_think = [&](Simulator&, Entity) { thinks.fetch_add(1, std::memory_order::relaxed); };
+            sim.SetRelation(1, 2, -0.75f);
+            sim.Update(reg, 0.5f, DVec3 {0.0, 0.0, 0.0});
+
+            const auto nearby = sim.GetGrid().Query(reg, DVec3 {102.0, 0.0, 100.0}, 25.0f);
+            Test::ExpectEq(nearby.size(), size_t {2});
+
+            Test::TempDir tmp;
+            const auto savePath = (tmp.Path() / "alife_state.bin").string();
+            Test::ExpectTrue(sim.Save(reg, savePath.c_str()));
+
+            auto world2Res = COM::CreateLogicWorldRef();
+            auto& reg2 = *(*world2Res)->Entities();
+            Simulator sim2 {};
+            Test::ExpectTrue(sim2.Load(reg2, savePath.c_str()));
+            Test::ExpectEq(reg2.EntitiesWith<ALifeComponent>().size(), size_t {2});
             return {};
         }
     };

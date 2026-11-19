@@ -72,13 +72,13 @@ function(_zhln_slang_prebuilt_asset _tag _out)
         string(SUBSTRING "${_ver}" 1 -1 _ver)
     endif()
 
-    if(APPLE)
-        set(_os "macos")
-    elseif(WIN32)
-        set(_os "windows")
-    else()
-        set(_os "linux")
-    endif()
+    # Linux only, and the guard at the top of this file is what makes that
+    # true. The macOS/Windows branches that used to be here could never be
+    # reached -- `if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux") return()` runs
+    # before this function is defined -- so they described a fallback that does
+    # not exist. The project's own Slang provisioning for those platforms is
+    # cmake/SlangResolve.cmake (config package) and extern/slang (vendored).
+    set(_os "linux")
 
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
         set(_arch "aarch64")

@@ -11,13 +11,9 @@
 #     its coverage page;
 #   * cooked 'FNT0' containers from a mounted pak or from disk.
 #
-# InstallBakedFontLoader (Fonts.hpp) installs core's BakedFontLoader hook; the
-# composition root calls it before InitializeDefaultScene and core takes over.
-# stb_image is not compiled here -- STB_IMAGE_IMPLEMENTATION lives in
-# src/engine/stbi_impl.c inside zahlen_engine, so the decode symbols arrive through
-# the engine link, the same way plugins/glTF gets them.
-#
-# Public headers are reached as <Fonts/Fonts.hpp>.
+# LoadBakedFont and UploadFontAtlas are explicit host operations; no installed
+# loader, global user pointer, engine service, or teardown hook is retained.
+# Image codecs are provided privately by zahlen_image.
 
 set(TARGET_NAME zahlen_fonts)
 
@@ -32,21 +28,19 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/stb
-)
 
 # Core is a public dependency: Fonts.hpp names Engine and the GUI baked-font
 # seam in its signatures.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_ui
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
-target_link_libraries(${TARGET_NAME} PRIVATE
+target_link_libraries(${TARGET_NAME} PRIVATE zahlen_image
     zahlen_serialization
     zahlen_warnings
 )

@@ -9,8 +9,8 @@
 // walks the reflected layout: member
 // offsets, sizes, strides and alignments come from the compiler's own model.
 // The Slang type decides the C++ spelling by itself -- float2/float3/float4
-// to ZHLN::Float2/Float3/Float4, uint2/int2 to std::array lanes, float4x4 to
-// ZHLN::Mat44, a fixed array to std::array of its element, and enums to generated
+// to ZHLN::FVec2/FVec3/FVec4, uint2/int2 to std::array lanes, float4x4 to
+// ZHLN::Mat4x4, a fixed array to std::array of its element, and enums to generated
 // types. Those four are the engine's own containers: the emitted struct is a
 // storage definition, so its members are the same value types the engine uses in
 // its hand-written structs, and no maths library appears in the generated header.
@@ -84,10 +84,10 @@ constexpr std::string_view kHeapStruct  = "DescriptorHeapPushData";
 // The storage spellings: the engine's container types, one per Slang float
 // vector width. They carry no arithmetic -- the engine's implementations do maths
 // in their own library -- because a generated struct is a layout, not behaviour.
-constexpr std::string_view kFloat2 = "::ZHLN::Float2";
-constexpr std::string_view kFloat3 = "::ZHLN::Float3";
-constexpr std::string_view kFloat4 = "::ZHLN::Float4";
-constexpr std::string_view kMat4   = "::ZHLN::Mat44";
+constexpr std::string_view kFloat2 = "::ZHLN::FVec2";
+constexpr std::string_view kFloat3 = "::ZHLN::FVec3";
+constexpr std::string_view kFloat4 = "::ZHLN::FVec4";
+constexpr std::string_view kMat4   = "::ZHLN::Mat4x4";
 
 constexpr auto kUniform = SLANG_PARAMETER_CATEGORY_UNIFORM;
 
@@ -294,7 +294,7 @@ auto SameEnum(const EnumDef& lhs, const EnumDef& rhs) -> bool {
 
 // The Slang-kind-to-C++ mapping for one member: float vectors are their engine
 // container type, 32-bit integer vectors are std::array lanes, a float4x4 is
-// ZHLN::Mat44, scalar kinds map to stdint, and a Slang enum gets a generated
+// ZHLN::Mat4x4, scalar kinds map to stdint, and a Slang enum gets a generated
 // enum. Fixed arrays map to std::array when their reflected stride is tight.
 auto MapMember(
     std::string_view structName,
@@ -332,10 +332,10 @@ auto MapMember(
         const uint32_t rows = static_cast<uint32_t>(type->getRowCount());
         const uint32_t cols = static_cast<uint32_t>(type->getColumnCount());
         if (rows != 4 || cols != 4 || !isFloat32) {
-            Fail("gpu types: {}.{} is not a float4x4; only float4x4 matrices map to ZHLN::Mat44", structName, memberName);
+            Fail("gpu types: {}.{} is not a float4x4; only float4x4 matrices map to ZHLN::Mat4x4", structName, memberName);
         }
         if (layout->getMatrixLayoutMode() != SLANG_MATRIX_LAYOUT_COLUMN_MAJOR) {
-            Fail("gpu types: {}.{} is not column-major; the host Mat44 assumes column-major", structName, memberName);
+            Fail("gpu types: {}.{} is not column-major; the host Mat4x4 assumes column-major", structName, memberName);
         }
         return {.form = CxxForm::Mat, .spelling = std::string {kMat4}, .size = 64, .cxxAlign = 16};
     }
@@ -567,7 +567,11 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 
 #pragma once
 
-#include <Zahlen/Math/ValueTypes.hpp> // the containers the members are spelled in
+// Include every native container named by the generated members directly.
+#include <Zahlen/Math/Vec2.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/Math/Matrix.hpp> // the containers the members are spelled in
 
 #include "vulkan/pipeline/PushDataLayout.hpp" // Vk::HeapPushDataLayout: kScenePushLayout's type
 

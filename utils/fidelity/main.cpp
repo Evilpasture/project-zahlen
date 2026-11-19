@@ -32,6 +32,7 @@
 // re-renders).
 
 #include "FidelityCore.hpp"
+#include <Zahlen/Math/Vec3.hpp>
 #include "ImageIO.hpp"
 
 #include <json/JSONSchema.hpp>
@@ -69,7 +70,7 @@ struct Orbit3 {
     float radius = 1.0f;   // camera distance, metres
 };
 
-struct Vec3 {
+struct FVec3 {
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
@@ -81,7 +82,7 @@ struct Scenario {
     std::string lighting;   // resolved absolute path
     bool        renderSkybox = false;
     Extent2     dimensions;
-    Vec3        target;
+    FVec3        target;
     Orbit3      orbit;
     float       verticalFov = 45.0f;
 };

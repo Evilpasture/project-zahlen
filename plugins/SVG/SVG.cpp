@@ -148,29 +148,29 @@ auto MapError(int32_t code) noexcept -> ErrorCode {
     // Only a library that has the variant can return it; on an older one that
     // same code is FILE_OPEN_FAILED.
     if (kLibraryNamesSvgzUnsupported && code == kNativeSvgzUnsupported) {
-        return SVGError::SVGZUnsupported;
+        return Error::SVGZUnsupported;
     }
 
     const int32_t named = ToHeaderCode(code);
     if (named == RESVG_ERROR_NOT_AN_UTF8_STR) {
-        return SVGError::NotUTF8;
+        return Error::NotUTF8;
     }
     if (named == RESVG_ERROR_FILE_OPEN_FAILED) {
-        return SVGError::FileOpenFailed;
+        return Error::FileOpenFailed;
     }
     if (named == RESVG_ERROR_MALFORMED_GZIP) {
-        return SVGError::MalformedGZip;
+        return Error::MalformedGZip;
     }
     if (named == RESVG_ERROR_ELEMENTS_LIMIT_REACHED) {
-        return SVGError::ElementsLimitReached;
+        return Error::ElementsLimitReached;
     }
     if (named == RESVG_ERROR_INVALID_SIZE) {
-        return SVGError::InvalidSize;
+        return Error::InvalidSize;
     }
     if (named == RESVG_ERROR_PARSING_FAILED) {
-        return SVGError::ParsingFailed;
+        return Error::ParsingFailed;
     }
-    return SVGError::Unknown;
+    return Error::Unknown;
 }
 
 // Allocates the pixmap resvg renders into. resvg composites onto whatever
@@ -183,12 +183,12 @@ auto MapError(int32_t code) noexcept -> ErrorCode {
 // process instead of returning an error.
 auto MakeRaster(uint32_t width, uint32_t height) noexcept -> std::expected<Raster, ErrorCode> {
     if (width == 0 || height == 0) {
-        return std::unexpected(SVGError::InvalidDimensions);
+        return std::unexpected(Error::InvalidDimensions);
     }
 
     const uint64_t pixelCount = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
     if (pixelCount > kMaxRasterPixels) {
-        return std::unexpected(SVGError::RasterTooLarge);
+        return std::unexpected(Error::RasterTooLarge);
     }
 
     Raster raster;
@@ -215,7 +215,7 @@ constexpr auto PremultiplyChannel(uint32_t channel, uint32_t alpha) noexcept -> 
 auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg_options*, ErrorCode> {
     resvg_options* native = resvg_options_create();
     if (native == nullptr) {
-        return std::unexpected(SVGError::OptionsCreationFailed);
+        return std::unexpected(Error::OptionsCreationFailed);
     }
 
     resvg_options_set_dpi(native, settings.dpi);
@@ -262,7 +262,7 @@ auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg
             // this face would otherwise render in a fallback and look like a
             // layout bug rather than a missing file.
             resvg_options_destroy(native);
-            return std::unexpected(SVGError::FontLoadFailed);
+            return std::unexpected(Error::FontLoadFailed);
         }
     }
 
@@ -460,7 +460,7 @@ auto Document::NodeTransform(std::string_view id) const noexcept -> std::optiona
 
 auto Document::Render(uint32_t width, uint32_t height, const Transform& transform, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(SVGError::InvalidDocument);
+        return std::unexpected(Error::InvalidDocument);
     }
 
     auto raster = MakeRaster(width, height);
@@ -478,20 +478,20 @@ auto Document::Render(uint32_t width, uint32_t height, const Transform& transfor
 
 auto Document::RenderAtScale(float scale, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(SVGError::InvalidDocument);
+        return std::unexpected(Error::InvalidDocument);
     }
     if (!std::isfinite(scale) || scale <= 0.0f) {
-        return std::unexpected(SVGError::InvalidDimensions);
+        return std::unexpected(Error::InvalidDimensions);
     }
 
     const Size  native = NativeSize();
     const float width  = native.width * scale;
     const float height = native.height * scale;
     if (!std::isfinite(width) || !std::isfinite(height) || width < 1.0f || height < 1.0f) {
-        return std::unexpected(SVGError::InvalidSize);
+        return std::unexpected(Error::InvalidSize);
     }
     if (width > kMaxRasterDimension || height > kMaxRasterDimension) {
-        return std::unexpected(SVGError::RasterTooLarge);
+        return std::unexpected(Error::RasterTooLarge);
     }
 
     // Rounded up: a 24x24 icon at 1.5x is 36x36, and truncating to 35x35 would
@@ -508,7 +508,7 @@ auto Document::RenderAtScale(float scale, AlphaMode alphaMode) const noexcept ->
 
 auto Document::RenderFitted(uint32_t width, uint32_t height, FitMode fit, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(SVGError::InvalidDocument);
+        return std::unexpected(Error::InvalidDocument);
     }
     return Render(width, height, FitTransform(NativeSize(), width, height, fit), alphaMode);
 }
@@ -516,10 +516,10 @@ auto Document::RenderFitted(uint32_t width, uint32_t height, FitMode fit, AlphaM
 auto Document::RenderNode(std::string_view id, uint32_t width, uint32_t height, const Transform& transform, AlphaMode alphaMode) const noexcept
     -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(SVGError::InvalidDocument);
+        return std::unexpected(Error::InvalidDocument);
     }
     if (id.empty()) {
-        return std::unexpected(SVGError::NodeNotFound);
+        return std::unexpected(Error::NodeNotFound);
     }
 
     auto raster = MakeRaster(width, height);
@@ -529,7 +529,7 @@ auto Document::RenderNode(std::string_view id, uint32_t width, uint32_t height, 
 
     const std::string idZ(id);
     if (!resvg_render_node(_impl->tree, idZ.c_str(), ToNative(transform), width, height, reinterpret_cast<char*>(raster->pixels.data()))) {
-        return std::unexpected(SVGError::NodeNotFound);
+        return std::unexpected(Error::NodeNotFound);
     }
 
     if (alphaMode == AlphaMode::Straight) {
@@ -590,7 +590,7 @@ auto Rasterizer::BuildError() const noexcept -> ErrorCode {
     if (_impl != nullptr && _impl->buildError) {
         return _impl->buildError;
     }
-    return SVGError::OptionsCreationFailed;
+    return Error::OptionsCreationFailed;
 }
 
 auto Rasterizer::GetOptions() const noexcept -> const Options& {
@@ -606,7 +606,7 @@ auto Rasterizer::LoadFile(std::string_view path) const noexcept -> std::expected
         return std::unexpected(BuildError());
     }
     if (path.empty()) {
-        return std::unexpected(SVGError::FileOpenFailed);
+        return std::unexpected(Error::FileOpenFailed);
     }
 
     // resvg wants NUL-terminated UTF-8. A UTF-8 path also works on Windows:
@@ -645,7 +645,7 @@ auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::e
     if (svg.empty()) {
         // resvg builds a Rust slice from (data, len) with no null check, so an
         // empty buffer is refused here instead of being handed down.
-        return std::unexpected(SVGError::ParsingFailed);
+        return std::unexpected(Error::ParsingFailed);
     }
 
     // Undo whatever a previous LoadFile derived: bytes in memory have no

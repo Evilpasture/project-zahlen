@@ -7,7 +7,7 @@
 // utils/zcook/GLBModel.hpp
 //
 // The reflected glTF 2.0 document model the GLB emitter serialises with
-// ZHLN::ReflectJSON::SerializeJSON. The struct declarations are the schema:
+// ZHLN::ReflectJSON::Serialize. The struct declarations are the schema:
 // field names are the glTF keys, so nothing here hand-builds a brace, a comma
 // or an escape -- see the emitter that fills them in GLB.cpp.
 //
@@ -22,7 +22,7 @@
 // hand-built strings mechanical.
 //
 // The model is a utils/ private: the runtime importer
-// (plugins/glTF/GLTFImporter.cpp) decodes with cgltf and never sees these
+// (plugins/glTF/GLTFDocument.cpp) decodes with cgltf and never sees these
 // types. Tests that synthesize their own documents intentionally keep their
 // own fixture structs (tests/render/TestGLTFImport.cpp) so the importer's
 // contract is asserted independently of the emitter's implementation.

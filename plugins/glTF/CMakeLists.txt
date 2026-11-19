@@ -1,105 +1,17 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# plugins/glTF -- the glTF/GLB importer and the drop-a-file inspector
-# (zahlen_gltf).
-#
-# This is the extra that owns vendored third-party code, and owning it in a
-# target of its own is what keeps that code off everyone else's include path:
-#
-#   * cgltf         -- the container parser, header plus cgltf_impl.c. It
-#                      used to live in the src/gltf static library; this target
-#                      compiles the one copy in the tree, so nothing else may.
-#   * stb_image     -- header only. STB_IMAGE_IMPLEMENTATION is
-#                      src/engine/stbi_impl.c, which is part of zahlen_engine, so
-#                      the decode symbols arrive through the engine link below.
-#
-# The importer is the one extra that produces data core then consumes: it fills
-# the prefab cache, and CreativeWorksFactory::LoadModelPrefab reads that cache.
-# No registration, and nothing in src/ includes it.
-#
-# ZHLN.glTF (glTF.cppm) is the inspector's interface and glTF.cpp is its module
-# implementation unit. GLTFImporter.cpp is an ordinary translation unit, not a
-# module unit, and it is the file that needs the two other targets below.
-#
-# Public headers and module interfaces are reached as <glTF/...>.
-
-set(TARGET_NAME zahlen_gltf)
-
-# Module interface units, named.
-set(ZHLN_GLTF_MODULES
-    glTF.cppm
-)
-
-# The ordinary translation units of this target, named.
-set(ZHLN_GLTF_SOURCES
-    GLTFImporter.cpp
-    TangentGenerator.cpp
-    glTF.cpp
-)
-
-add_library(${TARGET_NAME} STATIC)
-
-set_target_properties(${TARGET_NAME} PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    CXX_SCAN_FOR_MODULES ON
-    # Matters more here than in the plugins layer: cgltf_impl.c is a C
-    # translation unit compiled into this archive, and samples and tests link it
-    # straight into a PIE executable.
-    POSITION_INDEPENDENT_CODE ON
-)
-
-set_source_files_properties(${ZHLN_GLTF_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-
-target_sources(${TARGET_NAME}
-    PUBLIC
-        FILE_SET CXX_MODULES
-        TYPE CXX_MODULES
-        BASE_DIRS ${PROJECT_SOURCE_DIR}/plugins
-        FILES ${ZHLN_GLTF_MODULES}
-)
-
-target_sources(${TARGET_NAME} PRIVATE ${ZHLN_GLTF_SOURCES})
-
-# The cgltf implementation. PRIVATE, and exactly one target in the tree compiles
-# it: a second copy is a duplicate definition at link time, which is why
-# tests/render/CMakeLists.txt and tests/extras/CMakeLists.txt deliberately do
-# not list it either.
-target_sources(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cgltf_impl.c)
-
-target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/cgltf
-    ${PROJECT_SOURCE_DIR}/extern/stb
-)
-
-# Core is a public dependency: <glTF/GLTFImporter.hpp> names ZHLN::ModelPrefab,
-# RenderContext and CreativeWorksManager in its signatures.
-target_link_libraries(${TARGET_NAME} PUBLIC
-    zahlen_engine
-)
-
-# GLTFImporter.cpp includes <json/JSONSchema.hpp> to validate the container it is
-# about to parse. That is an implementation detail of the .cpp -- neither
-# <glTF/GLTFImporter.hpp> nor glTF.cppm mentions JSON -- so the link is PRIVATE:
-# a consumer of the importer needs no JSON reader of its own, and a consumer
-# that wants one links zahlen_serialization itself.
-target_link_libraries(${TARGET_NAME} PRIVATE
-    zahlen_serialization
-)
-
-target_include_directories(${TARGET_NAME} PUBLIC
-    ${PROJECT_SOURCE_DIR}/plugins
-)
-
-# glTF.cpp includes <Zahlen/ECS/Components.hpp>, whose layout depends on reflection.
+# CPU document decoding and COM asset authoring. Sole cgltf implementation.
+add_library(zahlen_gltf_assets STATIC
+    GLTFDocument.cpp GLTFAssets.cpp TangentGenerator.cpp cgltf_impl.c)
+set_target_properties(zahlen_gltf_assets PROPERTIES
+    CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON)
+target_include_directories(zahlen_gltf_assets PUBLIC ${PROJECT_SOURCE_DIR}/plugins)
+target_include_directories(zahlen_gltf_assets SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/cgltf)
+target_link_libraries(zahlen_gltf_assets PUBLIC zahlen_engine
+    PRIVATE zahlen_serialization zahlen_image zahlen_warnings)
 if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(${TARGET_NAME})
+    zahlen_enable_reflection(zahlen_gltf_assets)
 endif()
-
-# Jolt is direct: this library's own objects reference JPH symbols (shapes,
-# settings, factories), so it must be on the link line of whatever consumes
-# them. It used to arrive only through zahlen_engine's PUBLIC Jolt, which put
-# libJolt.so on all 18 executables -- including the ones that never touch it.
-target_link_libraries(${TARGET_NAME} PRIVATE Jolt zahlen_warnings)

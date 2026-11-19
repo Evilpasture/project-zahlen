@@ -12,9 +12,10 @@
 #include <Console/ConsoleDebugger.hpp>
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptBinderRegistry.hpp>
+#include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/ECS/ECS.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -26,9 +27,9 @@ namespace {
 auto JoinedLogs(const ZHLN::GameConsole& console) -> std::string {
     std::string out;
     for (size_t i = 0; i < console.GetEntryCount(); ++i) {
-        std::string_view text;
-        float            r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
-        console.GetEntry(i, text, r, g, b, a);
+        const auto entry = console.GetEntry(i);
+        if (!entry) continue;
+        const std::string_view text = entry->text;
         if (!out.empty()) {
             out += '\n';
         }
@@ -56,8 +57,53 @@ struct ConsoleDebuggerTestSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> matrix_range_properties_round_trip() {
+            auto& classes = ZHLN::ScriptBinder::Get().classes;
+            const auto typeIt = classes.find("WorldTransformComponent");
+            ZHLN::Test::ExpectTrue(typeIt != classes.end());
+            if (typeIt == classes.end()) return {};
+            const auto propIt = typeIt->second.properties.find("world");
+            ZHLN::Test::ExpectTrue(propIt != typeIt->second.properties.end());
+            if (propIt == typeIt->second.properties.end()) return {};
+            const auto& prop = propIt->second;
+            ZHLN::Test::ExpectTrue(bool(prop.get_element_at) && bool(prop.set_element_at));
+            if (!prop.get_element_at || !prop.set_element_at) return {};
+
+            ZHLN::Components::WorldTransformComponent component;
+            const auto changed = prop.set_element_at(&component, 9, ZHLN::ScriptVal {4.5});
+            ZHLN::Test::ExpectTrue(changed.has_value());
+            ZHLN::Test::ExpectEq(component.world[1, 2], 4.5f);
+            const auto element = prop.get_element_at(&component, 9);
+            ZHLN::Test::ExpectTrue(element.has_value());
+            if (element) {
+                const auto* number = std::get_if<double>(&*element);
+                ZHLN::Test::ExpectTrue(number && *number == 4.5);
+            }
+            ZHLN::Test::ExpectTrue(!prop.get_element_at(&component, 16));
+            ZHLN::Test::ExpectTrue(!prop.set_element_at(&component, 16, ZHLN::ScriptVal {1.0}));
+
+            auto serialized = prop.get(&component);
+            ZHLN::Test::ExpectTrue(serialized.has_value());
+            if (serialized) {
+                component.world = ZHLN::Mat4x4::Zero();
+                ZHLN::Test::ExpectTrue(prop.set(&component, *serialized).has_value());
+                ZHLN::Test::ExpectEq(component.world[1, 2], 4.5f);
+                auto* array = std::get_if<ZHLN::ScriptArray>(&*serialized);
+                ZHLN::Test::ExpectTrue(array && array->elements.size() == 16);
+                if (array && !array->elements.empty()) {
+                    array->elements.pop_back();
+                    ZHLN::Test::ExpectTrue(!prop.set(&component, *serialized));
+                }
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> help_lists_commands() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "help");
             const std::string logs = JoinedLogs(console);
@@ -73,7 +119,11 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> empty_line_is_a_no_op() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "   ");
             ZHLN::Test::ExpectEq(console.GetEntryCount(), static_cast<size_t>(0));
@@ -81,7 +131,11 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> unknown_command_reports_help_hint() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "explode");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(console), "Unknown command: 'explode'"));
@@ -89,7 +143,11 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> types_lists_registered_components() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "types");
             const std::string logs = JoinedLogs(console);
@@ -100,7 +158,11 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> type_dumps_fields_or_reports_missing() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "type");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(console), "Usage: type <TypeName>"));
@@ -119,10 +181,14 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> find_entity_and_inspect() {
-            ZHLN::ECS::Registry reg;
-            const ZHLN::Entity  hero = reg.Create();
-            reg.Add(hero, ZHLN::Components::NameComponent {.name = ZHLN::String64 {"Hero"}});
-            reg.Add(hero, ZHLN::Components::PBRComponent {.roughness = 0.4f, .metallic = 0.2f});
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto               world = std::move(*created);
+            auto&              reg   = *world->Entities();
+            const ZHLN::Entity hero  = reg.CreateEntity();
+            reg.Attach(hero, ZHLN::Components::NameComponent {.name = ZHLN::String64 {"Hero"}});
+            reg.Attach(hero, ZHLN::Components::PBRComponent {.roughness = 0.4f, .metallic = 0.2f});
 
             ZHLN::GameConsole findConsole;
             ZHLN::ConsoleDebugger::Execute(reg, findConsole, "find Hero");
@@ -145,22 +211,23 @@ struct ConsoleDebuggerTestSuite {
 
             ZHLN::GameConsole dead;
             const uint64_t    packed = hero.Pack();
-            reg.Destroy(hero);
+            reg.Despawn(hero);
+            world->Flush();
             ZHLN::ConsoleDebugger::Execute(reg, dead, std::format("entity {}", packed));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(dead), "Invalid or dead entity"));
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> get_and_set_component_fields() {
-            ZHLN::ECS::Registry reg;
-            // get/set resolve the component by name through
-            // Registry::GetFamilyIDFromName, which is filled by RegisterComponent
-            // (Engine::InitializeDefaultScene does RegisterAllComponentsIn).
-            // A bare Add() stores the component but does not map the name, so
-            // ScriptECSBridge would report ComponentNotFound.
-            reg.RegisterAllComponentsIn<ZHLN::Components>();
-            const ZHLN::Entity e = reg.Create();
-            reg.Add(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.0f});
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto  world = std::move(*created);
+            auto& reg   = *world->Entities();
+            // The debugger resolves a published POD component via IEntities;
+            // neither the test nor the consumer has registry access.
+            const ZHLN::Entity e = reg.CreateEntity();
+            reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.0f});
             const std::string id = std::format("{}", e.Pack());
 
             ZHLN::GameConsole getConsole;
@@ -171,7 +238,7 @@ struct ConsoleDebuggerTestSuite {
             ZHLN::ConsoleDebugger::Execute(reg, setConsole, std::format("set {} PBRComponent.roughness 0.25", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(setConsole), "Updated PBRComponent.roughness to 0.25"));
             const auto pbr = reg.Get<ZHLN::Components::PBRComponent>(e);
-            ZHLN::Test::ExpectTrue(pbr.has_value());
+            ZHLN::Test::ExpectTrue(pbr != nullptr);
             if (pbr) {
                 ZHLN::Test::ExpectEq(pbr->roughness, 0.25f);
             }
@@ -187,7 +254,11 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> sym_rejects_bad_addresses() {
-            ZHLN::ECS::Registry  reg;
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto                 world = std::move(*created);
+            auto&                reg   = *world->Entities();
             ZHLN::GameConsole    usage;
             ZHLN::ConsoleDebugger::Execute(reg, usage, "sym");
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(usage), "Usage: sym"));
@@ -199,19 +270,21 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> patch_applies_lua_table_and_rolls_back_on_error() {
-            ZHLN::ECS::Registry reg;
-            reg.RegisterAllComponentsIn<ZHLN::Components>();
-            const ZHLN::Entity e = reg.Create();
-            reg.Add(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
+            auto created = ZHLN::COM::CreateLogicWorldRef();
+            if (!created)
+                return std::unexpected(created.error());
+            auto  world = std::move(*created);
+            auto& reg   = *world->Entities();
+
+            const ZHLN::Entity e = reg.CreateEntity();
+            reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
             const std::string id = std::format("{}", e.Pack());
 
             ZHLN::GameConsole okConsole;
-            ZHLN::ConsoleDebugger::Execute(
-                reg, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id)
-            );
+            ZHLN::ConsoleDebugger::Execute(reg, okConsole, std::format("patch {} PBRComponent {{ roughness = 0.15 + 0.05, metallic = 0.8 }}", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(okConsole), "Patched PBRComponent"));
             const auto updated = reg.Get<ZHLN::Components::PBRComponent>(e);
-            ZHLN::Test::ExpectTrue(updated.has_value());
+            ZHLN::Test::ExpectTrue(updated != nullptr);
             if (updated) {
                 ZHLN::Test::ExpectEq(updated->roughness, 0.2f);
                 ZHLN::Test::ExpectEq(updated->metallic, 0.8f);
@@ -219,9 +292,7 @@ struct ConsoleDebuggerTestSuite {
 
             // Invalid field must roll back the entire patch cleanly.
             ZHLN::GameConsole badConsole;
-            ZHLN::ConsoleDebugger::Execute(
-                reg, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id)
-            );
+            ZHLN::ConsoleDebugger::Execute(reg, badConsole, std::format("patch {} PBRComponent {{ roughness = 0.99, noSuchProp = 1 }}", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(badConsole), "Failed to patch PBRComponent"));
             const auto preserved = reg.Get<ZHLN::Components::PBRComponent>(e);
             if (preserved) {
