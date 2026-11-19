@@ -127,7 +127,7 @@ struct ProceduralAnimationTestSuite {
                 ZHLN::ProceduralAnimationConfigComponent {}
             );
             uint32_t paletteUploads = 0;
-            (void)entities.Spawn(
+            entities.Spawn(
                 ZHLN::Components::HierarchyComponent {.parent = actor},
                 ZHLN::Components::TransformComponent {},
                 ZHLN::Components::MeshComponent {.nodeIndex = 0},

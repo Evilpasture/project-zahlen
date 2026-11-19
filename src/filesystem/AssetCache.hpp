@@ -58,28 +58,30 @@ class AssetCache {
     // without an out-parameter. References are decayed: no borrowed reference
     // can be carried out of the lock through the return value either.
     template <typename Fn>
-        requires std::invocable<Fn, T&>
-    [[nodiscard]] auto With(uint64_t id, Fn&& fn) const {
-        using Result = std::invoke_result_t<Fn, T&>;
-        if constexpr (std::is_void_v<Result>) {
-            return Lock(_mutex, [&]() -> bool {
-                const auto entry = _map.Find(id);
-                if (!entry || *entry == nullptr) {
-                    return false;
-                }
-                std::forward<Fn>(fn)(**entry);
-                return true;
-            });
-        } else {
-            using Ret = std::remove_cvref_t<Result>;
-            return Lock(_mutex, [&]() -> std::optional<Ret> {
-                const auto entry = _map.Find(id);
-                if (!entry || *entry == nullptr) {
-                    return std::nullopt;
-                }
-                return std::forward<Fn>(fn)(**entry);
-            });
-        }
+        requires std::invocable<Fn, T&> && std::is_void_v<std::invoke_result_t<Fn, T&>>
+    auto With(uint64_t id, Fn&& fn) const -> bool {
+        return Lock(_mutex, [&]() -> bool {
+            const auto entry = _map.Find(id);
+            if (!entry || *entry == nullptr) {
+                return false;
+            }
+            std::forward<Fn>(fn)(**entry);
+            return true;
+        });
+    }
+
+    template <typename Fn>
+        requires std::invocable<Fn, T&> && (!std::is_void_v<std::invoke_result_t<Fn, T&>>)
+    [[nodiscard]] auto With(uint64_t id, Fn&& fn) const
+        -> std::optional<std::remove_cvref_t<std::invoke_result_t<Fn, T&>>> {
+        using Ret = std::remove_cvref_t<std::invoke_result_t<Fn, T&>>;
+        return Lock(_mutex, [&]() -> std::optional<Ret> {
+            const auto entry = _map.Find(id);
+            if (!entry || *entry == nullptr) {
+                return std::nullopt;
+            }
+            return std::forward<Fn>(fn)(**entry);
+        });
     }
 
     void Insert(uint64_t id, std::unique_ptr<T> asset) {

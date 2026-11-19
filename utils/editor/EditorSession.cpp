@@ -166,14 +166,12 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
                 return std::unexpected(result.error);
             mesh = built;
             if (!entities.Attach(entity, Components::OwnedMeshComponent {.meshAsset = binding->meshAsset, .mesh = mesh})) {
-                (void) graphics.DestroyMesh(COM::InChain(mesh));
+                graphics.DestroyMesh(mesh);
                 return std::unexpected(COM::Error::InvalidArgument);
             }
         }
         if (!graphics.FindMesh(binding->meshAsset).HasValue()) {
-            auto registered = graphics.RegisterMesh(binding->meshAsset, mesh);
-            if (!registered.HasValue())
-                return std::unexpected(registered.error);
+            graphics.RegisterMesh(binding->meshAsset, mesh);
         }
         if (!material.HasValue()) {
             const auto& saved = it->second;
@@ -182,9 +180,7 @@ auto Session::RefreshPrimitives(COM::IEngine& engine) -> std::expected<void, Err
             );
             if (!built.HasValue())
                 return std::unexpected(built.error);
-            auto registered = graphics.RegisterMaterial(binding->materialAsset, built.value);
-            if (!registered.HasValue())
-                return std::unexpected(registered.error);
+            graphics.RegisterMaterial(binding->materialAsset, built.value);
         }
     }
     return {};
@@ -299,8 +295,7 @@ auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expe
         return std::unexpected(COM::Error::InvalidArgument);
     if (auto ready = RefreshPrimitives(engine); !ready)
         return ready;
-    if (auto ready = hostUI.BeginFrame(); !ready.HasValue())
-        return std::unexpected(ready.error);
+    hostUI.BeginFrame();
     COM::HostInputInfo input;
     auto               read = engine.ReadHostInput(engine.PrimaryWindow(), COM::OutChain(input), false);
     if (!read.HasValue())
@@ -319,9 +314,7 @@ auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expe
     if (auto box = gui.GetLastFrameRect("InspectorPanel"))
         right = std::clamp(box->x, left, float(extent.width));
     ViewportRect viewport {.x = uint32_t(left), .y = 0, .width = uint32_t(right - left), .height = extent.height};
-    auto         applied = engine.Graphics()->ApplySettings(COM::InChain(COM::ViewportInfo {viewport}));
-    if (!applied.HasValue())
-        return std::unexpected(applied.error);
+    engine.Graphics()->SetViewport(viewport);
     bool keyboard        = gui.IsTextInputFocused();
     bool transformActive = state.transformMode != State::TransformMode::None;
     UpdateTransformMode(entities, input, state, camera, SceneViewport {viewport.x, viewport.y, viewport.width, viewport.height}, keyboard);
@@ -371,7 +364,7 @@ void Session::Stop(COM::IEngine& engine) {
         return;
     if (auto pipeline = COM::Ref<COM::IFramePipeline>::Adopt(engine.Query<COM::IFramePipeline>()); pipeline && pipeline->FramePending())
         (void) pipeline->CancelFrame();
-    (void) engine.Graphics()->ApplySettings(COM::InChain(COM::ViewportInfo {_previousViewport}));
+    engine.Graphics()->SetViewport(_previousViewport);
     _started = false;
     _materials.clear();
     _engine   = {};

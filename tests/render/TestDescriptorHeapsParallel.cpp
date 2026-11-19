@@ -91,7 +91,7 @@ struct DescriptorHeapsParallelSuite {
 
             auto& rc = *engine->Graphics();
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;
@@ -140,7 +140,7 @@ struct DescriptorHeapsParallelSuite {
                     engine->Assets()->SpawnBox({halfExtent, halfExtent, halfExtent},
                         ZHLN::PrefabFactory::SpawnParams {
                             .position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
-                        }).value;
+                        });
                 }
             }
 

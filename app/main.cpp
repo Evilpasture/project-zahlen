@@ -56,11 +56,11 @@ struct SandboxGame {
         gfx.environment.ambientExposure = 3.0f;
         gfx.environment.skyZenith       = {0.08f, 0.18f, 0.34f, 1.0f};
         gfx.environment.skyHorizon      = {0.40f, 0.55f, 0.72f, 1.0f};
-        (void)engine.Graphics()->ApplySettings(gfx);
+        engine.Graphics()->ApplySettings(gfx);
 
         // Everything here is scene-owned: Engine's normal teardown reclaims
         // both the generated GPU meshes and their Jolt bodies.
-        (void)engine.Assets()->SpawnPlane( 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
+        engine.Assets()->SpawnPlane( 30.0f, {0.25f, 0.29f, 0.34f, 1.0f}, {.createPhysics = true, .isStaticPhysics = true});
 
         // --cubes controls the initial physics population. --seed optionally
         // jitters the grid with a fixed integer LCG (the default stays aligned).
@@ -74,7 +74,7 @@ struct SandboxGame {
             const float x      = (static_cast<float>(i % 8) - 2.0f) * 1.65f + (seed ? jitter() : 0.0f);
             const float z      = static_cast<float>(i / 8) * 1.65f + (seed ? jitter() : 0.0f);
             const float stripe = static_cast<float>(i % 5);
-            (void)engine.Assets()->SpawnBox( {0.55f, 0.55f, 0.55f},
+            engine.Assets()->SpawnBox( {0.55f, 0.55f, 0.55f},
                 {.position        = {x, 2.5f + stripe * 0.35f, z},
                  .createPhysics   = true,
                  .isStaticPhysics = false,
@@ -82,7 +82,7 @@ struct SandboxGame {
             );
         }
 
-        (void)reg.Spawn(
+        reg.Spawn(
             ZHLN::Components::SunTagComponent {}, ZHLN::Components::LightComponent {
                                                       .type        = ZHLN::LightType::Sun,
                                                       .color       = FVec3{1.0f, 0.95f, 0.85f},
@@ -138,17 +138,17 @@ struct SandboxGame {
         const float        yaw     = cam.yaw.ToRadians().value;
         const float        pitch   = cam.pitch.ToRadians().value;
         const FVec3    forward = FVec3{std::cos(yaw) * std::cos(pitch), std::sin(pitch), std::sin(yaw) * std::cos(pitch)}.Normalized();
-        const auto spawned = engine.Assets()->SpawnBox( {0.30f, 0.30f, 0.30f},
+        const auto cube = engine.Assets()->SpawnBox(
+            {0.30f, 0.30f, 0.30f},
             {.position = (cam.position + forward * 2.0f).Cast<double>(), .createPhysics = true, .isStaticPhysics = false, .color = FVec4{1.0f, 0.75f, 0.28f, 1.0f}}
         );
-        if (spawned.HasValue()) {
-            const auto cube = spawned.value;
+        if (cube != ZHLN::Entity::Null()) {
             if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
                 engine.Simulation()->AddImpulse(body->physicsID, forward * 12.0f);
             }
         }
         if (engine.Audio()->Initialized()) {
-            (void)engine.Audio()->PostEvent(
+            engine.Audio()->PostEvent(
                 ZHLN::AudioEvent {
                     .type     = ZHLN::AudioEventType::ProceduralBeep,
                     .volume   = 0.22f,

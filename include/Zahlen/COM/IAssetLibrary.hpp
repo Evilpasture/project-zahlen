@@ -78,10 +78,10 @@ struct IAssetLibrary : IObject {
 
     [[nodiscard]] virtual Option<PrefabInfo> DescribePrefab(uint64_t hash) const noexcept = 0;
 
-    [[nodiscard]] virtual Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* bounds) const noexcept = 0;
+    virtual Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* bounds) const noexcept = 0;
     // Exports cached prefab nodes, part bounds, skeletons and animation clips
     // into PrefabRigCounts and/or PrefabRigData output chain nodes.
-    [[nodiscard]] virtual Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept = 0;
+    virtual Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept = 0;
 
     // Copies the prefab's virtual path into `buffer` and null-terminates it
     // when there is room. Returns the length the path actually needs, which
@@ -96,7 +96,7 @@ struct IAssetLibrary : IObject {
     // buffer still instantiates the whole prefab and discards the ids. Size the
     // buffer first from PrefabInfo (the inline overload below does this) and
     // call once. Zero inside Result means nothing is cached under `hash`.
-    [[nodiscard]] virtual Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
+    virtual Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
                                                        uint32_t capacity) noexcept = 0;
 
     // Spawns a scene-owned procedural primitive entity (mesh, material,
@@ -105,7 +105,7 @@ struct IAssetLibrary : IObject {
     // CylinderMeshDesc, or ConeMeshDesc) plus optional PrefabFactory::SpawnParams.
     // Optional MeshBuildOptions explicitly selects BLAS construction (default
     // true here for native spawn compatibility); retained across device rebuilds.
-    [[nodiscard]] virtual Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept = 0;
+    virtual Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept = 0;
 
     [[nodiscard]] virtual Option<EnvironmentImageInfo> FindEnvironmentImage(StringView key) const noexcept = 0;
 
@@ -113,32 +113,32 @@ struct IAssetLibrary : IObject {
     // cleared or the engine is destroyed. Empty when the key is unknown.
     [[nodiscard]] virtual Span<const float> EnvironmentPixels(StringView key) const noexcept = 0;
 
-    [[nodiscard]] virtual Result<void> MountDirectory(StringView path) noexcept = 0;
-    [[nodiscard]] virtual Result<void> UnmountDirectory(StringView path) noexcept = 0;
-    [[nodiscard]] virtual Result<void> MountPak(StringView path) noexcept = 0;
+    virtual Result<void> MountDirectory(StringView path) noexcept = 0;
+    virtual Result<void> UnmountDirectory(StringView path) noexcept = 0;
+    virtual Result<void> MountPak(StringView path) noexcept = 0;
     [[nodiscard]] virtual bool VirtualFileExists(StringView path) const noexcept = 0;
     // Exact bytes; short buffers are untouched. A present empty file returns 0.
-    [[nodiscard]] virtual Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept = 0;
+    virtual Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept = 0;
     virtual void ClearCache() noexcept = 0;
-    [[nodiscard]] virtual Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept = 0;
+    virtual Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept = 0;
     // Borrowed collision spans remain valid until cache replacement/clear or
     // destruction; never retain them across those operations.
-    [[nodiscard]] virtual Result<void> GetCollisionMesh(CollisionAssetID id, ChainOutNode* out) const noexcept = 0;
-    [[nodiscard]] virtual Result<void> CacheEnvironmentImage(const ChainInNode* chain) noexcept = 0;
-    [[nodiscard]] virtual Result<void> GetEnvironmentImage(StringView key, ChainOutNode* out) const noexcept = 0;
+    virtual Result<void> GetCollisionMesh(CollisionAssetID id, ChainOutNode* out) const noexcept = 0;
+    virtual Result<void> CacheEnvironmentImage(const ChainInNode* chain) noexcept = 0;
+    virtual Result<void> GetEnvironmentImage(StringView key, ChainOutNode* out) const noexcept = 0;
     // Copies flat data. Cached prefab GPU resources become cache-owned.
     // Do not destroy transferred mesh resources independently after success.
-    [[nodiscard]] virtual Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept = 0;
+    virtual Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept = 0;
 
     // Validates every part before replacing aliases/retiring old buffers.
     // CPU nodes, colliders, animations and prefab address remain unchanged.
     // Live morph offsets/scratch buffers are rebound; animated weights and
     // joint palette offsets are retained. Returns the new monotonic revision.
-    [[nodiscard]] virtual Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept = 0;
+    virtual Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept = 0;
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
-    [[nodiscard]] auto FindPrefab(StringView virtualPath) const noexcept -> Result<uint64_t> {
+    auto FindPrefab(StringView virtualPath) const noexcept -> Result<uint64_t> {
         const uint64_t hash = PrefabHash(virtualPath);
         if (!HasPrefab(hash)) return Error::AssetNotCached;
         return hash;
@@ -153,7 +153,7 @@ struct IAssetLibrary : IObject {
         return path;
     }
 
-    [[nodiscard]] auto Instantiate(uint64_t hash, const PrefabFactory::SpawnParams& params = {}) -> std::vector<Entity> {
+    auto Instantiate(uint64_t hash, const PrefabFactory::SpawnParams& params = {}) -> std::vector<Entity> {
         const Option<PrefabInfo> info = DescribePrefab(hash);
         if (!info.HasValue()) return {};
 
@@ -168,34 +168,40 @@ struct IAssetLibrary : IObject {
         return entities;
     }
 
-    [[nodiscard]] auto SpawnBox(ZHLN::FVec3 halfExtents, const PrefabFactory::SpawnParams& params = {}) noexcept
-        -> Result<Entity> {
-        return SpawnPrimitive(InChain(BoxMeshDesc {.halfExtents = halfExtents, .color = params.color}, params));
+    auto SpawnBox(ZHLN::FVec3 halfExtents, const PrefabFactory::SpawnParams& params = {}) noexcept -> Entity {
+        const Result<Entity> spawned =
+            SpawnPrimitive(InChain(BoxMeshDesc {.halfExtents = halfExtents, .color = params.color}, params));
+        return spawned.HasValue() ? spawned.value : Entity::Null();
     }
 
-    [[nodiscard]] auto SpawnPlane(float extent = 10.0F, ZHLN::FVec4 color = {0.6F, 0.6F, 0.6F, 1.0F},
-                                  const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
-        return SpawnPrimitive(InChain(PlaneMeshDesc {.extent = extent, .color = color}, params));
+    auto SpawnPlane(float extent = 10.0F, ZHLN::FVec4 color = {0.6F, 0.6F, 0.6F, 1.0F},
+                    const PrefabFactory::SpawnParams& params = {}) noexcept -> Entity {
+        const Result<Entity> spawned =
+            SpawnPrimitive(InChain(PlaneMeshDesc {.extent = extent, .color = color}, params));
+        return spawned.HasValue() ? spawned.value : Entity::Null();
     }
 
-    [[nodiscard]] auto SpawnSphere(float radius = 0.5F, const PrefabFactory::SpawnParams& params = {}) noexcept
-        -> Result<Entity> {
-        return SpawnPrimitive(InChain(SphereMeshDesc {.radius = radius, .color = params.color}, params));
+    auto SpawnSphere(float radius = 0.5F, const PrefabFactory::SpawnParams& params = {}) noexcept -> Entity {
+        const Result<Entity> spawned =
+            SpawnPrimitive(InChain(SphereMeshDesc {.radius = radius, .color = params.color}, params));
+        return spawned.HasValue() ? spawned.value : Entity::Null();
     }
 
-    [[nodiscard]] auto SpawnCylinder(float radius = 0.5F, float height = 1.0F,
-                                     const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
-        return SpawnPrimitive(
-            InChain(CylinderMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+    auto SpawnCylinder(float radius = 0.5F, float height = 1.0F,
+                       const PrefabFactory::SpawnParams& params = {}) noexcept -> Entity {
+        const Result<Entity> spawned =
+            SpawnPrimitive(InChain(CylinderMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+        return spawned.HasValue() ? spawned.value : Entity::Null();
     }
 
-    [[nodiscard]] auto SpawnCone(float radius = 0.5F, float height = 1.0F,
-                                 const PrefabFactory::SpawnParams& params = {}) noexcept -> Result<Entity> {
-        return SpawnPrimitive(
-            InChain(ConeMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+    auto SpawnCone(float radius = 0.5F, float height = 1.0F,
+                   const PrefabFactory::SpawnParams& params = {}) noexcept -> Entity {
+        const Result<Entity> spawned =
+            SpawnPrimitive(InChain(ConeMeshDesc {.radius = radius, .height = height, .color = params.color}, params));
+        return spawned.HasValue() ? spawned.value : Entity::Null();
     }
 
-    [[nodiscard]] auto CacheEnvironmentImage(StringView key, const EnvironmentImage& img) noexcept -> Result<void> {
+    auto CacheEnvironmentImage(StringView key, const EnvironmentImage& img) noexcept -> Result<void> {
         return CacheEnvironmentImage(InChain(EnvironmentImageCacheInfo {
             .key          = key,
             .extent       = {.width = img.width, .height = img.height},

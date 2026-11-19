@@ -42,11 +42,11 @@ auto ClientReplicator::ApplyInitialObjects(COM::IEntities& entities, std::span<c
         const FVec3  scale    = object.size;
         const auto   worldMat = ComposeTransform(position, Quat::Identity(), scale);
 
-        (void)entities.Attach(e, Components::NameComponent {.name = String64("ReplicatedObject")});
-        (void)entities.Attach(e, Components::TransformComponent {.position = position, .scale = scale});
-        (void)entities.Attach(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-        (void)entities.Attach(e, IdentityComponent {.serverUID = object.uid, .isLocalOwner = false});
-        (void)entities.Attach(
+        entities.Attach(e, Components::NameComponent {.name = String64("ReplicatedObject")});
+        entities.Attach(e, Components::TransformComponent {.position = position, .scale = scale});
+        entities.Attach(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+        entities.Attach(e, IdentityComponent {.serverUID = object.uid, .isLocalOwner = false});
+        entities.Attach(
             e, InterpolationComponent {.targetPosition = position, .targetRotation = Quat::Identity()});
     }
     return {};
@@ -62,7 +62,7 @@ auto ClientReplicator::ApplyPhysicsBatch(COM::IEntities& entities, std::span<con
 
     for (const PhysicsBodyState& body : message->bodies) {
         if (const auto e = uidToEntityMap.Find(body.uid)) {
-            (void)entities.Patch<InterpolationComponent>(*e, [&](InterpolationComponent& interp) {
+            entities.Patch<InterpolationComponent>(*e, [&](InterpolationComponent& interp) {
                 interp.targetPosition = body.position;
                 interp.targetRotation = body.rotation;
                 interp.linearVelocity = body.velocity;

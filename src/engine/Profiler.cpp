@@ -47,7 +47,7 @@ void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
     const auto  push = [&](ProfileDataInternal<100>& data) { data.Push(timeMS); };
     if (!s_Metrics.With(key, push)) [[unlikely]] {
         s_Metrics.Insert(key, ProfileDataInternal<100> {});
-        (void)s_Metrics.With(key, push);
+        s_Metrics.With(key, push);
     }
 }
 

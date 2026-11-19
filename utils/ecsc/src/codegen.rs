@@ -73,7 +73,7 @@ impl<'a> CXXModuleGenerator<'a> {
             code.push_str("        ZHLN::Entity e = entities.CreateEntity();\n");
             for c in &all_comps {
                 code.push_str(&format!(
-                    "        (void) entities.Attach(e, _{});\n",
+                    "        entities.Attach(e, _{});\n",
                     c.to_lowercase()
                 ));
             }

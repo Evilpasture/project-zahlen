@@ -129,7 +129,7 @@ struct ViewmodelTestSuite {
             vmMat.baseColorFactor    = {0.0f, 1.0f, 0.5f, 1.0f};
 
             const ZHLN::Entity vmGun = engine->Assets()->SpawnBox({0.08f, 0.08f, 0.35f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.2, 1.35, 1.5}, .createPhysics = false, .materialOverride = vmMat});
 
             // Flag as Viewmodel
             reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
@@ -164,7 +164,7 @@ struct ViewmodelTestSuite {
             auto& reg = *engine->Entities();
 
             // Set Fullbright to test raw G-buffer viewmodel color resolution without lighting variance
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Setup Camera looking along standard forward direction (-Z)
             const auto camComp = engine->Entities()->GetSingleton<ZHLN::Components::CameraComponent>();
@@ -188,14 +188,14 @@ struct ViewmodelTestSuite {
             wallMat.baseColorFactor    = {0.15f, 0.15f, 0.15f, 1.0f};
 
             const ZHLN::Entity darkWall = engine->Assets()->SpawnBox({4.0f, 4.0f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .materialOverride = wallMat});
             ZHLN::Test::ExpectTrue(reg.IsAlive(darkWall));
 
             // 3. Vibrant Cyan Viewmodel Object placed in front of camera (Z = +1.2m in world, 0.8m from camera)
             ZHLN::Material vmMat;
             vmMat.baseColorFactor    = {0.0f, 1.0f, 1.0f, 1.0f};
 
-            const ZHLN::Entity vmObject = engine->Assets()->SpawnBox({0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat}).value;
+            const ZHLN::Entity vmObject = engine->Assets()->SpawnBox({0.3f, 0.3f, 0.3f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, 1.2}, .createPhysics = false, .materialOverride = vmMat});
             reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
             // 4. Render 15 frames to stabilize G-buffer and Viewmodel pass

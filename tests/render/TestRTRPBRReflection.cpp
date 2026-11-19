@@ -173,13 +173,13 @@ struct RTRPBRReflectionTestSuite {
     static void DisableAAAndFreeCam(ZHLN::COM::IEngine& engine) {
         auto& reg = *engine.Entities();
         for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+            engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
         }
-        (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+        engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
     }
 
     static void SetReflectionFlags(ZHLN::COM::IEngine& engine, int enableSSR, int enableRTR) {
-        (void)engine.Graphics()->PatchSettings([enableSSR, enableRTR](auto& gfx) {
+        engine.Graphics()->PatchSettings([enableSSR, enableRTR](auto& gfx) {
             gfx.environment.fullBright       = 0;
             gfx.environment.ambientExposure  = 6.0f;
             gfx.post.vignetteIntensity       = 0.0f;
@@ -227,11 +227,11 @@ struct RTRPBRReflectionTestSuite {
 
     static ZHLN::Entity SpawnMirror(ZHLN::COM::IEngine& engine, const ZHLN::Material& mat) {
         return engine.Assets()->SpawnPlane(16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = mat}).value;
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = mat});
     }
 
     static ZHLN::Entity SpawnEmitter(ZHLN::COM::IEngine& engine, const ZHLN::Material& mat, float x = 0.0f) {
-        return engine.Assets()->SpawnBox({2.4f, 1.1f, 0.12f}, ZHLN::PrefabFactory::SpawnParams {.position = {x, 3.2, -1.2}, .createPhysics = false, .materialOverride = mat}).value;
+        return engine.Assets()->SpawnBox({2.4f, 1.1f, 0.12f}, ZHLN::PrefabFactory::SpawnParams {.position = {x, 3.2, -1.2}, .createPhysics = false, .materialOverride = mat});
     }
 
     static bool TickFrames(ZHLN::COM::IEngine& engine, uint32_t frames, uint32_t lostBefore) {

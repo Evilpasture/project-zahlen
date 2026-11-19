@@ -289,7 +289,7 @@ uint32_t ImportModel(ZHLN::COM::IEngine& engine, std::span<const uint8_t> bytes,
         return 0;
     }
     // Rest pose, not track 0: animated fidelity scenarios capture the bind/rest pose.
-    (void)engine.Entities()->Patch<ZHLN::Animation::AnimatorComponent>(instances.front(), [](auto& animator) { animator.currentTrackIdx = -1; });
+    engine.Entities()->Patch<ZHLN::Animation::AnimatorComponent>(instances.front(), [](auto& animator) { animator.currentTrackIdx = -1; });
     return written;
 }
 
@@ -405,7 +405,7 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // Hands the conformance settings to the device that owns them: one transition,
 // no per-field write-back.
 void ApplyGraphicsSettings(ZHLN::COM::IEngine& engine, const ZHLN::GraphicsSettings& gfx) {
-    (void)engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->ApplySettings(gfx);
 }
 
 // Khronos fidelity is the environment and nothing else. Copy the handles
@@ -504,12 +504,12 @@ enum class DiagnosticCapture {
                 material->unlit           = true;
                 material->alphaMode       = 2;
                 material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-                (void)renderer.RegisterMaterial(mesh->materialAsset, *material);
+                renderer.RegisterMaterial(mesh->materialAsset, *material);
             } else if (mode == DiagnosticCapture::TransmissionWithoutIridescence) {
                 if (material->iridescenceFactor > 0.0f) {
                     ++iridescent;
                     material->iridescenceFactor = 0.0f;
-                    (void)renderer.RegisterMaterial(mesh->materialAsset, *material);
+                    renderer.RegisterMaterial(mesh->materialAsset, *material);
                 }
             }
         } else if (mode == DiagnosticCapture::DielectricSpecular && !material->unlit) {
@@ -524,7 +524,7 @@ enum class DiagnosticCapture {
             material->emissiveFactor.x   = 0.0f;
             material->emissiveFactor.y   = 0.0f;
             material->emissiveFactor.z   = 0.0f;
-            (void)renderer.RegisterMaterial(mesh->materialAsset, *material);
+            renderer.RegisterMaterial(mesh->materialAsset, *material);
         }
     }
 
@@ -743,7 +743,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Components::EnvironmentMapComponent env;
         env.source.assign(scenario.lighting);
         env.renderSkybox = scenario.renderSkybox;
-        (void)engine->Entities()->Spawn(std::move(env));
+        engine->Entities()->Spawn(std::move(env));
     }
 
     bool cameraValid = false;
@@ -798,7 +798,7 @@ auto main(int argc, char* argv[]) -> int {
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
-        (void)engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>( [&](auto& cameraComp) {
+        engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>( [&](auto& cameraComp) {
             SetFidelityCamera(cameraComp.camera, scenario);
         });
         ZHLN::Animation::Step(*engine, animCtx, dt);

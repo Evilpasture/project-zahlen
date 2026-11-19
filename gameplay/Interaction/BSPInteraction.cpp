@@ -26,12 +26,12 @@ namespace {
 
 void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float duration) noexcept {
     if (audio != nullptr && audio->Initialized()) {
-        (void)audio->PostEvent(COM::InChain(AudioEvent {
+        audio->PostEvent(AudioEvent {
             .type     = AudioEventType::ProceduralBeep,
             .volume   = volume,
             .param1   = frequency,
             .duration = duration,
-        }));
+        });
     }
 }
 
@@ -95,7 +95,7 @@ void AttachOutputs(COM::IEntities& entities, Entity e, const std::vector<BSP::En
         });
     }
     if (conn.outputCount > 0) {
-        (void)entities.Attach(e, conn);
+        entities.Attach(e, conn);
     }
 }
 
@@ -141,7 +141,7 @@ void AttachDoor(COM::IEntities& entities, const BSP::EntityRecord& record, const
         state    = DoorState::Open;
         progress = 1.0f;
         if (hasTransform) {
-            (void)entities.Patch<Components::TransformComponent>(record.entity, [&](auto& transform) {
+            entities.Patch<Components::TransformComponent>(record.entity, [&](auto& transform) {
                 if (rotating) {
                     transform.rotation = openRot;
                 } else {
@@ -151,7 +151,7 @@ void AttachDoor(COM::IEntities& entities, const BSP::EntityRecord& record, const
         }
     }
 
-    (void)entities.Attach(record.entity, DoorComponent {
+    entities.Attach(record.entity, DoorComponent {
         .state          = state,
         .flags          = flags,
         .closedPosition = closedPos,
@@ -190,7 +190,7 @@ void AttachButton(COM::IEntities& entities, const BSP::EntityRecord& record, con
     }
     const FVec3 pressed = ((flags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + moveDir * travel);
 
-    (void)entities.Attach(record.entity, ButtonComponent {
+    entities.Attach(record.entity, ButtonComponent {
         .state             = ButtonState::Off,
         .flags             = flags,
         .unpressedPosition = unpressed,
@@ -210,7 +210,7 @@ void AttachTrigger(COM::IEntities& entities, const BSP::EntityRecord& record) {
     const FVec3        half   = HalfExtentsOf(entities, record.entity);
     const float        radius = (half.LengthSquared() > 0.0f) ? half.Length() : 2.0f;
 
-    (void)entities.Attach(record.entity, TriggerComponent {
+    entities.Attach(record.entity, TriggerComponent {
         .radius      = radius,
         .flags       = flags,
         .halfExtents = half,
@@ -382,7 +382,7 @@ void InitializeBSPEntities(COM::IEntities& entities, const BSP::Map& map, const 
     const auto records = BSP::DescribeInteractiveEntities(entities, map, options);
     for (const BSP::EntityRecord& record : records) {
         if (record.kind == BSP::InteractiveKind::TeleportDestination) {
-            (void)entities.Spawn(
+            entities.Spawn(
                 Components::NameComponent {.name = String64(record.targetName)},
                 Components::TransformComponent {
                     .position = record.origin.value_or(FVec3::Zero()),
@@ -398,7 +398,7 @@ void InitializeBSPEntities(COM::IEntities& entities, const BSP::Map& map, const 
             continue;
         }
 
-        (void)entities.Attach(e, BSPEntityMetadataComponent {
+        entities.Attach(e, BSPEntityMetadataComponent {
             .className  = String64(record.className),
             .targetName = String64(record.targetName),
             .model      = String64(record.model),

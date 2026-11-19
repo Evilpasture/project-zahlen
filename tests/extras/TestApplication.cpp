@@ -512,7 +512,7 @@ void test_com_application_injected_ui_input_owns_spans() {
             ui.SubmitInput(GUI::UIInput {.pressedKeys = keys, .characterStream = chars});
             keys.assign(1, KeyCode::Z); chars.assign(1, U'z');
             // An unrelated window read must not discard primary supplied input.
-            (void)ui.ConsumeInput(0, static_cast<WindowID>(0x7fffffffu));
+            ui.ConsumeInput(0, static_cast<WindowID>(0x7fffffffu));
             const auto consumed = ui.ConsumeInput(0.01f);
             ExpectEq(consumed.pressedKeys.size(), size_t {2});
             ExpectEq(consumed.characterStream.size(), size_t {2});

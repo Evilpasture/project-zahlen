@@ -172,7 +172,7 @@ void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
         const int d      = std::abs(static_cast<int>(a.rgb[i]) - static_cast<int>(b.rgb[i]));
         amplified.rgb[i] = static_cast<uint8_t>(std::min(255, d * 4));
     }
-    (void) ZHLN::Test::Image::WritePPM(path, amplified);
+    ZHLN::Test::Image::WritePPM(path, amplified);
 }
 
 } // namespace
@@ -354,9 +354,9 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = engine->Graphics()->CreateBoxMesh({0.5f, 0.5f, 0.5f}).value},
-                Case {.name = "plane", .mesh = engine->Graphics()->CreatePlaneMesh(4.0f).value},
-                Case {.name = "cone", .mesh = engine->Graphics()->CreateConeMesh(0.5f, 1.0f).value},
+                Case {.name = "box", .mesh = engine->Graphics()->CreateBoxMesh({0.5f, 0.5f, 0.5f})},
+                Case {.name = "plane", .mesh = engine->Graphics()->CreatePlaneMesh(4.0f)},
+                Case {.name = "cone", .mesh = engine->Graphics()->CreateConeMesh(0.5f, 1.0f)},
             };
 
             bool allOk = true;
@@ -375,7 +375,7 @@ struct MeshShaderTestSuite {
                 allOk &= ZHLN::Test::ExpectGt(c.mesh.vertexCount, 0u);
             }
             for (const auto& c: cases) {
-                (void)rc.DestroyMesh(c.mesh); // directly inspected meshes were never registered as assets
+                rc.DestroyMesh(c.mesh); // directly inspected meshes were never registered as assets
             }
 
             if (!allOk) {
@@ -459,7 +459,7 @@ struct MeshShaderTestSuite {
 
                 // --- Determinism ---------------------------------------------
                 // fullBright bypasses lighting/shadow variance...
-                (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+                engine.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
                 // ...and AA has to be switched off AT ITS SOURCE. The camera's
                 // AASettingsComponent is authoritative: RenderSystem re-pushes it
@@ -468,7 +468,7 @@ struct MeshShaderTestSuite {
                 // spatial edge filters, so leaving one on changes the pixels at
                 // every high-contrast edge, which has nothing to do with the
                 // geometry pipeline.
-                (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+                engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
                 rc.SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
                 const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
@@ -486,7 +486,7 @@ struct MeshShaderTestSuite {
                 // rejected by the task shader's normal cone, and partial overlap.
                 const std::array<ZHLN::DVec3, 3> spawnPoints = {ZHLN::DVec3{-1.3, 1.0, 0.0}, ZHLN::DVec3{0.0, 1.0, -1.0}, ZHLN::DVec3{1.3, 1.2, 0.4}};
                 for (const auto& p: spawnPoints) {
-                    engine.Assets()->SpawnBox({0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false}).value;
+                    engine.Assets()->SpawnBox({0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false});
                 }
                 return {};
             };
@@ -667,13 +667,13 @@ struct MeshShaderTestSuite {
             // Declared (not deduced) return: every path returns, so a missing
             // camera fails the test instead of flowing off the end (-Wreturn-type).
             auto setupCloseup = [](ZHLN::COM::IEngine& engine, const CloseupSubject& subject) -> std::expected<void, ZHLN::ErrorCode> {
-                (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+                engine.Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 1;
                     gfx.post.enableSSR               = 0;
                     gfx.rayTracing.enableReflections = false;
                 });
-                (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
-                (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState{.mode = ZHLN::AAMode::None});
+                engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
+                engine.Graphics()->SetAntiAliasing(ZHLN::AAState{.mode = ZHLN::AAMode::None});
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
@@ -682,11 +682,11 @@ struct MeshShaderTestSuite {
                 if (subject.sphere) {
                     // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
                     closeupPos = {0.0f, 0.0f, 0.70f};
-                    engine.Assets()->SpawnSphere(0.5f, atOrigin).value;
+                    engine.Assets()->SpawnSphere(0.5f, atOrigin);
                 } else {
                     // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
                     closeupPos = {0.0f, 0.0f, 0.60f};
-                    engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f}, atOrigin).value;
+                    engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f}, atOrigin);
                 }
                 const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([closeupPos](auto& c) {
                     auto& cam = c.camera;
@@ -834,7 +834,7 @@ struct MeshShaderTestSuite {
             auto setupBackplane = [](ZHLN::COM::IEngine& engine) -> bool {
                 ZHLN::Test::Headless::DisableAA(engine);
                 auto& reg = *engine.Entities();
-                (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+                engine.Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 1;
                     gfx.post.vignetteIntensity       = 0.0f;
                     gfx.post.enableSSR               = 0;
@@ -870,7 +870,7 @@ struct MeshShaderTestSuite {
                 const ZHLN::Entity plane = engine.Assets()->SpawnPlane(1.0f, {1, 1, 1, 1},
                     ZHLN::PrefabFactory::SpawnParams {
                         .rotation = ZHLN::Quat::FromAxisAngle(ZHLN::FVec3::UnitX(), ZHLN::RadF{-std::numbers::pi_v<float> * 0.5f}), .materialOverride = *material
-                    }).value;
+                    });
                 const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);
                 const auto mesh = part ? rc.GetMesh(part->meshAsset) : std::nullopt;
                 return ZHLN::Test::ExpectTrue(mesh.HasValue() && mesh->meshletCount > 0);

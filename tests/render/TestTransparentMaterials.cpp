@@ -74,7 +74,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
     auto& registry = *engine.Entities();
     auto& renderCtx = *engine.Graphics();
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 1;
         gfx.post.vignetteIntensity       = 0.0f;
         gfx.post.glowIntensity           = 0.0f;
@@ -102,7 +102,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
         return SceneBuild::Material;
     }
 
-    engine.Assets()->SpawnBox({4.0f, 3.0f, 0.08f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat}).value;
+    engine.Assets()->SpawnBox({4.0f, 3.0f, 0.08f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat});
 
     if (pane != PaneKind::None) {
         const bool glass = pane == PaneKind::Glass;
@@ -123,7 +123,7 @@ enum class SceneBuild : uint8_t { Ok, Material, Camera };
             return SceneBuild::Material;
         }
 
-        const ZHLN::Entity paneEnt = engine.Assets()->SpawnBox({1.0f, 1.0f, 0.04f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *paneMat}).value;
+        const ZHLN::Entity paneEnt = engine.Assets()->SpawnBox({1.0f, 1.0f, 0.04f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *paneMat});
         if (glass) {
             registry.Patch<ZHLN::Components::MeshComponent>(paneEnt, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });
         }
@@ -271,7 +271,7 @@ struct TransparentMaterialsTestSuite {
             auto& rc = *engine->Graphics();
             auto& reg = *engine->Entities();
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 1.0f;
                 gfx.post.mode                    = 0;
@@ -327,8 +327,8 @@ struct TransparentMaterialsTestSuite {
                 return std::unexpected(TransparentMaterialError::MaterialCreationFailed);
             }
             engine->Assets()->SpawnBox({4.0f, 3.0f, 0.04f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat}).value;
-            const ZHLN::Entity pane = engine->Assets()->SpawnBox({1.0f, 1.0f, 0.02f}, ZHLN::PrefabFactory::SpawnParams {.createPhysics = false, .materialOverride = *paneMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wallMat});
+            const ZHLN::Entity pane = engine->Assets()->SpawnBox({1.0f, 1.0f, 0.02f}, ZHLN::PrefabFactory::SpawnParams {.createPhysics = false, .materialOverride = *paneMat});
             reg.Patch<ZHLN::Components::MeshComponent>(pane, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });
             ZHLN::Test::Headless::TickFrames(*engine, 6);
             const auto frame = ZHLN::Test::Headless::Capture(*engine, "masked_transmission.ppm");

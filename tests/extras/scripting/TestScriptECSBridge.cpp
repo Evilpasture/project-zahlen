@@ -58,7 +58,7 @@ struct ScriptECSBridgeTestSuite {
 
             // Create entity and attach component
             ZHLN::Entity e = reg.CreateEntity();
-            (void) reg.Attach(
+            reg.Attach(
                 e, PlayerDataComponent {
                        .playerName = ZHLN::String64("Stalker_Alex"), .level = 5, .coords = {.x = 100.0f, .y = 250.0f}, .inventory = {101, 102, 103}
                    }
@@ -106,7 +106,7 @@ struct ScriptECSBridgeTestSuite {
             // A boxed component member must be re-resolved after a sparse-set
             // swap removal, and must stop resolving when its owner is removed.
             const auto other = reg.CreateEntity();
-            (void) reg.Attach(other, PlayerDataComponent {.coords = {.x = 37.0f}});
+            reg.Attach(other, PlayerDataComponent {.coords = {.x = 37.0f}});
             auto movedBox = bridge.GetProperty(other, "PlayerDataComponent", "coords");
             ZHLN::Test::ExpectTrue(movedBox.has_value());
             reg.Detach<PlayerDataComponent>(e);

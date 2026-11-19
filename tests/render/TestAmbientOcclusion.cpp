@@ -186,7 +186,7 @@ void BuildAoScene(ZHLN::COM::IEngine& engine) {
     auto& reg = *engine.Entities();
     auto& rc = *engine.Graphics();
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0;
         gfx.environment.ambientExposure  = 50.0f;
         gfx.post.enableSSR               = 0;
@@ -199,7 +199,7 @@ void BuildAoScene(ZHLN::COM::IEngine& engine) {
         gfx.post.giIntensity             = 1.2f;
     });
 
-    engine.Assets()->SpawnPlane(120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}).value;
+    engine.Assets()->SpawnPlane(120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false});
 
     auto makeMat = [&](float gray) {
         return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {gray, gray, gray, 1.0f}});
@@ -211,9 +211,9 @@ void BuildAoScene(ZHLN::COM::IEngine& engine) {
         return; // the caller's capture checks surface this as a blank frame
     }
 
-    engine.Assets()->SpawnBox({0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *matA}).value;
-    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *matB}).value;
-    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC}).value;
+    engine.Assets()->SpawnBox({0.8f, 0.8f, 0.8f}, ZHLN::PrefabFactory::SpawnParams {.position = {-2.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *matA});
+    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, -2.0}, .createPhysics = false, .materialOverride = *matB});
+    engine.Assets()->SpawnBox({0.7f, 0.7f, 0.7f}, ZHLN::PrefabFactory::SpawnParams {.position = {2.2, 1.0, 1.0}, .createPhysics = false, .materialOverride = *matC});
 
     const ZHLN::Entity sunEnt = reg.Spawn();
     reg.AttachMany(
@@ -237,11 +237,11 @@ void BuildAoScene(ZHLN::COM::IEngine& engine) {
 }
 
 void SetGiMode(ZHLN::COM::IEngine& engine, int mode) {
-    (void)engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
+    engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.post.mode = mode; });
 }
 
 void SetAoRadius(ZHLN::COM::IEngine& engine, float radius) {
-    (void)engine.Graphics()->PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
+    engine.Graphics()->PatchSettings([radius](auto& gfx) { gfx.post.aoRadius = radius; });
 }
 
 } // namespace

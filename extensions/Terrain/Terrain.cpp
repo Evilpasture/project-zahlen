@@ -43,15 +43,10 @@ struct System::Impl {
         // unregisters that predecessor's asset ID. Publish only AFTER ownership
         // replacement, otherwise recovery erases the mesh we just registered.
         if (uploaded && !entities.Attach(tile.entity, Components::OwnedMeshComponent {.meshAsset = tile.meshID, .mesh = mesh})) {
-            (void) graphics.DestroyMesh(COM::InChain(mesh));
+            graphics.DestroyMesh(mesh);
             return std::unexpected(COM::Error::InvalidArgument);
         }
-        const auto registered = graphics.RegisterMesh(tile.meshID, mesh);
-        if (!registered.HasValue()) {
-            if (uploaded)
-                (void) entities.Detach<Components::OwnedMeshComponent>(tile.entity);
-            return std::unexpected(registered.error);
-        }
+        graphics.RegisterMesh(tile.meshID, mesh);
         const auto* config    = entities.Get<TileComponent>(tile.entity);
         const float roughness = config ? config->roughness : tile.info.roughness;
         const float metallic  = config ? config->metallic : tile.info.metallic;
@@ -66,9 +61,7 @@ struct System::Impl {
         }
         material.value.roughnessFactor = roughness;
         material.value.metallicFactor  = metallic;
-        const auto result              = graphics.RegisterMaterial(tile.materialID, material.value);
-        if (!result.HasValue())
-            return std::unexpected(result.error);
+        graphics.RegisterMaterial(tile.materialID, material.value);
         return {};
     }
 };

@@ -131,7 +131,7 @@ constexpr float kHaloBloomStrength = 0.003f;
 ) {
     auto& renderCtx = *engine.Graphics();
 
-    (void)engine.Graphics()->PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
+    engine.Graphics()->PatchSettings([glowIntensity, bloomStrength](auto& gfx) {
         if (glowIntensity.has_value()) {
             gfx.post.glowIntensity = *glowIntensity;
         }
@@ -155,7 +155,7 @@ constexpr float kHaloBloomStrength = 0.003f;
         return false;
     }
 
-    engine.Assets()->SpawnBox({1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material}).value;
+    engine.Assets()->SpawnBox({1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *material});
 
     const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
         auto& camera = c.camera;

@@ -44,13 +44,7 @@ int main(int argc, char* argv[]) {
         .Title("Zahlen COM Cube").Resolution(options.width, options.height)
         .Headless(options.headless)
         .OnStart([&](ZHLN::COM::IEngine& engine) {
-            if (options.emptyScene) return;
-            const auto cube = engine.Assets()->SpawnBox({1, 1, 1});
-            if (!cube.HasValue()) {
-                std::fputs("COM cube: scene creation failed\n", stderr);
-                failed = true;
-                engine.RequestClose();
-            }
+            if (!options.emptyScene) engine.Assets()->SpawnBox({1, 1, 1});
         })
         .Run([&](ZHLN::COM::IEngine& engine) {
             // Updates precede Tick. 'completed' counts prior successful ticks;

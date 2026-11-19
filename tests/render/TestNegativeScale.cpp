@@ -113,7 +113,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
     if (meshShading && !info.meshShadingActive) return std::unexpected(NegativeScaleError::MeshPathInactive);
 
     ZHLN::Test::Headless::DisableAA(*engine);
-    (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+    engine->Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0; // Must exercise front/back normal orientation.
         gfx.post.mode                    = 0;
         gfx.post.enableSSR               = 0;
@@ -151,7 +151,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         .unlit = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.05f, 0.9f, 0.05f, 1.0f}
     });
     if (!oneSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    (void)rc.RegisterMaterial(oneSidedID, *oneSided);
+    rc.RegisterMaterial(oneSidedID, *oneSided);
     bool hasDoubleSided = false;
     ZHLN::defer _([&] {
         engine->ClearScene(); // Releases the sole owner of the mesh before unregistering the materials.
@@ -162,15 +162,15 @@ const std::array<ZHLN::FVec3, 5> kCenters {
         .doubleSided = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}
     });
     if (!doubleSided) return std::unexpected(NegativeScaleError::ResourceCreationFailed);
-    (void)rc.RegisterMaterial(doubleSidedID, *doubleSided);
+    rc.RegisterMaterial(doubleSidedID, *doubleSided);
     hasDoubleSided = true;
 
     ZHLN::Mesh mesh = MakePanel(rc);
     if (!Complete(mesh)) {
-        (void)rc.DestroyMesh(mesh);
+        rc.DestroyMesh(mesh);
         return std::unexpected(NegativeScaleError::ResourceCreationFailed);
     }
-    (void)rc.RegisterMesh(meshID, mesh);
+    rc.RegisterMesh(meshID, mesh);
 
     for (size_t i = 0; i < kCenters.size(); ++i) {
         // Panel 2 reverses its surface direction with a *proper* rotation;
@@ -190,7 +190,7 @@ const std::array<ZHLN::FVec3, 5> kCenters {
             }
         );
         if (i == 0) { // Other instances only borrow the registered mesh.
-            (void)engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
+            engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
         }
     }
 

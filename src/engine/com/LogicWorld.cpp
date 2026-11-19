@@ -335,7 +335,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         Sim().Step(deltaTime);
     }
 
-    [[nodiscard]] Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept override {
+    Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept override {
         if (descChain == nullptr)
             return Error::NullArgument;
 
@@ -439,7 +439,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         );
     }
 
-    [[nodiscard]] Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
+    Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
         Physics::CharacterCreateDesc            desc {};
         std::optional<Physics::DualShapeConfig> dual {};
         if (descChain != nullptr) {

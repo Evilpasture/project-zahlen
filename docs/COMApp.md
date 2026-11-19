@@ -21,7 +21,7 @@ int main() {
         .Title("My COM Game")
         .Headless(true)
         .OnStart([](ZHLN::COM::IEngine& engine) {
-            (void)engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f});
+            engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f});
             engine.RequestClose();
         })
         .Run() ? 0 : 1;

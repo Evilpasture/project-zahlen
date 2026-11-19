@@ -38,9 +38,9 @@ struct COMScriptLifetimeSuite {
             ScriptECSBridge bridge(entities);
             bridge.RegisterComponentManifest<ConsolePODManifest>();
             auto victim = entities.CreateEntity();
-            (void) entities.Attach(victim, ConsolePOD {});
+            entities.Attach(victim, ConsolePOD {});
             auto entity = entities.CreateEntity();
-            (void) entities.Attach(entity, ConsolePOD {});
+            entities.Attach(entity, ConsolePOD {});
             auto branch = bridge.GetProperty(entity, "ConsolePOD", "branch");
             if (!branch)
                 return std::unexpected(branch.error());
@@ -59,7 +59,7 @@ struct COMScriptLifetimeSuite {
             ExpectTrue(std::get<BoxedObject>(*cell).rawPtr == nullptr);
             for (int i = 0; i < 150; ++i) {
                 auto e = entities.CreateEntity();
-                (void) entities.Attach(e, ConsolePOD {});
+                entities.Attach(e, ConsolePOD {});
             }
             ExpectTrue(entities.Detach<ConsolePOD>(victim));
             ExpectTrue(bridge.SetPropertyOf(*leaf, "value", ScriptVal {4.0}).has_value());
@@ -72,7 +72,7 @@ struct COMScriptLifetimeSuite {
             ExpectTrue(entities.Detach<ConsolePOD>(entity));
             ExpectTrue(!bridge.GetPropertyOf(*leaf, "value"));
             ExpectTrue(!bridge.GetPropertyOf(*cell, "value"));
-            (void) entities.Attach(entity, ConsolePOD {});
+            entities.Attach(entity, ConsolePOD {});
             auto refreshed = bridge.GetPropertyOf(*leaf, "value");
             ExpectTrue(refreshed.has_value());
             if (refreshed)
@@ -96,8 +96,8 @@ struct COMScriptLifetimeSuite {
             auto       f = (*b)->Entities()->CreateEntity();
             ConsolePOD initial;
             initial.branches[1].leaf.value = 7;
-            (void) (*a)->Entities()->Attach(e, initial);
-            (void) (*b)->Entities()->Attach(f, ConsolePOD {});
+            (*a)->Entities()->Attach(e, initial);
+            (*b)->Entities()->Attach(f, ConsolePOD {});
             auto values = left.GetProperty(e, "ConsolePOD", "branches");
             if (!values)
                 return std::unexpected(values.error());
@@ -123,7 +123,7 @@ struct COMScriptLifetimeSuite {
                 ScriptECSBridge bridge(*borrowed);
                 bridge.RegisterComponentManifest<ConsolePODManifest>();
                 auto e = borrowed->CreateEntity();
-                (void) borrowed->Attach(e, ConsolePOD {});
+                borrowed->Attach(e, ConsolePOD {});
                 auto box = bridge.GetProperty(e, "ConsolePOD", "branch");
                 if (!box)
                     return std::unexpected(box.error());
@@ -147,11 +147,11 @@ struct COMScriptLifetimeSuite {
             ScriptECSBridge bridge(entities);
             bridge.RegisterComponentManifest<ConsolePODManifest>();
             auto e = entities.CreateEntity();
-            (void) entities.Attach(e, ConsolePOD {});
+            entities.Attach(e, ConsolePOD {});
             ExpectTrue(bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string("renamed")}).has_value());
             ExpectEq(std::string_view(entities.Get<ConsolePOD>(e)->label), std::string_view("renamed"));
             ExpectTrue(!bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string(100, 'x')}));
-            (void) entities.Attach(e, ZHLN::Components::PhysicsComponent {});
+            entities.Attach(e, ZHLN::Components::PhysicsComponent {});
             ExpectTrue(!bridge.SetProperty(e, "PhysicsComponent", "isStatic", ScriptVal {true}));
             ExpectTrue(bridge.GetProperty(e, "PhysicsComponent", "isStatic").has_value());
             return {};

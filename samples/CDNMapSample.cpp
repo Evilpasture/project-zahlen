@@ -126,7 +126,7 @@ auto main(int argc, char* argv[]) -> int {
     const auto written = static_cast<uint32_t>(instances.size());
     instances.resize(std::min<size_t>(written, capacity));
     if (!doc->animations.empty() && !instances.empty()) {
-        (void)engine->Entities()->Attach(instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
+        engine->Entities()->Attach(instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
     }
     ZHLN::Log("[CDNMap] Spawned {} instance(s), {} part(s).", written, doc->parts.size());
 
@@ -147,11 +147,11 @@ auto main(int argc, char* argv[]) -> int {
         gfx.environment.ambientExposure = 2.0f;
         gfx.shadows.width               = std::clamp(radius * 8.0f, 32.0f, 4000.0f);
         gfx.shadows.resolution          = 2048;
-        (void)engine->Graphics()->ApplySettings(gfx);
+        engine->Graphics()->ApplySettings(gfx);
 
         const FVec3        sunPos = center + FVec3(radius * 4.0f, radius * 8.0f, radius * 3.0f);
         const ZHLN::Mat4x4 world  = ZHLN::ComposeTransform(sunPos, ZHLN::Quat::Identity(), FVec3::One());
-        (void)entities.Spawn(
+        entities.Spawn(
             ZHLN::Components::NameComponent {.name = ZHLN::String64("MapSun")},
             ZHLN::Components::TransformComponent {.position = sunPos, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
@@ -206,7 +206,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     for (ZHLN::Entity e : instances) {
-        if (engine->Entities()->IsAlive(e)) (void)engine->Entities()->Despawn(e);
+        if (engine->Entities()->IsAlive(e)) engine->Entities()->Despawn(e);
     }
     if (asset->ownsResources) {
         for (ZHLN::TextureID tex : asset->textures) {

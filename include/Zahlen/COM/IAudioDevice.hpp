@@ -29,12 +29,12 @@ struct IAudioDevice : IObject {
 
     // Queued, not played here: the mixer drains events on its own thread.
     // Supported node: AudioEvent.
-    [[nodiscard]] virtual Result<void> PostEvent(const ChainInNode* eventChain) noexcept = 0;
+    virtual Result<void> PostEvent(const ChainInNode* eventChain) noexcept = 0;
 
     // Supported node: VoiceDesc (nullptr uses default VoiceDesc). Returns
     // VoiceID::Invalid inside the Result when the file is missing or every
     // voice slot is taken; returns a Error on chain validation failure.
-    [[nodiscard]] virtual Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept = 0;
+    virtual Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept = 0;
 
     virtual void               PlayVoice(VoiceID voice) noexcept = 0;
     virtual void               StopVoice(VoiceID voice, float fadeOutSeconds) noexcept = 0;
@@ -48,8 +48,8 @@ struct IAudioDevice : IObject {
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
 
-    [[nodiscard]] auto PostEvent(const AudioEvent& event) noexcept -> Result<void> {
-        return PostEvent(InChain(event));
+    void PostEvent(const AudioEvent& event) noexcept {
+        (void)PostEvent(InChain(event));
     }
 
     [[nodiscard]] auto CreateVoice(StringView filepath, const VoiceDesc& desc) noexcept -> VoiceID {

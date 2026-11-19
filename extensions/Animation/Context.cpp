@@ -5,6 +5,8 @@
 #include <Animation/IK.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <unordered_map>
 #include <Zahlen/Math/Matrix.hpp>
@@ -929,7 +931,10 @@ void Context::Step(
             const UploadSlice& slice = inst.uploadSlices[s];
             const std::span<const Mat4x4> paletteSpan {_impl->paletteScratch.data() + slice.paletteOffset, slice.jointCount};
             if (graphics != nullptr) {
-                graphics->UpdateJointMatrices(slice.jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
+                if (const auto res = graphics->UpdateJointMatrices(slice.jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
+                    !res.HasValue()) {
+                    LogWarning("[Animation] joint palette upload failed at offset {} ({} joints): {}", slice.jointOffset, slice.jointCount, Error(res.error).Message());
+                }
             }
             if (sink.uploadPalette != nullptr) {
                 sink.uploadPalette(sink.user, slice.jointOffset, paletteSpan);

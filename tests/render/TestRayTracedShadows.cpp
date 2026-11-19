@@ -53,7 +53,7 @@ struct RayTracedShadowsTestSuite {
                 auto& reg = *engine->Entities();
                 auto& rc = *engine->Graphics();
 
-                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+                engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 1.5f;
                     gfx.post.enableSSR               = 1;
@@ -65,7 +65,7 @@ struct RayTracedShadowsTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 engine->Assets()->SpawnPlane(400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMatRes});
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
                 reg.AttachMany(
@@ -105,7 +105,7 @@ struct RayTracedShadowsTestSuite {
                     auto& reg = *eng.Entities();
 
                     const ZHLN::Entity occluder = eng.Assets()->SpawnBox({0.5f, 3.0f, 4.0f},
-                        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, -8.0}, .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}}).value;
+                        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, -8.0}, .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}});
 
                     TickFrames(eng, 2);
 

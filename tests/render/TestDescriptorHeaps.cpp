@@ -124,7 +124,7 @@ struct DescriptorHeapsSuite {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
         }
         if (!path.empty()) {
-            (void) ZHLN::Test::Image::WritePPM(path, image);
+            ZHLN::Test::Image::WritePPM(path, image);
         }
 
         outWidth  = static_cast<uint32_t>(image.width);
@@ -147,7 +147,7 @@ struct DescriptorHeapsSuite {
             auto& rc = *engine->Graphics();
 
             // Fullbright: raw albedo stamping so texture color is the output.
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Camera centered on the 8x8 grid, looking down -Z.
             if (!ZHLN::Test::ExpectTrue(engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
@@ -199,7 +199,7 @@ struct DescriptorHeapsSuite {
                 const ZHLN::FVec3 pos{firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f};
 
                 engine->Assets()->SpawnBox({halfExtent, halfExtent, halfExtent},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {pos.x, pos.y, pos.z}, .createPhysics = false, .materialOverride = mat});
             }
 
             // Render enough frames for culling + lighting to settle.
@@ -429,7 +429,7 @@ struct DescriptorHeapsSuite {
             auto& reg = *engine->Entities();
             auto& rc = *engine->Graphics();
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             if (!ZHLN::Test::ExpectTrue(reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, 1.5f, 6.0f};
@@ -469,14 +469,14 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
             engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *redMatRes});
 
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}});
             if (!greenMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
             engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {2.5, 1.5, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes});
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 6; ++frame) {

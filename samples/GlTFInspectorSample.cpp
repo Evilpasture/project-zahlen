@@ -63,7 +63,7 @@ struct InspectorState {
         if (engine == nullptr) return;
         auto& ents = *engine->Entities();
         for (ZHLN::Entity e : spawned) {
-            if (ents.IsAlive(e)) (void)ents.Despawn(e);
+            if (ents.IsAlive(e)) ents.Despawn(e);
         }
         spawned.clear();
         if (asset.ownsResources) {
@@ -75,19 +75,19 @@ struct InspectorState {
         document.reset();
     }
 
-    bool LoadPath(std::string_view path) {
-        if (engine == nullptr) return false;
+    void LoadPath(std::string_view path) {
+        if (engine == nullptr) return;
         auto doc = ZHLN::GLTF::Read(path, {}, engine->Assets());
         if (!doc) {
             status = "Failed to decode: " + std::string(path);
             ZHLN::LogError("[GlTFInspector] {}: {}", status, ZHLN::Error(doc.error()).Message());
-            return false;
+            return;
         }
         auto uploaded = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *doc);
         if (!uploaded) {
             status = "Failed to upload: " + std::string(path);
             ZHLN::LogError("[GlTFInspector] {}: {}", status, ZHLN::Error(uploaded.error()).Message());
-            return false;
+            return;
         }
         ClearModel();
         const bool animated = !doc->animations.empty();
@@ -97,10 +97,10 @@ struct InspectorState {
         spawned = engine->Assets()->Instantiate(uploaded->hash, params);
         if (spawned.empty()) {
             status = "Failed to instantiate: " + std::string(path);
-            return false;
+            return;
         }
         if (animated && !spawned.empty()) {
-            (void)engine->Entities()->Attach(spawned.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = uploaded->hash, .currentTrackIdx = 0, .currentLoop = true});
+            engine->Entities()->Attach(spawned.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = uploaded->hash, .currentTrackIdx = 0, .currentLoop = true});
         }
 
         ZHLN::FVec3 bmin {-1.0f, -1.0f, -1.0f};
@@ -123,7 +123,7 @@ struct InspectorState {
             rig.targetOffset   = ZHLN::FVec3::Zero();
             rig.distance       = std::max(radius * 2.4f, 1.5f);
             rig.targetDistance = rig.distance;
-            (void)ents.Attach(camOpt.value, rig);
+            ents.Attach(camOpt.value, rig);
         }
 
         document       = std::move(*doc);
@@ -131,7 +131,6 @@ struct InspectorState {
         lastGeneration = engine->DeviceGeneration();
         status         = std::string(path);
         ZHLN::Log("[GlTFInspector] Loaded '{}' ({} entity/ies).", path, spawned.size());
-        return true;
     }
 };
 
@@ -199,8 +198,8 @@ auto main(int argc, char* argv[]) -> int {
 #endif
 
     // Default studio sun + floor so any dropped model reads immediately.
-    (void)engine->Assets()->SpawnPlane(24.0f, {0.22f, 0.24f, 0.28f, 1.0f}, {.createPhysics = false});
-    (void)engine->Entities()->Spawn(
+    engine->Assets()->SpawnPlane(24.0f, {0.22f, 0.24f, 0.28f, 1.0f}, {.createPhysics = false});
+    engine->Entities()->Spawn(
         ZHLN::Components::SunTagComponent {},
         ZHLN::Components::LightComponent {
             .type        = ZHLN::LightType::Sun,
@@ -214,7 +213,7 @@ auto main(int argc, char* argv[]) -> int {
     InspectorState state {.engine = engine.Get(), .lastGeneration = engine->DeviceGeneration()};
     (void)engine->SetFileDropCallback(primary, &OnFileDrop, &state);
     if (!initialModel.empty()) {
-        (void)state.LoadPath(initialModel);
+        state.LoadPath(initialModel);
     }
 
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
@@ -230,7 +229,7 @@ auto main(int argc, char* argv[]) -> int {
         if (!state.pendingDrop.empty()) {
             const std::string dropped = std::move(state.pendingDrop);
             state.pendingDrop.clear();
-            (void)state.LoadPath(dropped);
+            state.LoadPath(dropped);
         }
         if (state.document && engine->DeviceGeneration() != state.lastGeneration) {
             if (ZHLN::GLTF::RebuildGPUResources(*engine, *state.document, state.asset)) {
@@ -243,7 +242,8 @@ auto main(int argc, char* argv[]) -> int {
 
         if (!engineConfig.headless) {
             const ZHLN::Extent2D extent = engine->WindowExtent(primary);
-            if (extent.width > 0 && extent.height > 0 && hostUI.BeginFrame().HasValue()) {
+            if (extent.width > 0 && extent.height > 0) {
+                hostUI.BeginFrame();
                 const auto uiInput = hostUI.ConsumeInput(dt, primary);
                 auto frame = hostUI.Context().BeginFrame(uiInput);
                 frame.Text(state.status, 15.0f, {0.92f, 0.94f, 0.98f, 1.0f});

@@ -124,7 +124,7 @@ auto LogicBenchmark::SpawnFloor() -> void {
         return;
     auto*        entities = m_world->Entities();
     const Entity e        = entities->CreateEntity();
-    (void) entities->Attach(e, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+    entities->Attach(e, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
     ++m_liveBodies;
 }
 
@@ -156,8 +156,8 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         if (!body.HasValue() || body.value == Physics::BodyID::Null())
             break;
         const Entity entity = registry->CreateEntity();
-        (void) registry->Attach(entity, Components::TransformComponent {.position = position});
-        (void) registry->Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+        registry->Attach(entity, Components::TransformComponent {.position = position});
+        registry->Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
         m_entities.push_back(entity);
         ++m_spawnedCubes;
         ++m_liveBodies;

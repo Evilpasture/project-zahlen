@@ -145,7 +145,7 @@ struct TextureTransformsTestSuite {
             auto& reg = *engine->Entities();
             ZHLN::Test::Headless::DisableAA(*engine);
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright = 1;
                 gfx.post.vignetteIntensity = 0.0f;
                 gfx.post.glowIntensity     = 0.0f;
@@ -190,17 +190,17 @@ struct TextureTransformsTestSuite {
                 const auto material = rc.CreateMaterial(desc);
                 if (!material) return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 const auto materialID = ZHLN::HashAssetID(materialKeys[column]);
-                (void)rc.RegisterMaterial(materialID, *material);
+                rc.RegisterMaterial(materialID, *material);
                 registeredMaterials[registeredCount++] = materialID;
 
                 ZHLN::Mesh mesh = MakePanel(rc, column);
                 if (mesh.posBuffer == ZHLN::BufferID::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferID::Invalid ||
                     mesh.surfaceBuffer == ZHLN::BufferID::Invalid || mesh.indexBuffer == ZHLN::BufferID::Invalid) {
-                    (void)rc.DestroyMesh(mesh);
+                    rc.DestroyMesh(mesh);
                     return std::unexpected(TextureTransformError::ResourceCreationFailed);
                 }
                 const auto meshID = ZHLN::HashAssetID(meshKeys[column]);
-                (void)rc.RegisterMesh(meshID, mesh);
+                rc.RegisterMesh(meshID, mesh);
                 const ZHLN::FVec3 offset{kPanelX[column], 0.0f, 0.0f};
                 const auto world = ZHLN::CreateTranslation(offset);
                 const ZHLN::Entity e = reg.Spawn(
@@ -208,7 +208,7 @@ struct TextureTransformsTestSuite {
                     ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
                     ZHLN::Components::MeshComponent {.meshAsset = meshID, .materialAsset = materialID, .cullRadius = 1.0f}
                 );
-                (void)engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
+                engine->Entities()->Attach<ZHLN::Components::OwnedMeshComponent>(e, {.meshAsset = meshID, .mesh = mesh});
             }
 
             ZHLN::Test::Headless::TickFrames(*engine, 5);

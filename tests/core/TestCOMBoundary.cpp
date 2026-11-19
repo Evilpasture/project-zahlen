@@ -232,7 +232,7 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
 
     ZHLN::GraphicsSettings full = graphics.Settings();
     full.post.exposure          = 1.75F;
-    ZHLN::Test::ExpectTrue(graphics.ApplySettings(full).HasValue());
+    graphics.ApplySettings(full);
     ZHLN::Test::ExpectEq(graphics.Settings().post.exposure, 1.75F);
 
     // Buffer creation, update and cleanup.
@@ -253,7 +253,7 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
     });
     if (matRes.HasValue()) {
         const ZHLN::MaterialID matKey = assets.AssetHash("com_boundary_mat");
-        ZHLN::Test::ExpectTrue(graphics.RegisterMaterial(matKey, matRes.value).HasValue());
+        graphics.RegisterMaterial(matKey, matRes.value);
         const ZHLN::COM::Option<ZHLN::Material> foundMat = graphics.FindMaterial(matKey);
         ZHLN::Test::ExpectTrue(foundMat.HasValue());
         graphics.UnregisterMaterial(matKey);
@@ -261,14 +261,14 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
     }
 
     // Procedural + raw-stream mesh creation, registration, lookup and destruction.
-    const auto boxMeshRes = graphics.CreateBoxMesh({0.5F, 0.5F, 0.5F});
-    if (ZHLN::Test::ExpectTrue(boxMeshRes.HasValue())) {
+    const ZHLN::Mesh boxMesh = graphics.CreateBoxMesh({0.5F, 0.5F, 0.5F});
+    if (ZHLN::Test::ExpectTrue(boxMesh.posBuffer != ZHLN::BufferID::Invalid && boxMesh.vertexCount > 0)) {
         const ZHLN::AssetID meshKey = assets.AssetHash("com_boundary_box_mesh");
-        ZHLN::Test::ExpectTrue(graphics.RegisterMesh(meshKey, boxMeshRes.value).HasValue());
+        graphics.RegisterMesh(meshKey, boxMesh);
         ZHLN::Test::ExpectTrue(graphics.FindMesh(meshKey).HasValue());
         graphics.UnregisterMesh(meshKey);
         ZHLN::Test::ExpectTrue(!graphics.FindMesh(meshKey).HasValue());
-        ZHLN::Test::ExpectTrue(graphics.DestroyMesh(boxMeshRes.value).HasValue());
+        graphics.DestroyMesh(boxMesh);
     }
 
     const std::array<ZHLN::VertexPosition, 3> triPos {
@@ -284,7 +284,7 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
     if (ZHLN::Test::ExpectTrue(rawMeshRes.HasValue())) {
         ZHLN::Test::ExpectEq(rawMeshRes.value.vertexCount, uint32_t {3});
         ZHLN::Test::ExpectEq(rawMeshRes.value.indexCount, uint32_t {3});
-        ZHLN::Test::ExpectTrue(graphics.DestroyMesh(rawMeshRes.value).HasValue());
+        graphics.DestroyMesh(rawMeshRes.value);
     }
 }
 
@@ -374,7 +374,7 @@ void CheckAudio(ZHLN::COM::IAudioDevice& audio) {
     audio.StopVoice(ZHLN::VoiceID::Invalid, 0.0F);
 
     const ZHLN::AudioEvent event {.type = ZHLN::AudioEventType::OneShot2D, .volume = 0.25F};
-    ZHLN::Test::ExpectTrue(audio.PostEvent(event).HasValue());
+    audio.PostEvent(event);
 
     ZHLN::Test::ExpectTrue(audio.Initialized() || !audio.Initialized());
 }
@@ -410,13 +410,13 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
     spawnParams.position      = {1.0, 3.0, -2.0};
     spawnParams.color         = {0.2F, 0.7F, 0.9F, 1.0F};
     spawnParams.createPhysics = true;
-    const auto boxEnt         = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
-    if (ZHLN::Test::ExpectTrue(boxEnt.HasValue())) {
-        ZHLN::Test::ExpectTrue(entities.IsAlive(boxEnt.value));
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt.value, "ZHLN::Components::MeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt.value, "ZHLN::Components::OwnedMeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt.value, "ZHLN::Components::PhysicsComponent") != nullptr);
-        entities.Despawn(boxEnt.value);
+    const ZHLN::Entity boxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
+    if (ZHLN::Test::ExpectTrue(boxEnt != ZHLN::Entity::Null())) {
+        ZHLN::Test::ExpectTrue(entities.IsAlive(boxEnt));
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::MeshComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::OwnedMeshComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::PhysicsComponent") != nullptr);
+        entities.Despawn(boxEnt);
     }
 }
 
@@ -476,7 +476,7 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
         ZHLN::Test::ExpectTrue(actions.ClearBindings("Gameplay", jumpId));
     }
 
-    ZHLN::Test::ExpectTrue(actions.SetRoutingPolicy(ZHLN::SeatRoutingPolicy::DedicatedGamepadSeats).HasValue());
+    actions.SetRoutingPolicy(ZHLN::SeatRoutingPolicy::DedicatedGamepadSeats);
     ZHLN::Test::ExpectTrue(actions.SetKeyboardMouseSeat(ZHLN::PlayerSeat {1}, true).HasValue());
     ZHLN::Test::ExpectTrue(actions.RoutingPolicy() == ZHLN::SeatRoutingPolicy::DedicatedGamepadSeats);
 

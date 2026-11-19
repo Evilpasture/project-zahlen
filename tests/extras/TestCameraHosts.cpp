@@ -106,7 +106,7 @@ struct CameraHostsSuite {
             CameraRig::Apply(entities, {}, 0.1f);
             ExpectTrue((entities.Get<Components::CameraComponent>(a)->camera.position - FVec3 {2, 3, 2}).LengthSquared() < 1e-6f);
             ExpectTrue((entities.Get<Components::CameraComponent>(b)->camera.position - FVec3 {2, 8, 2}).LengthSquared() < 1e-6f);
-            (void) entities.Attach(a, FreeCam::TagComponent {});
+            entities.Attach(a, FreeCam::TagComponent {});
             entities.Get<Components::TransformComponent>(target)->position = {6, 3, 2};
             CameraRig::Apply(entities, {}, 0.1f);
             ExpectEq(entities.Get<Components::CameraComponent>(a)->camera.position.x, 2.0f);

@@ -537,7 +537,7 @@ void Frame::Cancel() noexcept {
         while (impl->clayContext->openLayoutElementStack.length > 1) {
             Clay__CloseElement();
         }
-        (void) Clay_EndLayout(impl->lastDt);
+        Clay_EndLayout(impl->lastDt);
         impl->inLayout = false;
     }
     impl->scrollStack.clear();

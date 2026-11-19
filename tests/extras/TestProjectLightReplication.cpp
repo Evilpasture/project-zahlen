@@ -136,7 +136,7 @@ struct TestProjectLightReplicationSuite {
         std::expected<void, ZHLN::ErrorCode> instance_identity_round_trips_through_components() {
             auto worldRes = ZHLN::COM::CreateLogicWorldRef(); auto& registry = *(*worldRes)->Entities();
             const Entity entity = registry.CreateEntity();
-            (void)registry.AttachMany(
+            registry.AttachMany(
                 entity,
                 ProjectLightInstanceComponent {.uid = kTorsoUid},
                 ProjectLightNetworkOwnerComponent {.ownerUid = kLocalUserUid},

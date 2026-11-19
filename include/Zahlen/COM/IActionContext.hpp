@@ -37,7 +37,7 @@ struct IActionContext : IObject {
     // --- Action-map & binding setup -----------------------------------------
 
     // Creates or updates an action map. Supported node: ActionMapConfig.
-    [[nodiscard]] virtual Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept = 0;
+    virtual Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept = 0;
     virtual bool                       RemoveActionMap(StringView mapName) noexcept = 0;
     [[nodiscard]] virtual bool         HasActionMap(StringView mapName) const noexcept = 0;
     [[nodiscard]] virtual bool         IsActionMapEnabled(StringView mapName) const noexcept = 0;
@@ -47,11 +47,11 @@ struct IActionContext : IObject {
 
     // Creates or updates an action within a map and returns its ActionID.
     // Supported node: ActionConfig.
-    [[nodiscard]] virtual Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept = 0;
+    virtual Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept = 0;
 
     // Appends or rebinds a binding on an existing action.
     // Supported nodes: InputBinding (append) or ActionRebindConfig (replace slot).
-    [[nodiscard]] virtual Result<void> BindAction(StringView mapName, ActionID action,
+    virtual Result<void> BindAction(StringView mapName, ActionID action,
                                                   const ChainInNode* bindingChain) noexcept = 0;
     virtual bool                       ClearBindings(StringView mapName, ActionID action) noexcept = 0;
 
@@ -60,8 +60,8 @@ struct IActionContext : IObject {
     virtual void ResetAllToDefaults() noexcept = 0;
 
     // Multi-seat routing configuration. Supported node: InputRoutingConfig.
-    [[nodiscard]] virtual Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept = 0;
-    [[nodiscard]] virtual Result<void> GetRouting(ChainOutNode* routingChain) const noexcept = 0;
+    virtual Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept = 0;
+    virtual Result<void> GetRouting(ChainOutNode* routingChain) const noexcept = 0;
 
     // --- Virtual actions ----------------------------------------------------
 
@@ -115,12 +115,12 @@ struct IActionContext : IObject {
     // size. A short buffer is left untouched; pass the returned size to retry.
     // Successful copies are exact bytes with no trailing NUL. No allocator or
     // std::string crosses the boundary. Null with nonzero capacity is invalid.
-    [[nodiscard]] virtual Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept = 0;
-    [[nodiscard]] virtual Result<void> DeserializeBindings(StringView text) noexcept = 0;
+    virtual Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept = 0;
+    virtual Result<void> DeserializeBindings(StringView text) noexcept = 0;
 
     // --- Ergonomics & derived reads: not in the vtable ----------------------
 
-    [[nodiscard]] auto CreateActionMap(StringView name, int32_t priority = 0, bool enabled = true) noexcept
+    auto CreateActionMap(StringView name, int32_t priority = 0, bool enabled = true) noexcept
         -> Result<void> {
         return ConfigureActionMap(InChain(ActionMapConfig {
             .name     = String64(std::string_view(name)),
@@ -129,7 +129,7 @@ struct IActionContext : IObject {
         }));
     }
 
-    [[nodiscard]] auto AddAction(StringView mapName, StringView actionName, ActionKind kind = ActionKind::Digital,
+    auto AddAction(StringView mapName, StringView actionName, ActionKind kind = ActionKind::Digital,
                                  Span<const InputBinding> bindings = {}) noexcept -> Result<ActionID> {
         return ConfigureAction(InChain(ActionConfig {
             .mapName         = String64(std::string_view(mapName)),
@@ -141,21 +141,21 @@ struct IActionContext : IObject {
         }));
     }
 
-    [[nodiscard]] auto AddBinding(StringView mapName, ActionID action, const InputBinding& binding) noexcept
+    auto AddBinding(StringView mapName, ActionID action, const InputBinding& binding) noexcept
         -> Result<void> {
         return BindAction(mapName, action, InChain(binding));
     }
 
-    [[nodiscard]] auto Rebind(StringView mapName, ActionID action, uint32_t slotIndex,
+    auto Rebind(StringView mapName, ActionID action, uint32_t slotIndex,
                               const InputBinding& binding) noexcept -> Result<void> {
         return BindAction(mapName, action, InChain(ActionRebindConfig {.slotIndex = slotIndex, .binding = binding}));
     }
 
-    [[nodiscard]] auto SetRoutingPolicy(SeatRoutingPolicy policy) noexcept -> Result<void> {
+    void SetRoutingPolicy(SeatRoutingPolicy policy) noexcept {
         InputRoutingConfig current {};
         (void)GetRouting(OutChain(current));
         current.policy = policy;
-        return ConfigureRouting(InChain(current));
+        (void)ConfigureRouting(InChain(current));
     }
 
     [[nodiscard]] auto RoutingPolicy() const noexcept -> SeatRoutingPolicy {
@@ -164,7 +164,7 @@ struct IActionContext : IObject {
         return current.policy;
     }
 
-    [[nodiscard]] auto SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept -> Result<void> {
+    auto SetKeyboardMouseSeat(PlayerSeat seat, bool enabled) noexcept -> Result<void> {
         if (!seat.IsValid()) return Error::InvalidArgument;
         InputRoutingConfig current {};
         (void)GetRouting(OutChain(current));

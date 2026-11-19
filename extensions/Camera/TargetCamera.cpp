@@ -66,7 +66,7 @@ void Step(COM::IEngine& engine, float dt) {
     auto&      entities = *engine.Entities();
     const auto camera   = entities.SingletonEntity<Components::MainCameraTagComponent>();
     if (camera.HasValue() && !entities.Get<Components::PendingDestroy>(camera.value) && !entities.Get<TargetComponent>(camera.value))
-        (void) entities.Attach(camera.value, TargetComponent {});
+        entities.Attach(camera.value, TargetComponent {});
     Apply(entities, ReadInput(*engine.Actions()), dt);
 }
 } // namespace ZHLN::CameraRig

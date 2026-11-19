@@ -196,7 +196,7 @@ private:
 };
 
 template <typename Allowed, std::size_t Index, std::size_t Total, typename Visitor>
-[[nodiscard]] constexpr auto TryMatchInNode(const ChainInNode& node, std::array<bool, Total>& seen, bool& matched,
+constexpr auto TryMatchInNode(const ChainInNode& node, std::array<bool, Total>& seen, bool& matched,
                                             Visitor& visitor) noexcept -> Result<void> {
     if (matched || node.sType != ChainTypeID<Allowed>()) {
         return {};
@@ -219,7 +219,7 @@ template <typename Allowed, std::size_t Index, std::size_t Total, typename Visit
 }
 
 template <typename Allowed, std::size_t Index, std::size_t Total, typename Visitor>
-[[nodiscard]] constexpr auto TryMatchOutNode(ChainOutNode& node, std::array<bool, Total>& seen, bool& matched,
+constexpr auto TryMatchOutNode(ChainOutNode& node, std::array<bool, Total>& seen, bool& matched,
                                              Visitor& visitor) noexcept -> Result<void> {
     if (matched || node.sType != ChainTypeID<Allowed>()) {
         return {};
@@ -242,7 +242,7 @@ template <typename Allowed, std::size_t Index, std::size_t Total, typename Visit
 }
 
 template <typename... AllowedTs, std::size_t... Is, typename Visitor>
-[[nodiscard]] constexpr auto DispatchInNodeImpl(const ChainInNode& node, std::array<bool, sizeof...(AllowedTs)>& seen,
+constexpr auto DispatchInNodeImpl(const ChainInNode& node, std::array<bool, sizeof...(AllowedTs)>& seen,
                                                 Visitor& visitor, std::index_sequence<Is...>) noexcept -> Result<void> {
     bool         matched = false;
     Result<void> outcome {};
@@ -254,7 +254,7 @@ template <typename... AllowedTs, std::size_t... Is, typename Visitor>
 }
 
 template <typename... AllowedTs, std::size_t... Is, typename Visitor>
-[[nodiscard]] constexpr auto DispatchOutNodeImpl(ChainOutNode& node, std::array<bool, sizeof...(AllowedTs)>& seen,
+constexpr auto DispatchOutNodeImpl(ChainOutNode& node, std::array<bool, sizeof...(AllowedTs)>& seen,
                                                  Visitor& visitor, std::index_sequence<Is...>) noexcept -> Result<void> {
     bool         matched = false;
     Result<void> outcome {};
@@ -292,7 +292,7 @@ template <ChainPayload... Ts>
 
 template <ChainPayload... AllowedTs, typename Visitor>
     requires (sizeof...(AllowedTs) > 0)
-[[nodiscard]] constexpr auto DispatchInChain(const ChainInNode* head, Visitor&& visitor) noexcept -> Result<void> {
+constexpr auto DispatchInChain(const ChainInNode* head, Visitor&& visitor) noexcept -> Result<void> {
     static_assert(TemplatedDetail::ChainTypesUnique<AllowedTs...>(),
                   "DispatchInChain allowed type list must not contain duplicates.");
     std::array<bool, sizeof...(AllowedTs)> seen {};
@@ -315,7 +315,7 @@ template <ChainPayload... AllowedTs, typename Visitor>
 
 template <ChainPayload... AllowedTs, typename Visitor>
     requires (sizeof...(AllowedTs) > 0)
-[[nodiscard]] constexpr auto DispatchOutChain(ChainOutNode* head, Visitor&& visitor) noexcept -> Result<void> {
+constexpr auto DispatchOutChain(ChainOutNode* head, Visitor&& visitor) noexcept -> Result<void> {
     static_assert(TemplatedDetail::ChainTypesUnique<AllowedTs...>(),
                   "DispatchOutChain allowed type list must not contain duplicates.");
     if (head == nullptr) {

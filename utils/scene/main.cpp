@@ -86,10 +86,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesyst
         }
     }
 
-    if (const auto applied = engine.Graphics()->ApplySettings(staging); !applied.HasValue()) {
-        ZHLN::LogWarning("[Graphics] '{}' rejected by the device ({}).", path.string(), applied.error);
-        return;
-    }
+    engine.Graphics()->ApplySettings(staging);
     ZHLN::Log("[Graphics] applied declarative profile '{}' (preset={}).", path.string(), staging.qualityPreset);
 }
 #endif

@@ -884,7 +884,7 @@ auto AttachCharacterRig(
 
         // Clean up the redundant prefab container root (parts[0]).
         if (writtenCount > 0) {
-            (void)reg.Despawn(parts[0]);
+            reg.Despawn(parts[0]);
         }
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap
@@ -991,7 +991,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
             .targetFov      = kOrbitFov,
         };
         if (!registry.Patch<ZHLN::CameraRig::TargetComponent>(camEnt, [&](auto& rig) -> auto { rig = orbit; })) {
-            (void)registry.Attach(camEnt, orbit);
+            registry.Attach(camEnt, orbit);
         }
     }
 
@@ -1488,7 +1488,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
         );
-        (void)ZHLN::Character::Attach(reg, g_player, {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters});
+        ZHLN::Character::Attach(reg, g_player, {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters});
 
         const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
         if (camEnt != ZHLN::Entity::Null()) {
@@ -1524,7 +1524,7 @@ auto main(int argc, char* argv[]) -> int {
         gfx.rayTracing.denoiserPasses    = 0;
         gfx.shadows.width                = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
         gfx.shadows.resolution           = 2048;
-        (void)engine->Graphics()->ApplySettings(gfx);
+        engine->Graphics()->ApplySettings(gfx);
     }
 
     PrintControlsBanner(virtualPath);
@@ -1630,7 +1630,8 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         benchmarkViewer.Tick(*engine);
-        if (!engineConfig.headless && hostUI.BeginFrame().HasValue()) {
+        if (!engineConfig.headless) {
+            hostUI.BeginFrame();
             const auto ext = engine->WindowExtent(primary);
             if (ext.width > 0 && ext.height > 0) {
                 DrawCrosshairHUD(*engine, hudGui, hostUI);

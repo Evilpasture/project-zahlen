@@ -90,9 +90,9 @@ void Step(COM::IEngine& engine, float dt) {
     if (camera != Entity::Null() && !entities.Get<HostFreeCamOptOutComponent>(camera) && !entities.Get<Components::PendingDestroy>(camera)) {
         // Seed independently: a caller may intentionally attach only the tag.
         if (!entities.Get<TagComponent>(camera))
-            (void) entities.Attach(camera, TagComponent {});
+            entities.Attach(camera, TagComponent {});
         if (!entities.Get<Component>(camera))
-            (void) entities.Attach(camera, Component {});
+            entities.Attach(camera, Component {});
     }
     Apply(entities, ReadInput(*engine.Actions()), dt);
 }

@@ -58,7 +58,7 @@ struct ConsoleHostSuite {
             GameConsole console;
             ConsoleDebugger::Execute(*engine.Get(), console, "find ConsoleTarget");
             ExpectTrue(Logs(console).find("Found Entity: ConsoleTarget") != std::string::npos);
-            (void) engine->Entities()->Attach(target, Components::PBRComponent {.roughness = .5f});
+            engine->Entities()->Attach(target, Components::PBRComponent {.roughness = .5f});
             ConsoleDebugger::Execute(*engine.Get(), console, std::format("set {} PBRComponent.roughness 0.25", target.Pack()));
             ExpectEq(engine->Entities()->Get<Components::PBRComponent>(target)->roughness, .25f);
             ScriptECSBridge bridge(*engine->Entities());
@@ -72,7 +72,7 @@ struct ConsoleHostSuite {
             ExpectTrue(!bridge.SetProperty(target, "PhysicsComponent", "isStatic", ScriptVal {true}));
             ExpectTrue(engine->Simulation()->BodyPosition(body).HasValue());
             HostUI host(*engine.Get());
-            ExpectTrue(host.BeginFrame().HasValue());
+            host.BeginFrame();
             auto& context = host.Context();
             auto  ui      = context.BeginFrame(host.ConsumeInput(1.f / 60));
             ui.Text(Logs(console));

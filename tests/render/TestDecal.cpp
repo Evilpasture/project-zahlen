@@ -144,7 +144,7 @@ struct DecalTestSuite {
             auto& rc = *engine->Graphics();
 
             // Set Fullbright to test raw G-buffer decal color stamping without lighting variance
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
             const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
@@ -178,7 +178,7 @@ struct DecalTestSuite {
             const ZHLN::Entity wall = engine->Assets()->SpawnBox({4.0f, 4.0f, 0.2f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {0.0, 1.5, -2.0}, .createPhysics = false, .color = {0.15f, 0.15f, 0.15f, 1.0f} // Dark gray background (RGB: ~38)
-                }).value;
+                });
             ZHLN::Test::ExpectTrue(reg.IsAlive(wall));
 
             // 3. Create solid red procedural decal texture (R=255, G=0, B=0, A=255)
@@ -272,11 +272,11 @@ struct DecalTestSuite {
 
             // 1. Front Wall at Z = -2.0m (Inside decal projection volume)
             engine->Assets()->SpawnBox({2.0f, 2.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -2.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}});
 
             // 2. Far Object at Z = -15.0m (Completely outside decal projection depth)
             engine->Assets()->SpawnBox({4.0f, 4.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -15.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.5, -15.0}, .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}});
 
             // 3. Small decal positioned tightly around the front wall (depth extent = 1.0m)
             auto                bluePixels   = GenerateCircularDecalTexture(64, 0, 120, 255);

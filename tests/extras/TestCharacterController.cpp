@@ -27,7 +27,7 @@ auto Body(COM::IEngine& engine, FVec3 halfSize, DVec3 position, Physics::MotionT
     const auto body = engine.Simulation()->CreateBoxBody(halfSize, {.position = position, .motionType = motion});
     if (!ExpectTrue(body.HasValue()))
         return Physics::BodyID::Null();
-    (void) engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = motion == Physics::MotionType::Static});
+    engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = motion == Physics::MotionType::Static});
     return body.value;
 }
 struct CharacterHostSuite {

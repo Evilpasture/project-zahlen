@@ -683,7 +683,7 @@ class EventWriter {
     template <typename... Args>
         requires std::constructible_from<T, Args...>
     [[nodiscard]] auto TryEmplace(Args&&... args) const -> bool {
-        return Visit([&](EventBus& bus) { (void)bus.Emplace<T>(std::forward<Args>(args)...); });
+        return Visit([&](EventBus& bus) { bus.Emplace<T>(std::forward<Args>(args)...); });
     }
 
     template <typename... Args>

@@ -85,13 +85,11 @@ struct System::Impl {
                 return std::unexpected(result.error);
             mesh = built;
             if (!entities.Attach(resources, Components::OwnedMeshComponent {.meshAsset = meshID, .mesh = mesh})) {
-                (void) graphics.DestroyMesh(COM::InChain(mesh));
+                graphics.DestroyMesh(mesh);
                 return std::unexpected(COM::Error::InvalidArgument);
             }
         }
-        auto registered = graphics.RegisterMesh(meshID, mesh);
-        if (!registered.HasValue())
-            return std::unexpected(registered.error);
+        graphics.RegisterMesh(meshID, mesh);
         if (!graphics.FindMaterial(materialID).HasValue()) {
             MaterialDesc desc = MaterialDesc::Basic();
             desc.roughness    = .94f;
@@ -99,9 +97,7 @@ struct System::Impl {
             auto material     = graphics.CreateMaterial(desc);
             if (!material.HasValue())
                 return std::unexpected(material.error);
-            auto result = graphics.RegisterMaterial(materialID, material.value);
-            if (!result.HasValue())
-                return std::unexpected(result.error);
+            graphics.RegisterMaterial(materialID, material.value);
         }
         for (auto& crater: craters)
             if (auto* decal = entities.Get<Components::DecalComponent>(crater.entity)) {
@@ -218,7 +214,7 @@ auto System::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
     }
     _impl->emitters.push_back({root, debris, std::move(exp)});
     auto* audio = _impl->engine->Audio();
-    (void) audio->PostEvent(
+    audio->PostEvent(
         {.type       = AudioEventType::NoiseBurst3D,
          .position   = info.origin,
          .volume     = 1,
@@ -228,7 +224,7 @@ auto System::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
          .filterType = AudioFilterType::LowPass,
          .noiseType  = AudioNoiseType::Brownian}
     );
-    (void) audio->PostEvent(
+    audio->PostEvent(
         {.type     = AudioEventType::ToneSweep3D,
          .position = info.origin,
          .volume   = .85f,
@@ -237,7 +233,7 @@ auto System::Spawn(const SpawnInfo& info) -> std::expected<Entity, ErrorCode> {
          .duration = .45f,
          .waveType = AudioWaveformType::Sawtooth}
     );
-    (void) audio->PostEvent(
+    audio->PostEvent(
         {.type       = AudioEventType::NoiseBurst3D,
          .position   = info.origin,
          .volume     = .65f,

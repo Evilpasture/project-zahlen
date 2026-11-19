@@ -272,7 +272,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Scene::Instance inst;
             for (const auto& sceneEnt: scene.entities) {
                 const auto e = reg.CreateEntity();
-                (void)reg.Attach(e, ZHLN::Components::NameComponent {.name = ZHLN::String64(sceneEnt.name)});
+                reg.Attach(e, ZHLN::Components::NameComponent {.name = ZHLN::String64(sceneEnt.name)});
                 (*reg.Attach(e, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {
                         .position = FVec3{sceneEnt.transform.position}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                     }}));
@@ -416,7 +416,7 @@ struct BSPInteractionTestSuite {
             ZHLN::Scene::Instance inst;
             for (const auto& sceneEnt : scene.entities) {
                 const auto e = reg.CreateEntity();
-                (void)reg.Attach(e, ZHLN::Components::NameComponent {.name = ZHLN::String64(sceneEnt.name)});
+                reg.Attach(e, ZHLN::Components::NameComponent {.name = ZHLN::String64(sceneEnt.name)});
                 (*reg.Attach(e, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {
                         .position = FVec3{sceneEnt.transform.position},
                         .rotation = ZHLN::Quat::Identity(),
@@ -474,7 +474,7 @@ struct BSPInteractionTestSuite {
             auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
 
             const auto doorEnt = reg.CreateEntity();
-            (void)reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("sliding_door")});
+            reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("sliding_door")});
             (*reg.Attach(doorEnt, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {
                     .position = FVec3{0.0f, 0.0f, 0.0f}, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)
                 }}));
@@ -533,7 +533,7 @@ struct BSPInteractionTestSuite {
             auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
 
             const auto rotDoorEnt = reg.CreateEntity();
-            (void)reg.Attach(rotDoorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("rot_door")});
+            reg.Attach(rotDoorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("rot_door")});
             (*reg.Attach(rotDoorEnt, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {.position = FVec3::Zero(), .rotation = ZHLN::Quat::Identity(), .scale = FVec3::Splat(1.0f)}}));
 
             const auto closedQ = ZHLN::Quat::Identity();
@@ -580,7 +580,7 @@ struct BSPInteractionTestSuite {
 
             // 1. Door
             const auto doorEnt = reg.CreateEntity();
-            (void)reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("secure_vault")});
+            reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("secure_vault")});
             (*reg.Attach(doorEnt, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {}}));
             (*reg.Attach(doorEnt, ZHLN::Interaction::DoorComponent {ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,
@@ -594,7 +594,7 @@ struct BSPInteractionTestSuite {
 
             // 2. Button wired to Door
             const auto btnEnt = reg.CreateEntity();
-            (void)reg.Attach(btnEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("vault_button")});
+            reg.Attach(btnEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("vault_button")});
             (*reg.Attach(btnEnt, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {}}));
             (*reg.Attach(btnEnt, ZHLN::Interaction::ButtonComponent {ZHLN::Interaction::ButtonComponent {
                     .state      = ZHLN::Interaction::ButtonState::Off,
@@ -605,7 +605,7 @@ struct BSPInteractionTestSuite {
 
             ZHLN::Interaction::EntityConnectionComponent conn;
             conn.AddOutput({.event = ZHLN::String64("OnPressed"), .target = ZHLN::String64("secure_vault"), .input = ZHLN::String64("Toggle")});
-            (void)reg.Attach(btnEnt, std::move(conn));
+            reg.Attach(btnEnt, std::move(conn));
 
             // Verify door is closed initially
             auto door = reg.Get<ZHLN::Interaction::DoorComponent>(doorEnt);
@@ -695,7 +695,7 @@ struct BSPInteractionTestSuite {
 
             // Create unlocked door near player
             const auto doorEnt = reg.CreateEntity();
-            (void)reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("interact_door")});
+            reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("interact_door")});
             (*reg.Attach(doorEnt, ZHLN::Components::TransformComponent {ZHLN::Components::TransformComponent {.position = FVec3{1.0f, 0.0f, 0.0f}}}));
             (*reg.Attach(doorEnt, ZHLN::Interaction::DoorComponent {ZHLN::Interaction::DoorComponent {
                     .state          = ZHLN::Interaction::DoorState::Closed,

@@ -93,7 +93,7 @@ struct PBRTestSuite {
             // scene's proven-sane combo; the INFO means below confirm red
             // reads red -- if a future grade pushes faces back toward clip,
             // re-level here, never in the gates.
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright      = 0;
                 gfx.environment.ambientExposure = 2.0f;
             });
@@ -132,7 +132,7 @@ struct PBRTestSuite {
             }
 
             const ZHLN::Entity goldCube = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *goldMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *goldMatRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(goldCube));
 
             // 4. Construct PBR Plastic Red Dielectric Material (metallic = 0.0, roughness = 0.25)
@@ -142,7 +142,7 @@ struct PBRTestSuite {
             }
 
             const ZHLN::Entity redCube = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.2, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(redCube));
 
             // 5. Render 15 frames of PBR lighting evaluation
@@ -226,17 +226,17 @@ struct PBRTestSuite {
             auto& rc = *engine->Graphics();
 
             for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-                (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
+                engine->Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode = ZHLN::AAMode::None; });
             }
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 12.0f;
                 gfx.post.vignetteIntensity       = 0.0f;
                 gfx.post.enableSSR               = 0;
                 gfx.rayTracing.enableReflections = false;
             });
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.shadows.width   = 400.0f;
                 gfx.shadows.sunSize = 0.001f;
             });
@@ -283,10 +283,10 @@ struct PBRTestSuite {
             }
 
             const ZHLN::Entity smoothBox = engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *smoothMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{-1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *smoothMatRes});
 
             const ZHLN::Entity roughBox = engine->Assets()->SpawnBox({0.7f, 0.7f, 0.7f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *roughMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{1.15, 1.0, 0.0}, .createPhysics = false, .materialOverride = *roughMatRes});
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(smoothBox));
             ZHLN::Test::ExpectTrue(reg.IsAlive(roughBox));
@@ -415,7 +415,7 @@ struct PBRTestSuite {
             auto& reg = *engine->Entities();
             auto& rc = *engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 1.0f;
@@ -441,7 +441,7 @@ struct PBRTestSuite {
                 return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
             }
             engine->Assets()->SpawnBox({1.5f, 1.5f, 0.2f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *material});
 
             // Flat HDR vs. the same sky with a single-pixel point-like
             // hotspot at N dot L ~= -0.53 on the +Z face. The 9-coefficient SH
@@ -557,7 +557,7 @@ struct PBRTestSuite {
             auto& reg = *engine->Entities();
             auto& rc = *engine->Graphics();
             ZHLN::Test::Headless::DisableAA(*engine);
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.ambientExposure  = 1.0f;
                 gfx.post.exposure                = 0.1f;
@@ -568,7 +568,7 @@ struct PBRTestSuite {
                 gfx.post.enableSSR               = 0;
                 gfx.rayTracing.enableReflections = false; // Exercise the CSM path, not ambient/RTR.
             });
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.shadows.width      = 16.0f;
                 gfx.shadows.resolution = 2048;
                 gfx.shadows.sunSize    = 0.001f;
@@ -587,7 +587,7 @@ struct PBRTestSuite {
                 .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
             });
             if (!mat) return std::unexpected(PBRTestError::MaterialCreationFailed);
-            engine->Assets()->SpawnBox({3.0f, 3.0f, 0.07f}, {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mat}).value;
+            engine->Assets()->SpawnBox({3.0f, 3.0f, 0.07f}, {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mat});
 
             constexpr uint32_t w = 128, h = 64;
             ZHLN::EnvironmentImage env;
@@ -621,7 +621,7 @@ struct PBRTestSuite {
             engine->Assets()->SpawnBox({0.32f, 0.32f, 0.32f},
                 {.position = ZHLN::DVec3{sunDirection[0] * distance, 1.0 + sunDirection[1] * distance, sunDirection[2] * distance},
                  .createPhysics    = false,
-                 .materialOverride = *mat}).value;
+                 .materialOverride = *mat});
             ZHLN::Test::Headless::TickFrames(*engine, 6, 1.0f / 60.0f);
             const auto shadowed = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_occluded.ppm");
             if (!lit.Valid() || !shadowed.Valid() || lit.width != shadowed.width || lit.height != shadowed.height)
@@ -654,7 +654,7 @@ struct PBRTestSuite {
             ZHLN::Test::Headless::DisableAA(*engine);
             auto& reg = *engine->Entities();
             auto& rc = *engine->Graphics();
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.post.mode                    = 0;
                 gfx.environment.fullBright       = 0;
                 gfx.environment.ambientExposure  = 2.0f;
@@ -705,8 +705,8 @@ struct PBRTestSuite {
                 })) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
             }
-            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control}).value;
-            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped}).value;
+            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{-0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *control});
+            engine->Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams{.position = ZHLN::DVec3{0.95, 1.0, 0.0}, .createPhysics = false, .materialOverride = *mapped});
             ZHLN::Test::Headless::TickFrames(*engine, 8);
             if (!reg.EntitiesWith<ZHLN::Components::LightComponent>().empty())
                 return std::unexpected(PBRTestError::EnvironmentBakeFailed);
@@ -733,7 +733,7 @@ struct PBRTestSuite {
             auto& rc = *engine->Graphics();
 
             // Set Fullbright ON: Disables direct lighting/shadows and outputs raw G-buffer albedo directly
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+            engine->Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
             // Create explicit bright green material
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
@@ -753,7 +753,7 @@ struct PBRTestSuite {
             }
 
             engine->Assets()->SpawnBox({2.0f, 2.0f, 0.1f},
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes});
 
             // Tick 5 frames
             constexpr float dt = 1.0f / 60.0f;

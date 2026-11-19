@@ -146,7 +146,7 @@ struct Option {
 static_assert(std::is_standard_layout_v<Option<uint32_t>> && std::is_trivially_copyable_v<Option<uint32_t>>);
 
 template <typename T>
-struct Result {
+struct [[nodiscard]] Result {
     static_assert(std::is_standard_layout_v<T> && std::is_trivially_copyable_v<T>,
                   "COM::Result<T> carries T by value across the boundary; T must be a fixed-layout value.");
 
@@ -187,7 +187,7 @@ struct Result {
 static_assert(std::is_standard_layout_v<Result<uint32_t>> && std::is_trivially_copyable_v<Result<uint32_t>>);
 
 template <>
-struct Result<void> {
+struct [[nodiscard]] Result<void> {
     ErrorCode error {};
     bool      ok = true;
 

@@ -129,7 +129,7 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::COM::IEngine& engine) {
         reg.Detach<ZHLN::CameraRig::TargetComponent>(camEnt);
     }
     // AA off so the static scene is actually static.
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.antiAliasing.mode            = ZHLN::AAMode::None;
         gfx.environment.fullBright       = 1;
         gfx.post.vignetteIntensity       = 0.0f;
@@ -158,7 +158,7 @@ struct ViewportSubregionTestSuite {
             if (!engine.Valid()) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright = 1;
                 gfx.environment.ambientExposure = 7.0f;
                 gfx.post.exposure = 3.0f;
@@ -184,7 +184,7 @@ struct ViewportSubregionTestSuite {
             struct ViewportRestore {
                 ZHLN::COM::IGraphicsDevice& rc;
                 ZHLN::ViewportRect   full;
-                ~ViewportRestore() { (void)rc.SetViewport(full); }
+                ~ViewportRestore() { rc.SetViewport(full); }
             } restore {rc, rc.Viewport()};
 
             DisableJitterVignetteAndTargetDrive(*engine);
@@ -208,7 +208,7 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
             const ZHLN::Entity box = engine->Assets()->SpawnBox(ZHLN::FVec3::Splat(0.5f),
-                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3::Zero(), .createPhysics = false, .materialOverride = *matRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 
             // The engine is pooled across suites; force one target recreate so
@@ -224,7 +224,7 @@ struct ViewportSubregionTestSuite {
             const Band     bandB {160, 640};
 
             auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<RgbImage, ZHLN::ErrorCode> {
-                (void)rc.SetViewport(ZHLN::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
+                rc.SetViewport(ZHLN::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
                 ZHLN::Screenshot::CaptureBuffer capBuf;
                 const auto captured = capBuf.Read(rc, ZHLN::Extent2D {.width = 960u, .height = H});
@@ -235,7 +235,7 @@ struct ViewportSubregionTestSuite {
                 if (!image.Valid()) {
                     return std::unexpected(ViewportSubregionError::RenderOutputBlank);
                 }
-                (void) ZHLN::Test::Image::WritePPM(ppmPath, image);
+                ZHLN::Test::Image::WritePPM(ppmPath, image);
                 return image;
             };
 

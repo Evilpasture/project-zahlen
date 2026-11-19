@@ -289,25 +289,25 @@ class Engine final:
         Session().CloseWindow();
     }
 
-    [[nodiscard]] Result<void> Tick(float dt) noexcept override {
+    Result<void> Tick(float dt) noexcept override {
         const auto outcome = m_engine->Tick(dt);
         if (!outcome) return outcome.error();
         return {};
     }
 
-    [[nodiscard]] Result<void> AdvanceFrame(float dt) noexcept override {
+    Result<void> AdvanceFrame(float dt) noexcept override {
         const auto result = m_engine->AdvanceFrame(dt);
         if (!result)
             return result.error();
         return {};
     }
-    [[nodiscard]] Result<void> FinishFrame() noexcept override {
+    Result<void> FinishFrame() noexcept override {
         const auto result = m_engine->FinishFrame();
         if (!result)
             return result.error();
         return {};
     }
-    [[nodiscard]] Result<void> CancelFrame() noexcept override {
+    Result<void> CancelFrame() noexcept override {
         const auto result = m_engine->CancelFrame();
         if (!result)
             return result.error();
@@ -355,7 +355,7 @@ class Engine final:
     [[nodiscard]] uint64_t CurrentFrame() const noexcept override { return m_engine->GetCurrentFrame(); }
     [[nodiscard]] uint64_t DeviceGeneration() const noexcept override { return m_engine->DeviceGeneration(); }
 
-    [[nodiscard]] Result<void> RecreateGraphicsDevice() noexcept override {
+    Result<void> RecreateGraphicsDevice() noexcept override {
         if (m_engine->FramePending())
             return FramePipelineError::FrameInProgress;
         const auto result = m_engine->HandleDeviceLost();
@@ -363,7 +363,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<uint64_t> AddDeviceLostCallback(void (*callback)(void*), void* userdata) noexcept override {
+    Result<uint64_t> AddDeviceLostCallback(void (*callback)(void*), void* userdata) noexcept override {
         if (callback == nullptr) return Error::NullArgument;
         if (!m_deviceLostListeners) {
             m_deviceLostListeners = std::make_shared<DeviceLostListeners>();
@@ -398,7 +398,7 @@ class Engine final:
         }
     }
 
-    [[nodiscard]] Result<WindowID> AddWindow(const ChainInNode* chain) noexcept override {
+    Result<WindowID> AddWindow(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<WindowCreateInfo>(chain);
         if (!info.HasValue()) return info.error;
         if (!Valid(info.value.title)) return Error::NullArgument;
@@ -420,19 +420,19 @@ class Engine final:
     [[nodiscard]] CursorMode GetCursorMode(WindowID window) const noexcept override { return Session().WindowCursorMode(window); }
     void CaptureMouse(WindowID window, bool captured) noexcept override { Session().CaptureWindowMouse(window, captured); }
     [[nodiscard]] bool IsMouseCaptured(WindowID window) const noexcept override { return Session().WindowMouseCaptured(window); }
-    [[nodiscard]] Result<void> SetClipboardText(StringView text) noexcept override {
+    Result<void> SetClipboardText(StringView text) noexcept override {
         if (!Valid(text)) return Error::NullArgument;
         Session().SetClipboard(Text(text));
         return {};
     }
-    [[nodiscard]] Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept override {
+    Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept override {
         if (buffer == nullptr && capacity != 0) return Error::NullArgument;
         const auto text = Session().Clipboard();
         if (text.size() > UINT32_MAX) return Error::InvalidArgument;
         if (buffer && capacity >= text.size() && !text.empty()) std::memcpy(buffer, text.data(), text.size());
         return static_cast<uint32_t>(text.size());
     }
-    [[nodiscard]] Result<void> SetFileDropCallback(WindowID window, FileDropCallback callback, void* userdata) noexcept override {
+    Result<void> SetFileDropCallback(WindowID window, FileDropCallback callback, void* userdata) noexcept override {
         if (!WindowExists(window)) return Error::InvalidArgument;
         // Detach before releasing the stable userdata object. A callback may
         // replace/remove itself; the trampoline copies call state first.
@@ -458,7 +458,7 @@ class Engine final:
         const auto value = Device().GetPacedDeltaTime();
         return value ? Option<float>(*value) : Option<float> {};
     }
-    [[nodiscard]] Result<void> ReadHostInput(WindowID window, ChainOutNode* output, bool consume) noexcept override {
+    Result<void> ReadHostInput(WindowID window, ChainOutNode* output, bool consume) noexcept override {
         if (!output) return Error::NullArgument;
         if (!WindowExists(window)) return Error::InvalidArgument;
         const auto checked = DispatchOutChain<HostInputInfo>(output, [](HostInputInfo&) -> Result<void> { return {}; });
@@ -475,7 +475,7 @@ class Engine final:
         }
         return DispatchOutChain<HostInputInfo>(output, [&](HostInputInfo& out) -> Result<void> { out = info; return {}; });
     }
-    [[nodiscard]] Result<void> SubmitUI(WindowID window, const ChainInNode* chain) noexcept override {
+    Result<void> SubmitUI(WindowID window, const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<UISubmitInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& ui = info.value;
@@ -492,25 +492,25 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<uint32_t> AllocateJoints(uint32_t count) noexcept override {
+    Result<uint32_t> AllocateJoints(uint32_t count) noexcept override {
         const auto offset = JointAllocator::AllocateJoints(*m_engine, count);
         if (offset == UINT32_MAX) return Error::InvalidArgument;
         return offset;
     }
-    [[nodiscard]] Result<void> UpdateJointMatrices(uint32_t offset, Span<const Mat4x4> matrices) noexcept override {
+    Result<void> UpdateJointMatrices(uint32_t offset, Span<const Mat4x4> matrices) noexcept override {
         if (!Valid(matrices)) return Error::NullArgument;
         if (offset > 8192 || matrices.size > 8192 - offset) return Error::InvalidArgument;
         if (matrices.size) Device().UpdateJointMatrices(offset, matrices);
         return {};
     }
-    [[nodiscard]] Result<uint32_t> AllocateMorphDeltas(Span<const float> deltas) noexcept override {
+    Result<uint32_t> AllocateMorphDeltas(Span<const float> deltas) noexcept override {
         if (!Valid(deltas)) return Error::NullArgument;
         if (deltas.size == 0 || deltas.size > UINT32_MAX || deltas.size % 4 != 0) return Error::InvalidArgument;
         const auto offset = Device().AllocateMorphDeltas(deltas);
         if (offset == UINT32_MAX) return Error::InvalidArgument;
         return offset;
     }
-    [[nodiscard]] Result<TextureID> CreateTextureCube(const ChainInNode* chain) noexcept override {
+    Result<TextureID> CreateTextureCube(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<TextureCubeCreateInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& cube = info.value;
@@ -526,7 +526,7 @@ class Engine final:
         if (!result) return result.error();
         return *result;
     }
-    [[nodiscard]] Result<TextureID> CreateRenderTexture(const ChainInNode* chain) noexcept override {
+    Result<TextureID> CreateRenderTexture(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<RenderTextureCreateInfo>(chain);
         if (!info.HasValue()) return info.error;
         if (!info.value.extent.width || !info.value.extent.height) return Error::InvalidArgument;
@@ -535,7 +535,7 @@ class Engine final:
         return *result;
     }
     void DestroyRenderTexture(TextureID texture) noexcept override { Device().DestroyRenderTexture(texture); }
-    [[nodiscard]] Result<void> SetEnvironmentRadiance(const ChainInNode* chain) noexcept override {
+    Result<void> SetEnvironmentRadiance(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<EnvironmentRadianceInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& env = info.value;
@@ -550,7 +550,7 @@ class Engine final:
         if (!result) return result.error();
         return {};
     }
-    [[nodiscard]] Result<uint64_t> CaptureFrame(ChainOutNode* info, Span<uint8_t> pixels) noexcept override {
+    Result<uint64_t> CaptureFrame(ChainOutNode* info, Span<uint8_t> pixels) noexcept override {
         if (!Valid(pixels)) return Error::NullArgument;
         if (!info) return Error::NullArgument;
         const auto checked = DispatchOutChain<CaptureInfo>(info, [](CaptureInfo&) -> Result<void> { return {}; });
@@ -571,12 +571,12 @@ class Engine final:
     void AddLine(const FVec3& start, const FVec3& end, const FVec4& colorStart, const FVec4& colorEnd) noexcept override {
         m_engine->Scene().AddLine(start, end, colorStart, colorEnd);
     }
-    [[nodiscard]] Result<void> AddBillboards(TextureID texture, Span<const BillboardQuad> quads, bool additive) noexcept override {
+    Result<void> AddBillboards(TextureID texture, Span<const BillboardQuad> quads, bool additive) noexcept override {
         if (quads.size != 0 && quads.data == nullptr) return Error::NullArgument;
         if (quads.size != 0) m_engine->Scene().AddBillboards(texture, std::span<const BillboardQuad>(quads), additive);
         return {};
     }
-    [[nodiscard]] Result<void> AddDebugTriangles(Span<const VertexPosition> positions,
+    Result<void> AddDebugTriangles(Span<const VertexPosition> positions,
                                                  Span<const VertexSurface> surfaces) noexcept override {
         if ((positions.size != 0 && positions.data == nullptr) ||
             (surfaces.size != 0 && surfaces.data == nullptr)) return Error::NullArgument;
@@ -585,7 +585,7 @@ class Engine final:
                                                                    std::span<const VertexSurface>(surfaces));
         return {};
     }
-    [[nodiscard]] Result<void> SubmitParticles(const ChainInNode* chain) noexcept override {
+    Result<void> SubmitParticles(const ChainInNode* chain) noexcept override {
         if (chain == nullptr) return Error::NullArgument;
         std::optional<ParticleEmitterSubmission> submission;
         const auto valid = DispatchInChain<ParticleEmitterSubmission>(chain, [&](const auto& value) -> Result<void> {
@@ -597,7 +597,7 @@ class Engine final:
         m_engine->Scene().particleEmitters.push_back(*submission);
         return {};
     }
-    [[nodiscard]] Result<void> SubmitMeshParticles(const ChainInNode* chain) noexcept override {
+    Result<void> SubmitMeshParticles(const ChainInNode* chain) noexcept override {
         if (chain == nullptr) return Error::NullArgument;
         std::optional<MeshParticleEmitterSubmission> submission;
         const auto valid = DispatchInChain<MeshParticleEmitterSubmission>(chain, [&](const auto& value) -> Result<void> {
@@ -662,7 +662,7 @@ class Engine final:
         return Device().GetFrameIndex();
     }
 
-    [[nodiscard]] Result<void> ApplySettings(const ChainInNode* settingsChain) noexcept override {
+    Result<void> ApplySettings(const ChainInNode* settingsChain) noexcept override {
         if (settingsChain == nullptr) return Error::NullArgument;
 
         GraphicsSettings merged   = Device().GetSettings();
@@ -703,7 +703,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept override {
+    Result<void> GetSettings(ChainOutNode* settingsChain) const noexcept override {
         const GraphicsSettings& current = Device().GetSettings();
         return DispatchOutChain<GraphicsSettings, AAState, GISettings, ShadowSettings, RayTracingConfig, EnvironmentSettings, GraphicsDeviceInfo>(
             settingsChain, [&]<typename NodeT>(NodeT& out) -> Result<void> {
@@ -737,7 +737,7 @@ class Engine final:
         );
     }
 
-    [[nodiscard]] Result<BufferID> CreateBuffer(const ChainInNode* bufferChain) noexcept override {
+    Result<BufferID> CreateBuffer(const ChainInNode* bufferChain) noexcept override {
         if (bufferChain == nullptr) return Error::NullArgument;
 
         std::optional<BufferCreateInfo> createInfo;
@@ -761,13 +761,13 @@ class Engine final:
         Device().DestroyBuffer(handle);
     }
 
-    [[nodiscard]] Result<void> UpdateBuffer(BufferID handle, Span<const std::byte> data) noexcept override {
+    Result<void> UpdateBuffer(BufferID handle, Span<const std::byte> data) noexcept override {
         const auto outcome = Device().UpdateBuffer(handle, std::span<const std::byte>(data));
         if (!outcome) return outcome.error();
         return {};
     }
 
-    [[nodiscard]] Result<TextureID> CreateTexture(const ChainInNode* textureChain) noexcept override {
+    Result<TextureID> CreateTexture(const ChainInNode* textureChain) noexcept override {
         if (textureChain == nullptr) return Error::NullArgument;
 
         std::optional<TextureCreateInfo> info;
@@ -798,7 +798,7 @@ class Engine final:
         Device().UnloadTexture(handle);
     }
 
-    [[nodiscard]] Result<void> CreateMaterial(const ChainInNode* descChain, ChainOutNode* outMaterialChain) noexcept override {
+    Result<void> CreateMaterial(const ChainInNode* descChain, ChainOutNode* outMaterialChain) noexcept override {
         if (descChain == nullptr || outMaterialChain == nullptr) return Error::NullArgument;
 
         std::optional<MaterialDesc> desc;
@@ -843,7 +843,7 @@ class Engine final:
         });
     }
 
-    [[nodiscard]] Result<void> RegisterMaterial(MaterialID id, const ChainInNode* materialChain) noexcept override {
+    Result<void> RegisterMaterial(MaterialID id, const ChainInNode* materialChain) noexcept override {
         if (materialChain == nullptr) return Error::NullArgument;
 
         std::optional<ZHLN::Material> mat;
@@ -859,7 +859,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<void> GetMaterial(MaterialID id, ChainOutNode* outMaterialChain) const noexcept override {
+    Result<void> GetMaterial(MaterialID id, ChainOutNode* outMaterialChain) const noexcept override {
         if (outMaterialChain == nullptr) return Error::NullArgument;
 
         const std::optional<ZHLN::Material> found = Device().GetGPUMaterial(id);
@@ -874,7 +874,7 @@ class Engine final:
         Device().UnregisterGPUMaterial(id);
     }
 
-    [[nodiscard]] Result<void> CreateMesh(const ChainInNode* buildChain, ChainOutNode* outMeshChain) noexcept override {
+    Result<void> CreateMesh(const ChainInNode* buildChain, ChainOutNode* outMeshChain) noexcept override {
         if (buildChain == nullptr || outMeshChain == nullptr) return Error::NullArgument;
 
         MeshBuildOptions                   options {};
@@ -1016,7 +1016,7 @@ class Engine final:
         });
     }
 
-    [[nodiscard]] Result<void> RegisterMesh(AssetID id, const ChainInNode* meshChain) noexcept override {
+    Result<void> RegisterMesh(AssetID id, const ChainInNode* meshChain) noexcept override {
         if (meshChain == nullptr) return Error::NullArgument;
 
         std::optional<ZHLN::Mesh> mesh;
@@ -1032,7 +1032,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<void> GetMesh(AssetID id, ChainOutNode* outMeshChain) const noexcept override {
+    Result<void> GetMesh(AssetID id, ChainOutNode* outMeshChain) const noexcept override {
         if (outMeshChain == nullptr) return Error::NullArgument;
 
         const std::optional<ZHLN::Mesh> found = Device().GetGPUMesh(id);
@@ -1047,7 +1047,7 @@ class Engine final:
         Device().UnregisterGPUMesh(id);
     }
 
-    [[nodiscard]] Result<void> DestroyMesh(const ChainInNode* meshChain) noexcept override {
+    Result<void> DestroyMesh(const ChainInNode* meshChain) noexcept override {
         if (meshChain == nullptr) return Error::NullArgument;
 
         std::optional<ZHLN::Mesh> mesh;
@@ -1063,7 +1063,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<void> BuildMeshBLAS(const ChainInNode* inMeshChain, ChainOutNode* outMeshChain) noexcept override {
+    Result<void> BuildMeshBLAS(const ChainInNode* inMeshChain, ChainOutNode* outMeshChain) noexcept override {
         if (inMeshChain == nullptr || outMeshChain == nullptr) return Error::NullArgument;
 
         std::optional<ZHLN::Mesh> mesh;
@@ -1273,7 +1273,7 @@ class Engine final:
         Sim().Step(deltaTime);
     }
 
-    [[nodiscard]] Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept override {
+    Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept override {
         if (descChain == nullptr) return Error::NullArgument;
 
         Physics::RigidBodyPose                       pose {};
@@ -1380,7 +1380,7 @@ class Engine final:
                                      surface.materialID, filter.category, filter.mask, pose.activation, pose.scale);
     }
 
-    [[nodiscard]] Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
+    Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
         Physics::CharacterCreateDesc           desc {};
         std::optional<Physics::DualShapeConfig> dual {};
         if (descChain != nullptr) {
@@ -1423,7 +1423,7 @@ class Engine final:
         return Sound().IsInitialized();
     }
 
-    [[nodiscard]] Result<void> PostEvent(const ChainInNode* eventChain) noexcept override {
+    Result<void> PostEvent(const ChainInNode* eventChain) noexcept override {
         if (eventChain == nullptr) return Error::NullArgument;
 
         std::optional<AudioEvent> evt;
@@ -1439,7 +1439,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept override {
+    Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept override {
         VoiceDesc desc {};
         if (voiceChain != nullptr) {
             const Result<void> chainRes =
@@ -1513,7 +1513,7 @@ class Engine final:
         };
     }
 
-    [[nodiscard]] Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* out) const noexcept override {
+    Result<void> GetPrefabBounds(uint64_t hash, ChainOutNode* out) const noexcept override {
         if (!out)
             return Error::NullArgument;
         const auto* prefab = Library().BorrowCachedPrefab(hash);
@@ -1536,7 +1536,7 @@ class Engine final:
         });
     }
 
-    [[nodiscard]] Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept override {
+    Result<void> ReadPrefabRig(uint64_t hash, ChainOutNode* out) const noexcept override {
         if (out == nullptr) return Error::NullArgument;
         const ModelPrefab* prefabPtr = Library().BorrowCachedPrefab(hash);
         if (prefabPtr == nullptr) return Error::AssetNotCached;
@@ -1658,7 +1658,7 @@ class Engine final:
         return length;
     }
 
-    [[nodiscard]] Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
+    Result<uint32_t> Instantiate(uint64_t hash, const ChainInNode* spawnChain, Entity* entities,
                                                uint32_t capacity) noexcept override {
         PrefabFactory::SpawnParams params {};
         if (spawnChain != nullptr) {
@@ -1675,7 +1675,7 @@ class Engine final:
         return PrefabFactory::InstantiatePrefab(*m_engine, *prefab, params, entities, capacity);
     }
 
-    [[nodiscard]] Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept override {
+    Result<Entity> SpawnPrimitive(const ChainInNode* primitiveChain) noexcept override {
         if (primitiveChain == nullptr) return Error::NullArgument;
 
         PrefabFactory::SpawnParams      params {};
@@ -1764,17 +1764,17 @@ class Engine final:
         return Span<const float>(view->rgba);
     }
 
-    [[nodiscard]] Result<void> MountDirectory(StringView path) noexcept override {
+    Result<void> MountDirectory(StringView path) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
         if (!path.size || !Library().VFS().MountDirectory(Text(path))) return Error::InvalidArgument;
         return {};
     }
-    [[nodiscard]] Result<void> UnmountDirectory(StringView path) noexcept override {
+    Result<void> UnmountDirectory(StringView path) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
         if (!Library().VFS().UnmountDirectory(Text(path))) return Error::InvalidArgument;
         return {};
     }
-    [[nodiscard]] Result<void> MountPak(StringView path) noexcept override {
+    Result<void> MountPak(StringView path) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
         if (!path.size || !Library().VFS().MountPak(Text(path))) return Error::InvalidArgument;
         return {};
@@ -1782,7 +1782,7 @@ class Engine final:
     [[nodiscard]] bool VirtualFileExists(StringView path) const noexcept override {
         return Valid(path) && path.size && Library().VFS().Exists(Text(path));
     }
-    [[nodiscard]] Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept override {
+    Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept override {
         if (!Valid(path) || !Valid(bytes)) return Error::NullArgument;
         if (!path.size || !Library().VFS().Exists(Text(path))) return Error::AssetNotCached;
         const auto file = Library().ReadVirtualFile(Text(path));
@@ -1791,7 +1791,7 @@ class Engine final:
         return static_cast<uint64_t>(file->size());
     }
     void ClearCache() noexcept override { Library().ClearCache(); }
-    [[nodiscard]] Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept override {
+    Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<CollisionMeshInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& mesh = info.value;
@@ -1805,7 +1805,7 @@ class Engine final:
         if (!Library().CacheCollisionMesh(mesh.id, std::move(geometry))) return Error::InvalidArgument;
         return {};
     }
-    [[nodiscard]] Result<void> GetCollisionMesh(CollisionAssetID id, ChainOutNode* out) const noexcept override {
+    Result<void> GetCollisionMesh(CollisionAssetID id, ChainOutNode* out) const noexcept override {
         if (!out) return Error::NullArgument;
         const auto mesh = Library().FindCollisionMesh(id);
         if (!mesh) return Error::AssetNotCached;
@@ -1814,7 +1814,7 @@ class Engine final:
             return {};
         });
     }
-    [[nodiscard]] Result<void> CacheEnvironmentImage(const ChainInNode* chain) noexcept override {
+    Result<void> CacheEnvironmentImage(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<EnvironmentImageCacheInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& desc = info.value;
@@ -1830,7 +1830,7 @@ class Engine final:
         if (!Library().CacheEnvironmentImage(Text(desc.key), std::move(image))) return Error::InvalidArgument;
         return {};
     }
-    [[nodiscard]] Result<void> GetEnvironmentImage(StringView key, ChainOutNode* out) const noexcept override {
+    Result<void> GetEnvironmentImage(StringView key, ChainOutNode* out) const noexcept override {
         if (!Valid(key) || !out) return Error::NullArgument;
         const auto image = Library().FindEnvironmentImage(Text(key));
         if (!image) return Error::AssetNotCached;
@@ -1841,7 +1841,7 @@ class Engine final:
             return {};
         });
     }
-    [[nodiscard]] Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept override {
+    Result<uint64_t> RegisterPrefab(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<PrefabRegistrationInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& desc = info.value;
@@ -1976,7 +1976,7 @@ class Engine final:
         return hash;
     }
 
-    [[nodiscard]] Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept override {
+    Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept override {
         const auto info = ReadNode<PrefabGPUReplacementInfo>(chain);
         if (!info.HasValue()) return info.error;
         const auto& desc = info.value;
@@ -2072,7 +2072,7 @@ class Engine final:
     // are constructed by it; the calls themselves are the same value operations
     // a caller makes.
 
-    [[nodiscard]] Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept override {
+    Result<void> ConfigureActionMap(const ChainInNode* mapChain) noexcept override {
         if (mapChain == nullptr) return Error::NullArgument;
 
         std::optional<ActionMapConfig> cfg;
@@ -2116,7 +2116,7 @@ class Engine final:
         return Inputs().SetActionMapEnabledForSeat(std::string_view(mapName), seat, enabled);
     }
 
-    [[nodiscard]] Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept override {
+    Result<ActionID> ConfigureAction(const ChainInNode* actionChain) noexcept override {
         if (actionChain == nullptr) return Error::NullArgument;
 
         std::optional<ActionConfig> cfg;
@@ -2141,7 +2141,7 @@ class Engine final:
         return action;
     }
 
-    [[nodiscard]] Result<void> BindAction(StringView mapName, ActionID action,
+    Result<void> BindAction(StringView mapName, ActionID action,
                                           const ChainInNode* bindingChain) noexcept override {
         if (bindingChain == nullptr) return Error::NullArgument;
 
@@ -2189,7 +2189,7 @@ class Engine final:
         Inputs().ResetAllToDefaults();
     }
 
-    [[nodiscard]] Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept override {
+    Result<void> ConfigureRouting(const ChainInNode* routingChain) noexcept override {
         if (routingChain == nullptr) return Error::NullArgument;
 
         std::optional<InputRoutingConfig> cfg;
@@ -2209,7 +2209,7 @@ class Engine final:
         return {};
     }
 
-    [[nodiscard]] Result<void> GetRouting(ChainOutNode* routingChain) const noexcept override {
+    Result<void> GetRouting(ChainOutNode* routingChain) const noexcept override {
         return DispatchOutChain<InputRoutingConfig>(routingChain, [&](InputRoutingConfig& outCfg) -> Result<void> {
             outCfg.policy = Reader().RoutingPolicy();
             SeatMask mask = SeatMask::None();
@@ -2312,7 +2312,7 @@ class Engine final:
         return *captured;
     }
     [[nodiscard]] BindingCaptureStatus CaptureStatus() const noexcept override { return Inputs().CaptureStatus(); }
-    [[nodiscard]] Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept override {
+    Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept override {
         if (buffer == nullptr && capacity != 0) return Error::NullArgument;
         const auto text = Inputs().SerializeBindings();
         if (text.size() > std::numeric_limits<uint32_t>::max()) return Error::InvalidArgument;
@@ -2320,7 +2320,7 @@ class Engine final:
         if (buffer != nullptr && capacity >= needed && needed != 0) std::memcpy(buffer, text.data(), needed);
         return needed;
     }
-    [[nodiscard]] Result<void> DeserializeBindings(StringView text) noexcept override {
+    Result<void> DeserializeBindings(StringView text) noexcept override {
         if (text.data == nullptr && text.size != 0) return Error::NullArgument;
         const auto outcome = Inputs().DeserializeBindings(text.size == 0 ? std::string_view {} : std::string_view(text));
         if (!outcome) return outcome.error();

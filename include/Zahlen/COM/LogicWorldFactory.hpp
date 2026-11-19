@@ -6,7 +6,7 @@
 namespace ZHLN::COM {
 // Accepts PhysicsConfig, or nullptr for defaults. Acquires Jolt registration
 // through the engine runtime, but never initializes a window, GPU or audio.
-[[nodiscard]] ZHLN_API auto CreateLogicWorld(const ChainInNode* config = nullptr) noexcept -> Result<ILogicWorld*>;
+ZHLN_API auto CreateLogicWorld(const ChainInNode* config = nullptr) noexcept -> Result<ILogicWorld*>;
 [[nodiscard]] inline auto   CreateLogicWorldRef(const ChainInNode* config = nullptr) noexcept -> std::expected<Ref<ILogicWorld>, ErrorCode> {
     auto created = CreateLogicWorld(config);
     if (!created.HasValue())

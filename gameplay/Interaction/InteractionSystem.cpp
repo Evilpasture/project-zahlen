@@ -28,12 +28,12 @@ namespace {
 
 void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float duration) noexcept {
     if (audio != nullptr && audio->Initialized()) {
-        (void)audio->PostEvent(COM::InChain(AudioEvent {
+        audio->PostEvent(AudioEvent {
             .type     = AudioEventType::ProceduralBeep,
             .volume   = volume,
             .param1   = frequency,
             .duration = duration,
-        }));
+        });
     }
 }
 
@@ -101,7 +101,7 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
 
     const FVec3 forward = destTrans->rotation * FVec3::UnitX();
     if (const auto camEnt = entities.SingletonEntity<Components::MainCameraTagComponent>(); camEnt.HasValue()) {
-        (void)entities.Patch<Components::CameraComponent>(camEnt.value, [&](Components::CameraComponent& cc) {
+        entities.Patch<Components::CameraComponent>(camEnt.value, [&](Components::CameraComponent& cc) {
             cc.camera.yaw   = Atan2(forward.z, forward.x).ToDegrees();
             cc.camera.pitch = Asin(std::clamp(forward.y, -1.0f, 1.0f)).ToDegrees();
         });
@@ -201,8 +201,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                                 pickup->isPickedUp                   = 1;
 
                                 // Engine-published Detach releases the physics body via SceneResources.
-                                (void)entities.Detach<Components::PhysicsComponent>(triggerEnt);
-                                (void)entities.Detach<Components::MeshComponent>(triggerEnt);
+                                entities.Detach<Components::PhysicsComponent>(triggerEnt);
+                                entities.Detach<Components::MeshComponent>(triggerEnt);
 
                                 trigger->flags &= ~TriggerFlags::Active;
                                 trigger->flags &= ~TriggerFlags::PlayerInside;

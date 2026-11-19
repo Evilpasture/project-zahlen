@@ -53,7 +53,7 @@ struct ReflectionsTestSuite {
                 auto& reg = *engine->Entities();
                 auto& rc = *engine->Graphics();
 
-                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+                engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 6.0f;
                     gfx.post.enableSSR               = 1;
@@ -65,7 +65,7 @@ struct ReflectionsTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 engine->Assets()->SpawnPlane(120.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mirrorMatRes}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mirrorMatRes});
 
                 auto emissiveMatRes = rc.CreateMaterial(
                     ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}}
@@ -74,7 +74,7 @@ struct ReflectionsTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
                 engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 3.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMatRes});
 
                 const ZHLN::Entity sunEnt = reg.Spawn();
                 reg.AttachMany(
@@ -141,10 +141,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
+                    eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_rt_reflect_rtr_off.ppm");
-                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
+                    eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -214,7 +214,7 @@ struct ReflectionsTestSuite {
                 auto& reg = *engine->Entities();
                 auto& rc = *engine->Graphics();
 
-                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+                engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.environment.ambientExposure  = 6.0f;
                     gfx.post.enableSSR               = 1;
@@ -244,7 +244,7 @@ struct ReflectionsTestSuite {
                 }
 
                 engine->Assets()->SpawnPlane(120.0f, {0.9f, 0.9f, 0.95f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat});
 
                 // 4 Distinct High-Luminance Emissive Geometric Emitters at Y = 3.0, Z = 0.0:
                 //   Emitter 1: X = -4.5 (Pure Red)
@@ -265,13 +265,13 @@ struct ReflectionsTestSuite {
                 );
 
                 engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {-4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveRed}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveRed});
                 engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {-1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveGrn}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {-1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveGrn});
                 engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveBlu}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {1.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveBlu});
                 engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {4.5, 3.0, 0.0}, .createPhysics = false, .materialOverride = *matEmissiveYel});
 
                 const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     auto& cam = c.camera;
@@ -308,10 +308,10 @@ struct ReflectionsTestSuite {
                         return false;
                     }
 
-                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
+                    eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = false; });
                     TickFrames(eng, 2);
                     const RgbImage off = Capture(eng, "headless_lighting_multi_emissive_rtr_off.ppm");
-                    (void)eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
+                    eng.Graphics()->PatchSettings([](auto& gfx) { gfx.rayTracing.enableReflections = true; });
                     if (!ZHLN::Test::ExpectTrue(off.Valid())) {
                         captureFailed = true;
                         return false;
@@ -490,7 +490,7 @@ struct ReflectionsTestSuite {
                 auto& reg = *engine->Entities();
                 auto& rc = *engine->Graphics();
 
-                (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+                engine->Graphics()->PatchSettings([](auto& gfx) {
                     gfx.environment.fullBright       = 0;
                     gfx.post.exposure                = 0.015f;
                     gfx.environment.ambientExposure  = 6.0f;
@@ -501,13 +501,13 @@ struct ReflectionsTestSuite {
 
                 auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
                 engine->Assets()->SpawnPlane(80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat});
 
                 auto monolithMat = rc.CreateMaterial(
                     ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.2f, .baseColor = {0.0f, 1.0f, 1.0f, 1.0f}, .emissive = {0.0f, 20.0f, 20.0f, 1.0f}}
                 );
                 engine->Assets()->SpawnBox({0.8f, 2.5f, 0.8f},
-                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 2.5, 0.0}, .createPhysics = false, .materialOverride = *monolithMat}).value;
+                    ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 2.5, 0.0}, .createPhysics = false, .materialOverride = *monolithMat});
 
                 auto goldMat      = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
                 auto roughPlastic = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.8f, 0.2f, 0.2f, 1.0f}});
@@ -521,7 +521,7 @@ struct ReflectionsTestSuite {
                         engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                             ZHLN::PrefabFactory::SpawnParams {
                                 .position = {px, 0.5, pz}, .createPhysics = false, .materialOverride = ((x + z) % 2 == 0) ? *goldMat : *roughPlastic
-                            }).value;
+                            });
                     }
                 }
 

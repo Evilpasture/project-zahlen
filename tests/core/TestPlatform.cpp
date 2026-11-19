@@ -125,7 +125,7 @@ struct PlatformTestSuite {
             const TickFn tick     = lib.Symbol<TickFn>("GetTickCount");
             ZHLN::Test::ExpectTrue(tick != nullptr);
             if (tick != nullptr) {
-                (void) tick();
+                tick();
             }
 #else
             static constexpr const char* const names[] = {

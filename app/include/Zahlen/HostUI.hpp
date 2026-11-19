@@ -21,8 +21,8 @@ public:
     auto Context() -> GUI::Context& { _gui.SetFontAtlas(GetFontAtlas()); return _gui; }
     auto ConsumeInput(float dt, WindowID window = WindowID::Primary) -> GUI::UIInput;
     void SubmitInput(GUI::UIInput input);
-    [[nodiscard]] auto Submit(UIDrawData data, WindowID window = WindowID::Primary) -> COM::Result<void>;
-    [[nodiscard]] auto BeginFrame() -> COM::Result<void>;
+    auto Submit(UIDrawData data, WindowID window = WindowID::Primary) -> COM::Result<void>;
+    void BeginFrame();
 private:
     COM::IEngine& _engine; // borrowed from the owning Application's Ref
     FontAtlas _font {};

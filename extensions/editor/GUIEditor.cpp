@@ -64,7 +64,7 @@ consteval auto MakeComponentKind() -> ComponentKind {
                           // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
                           .name   = ZHLN::Reflect::TypeName<C>(),
                           .has    = [](const ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity) != nullptr; },
-                          .add    = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { (void) reg.Attach<C>(entity, C {}); },
+                          .add    = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { reg.Attach<C>(entity, C {}); },
                           .remove = [](ZHLN::COM::IEntities& reg, ZHLN::Entity entity) -> void { reg.Detach<C>(entity); }
     };
 }

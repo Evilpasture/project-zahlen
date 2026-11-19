@@ -464,7 +464,7 @@ void ClearSubject(ZHLN::COM::IEngine& engine, Subject& subject) {
     auto& entities = *engine.Entities();
     for (const ZHLN::Entity entity: subject.instances) {
         if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
-            (void)entities.Despawn(entity);
+            entities.Despawn(entity);
         }
     }
     subject.instances.clear();
@@ -502,7 +502,7 @@ auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const
     const auto written = static_cast<uint32_t>(subject.instances.size());
     subject.instances.resize(std::min<size_t>(written, capacity));
     if (!doc->animations.empty() && !subject.instances.empty()) {
-        (void)engine.Entities()->Attach(subject.instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
+        engine.Entities()->Attach(subject.instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
     }
 
     subject.boundsMin = FVec3(-1.0f, -1.0f, -1.0f);
@@ -569,7 +569,7 @@ void ClearStudio(ZHLN::COM::IEngine& engine, Studio& studio) {
     auto& entities = *engine.Entities();
     for (const ZHLN::Entity entity: {studio.sun, studio.fill, studio.rim, studio.floor}) {
         if (entity != ZHLN::Entity::Null() && entities.IsAlive(entity)) {
-            (void)entities.Despawn(entity);
+            entities.Despawn(entity);
         }
     }
     studio.sun   = ZHLN::Entity::Null();
@@ -642,14 +642,15 @@ void BuildStudio(ZHLN::COM::IEngine& engine, Studio& studio, const Subject& subj
     const auto floorMatRes = engine.Graphics()->CreateMaterial(floorDesc);
     const ZHLN::Material floorMaterial = floorMatRes.HasValue() ? floorMatRes.value : ZHLN::Material {};
 
-    { const auto r = engine.Assets()->SpawnPlane(radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
+    studio.floor = engine.Assets()->SpawnPlane(
+        radius * kFloorExtent, {1.0f, 1.0f, 1.0f, 1.0f},
         ZHLN::PrefabFactory::SpawnParams {
             .position         = {center.x, subject.boundsMin.y, center.z},
             .createPhysics    = false,
             .materialOverride = floorMaterial,
         }
-    ); studio.floor = r.HasValue() ? r.value : ZHLN::Entity::Null(); }
-    (void)entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
+    );
+    entities.Attach(studio.floor, ZHLN::Components::NameComponent {.name = ZHLN::String64("StudioFloor")});
     SetFloorVisible(engine, studio);
 }
 
@@ -758,7 +759,7 @@ void BuildStudio(ZHLN::COM::IEngine& engine, Studio& studio, const Subject& subj
 // across in one call, so the renderer sees one transition rather than a field
 // at a time -- which is also the honest way to show what a preset is.
 void ApplyGraphicsSettings(ZHLN::COM::IEngine& engine, const ZHLN::GraphicsSettings& gfx) {
-    (void)engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->ApplySettings(gfx);
 }
 
 [[nodiscard]] constexpr auto FrameFarPlane(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
@@ -779,7 +780,7 @@ void UpdateShadowExtent(ZHLN::COM::IEngine& engine, float orbitDistance, float m
     const float wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
     { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); if (std::abs(gfx.shadows.width - wanted) > (wanted * 0.02f)) {
             gfx.shadows.width = wanted;
-        } (void)engine.Graphics()->ApplySettings(gfx); }
+        } engine.Graphics()->ApplySettings(gfx); }
 }
 
 // QualityLevel and AAMode log as integers, so the HUD spells them out.
@@ -1137,7 +1138,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     // that says whether the shimmer is the reflection or the sun shadow.
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
-        { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; (void)engine.Graphics()->ApplySettings(gfx); }
+        { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; engine.Graphics()->ApplySettings(gfx); }
         ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
@@ -1458,7 +1459,8 @@ auto main(int argc, char* argv[]) -> int {
             }
         }
         ZHLN::Animation::Step(*engine, animCtx, state.dt);
-        if (!engineConfig.headless && state.hostUI->BeginFrame().HasValue()) {
+        if (!engineConfig.headless) {
+            state.hostUI->BeginFrame();
             const auto ext = engine->WindowExtent(engine->PrimaryWindow());
             if (ext.width > 0 && ext.height > 0) DrawHUD(*engine, state);
         }

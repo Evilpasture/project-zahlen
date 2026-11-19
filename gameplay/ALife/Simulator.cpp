@@ -292,7 +292,7 @@ auto Simulator::Load(COM::IEntities& entities, const char* filename) -> bool {
         const Entity fresh = entities.CreateEntity();
         rec.comp.self_entity  = fresh;
         rec.comp.next_in_grid = Entity::Null();
-        (void)entities.Attach(fresh, rec.comp);
+        entities.Attach(fresh, rec.comp);
         _grid.UpdateEntity(entities, fresh, DVec3 {-1.0, -1.0, -1.0});
     }
     return true;

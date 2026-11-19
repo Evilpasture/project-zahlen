@@ -167,7 +167,7 @@ struct MorphPosePassSuite {
         }
 
         auto& rc = *engine.Graphics();
-        const ZHLN::Mesh box = rc.CreateBoxMesh({0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f}).value;
+        const ZHLN::Mesh box = rc.CreateBoxMesh({0.6f, 0.6f, 0.6f}, {0.85f, 0.45f, 0.2f, 1.0f});
 
         std::vector<float> deltas(static_cast<size_t>(box.vertexCount) * kMorphTargets * 4, 0.0f);
         for (uint32_t vertex = 0; vertex < box.vertexCount; ++vertex) {
@@ -261,7 +261,7 @@ struct MorphPosePassSuite {
 
         for (uint32_t i = 0; i < count; ++i) {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
-            (void) engine.Assets()->Instantiate(
+            engine.Assets()->Instantiate(
                 prefabHash,
                 ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3{x, 1.0, 0.0}, .createPhysics = false, .isAnimated = true, .materialOverride = material}
             );

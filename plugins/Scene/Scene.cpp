@@ -229,7 +229,7 @@ auto Instantiate(
                 // Every mesh part of a prop carries the same leaf ambient cube.
                 if (entity.hasAmbientCube) {
                     for (uint32_t i = 0; i < recorded; ++i) {
-                        (void) entities.Attach(parts[i], Components::AmbientCubeComponent {.cube = entity.ambientCube});
+                        entities.Attach(parts[i], Components::AmbientCubeComponent {.cube = entity.ambientCube});
                     }
                 }
 
@@ -255,7 +255,7 @@ auto Instantiate(
                     );
                     if (!body.HasValue())
                         return std::unexpected(body.error);
-                    (void) entities.Attach(parts[0], Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+                    entities.Attach(parts[0], Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
                 }
 
                 break;
@@ -348,9 +348,7 @@ auto Instantiate(
         CopySharedFields(gfx.post, environment);
         CopySharedFields(gfx.environment, environment);
         gfx.rayTracing.enableReflections = environment.enableRTR;
-        const auto applied               = graphics.ApplySettings(gfx);
-        if (!applied.HasValue())
-            return std::unexpected(applied.error);
+        graphics.ApplySettings(gfx);
     }
 
     committed = true;

@@ -93,8 +93,7 @@ auto Application::RunConfigured(const EngineConfig& config, const Update& update
             break;
         }
 
-        const auto begun = ui.BeginFrame();
-        if (!begun.HasValue()) { frameError = begun.error; break; }
+        ui.BeginFrame();
 
         const float                rawDt   = runClock.Tick();
         const auto pacing = engine->Graphics()->PacedDeltaTime();

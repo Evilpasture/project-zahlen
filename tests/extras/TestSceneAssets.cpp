@@ -91,7 +91,7 @@ struct SceneAssetsSuite {
                 const auto result = graphics.CreateMesh(COM::InChain(shape, COM::MeshBuildOptions {.buildBLAS = false}), COM::OutChain(mesh));
                 if (ExpectTrue(result.HasValue())) {
                     ExpectTrue(mesh.posBuffer != BufferID::Invalid && mesh.vertexCount > 0);
-                    ExpectTrue(graphics.DestroyMesh(mesh).HasValue());
+                    graphics.DestroyMesh(mesh);
                 }
             };
             checkMesh(COM::BoxMeshDesc {});
@@ -159,7 +159,7 @@ struct SceneAssetsSuite {
             );
             const auto oldCamera = engine->Entities()->SingletonEntity<Components::MainCameraTagComponent>();
             if (oldCamera.HasValue())
-                (void) engine->Entities()->Detach<Components::MainCameraTagComponent>(oldCamera.value);
+                engine->Entities()->Detach<Components::MainCameraTagComponent>(oldCamera.value);
             auto instance = Scene::Instantiate(*engine.Get(), doc, {.buildBLAS = false});
             if (!instance)
                 Println("    Scene instantiate error: {}", instance.error());
@@ -168,8 +168,8 @@ struct SceneAssetsSuite {
             ExpectEq(instance->entities.size(), size_t(3));
             ExpectEq(instance->lights.size(), size_t(1));
             // Runtime-only content must not become authored scene content.
-            (void) engine->Entities()->Spawn(Components::MeshComponent {});
-            (void) engine->Entities()->Spawn(Components::LightComponent {});
+            engine->Entities()->Spawn(Components::MeshComponent {});
+            engine->Entities()->Spawn(Components::LightComponent {});
             const auto out = Scene::Extract(*engine.Get());
             ExpectEq(out.entities.size(), size_t(3));
             ExpectEq(out.lights.size(), size_t(1));
@@ -220,12 +220,12 @@ struct SceneAssetsSuite {
             auto& gfx    = *engine->Graphics();
             auto& assets = *engine->Assets();
             Println("    [scene prefab] creating mesh/material");
-            auto mesh = gfx.CreateBoxMesh({1, 2, 3});
-            if (!ExpectTrue(mesh.HasValue()))
+            const Mesh mesh = gfx.CreateBoxMesh({1, 2, 3});
+            if (!ExpectTrue(mesh.posBuffer != BufferID::Invalid && mesh.vertexCount > 0))
                 return {};
             auto material = gfx.CreateMaterial(COM::PbrMaterialConfig {});
             if (!ExpectTrue(material.HasValue())) {
-                (void) gfx.DestroyMesh(mesh.value);
+                gfx.DestroyMesh(mesh);
                 return {};
             }
             std::array<COM::PrefabPartInfo, 2> parts {};
@@ -233,7 +233,7 @@ struct SceneAssetsSuite {
                 parts[i].name            = String64(i ? "leaf2" : "leaf1");
                 parts[i].meshAsset       = assets.AssetHash(i ? "scene/mesh2" : "scene/mesh1");
                 parts[i].materialAsset   = assets.AssetHash(i ? "scene/mat2" : "scene/mat1");
-                parts[i].mesh            = mesh.value;
+                parts[i].mesh            = mesh;
                 parts[i].defaultMaterial = material.value;
                 parts[i].localMin        = {-1, -2, -3};
                 parts[i].localMax        = {1, 2, 3};
@@ -242,7 +242,7 @@ struct SceneAssetsSuite {
             Println("    [scene prefab] registering two parts");
             const auto cached = assets.RegisterPrefab(COM::InChain(COM::PrefabRegistrationInfo {.virtualPath = "scene/cached", .parts = parts}));
             if (!ExpectTrue(cached.HasValue())) {
-                (void) gfx.DestroyMesh(mesh.value);
+                gfx.DestroyMesh(mesh);
                 return {};
             }
             COM::PrefabBoundsInfo bounds {};

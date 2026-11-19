@@ -108,7 +108,7 @@ struct HiZTestSuite {
 
             // Spawn ground plane and multiple scatter cubes
             const ZHLN::Entity ground = engine->Assets()->SpawnPlane(60.0f, {0.2f, 0.2f, 0.25f, 1.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = true, .isStaticPhysics = true}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = true, .isStaticPhysics = true});
             ZHLN::Test::ExpectTrue(reg.IsAlive(ground));
 
             for (int x = -3; x <= 3; ++x) {
@@ -119,7 +119,7 @@ struct HiZTestSuite {
                             .createPhysics   = true,
                             .isStaticPhysics = true,
                             .color           = {0.8f, 0.4f, 0.1f, 1.0f}
-                        }).value;
+                        });
                 }
             }
 
@@ -165,19 +165,19 @@ struct HiZTestSuite {
             const ZHLN::Entity occluderWall = engine->Assets()->SpawnBox({6.0f, 4.0f, 0.25f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {0.0, 4.0, 5.0}, .createPhysics = true, .isStaticPhysics = true, .color = {0.15f, 0.15f, 0.15f, 1.0f}
-                }).value;
+                });
 
             // 2. Small Target Box occluded completely behind the wall (Z = 18m)
             const ZHLN::Entity hiddenTarget = engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {0.0, 4.0, 18.0}, .createPhysics = true, .isStaticPhysics = true, .color = {1.0f, 0.0f, 0.0f, 1.0f}
-                }).value;
+                });
 
             // 3. Visible Target Box placed to the side (Z = 5m, X = 15m - outside wall footprint)
             const ZHLN::Entity visibleTarget = engine->Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {15.0, 4.0, 5.0}, .createPhysics = true, .isStaticPhysics = true, .color = {0.0f, 1.0f, 0.0f, 1.0f}
-                }).value;
+                });
 
             const bool camOk = engine->Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                 auto& cam = c.camera;

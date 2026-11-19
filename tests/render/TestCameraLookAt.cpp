@@ -33,7 +33,7 @@ enum class CameraLookAtError : uint8_t {
 namespace {
 
 void DisableJitterAndVignette(ZHLN::COM::IEngine& engine) {
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.antiAliasing.mode            = ZHLN::AAMode::None;
         gfx.environment.fullBright       = 1;
         gfx.post.vignetteIntensity       = 0.0f;
@@ -84,9 +84,9 @@ struct CameraLookAtTestSuite {
 
             // Default camera looks toward the origin. Put the subject well off that axis.
             const ZHLN::Entity target = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {4.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *redMatRes});
             const ZHLN::Entity decoy = engine->Assets()->SpawnBox({0.8f, 0.8f, 0.8f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 1.0, 0.0}, .createPhysics = false, .materialOverride = *greenMatRes});
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));
 

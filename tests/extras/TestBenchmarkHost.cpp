@@ -30,7 +30,7 @@ struct BenchmarkHostSuite {
             auto capturePath = std::filesystem::temp_directory_path() / "zahlen-benchmark-com-test.csv";
             ExpectTrue(viewer.GetFrameTelemetry().StartCapture(capturePath));
             for (int i = 0; i < 3; ++i) {
-                ExpectTrue(host.BeginFrame().HasValue());
+                host.BeginFrame();
                 auto& gui = host.Context();
                 viewer.SetFontAtlas(&host.GetFontAtlas());
                 auto ui = gui.BeginFrame(host.ConsumeInput(1.f / 60));

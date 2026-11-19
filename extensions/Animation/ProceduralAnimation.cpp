@@ -26,6 +26,7 @@ module;
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
@@ -1101,8 +1102,7 @@ void ConfigureFootAttachmentConstraints(const Animation::PrefabRig& prefab, RigB
     auto addFootConstraint = [&](RigNodeIndex parent, RigNodeIndex child) {
         if (!IsValidRigNode(parent, map.nodeCount) || !IsValidRigNode(child, map.nodeCount) || parent == child || constrainedNodes[child] ||
             IsNodeDescendant(map, child, parent) || IsNodeDescendant(map, parent, child) || map.childOfConstraintCount >= map.childOfConstraints.size()) {
-            // TODO(Evilpasture): What's the entire fucking point of returning a bool if every single caller discards?
-            return false;
+            return;
         }
         RigChildOfConstraint& constraint = map.childOfConstraints[map.childOfConstraintCount++];
         constraint.parent                = parent;
@@ -1111,7 +1111,6 @@ void ConfigureFootAttachmentConstraints(const Animation::PrefabRig& prefab, RigB
         constraint.bindRelative          = Inverse(map.modelTransforms[parent]) * map.modelTransforms[child];
         constraint.localPoseDelta        = Mat4x4::Identity();
         constrainedNodes[child]          = true;
-        return true;
     };
 
     // Secondary skins may carry their own exported copy of a semantic foot
@@ -1128,9 +1127,9 @@ void ConfigureFootAttachmentConstraints(const Animation::PrefabRig& prefab, RigB
             const bool             matchesL   = MatchesBone(normalized, CharacterBone::FootL, false);
             const bool             matchesR   = MatchesBone(normalized, CharacterBone::FootR, false);
             if (matchesL) {
-                static_cast<void>(addFootConstraint(footL, child));
+                addFootConstraint(footL, child);
             } else if (matchesR) {
-                static_cast<void>(addFootConstraint(footR, child));
+                addFootConstraint(footR, child);
             }
         }
     }
@@ -1265,7 +1264,7 @@ void ConfigureFootAttachmentConstraints(const Animation::PrefabRig& prefab, RigB
             }
         }
         if (nearest != nullptr) {
-            static_cast<void>(addFootConstraint(nearest->node, root));
+            addFootConstraint(nearest->node, root);
         }
     }
 }
@@ -2269,7 +2268,7 @@ void ProceduralAnimation::Evaluate(
                     itemTransform->rotation = ExtractRotation(localItem);
                     auto itemWorld          = entities.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
                     if (!itemWorld) {
-                        (void)entities.Attach(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
+                        entities.Attach(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
                     } else {
                         itemWorld->previous = itemWorld->world;
                         itemWorld->world    = worldItem;
@@ -2467,7 +2466,14 @@ void ProceduralAnimation::Evaluate(
             }
             const std::span<const Mat4x4> paletteSpan {palette.data(), paletteCount};
             if (graphics != nullptr) {
-                graphics->UpdateJointMatrices(skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
+                if (const auto res =
+                        graphics->UpdateJointMatrices(skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
+                    !res.HasValue()) {
+                    ZHLN::LogWarning(
+                        "[ProceduralAnimation] joint palette upload failed at offset {} ({} joints): {}",
+                        skeletalMesh->jointOffset, paletteCount, ZHLN::Error(res.error).Message()
+                    );
+                }
             }
             if (sink.uploadPalette != nullptr) {
                 sink.uploadPalette(sink.user, skeletalMesh->jointOffset, paletteSpan);

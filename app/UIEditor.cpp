@@ -582,7 +582,7 @@ auto DrawPreview(ZHLN::COM::IEngine& engine, Session& session) -> ZHLN::COM::Res
             .direction = GUI::Direction::Column,
         },
         [&]() {
-            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
+            GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
     const ZHLN::UIDrawData uiData = std::move(gui).End();

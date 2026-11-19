@@ -69,7 +69,7 @@ struct IEntities : IObject {
     // Compiled in the consumer's TU; not part of the vtable. The audit ignores
     // templates, and these never cross the boundary as symbols.
     template <Component T>
-    [[nodiscard]] auto Attach(Entity entity, const T& component) noexcept -> T* {
+    auto Attach(Entity entity, const T& component) noexcept -> T* {
         if (IsEngineComponent(ComponentName<T>())) {
             // Already a constructed T in typed storage; assign, do not
             // placement-new over storage the registry is tracking. No
@@ -153,7 +153,7 @@ struct IEntities : IObject {
         return ((Attach<T>(entity, components) != nullptr) && ...);
     }
     template <Component... T>
-    [[nodiscard]] auto Spawn(const T&... components) noexcept -> Entity {
+    auto Spawn(const T&... components) noexcept -> Entity {
         const auto entity = CreateEntity();
         if (!((Attach<T>(entity, components) != nullptr) && ...)) { Despawn(entity); return Entity::Null(); }
         return entity;

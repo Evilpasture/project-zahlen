@@ -44,8 +44,7 @@ auto Run(const ZHLN::EngineConfig& config, uint32_t frames) -> std::expected<voi
         auto        paced  = engine->Graphics()->PacedDeltaTime();
         auto        pacing = paced.HasValue() ? std::optional<float>(paced.value) : std::nullopt;
         const float dt     = pacer.SelectDelta(clock.Tick(), pacing);
-        if (auto ready = host.BeginFrame(); !ready.HasValue())
-            return std::unexpected(ready.error);
+        host.BeginFrame();
         auto& gui = host.Context();
         viewer.SetFontAtlas(&host.GetFontAtlas());
         auto ui = gui.BeginFrame(host.ConsumeInput(dt));

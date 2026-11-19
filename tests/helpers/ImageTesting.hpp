@@ -73,7 +73,7 @@ struct RgbImage {
     return img;
 }
 
-[[nodiscard]] inline bool WritePPM(std::string_view path, const RgbImage& img) {
+inline bool WritePPM(std::string_view path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
     }
@@ -97,7 +97,7 @@ struct RgbImage {
     return png;
 }
 
-[[nodiscard]] inline bool SavePNG(std::string_view path, const RgbImage& img) {
+inline bool SavePNG(std::string_view path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
     }
@@ -541,8 +541,8 @@ inline void WriteRegionCrop(std::string_view path, const RgbImage& img, const Ch
     }
 
     const RgbImage cropped {.width = w, .height = h, .rgb = crop};
-    (void) WritePPM(path, cropped);
-    (void) SavePNG(PngPathOf(path), cropped);
+    WritePPM(path, cropped);
+    SavePNG(PngPathOf(path), cropped);
 }
 
 // Writes |a - b| scaled 4x, so sub-visible drift becomes inspectable.
@@ -558,8 +558,8 @@ inline void WriteAmplifiedDiff(std::string_view path, const RgbImage& a, const R
     }
 
     const RgbImage diff {.width = a.width, .height = a.height, .rgb = amplified};
-    (void) WritePPM(path, diff);
-    (void) SavePNG(PngPathOf(path), diff);
+    WritePPM(path, diff);
+    SavePNG(PngPathOf(path), diff);
 }
 
 // ============================================================================

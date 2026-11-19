@@ -16,7 +16,7 @@ struct Upload {
         if (committed)
             return;
         for (const auto& mesh: meshes)
-            (void) graphics.DestroyMesh(mesh);
+            graphics.DestroyMesh(mesh);
         for (const auto texture: textures)
             graphics.UnloadTexture(texture);
     }

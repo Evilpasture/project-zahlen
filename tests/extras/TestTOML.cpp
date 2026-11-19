@@ -614,7 +614,7 @@ onClickAction = "editor.save_scene"
 
             // A dynamic box: everything the live components can answer for
             // itself, plus the provenance record for what they cannot.
-            (void)registry.Spawn(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
                 ZHLN::Components::TransformComponent {
                     .position = FVec3{1.0f, 2.0f, 3.0f},
@@ -630,21 +630,21 @@ onClickAction = "editor.save_scene"
 
             // A static plane: PhysicsComponent::isStatic is what the spawners
             // leave behind for a body that cannot move.
-            (void)registry.Spawn(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
             );
 
-            (void)registry.Spawn(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedCrate"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Prefab, .source = ZHLN::String256 {"models/crate.glb"}}
             );
 
             // Not scene content: no provenance, so Extract leaves it out rather
             // than guessing that it is a box.
-            (void)registry.Spawn(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
+            registry.Spawn(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
 
-            (void)registry.Spawn(
+            registry.Spawn(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
                 ZHLN::Components::TransformComponent {
                     .position = FVec3{4.0f, 5.0f, 6.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, -35.0f, 0.0f}})
@@ -663,7 +663,7 @@ onClickAction = "editor.save_scene"
 
             // The "Glow_*" light an emissive prefab brings with it: untagged, so
             // it is not written. Re-instantiating the prefab spawns it again.
-            (void)registry.Spawn(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
+            registry.Spawn(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
 
             ZHLN::Camera camera;
             camera.position = {0.0f, 3.8f, 7.5f};

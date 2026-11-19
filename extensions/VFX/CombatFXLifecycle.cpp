@@ -61,7 +61,7 @@ auto System::SpawnImpact(COM::IEngine& engine, const FVec3& point, const FVec3& 
 
     // 3. Acoustic Audio Feedback via Unified Fire-and-Forget Event Queue
     if (cfg.hasAudio) {
-        const auto posted = engine.Audio()->PostEvent(
+        engine.Audio()->PostEvent(
             {.type       = AudioEventType::NoiseBurst3D,
              .position   = point,
              .volume     = 0.65f,
@@ -71,8 +71,6 @@ auto System::SpawnImpact(COM::IEngine& engine, const FVec3& point, const FVec3& 
              .filterType = AudioFilterType::BandPass,
              .noiseType  = AudioNoiseType::Pink}
         );
-        if (!posted.HasValue())
-            return std::unexpected(posted.error);
     }
     return {};
 }

@@ -13,13 +13,13 @@ struct IFramePipeline: IObject {
     // propagation, command playback and cleanup. Stops before camera projection.
     // dt must be finite and nonnegative. A second advance or Tick is refused
     // until this frame is finished/cancelled; no clock time is consumed on refusal.
-    [[nodiscard]] virtual Result<void> AdvanceFrame(float dt) noexcept = 0;
+    virtual Result<void> AdvanceFrame(float dt) noexcept = 0;
     // Projects the host's final camera poses, culls, renders and commits history.
     // Exactly once per successful advance; CurrentFrame advances on completion.
-    [[nodiscard]] virtual Result<void> FinishFrame() noexcept = 0;
+    virtual Result<void> FinishFrame() noexcept = 0;
     // No render, input re-evaluation or physics replay. Preserves presentation
     // history and counts the consumed simulation frame. Not a simulation rollback.
-    [[nodiscard]] virtual Result<void> CancelFrame() noexcept        = 0;
+    virtual Result<void> CancelFrame() noexcept        = 0;
     [[nodiscard]] virtual bool         FramePending() const noexcept = 0;
 
   protected:

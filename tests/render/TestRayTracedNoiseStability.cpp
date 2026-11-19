@@ -85,13 +85,13 @@ struct RayTracedNoiseStabilityTestSuite {
     static void SetAA(ZHLN::COM::IEngine& engine, ZHLN::AAMode mode) {
         auto& reg = *engine.Entities();
         for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            (void)engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
+            engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
-        (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = mode});
+        engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
     static void SetRayTracedShadows(ZHLN::COM::IEngine& engine, int enableRTR) {
-        (void)engine.Graphics()->PatchSettings([enableRTR](auto& gfx) {
+        engine.Graphics()->PatchSettings([enableRTR](auto& gfx) {
             gfx.environment.fullBright       = 0;
             gfx.post.enableSSR               = 0;
             gfx.rayTracing.enableReflections = enableRTR != 0;
@@ -121,7 +121,7 @@ struct RayTracedNoiseStabilityTestSuite {
         outBoxMat = *boxMat;
 
         engine.Assets()->SpawnPlane(120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat}).value;
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat});
 
         const ZHLN::Entity sunEnt = reg.Spawn();
         reg.AttachMany(
@@ -187,9 +187,9 @@ struct RayTracedNoiseStabilityTestSuite {
             // thick at y = 0.18m, t ~ 0.4m < 1.2m along L_sun) right inside the
             // CSM normal/depth-bias Peter-Panning zone.
             engine->Assets()->SpawnBox({4.0f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat});
             engine->Assets()->SpawnBox({4.0f, 0.008f, 0.012f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.18, 16.5}, .createPhysics = false, .materialOverride = boxMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.18, 16.5}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
@@ -246,7 +246,7 @@ struct RayTracedNoiseStabilityTestSuite {
                 c.camera.pitch    = ZHLN::DegF{-18.0f};
             });
             const ZHLN::Entity highCaster = engine->Assets()->SpawnBox({3.0f, 3.0f, 3.0f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 12.0, 22.0}, .createPhysics = false, .materialOverride = boxMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 12.0, 22.0}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 
@@ -299,7 +299,7 @@ struct RayTracedNoiseStabilityTestSuite {
             }
 
             const ZHLN::Entity curb = engine->Assets()->SpawnBox({2.2f, 0.06f, 0.25f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {-2.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {-2.0, 0.06, 15.0}, .createPhysics = false, .materialOverride = boxMat});
 
             RayTracedNoiseStabilityTestSuite::SetAA(*engine, ZHLN::AAMode::None);
 

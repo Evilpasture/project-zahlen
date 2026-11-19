@@ -81,11 +81,11 @@ struct ISimulation : IObject {
     // CapsuleShapeDesc, CylinderShapeDesc, PlaneShapeDesc, MeshShapeDesc,
     // HeightFieldShapeDesc, or CompoundShapeDesc) plus any subset of
     // RigidBodyPose, RigidBodySurface and RigidBodyFilter.
-    [[nodiscard]] virtual Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept = 0;
+    virtual Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept = 0;
 
     // Accepts Physics::CharacterCreateDesc in `descChain` (nullptr uses defaults
     // at the origin).
-    [[nodiscard]] virtual Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept = 0;
+    virtual Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept = 0;
 
     // Borrowed vertex spans owned by the engine's debug buffers. They stay
     // valid until the next call or the next step, and are never freed by the
@@ -100,12 +100,12 @@ struct ISimulation : IObject {
         return created.HasValue() ? created.value : Physics::BodyID::Null();
     }
 
-    [[nodiscard]] auto CreateBoxBody(FVec3 halfExtents, const Physics::RigidBodyPose& pose = {}) noexcept
+    auto CreateBoxBody(FVec3 halfExtents, const Physics::RigidBodyPose& pose = {}) noexcept
         -> Result<Physics::BodyID> {
         return CreateRigidBody(InChain(Physics::BoxShapeDesc {.halfExtents = halfExtents}, pose));
     }
 
-    [[nodiscard]] auto CreateSphereBody(float radius, const Physics::RigidBodyPose& pose = {}) noexcept
+    auto CreateSphereBody(float radius, const Physics::RigidBodyPose& pose = {}) noexcept
         -> Result<Physics::BodyID> {
         return CreateRigidBody(InChain(Physics::SphereShapeDesc {.radius = radius}, pose));
     }

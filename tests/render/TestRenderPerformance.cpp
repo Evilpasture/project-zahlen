@@ -149,7 +149,7 @@ void PrepareEngineForTest(ZHLN::COM::IEngine& engine) {
     // 4. Reset the main camera framing to defaults.
     auto& camReg = *engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
-    (void) camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
+    camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
     engine.State()->ResetCullingStats();
 }
 
@@ -178,7 +178,7 @@ auto RunGeometryTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> s
     auto& reg = *engine.Entities();
     auto& rc = *engine.Graphics();
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
+    engine.Graphics()->PatchSettings([](auto& gfx) { gfx.environment.fullBright = 1; });
 
     constexpr size_t kGridCols = 40;
     constexpr size_t kGridRows = 40;
@@ -191,7 +191,7 @@ auto RunGeometryTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> s
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
             const ZHLN::Entity box  = engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
-                ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat}).value;
+                ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat});
             // A box has three vertex streams and three meshlet buffers. Fail
             // immediately rather than timing a scene with invalid geometry.
             const auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
@@ -267,13 +267,13 @@ auto RunLightingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> s
 
     auto& reg = *engine.Entities();
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright      = 0;
         gfx.environment.ambientExposure = 8.0f;
     });
 
     engine.Assets()->SpawnPlane(100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}).value;
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f});
 
     constexpr size_t          kLightCount = 64;
     std::vector<ZHLN::Entity> lightEntities;
@@ -343,7 +343,7 @@ auto RunParticlesTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> 
     constexpr uint32_t  kMaxParticles = 20000;
     ZHLN::TextureID fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", ZHLN::Extent2D{64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 0.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -4.0f, 0.0f},
@@ -397,14 +397,14 @@ auto RunVolumetricsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
 
     auto& reg = *engine.Entities();
 
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 40.0f, 0.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.95f, 0.85f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.8f, 0.3f}.Normalized()
         }
     );
 
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.05f,
             .heightFalloff   = 0.02f,
@@ -418,7 +418,7 @@ auto RunVolumetricsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
         }
     );
 
-    engine.Assets()->SpawnPlane(80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false}).value;
+    engine.Assets()->SpawnPlane(80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false});
 
     const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
         auto& cam = c.camera;
@@ -450,7 +450,7 @@ auto RunDecalsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std
     auto& reg = *engine.Entities();
     auto& rc = *engine.Graphics();
 
-    engine.Assets()->SpawnBox({25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}).value;
+    engine.Assets()->SpawnBox({25.0f, 15.0f, 0.5f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 7.5, 0}, .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}});
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
     auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", ZHLN::Extent2D{64, 64}, decalPixels, true);
@@ -463,7 +463,7 @@ auto RunDecalsTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std
         const ZHLN::FVec3  pos{posX, posY, 0.0f};
         const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        (void) reg.Spawn(
+        reg.Spawn(
             ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = decalTex, .roughness = 0.8f, .metallic = 0.1f}
@@ -500,7 +500,7 @@ auto RunUITest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -> std::ex
     ZHLN::HostUI hostUI(engine);
     ZHLN::GUI::Context perfGui(hostUI.GetFontAtlas());
     auto composeUI = [&](float frameDt) {
-        (void) hostUI.BeginFrame();
+        hostUI.BeginFrame();
         perfGui.SetFontAtlas(hostUI.GetFontAtlas());
         ZHLN::GUI::Frame ui = perfGui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
@@ -557,10 +557,10 @@ auto RunPostProcessingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode
     auto& reg = *engine.Entities();
 
     for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
+        engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright      = 0;
         gfx.environment.ambientExposure = 10.0f;
         gfx.post.vignetteIntensity      = 1.2f;
@@ -568,7 +568,7 @@ auto RunPostProcessingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode
         gfx.post.enableSSR              = 1;
     });
 
-    engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}).value;
+    engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0, 2, 0}, .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f});
 
     constexpr uint32_t         kFrames = 60;
     ZHLN::Test::BenchmarkTimer timer;
@@ -597,7 +597,7 @@ auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) ->
 
     auto& reg = *engine.Entities();
 
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0;
         gfx.environment.ambientExposure  = 6.0f;
         gfx.post.enableSSR               = 0;
@@ -605,7 +605,7 @@ auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) ->
         gfx.post.mode                    = 0;
     });
 
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{40.0f, 50.0f, 30.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.94f}, .intensity = 180.0f, .direction = ZHLN::FVec3{0.5f, 0.7f, 0.35f}.Normalized()
@@ -614,7 +614,7 @@ auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) ->
 
     auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
     engine.Assets()->SpawnPlane(100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat}).value;
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *mirrorMat});
 
     constexpr size_t kGridDim  = 20;
     auto             chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}});
@@ -628,14 +628,14 @@ auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) ->
             engine.Assets()->SpawnBox({0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = {posX, 0.5, posZ}, .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
-                }).value;
+                });
         }
     }
 
     auto emissiveMat = rc.CreateMaterial(
         ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
-    const ZHLN::Entity emissiveCube = engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat}).value;
+    const ZHLN::Entity emissiveCube = engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 5.0, 0.0}, .createPhysics = false, .materialOverride = *emissiveMat});
 
     const bool camOk = engine.Entities()->PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
         auto& cam = c.camera;
@@ -666,7 +666,7 @@ auto RunRayTracingTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) ->
     if (!outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::RayTracingThroughputFailed);
     }
-    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
+    ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     ZHLN::Test::ExpectGt(litPixels, 30000u);
@@ -697,7 +697,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
     // 1. Scene Backdrop & Floor
     auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
     engine.Assets()->SpawnPlane(120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat}).value;
+        ZHLN::PrefabFactory::SpawnParams {.position = {0, 0, 0}, .createPhysics = false, .materialOverride = *floorMat});
 
     // 2. Geometry Population (600 Distinct PBR Meshes with RT Reflection Targets)
     constexpr size_t kCols = 25;
@@ -713,12 +713,12 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
             float posZ = (static_cast<float>(r) - kRows * 0.5f) * 3.0f;
             auto  mat  = (c % 3 == 0) ? *goldMat : ((c % 3 == 1) ? *redMat : *chromeMat);
 
-            engine.Assets()->SpawnBox({0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.6, posZ}, .createPhysics = false, .materialOverride = mat}).value;
+            engine.Assets()->SpawnBox({0.6f, 0.6f, 0.6f}, ZHLN::PrefabFactory::SpawnParams {.position = {posX, 0.6, posZ}, .createPhysics = false, .materialOverride = mat});
         }
     }
 
     // 3. Clustered Forward+ Multi-Light Grid (48 Dynamic Point Lights + Sun)
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 50.0f, 0.0f}},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = ZHLN::FVec3{1.0f, 0.98f, 0.92f}, .intensity = 160.0f, .direction = ZHLN::FVec3{0.6f, 0.75f, 0.4f}.Normalized()
@@ -745,7 +745,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
 
     // 4. GPU Particle Emitter (10,000 Particles)
     auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", ZHLN::Extent2D{64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::TransformComponent {.position = ZHLN::FVec3{0.0f, 1.0f, 0.0f}}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
                                                                                                 {.gravity     = {0.0f, -2.5f, 0.0f},
@@ -771,7 +771,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
     );
 
     // 5. Volumetric Fog Environment
-    (void) reg.Spawn(
+    reg.Spawn(
         ZHLN::Components::VolumetricFogComponent {
             .density         = 0.035f,
             .heightFalloff   = 0.025f,
@@ -792,7 +792,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
         const ZHLN::FVec3  pos   = {posX, 0.01f, posZ};
         const auto world = ZHLN::ComposeTransform(pos, ZHLN::Quat::Identity(), {2.5f, 2.5f, 2.5f});
 
-        (void) reg.Spawn(
+        reg.Spawn(
             ZHLN::Components::TransformComponent {.position = pos, .scale = ZHLN::FVec3{2.5f, 2.5f, 2.5f}},
             ZHLN::Components::WorldTransformComponent {.world = world, .previous = world},
             ZHLN::Components::DecalComponent {.albedoMap = sparkTex, .roughness = 0.9f, .metallic = 0.0f}
@@ -803,7 +803,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
     ZHLN::HostUI hostUI(engine);
     ZHLN::GUI::Context hudGui(hostUI.GetFontAtlas());
     auto composeUI = [&](float frameDt) {
-        (void) hostUI.BeginFrame();
+        hostUI.BeginFrame();
         hudGui.SetFontAtlas(hostUI.GetFontAtlas());
         ZHLN::GUI::Frame ui = hudGui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
@@ -835,10 +835,10 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
 
     // 8. Configure Post-Processing
     for (ZHLN::Entity camEnt: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
+        engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::SMAA; });
     }
 
-    (void)engine.Graphics()->PatchSettings([useHardwareRT](auto& gfx) {
+    engine.Graphics()->PatchSettings([useHardwareRT](auto& gfx) {
         gfx.environment.fullBright       = 0;
         gfx.environment.ambientExposure  = 10.0f;
         gfx.post.vignetteIntensity       = 1.15f;
@@ -898,7 +898,7 @@ auto RunGrandMasterTest(ZHLN::COM::IEngine& engine, ZHLN::ValidationMode mode) -
     if (!outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);
     }
-    (void) ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
+    ZHLN::Test::Image::WritePPM(ppmPath, outputImg); // diagnostic mirror
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
     uint32_t valRaised = ZHLN::Test::ValidationErrorCount() - valBefore;

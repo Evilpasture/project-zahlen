@@ -75,7 +75,7 @@ void ClearArena(ZHLN::COM::IEngine& engine, std::span<const ZHLN::Entity> entiti
     auto& ents = *engine.Entities();
     for (ZHLN::Entity entity : entities) {
         if (ents.IsAlive(entity)) {
-            (void)ents.Despawn(entity);
+            ents.Despawn(entity);
         }
     }
 }
@@ -91,10 +91,10 @@ void ClearArena(ZHLN::COM::IEngine& engine, std::span<const ZHLN::Entity> entiti
     gfx.environment.skyZenith       = kSkyZenith;
     gfx.environment.skyHorizon      = kSkyHorizon;
     gfx.environment.skyGround       = kSkyGround;
-    (void)engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->ApplySettings(gfx);
 
-    auto pushSpawned = [&](ZHLN::COM::Result<ZHLN::Entity> res) {
-        if (res.HasValue()) entities.push_back(res.value);
+    auto pushSpawned = [&](ZHLN::Entity entity) {
+        if (entity != ZHLN::Entity::Null()) entities.push_back(entity);
     };
 
     pushSpawned(assets.SpawnPlane(24.0f, {0.32f, 0.34f, 0.38f, 1.0f}, {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}));

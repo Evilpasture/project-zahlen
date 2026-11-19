@@ -23,7 +23,7 @@ void SeedAnimatedPrefabRoots(COM::IEntities& entities) {
         if (inst == nullptr || !inst->animated || inst->prefabAsset == InvalidAssetID) continue;
         if (inst->animationCount == 0 && inst->skeletonCount == 0) continue;
         if (entities.Has<AnimatorComponent>(entity)) continue;
-        (void)entities.Attach(entity, AnimatorComponent {
+        entities.Attach(entity, AnimatorComponent {
             .prefabAsset     = inst->prefabAsset,
             .currentTrackIdx = inst->animationCount > 0 ? 0 : -1,
         });

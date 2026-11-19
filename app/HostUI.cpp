@@ -69,15 +69,13 @@ auto HostUI::ConsumeInput(float dt, WindowID window) -> GUI::UIInput {
         },
     };
 }
-auto HostUI::BeginFrame() -> COM::Result<void> {
+void HostUI::BeginFrame() {
     std::vector<WindowID> windows(_engine.Windows(nullptr, 0));
     const auto total = _engine.Windows(windows.data(), static_cast<uint32_t>(windows.size()));
     windows.resize(std::min<size_t>(total, windows.size()));
     for (const auto id: windows) {
-        auto cleared = _engine.SubmitUI(id, COM::UISubmitInfo {});
-        if (!cleared.HasValue()) return cleared;
+        (void)_engine.SubmitUI(id, COM::UISubmitInfo {});
     }
-    return {};
 }
 auto HostUI::Submit(UIDrawData data, WindowID window) -> COM::Result<void> {
     const auto result = _engine.SubmitUI(window, COM::UISubmitInfo {

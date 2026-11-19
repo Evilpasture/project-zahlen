@@ -15,10 +15,10 @@ struct LogicWorldInfo {
 struct ILogicWorld: IObject {
     [[nodiscard]] virtual IEntities*   Entities() noexcept                   = 0;
     [[nodiscard]] virtual ISimulation* Simulation() noexcept                 = 0;
-    [[nodiscard]] virtual Result<void> GetInfo(ChainOutNode*) const noexcept = 0;
+    virtual Result<void> GetInfo(ChainOutNode*) const noexcept = 0;
     // Flush deferred hierarchy destruction, step physics once. No fixed clock,
     // ECS transform sync, graphics, event polling or input evaluation is hidden.
-    [[nodiscard]] virtual Result<void> Advance(float dt) noexcept = 0;
+    virtual Result<void> Advance(float dt) noexcept = 0;
     virtual void                       Flush() noexcept           = 0;
     virtual void                       Clear() noexcept           = 0;
 

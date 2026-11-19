@@ -52,7 +52,7 @@ auto AssetManager::GetCachedPrefab(uint64_t hash) const noexcept -> ZHLN::Option
 
 auto AssetManager::BorrowCachedPrefab(uint64_t hash) const noexcept -> ModelPrefab* {
     ModelPrefab* found = nullptr;
-    (void)_prefabCache.With(hash, [&](ModelPrefab& prefab) { found = &prefab; });
+    _prefabCache.With(hash, [&](ModelPrefab& prefab) { found = &prefab; });
     return found;
 }
 
@@ -155,7 +155,7 @@ auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFont
 
 auto AssetManager::BorrowCachedFont(uint64_t hash) const noexcept -> GUI::BakedFontAsset* {
     GUI::BakedFontAsset* found = nullptr;
-    (void)_fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
+    _fontCache.With(hash, [&](GUI::BakedFontAsset& font) { found = &font; });
     return found;
 }
 

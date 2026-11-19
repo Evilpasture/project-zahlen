@@ -42,15 +42,13 @@ struct System::Impl {
                 return std::unexpected(built.error);
             mesh = built.value;
             if (!entities.Attach(bolt.entity, Components::OwnedMeshComponent {.meshAsset = bolt.meshID, .mesh = mesh})) {
-                (void) graphics.DestroyMesh(COM::InChain(mesh));
+                graphics.DestroyMesh(mesh);
                 return std::unexpected(COM::Error::InvalidArgument);
             }
         }
         // Publish after replacing ownership (replacement unregisters old ID).
         mesh.vertexCount = bolt.state.visibleVertices;
-        auto registered  = graphics.RegisterMesh(bolt.meshID, mesh);
-        if (!registered.HasValue())
-            return std::unexpected(registered.error);
+        graphics.RegisterMesh(bolt.meshID, mesh);
         auto material = graphics.FindMaterial(bolt.materialID);
         if (!material.HasValue()) {
             MaterialDesc desc  = MaterialDesc::Basic();
@@ -67,9 +65,7 @@ struct System::Impl {
         material.value.emissiveFactor.x = .88f * intensity;
         material.value.emissiveFactor.y = .95f * intensity;
         material.value.emissiveFactor.z = intensity;
-        auto result                     = graphics.RegisterMaterial(bolt.materialID, material.value);
-        if (!result.HasValue())
-            return std::unexpected(result.error);
+        graphics.RegisterMaterial(bolt.materialID, material.value);
         if (!entities.Attach(bolt.entity, bolt.state))
             return std::unexpected(COM::Error::InvalidArgument);
         if (auto* light = entities.Get<Components::LightComponent>(bolt.flash))
@@ -184,7 +180,7 @@ auto System::BeforeRender(COM::IEngine& engine, float dt) -> std::expected<void,
                     state.phase           = Phase::ReturnStroke;
                     state.phaseTime       = 0;
                     // Best effort missing-content audio, matching the native demo.
-                    (void) engine.Audio()->PostEvent(
+                    engine.Audio()->PostEvent(
                         {.type     = AudioEventType::OneShot3D,
                          .filepath = "resources/assets/audio/lightning.wav",
                          .position = bolt.ground,

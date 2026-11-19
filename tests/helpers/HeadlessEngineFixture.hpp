@@ -91,7 +91,7 @@ static_assert(std::is_trivially_copyable_v<EngineView> && std::is_trivially_dest
 
 inline void ResetScene(ZHLN::COM::IEngine& engine) {
     engine.ClearScene();
-    (void)engine.Graphics()->ApplySettings(ZHLN::GraphicsSettings {});
+    engine.Graphics()->ApplySettings(ZHLN::GraphicsSettings {});
     auto&      camReg    = *engine.Entities();
     const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     if (camEntity) camReg.Patch<ZHLN::Components::CameraComponent>(*camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
@@ -231,8 +231,8 @@ class ZHLN_ANNOTATION(ZHLN::Test::FunctionFixture {}) PooledEngine {
 inline void DisableAA(ZHLN::COM::IEngine& engine) {
     ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings();
     gfx.antiAliasing.mode      = ZHLN::AAMode::None;
-    (void)engine.Graphics()->ApplySettings(gfx);
-    (void)engine.Graphics()->ApplySettings(ZHLN::COM::InChain(ZHLN::AAState {.mode = ZHLN::AAMode::None}));
+    engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->SetAntiAliasing(ZHLN::AAMode::None);
 }
 
 [[nodiscard]] inline auto ToRgbImage(const ZHLN::CapturedFrame& frame) -> Image::RgbImage {
@@ -277,8 +277,8 @@ inline void DisableAA(ZHLN::COM::IEngine& engine) {
     const Image::RgbImage img = ToRgbImage(**captured);
     if (!img.Valid()) return {};
     if (!ppmPath.empty()) {
-        (void)Image::WritePPM(ppmPath, img);
-        (void)Image::SavePNG(Image::PngPathOf(ppmPath), img);
+        Image::WritePPM(ppmPath, img);
+        Image::SavePNG(Image::PngPathOf(ppmPath), img);
     }
     return img;
 }

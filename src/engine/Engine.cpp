@@ -675,7 +675,7 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
         module.registerComponents(GetInternalRegistry());
     }
     if (module.sceneCleanup != nullptr) {
-        (void) AddSceneCleanupPass(module.sceneCleanup);
+        AddSceneCleanupPass(module.sceneCleanup);
     }
     if (module.teardown != nullptr) {
         AddTeardownHook(module.teardown);

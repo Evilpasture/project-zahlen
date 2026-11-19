@@ -133,9 +133,9 @@ struct RayTracedReflectionNoiseTestSuite {
     static void SetAA(ZHLN::COM::IEngine& engine, ZHLN::AAMode mode) {
         auto& reg = *engine.Entities();
         for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            (void)engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
+            engine.Graphics()->PatchSettings([mode](auto& gfx) { gfx.antiAliasing.mode        = mode; });
         }
-        (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = mode});
+        engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = mode});
     }
 
     // Same switch the shadow suite drives: rayTracing.enableReflections is the
@@ -143,7 +143,7 @@ struct RayTracedReflectionNoiseTestSuite {
     // form pc.enableRTR and to select the RTR pipeline variants for lighting
     // and reflection.
     static void SetRTR(ZHLN::COM::IEngine& engine, int enableSSR, int enableRTR) {
-        (void)engine.Graphics()->PatchSettings([enableSSR, enableRTR](auto& gfx) {
+        engine.Graphics()->PatchSettings([enableSSR, enableRTR](auto& gfx) {
             gfx.environment.fullBright       = 0;
             gfx.post.enableSSR               = enableSSR;
             gfx.rayTracing.enableReflections = enableRTR != 0;
@@ -211,7 +211,7 @@ struct RayTracedReflectionNoiseTestSuite {
         }
 
         engine.Assets()->SpawnPlane(120.0f, {0.05f, 0.05f, 0.06f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat}).value;
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = *floorMat});
         // Just above the floor so it wins the depth test everywhere it covers.
         //
         // Size matters: the mirror image of the box crosses the floor plane
@@ -222,8 +222,8 @@ struct RayTracedReflectionNoiseTestSuite {
         // rough floor then survives only past z~90, which is exactly the
         // far strip inside the top probe rows.
         engine.Assets()->SpawnPlane(60.0f, {0.5f, 0.5f, 0.5f, 1.0f},
-            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.02, 8.0}, .createPhysics = false, .materialOverride = *plateMat}).value;
-        engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 6.0, 6.0}, .createPhysics = false, .materialOverride = *boxMat}).value;
+            ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.02, 8.0}, .createPhysics = false, .materialOverride = *plateMat});
+        engine.Assets()->SpawnBox({2.0f, 2.0f, 2.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 6.0, 6.0}, .createPhysics = false, .materialOverride = *boxMat});
 
         const ZHLN::Entity sunEnt = reg.Spawn();
         reg.AttachMany(

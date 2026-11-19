@@ -345,8 +345,8 @@ void TickFrames(ZHLN::COM::IEngine& engine, uint32_t frames, float dt = 1.0f / 6
 // alone gets overwritten. Both remaining AA modes are spatial filters that
 // would perturb the frame-to-frame comparison at high-contrast edges.
 void DisableAA(ZHLN::COM::IEngine& engine) {
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
-    (void)engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+    engine.Graphics()->PatchSettings([](auto& gfx) { gfx.antiAliasing.mode        = ZHLN::AAMode::None; });
+    engine.Graphics()->SetAntiAliasing(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
 // Captures through Engine::GetRenderContext() so the call always uses the
@@ -355,7 +355,7 @@ void DisableAA(ZHLN::COM::IEngine& engine) {
 [[nodiscard]] RgbImage Capture(ZHLN::COM::IEngine& engine, std::string_view path) {
     RgbImage img = ZHLN::Test::Headless::Capture(engine, path);
     if (img.Valid()) {
-        (void) ZHLN::Test::Image::SavePNG(ZHLN::Test::Image::PngPathOf(path), img);
+        ZHLN::Test::Image::SavePNG(ZHLN::Test::Image::PngPathOf(path), img);
     }
     return img;
 }
@@ -515,7 +515,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             // opt-in and covered by its own suites.
             DisableAA(*engine);
 
-            (void)engine->Graphics()->PatchSettings([](auto& gfx) {
+            engine->Graphics()->PatchSettings([](auto& gfx) {
                 gfx.environment.fullBright       = 0;
                 gfx.post.exposure                = 0.015f;
                 gfx.environment.ambientExposure  = 10.0f;
@@ -525,7 +525,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             });
 
             // Ground plane gives the shadow catch + distance reference.
-            engine->Assets()->SpawnPlane(220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false}).value;
+            engine->Assets()->SpawnPlane(220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false});
 
             // Far-field ramp probe: large red surface crossing the cascade
             // seam at a grazing sun angle (see the constants block). Width
@@ -538,7 +538,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                     .scale         = {0.34f, 1.0f, 1.0f},
                     .createPhysics = false,
                     .roughness     = 0.65f
-                }).value;
+                });
 
             // One material per ring: alternating dielectric / metallic branches
             // of the PBR model, all hue-distinct after shading.
@@ -583,7 +583,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
                         .position         = {static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)},
                         .createPhysics    = false,
                         .materialOverride = *mat
-                    }).value;
+                    });
             }
 
             // Sun (cascade shadows) + two point lights anchored at mid/far depth
@@ -592,7 +592,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             // looks along +Z, so the +Z faces of the rings are the visible
             // ones and they must be the sunlit ones. (Direction is the
             // "toward the sun" vector; LightingSystem consumes it directly.)
-            (void)reg.Spawn(
+            reg.Spawn(
                 ZHLN::Components::TransformComponent {
                     .position = ZHLN::FVec3{0.0f, 60.0f, -40.0f}, .rotation = ZHLN::Quat::FromEulerDegrees({{50.0f, 0.0f, 180.0f}})
                 },
@@ -605,7 +605,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             );
 
             auto addPointLight = [&](const ZHLN::FVec3& pos, const ZHLN::FVec3& color, float intensity, float range) {
-                (void)reg.Spawn(
+                reg.Spawn(
                     ZHLN::Components::TransformComponent {.position = pos},
                     ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = color, .intensity = intensity, .range = range}
                 );

@@ -50,7 +50,7 @@ auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
 }
 
 void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
-    (void)InternAndMapNameToFamilyID(name, id);
+    InternAndMapNameToFamilyID(name, id);
 }
 
 auto Registry::InternAndMapNameToFamilyID(std::string_view name, uint32_t id) noexcept -> std::string_view {

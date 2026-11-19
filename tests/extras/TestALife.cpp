@@ -38,7 +38,7 @@ struct ALifeTestSuite {
             grid.UpdateEntity(reg, e2, DVec3 {-1.0, -1.0, -1.0});
 
             const Entity e3 = reg.CreateEntity();
-            (void)reg.Attach(e3, ALifeComponent {.position = {800.0, 0.0, 800.0}, .self_entity = e3});
+            reg.Attach(e3, ALifeComponent {.position = {800.0, 0.0, 800.0}, .self_entity = e3});
             grid.UpdateEntity(reg, e3, DVec3 {-1.0, -1.0, -1.0});
 
             Test::ExpectTrue(c1 != nullptr && c2 != nullptr);
@@ -61,7 +61,7 @@ struct ALifeTestSuite {
             (*worldRes)->Flush();
 
             const Entity replacement = reg.CreateEntity();
-            (void)reg.Attach(replacement, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = replacement});
+            reg.Attach(replacement, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = replacement});
             grid.UpdateEntity(reg, replacement, DVec3 {-1.0, -1.0, -1.0});
 
             results = grid.Query(reg, DVec3 {100.0, 0.0, 100.0}, 20.0f, std::move(results));
@@ -80,9 +80,9 @@ struct ALifeTestSuite {
             auto& reg = *(*worldRes)->Entities();
 
             const Entity a = reg.CreateEntity();
-            (void)reg.Attach(a, ALifeComponent {.position = {100.0, 0.0, 100.0}, .self_entity = a});
+            reg.Attach(a, ALifeComponent {.position = {100.0, 0.0, 100.0}, .self_entity = a});
             const Entity b = reg.CreateEntity();
-            (void)reg.Attach(b, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = b});
+            reg.Attach(b, ALifeComponent {.position = {105.0, 0.0, 100.0}, .self_entity = b});
 
             Simulator sim {};
             std::atomic<uint32_t> thinks {0};

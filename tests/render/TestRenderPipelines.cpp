@@ -81,7 +81,7 @@ struct RenderPipelinesTestSuite {
             auto& reg = *engine->Entities();
             auto& rc  = *engine->Graphics();
             const auto box =
-                engine->Assets()->SpawnBox(ZHLN::FVec3 {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3 {0, 3, 0}, .createPhysics = false}).value;
+                engine->Assets()->SpawnBox(ZHLN::FVec3 {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3 {0, 3, 0}, .createPhysics = false});
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
             if (!ZHLN::Test::ExpectTrue(boxMesh != nullptr && reg.PatchSingleton<ZHLN::Components::CameraComponent>([](auto& c) {
                     c.camera.position = {0.0f, 5.0f, 10.0f};
@@ -112,7 +112,7 @@ struct RenderPipelinesTestSuite {
                 return std::unexpected(transient.error);
             }
             const ZHLN::MaterialID transientId = ZHLN::HashAssetID("test_pipeline_cache_transient_material");
-            (void) rc.RegisterMaterial(transientId, *transient);
+            rc.RegisterMaterial(transientId, *transient);
             ZHLN::Test::ExpectTrue(rc.GetMaterial(transientId).HasValue());
             rc.UnregisterMaterial(transientId);
             ZHLN::Test::ExpectFalse(rc.GetMaterial(transientId).HasValue());
@@ -163,7 +163,7 @@ struct RenderPipelinesTestSuite {
             auto& rc  = *engine->Graphics();
             auto& reg = *engine->Entities();
 
-            const auto entity = engine->Assets()->SpawnBox(ZHLN::FVec3 {0.5f, 0.5f, 0.5f}).value;
+            const auto entity = engine->Assets()->SpawnBox(ZHLN::FVec3 {0.5f, 0.5f, 0.5f});
             const auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(entity);
             if (!ZHLN::Test::ExpectTrue(owner != nullptr && owner->mesh.posBuffer != ZHLN::BufferID::Invalid)) {
                 return {};
@@ -173,7 +173,7 @@ struct RenderPipelinesTestSuite {
 
             rc.UnregisterMesh(id);
             ZHLN::Test::ExpectFalse(rc.GetMesh(id).HasValue());
-            (void) rc.RegisterMesh(id, owner->mesh);
+            rc.RegisterMesh(id, owner->mesh);
             const auto rebound = rc.GetMesh(id);
             ZHLN::Test::ExpectTrue(rebound.HasValue());
             if (rebound) {
@@ -203,7 +203,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::Headless::TickFrames(*engine, 1);
             }
 
-            const auto plane      = engine->Assets()->SpawnPlane(2.0f).value;
+            const auto plane      = engine->Assets()->SpawnPlane(2.0f);
             const auto planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
             if (ZHLN::Test::ExpectTrue(planeOwner != nullptr)) {
                 const auto planeID = planeOwner->meshAsset;
@@ -213,7 +213,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectFalse(rc.GetMesh(planeID).HasValue());
             }
 
-            const auto sphere      = engine->Assets()->SpawnSphere(0.5f).value;
+            const auto sphere      = engine->Assets()->SpawnSphere(0.5f);
             const auto sphereOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(sphere);
             if (ZHLN::Test::ExpectTrue(sphereOwner != nullptr)) {
                 const auto sphereID = sphereOwner->meshAsset;
@@ -230,7 +230,7 @@ struct RenderPipelinesTestSuite {
             auto& rc  = *engine->Graphics();
             const auto box = engine->Assets()->SpawnBox(
                 ZHLN::FVec3 {1.0f, 1.0f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3 {0, 3, 0}, .createPhysics = false}
-            ).value;
+            );
             auto camera = reg.GetSingleton<ZHLN::Components::CameraComponent>();
             auto mesh   = reg.Get<ZHLN::Components::MeshComponent>(box);
             auto owner  = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
@@ -246,7 +246,7 @@ struct RenderPipelinesTestSuite {
             const auto cstats = engine->State()->CullingStats();
             if (!ZHLN::Test::ExpectTrue(cstats.TotalObjects > cstats.CulledObjects)) return {};
 
-            (void) reg.Attach(box, ZHLN::Components::SkeletalMeshComponent {});
+            reg.Attach(box, ZHLN::Components::SkeletalMeshComponent {});
             rc.UnregisterMesh(id);
             ZHLN::Test::ExpectFalse(rc.GetMesh(id).HasValue());
             ZHLN::Test::Headless::TickFrames(*engine, 1);
@@ -274,9 +274,9 @@ struct RenderPipelinesTestSuite {
             }
             auto& rc     = *engine->Graphics();
             auto& assets = *engine->Assets();
-            const auto mesh = rc.CreatePlaneMesh(1.0f).value;
+            const auto mesh = rc.CreatePlaneMesh(1.0f);
             if (!ZHLN::Test::ExpectTrue(mesh.posBuffer != ZHLN::BufferID::Invalid)) {
-                (void) rc.DestroyMesh(mesh);
+                rc.DestroyMesh(mesh);
                 return {};
             }
 
@@ -287,8 +287,8 @@ struct RenderPipelinesTestSuite {
             parts[0].mesh      = mesh;
             parts[1].meshAsset = secondID;
             parts[1].mesh      = mesh;
-            (void) rc.RegisterMesh(firstID, mesh);
-            (void) rc.RegisterMesh(secondID, mesh);
+            rc.RegisterMesh(firstID, mesh);
+            rc.RegisterMesh(secondID, mesh);
             ZHLN::Test::ExpectTrue(assets.RegisterPrefab(ZHLN::COM::InChain(ZHLN::COM::PrefabRegistrationInfo {
                 .virtualPath = "test_prefab_mesh_shared",
                 .parts       = ZHLN::COM::Span<const ZHLN::COM::PrefabPartInfo>(parts.data(), parts.size()),
@@ -331,7 +331,7 @@ struct RenderPipelinesTestSuite {
             reg.Patch<ZHLN::Components::MeshParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             ZHLN::Test::Headless::TickFrames(*engine, 2);
             reg.Detach<ZHLN::Components::ParticleEmitterComponent>(entity);
-            (void) reg.Attach(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            reg.Attach(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             reg.Despawn(entity);
@@ -463,7 +463,7 @@ struct RenderPipelinesTestSuite {
             const ZHLN::Entity falling = first->Assets()->SpawnBox(
                 ZHLN::FVec3 {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3 {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}
-            ).value;
+            );
             ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
 
             constexpr float dt = 1.0f / 60.0f;
@@ -487,7 +487,7 @@ struct RenderPipelinesTestSuite {
             const ZHLN::Entity fallingB = second->Assets()->SpawnBox(
                 ZHLN::FVec3 {0.5f, 0.5f, 0.5f},
                 ZHLN::PrefabFactory::SpawnParams {.position = ZHLN::DVec3 {0.0, 8.0, 0.0}, .createPhysics = true, .isStaticPhysics = false}
-            ).value;
+            );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();
                 ZHLN::Test::ExpectTrue(second->Tick(dt).HasValue());

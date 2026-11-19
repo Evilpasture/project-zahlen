@@ -116,8 +116,8 @@ auto SpawnCharacter(
     const Physics::DualShapeConfig shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
     const Physics::BodyID          physicsID      = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
     const float                    sprintMult     = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
-    (void)entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});
-    (void)Character::Attach(
+    entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});
+    Character::Attach(
         *entities,
         entity,
         Character::MovementComponent {
@@ -130,7 +130,7 @@ auto SpawnCharacter(
         Character::ControllerComponent {});
 
     if ((!prefab.animations.empty() || !prefab.skeletons.empty()) && !entities->Has<Animation::AnimatorComponent>(entity)) {
-        (void)entities->Attach(entity, Animation::AnimatorComponent {
+        entities->Attach(entity, Animation::AnimatorComponent {
             .prefabAsset     = prefabHash,
             .currentTrackIdx = prefab.animations.empty() ? -1 : 0,
         });
@@ -170,7 +170,7 @@ void DestroyCharacter(COM::IEngine& engine, Entity characterEntity) {
     const Entity activeCam = FindActiveCamera(*entities);
     if (const auto* rig = entities->Get<CameraRig::TargetComponent>(activeCam);
         rig != nullptr && rig->target == characterEntity) {
-        (void)entities->Detach<CameraRig::TargetComponent>(activeCam);
+        entities->Detach<CameraRig::TargetComponent>(activeCam);
     }
     if (const auto* physicsComp = entities->Get<Components::PhysicsComponent>(characterEntity);
         physicsComp != nullptr && physicsComp->physicsID != Physics::BodyID::Null()) {
@@ -210,7 +210,7 @@ void SwitchToFollowCamera(COM::IEngine& engine, Entity characterEntity, const Ch
         rig.smoothTargetPos     = transform->position + FVec3 {0.0f, rig.targetOffset.y, 0.0f};
         rig.hasInitSmoothTarget = 1u;
     }
-    (void)entities->Attach(activeCam, rig);
+    entities->Attach(activeCam, rig);
 }
 
 void RecenterFollowCamera(COM::IEngine& engine, Entity characterEntity) {

@@ -66,7 +66,7 @@ struct NetworkTransformHistory {
     // Position and rotation at `renderTime`, interpolated between the two
     // samples that straddle it. Returns false only when there is nothing to
     // sample; the caller decides whether to fall back to the authoritative pose.
-    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, FVec3& position, Quat& rotation) const noexcept -> bool {
+    auto Sample(std::chrono::steady_clock::time_point renderTime, FVec3& position, Quat& rotation) const noexcept -> bool {
         if (Empty()) return false;
 
         const std::size_t oldest = (m_next + Capacity - m_count) % Capacity;

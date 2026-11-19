@@ -187,8 +187,8 @@ struct ConsoleDebuggerTestSuite {
             auto               world = std::move(*created);
             auto&              reg   = *world->Entities();
             const ZHLN::Entity hero  = reg.CreateEntity();
-            (void) reg.Attach(hero, ZHLN::Components::NameComponent {.name = ZHLN::String64 {"Hero"}});
-            (void) reg.Attach(hero, ZHLN::Components::PBRComponent {.roughness = 0.4f, .metallic = 0.2f});
+            reg.Attach(hero, ZHLN::Components::NameComponent {.name = ZHLN::String64 {"Hero"}});
+            reg.Attach(hero, ZHLN::Components::PBRComponent {.roughness = 0.4f, .metallic = 0.2f});
 
             ZHLN::GameConsole findConsole;
             ZHLN::ConsoleDebugger::Execute(reg, findConsole, "find Hero");
@@ -227,7 +227,7 @@ struct ConsoleDebuggerTestSuite {
             // The debugger resolves a published POD component via IEntities;
             // neither the test nor the consumer has registry access.
             const ZHLN::Entity e = reg.CreateEntity();
-            (void) reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.0f});
+            reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.0f});
             const std::string id = std::format("{}", e.Pack());
 
             ZHLN::GameConsole getConsole;
@@ -277,7 +277,7 @@ struct ConsoleDebuggerTestSuite {
             auto& reg   = *world->Entities();
 
             const ZHLN::Entity e = reg.CreateEntity();
-            (void) reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
+            reg.Attach(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.1f});
             const std::string id = std::format("{}", e.Pack());
 
             ZHLN::GameConsole okConsole;

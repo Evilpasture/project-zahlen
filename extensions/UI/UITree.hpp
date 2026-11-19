@@ -330,7 +330,7 @@ struct RenderUITreeResult {
 // EndFrame. @p properties is non-const because bound
 // widgets write back; pass a dummy store when the tree has no bindings.
 // @p selectedId is tinted in Design mode so a builder can see the selection.
-[[nodiscard]] ZHLN_STATIC_API auto RenderUITree(
+ZHLN_STATIC_API auto RenderUITree(
     Frame&                gui,
     const UINode&         root,
     const ActionRegistry& actions,

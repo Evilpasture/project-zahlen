@@ -104,7 +104,7 @@ struct UITestSuite {
             ZHLN::HostUI hostUI(*engine);
             ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
             auto composeUI = [&](float frameDt) {
-                (void) hostUI.BeginFrame();
+                hostUI.BeginFrame();
                 gui.SetFontAtlas(hostUI.GetFontAtlas());
                 ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
@@ -202,7 +202,7 @@ struct UITestSuite {
 
             ZHLN::GUI::Context gui(hostUI.GetFontAtlas());
             auto composeUI = [&](float frameDt) {
-                (void) hostUI.BeginFrame();
+                hostUI.BeginFrame();
                 gui.SetFontAtlas(hostUI.GetFontAtlas());
                 ZHLN::GUI::Frame ui = gui.BeginFrame(hostUI.ConsumeInput(frameDt));
 
@@ -350,7 +350,7 @@ struct UITestSuite {
             auto tickHostFrames = [&] {
                 for (uint32_t i = 0; i < 2; ++i) {
                     engine->ProcessEvents();
-                    (void) hostUI.BeginFrame();
+                    hostUI.BeginFrame();
                     (void) hostUI.Submit({});
                     ZHLN::Test::ExpectTrue(engine->Tick(1.0f / 60.0f).HasValue());
                 }

@@ -250,27 +250,25 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
 
         const FVec3 halfExtents = FVec3::Splat(0.5f);
         auto* assets = engine.Assets();
-        COM::Result<Entity> spawned = COM::Error::InvalidArgument;
         switch (object.shape) {
             case PartShape::Sphere:
             case PartShape::Head:
-                spawned = assets->SpawnSphere(0.5f, params);
+                entity = assets->SpawnSphere(0.5f, params);
                 break;
             case PartShape::Cylinder:
-                spawned = assets->SpawnCylinder(0.5f, 1.0f, params);
+                entity = assets->SpawnCylinder(0.5f, 1.0f, params);
                 break;
             case PartShape::Cone:
-                spawned = assets->SpawnCone(0.5f, 1.0f, params);
+                entity = assets->SpawnCone(0.5f, 1.0f, params);
                 break;
             case PartShape::Cube:
             case PartShape::Wedge:
             case PartShape::CornerWedge:
             case PartShape::Capsule:
             default:
-                spawned = assets->SpawnBox(halfExtents, params);
+                entity = assets->SpawnBox(halfExtents, params);
                 break;
         }
-        entity = spawned.HasValue() ? spawned.value : Entity::Null();
 
         if (entity == Entity::Null() || !entities.IsAlive(entity)) {
             object.materialId = InvalidMaterialID;
@@ -282,9 +280,9 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
         // answers "which instance am I" and "who owns me" on its own; the index
         // is the only place the reverse question is answered.
         state.index.Bind(object.uid, entity);
-        (void)entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
-        (void)entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
-        (void)entities.Attach(entity, ProjectLightReplicaTag {});
+        entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
+        entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
+        entities.Attach(entity, ProjectLightReplicaTag {});
 
         if (auto* name = entities.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
         if (auto* transform = entities.Get<Components::TransformComponent>(entity)) {
@@ -333,7 +331,7 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
                                               object.color.z * object.emission, 1.0f};
             material.value.roughnessFactor = object.roughness;
             material.value.metallicFactor  = object.metallic;
-            (void)engine.Graphics()->RegisterMaterial(object.materialId, material.value);
+            engine.Graphics()->RegisterMaterial(object.materialId, material.value);
         }
         if (auto* pbr = entities.Get<Components::PBRComponent>(entity)) {
             pbr->roughness = object.roughness;
@@ -355,13 +353,13 @@ void SpawnOrUpdateLightEntity(COM::IEngine& engine, SceneMirrorState& state, Rep
     if (entity == Entity::Null() || !entities.IsAlive(entity) || entities.Has<Components::PendingDestroy>(entity)) {
         entity            = entities.CreateEntity();
         const auto matrix = ComposeTransform(object.position, object.rotationQuat, {1.0f, 1.0f, 1.0f});
-        (void)entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
-        (void)entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
-        (void)entities.Attach(entity, ProjectLightReplicaTag {});
-        (void)entities.Attach(entity, Components::NameComponent {.name = String64(object.name)});
-        (void)entities.Attach(entity, Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)});
-        (void)entities.Attach(entity, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
-        (void)entities.Attach(entity, Components::LightComponent {
+        entities.Attach(entity, ProjectLightInstanceComponent {.uid = object.uid});
+        entities.Attach(entity, ProjectLightNetworkOwnerComponent {.ownerUid = object.networkOwnerUid});
+        entities.Attach(entity, ProjectLightReplicaTag {});
+        entities.Attach(entity, Components::NameComponent {.name = String64(object.name)});
+        entities.Attach(entity, Components::TransformComponent {.position = object.position, .rotation = object.rotationQuat, .scale = FVec3::Splat(1.0f)});
+        entities.Attach(entity, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
+        entities.Attach(entity, Components::LightComponent {
             .type      = directional ? LightType::Sun : LightType::Point,
             .color     = resolved.color,
             .intensity = rendererIntensity,
@@ -369,15 +367,15 @@ void SpawnOrUpdateLightEntity(COM::IEngine& engine, SceneMirrorState& state, Rep
             .direction = resolved.direction,
             .range     = object.range,
         });
-        (void)entities.Attach(entity, Components::SceneLightTagComponent {});
+        entities.Attach(entity, Components::SceneLightTagComponent {});
         state.index.Bind(object.uid, entity);
         object.visualDirty = true;
     }
 
     if (directional && object.isMain && !entities.Get<Components::SunTagComponent>(entity)) {
-        (void)entities.Attach(entity, Components::SunTagComponent {});
+        entities.Attach(entity, Components::SunTagComponent {});
     } else if (directional && !object.isMain && entities.Get<Components::SunTagComponent>(entity)) {
-        (void)entities.Detach<Components::SunTagComponent>(entity);
+        entities.Detach<Components::SunTagComponent>(entity);
     }
 
     if (auto* name = entities.Get<Components::NameComponent>(entity)) name->name = String64(object.name);
@@ -441,7 +439,7 @@ void SyncEnvironment(COM::IEngine& engine, SceneMirrorState& state) {
         gfx.environment.skyHorizon = {0.0f, 0.0f, 0.0f, 1.0f};
         gfx.environment.skyGround  = {0.0f, 0.0f, 0.0f, 1.0f};
     }
-    (void)engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->ApplySettings(gfx);
 }
 void UpdateRemoteCharacterParts(COM::IEngine& engine, SceneMirrorState& state, float dt) {
     (void)dt;
@@ -521,7 +519,7 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
             // before it dies: anything running later in the frame (and the
             // socket-free mirror test) can read the removal off the registry
             // instead of asking the session what it just did.
-            (void)entities.Attach(entity, ProjectLightRemovalPending {});
+            entities.Attach(entity, ProjectLightRemovalPending {});
             DespawnEntity(engine, entity);
         }
         state.controllerStates.erase(object.userId);
@@ -539,7 +537,7 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
             object.physicsHistory.Clear();
             object.hasPhysicsSample = false;
         } else if (object.hasPhysicsSample) {
-            (void)object.physicsHistory.Sample(renderTime, object.renderPosition, object.renderRotation);
+            object.physicsHistory.Sample(renderTime, object.renderPosition, object.renderRotation);
         }
         if (object.hasPhysicsSample) object.transformDirty = true;
     }
@@ -663,16 +661,16 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
 
     const Entity controller = entities.CreateEntity();
     const auto   matrix     = ComposeTransform(rootPart->position, rootPart->rotationQuat, {1.0f, 1.0f, 1.0f});
-    (void)entities.Attach(controller, Components::NameComponent {.name = String64("ProjectLightLocalController")});
-    (void)entities.Attach(controller, Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)});
-    (void)entities.Attach(controller, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
-    (void)entities.Attach(controller, Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false});
+    entities.Attach(controller, Components::NameComponent {.name = String64("ProjectLightLocalController")});
+    entities.Attach(controller, Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)});
+    entities.Attach(controller, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
+    entities.Attach(controller, Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false});
     Character::MovementComponent moveComp {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat};
     if (const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid); humanoid != nullptr) {
         moveComp.speed     = std::max(0.0f, humanoid->walkSpeed);
         moveComp.jumpForce = std::max(0.0f, humanoid->jumpPower) * kLocalJumpScale;
     }
-    (void)Character::Attach(entities, controller, moveComp, Character::ControllerComponent {});
+    Character::Attach(entities, controller, moveComp, Character::ControllerComponent {});
     state.localController      = controller;
     state.controllerForRootUid = state.localRootPartUid;
 

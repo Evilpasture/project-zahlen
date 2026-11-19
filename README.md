@@ -150,7 +150,7 @@ int main(int argc, char* argv[]) {
     const auto result = ZHLN::App()
         .OnStart([](ZHLN::COM::IEngine& engine) {
             // Persistent entities are created ONCE, after initialization.
-            (void) engine.Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f});
+            engine.Assets()->SpawnBox(ZHLN::FVec3{1.0f, 1.0f, 1.0f});
         })
         .Run(argc, argv, [](ZHLN::COM::IEngine& engine, float dt) {
             // Input has been pumped; this runs once each frame before engine.Tick(dt).

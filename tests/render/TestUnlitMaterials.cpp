@@ -77,7 +77,7 @@ struct MeanRgb {
 
 void ConfigureUnlitCapture(ZHLN::COM::IEngine& engine) {
     ZHLN::Test::Headless::DisableAA(engine);
-    (void)engine.Graphics()->PatchSettings([](auto& gfx) {
+    engine.Graphics()->PatchSettings([](auto& gfx) {
         gfx.environment.fullBright       = 0; // fullBright bypasses all shading: it cannot detect an unlit regression.
         gfx.post.mode                    = 0;
         gfx.post.enableSSR               = 0;
@@ -185,8 +185,8 @@ auto SpawnUnlitChamfer(ZHLN::COM::IEngine& engine, float x, const ZHLN::Material
     const std::string  tag = std::to_string(e.index);
     const ZHLN::AssetID    meshAsset = ZHLN::HashAssetID("unlit_chamfer_mesh_" + tag);
     const ZHLN::MaterialID matAsset  = ZHLN::HashAssetID("unlit_chamfer_mat_" + tag);
-    (void)rc.RegisterMesh(meshAsset, mesh);
-    (void)rc.RegisterMaterial(matAsset, material);
+    rc.RegisterMesh(meshAsset, mesh);
+    rc.RegisterMaterial(matAsset, material);
 
     const ZHLN::FVec3  position = {x, 0.0f, 0.0f};
     const auto worldMat = ZHLN::ComposeTransform(position, ZHLN::Quat::Identity(), {1.0f, 1.0f, 1.0f});
@@ -254,7 +254,7 @@ struct UnlitMaterialsTestSuite {
                 ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}, .anisotropyStrength = 1.0f}
             );
             if (!controlMaterial) return std::unexpected(UnlitMaterialError::MaterialCreationFailed);
-            engine->Assets()->SpawnBox({0.45f, 0.45f, 0.45f}, {.position = {0.0, -1.6, 0.0}, .createPhysics = false, .materialOverride = *controlMaterial}).value;
+            engine->Assets()->SpawnBox({0.45f, 0.45f, 0.45f}, {.position = {0.0, -1.6, 0.0}, .createPhysics = false, .materialOverride = *controlMaterial});
 
             ZHLN::Test::Headless::TickFrames(*engine, 6);
             const auto dark = ZHLN::Test::Headless::Capture(*engine, "authored_unlit_dark.ppm");
@@ -333,9 +333,9 @@ struct UnlitMaterialsTestSuite {
                 .baseColor = {0.0f, 1.0f, 1.0f, 0.5f}, .albedoMap = *texture
             });
             if (!wall || !mask || !blend) return std::unexpected(UnlitMaterialError::MaterialCreationFailed);
-            engine->Assets()->SpawnBox({4.0f, 3.0f, 0.04f}, {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wall}).value;
-            engine->Assets()->SpawnBox({0.55f, 0.6f, 0.02f}, {.position = {-0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mask}).value;
-            engine->Assets()->SpawnBox({0.55f, 0.6f, 0.02f}, {.position = {0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *blend}).value;
+            engine->Assets()->SpawnBox({4.0f, 3.0f, 0.04f}, {.position = {0.0, 0.0, -1.0}, .createPhysics = false, .materialOverride = *wall});
+            engine->Assets()->SpawnBox({0.55f, 0.6f, 0.02f}, {.position = {-0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *mask});
+            engine->Assets()->SpawnBox({0.55f, 0.6f, 0.02f}, {.position = {0.7, 0.0, 0.0}, .createPhysics = false, .materialOverride = *blend});
 
             ZHLN::Test::Headless::TickFrames(*engine, 6);
             const auto frame = ZHLN::Test::Headless::Capture(*engine, "unlit_alpha_coverage.ppm");

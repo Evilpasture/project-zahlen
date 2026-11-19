@@ -65,9 +65,9 @@ static_assert(std::is_standard_layout_v<PhysicsConfig> && std::is_trivially_copy
 // the boundary by value and so requires a trivially copyable T, which a
 // reference-counting handle is not. The reference is already taken -- adopt
 // it, do not AddRef it. Pass nullptr (or COM::InChain()) for defaults.
-[[nodiscard]] ZHLN_API auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*>;
+ZHLN_API auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*>;
 
-[[nodiscard]] inline auto CreateEngine() noexcept -> Result<IEngine*> {
+inline auto CreateEngine() noexcept -> Result<IEngine*> {
     return CreateEngine(nullptr);
 }
 

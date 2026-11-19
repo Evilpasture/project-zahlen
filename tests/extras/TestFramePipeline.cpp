@@ -193,7 +193,7 @@ struct FramePipelineSuite {
             const auto cameraID = entities.SingletonEntity<Components::MainCameraTagComponent>();
             if (!ExpectTrue(cameraID.HasValue()))
                 return {};
-            (void) entities.Attach(
+            entities.Attach(
                 cameraID.value, CameraRig::TargetComponent {
                                     .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0
                                 }
@@ -295,7 +295,7 @@ struct FramePipelineSuite {
                         target          = entities.Spawn(Components::TransformComponent {}, Components::WorldTransformComponent {});
                         const auto main = entities.SingletonEntity<Components::MainCameraTagComponent>();
                         if (main.HasValue())
-                            (void) entities.Attach(
+                            entities.Attach(
                                 main.value,
                                 CameraRig::TargetComponent {
                                     .target = target, .distance = 2, .targetDistance = 2, .yaw = 0, .pitch = 0, .targetOffset = FVec3::Zero(), .stiffness = 0

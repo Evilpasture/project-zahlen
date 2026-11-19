@@ -329,21 +329,21 @@ auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::System& ter
     gfx.environment.skyZenith       = kSkyZenith;
     gfx.environment.skyHorizon      = kSkyHorizon;
     gfx.environment.skyGround       = kSkyGround;
-    (void)engine.Graphics()->ApplySettings(gfx);
+    engine.Graphics()->ApplySettings(gfx);
 
     if (auto geom = ZHLN::Terrain::Generate({.sampleCount = 128, .worldSize = 220.0f, .maxHeight = 12.0f, .type = ZHLN::Terrain::Type::Default})) {
         (void)terrain.Create(std::move(*geom), {.position = {0.0f, 0.0f, 0.0f}, .roughness = 0.80f, .createPhysics = true});
     }
 
     // 3. Center Platform
-    (void)engine.Assets()->SpawnBox({10.0f, 0.50f, 10.0f},
+    engine.Assets()->SpawnBox({10.0f, 0.50f, 10.0f},
         ZHLN::PrefabFactory::SpawnParams {
             .position = {0.0, 0.50, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.50f, .color = {0.32f, 0.34f, 0.38f, 1.0f}
         }
     );
 
     // 4. 30-Degree Grounding Test Ramp
-    (void)engine.Assets()->SpawnBox({4.5f, 0.18f, 2.2f},
+    engine.Assets()->SpawnBox({4.5f, 0.18f, 2.2f},
         ZHLN::PrefabFactory::SpawnParams {
             .position        = {-14.0, 2.75, 5.0},
             .rotation        = Quat::FromAxisAngle(FVec3::UnitZ(), ZHLN::DegF{30.0f}.ToRadians()),
@@ -357,7 +357,7 @@ auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::System& ter
     // 5. Stepping Stones
     for (int i = 0; i < 6; ++i) {
         float stepHeight = 0.20f + (static_cast<float>(i) * 0.10f);
-        (void)engine.Assets()->SpawnBox({1.0f, stepHeight * 0.5f, 1.0f},
+        engine.Assets()->SpawnBox({1.0f, stepHeight * 0.5f, 1.0f},
             ZHLN::PrefabFactory::SpawnParams {
                 .position        = {12.0 + (static_cast<double>(i) * 2.5), static_cast<double>(stepHeight * 0.5f), -4.0},
                 .createPhysics   = true,
@@ -380,7 +380,7 @@ auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::System& ter
          {.x = 14.0f, .z = -16.0f, .width = 2.0f, .height = 8.0f, .color = {0.28f, 0.38f, 0.52f, 1.0f}}}
     };
     for (const auto& p: pillars) {
-        (void)engine.Assets()->SpawnBox({p.width * 0.5f, p.height * 0.5f, p.width * 0.5f},
+        engine.Assets()->SpawnBox({p.width * 0.5f, p.height * 0.5f, p.width * 0.5f},
             ZHLN::PrefabFactory::SpawnParams {
                 .position        = {static_cast<double>(p.x), static_cast<double>(p.height * 0.5f), static_cast<double>(p.z)},
                 .createPhysics   = true,
@@ -391,7 +391,7 @@ auto BuildProceduralArena(ZHLN::COM::IEngine& engine, ZHLN::Terrain::System& ter
     }
 
     // 7. Directional Sunlight via Variadic Create
-    (void)entities.Spawn(
+    entities.Spawn(
         ZHLN::Components::NameComponent {.name = ZHLN::String64("SunLight")}, ZHLN::Components::TransformComponent {.position = kSunPosition},
         ZHLN::Components::LightComponent {
             .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = FVec3{0.45f, 1.00f, 0.30f}.Normalized()
@@ -429,10 +429,10 @@ auto CreateTestHandgun(ZHLN::COM::IEngine& engine, ZHLN::Entity player, float it
         materialDesc.roughness        = 0.32f;
         materialDesc.baseColor        = {color.x, color.y, color.z, color.w};
         const ZHLN::Material material = [&]{ auto r = engine.Graphics()->CreateMaterial(materialDesc); return r.HasValue() ? r.value : ZHLN::Material{}; }();
-        const auto partRes = engine.Assets()->SpawnBox(FVec3{halfExtents} * scale,
+        const ZHLN::Entity part = engine.Assets()->SpawnBox(
+            FVec3{halfExtents} * scale,
             ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = false, .materialOverride = material}
         );
-        const ZHLN::Entity part = partRes.HasValue() ? partRes.value : ZHLN::Entity::Null();
         entities.AttachMany(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
         entities.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
             transform.position = FVec3{localPosition} * scale;
@@ -618,7 +618,7 @@ auto AttachCharacterRig(
 
         // Clean up the redundant prefab container root (parts[0]).
         if (writtenCount > 0) {
-            (void)reg.Despawn(parts[0]);
+            reg.Despawn(parts[0]);
         }
 
         // Variadic component registration: AnimatorComponent triggers RigBoneMap discovery
@@ -730,7 +730,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Components::TransformComponent {.position = {0.0f, 1.20f, 0.0f}},
         ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}
     );
-    (void)ZHLN::Character::Attach(*engine->Entities(), player, {.speed = kWalkSpeed, .jumpForce = kJumpForce});
+    ZHLN::Character::Attach(*engine->Entities(), player, {.speed = kWalkSpeed, .jumpForce = kJumpForce});
     const ZHLN::Entity handgun    = CreateTestHandgun(*engine, player, handgunScale);
 
     FirstPersonViewState viewState;

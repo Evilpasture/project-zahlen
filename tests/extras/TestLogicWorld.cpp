@@ -73,9 +73,9 @@ struct LogicWorldSuite {
             auto c = Body(*sim);
             if (!c.HasValue())
                 return {};
-            (void) entities->Attach(e, Components::PhysicsComponent {.physicsID = c.value});
+            entities->Attach(e, Components::PhysicsComponent {.physicsID = c.value});
             const auto child = entities->CreateEntity();
-            (void) entities->Attach(child, Components::HierarchyComponent {.parent = e});
+            entities->Attach(child, Components::HierarchyComponent {.parent = e});
             entities->Despawn(e);
             ExpectTrue(entities->IsAlive(e));
             world.Flush();
