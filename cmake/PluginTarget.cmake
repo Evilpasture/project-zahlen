@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Declare a dynamically loadable COM::IAppLayer shared library linked against
-# libzahlen_engine, exporting only ZHLN_CreateAppLayer.
+# libzahlen_engine, exporting only ZHLN::COM::CreateAppLayer.
 function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
     add_library(${TARGET_NAME} SHARED ${ARGN})
     set_target_properties(${TARGET_NAME} PROPERTIES
@@ -23,6 +23,7 @@ function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
             RUNTIME_OUTPUT_DIRECTORY_${_cfg} "${CMAKE_BINARY_DIR}/bin"
         )
     endforeach()
+    target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_PLUGIN_BUILD)
     target_link_libraries(${TARGET_NAME} PRIVATE zahlen_engine zahlen_warnings)
     if(UNIX AND NOT APPLE)
         set(_zhln_plugin_map "${PROJECT_SOURCE_DIR}/cmake/zahlen_plugin.map")
@@ -34,7 +35,10 @@ function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
     elseif(MINGW)
         target_link_options(${TARGET_NAME} PRIVATE "LINKER:--exclude-libs,ALL")
     elseif(APPLE)
-        target_link_options(${TARGET_NAME} PRIVATE "LINKER:-exported_symbol,_ZHLN_CreateAppLayer")
+        # Mach-O prepends an extra leading underscore to symbol table entries:
+        # dlsym takes the Itanium name ("_Z..."), while ld64 -exported_symbol
+        # takes the Mach-O symbol ("__Z...").
+        target_link_options(${TARGET_NAME} PRIVATE "LINKER:-exported_symbol,__ZN4ZHLN3COM14CreateAppLayer*")
     endif()
     if(COMMAND zahlen_enable_reflection)
         zahlen_enable_reflection(${TARGET_NAME})

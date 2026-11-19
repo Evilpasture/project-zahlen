@@ -68,34 +68,24 @@ class FreeCamPlugin final : public COM::Implements<FreeCamPlugin, COM::IAppLayer
 
 } // namespace
 
-extern "C"
-#if defined(_WIN32)
-__declspec(dllexport)
-#else
-[[gnu::visibility("default")]]
-#endif
-void ZHLN_CreateAppLayer(
-    const ZHLN::COM::ChainInNode*             config,
-    ZHLN::COM::Result<ZHLN::COM::IAppLayer*>* outResult
-) noexcept {
-    if (outResult == nullptr) {
-        return;
-    }
-    ZHLN::FreeCam::Component knobs {};
-    bool                     hasKnobs = false;
-    const auto               checked  = ZHLN::COM::DispatchInChain<ZHLN::FreeCam::Component>(
-        config, [&](const ZHLN::FreeCam::Component& value) noexcept {
+namespace ZHLN::COM {
+
+auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+    FreeCam::Component knobs {};
+    bool               hasKnobs = false;
+    const auto         checked  = DispatchInChain<FreeCam::Component>(
+        config, [&](const FreeCam::Component& value) noexcept {
             knobs    = value;
             hasKnobs = true;
         });
     if (!checked.HasValue()) {
-        *outResult = checked.error;
-        return;
+        return checked.error;
     }
     auto* instance = new (std::nothrow) FreeCamPlugin(knobs, hasKnobs);
     if (instance == nullptr) {
-        *outResult = ZHLN::COM::Error::AllocationFailed;
-        return;
+        return Error::AllocationFailed;
     }
-    *outResult = static_cast<ZHLN::COM::IAppLayer*>(instance);
+    return static_cast<IAppLayer*>(instance);
 }
+
+} // namespace ZHLN::COM

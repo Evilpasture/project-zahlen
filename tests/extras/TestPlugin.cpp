@@ -11,7 +11,12 @@
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/Log.hpp>
+#if !defined(_WIN32)
+    #include <dlfcn.h>
+#endif
 #include <Zahlen/ECS/Components.hpp>
 #include <cmath>
 #include <cstdlib>
@@ -60,6 +65,10 @@ struct UnrecognizedPluginExtension {
 
 void test_plugin_freecam_dynamic_load_config_and_detach() {
     static_assert(COM::AuditInterfaceABI<COM::IAppLayer>());
+    static_assert(COM::AuditFunctionABI<&COM::CreateAppLayer>());
+    static_assert(
+        COM::kCreateAppLayerSymbol == "_ZN4ZHLN3COM14CreateAppLayerEPKNS0_11ChainInNodeE"
+    );
 
     // Load libzahlen_plugin_freecam by bare name with custom InChain config,
     // verify it attaches custom FreeCam::Component across the .so boundary in
@@ -244,5 +253,84 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     ExpectFalse(driftedRes.has_value());
     if (!driftedRes) ExpectTrue(driftedRes.error().Is(COM::Error::LayoutMismatch));
 }
+
+#if !defined(_WIN32)
+void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
+#if defined(__APPLE__)
+    constexpr std::string_view kExt = ".dylib";
+#else
+    constexpr std::string_view kExt = ".so";
+#endif
+    std::error_code             ec;
+    const std::filesystem::path exeDir =
+#if defined(__linux__)
+        std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
+#else
+        std::filesystem::current_path(ec);
+#endif
+    const std::filesystem::path buildRoot = exeDir.parent_path().parent_path();
+    std::filesystem::path       enginePath;
+    Dl_info                     info {};
+    if (dladdr(reinterpret_cast<const void*>(&GetLogLevel), &info) != 0 &&
+        info.dli_fname != nullptr &&
+        std::filesystem::path(info.dli_fname).filename().string().find("zahlen_engine") != std::string::npos &&
+        std::filesystem::exists(info.dli_fname, ec)) {
+        enginePath = info.dli_fname;
+    } else {
+        for (const auto& d: {buildRoot, buildRoot / "lib", exeDir.parent_path()}) {
+            const auto cand = d / ("libzahlen_engine" + std::string(kExt));
+            if (std::filesystem::exists(cand)) { enginePath = cand; break; }
+        }
+    }
+    if (!ExpectFalse(enginePath.empty())) return;
+
+    for (const std::string_view name: {"freecam", "screenshot"}) {
+        const std::string filename = "libzahlen_plugin_" + std::string(name) + std::string(kExt);
+        SharedLibrary     lib;
+        for (const auto& d: {enginePath.parent_path() / "lib", enginePath.parent_path(), buildRoot / "lib"}) {
+            if (lib.Open((d / filename).string().c_str(), SharedLibraryBind::Local)) break;
+        }
+        if (!ExpectTrue(lib.IsOpen())) continue;
+
+        // Old extern "C" entry point is absent; consteval-mangled C++ symbol resolves cleanly.
+        ExpectTrue(lib.GetSymbol("ZHLN_CreateAppLayer") == nullptr);
+        constexpr auto mangled = COM::MangleFunction<&COM::CreateAppLayer>();
+        void* const    raw     = lib.GetSymbol(mangled.data());
+        const auto     factory = COM::ResolveSymbol<&COM::CreateAppLayer>(lib);
+        ExpectTrue(raw != nullptr);
+        ExpectTrue(factory != nullptr);
+        ExpectTrue(raw == reinterpret_cast<void*>(factory));
+        if (!factory) continue;
+
+        // Direct by-value Result<IAppLayer*> return (no outResult pointer).
+        const COM::Result<COM::IAppLayer*> created = factory(nullptr);
+        ExpectTrue(created.HasValue());
+        if (created.HasValue() && ExpectTrue(created.value != nullptr)) {
+            auto layer = COM::Ref<COM::IAppLayer>::Adopt(created.value);
+            ExpectTrue(layer.As<COM::IObject>().Get() != nullptr);
+            ExpectTrue(layer.As<COM::IAppLayer>().Get() != nullptr);
+        }
+
+        // Direct by-value error return across the DSO boundary.
+        const COM::Result<COM::IAppLayer*> rejected =
+            factory(COM::InChain(UnrecognizedPluginExtension {}));
+        ExpectFalse(rejected.HasValue());
+        if (!rejected.HasValue()) {
+            ExpectTrue(rejected.error.Is(COM::Error::UnsupportedExtension));
+        }
+    }
+
+    // A valid shared library without ZHLN::COM::CreateAppLayer fails with PluginSymbolMissing.
+    const auto noSym = BaseHeadlessApp("NoCreateAppLayer").LoadPlugin(enginePath.string()).Run();
+    ExpectFalse(noSym.has_value());
+    if (!noSym) {
+        ExpectTrue(noSym.error().Is(AppError::PluginSymbolMissing));
+        ExpectEq(
+            noSym.error().ToError().Message(),
+            std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"}
+        );
+    }
+}
+#endif
 
 } // namespace ZHLN::Test

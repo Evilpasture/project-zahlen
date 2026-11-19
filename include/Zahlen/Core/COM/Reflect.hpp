@@ -146,6 +146,36 @@ template <typename Iface>
     return InterfaceLayoutCompliant<Iface>();
 }
 
+template <typename FnPtr>
+struct FunctionTypeAudit {
+    static constexpr bool kCompliant = false;
+};
+
+template <typename Return, typename... Parameters>
+struct FunctionTypeAudit<Return (*)(Parameters...) noexcept> {
+    static constexpr bool kCompliant =
+        MethodCompliant<Reflect::MethodSignature<Return, true, Parameters...>>();
+};
+
+// Free/static COM entry-point audit (factories, plugin entry points). Applies
+// the same noexcept + return + parameter wire rules as virtual interface slots;
+// throwing, C-variadic, and non-function-pointer types evaluate to false.
+template <typename FnPtr>
+[[nodiscard]] consteval bool FunctionTypeCompliant() noexcept {
+    return FunctionTypeAudit<std::remove_cv_t<FnPtr>>::kCompliant;
+}
+
+template <auto Fn>
+    requires (std::is_pointer_v<decltype(Fn)> && std::is_function_v<std::remove_pointer_t<decltype(Fn)>>)
+[[nodiscard]] consteval bool AuditFunctionABI() noexcept {
+    using FnPtr = decltype(Fn);
+    static_assert(
+        !std::is_same_v<std::integral_constant<FnPtr, Fn>, std::integral_constant<FnPtr, nullptr>>,
+        "AuditFunctionABI requires a non-null function pointer."
+    );
+    return FunctionTypeCompliant<FnPtr>();
+}
+
 template <typename Derived, typename... Interfaces>
 class Implements : public ImplementationTag, public Interfaces... {
     static_assert(sizeof...(Interfaces) > 0, "Implements<Derived, ...> needs at least one interface.");

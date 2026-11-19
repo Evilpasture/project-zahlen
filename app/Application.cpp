@@ -7,6 +7,7 @@
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
+#include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
 #include <Zahlen/HostRunner.hpp>
@@ -378,7 +379,7 @@ auto App::RunConfigured(
         if (!*opened) {
             return {};
         }
-        const auto factory = library.Symbol<COM::CreateAppLayerFn>(COM::kCreateAppLayerSymbol);
+        const auto factory = COM::ResolveSymbol<&COM::CreateAppLayer>(library);
         if (factory == nullptr) {
             LogError("[App] Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerSymbol);
             return std::unexpected(AppError::PluginSymbolMissing);

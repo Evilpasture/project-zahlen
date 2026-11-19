@@ -53,13 +53,14 @@ C++ layers registered with `.AddLayer(layer)` may implement any subset of
 returning `void` or `std::expected<void, ErrorCode>`.
 
 Dynamically loaded plugins (`<Zahlen/COM/IPlugin.hpp>`) implement
-`ZHLN::COM::IAppLayer` and export a single C symbol:
+`ZHLN::COM::IAppLayer` and export a single COM-audited C++ factory resolved via
+`COM::MangleFunction<&COM::CreateAppLayer>()` (`COM::kCreateAppLayerSymbol`
+/ `COM::ResolveSymbol<&COM::CreateAppLayer>(library)`):
 
 ```cpp
-extern "C" void ZHLN_CreateAppLayer(
-    const ZHLN::COM::ChainInNode*        config,
-    ZHLN::COM::Result<ZHLN::COM::IAppLayer*>* outResult
-) noexcept;
+namespace ZHLN::COM {
+Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
+}
 ```
 
 - `app.AddPlugin(COM::Ref<COM::IAppLayer>)` attaches an in-process COM layer.

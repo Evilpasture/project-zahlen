@@ -225,7 +225,7 @@ relocatable **source/header package** under `share/zahlen/src/<pkg>` — zero
 prebuilt `.a` archives and zero compiler-specific module BMIs. `ZahlenFreeCam`
 and `ZahlenScreenshot` additionally ship dynamically loadable `COM::IAppLayer`
 shared libraries (`lib/zahlen/plugins/libzahlen_plugin_{freecam,screenshot}.so`,
-exporting only `ZHLN_CreateAppLayer`) for `App::LoadPlugin`,
+exporting only `ZHLN::COM::CreateAppLayer`) for `App::LoadPlugin`,
 `App::TryLoadPlugin`, and `--plugin`. Consumers compile
 those sources with their own compiler release, flags, and build type (`Debug`,
 `RelWithDebInfo`, or `Release`) directly against the single Release

@@ -31,6 +31,7 @@ set(ZHLN_CPU_TEST_SOURCES
     core/TestUIData.cpp
     core/TestGraphicsSettings.cpp
     core/TestInputLive.cpp
+    core/TestMangle.cpp
     core/TestMath.cpp
     core/TestNamespaceFixture.cpp
     core/TestOptional.cpp
@@ -78,8 +79,42 @@ target_include_directories(ztest_cpu PRIVATE
     ${PROJECT_SOURCE_DIR}/extensions
 )
 
+add_library(ztest_mangle_fixture SHARED
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/MangleFixture.cpp
+)
+set_target_properties(ztest_mangle_fixture PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    POSITION_INDEPENDENT_CODE ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+)
+target_compile_definitions(ztest_mangle_fixture PRIVATE ZHLN_MANGLE_FIXTURE_BUILD)
+target_include_directories(ztest_mangle_fixture PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+)
+target_link_libraries(ztest_mangle_fixture PRIVATE zahlen_engine)
+zahlen_enable_reflection(ztest_mangle_fixture)
+if(USE_SANITIZERS)
+    target_compile_options(ztest_mangle_fixture PRIVATE
+        -fsanitize=address,undefined
+        -fno-sanitize=vptr
+        -fno-omit-frame-pointer
+    )
+    target_link_options(ztest_mangle_fixture PRIVATE
+        -fsanitize=address,undefined
+        -fno-sanitize=vptr
+    )
+    target_compile_definitions(ztest_mangle_fixture PRIVATE __ASAN_ENABLED__)
+endif()
+
 zahlen_enable_reflection(ztest_cpu)
-add_dependencies(ztest_cpu zcook)
+add_dependencies(ztest_cpu zcook ztest_mangle_fixture)
 
 if(USE_SANITIZERS)
     target_compile_options(ztest_cpu PRIVATE

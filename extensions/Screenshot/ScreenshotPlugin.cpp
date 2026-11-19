@@ -60,31 +60,19 @@ class ScreenshotPlugin final : public COM::Implements<ScreenshotPlugin, COM::IAp
 
 } // namespace
 
-extern "C"
-#if defined(_WIN32)
-__declspec(dllexport)
-#else
-[[gnu::visibility("default")]]
-#endif
-void ZHLN_CreateAppLayer(
-    const ZHLN::COM::ChainInNode*             config,
-    ZHLN::COM::Result<ZHLN::COM::IAppLayer*>* outResult
-) noexcept {
-    if (outResult == nullptr) {
-        return;
-    }
-    ZHLN::Screenshot::PluginConfig parsed {};
-    const auto checked = ZHLN::COM::DispatchInChain<ZHLN::Screenshot::PluginConfig>(
-        config, [&](const ZHLN::Screenshot::PluginConfig& value) noexcept {
+namespace ZHLN::COM {
+
+auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+    Screenshot::PluginConfig parsed {};
+    const auto               checked = DispatchInChain<Screenshot::PluginConfig>(
+        config, [&](const Screenshot::PluginConfig& value) noexcept {
             parsed = value;
         });
     if (!checked.HasValue()) {
-        *outResult = checked.error;
-        return;
+        return checked.error;
     }
     if (parsed.path.size > 0 && parsed.path.data == nullptr) {
-        *outResult = ZHLN::COM::Error::NullArgument;
-        return;
+        return Error::NullArgument;
     }
     std::string ownedPath;
     if (parsed.path.size > 0) {
@@ -92,8 +80,9 @@ void ZHLN_CreateAppLayer(
     }
     auto* instance = new (std::nothrow) ScreenshotPlugin(std::move(ownedPath), parsed.afterFrames);
     if (instance == nullptr) {
-        *outResult = ZHLN::COM::Error::AllocationFailed;
-        return;
+        return Error::AllocationFailed;
     }
-    *outResult = static_cast<ZHLN::COM::IAppLayer*>(instance);
+    return static_cast<IAppLayer*>(instance);
 }
+
+} // namespace ZHLN::COM

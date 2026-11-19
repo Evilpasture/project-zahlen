@@ -18,7 +18,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 * Freeze the public method surface of `Engine`. New engine capabilities must be
   designed on `include/Zahlen/COM/` first; `Engine` is a transitional internal
   implementation, not the extension API.
-* Preserve `Core/COM/{IObject,Reflect,Chain,Ref,Types}.hpp`: this migration changes
+* Preserve `Core/COM/{IObject,Reflect,ItaniumMangle,Chain,Ref,Types}.hpp`: this migration changes
   capabilities and their consumers, not the object protocol.
 * Complete internal ownership cleanups before expanding COM. Do not add new
   consumers of `Engine::GetInternalRegistry()` or `Engine::Commands()` outside
@@ -663,17 +663,21 @@ inline namespaces and platform-dependent type aliases can still differ; the
 canonical grammar is not an ABI compatibility guarantee.
 
 The reflection library has **no domain**: it gained only generic primitives --
-`CanonicalTypeName<T>()` in `CanonicalName.hpp`, and
+`CanonicalTypeName<T>()` in `CanonicalName.hpp`,
+`FunctionTraits<Fn>` in `Callable.hpp`, entity/scope/template-argument
+descriptors plus opaque `EntityToken` in `Entity.hpp`, and
 `MethodSignature<Return, Noexcept, Parameters...>` plus
 `ForEachMethodSignature<T>(f)` in `Class.hpp`, next to the existing
-`ForEachBase`. `MethodSignature` reports a return type, a `noexcept` bit and
-the declaration-order parameter types as `std::tuple<Parameters...>`, with no
-implicit object parameter; it does not know that any of them means anything.
+`ForEachBase`. `MethodSignature` and `FunctionTraits` report return and
+parameter types, language qualifiers, identifiers and enclosing scopes, with no
+implicit object parameter; they do not know that any of them means anything.
 Every ABI policy decision -- `ReturnCompliant`, `ParameterCompliant`,
-`MethodCompliant`, `AuditInterfaceABI<I>()` -- lives in
-`Core/COM/Reflect.hpp`. `check_reflection_boundary.py` keeps the raw
-`std::meta` tokens inside `Reflection/`, so COM consumes plain types and
-bools and never a reflection `info`.
+`MethodCompliant`, `AuditInterfaceABI<I>()`, `AuditFunctionABI<Fn>()`, and
+consteval Itanium C++ ABI symbol encoding plus typed DSO resolution
+(`MangleFunction<Fn>()`, `ResolveSymbol<Fn>()`) -- lives in
+`Core/COM/{Reflect,ItaniumMangle}.hpp`. `check_reflection_boundary.py` keeps
+the raw `std::meta` tokens inside `Reflection/`, so COM consumes plain types,
+bools, strings and opaque tokens and never a reflection `info`.
 Zahlen already hard-requires `-freflection`, so there is no non-reflection
 fallback and no second code path.
 

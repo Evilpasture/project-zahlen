@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ELF symbol version script for dynamically loaded COM::IAppLayer plugins.
- * Only the single extern "C" factory crosses the plugin DSO boundary.
+ * Only ZHLN::COM::CreateAppLayer crosses the plugin DSO boundary.
  */
 {
   global:
-    ZHLN_CreateAppLayer;
+    _ZN4ZHLN3COM14CreateAppLayer[BE]*;  /* @api ZHLN::COM::CreateAppLayer */
   local:
     *;
 };
