@@ -22,7 +22,6 @@ class VisibilityState;
 class PhysicsContext;
 class ArticulationContext;
 struct CullingStats;
-struct DebugSettings;
 
 namespace ECS {
 class Registry;
@@ -56,10 +55,8 @@ class World {
     // reached only as InputReader/InputHaptics/InputActions.
 
     auto GetArticulationContext() -> ArticulationContext&;
-    auto GetCullingStats() noexcept -> CullingStats&;
-    [[nodiscard]] auto GetCullingStats() const noexcept -> const CullingStats&;
-    auto GetDebugSettings() noexcept -> DebugSettings&;
-    [[nodiscard]] auto GetDebugSettings() const noexcept -> const DebugSettings&;
+    [[nodiscard]] auto PhysicsDrawMode() const noexcept -> int;
+    void SetPhysicsDrawMode(int mode) noexcept;
 
     // Read-only views onto the engine-owned visibility lists. No container type
     // crosses this boundary, and no caller can clear or resize engine state.
@@ -74,6 +71,8 @@ class World {
     friend class COM::LogicWorld;
     auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
+    auto GetCullingStats() noexcept -> CullingStats&;
+    [[nodiscard]] auto GetCullingStats() const noexcept -> const CullingStats&;
     auto VisibilityForServices() noexcept -> VisibilityState&;
 
     World() = default;

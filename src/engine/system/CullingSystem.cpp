@@ -192,6 +192,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
 
     auto meshes = query.Raw<Components::MeshComponent>();
 
+    stats.TotalObjects      = static_cast<uint32_t>(entities.size());
+    stats.CulledObjects     = 0;
     stats.TotalTriangles    = 0;
     stats.RenderedTriangles = 0;
 
@@ -296,6 +298,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         }
     }
 
+    stats.CulledObjects = static_cast<uint32_t>(entities.size() - visibility.Visible().size());
     if constexpr (isDev) {
         ZHLN::Tests::VerifyCullingResults(query, visibility.Visible(), scratch.mainFrustum, stats);
     }

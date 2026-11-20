@@ -54,7 +54,7 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
 }
 
 void DespawnEntity(Engine& engine, Entity entity) {
-    auto& registry = engine.GetInternalRegistry();
+    auto& registry = engine.Registry();
     if (!registry.IsAlive(entity)) {
         return;
     }

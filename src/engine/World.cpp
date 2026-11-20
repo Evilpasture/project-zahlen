@@ -37,7 +37,7 @@ struct World::Impl {
 
     VisibilityState visibility;
     CullingStats   cullingStats {};
-    DebugSettings  debugSettings {};
+    int            physicsDrawMode = 0;
 
     bool joltAcquired = false;
 };
@@ -128,12 +128,12 @@ auto World::GetCullingStats() const noexcept -> const CullingStats& {
     return _impl->cullingStats;
 }
 
-auto World::GetDebugSettings() noexcept -> DebugSettings& {
-    return _impl->debugSettings;
+auto World::PhysicsDrawMode() const noexcept -> int {
+    return _impl->physicsDrawMode;
 }
 
-auto World::GetDebugSettings() const noexcept -> const DebugSettings& {
-    return _impl->debugSettings;
+void World::SetPhysicsDrawMode(int mode) noexcept {
+    _impl->physicsDrawMode = mode;
 }
 
 auto World::VisibilityForServices() noexcept -> VisibilityState& {

@@ -55,14 +55,13 @@ class EventBus;
 
 namespace COM {
 class Engine;
-struct JointAllocator;
 }
 
 class ArticulationContext;
 class InputContext;
 struct CullingStats;
 class Engine;
-struct EngineCore;
+struct FrameContext;
 
 class Engine {
   public:
@@ -238,6 +237,7 @@ class Engine {
     // a module's declared steps all-or-nothing against core's anchors.
     [[nodiscard]] auto Steps() const noexcept -> std::span<const FrameStep>;
 
+    [[nodiscard]] uint32_t AllocateJoints(uint32_t count) noexcept;
     void               PushKinematicPose(uint32_t jointOffset, std::span<const Mat4x4> modelJoints);
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
@@ -295,15 +295,10 @@ class Engine {
             -> std::expected<void, ErrorCode>;
 
   private:
-    friend struct EngineCore;
     friend class COM::Engine;
-    friend struct COM::JointAllocator;
-    friend void DespawnEntity(Engine& engine, Entity entity);
 
-    // Cold-start / build-tree-only path to the concrete registry. API consumers
-    // get Entities() and Commands() instead.
-    auto               GetInternalRegistry() noexcept -> ECS::Registry&;
-    [[nodiscard]] auto GetInternalRegistry() const noexcept -> const ECS::Registry&;
+    static void EvaluateInput(Engine& engine, float dt, FrameContext& ctx);
+    static void Present(Engine& engine, float dt, FrameContext& ctx);
 
     // Consume window-input resize notifications during the event pump. The
     // application and bespoke hosts never need to inspect ECS resize flags.

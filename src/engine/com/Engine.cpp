@@ -1,4 +1,3 @@
-#include <engine/JointAllocator.hpp>
 #include <engine/InputContext.hpp>
 #include <engine/KernelSession.hpp>
 #include <engine/PrefabFactoryInternal.hpp>
@@ -493,7 +492,7 @@ class Engine final:
     }
 
     Result<uint32_t> AllocateJoints(uint32_t count) noexcept override {
-        const auto offset = JointAllocator::AllocateJoints(*m_engine, count);
+        const auto offset = m_engine->AllocateJoints(count);
         if (offset == UINT32_MAX) return Error::InvalidArgument;
         return offset;
     }

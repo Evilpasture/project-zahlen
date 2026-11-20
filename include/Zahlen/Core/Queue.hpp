@@ -25,7 +25,7 @@ class Queue {
     }
 
     Queue(const Queue& other): _tail(other._size), _capacity(other._capacity), _size(other._size) {
-        MutexGuard otherGuard(const_cast<Queue&>(other)._mutex);
+        MutexGuard otherGuard(other._mutex);
 
         _data = static_cast<T*>(::operator new[](_capacity * sizeof(T), std::align_val_t {alignof(T)}, std::nothrow));
         if (_data == nullptr) [[unlikely]] {
@@ -40,10 +40,10 @@ class Queue {
 
     Queue& operator=(const Queue& other) {
         if (this != &other) {
-            Queue* first  = this;
-            auto*  second = const_cast<Queue*>(&other);
+            const Queue* first  = this;
+            const Queue* second = &other;
             if (first > second) {
-                Queue* temp = first;
+                const Queue* temp = first;
                 first       = second;
                 second      = temp;
             }
@@ -141,17 +141,17 @@ class Queue {
     }
 
     [[nodiscard]] bool empty() const noexcept {
-        MutexGuard guard(const_cast<Mutex&>(_mutex));
+        MutexGuard guard(_mutex);
         return _size == 0;
     }
 
     [[nodiscard]] size_t size() const noexcept {
-        MutexGuard guard(const_cast<Mutex&>(_mutex));
+        MutexGuard guard(_mutex);
         return _size;
     }
 
     [[nodiscard]] size_t capacity() const noexcept {
-        MutexGuard guard(const_cast<Mutex&>(_mutex));
+        MutexGuard guard(_mutex);
         return _capacity;
     }
 

@@ -35,12 +35,12 @@ class RenderSystem {
         const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
 
     static std::expected<void, ErrorCode> Update(
-        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
+        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, float dt
     );
 
   private:
     static FrameOutcome<FrameSkipped> RenderMain(
-        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
+        Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads,
         Mat4x4& outShadowProjView, float dt
     );
 

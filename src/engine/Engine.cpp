@@ -1,5 +1,4 @@
 #include "ArticulationContext.hpp"
-#include "JointAllocator.hpp"
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -159,7 +158,7 @@ void Engine::TraceDiagnostics() const noexcept {
     }
 
     Frustum    f {};
-    const bool frozen = world.GetCullingStats().FreezeFrustum;
+    const bool frozen = CullingStatsSnapshot().FreezeFrustum;
     if (camComp) {
         f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
     }
@@ -214,7 +213,6 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
             .input         = _impl->kernel->InputFor(),
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
-            .debugSettings = _impl->world->GetDebugSettings(),
             .visibility    = _impl->world->VisibilityForServices(),
         });
     }
@@ -277,7 +275,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
 
     // Core's steps, components, baseline world entities and system graphs are
     // wired here so an Engine returned by Create() is immediately ready to run.
-    SeedBaselineScene(GetInternalRegistry());
+    SeedBaselineScene(Registry());
     EnsureFramePlan();
     InitializeSystemGraphs();
 
@@ -387,87 +385,69 @@ void Engine::SetFreezeFrustum(bool freeze) noexcept {
     _impl->world->GetCullingStats().FreezeFrustum = freeze;
 }
 auto Engine::PhysicsDrawMode() const noexcept -> int {
-    return _impl->world->GetDebugSettings().physicsDrawMode;
+    return _impl->world->PhysicsDrawMode();
 }
 void Engine::SetPhysicsDrawMode(int mode) noexcept {
-    _impl->world->GetDebugSettings().physicsDrawMode = mode;
+    _impl->world->SetPhysicsDrawMode(mode);
 }
 auto Engine::Configuration() const noexcept -> const EngineConfig& {
     return _impl->kernel->GetConfig();
 }
 
-struct EngineCore {
-    static auto Registry(Engine& e) noexcept -> ECS::Registry& {
-        return e.GetInternalRegistry();
-    }
-    static auto Assets(Engine& e) noexcept -> AssetManager& {
-        return e._impl->kernel->GetAssetManager();
-    }
-    static auto Physics(Engine& e) noexcept -> PhysicsContext& {
-        return e._impl->world->GetPhysics();
-    }
-    static auto Articulation(Engine& e) noexcept -> ArticulationContext& {
-        return e._impl->world->GetArticulationContext();
-    }
-    static auto EvaluateInput(Engine& engine, float, FrameContext&) -> void {
-        engine._impl->kernel->InputFor().RefreshActionsForCurrentFrame(&engine._impl->world->GetEventBus());
-    }
+void Engine::EvaluateInput(Engine& engine, float, FrameContext&) {
+    engine._impl->kernel->InputFor().RefreshActionsForCurrentFrame(&engine._impl->world->GetEventBus());
+}
 
-    static auto Present(Engine& engine, float dt, FrameContext& ctx) -> void {
-        auto render_res = RenderSystem::Update(
-            engine, engine.GetInternalRegistry(), engine._impl->sceneData, engine._impl->poseUploads, engine._impl->world->GetCullingStats(), dt
-        );
-        if (!render_res) {
-            if (render_res.error().Is(FrameResult::DeviceLost)) {
-                if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
-                    ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
-                    ctx.error = lost_res.error();
-                    engine.Session().CloseWindow();
-                }
-            }
+void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
+    auto renderRes = RenderSystem::Update(engine, engine.Registry(), engine._impl->sceneData, engine._impl->poseUploads, dt);
+    if (!renderRes && renderRes.error().Is(FrameResult::DeviceLost)) {
+        if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
+            ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lostRes.error());
+            ctx.error = lostRes.error();
+            engine.Session().CloseWindow();
         }
     }
-};
+}
 
 namespace PrefabFactory {
 auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBoxInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params);
+    return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params);
 }
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphereInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params);
+    return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params);
 }
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinderInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
+    return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateConeInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params);
+    return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
 auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
-    return CreatePlaneInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params);
+    return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params);
 }
 auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateBoxInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), halfExtents, params, buildBLAS);
+    return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params, buildBLAS);
 }
 auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreatePlaneInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), extent, color, params, buildBLAS);
+    return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params, buildBLAS);
 }
 auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateSphereInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, params, buildBLAS);
+    return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params, buildBLAS);
 }
 auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateCylinderInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+    return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
-    return CreateConeInternal(engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), radius, height, params, buildBLAS);
+    return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     // A lookup, not a load: an importer has already cached the prefab by the
     // time a scene names it.
-    return EngineCore::Assets(engine).GetCachedPrefab(HashAssetPath(path));
+    return engine.Assets().GetCachedPrefab(HashAssetPath(path));
 }
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefabInternal(
-        engine.Render(), EngineCore::Registry(engine), EngineCore::Physics(engine), EngineCore::Articulation(engine), prefab, params, outBuffer, maxCount,
+        engine.Render(), engine.Registry(), engine.Physics(), engine.GetWorld().GetArticulationContext(), prefab, params, outBuffer, maxCount,
         nullptr, nullptr
     );
 }
@@ -501,7 +481,6 @@ void Engine::InitializeSystemGraphs() {
         .input         = _impl->kernel->InputFor(),
         .extensions    = _impl->extensions,
         .cullingStats  = _impl->world->GetCullingStats(),
-        .debugSettings = _impl->world->GetDebugSettings(),
         .visibility    = _impl->world->VisibilityForServices(),
     });
 
@@ -533,15 +512,6 @@ void Engine::ResetWorkerScratch() noexcept {
 auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return _impl->kernel->GetFileSystemWatcher();
 }
-auto Engine::GetInternalRegistry() noexcept -> ECS::Registry& {
-    return _impl->world->GetRegistry();
-}
-
-auto Engine::GetInternalRegistry() const noexcept -> const ECS::Registry& {
-    return _impl->world->GetRegistry();
-}
-
-
 auto Engine::GetUpdateGraph() -> SimGraph& {
     return *_impl->updateGraph;
 }
@@ -560,18 +530,18 @@ auto Engine::GetEventBus() const noexcept -> const ECS::EventBus& {
 }
 
 void Engine::ProcessPendingDestroy() {
-    SceneCleanupSystem::ProcessPending(*this, GetInternalRegistry());
+    SceneCleanupSystem::ProcessPending(*this, Registry());
 }
 
 void Engine::ReleaseSceneContents() {
-    SceneCleanupSystem::ClearAll(*this, GetInternalRegistry());
+    SceneCleanupSystem::ClearAll(*this, Registry());
     _impl->poseUploads.Clear();
     // Queued destroys and any surviving bodies retain their own shapes.
     Physics().ClearMeshShapeCache();
     ClearVisibilityLists();
     _impl->world->GetEventBus().ClearEvents();
-    _impl->world->GetCullingStats() = {};
-    _impl->world->GetDebugSettings() = {};
+    ResetCullingStats();
+    SetPhysicsDrawMode(0);
     if (_impl->updateGraph != nullptr) {
         _impl->updateGraph->ResetLocals();
     }
@@ -580,8 +550,8 @@ void Engine::ReleaseSceneContents() {
     }
 }
 
-uint32_t COM::JointAllocator::AllocateJoints(ZHLN::Engine& engine, uint32_t count) noexcept {
-    return engine._impl->world->GetArticulationContext().AllocateJoints(count);
+uint32_t Engine::AllocateJoints(uint32_t count) noexcept {
+    return _impl->world->GetArticulationContext().AllocateJoints(count);
 }
 
 void Engine::ClearScene() {
@@ -590,7 +560,7 @@ void Engine::ClearScene() {
     if (FramePending())
         (void) CancelFrame();
     ReleaseSceneContents();
-    SeedBaselineScene(GetInternalRegistry());
+    SeedBaselineScene(Registry());
 }
 
 auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
@@ -666,7 +636,7 @@ auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePla
     }
 
     if (module.registerComponents != nullptr) {
-        module.registerComponents(GetInternalRegistry());
+        module.registerComponents(Registry());
     }
     if (module.sceneCleanup != nullptr) {
         AddSceneCleanupPass(module.sceneCleanup);
@@ -700,7 +670,7 @@ void Engine::EnsureFramePlan() {
         return;
     }
     _impl->framePlanBuilt = true;
-    BuildCoreFramePlan(_impl->framePlan, &EngineCore::Present, &EngineCore::EvaluateInput);
+    BuildCoreFramePlan(_impl->framePlan, &Engine::Present, &Engine::EvaluateInput);
 }
 
 void Engine::SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks) {

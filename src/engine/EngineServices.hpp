@@ -20,10 +20,6 @@ class AudioContext;
 class ArticulationContext;
 class InputContext;
 
-struct DebugSettings {
-    int physicsDrawMode = 0;
-};
-
 namespace ECS {
 class EventBus;
 } // namespace ECS
@@ -46,7 +42,6 @@ struct RenderServices {
     InputContext&           input;
     ECS::ExtensionServices& extensions;
     CullingStats&           cullingStats;
-    DebugSettings&          debugSettings;
     VisibilityState&        visibility;
 };
 

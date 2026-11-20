@@ -396,11 +396,11 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
 }
 
 std::expected<void, ErrorCode> RenderSystem::Update(
-    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats, float dt
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, float dt
 ) {
     auto shadowProjView = Mat4x4::Identity();
 
-    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, cullingStats, shadowProjView, dt);
+    auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, shadowProjView, dt);
     if (!mainResult) {
         return std::unexpected(mainResult.error());
     }
@@ -412,7 +412,7 @@ std::expected<void, ErrorCode> RenderSystem::Update(
 }
 
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
-    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, CullingStats& cullingStats,
+    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads,
     Mat4x4& outShadowProjView, float dt
 ) {
     auto& rc = engine.Render();
@@ -429,7 +429,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     // registry across the whole submit would dangle if that component's storage
     // ever moved.
     const Camera cam            = camera->camera;
-    const auto& visibleEntities = engine.GetVisibleEntities();
 
     Mat4x4 vp {};
     Mat4x4 unjitteredVp {};
@@ -445,7 +444,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
 
     sceneData.dt = dt;
     SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), sceneData);
-    RenderDebug(engine, cullingStats, query.As<RenderDebugQuery>(), physicsDrawMode);
+    RenderDebug(engine, engine.CullingStatsSnapshot(), query.As<RenderDebugQuery>(), physicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
@@ -627,9 +626,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     if (auto end_res = std::move(gpuFrame).End(); !end_res) {
         return std::unexpected(end_res.error());
     }
-
-    cullingStats.TotalObjects  = query.Entities<Components::MeshComponent>().size();
-    cullingStats.CulledObjects = cullingStats.TotalObjects - visibleEntities.size();
 
     return {};
 }

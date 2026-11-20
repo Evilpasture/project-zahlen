@@ -95,9 +95,9 @@ class SkipList {
     template <typename Fn>
         requires std::invocable<Fn, const Value&> && std::is_void_v<std::invoke_result_t<Fn, const Value&>>
     auto With(const Key& key, Fn&& fn) const noexcept -> bool {
-        const_cast<SkipList*>(this)->EnterReader();
+        EnterReader();
         const bool found = WithUnlocked(key, std::forward<Fn>(fn));
-        const_cast<SkipList*>(this)->ExitReader();
+        ExitReader();
         return found;
     }
 
@@ -106,10 +106,10 @@ class SkipList {
     [[nodiscard]] auto With(const Key& key, Fn&& fn) const noexcept
         -> std::optional<std::remove_cvref_t<std::invoke_result_t<Fn, const Value&>>> {
         using Ret = std::remove_cvref_t<std::invoke_result_t<Fn, const Value&>>;
-        const_cast<SkipList*>(this)->EnterReader();
+        EnterReader();
         std::optional<Ret> result;
         WithUnlocked(key, [&](const Value& value) { result.emplace(std::forward<Fn>(fn)(value)); });
-        const_cast<SkipList*>(this)->ExitReader();
+        ExitReader();
         return result;
     }
 
@@ -143,7 +143,7 @@ class SkipList {
 
     template <typename Func>
     void Iterate(Func&& func) const {
-        const_cast<SkipList*>(this)->EnterReader();
+        EnterReader();
 
         const SkipNode* curr = _head->GetForward()[0].load(std::memory_order::acquire);
         while (curr != nullptr) {
@@ -153,7 +153,7 @@ class SkipList {
             curr = curr->GetForward()[0].load(std::memory_order::acquire);
         }
 
-        const_cast<SkipList*>(this)->ExitReader();
+        ExitReader();
     }
 
     void Insert(const Key& key, const Value& value) {
@@ -368,11 +368,11 @@ class SkipList {
         return true;
     }
 
-    void EnterReader() noexcept {
+    void EnterReader() const noexcept {
         _activeReaders.fetch_add(1, std::memory_order::acquire);
     }
 
-    void ExitReader() noexcept {
+    void ExitReader() const noexcept {
         if (_activeReaders.fetch_sub(1, std::memory_order::release) == 1) {
             TryPurge();
         }
@@ -383,7 +383,7 @@ class SkipList {
         TryPurge();
     }
 
-    void TryPurge() {
+    void TryPurge() const {
         if (_activeReaders.load(std::memory_order::acquire) == 0) {
             std::vector<SkipNode*> localQueue;
 
@@ -443,9 +443,10 @@ class SkipList {
     ZHLN::Atomic<uint32_t> _level {1};
     ZHLN::Atomic<size_t>   _size {0};
 
-    ZHLN::Atomic<uint32_t> _activeReaders {0};
-    ZHLN::Mutex            _retireMutex {};
-    std::vector<SkipNode*> _retireQueue;
+    // Const lookups participate in reader tracking and may reclaim retired nodes.
+    mutable ZHLN::Atomic<uint32_t> _activeReaders {0};
+    mutable ZHLN::Mutex            _retireMutex {};
+    mutable std::vector<SkipNode*> _retireQueue;
 };
 
 }
