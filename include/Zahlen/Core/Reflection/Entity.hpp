@@ -51,7 +51,17 @@ struct EntityToken {
         if (valid != other.valid) {
             return false;
         }
-        return !valid || tag == other.tag;
+        if (!valid) {
+            return true;
+        }
+        if consteval {
+            // GCC with ASan/UBSan can also reject equality of two non-null
+            // static tag addresses. Compare their reflected pointer values
+            // instead, preserving identity without a pointer comparison.
+            return std::meta::reflect_constant(tag) == std::meta::reflect_constant(other.tag);
+        } else {
+            return tag == other.tag;
+        }
     }
 };
 
