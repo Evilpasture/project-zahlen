@@ -19,6 +19,12 @@ name: Release (Ubuntu 22.04 baseline)
 #              and the libraries are the distro's own, so the artifact's glibc
 #              floor is the floor of the machine that built it -- and it is the
 #              same compiler package a jammy user installs.
+#              This job runs no test suite: the full ztest gate for the commit
+#              is ci.yml's "Test (release)" (unsanitised, current lavapipe),
+#              and what the shipped bytes do at run time is consume/render
+#              below. A suite run on jammy could only fail at Vulkan device
+#              creation -- its Mesa 23.x is below the engine's driver floor --
+#              while still costing the compile of every test target.
 #   consume    NO container, NO checkout of build outputs: a fresh jammy runner
 #              downloads that release, installs it with zpkg as an unprivileged
 #              user, builds a consumer app against it and checks the glibc floor
@@ -162,7 +168,7 @@ jobs:
       # Everything below runs as a user on a jammy machine: the compiler, binutils,
       # wayland-scanner and the libraries are the distro's own, so there is no target
       # prefix to mount and nothing foreign to run.
-      - name: Build, test and package
+      - name: Build and package
         run: |
           # dist must exist here, created by this user, before docker runs: the
           # daemon creates a missing bind-mount source as root, and then every
