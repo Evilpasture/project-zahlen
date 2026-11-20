@@ -403,6 +403,7 @@ cmake -B "${build}" -S . -G Ninja \
     -DCMAKE_CXX_COMPILER="${CXX}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DZHLN_BUILD_TESTS=OFF \
+    -DZHLN_BUILD_SAMPLES=OFF \
     -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON \
     -DZHLN_DEV_MODE=OFF \
     -DZHLN_GLIBC_BASELINE="${glibc_baseline}" \
@@ -447,6 +448,11 @@ cmake -B "${build}" -S . -G Ninja \
 #       test targets to learn that again costs most of this lane's build.
 #       What the release bytes themselves do on a capable driver is the
 #       release workflow's render job, on the installed packages.
+#   ZHLN_BUILD_SAMPLES=OFF    same reasoning: the samples are development
+#       executables with no install rules and no packaged component comes
+#       from samples/ (the consumer the release ships is the tests/installed
+#       cube source, packaged by scripts/package-toolchain.sh). Building
+#       them here only costs engine-linked compiles nobody publishes.
 #   ZHLN_BUILD_SVG=OFF        resvg is not packaged for jammy and building it needs
 #       cargo; without this the configure drops the plugin with a warning on every
 #       run. It is not one of the 30 released components.
