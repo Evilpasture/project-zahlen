@@ -2,6 +2,7 @@ import gpu_push_constants;
 import gtao_surface;
 import pbr_helpers;
 import uniforms;
+import numbers;
 
 [vk::push_constant]
 GtaoPushConstants pc;
@@ -12,9 +13,6 @@ Texture2D<float4> texNormalRoughness;
 SamplerState pointSampler;
 ConstantBuffer<FrameUniforms> frame;
 RWTexture2D<float> outAo;
-
-static const float PI = 3.14159265359f;
-static const float HALF_PI = PI * 0.5f;
 
 // Integral from 0 to h of cos(theta - n) * sin(theta) dtheta.
 float IntegrateArc(float h, float n) {
@@ -91,7 +89,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID) {
     float unoccluded = 0.0f;
 
     for (int slice = 0; slice < slices; ++slice) {
-        float angle = (float(slice) + noise.x) * PI / float(slices);
+        float angle = (float(slice) + noise.x) * Numbers::Pi / float(slices);
         float2 axis = float2(cos(angle), sin(angle));
         float2 pixelStep = axis * pc.rcpFullRes;
         float3 D = ReconstructWorldPos(uv + pixelStep, depth, pc.invViewProj) - P;
@@ -111,8 +109,8 @@ void CSMain(uint3 tid : SV_DispatchThreadID) {
         for (int side = 0; side < 2; ++side) {
             float signSide = side == 0 ? 1.0f : -1.0f;
             float normalAngle = n * signSide;
-            float lo = clamp(normalAngle - HALF_PI, 0.0f, PI);
-            float hi = clamp(normalAngle + HALF_PI, 0.0f, PI);
+            float lo = clamp(normalAngle - Numbers::HalfPi, 0.0f, Numbers::Pi);
+            float hi = clamp(normalAngle + Numbers::HalfPi, 0.0f, Numbers::Pi);
             float openCos = cos(hi);
             float horizon = openCos;
             for (int i = 0; i < steps; ++i) {

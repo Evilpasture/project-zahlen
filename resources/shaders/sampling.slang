@@ -3,7 +3,7 @@
 
 module sampling;
 
-public static const float PI = 3.141592653589793f;
+import numbers;
 
 [ForceInline]
 public float RadicalInverseVdC(uint bits) {
@@ -23,7 +23,7 @@ public float2 Hammersley(uint i, uint N) {
 [ForceInline]
 public float3 ImportanceSampleGGX(float u1, float u2, float roughness) {
     float a        = roughness * roughness;
-    float phi      = 2.0f * PI * u1;
+    float phi      = 2.0f * Numbers::Pi * u1;
     float cosTheta = sqrt(max((1.0f - u2) / (1.0f + (a * a - 1.0f) * u2), 0.0f));
     float sinTheta = sqrt(max(1.0f - cosTheta * cosTheta, 0.0f));
     return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
@@ -41,7 +41,7 @@ public float GGXReflectionPDF(float3 N, float3 V, float3 H, float roughness) {
     float alpha  = roughness * roughness; // same alpha as ImportanceSampleGGX
     float alpha2 = alpha * alpha;
     float denom  = max(NdotH * NdotH * (alpha2 - 1.0f) + 1.0f, 1e-6f);
-    float D      = alpha2 / (PI * denom * denom);
+    float D      = alpha2 / (Numbers::Pi * denom * denom);
     return D * NdotH / (4.0f * VdotH);
 }
 
@@ -81,7 +81,7 @@ public float3 ImportanceSampleVNDF(float3 V_local, float2 alpha, float2 u) {
         cosTheta = 1.0f - u.x * (1.0f - cosThetaMax);
         sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
     }
-    float phi = 2.0f * PI * u.y;
+    float phi = 2.0f * Numbers::Pi * u.y;
 
     float3 Hs = cosTheta * Vh + sinTheta * (cos(phi) * T1 + sin(phi) * T2);
 
@@ -107,7 +107,7 @@ public float VNDFReflectionPDF(float3 N, float3 V, float3 H, float2 alpha) {
     float a2 = alpha.x * alpha.y;
     float denom = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
     denom = max(denom, 1e-6f);
-    float D = a2 / (PI * denom * denom);
+    float D = a2 / (Numbers::Pi * denom * denom);
 
     // Smith G1 (Schlick approximation)
     float k = 0.25f * (alpha.x + alpha.y);

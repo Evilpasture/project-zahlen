@@ -4,6 +4,7 @@
 import gpu_push_constants;
 import gpu_buffer;
 import sampling;
+import numbers;
 
 [vk::push_constant]
 IBLBakePush pc;
@@ -13,8 +14,8 @@ SamplerState radianceSampler;
 RWTexture2DArray<float4> outTexture;
 
 float3 SampleEquirect(float3 dir, float mipLevel) {
-    float u = atan2(dir.z, dir.x) * (0.5f / PI) + 0.5f;
-    float v = acos(clamp(dir.y, -1.0f, 1.0f)) * (1.0f / PI);
+    float u = atan2(dir.z, dir.x) * (0.5f / Numbers::Pi) + 0.5f;
+    float v = acos(clamp(dir.y, -1.0f, 1.0f)) * (1.0f / Numbers::Pi);
     return radianceMap.SampleLevel(radianceSampler, float2(u, v), mipLevel).rgb;
 }
 
@@ -50,8 +51,8 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
             radianceMap.GetDimensions(0u, sourceWidth, sourceHeight, sourceMipLevels);
         // An equirectangular texel covers dPhi*dTheta*sin(theta) steradians.
         // Clamp the polar footprint to the first/last texel *center*, not zero.
-        float texelSolidAngleScale = (2.0f * PI * PI) / (float(sourceWidth) * float(sourceHeight));
-        float minSinTheta = sin(0.5f * PI / float(sourceHeight));
+        float texelSolidAngleScale = (2.0f * Numbers::Pi * Numbers::Pi) / (float(sourceWidth) * float(sourceHeight));
+        float minSinTheta = sin(0.5f * Numbers::Pi / float(sourceHeight));
         for (uint i = 0; i < samples; ++i) {
             float2 xi   = Hammersley(i, samples);
             // VNDF: V == N here (view along the reflection direction), so in the
@@ -93,14 +94,14 @@ void SHMain(uint3 tid: SV_DispatchThreadID, uint gtid: SV_GroupThreadID) {
     for (int c = 0; c < 9; ++c)
         local[c] = float3(0.0f, 0.0f, 0.0f);
 
-    float weight = 4.0f * PI / float(samples);
+    float weight = 4.0f * Numbers::Pi / float(samples);
     float A[9]   = {1.0f, 2.0f / 3.0f, 2.0f / 3.0f, 2.0f / 3.0f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f};
 
     for (uint i = tid.x; i < samples; i += 64u) {
         float2 xi  = Hammersley(i, samples);
         float z    = 1.0f - 2.0f * xi.x;
         float r    = sqrt(max(0.0f, 1.0f - z * z));
-        float phi  = 2.0f * PI * xi.y;
+        float phi  = 2.0f * Numbers::Pi * xi.y;
         float3 dir = float3(r * cos(phi), r * sin(phi), z);
         float3 Lin = SampleEnvironment(dir, 0.0f);
         float Y[9];
