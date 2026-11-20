@@ -5,6 +5,7 @@ __exported import blue_noise;
 __exported import instance_data;
 __exported import math.math;
 __exported import math.transform;
+import sampling;
 __exported import uniforms;
 __exported import vertex_format;
 
@@ -649,22 +650,11 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
 
 
 public float3 SampleGGX_VNDF(float3 V_local, float2 alpha, float2 u) {
-    float3 Vh = normalize(float3(alpha.x * V_local.x, alpha.y * V_local.y, max(V_local.z, 0.001f)));
-
-    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
-    float3 T1   = (lensq > 1e-7f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
-    float3 T2   = cross(Vh, T1);
-
-    float r   = sqrt(u.x);
-    float phi = 2.0f * 3.141592653589793f * u.y;
-    float t1  = r * cos(phi);
-    float t2  = r * sin(phi);
-    float s   = 0.5f * (1.0f + Vh.z);
-    t2        = (1.0f - s) * sqrt(max(0.0f, 1.0f - t1 * t1)) + s * t2;
-
-    float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
-
-    return normalize(float3(alpha.x * Nh.x, alpha.y * Nh.y, max(Nh.z, 0.0f)));
+    // Dupuy & Benyoub (2023) + Eto & Tokuyoshi (2023) Bounded VNDF.
+    // Bounds sampling to the visible-normal spherical cap around the stretched
+    // view vector — no rejection, no ad-hoc remapping (Heitz 2018). Converges
+    // faster at high roughness and grazing angles. Kept for future reflection use.
+    return ImportanceSampleVNDF(V_local, alpha, u);
 }
 
 public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {

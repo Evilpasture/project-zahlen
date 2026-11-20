@@ -54,13 +54,17 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
         float minSinTheta = sin(0.5f * PI / float(sourceHeight));
         for (uint i = 0; i < samples; ++i) {
             float2 xi   = Hammersley(i, samples);
-            float3 H    = AlignHemisphere(N, ImportanceSampleGGX(xi.x, xi.y, pc.roughness));
+            // VNDF: V == N here (view along the reflection direction), so in the
+            // local frame where N = z+, V_local is the pole (0,0,1). Bounded VNDF
+            // samples visible normals directly — no rejection, lower variance at
+            // high roughness and grazing angles than GGX importance sampling.
+            float3 H    = AlignHemisphere(N, ImportanceSampleVNDF(float3(0.0f, 0.0f, 1.0f), pc.roughness, xi));
             float3 L    = normalize(2.0f * dot(V, H) * H - V);
             float NdotL = max(dot(L, N), 0.0f);
             if (NdotL > 0.0f) {
                 float mipLevel = 0.0f;
                 if (pc.hasRadiance != 0u) {
-                    float pdf = GGXReflectionPDF(N, V, H, pc.roughness);
+                    float pdf = VNDFReflectionPDF(N, V, H, float2(pc.roughness));
                     float sampleSolidAngle = 1.0f / (float(samples) * max(pdf, 1e-6f));
                     float sinTheta = max(sqrt(max(1.0f - L.y * L.y, 0.0f)), minSinTheta);
                     float texelSolidAngle = texelSolidAngleScale * sinTheta;

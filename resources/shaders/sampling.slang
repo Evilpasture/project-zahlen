@@ -45,6 +45,77 @@ public float GGXReflectionPDF(float3 N, float3 V, float3 H, float roughness) {
     return D * NdotH / (4.0f * VdotH);
 }
 
+// Bounded VNDF importance sampling (Dupuy & Benyoub 2023; Eto & Tokuyoshi 2023).
+// Samples visible normals (V·H > 0) within a spherical cap around the stretched
+// view vector, avoiding rejection and Heitz 2018's ad-hoc remapping. Converges
+// faster than ImportanceSampleGGX at high roughness and grazing angles, and
+// reduces variance on rough mips and grazing LUT texels.
+//
+// V_local: normalized view in local tangent frame (N = z+)
+// alpha:   roughness squared, per-axis (alpha = roughness * roughness)
+// u:       two uniform [0,1) random numbers
+// Returns: normalized half vector H in the local tangent frame
+[ForceInline]
+public float3 ImportanceSampleVNDF(float3 V_local, float2 alpha, float2 u) {
+    // Stretch view into ellipsoidal (GGX-aligned) space
+    float3 Vh = normalize(float3(alpha.x * V_local.x, alpha.y * V_local.y, max(V_local.z, 0.001f)));
+
+    // Orthonormal basis around stretched view
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    float3 T1 = (lensq > 1e-7f) ? normalize(float3(-Vh.y, Vh.x, 0.0f)) : float3(1.0f, 0.0f, 0.0f);
+    float3 T2 = cross(Vh, T1);
+
+    // Spherical cap bounded by visibility.
+    // cos(theta_max) = Vh.z bounds the region where V·H > 0 after unstretching.
+    // Near normal incidence (Vh.z ≈ 1) the cap degenerates to a point, so fall
+    // back to a cosine-weighted hemisphere around Vh which matches D(H)·H.z there.
+    float cosThetaMax = Vh.z > 0.999f ? 0.0f : Vh.z;
+
+    float cosTheta, sinTheta;
+    if (cosThetaMax <= 0.0f) {
+        // Cosine-weighted hemisphere (normal incidence fallback)
+        cosTheta = sqrt(max(0.0f, 1.0f - u.x));
+        sinTheta = sqrt(u.x);
+    } else {
+        // Uniform in solid angle within spherical cap
+        cosTheta = 1.0f - u.x * (1.0f - cosThetaMax);
+        sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+    }
+    float phi = 2.0f * PI * u.y;
+
+    float3 Hs = cosTheta * Vh + sinTheta * (cos(phi) * T1 + sin(phi) * T2);
+
+    // Unstretch back to GGX microfacet space
+    return normalize(float3(Hs.x / alpha.x, Hs.y / alpha.y, max(Hs.z, 0.0f)));
+}
+
+[ForceInline]
+public float3 ImportanceSampleVNDF(float3 V_local, float alpha, float2 u) {
+    return ImportanceSampleVNDF(V_local, float2(alpha), u);
+}
+
+// PDF of ImportanceSampleVNDF with respect to solid angle of reflected
+// direction L. For bounded VNDF sampling, p(L) = D(H) * G1(V) / (4 * |N·V|)
+// (the V·H term cancels). Used for mip-level selection in IBL baking.
+[ForceInline]
+public float VNDFReflectionPDF(float3 N, float3 V, float3 H, float2 alpha) {
+    float NdotH = max(dot(N, H), 0.0f);
+    float NdotV = max(dot(N, V), 0.0f);
+    if (NdotH <= 0.0f || NdotV <= 0.0f)
+        return 0.0f;
+
+    float a2 = alpha.x * alpha.y;
+    float denom = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
+    denom = max(denom, 1e-6f);
+    float D = a2 / (PI * denom * denom);
+
+    // Smith G1 (Schlick approximation)
+    float k = 0.25f * (alpha.x + alpha.y);
+    float G1 = NdotV / max(NdotV * (1.0f - k) + k, 0.001f);
+
+    return D * G1 / max(4.0f * NdotV, 1e-6f);
+}
+
 [ForceInline]
 public float3 AlignHemisphere(float3 N, float3 localH) {
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);

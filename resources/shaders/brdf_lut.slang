@@ -25,7 +25,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint samples = max(pc.sampleCount, 1u);
     for (uint i = 0; i < samples; ++i) {
         float2 xi   = Hammersley(i, samples);
-        float3 H    = ImportanceSampleGGX(xi.x, xi.y, roughness);
+        float3 H    = ImportanceSampleVNDF(V, roughness, xi);
         float3 L    = normalize(2.0f * dot(V, H) * H - V);
         float NdotL = max(L.z, 0.0f);
         float NdotH = max(H.z, 0.0f);
