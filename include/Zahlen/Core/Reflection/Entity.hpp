@@ -37,17 +37,27 @@ enum class EntityKind : uint8_t {
 // cv-qualifiers, pointers, arrays, functions, and specializations stay distinct.
 struct EntityToken {
     const void* tag = nullptr;
+    /*
+     * TODO(Evilpasture): Temporary. When -fsanitize=undefined (from -fsanitize=address,undefined) is enabled, GCC's UBSan null-check handling
+     * (-fsanitize=null) prevents GCC from constant-folding (&symbol) != nullptr / == nullptr in constexpr/consteval contexts, producing a bogus compiler error.
+     */
+    bool valid = false;
 
     [[nodiscard]] constexpr explicit operator bool() const noexcept {
-        return tag != nullptr;
+        return valid;
     }
 
-    [[nodiscard]] constexpr auto operator==(const EntityToken&) const noexcept -> bool = default;
+    [[nodiscard]] constexpr auto operator==(const EntityToken& other) const noexcept -> bool {
+        if (valid != other.valid) {
+            return false;
+        }
+        return !valid || tag == other.tag;
+    }
 };
 
 struct EntityDescriptor {
-    EntityKind       kind                     = EntityKind::Other;
-    std::string_view name                     = {};
+    EntityKind       kind = EntityKind::Other;
+    std::string_view name;
     bool             hasIdentifier            = false;
     bool             isGlobal                 = false;
     bool             isTopLevel               = false;
@@ -79,9 +89,9 @@ template <std::meta::info Entity>
 consteval auto MakeEntityToken() noexcept -> EntityToken {
     constexpr std::meta::info kCanonical = std::meta::dealias(Entity);
     if constexpr (std::meta::is_type(kCanonical)) {
-        return EntityToken {&TypeEntityTag<typename[:kCanonical:]>::kByte};
+        return EntityToken {&TypeEntityTag<typename[:kCanonical:]>::kByte, true};
     } else {
-        return EntityToken {&MetaEntityTag<kCanonical>::kByte};
+        return EntityToken {&MetaEntityTag<kCanonical>::kByte, true};
     }
 }
 
@@ -138,8 +148,8 @@ consteval auto IsVariadicSpecInfo() noexcept -> bool {
     if constexpr (!std::meta::is_type(kInfo) || !std::meta::has_template_arguments(kInfo)) {
         return false;
     } else {
-        constexpr std::meta::info  kTmpl = std::meta::template_of(kInfo);
-        const std::vector<std::meta::info> args = std::meta::template_arguments_of(kInfo);
+        constexpr std::meta::info          kTmpl = std::meta::template_of(kInfo);
+        const std::vector<std::meta::info> args  = std::meta::template_arguments_of(kInfo);
         // Primary templates always declare at least one parameter, and
         // template_arguments_of fills in defaulted arguments, so zero arguments
         // implies an empty parameter pack (e.g. Pack<>).
@@ -156,19 +166,15 @@ consteval auto IsVariadicSpecInfo() noexcept -> bool {
         }
         // Cover fixed-head + empty trailing pack (e.g. HeadTail<int>,
         // TypeThenInts<int>) where the pack kind differs from args.back().
-        return acceptsExtra(^^int) ||
-               acceptsExtra(std::meta::reflect_constant(0)) ||
-               acceptsExtra(std::meta::reflect_constant(0U)) ||
-               acceptsExtra(std::meta::reflect_constant(std::size_t {0})) ||
-               acceptsExtra(std::meta::reflect_constant(false)) ||
-               acceptsExtra(std::meta::reflect_constant(nullptr)) ||
-               acceptsExtra(^^VariadicProbeTemplate);
+        return acceptsExtra(^^int) || acceptsExtra(std::meta::reflect_constant(0)) || acceptsExtra(std::meta::reflect_constant(0U)) ||
+               acceptsExtra(std::meta::reflect_constant(std::size_t {0})) || acceptsExtra(std::meta::reflect_constant(false)) ||
+               acceptsExtra(std::meta::reflect_constant(nullptr)) || acceptsExtra(^^VariadicProbeTemplate);
     }
 }
 
 template <std::meta::info Entity>
 consteval auto EntityUnqualifiedName() noexcept -> std::pair<bool, std::string_view> {
-    constexpr std::meta::info kInfo = std::meta::dealias(Entity);
+    constexpr std::meta::info kInfo  = std::meta::dealias(Entity);
     constexpr std::meta::info kNamed = []() consteval -> std::meta::info {
         if constexpr (std::meta::is_type(kInfo) && std::meta::has_template_arguments(kInfo)) {
             return std::meta::template_of(kInfo);
@@ -185,10 +191,10 @@ consteval auto EntityUnqualifiedName() noexcept -> std::pair<bool, std::string_v
 
 template <std::meta::info Entity>
 consteval auto DescribeEntityInfo() noexcept -> EntityDescriptor {
-    constexpr std::meta::info kInfo = std::meta::dealias(Entity);
-    constexpr EntityKind      kKind = ClassifyEntity(kInfo);
-    constexpr auto            kName = EntityUnqualifiedName<kInfo>();
-    constexpr bool            kGlobal = (kInfo == ^^::);
+    constexpr std::meta::info kInfo     = std::meta::dealias(Entity);
+    constexpr EntityKind      kKind     = ClassifyEntity(kInfo);
+    constexpr auto            kName     = EntityUnqualifiedName<kInfo>();
+    constexpr bool            kGlobal   = (kInfo == ^^::);
     constexpr bool            kTopLevel = []() consteval -> bool {
         if constexpr (HasDeclaringScope(kInfo)) {
             return std::meta::dealias(std::meta::parent_of(kInfo)) == ^^::;
@@ -196,7 +202,7 @@ consteval auto DescribeEntityInfo() noexcept -> EntityDescriptor {
             return false;
         }
     }();
-    constexpr bool kIsSpec = std::meta::is_type(kInfo) && std::meta::has_template_arguments(kInfo);
+    constexpr bool        kIsSpec     = std::meta::is_type(kInfo) && std::meta::has_template_arguments(kInfo);
     constexpr EntityToken kTemplateId = []() consteval -> EntityToken {
         if constexpr (kIsSpec) {
             return MakeEntityToken<std::meta::template_of(kInfo)>();
@@ -223,8 +229,7 @@ template <std::meta::info Scope, typename Visitor>
 constexpr void DispatchEnclosingScope(Visitor& visitor) {
     constexpr std::meta::info kScope = std::meta::dealias(Scope);
     constexpr ScopeDescriptor kDesc  = DescribeEntityInfo<kScope>();
-    if constexpr (std::meta::is_type(kScope) &&
-                  (std::meta::is_class_type(kScope) || std::meta::is_union_type(kScope) || std::meta::is_enum_type(kScope))) {
+    if constexpr (std::meta::is_type(kScope) && (std::meta::is_class_type(kScope) || std::meta::is_union_type(kScope) || std::meta::is_enum_type(kScope))) {
         using OwnerType = typename[:kScope:];
         if constexpr (requires { visitor.template OnTypeScope<OwnerType>(kDesc); }) {
             visitor.template OnTypeScope<OwnerType>(kDesc);
@@ -278,8 +283,7 @@ constexpr void DispatchTemplateArgument(Visitor& visitor) {
         visitor.template OnTemplate<TemplateEntityTag<std::meta::dealias(Arg)>>();
     } else if constexpr (std::meta::is_value(Arg)) {
         using ValueType = std::remove_cv_t<typename[:std::meta::dealias(std::meta::type_of(Arg)):]>;
-        if constexpr (std::is_integral_v<ValueType> || std::is_enum_v<ValueType> ||
-                      std::is_null_pointer_v<ValueType> || std::is_floating_point_v<ValueType>) {
+        if constexpr (std::is_integral_v<ValueType> || std::is_enum_v<ValueType> || std::is_null_pointer_v<ValueType> || std::is_floating_point_v<ValueType>) {
             constexpr ValueType kValue = std::meta::extract<ValueType>(Arg);
             visitor.template OnValue<kValue>();
         } else {
@@ -297,7 +301,7 @@ constexpr void DispatchTemplateArgument(Visitor& visitor) {
 // references, and function types each retain their own distinct token).
 template <typename T>
 [[nodiscard]] consteval auto EntityTokenOf() noexcept -> EntityToken {
-    return EntityToken {&TemplatedDetail::TypeEntityTag<T>::kByte};
+    return EntityToken {&TemplatedDetail::TypeEntityTag<T>::kByte, true};
 }
 
 // Describes the unqualified type entity T (class, union, enum, or Other).
@@ -355,7 +359,7 @@ constexpr void ForEachEnclosingScope(Visitor&& visitor) {
 // No-op if T is not a template specialization.
 template <typename T, typename Visitor>
 constexpr void ForEachTemplateArgument(Visitor&& visitor) {
-    using Bare = std::remove_cv_t<T>;
+    using Bare                      = std::remove_cv_t<T>;
     constexpr std::meta::info kInfo = std::meta::dealias(^^Bare);
     if constexpr (std::meta::is_type(kInfo) && std::meta::has_template_arguments(kInfo)) {
         constexpr auto kArgs = TemplatedDetail::TemplateArgumentsArray<kInfo>();
