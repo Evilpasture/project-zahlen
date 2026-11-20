@@ -10,12 +10,13 @@
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
-#include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/Core/COM/Contract.hpp>
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
+#include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
+#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -45,14 +46,7 @@ namespace {
 }
 
 [[nodiscard]] auto BaseHeadlessApp(std::string_view title) -> App {
-    return App()
-        .Title(title)
-        .Resolution(64, 48)
-        .Headless(true)
-        .Validation(false)
-        .VSync(false)
-        .MeshShading(false)
-        .LogLevel(LogLevel::Quiet);
+    return App().Title(title).Resolution(64, 48).Headless(true).Validation(false).VSync(false).MeshShading(false).LogLevel(LogLevel::Quiet);
 }
 
 } // namespace
@@ -64,17 +58,15 @@ struct UnrecognizedPluginExtension {
 void test_plugin_freecam_dynamic_load_config_and_detach() {
     static_assert(COM::AuditInterfaceABI<COM::IAppLayer>());
     static_assert(COM::AuditFunctionABI<&COM::CreateAppLayer>());
-    static_assert(
-        COM::kCreateAppLayerSymbol == "_ZN4ZHLN3COM14CreateAppLayerEPKNS0_11ChainInNodeE"
-    );
+    static_assert(COM::kCreateAppLayerSymbol == "_ZN4ZHLN3COM14CreateAppLayerEPKNS0_11ChainInNodeE");
 
     // Load libzahlen_plugin_freecam by bare name with custom InChain config,
     // verify it attaches custom FreeCam::Component across the .so boundary in
     // OnBeforeRender and detaches cleanly in OnStop before dlclose.
-    bool  sawAttached  = false;
-    float observedSpeed = 0.0f;
+    bool  sawAttached     = false;
+    float observedSpeed   = 0.0f;
     bool  observedLookBtn = true;
-    bool  detachedOnStop = false;
+    bool  detachedOnStop  = false;
 
     struct PreObserver {
         bool* detachedOnStop = nullptr;
@@ -83,8 +75,7 @@ void test_plugin_freecam_dynamic_load_config_and_detach() {
             auto&      entities = *engine.Entities();
             const auto cam      = entities.SingletonEntity<Components::MainCameraTagComponent>();
             if (cam.HasValue()) {
-                *detachedOnStop = (entities.Get<FreeCam::TagComponent>(cam.value) == nullptr) &&
-                                  (entities.Get<FreeCam::Component>(cam.value) == nullptr);
+                *detachedOnStop = (entities.Get<FreeCam::TagComponent>(cam.value) == nullptr) && (entities.Get<FreeCam::Component>(cam.value) == nullptr);
             }
         }
     };
@@ -93,19 +84,21 @@ void test_plugin_freecam_dynamic_load_config_and_detach() {
                          .MaxFrames(1)
                          .AddLayer(PreObserver {.detachedOnStop = &detachedOnStop})
                          .LoadPlugin(
-                             "freecam",
-                             COM::InChain(FreeCam::Component {
-                                 .speed              = 37.5f,
-                                 .lookSensitivity    = 0.25f,
-                                 .sprintMultiplier   = 2.0f,
-                                 .enabled            = true,
-                                 .lookRequiresButton = false,
-                             })
+                             "freecam", COM::InChain(
+                                            FreeCam::Component {
+                                                .speed              = 37.5f,
+                                                .lookSensitivity    = 0.25f,
+                                                .sprintMultiplier   = 2.0f,
+                                                .enabled            = true,
+                                                .lookRequiresButton = false,
+                                            }
+                                        )
                          )
                          .AfterTick([&](COM::IEngine& engine) {
                              auto&      entities = *engine.Entities();
                              const auto cam      = entities.SingletonEntity<Components::MainCameraTagComponent>();
-                             if (!ExpectTrue(cam.HasValue())) return;
+                             if (!ExpectTrue(cam.HasValue()))
+                                 return;
                              sawAttached = entities.Get<FreeCam::TagComponent>(cam.value) != nullptr;
                              if (const auto* comp = entities.Get<FreeCam::Component>(cam.value)) {
                                  observedSpeed   = comp->speed;
@@ -113,15 +106,16 @@ void test_plugin_freecam_dynamic_load_config_and_detach() {
                              }
                          })
                          .Run();
-    if (!ExpectTrue(res.has_value())) return;
+    if (!ExpectTrue(res.has_value()))
+        return;
     ExpectTrue(sawAttached);
     ExpectTrue(std::fabs(observedSpeed - 37.5f) < 1e-4f);
     ExpectFalse(observedLookBtn);
     ExpectTrue(detachedOnStop);
 
     // Also load freecam via CLI --plugin with default config.
-    bool cliAttached = false;
-    const auto cliRes = RunAppCli(
+    bool       cliAttached = false;
+    const auto cliRes      = RunAppCli(
         BaseHeadlessApp("PluginFreeCamCli").AfterTick([&](COM::IEngine& engine) {
             const auto cam = engine.Entities()->SingletonEntity<Components::MainCameraTagComponent>();
             if (cam.HasValue()) {
@@ -143,15 +137,17 @@ void test_plugin_screenshot_dynamic_load_and_error_propagation() {
     const auto res = BaseHeadlessApp("PluginScreenshot")
                          .LoadPlugin("freecam")
                          .LoadPlugin(
-                             "screenshot",
-                             COM::InChain(Screenshot::PluginConfig {
-                                 .path        = COM::StringView(pngPath),
-                                 .afterFrames = 2,
-                             })
+                             "screenshot", COM::InChain(
+                                               Screenshot::PluginConfig {
+                                                   .path        = COM::StringView(pngPath),
+                                                   .afterFrames = 2,
+                                               }
+                                           )
                          )
                          .AfterTick([&](COM::IEngine& e) { frames = e.CurrentFrame(); })
                          .Run();
-    if (!ExpectTrue(res.has_value())) return;
+    if (!ExpectTrue(res.has_value()))
+        return;
     // Screenshot plugin closes on frame 2 inside layer AfterTick (skipping app AfterTick on frame 2).
     ExpectEq(frames, uint64_t {1});
     ExpectTrue(std::filesystem::exists(pngPath));
@@ -171,14 +167,15 @@ void test_plugin_screenshot_dynamic_load_and_error_propagation() {
     // Write failure inside screenshot .so propagates typed Screenshot::Error::WriteFailed across boundary.
     const std::string badPath = (tmp.Path() / "no_such_dir" / "shot.png").string();
     const auto        badRes  = BaseHeadlessApp("PluginScreenshotFail")
-                            .LoadPlugin(
-                                "screenshot",
-                                COM::InChain(Screenshot::PluginConfig {
-                                    .path        = COM::StringView(badPath),
-                                    .afterFrames = 1,
-                                })
-                            )
-                            .Run();
+                                    .LoadPlugin(
+                                        "screenshot", COM::InChain(
+                                                          Screenshot::PluginConfig {
+                                                              .path        = COM::StringView(badPath),
+                                                              .afterFrames = 1,
+                                                          }
+                                                      )
+                                    )
+                                    .Run();
     ExpectFalse(badRes.has_value());
     if (!badRes) {
         ExpectTrue(badRes.error().Is(Screenshot::Error::WriteFailed));
@@ -188,34 +185,31 @@ void test_plugin_screenshot_dynamic_load_and_error_propagation() {
 
 void test_plugin_missing_optional_malformed_and_chain_rejection() {
     // Missing required plugin fails before engine creation.
-    bool started = false;
-    const auto missing = BaseHeadlessApp("MissingPlugin")
-                             .LoadPlugin("definitely_nonexistent_plugin_xyz")
-                             .OnStart([&](COM::IEngine&) { started = true; })
-                             .Run();
+    bool       started = false;
+    const auto missing = BaseHeadlessApp("MissingPlugin").LoadPlugin("definitely_nonexistent_plugin_xyz").OnStart([&](COM::IEngine&) { started = true; }).Run();
     ExpectFalse(missing.has_value());
-    if (!missing) ExpectTrue(missing.error().Is(AppError::PluginNotFound));
+    if (!missing)
+        ExpectTrue(missing.error().Is(AppError::PluginNotFound));
     ExpectFalse(started);
 
     // CLI --plugin validation: missing value and missing plugin both fail; --help skips plugin open.
     const auto missingVal = RunAppCli(BaseHeadlessApp("CliPluginNoVal"), {"--plugin"});
     ExpectFalse(missingVal.has_value());
-    if (!missingVal) ExpectTrue(missingVal.error().Is(CommandLineError::MissingValue));
+    if (!missingVal)
+        ExpectTrue(missingVal.error().Is(CommandLineError::MissingValue));
 
-    const auto helpSkip = RunAppCli(
-        BaseHeadlessApp("CliPluginHelp").LoadPlugin("definitely_nonexistent_plugin_xyz"),
-        {"--plugin", "also_missing_xyz", "--help"}
-    );
+    const auto helpSkip =
+        RunAppCli(BaseHeadlessApp("CliPluginHelp").LoadPlugin("definitely_nonexistent_plugin_xyz"), {"--plugin", "also_missing_xyz", "--help"});
     ExpectTrue(helpSkip.has_value() && *helpSkip == AppExitReason::CliHelpRequested);
 
     // Optional TryLoadPlugin silently skips a missing shared library and runs normally.
-    uint64_t optionalFrames = 0;
-    const auto optionalOk   = BaseHeadlessApp("OptionalMissingPlugin")
-                                .MaxFrames(1)
-                                .TryLoadPlugin("definitely_nonexistent_plugin_xyz")
-                                .TryLoadPlugin((std::filesystem::temp_directory_path() / "zhln_absent_plugin_xyz.so").string())
-                                .AfterTick([&](COM::IEngine& e) { optionalFrames = e.CurrentFrame(); })
-                                .Run();
+    uint64_t   optionalFrames = 0;
+    const auto optionalOk     = BaseHeadlessApp("OptionalMissingPlugin")
+                                    .MaxFrames(1)
+                                    .TryLoadPlugin("definitely_nonexistent_plugin_xyz")
+                                    .TryLoadPlugin((std::filesystem::temp_directory_path() / "zhln_absent_plugin_xyz.so").string())
+                                    .AfterTick([&](COM::IEngine& e) { optionalFrames = e.CurrentFrame(); })
+                                    .Run();
     ExpectTrue(optionalOk.has_value());
     ExpectEq(optionalFrames, uint64_t {1});
 
@@ -228,17 +222,17 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     }
     const auto corruptRes = BaseHeadlessApp("CorruptPlugin").TryLoadPlugin(bogusSo.string()).Run();
     ExpectFalse(corruptRes.has_value());
-    if (!corruptRes) ExpectTrue(corruptRes.error().Is(AppError::PluginLoadFailed));
+    if (!corruptRes)
+        ExpectTrue(corruptRes.error().Is(AppError::PluginLoadFailed));
 
     // Unrecognized InChain extension rejected cleanly by plugin factory.
-    const auto unknownExt = BaseHeadlessApp("UnknownChain")
-                                .LoadPlugin("freecam", COM::InChain(UnrecognizedPluginExtension {}))
-                                .Run();
+    const auto unknownExt = BaseHeadlessApp("UnknownChain").LoadPlugin("freecam", COM::InChain(UnrecognizedPluginExtension {})).Run();
     ExpectFalse(unknownExt.has_value());
-    if (!unknownExt) ExpectTrue(unknownExt.error().Is(COM::Error::UnsupportedExtension));
+    if (!unknownExt)
+        ExpectTrue(unknownExt.error().Is(COM::Error::UnsupportedExtension));
 
     // Layout hash drift rejected cleanly across the .so boundary.
-    FreeCam::Component payload {};
+    FreeCam::Component     payload {};
     const COM::ChainInNode drifted {
         .sType      = COM::ChainTypeID<FreeCam::Component>(),
         .layoutHash = Reflect::LayoutHash<FreeCam::Component>() ^ 0x1u,
@@ -249,12 +243,14 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     };
     const auto driftedRes = BaseHeadlessApp("LayoutMismatch").LoadPlugin("freecam", &drifted).Run();
     ExpectFalse(driftedRes.has_value());
-    if (!driftedRes) ExpectTrue(driftedRes.error().Is(COM::Error::LayoutMismatch));
+    if (!driftedRes)
+        ExpectTrue(driftedRes.error().Is(COM::Error::LayoutMismatch));
 }
 
 void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     const std::filesystem::path enginePath = SharedLibrary::RuntimeModulePath();
-    if (!ExpectFalse(enginePath.empty())) return;
+    if (!ExpectFalse(enginePath.empty()))
+        return;
 
     const std::filesystem::path exeDir       = FS::Paths::ExecutableDir();
     const std::filesystem::path engineDir    = enginePath.parent_path();
@@ -272,21 +268,31 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
 
     for (const std::string_view name: {"freecam", "screenshot"}) {
         SharedLibrary lib;
-        ExpectTrue(
-            lib.OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs}) ==
-            SharedLibraryOpenStatus::Opened
-        );
-        if (!ExpectTrue(lib.IsOpen())) continue;
+        ExpectTrue(lib.OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs}) == SharedLibraryOpenStatus::Opened);
+        if (!ExpectTrue(lib.IsOpen()))
+            continue;
 
         // Old extern "C" entry point is absent; consteval-mangled C++ symbol resolves cleanly.
         ExpectTrue(lib.GetSymbol("ZHLN_CreateAppLayer") == nullptr);
         constexpr auto mangled = COM::MangleFunction<&COM::CreateAppLayer>();
         void* const    raw     = lib.GetSymbol(mangled.data());
-        const auto     factory = COM::ResolveSymbol<&COM::CreateAppLayer>(lib);
+        const auto     factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(lib);
         ExpectTrue(raw != nullptr);
         ExpectTrue(factory != nullptr);
         ExpectTrue(raw == reinterpret_cast<void*>(factory));
-        if (!factory) continue;
+        using Witness = COM::EntryPointWitness<&COM::CreateAppLayer>;
+        using Stale   = COM::Contract<COM::CreateAppLayerFn, COM::EntryPointContract<&COM::CreateAppLayer>() ^ uint64_t { 1 }>;
+        ExpectTrue(COM::ResolveSymbol<&Witness::Seal>(lib) != nullptr);
+        ExpectTrue(COM::ResolveSymbol<&Stale::Seal>(lib) == nullptr);
+        struct MissingWitness {
+            const SharedLibrary& library;
+            auto                 GetSymbol(const char* name) const noexcept -> void* {
+                return std::string_view(name) == COM::kCreateAppLayerSymbol ? library.GetSymbol(name) : nullptr;
+            }
+        };
+        ExpectTrue(COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(MissingWitness {lib}) == nullptr);
+        if (!factory)
+            continue;
 
         // Direct by-value Result<IAppLayer*> return (no outResult pointer).
         const COM::Result<COM::IAppLayer*> created = factory(nullptr);
@@ -298,8 +304,7 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
         }
 
         // Direct by-value error return across the DSO boundary.
-        const COM::Result<COM::IAppLayer*> rejected =
-            factory(COM::InChain(UnrecognizedPluginExtension {}));
+        const COM::Result<COM::IAppLayer*> rejected = factory(COM::InChain(UnrecognizedPluginExtension {}));
         ExpectFalse(rejected.HasValue());
         if (!rejected.HasValue()) {
             ExpectTrue(rejected.error.Is(COM::Error::UnsupportedExtension));
@@ -311,10 +316,7 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     ExpectFalse(noSym.has_value());
     if (!noSym) {
         ExpectTrue(noSym.error().Is(AppError::PluginSymbolMissing));
-        ExpectEq(
-            noSym.error().ToError().Message(),
-            std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"}
-        );
+        ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"});
     }
 }
 } // namespace ZHLN::Test

@@ -8,6 +8,7 @@
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/Core/COM/Contract.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/COM/Types.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
@@ -129,6 +130,7 @@ static_assert(!CreateLayerTraits::isTemplateSpecialization);
 
 // Positive COM free-function ABI audit checks (including by-value Result<T>).
 using CreateEngineChainFn = COM::Result<COM::IEngine*> (*)(const COM::ChainInNode*) noexcept;
+static_assert(COM::EntryPointContract<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>() != 0);
 
 static_assert(
     COM::MangleFunction<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>() ==

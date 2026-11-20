@@ -7,6 +7,7 @@
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
+#include <Zahlen/Core/COM/Contract.hpp>
 #include <Zahlen/Core/COM/ItaniumMangle.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/SharedLibrary.hpp>
@@ -30,7 +31,7 @@ namespace ZHLN {
 namespace {
 
 struct BuiltinHostOptions {
-    uint32_t    frames  ZHLN_ANNOTATION(Description<"Close after this many completed frames (0: unlimited)"> {}) = 0;
+    uint32_t frames     ZHLN_ANNOTATION(Description<"Close after this many completed frames (0: unlimited)"> {})               = 0;
     std::string capture ZHLN_ANNOTATION(Description<"Capture a PNG after --frames completed frames (default: 1) and exit"> {}) = {};
 };
 
@@ -54,12 +55,11 @@ struct BuiltinHostOptions {
     return dirs;
 }
 
-[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary)
-    -> std::expected<bool, ErrorCode> {
+[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary) -> std::expected<bool, ErrorCode> {
     const char* const             rawEnv     = std::getenv("ZHLN_PLUGIN_PATH");
     const auto                    searchDirs = DefaultPluginSearchDirs();
     std::filesystem::path         resolvedPath;
-    const SharedLibraryOpenStatus status     = outLibrary.OpenPlugin(
+    const SharedLibraryOpenStatus status = outLibrary.OpenPlugin(
         spec,
         PluginSearchOptions {
             .envPath    = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {},
@@ -93,27 +93,29 @@ auto App::MakePluginSlot(COM::Ref<COM::IAppLayer> plugin) -> LayerSlot {
     slot.state = std::make_shared<Holder>(std::move(plugin));
     slot.start = [](void* state, COM::IEngine& engine) -> std::expected<void, ErrorCode> {
         const auto res = (*static_cast<Holder*>(state))->OnStart(&engine);
-        if (!res.HasValue()) return std::unexpected(res.error);
+        if (!res.HasValue())
+            return std::unexpected(res.error);
         return {};
     };
     slot.tick = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
         const auto res = (*static_cast<Holder*>(state))->OnTick(&engine, dt);
-        if (!res.HasValue()) return std::unexpected(res.error);
+        if (!res.HasValue())
+            return std::unexpected(res.error);
         return {};
     };
     slot.beforeRender = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
         const auto res = (*static_cast<Holder*>(state))->OnBeforeRender(&engine, dt);
-        if (!res.HasValue()) return std::unexpected(res.error);
+        if (!res.HasValue())
+            return std::unexpected(res.error);
         return {};
     };
     slot.afterTick = [](void* state, COM::IEngine& engine, float dt) -> std::expected<void, ErrorCode> {
         const auto res = (*static_cast<Holder*>(state))->OnAfterTick(&engine, dt);
-        if (!res.HasValue()) return std::unexpected(res.error);
+        if (!res.HasValue())
+            return std::unexpected(res.error);
         return {};
     };
-    slot.stop = [](void* state, COM::IEngine& engine) {
-        (*static_cast<Holder*>(state))->OnStop(&engine);
-    };
+    slot.stop = [](void* state, COM::IEngine& engine) { (*static_cast<Holder*>(state))->OnStop(&engine); };
     return slot;
 }
 
@@ -152,18 +154,22 @@ auto App::AddPlugin(COM::Ref<COM::IAppLayer> plugin) -> App& {
 }
 
 auto App::LoadPlugin(std::string_view spec, const COM::ChainInNode* config) -> App& {
-    _entries.push_back(LayerEntry {
-        .plugin   = CapturePluginRequest(spec, true, config),
-        .isPlugin = true,
-    });
+    _entries.push_back(
+        LayerEntry {
+            .plugin   = CapturePluginRequest(spec, true, config),
+            .isPlugin = true,
+        }
+    );
     return *this;
 }
 
 auto App::TryLoadPlugin(std::string_view spec, const COM::ChainInNode* config) -> App& {
-    _entries.push_back(LayerEntry {
-        .plugin   = CapturePluginRequest(spec, false, config),
-        .isPlugin = true,
-    });
+    _entries.push_back(
+        LayerEntry {
+            .plugin   = CapturePluginRequest(spec, false, config),
+            .isPlugin = true,
+        }
+    );
     return *this;
 }
 
@@ -182,18 +188,20 @@ auto App::RunFromCLI(EngineConfig config, std::span<char* const> args, const Upd
     std::vector<std::string> cliPlugins;
     ConfigCli                cli = _cli;
     cli.WithConfig(hostOptions);
-    cli.Add(CliFlag {
-        .key         = "--plugin",
-        .placeholder = "<name|path>",
-        .description = "Load a COM::IAppLayer shared library plugin (repeatable)",
-        .action      = [&cliPlugins](std::string_view value) -> std::expected<void, CommandLineError> {
-            if (value.empty()) {
-                return std::unexpected(CommandLineError::MissingValue);
-            }
-            cliPlugins.emplace_back(value);
-            return {};
-        },
-    });
+    cli.Add(
+        CliFlag {
+            .key         = "--plugin",
+            .placeholder = "<name|path>",
+            .description = "Load a COM::IAppLayer shared library plugin (repeatable)",
+            .action      = [&cliPlugins](std::string_view value) -> std::expected<void, CommandLineError> {
+                if (value.empty()) {
+                    return std::unexpected(CommandLineError::MissingValue);
+                }
+                cliPlugins.emplace_back(value);
+                return {};
+            },
+        }
+    );
     CliParseConfig parseCfg {.programTitle = std::string_view(config.appName)};
     auto           parsed = ParseEngineConfig(args, config, cli.Flags(), parseCfg);
     if (!parsed) {
@@ -230,15 +238,14 @@ auto App::RunConfigured(
     // instances) and the engine so Release() executes while plugin text is
     // still mapped, and dlclose runs cleanly in reverse order on return.
     std::vector<SharedLibrary> pluginLibraries;
-    auto closePluginLibraries = [&]() noexcept {
+    auto                       closePluginLibraries = [&]() noexcept {
         while (!pluginLibraries.empty()) {
             pluginLibraries.back().Close();
             pluginLibraries.pop_back();
         }
     };
 
-    auto instantiatePlugin = [&](const PluginRequest& req, std::vector<LayerSlot>& outSlots)
-        -> std::expected<void, ErrorCode> {
+    auto instantiatePlugin = [&](const PluginRequest& req, std::vector<LayerSlot>& outSlots) -> std::expected<void, ErrorCode> {
         if (req.invalidChain) {
             return std::unexpected(COM::Error::DuplicateExtension);
         }
@@ -250,8 +257,12 @@ auto App::RunConfigured(
         if (!*opened) {
             return {};
         }
-        const auto factory = COM::ResolveSymbol<&COM::CreateAppLayer>(library);
+        const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(library);
         if (factory == nullptr) {
+            if (COM::ResolveSymbol<&COM::CreateAppLayer>(library) != nullptr) {
+                LogError("[App] Plugin '{}' has a missing or incompatible factory ABI witness. Rebuild the plugin.", req.spec);
+                return std::unexpected(AppError::PluginAbiMismatch);
+            }
             LogError("[App] Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerSymbol);
             return std::unexpected(AppError::PluginSymbolMissing);
         }
@@ -305,17 +316,20 @@ auto App::RunConfigured(
         }
     }
 
-    auto created = COM::CreateEngineRef(COM::InChain(
-        COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
-        COM::WindowConfig {
-            .width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless
-        },
-        COM::RenderConfig {
-            .validationMode = config.validationMode, .enableMeshShading = config.enableMeshShading, .initialPipelineBinary = config.initialPipelineBinaryData
-        },
-        config.physics,
-        COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
-    ));
+    auto created = COM::CreateEngineRef(
+        COM::InChain(
+            COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
+            COM::WindowConfig {
+                .width = config.width, .height = config.height, .fullscreen = config.fullscreen, .vsync = config.vsync, .headless = config.headless
+            },
+            COM::RenderConfig {
+                .validationMode        = config.validationMode,
+                .enableMeshShading     = config.enableMeshShading,
+                .initialPipelineBinary = config.initialPipelineBinaryData
+            },
+            config.physics, COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
+        )
+    );
     if (!created) {
         LogError("[App] engine creation failed: {}", created.error());
         layers.clear();
@@ -332,9 +346,9 @@ auto App::RunConfigured(
         return std::unexpected(COM::Error::UnsupportedExtension);
     }
 
-    Screenshot::CaptureOutcome               captureOutcome;
-    std::optional<Screenshot::CaptureLayer>  builtinCapture;
-    const uint32_t                           captureFrame = maxFrames > 0 ? maxFrames : 1u;
+    Screenshot::CaptureOutcome              captureOutcome;
+    std::optional<Screenshot::CaptureLayer> builtinCapture;
+    const uint32_t                          captureFrame = maxFrames > 0 ? maxFrames : 1u;
     if (!capturePath.empty()) {
         builtinCapture.emplace(std::string(capturePath), captureFrame, captureOutcome);
         builtinCapture->Start(*engine.Get());
@@ -420,7 +434,7 @@ auto App::RunConfigured(
             }
         }
         if (frameError || !engine->IsRunning()) {
-            (void)pipeline->CancelFrame();
+            (void) pipeline->CancelFrame();
             break;
         }
         if (auto finished = pipeline->FinishFrame(); !finished.HasValue()) {
@@ -478,13 +492,8 @@ auto App::RunConfigured(
     }
     if (builtinCapture) {
         if (captureOutcome.Succeeded()) {
-            Log(
-                "[Capture] Wrote {}x{} PNG '{}' (mean luma {}).",
-                captureOutcome.extent.width,
-                captureOutcome.extent.height,
-                capturePath,
-                captureOutcome.metrics.meanLuma
-            );
+            Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).", captureOutcome.extent.width, captureOutcome.extent.height, capturePath,
+                captureOutcome.metrics.meanLuma);
         } else if (captureOutcome.status == Screenshot::CaptureStatus::ReadFailed) {
             LogError("[Capture] Failed to capture frame: {}", captureOutcome.error);
             return std::unexpected(captureOutcome.error);

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <Zahlen/Core/Reflection/Core.hpp>
+#include <Zahlen/Core/Reflection/Callable.hpp>
 #include <cstdint>
 #include <string>
 #include <type_traits>
@@ -60,6 +61,18 @@ consteval void AppendCanonical(std::string& out) {
         else if constexpr (std::meta::is_const_type(info)) { out += "C{"; AppendCanonical<std::meta::remove_const(info)>(out); out += '}'; return; }
         else if constexpr (std::meta::is_volatile_type(info)) { out += "Q{"; AppendCanonical<std::meta::remove_volatile(info)>(out); out += '}'; return; }
         else if constexpr (std::meta::is_pointer_type(info)) { out += "P{"; AppendCanonical<std::meta::remove_pointer(info)>(out); out += '}'; return; }
+        else if constexpr (std::meta::is_function_type(info)) {
+            using Traits = FunctionTypeTraits<typename[:info:]>;
+            out += Traits::isNoexcept ? "FN{" : "F{";
+            using Return = typename Traits::ReturnType;
+            AppendCanonical<^^Return>(out);
+            [&]<typename... Args>(std::type_identity<std::tuple<Args...>>) consteval {
+                ((out += ';', AppendCanonical<^^Args>(out)), ...);
+            }(std::type_identity<typename Traits::ParameterTypes>{});
+            if constexpr (Traits::isCVariadic) out += ";...";
+            out += '}';
+            return;
+        }
         else if constexpr (std::meta::is_array_type(info)) {
             out += "A{";
             if constexpr (std::meta::is_bounded_array_type(info)) AppendUnsigned(out, std::meta::extent(info));

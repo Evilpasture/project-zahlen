@@ -53,15 +53,21 @@ C++ layers registered with `.AddLayer(layer)` may implement any subset of
 returning `void` or `std::expected<void, ErrorCode>`.
 
 Dynamically loaded plugins (`<Zahlen/COM/IPlugin.hpp>`) implement
-`ZHLN::COM::IAppLayer` and export a single COM-audited C++ factory resolved via
-`COM::MangleFunction<&COM::CreateAppLayer>()` (`COM::kCreateAppLayerSymbol`
-/ `COM::ResolveSymbol<&COM::CreateAppLayer>(library)`):
+`ZHLN::COM::IAppLayer` and define the ordinary, by-value `CreateAppLayer`
+factory declared in that header. In the same source file, include
+`<Zahlen/Core/COM/Contract.hpp>` and export the factory's witness:
 
 ```cpp
-namespace ZHLN::COM {
-ZHLN_EXPORT Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
-}
+template <>
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
 ```
+
+The host uses `COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(library)`.
+This checks the witness by name (it never calls it) before resolving the
+factory. The witness name includes the factory signature and the fingerprint
+of its wire types and exposed interfaces. The factory's own symbol and
+by-value calling convention do not change. Older plugins without a matching
+witness fail with `AppError::PluginAbiMismatch` and must be rebuilt.
 
 - `app.AddPlugin(COM::Ref<COM::IAppLayer>)` attaches an in-process COM layer.
 - `app.LoadPlugin("freecam", COM::InChain(FreeCam::Component{...}))` loads a

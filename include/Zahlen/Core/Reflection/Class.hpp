@@ -167,6 +167,31 @@ constexpr void ForEachVirtualMethodSignature(F&& f) {
     });
 }
 
+// Enumerate declared field types (including private fields), without requiring
+// an instance or exposing reflection handles to the caller.
+template <typename T, typename F>
+consteval void ForEachDeclaredFieldType(F&& f) {
+    constexpr auto members = std::define_static_array(
+        std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()));
+    [:Expand(members):] >> [&]<auto Member>() consteval {
+        using Field = typename[:std::meta::dealias(std::meta::type_of(Member)):];
+        f.template operator()<Field>(std::meta::identifier_of(Member));
+    };
+}
+
+// As above for virtual methods. The additional type is the declared function
+// type, retaining qualifiers that the portable MethodSignature does not model.
+template <typename T, typename F>
+consteval void ForEachNamedVirtualMethodSignature(F&& f) {
+    ForEachVirtualMemberFunction<T>([&]<auto Member>() consteval {
+        if constexpr (!std::meta::is_special_member_function(Member)) {
+            using Signature = typename[:TemplatedDetail::SignatureOf<MethodSignature>(Member):];
+            using DeclaredType = typename[:std::meta::type_of(Member):];
+            f.template operator()<Signature, DeclaredType>(std::meta::identifier_of(Member));
+        }
+    });
+}
+
 template <typename T>
 consteval auto BaseClasses() {
     return std::meta::bases_of(^^std::remove_cvref_t<T>, std::meta::access_context::current());

@@ -5,6 +5,7 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/COM/IPlugin.hpp>
+#include <Zahlen/Core/COM/Contract.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <new>
@@ -87,3 +88,6 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 }
 
 } // namespace ZHLN::COM
+
+template <>
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}

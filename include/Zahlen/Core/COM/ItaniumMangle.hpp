@@ -575,11 +575,8 @@ consteval void EncodeType(ItaniumMangler& m) {
     }
 }
 
-/*
- * TODO(Evilpasture): Return types aren’t in the mangled name for non-template functions. If the .so changes int to int64_t as the return, the symbol still
- * resolves and the call is silently wrong. So the “fails to resolve instead of being called with the wrong ABI” guarantee holds for parameters but not returns.
- * This is probably the biggest hole.
- */
+// Plain symbol lookup cannot verify a non-template function's return type.
+// Use ResolveVerifiedSymbol (Contract.hpp) for a contract-checked DSO boundary.
 
 // Even though non-template function symbols omit the return type from
 // <bare-function-type>, compiler ABI tags on a return type (e.g. libstdc++'s
