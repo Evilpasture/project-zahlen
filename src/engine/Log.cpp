@@ -59,13 +59,13 @@ auto GetErrorRegistry() noexcept -> ErrorRegistryState& {
 } // namespace
 
 void TemplatedDetail::RegisterEnumCategory(
-    const uint32_t        hash,
+    const uint32_t         hash,
     const std::string_view categoryName,
-    const EnumErrorEntry* entries,
-    const std::size_t     entryCount
+    const EnumErrorEntry*  entries,
+    const std::size_t      entryCount
 ) noexcept {
-    auto&                   registry = GetErrorRegistry();
-    const std::scoped_lock  lock(registry.mutex);
+    auto&                  registry = GetErrorRegistry();
+    const std::scoped_lock lock(registry.mutex);
     for (const auto& existing: registry.records) {
         if (existing->hash == hash) {
             return;
@@ -76,17 +76,18 @@ void TemplatedDetail::RegisterEnumCategory(
     record->categoryName = std::string(categoryName);
     record->entries.reserve(entryCount);
     for (std::size_t i = 0; i < entryCount; ++i) {
-        record->entries.push_back(OwnedEnumEntry {
-            .value   = entries[i].value,
-            .name    = std::string(entries[i].name),
-            .message = std::string(entries[i].message),
-        });
+        record->entries.push_back(
+            OwnedEnumEntry {
+                .value   = entries[i].value,
+                .name    = std::string(entries[i].name),
+                .message = std::string(entries[i].message),
+            }
+        );
     }
     registry.records.push_back(std::move(record));
 }
 
-auto TemplatedDetail::LookupErrorStrings(const uint32_t hash, const uint32_t value) noexcept
-    -> TemplatedDetail::ResolvedErrorStrings {
+auto TemplatedDetail::LookupErrorStrings(const uint32_t hash, const uint32_t value) noexcept -> TemplatedDetail::ResolvedErrorStrings {
     auto&                  registry = GetErrorRegistry();
     const std::scoped_lock lock(registry.mutex);
     for (const auto& record: registry.records) {
@@ -331,21 +332,6 @@ void InternalWriteLog(LogChannel channel, LogSeverity severity, const char* file
     InternalWriteLog(LogChannel::StdErr, LogSeverity::Error, file, line, message);
     std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
     std::abort();
-}
-
-void LogManual(std::string_view file, int line, std::string_view message, const char* color) {
-    if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
-        return;
-    }
-
-    uint64_t    fid      = GetCurrentFiberID();
-    std::string fiberTag = (fid == 0) ? "Thread" : (fid == 1) ? "Main" : std::format("{:#x}", fid);
-
-    if (color[0] != '\0') {
-        std::println(stderr, "{}[{}:{}] [Fiber:{}] [LUA] {}{}", color, file, line, fiberTag, message, Color::Reset);
-    } else {
-        std::println(stderr, "[{}:{}] [Fiber:{}] [LUA] {}", file, line, fiberTag, message);
-    }
 }
 
 } // namespace ZHLN

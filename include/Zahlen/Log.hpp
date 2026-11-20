@@ -148,7 +148,24 @@ inline void Assert(bool condition, std::source_location loc = std::source_locati
     }
 }
 
-void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
+template <std::ranges::contiguous_range A, std::ranges::contiguous_range B, typename... Args>
+    requires std::ranges::sized_range<A> && std::ranges::sized_range<B>
+void AssertNoAliasing(const A& src, const B& dst, LogContext ctx, const Args&... args) {
+    // Half-open byte ranges [a, a+n) and [b, b+m) overlap iff a < b+m && b < a+n.
+    const bool overlap = [](std::span<const std::byte> a, std::span<const std::byte> b) {
+        const std::less<> less {}; // total order even for unrelated pointers
+        return a.empty() || b.empty() ? false : less(a.data(), b.data() + b.size()) && less(b.data(), a.data() + a.size());
+    }(std::as_bytes(std::span {std::ranges::data(src), std::ranges::size(src)}), std::as_bytes(std::span {std::ranges::data(dst), std::ranges::size(dst)}));
+
+    if constexpr (isDev) {
+        if (overlap) [[unlikely]] {
+            const std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
+            InternalPanic(ctx.loc.file_name(), ctx.loc.line(), formatted);
+        }
+    } else {
+        [[assume(!overlap)]];
+    }
+}
 
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
 auto JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) noexcept -> bool;
