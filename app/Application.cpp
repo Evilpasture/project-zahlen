@@ -432,52 +432,93 @@ auto App::RunConfigured(
         return {};
     };
 
-    // Load registry-managed plugins in dependency order first.
-    for (const auto& entry: loadOrder) {
-        bool matched = false;
-        for (size_t i = 0; i < registryReqs.size(); ++i) {
-            if (!registryReqs[i].spec.empty() && registryReqs[i].spec == entry.name) {
-                PendingPlugin pp {
-                    .req        = std::move(registryReqs[i]),
-                    .libraryStem = entry.libraryStem,
-                    .hotReload  = entry.hotReload,
-                };
-                registryReqs[i] = PluginRequest {}; // consume
-                if (auto loaded = loadOne(pp); !loaded) {
-                    return std::unexpected(loaded.error());
-                }
-                matched = true;
-                break;
-            }
-        }
-        if (!matched) {
-            LogError("[App] Resolved plugin '{}' has no load request.", entry.name);
-        }
-    }
-    // Load any registry-managed requests that were not resolved, then direct
-    // path specs and unknown names, in their original order.
-    for (const auto& req: registryReqs) {
-        if (req.spec.empty()) continue;
-        PendingPlugin pp {.req = req, .libraryStem = {}, .hotReload = false};
-        if (auto loaded = loadOne(pp); !loaded) {
-            return std::unexpected(loaded.error());
-        }
-    }
-    for (const auto& req: directReqs) {
-        PendingPlugin pp {.req = req, .libraryStem = {}, .hotReload = false};
-        if (auto loaded = loadOne(pp); !loaded) {
-            return std::unexpected(loaded.error());
-        }
+    // A plugin name → its position in `loadOrder`, for dependency-aware
+    // loading that preserves `_entries` order for non-plugin layers.
+    std::unordered_map<std::string, size_t> loadOrderIndex;
+    loadOrderIndex.reserve(loadOrder.size());
+    for (size_t i = 0; i < loadOrder.size(); ++i) {
+        loadOrderIndex.emplace(loadOrder[i].name, i);
     }
 
-    // Non-plugin layers (built-in layers added via AddLayer) start after the
-    // dependency-ordered plugins, so plugins can provide capabilities built-in
-    // layers consume.
+    std::unordered_set<std::string> loadedNames;
+    loadedNames.reserve(loadOrder.size() + directReqs.size());
+
+    auto loadResolved = [&](std::string_view name) -> std::expected<void, ErrorCode> {
+        auto it = loadOrderIndex.find(std::string(name));
+        if (it == loadOrderIndex.end()) {
+            return std::unexpected(AppError::PluginNotFound);
+        }
+        const size_t end = it->second;
+        for (size_t i = 0; i <= end; ++i) {
+            if (!loadedNames.insert(loadOrder[i].name).second) {
+                continue; // already loaded by an earlier request
+            }
+            PendingPlugin pp {
+                .req        = PluginRequest {.spec = std::string(loadOrder[i].name), .required = true},
+                .libraryStem = loadOrder[i].libraryStem,
+                .hotReload  = loadOrder[i].hotReload,
+            };
+            if (auto loaded = loadOne(pp); !loaded) {
+                return loaded;
+            }
+        }
+        return {};
+    };
+
+    // Process `_entries` in order so non-plugin layers keep their position
+    // relative to plugins. Registry plugins load their required dependencies
+    // (from `loadOrder`) before themselves.
     for (const auto& entry: _entries) {
         if (!entry.isPlugin) {
             layers.push_back(entry.slot);
+            continue;
         }
+        if (loadedNames.contains(entry.plugin.spec)) {
+            continue; // already loaded as a dependency of an earlier plugin
+        }
+        if (isKnown(entry.plugin.spec)) {
+            if (auto loaded = loadResolved(entry.plugin.spec); !loaded) {
+                return std::unexpected(loaded.error());
+            }
+            continue;
+        }
+        // Direct path spec or unknown name: load directly as before.
+        PendingPlugin pp {.req = entry.plugin, .libraryStem = {}, .hotReload = false};
+        if (auto loaded = loadOne(pp); !loaded) {
+            return std::unexpected(loaded.error());
+        }
+        loadedNames.insert(entry.plugin.spec);
     }
+
+    // Load any resolved registry plugins not requested by `_entries` (auto-
+    // pulled required dependencies), then direct path specs and unknown names
+    // from `cliPlugins`, in their original order.
+    for (const auto& entry: loadOrder) {
+        if (loadedNames.contains(entry.name)) {
+            continue;
+        }
+        PendingPlugin pp {
+            .req        = PluginRequest {.spec = entry.name, .required = true},
+            .libraryStem = entry.libraryStem,
+            .hotReload  = entry.hotReload,
+        };
+        if (auto loaded = loadOne(pp); !loaded) {
+            return std::unexpected(loaded.error());
+        }
+        loadedNames.insert(entry.name);
+    }
+    for (const auto& req: directReqs) {
+        if (loadedNames.contains(req.spec)) {
+            continue;
+        }
+        PendingPlugin pp {.req = req, .libraryStem = {}, .hotReload = false};
+        if (auto loaded = loadOne(pp); !loaded) {
+            return std::unexpected(loaded.error());
+        }
+        loadedNames.insert(req.spec);
+    }
+
+    // Non-plugin layers were already pushed above in `_entries` order.
 
     auto created = COM::CreateEngineRef(
         COM::InChain(
