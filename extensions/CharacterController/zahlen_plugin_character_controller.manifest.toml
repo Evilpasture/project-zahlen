@@ -1,0 +1,7 @@
+[plugin]
+name        = "character_controller"
+library     = "zahlen_plugin_character_controller"
+api         = 1
+description = "Host-driven character locomotion layer"
+auto_load   = false
+hot_reload  = true

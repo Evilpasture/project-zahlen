@@ -35,3 +35,15 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+# The editor is UI-dependent: only build its loadable plugin when the UI
+# extension is present, mirroring how app/CMakeLists.txt guards zahlen_ui_editor.
+if(COMMAND zahlen_add_plugin AND TARGET zahlen_ui)
+    zahlen_add_plugin(zahlen_plugin_editor editor EditorPlugin.cpp)
+    target_link_libraries(zahlen_plugin_editor PRIVATE zahlen_editor)
+    target_include_directories(zahlen_plugin_editor PUBLIC
+        ${PROJECT_SOURCE_DIR}/extensions)
+endif()
+
+configure_file(zahlen_plugin_editor.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_editor.manifest.toml COPYONLY)

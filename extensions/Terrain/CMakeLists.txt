@@ -9,3 +9,13 @@ target_include_directories(zahlen_terrain PUBLIC ${PROJECT_SOURCE_DIR}/extension
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_terrain)
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_terrain terrain TerrainPlugin.cpp)
+    target_link_libraries(zahlen_plugin_terrain PRIVATE zahlen_terrain)
+    target_include_directories(zahlen_plugin_terrain PUBLIC
+        ${PROJECT_SOURCE_DIR}/extensions)
+endif()
+
+configure_file(zahlen_plugin_terrain.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_terrain.manifest.toml COPYONLY)

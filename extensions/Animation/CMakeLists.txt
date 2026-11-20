@@ -72,3 +72,13 @@ target_link_libraries(zahlen_procedural_animation PUBLIC
     zahlen_character_controller
 )
 _zhln_configure_animation_target(zahlen_procedural_animation)
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_animation animation AnimationPlugin.cpp)
+    target_link_libraries(zahlen_plugin_animation PRIVATE zahlen_animation)
+    target_include_directories(zahlen_plugin_animation PUBLIC
+        ${PROJECT_SOURCE_DIR}/extensions)
+endif()
+
+configure_file(zahlen_plugin_animation.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_animation.manifest.toml COPYONLY)

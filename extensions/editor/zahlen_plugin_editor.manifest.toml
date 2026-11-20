@@ -1,0 +1,7 @@
+[plugin]
+name        = "editor"
+library     = "zahlen_plugin_editor"
+api         = 1
+description = "World-editor Hierarchy and Inspector panels"
+auto_load   = false
+hot_reload  = true

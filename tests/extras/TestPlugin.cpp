@@ -17,6 +17,10 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PluginManifest.hpp>
+#include <Zahlen/PluginManifestGraph.hpp>
+#include <Zahlen/PluginManifestRegistry.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -318,5 +322,146 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
         ExpectTrue(noSym.error().Is(AppError::PluginSymbolMissing));
         ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"});
     }
+}
+
+void test_plugin_manifest_parsing() {
+    using ZHLN::Plugin::ParsePluginManifest;
+
+    const std::string valid = R"toml([plugin]
+name        = "animation"
+library     = "zahlen_plugin_animation"
+api         = 1
+description = "Skeletal animation host layer"
+requires    = ["character_controller", "camera"]
+optional_requires = ["freecam"]
+auto_load   = false
+hot_reload  = true
+)toml";
+    auto parsed = ParsePluginManifest(valid);
+    ExpectTrue(parsed.has_value());
+    if (!parsed)
+        return;
+    ExpectEq(parsed->name, std::string("animation"));
+    ExpectEq(parsed->library, std::string("zahlen_plugin_animation"));
+    ExpectEq(parsed->description, std::string("Skeletal animation host layer"));
+    ExpectEq(parsed->required, (std::vector<std::string> {"character_controller", "camera"}));
+    ExpectEq(parsed->optional, (std::vector<std::string> {"freecam"}));
+    ExpectEq(parsed->api, uint32_t {1});
+    ExpectFalse(parsed->autoLoad);
+    ExpectTrue(parsed->hotReload);
+
+    ExpectFalse(ParsePluginManifest("[plugin]\nlibrary = \"x\"\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nname = \"x\"\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nbogus = 1\n").has_value());
+    ExpectFalse(ParsePluginManifest("[other]\nname = \"x\"\nlibrary = \"y\"\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nname = \"x\"\nlibrary = \"x\"\nrequires = [\"x\"]\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nname = \"x\"\nlibrary = \"x\"\napi = 99\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nname = \"x\"\nlibrary = \"x\"\nname = \"y\"\n").has_value());
+    ExpectFalse(ParsePluginManifest("[plugin]\nname = \"x\"\nlibrary = \"x\"\nrequires = [\"a\", \"a\"]\n").has_value());
+    ExpectTrue(ZHLN::Plugin::IsValidPluginName("animation"));
+    ExpectFalse(ZHLN::Plugin::IsValidPluginName("Animation"));
+    ExpectFalse(ZHLN::Plugin::IsValidPluginName("-animation"));
+    ExpectFalse(ZHLN::Plugin::IsValidPluginName("animation-"));
+    ExpectFalse(ZHLN::Plugin::IsValidPluginName(""));
+}
+
+void test_plugin_graph_resolves_required_dependency_order() {
+    using ZHLN::Plugin::PluginManifest;
+    using ZHLN::Plugin::PluginManifestGraph;
+
+    auto manifest = [](std::string name, std::vector<std::string> deps = {}) {
+        PluginManifest m;
+        m.name     = std::move(name);
+        m.library  = "zahlen_plugin_" + m.name;
+        m.required = std::move(deps);
+        return m;
+    };
+
+    PluginManifestGraph graph;
+    ExpectTrue(graph.Add(manifest("c", {"b"})));
+    ExpectTrue(graph.Add(manifest("a")));
+    ExpectTrue(graph.Add(manifest("b", {"a"})));
+    ExpectTrue(graph.Add(manifest("d")));
+    ExpectTrue(graph.Finalize(std::vector<std::string> {"c", "d"}));
+
+    const auto order = graph.Order();
+    ExpectEq(order.size(), size_t {4});
+    std::vector<std::string> names;
+    names.reserve(order.size());
+    for (const auto& entry: order)
+        names.push_back(entry.name);
+    ExpectEq(names, (std::vector<std::string> {"a", "b", "c", "d"}));
+
+    bool cSeesB = false;
+    for (const auto& entry: order) {
+        if (entry.name == "c") {
+            cSeesB = std::ranges::find(entry.before, std::string("b")) != entry.before.end();
+        }
+    }
+    ExpectTrue(cSeesB);
+
+    PluginManifestGraph cyclic;
+    ExpectTrue(cyclic.Add(manifest("x", {"y"})));
+    ExpectTrue(cyclic.Add(manifest("y", {"x"})));
+    ExpectFalse(cyclic.Finalize(std::vector<std::string> {"x", "y"}));
+
+    PluginManifestGraph missing;
+    ExpectTrue(missing.Add(manifest("a")));
+    ExpectFalse(missing.Finalize(std::vector<std::string> {"a", "no_such_plugin"}));
+}
+
+void test_plugin_registry_orders_required_dependencies() {
+    using ZHLN::Plugin::PluginManifestRegistry;
+
+    TempDir tmp;
+
+    auto writePlugin = [&](std::string name, std::vector<std::string> deps = {}) {
+        const std::filesystem::path manifestPath =
+            tmp.Path() / ("zahlen_plugin_" + name + std::string(ZHLN::Plugin::kManifestSuffix));
+        std::ofstream out(manifestPath);
+        out << "[plugin]\n";
+        out << "name = \"" << name << "\"\n";
+        out << "library = \"zahlen_plugin_" << name << "\"\n";
+        out << "api = 1\n";
+        if (!deps.empty()) {
+            out << "requires = [";
+            for (size_t i = 0; i < deps.size(); ++i) {
+                if (i != 0)
+                    out << ", ";
+                out << "\"" << deps[i] << "\"";
+            }
+            out << "]\n";
+        }
+        out << "auto_load = false\n";
+        out << "hot_reload = true\n";
+        const std::filesystem::path soPath =
+            tmp.Path() / ("libzahlen_plugin_" + name + std::string(".so"));
+        std::ofstream soOut(soPath, std::ios::binary);
+        soOut << "dummy";
+    };
+
+    writePlugin("b");
+    writePlugin("a", {"b"});
+    writePlugin("c");
+
+    PluginManifestRegistry registry;
+    const auto             discovered = registry.Discover({tmp.Path()});
+    ExpectTrue(discovered.has_value());
+    if (!discovered)
+        return;
+
+    const auto resolved = registry.ResolveOrder(*discovered, std::vector<std::string> {"a", "c"});
+    ExpectTrue(resolved.has_value());
+    if (!resolved)
+        return;
+    ExpectEq(resolved->size(), size_t {3});
+    ExpectEq((*resolved)[0].name, std::string("b"));
+    ExpectEq((*resolved)[1].name, std::string("a"));
+    ExpectEq((*resolved)[2].name, std::string("c"));
+    ExpectEq((*resolved)[1].libraryStem, std::string("zahlen_plugin_a"));
+    ExpectTrue((*resolved)[1].hotReload);
+
+    const auto unknown = registry.ResolveOrder(*discovered, std::vector<std::string> {"no_such_plugin"});
+    ExpectFalse(unknown.has_value());
 }
 } // namespace ZHLN::Test

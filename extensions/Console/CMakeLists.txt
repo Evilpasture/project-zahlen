@@ -57,3 +57,13 @@ if(MINGW)
         dbghelp
     )
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_console console ConsolePlugin.cpp)
+    target_link_libraries(zahlen_plugin_console PRIVATE zahlen_console)
+    target_include_directories(zahlen_plugin_console PUBLIC
+        ${PROJECT_SOURCE_DIR}/extensions)
+endif()
+
+configure_file(zahlen_plugin_console.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_console.manifest.toml COPYONLY)

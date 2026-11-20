@@ -14,6 +14,7 @@
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PluginManifestRegistry.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -23,6 +24,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -245,12 +247,19 @@ auto App::RunConfigured(
         }
     };
 
-    auto instantiatePlugin = [&](const PluginRequest& req, std::vector<LayerSlot>& outSlots) -> std::expected<void, ErrorCode> {
+    // `libraryStemOverride` names a manifest-resolved library to load; when empty
+    // `req.spec` is used directly (a file path or a manifest-less plugin name).
+    auto instantiatePlugin = [&](const PluginRequest& req, std::string_view libraryStemOverride,
+                                 std::vector<LayerSlot>& outSlots) -> std::expected<void, ErrorCode> {
         if (req.invalidChain) {
             return std::unexpected(COM::Error::DuplicateExtension);
         }
         SharedLibrary library;
-        const auto    opened = OpenPluginLibrary(req.spec, req.required, library);
+        const auto    opened = OpenPluginLibrary(
+            libraryStemOverride.empty() ? req.spec : libraryStemOverride,
+            req.required,
+            library
+        );
         if (!opened) {
             return std::unexpected(opened.error());
         }
@@ -294,25 +303,179 @@ auto App::RunConfigured(
     // Keep the Engine lifetime inside the shared process/task scope.
     ProcessScope process;
 
-    std::vector<LayerSlot> layers;
-    layers.reserve(_entries.size() + cliPlugins.size());
+    // --- Plugin discovery, dependency ordering and loading ------------------
+    // Manifests declare start-order constraints (requires) and whether the
+    // host may hot-reload a plugin in a live process. Registry-managed plugins
+    // are loaded in dependency order; explicit path specs and manifest-less or
+    // unknown names load directly as before.
+    using ZHLN::Plugin::DiscoveredPlugin;
+    using ZHLN::Plugin::LoadEntry;
+    using ZHLN::Plugin::PluginManifestRegistry;
+
+    auto IsPathSpec = [](std::string_view spec) -> bool {
+        return spec.find_first_of("/\\") != std::string_view::npos;
+    };
+
+    PluginManifestRegistry registry;
+    const auto             discovered = registry.Discover(DefaultPluginSearchDirs());
+    if (!discovered) {
+        LogError("[App] Plugin discovery failed: {}", discovered.error().detail);
+        return std::unexpected(AppError::PluginLoadFailed);
+    }
+    const std::vector<DiscoveredPlugin>& discoveredPlugins = *discovered;
+
+    struct PendingPlugin {
+        PluginRequest req;
+        std::string   libraryStem; // empty ⇒ load req.spec directly
+        bool          hotReload    = false;
+    };
+
+    std::vector<std::string>     registryNames;
+    std::vector<PluginRequest>   registryReqs;
+    std::vector<PluginRequest>   directReqs;
     for (const auto& entry: _entries) {
-        if (!entry.isPlugin) {
-            layers.push_back(entry.slot);
-            continue;
-        }
-        if (auto loaded = instantiatePlugin(entry.plugin, layers); !loaded) {
-            layers.clear();
-            closePluginLibraries();
-            return std::unexpected(loaded.error());
+        if (!entry.isPlugin) continue;
+        if (IsPathSpec(entry.plugin.spec)) {
+            directReqs.push_back(entry.plugin);
+        } else {
+            registryNames.push_back(entry.plugin.spec);
+            registryReqs.push_back(entry.plugin);
         }
     }
     for (const auto& spec: cliPlugins) {
-        const PluginRequest req {.spec = spec, .required = true};
-        if (auto loaded = instantiatePlugin(req, layers); !loaded) {
-            layers.clear();
-            closePluginLibraries();
+        PluginRequest req {.spec = spec, .required = true};
+        if (IsPathSpec(spec)) {
+            directReqs.push_back(std::move(req));
+        } else {
+            registryNames.push_back(spec);
+            registryReqs.push_back(req);
+        }
+    }
+
+    // A manifest-less or otherwise unknown name is not routed through the
+    // registry: it loads directly by spec so a missing plugin still reports
+    // PluginNotFound exactly as before this change.
+    auto isKnown = [&](std::string_view name) -> bool {
+        for (const auto& plugin: discoveredPlugins) {
+            if (plugin.name == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::vector<std::string>     knownNames;
+    std::vector<PluginRequest>   knownReqs;
+    for (size_t i = 0; i < registryNames.size(); ++i) {
+        if (isKnown(registryNames[i])) {
+            knownNames.push_back(registryNames[i]);
+            knownReqs.push_back(std::move(registryReqs[i]));
+        } else {
+            directReqs.push_back(std::move(registryReqs[i]));
+        }
+        registryReqs[i] = PluginRequest {};
+    }
+    registryNames = std::move(knownNames);
+    registryReqs  = std::move(knownReqs);
+
+    // Resolve the registry-managed names into dependency order. A requested
+    // name pulls in its required dependencies automatically; a dependency
+    // cycle is a startup error.
+    std::vector<LoadEntry> loadOrder;
+    if (!registryNames.empty()) {
+        auto resolved = registry.ResolveOrder(discoveredPlugins, std::move(registryNames));
+        if (!resolved) {
+            LogError("[App] Plugin order resolution failed: {}", resolved.error().detail);
+            return std::unexpected(AppError::PluginLoadFailed);
+        }
+        loadOrder = *resolved;
+    }
+
+    // Manifest path per library stem, for hot-reload change detection.
+    std::unordered_map<std::string, std::filesystem::path> manifestPathByStem;
+    for (const auto& plugin: discoveredPlugins) {
+        if (plugin.hasManifest && !plugin.manifestPath.empty()) {
+            manifestPathByStem.emplace(plugin.libraryStem, plugin.manifestPath);
+        }
+    }
+
+    struct HotReloadPlugin {
+        std::string                        libraryStem;
+        std::filesystem::path              manifestPath;
+        std::filesystem::file_time_type    lastWrite;
+        size_t                             layerIndex;
+    };
+    std::vector<LayerSlot> layers;
+    layers.reserve(_entries.size() + cliPlugins.size());
+
+    std::vector<HotReloadPlugin> hotReloadPlugins;
+
+    auto loadOne = [&](const PendingPlugin& pp) -> std::expected<void, ErrorCode> {
+        if (auto loaded = instantiatePlugin(pp.req, pp.libraryStem, layers); !loaded) {
+            return loaded;
+        }
+        if (pp.hotReload && !pp.libraryStem.empty()) {
+            std::error_code ec;
+            auto            it = manifestPathByStem.find(pp.libraryStem);
+            if (it != manifestPathByStem.end()) {
+                std::error_code mtimeEc;
+                const auto      mtime = std::filesystem::last_write_time(it->second, mtimeEc);
+                if (!mtimeEc) {
+                    hotReloadPlugins.push_back(HotReloadPlugin {
+                        .libraryStem = pp.libraryStem,
+                        .manifestPath = it->second,
+                        .lastWrite    = mtime,
+                        .layerIndex   = layers.size() - 1,
+                    });
+                }
+            }
+        }
+        return {};
+    };
+
+    // Load registry-managed plugins in dependency order first.
+    for (const auto& entry: loadOrder) {
+        bool matched = false;
+        for (size_t i = 0; i < registryReqs.size(); ++i) {
+            if (!registryReqs[i].spec.empty() && registryReqs[i].spec == entry.name) {
+                PendingPlugin pp {
+                    .req        = std::move(registryReqs[i]),
+                    .libraryStem = entry.libraryStem,
+                    .hotReload  = entry.hotReload,
+                };
+                registryReqs[i] = PluginRequest {}; // consume
+                if (auto loaded = loadOne(pp); !loaded) {
+                    return std::unexpected(loaded.error());
+                }
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            LogError("[App] Resolved plugin '{}' has no load request.", entry.name);
+        }
+    }
+    // Load any registry-managed requests that were not resolved, then direct
+    // path specs and unknown names, in their original order.
+    for (const auto& req: registryReqs) {
+        if (req.spec.empty()) continue;
+        PendingPlugin pp {.req = req, .libraryStem = {}, .hotReload = false};
+        if (auto loaded = loadOne(pp); !loaded) {
             return std::unexpected(loaded.error());
+        }
+    }
+    for (const auto& req: directReqs) {
+        PendingPlugin pp {.req = req, .libraryStem = {}, .hotReload = false};
+        if (auto loaded = loadOne(pp); !loaded) {
+            return std::unexpected(loaded.error());
+        }
+    }
+
+    // Non-plugin layers (built-in layers added via AddLayer) start after the
+    // dependency-ordered plugins, so plugins can provide capabilities built-in
+    // layers consume.
+    for (const auto& entry: _entries) {
+        if (!entry.isPlugin) {
+            layers.push_back(entry.slot);
         }
     }
 
@@ -379,7 +542,52 @@ auto App::RunConfigured(
 
     FramePacer pacer(engine->MaxFramesPerSecond());
     Clock      runClock({.maxDeltaTime = 0.1f});
+    // Hot-reload loop: each frame, check whether a hot-reload plugin's manifest
+    // changed on disk. If so, stop its layer, unload the old library and load
+    // the new one in place, keeping the engine and all other layers running.
     while (!frameError && engine->IsRunning()) {
+        for (auto& hr: hotReloadPlugins) {
+            std::error_code ec;
+            const auto      mtime = std::filesystem::last_write_time(hr.manifestPath, ec);
+            if (ec || mtime == hr.lastWrite) {
+                continue;
+            }
+            COM::IEngine&            engineRef = *engine.Get();
+            auto&                    slot      = layers[hr.layerIndex];
+            auto&                    lib       = pluginLibraries[hr.layerIndex];
+            if (slot.stop != nullptr) {
+                slot.stop(slot.state.get(), engineRef);
+            }
+            slot = {}; // release the old plugin instance before dlclose
+            lib.Close();
+            const auto reopened = OpenPluginLibrary(hr.libraryStem, true, lib);
+            if (!reopened || !*reopened) {
+                LogError("[App] Hot reload failed to reopen plugin '{}'.", hr.libraryStem);
+                hr.lastWrite = mtime;
+                continue;
+            }
+            const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(lib);
+            if (factory == nullptr) {
+                LogError("[App] Hot-reloaded plugin '{}' has an incompatible factory ABI.", hr.libraryStem);
+                hr.lastWrite = mtime;
+                continue;
+            }
+            auto recreated = COM::CreateAppLayerRef(factory, nullptr);
+            if (!recreated) {
+                LogError("[App] Hot-reloaded plugin '{}' failed to initialize: {}.", hr.libraryStem, recreated.error());
+                hr.lastWrite = mtime;
+                continue;
+            }
+            slot = MakePluginSlot(std::move(*recreated));
+            if (slot.start != nullptr) {
+                if (const auto started = slot.start(slot.state.get(), engineRef); !started) {
+                    LogError("[App] Hot-reloaded plugin '{}' failed to start: {}.", hr.libraryStem, started.error());
+                }
+            }
+            hr.lastWrite = mtime;
+            LogInfo("[App] Hot-reloaded plugin '{}'.", hr.libraryStem);
+        }
+
         if (maxFrames > 0 && engine->CurrentFrame() >= maxFrames) {
             engine->RequestClose();
             break;

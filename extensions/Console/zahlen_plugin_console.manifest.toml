@@ -1,0 +1,7 @@
+[plugin]
+name        = "console"
+library     = "zahlen_plugin_console"
+api         = 1
+description = "In-memory game console layer"
+auto_load   = false
+hot_reload  = true

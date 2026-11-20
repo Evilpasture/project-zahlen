@@ -1,0 +1,7 @@
+[plugin]
+name        = "vfx"
+library     = "zahlen_plugin_vfx"
+api         = 1
+description = "Explosion and lightning combat FX layer"
+auto_load   = false
+hot_reload  = true

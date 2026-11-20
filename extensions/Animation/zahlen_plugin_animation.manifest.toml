@@ -1,0 +1,8 @@
+[plugin]
+name        = "animation"
+library     = "zahlen_plugin_animation"
+api         = 1
+description = "Skeletal animation host layer"
+requires    = ["character_controller"]
+auto_load   = false
+hot_reload  = true

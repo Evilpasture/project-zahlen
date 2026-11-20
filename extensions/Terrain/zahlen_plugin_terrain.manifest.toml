@@ -1,0 +1,7 @@
+[plugin]
+name        = "terrain"
+library     = "zahlen_plugin_terrain"
+api         = 1
+description = "Capability-only host terrain layer"
+auto_load   = false
+hot_reload  = true

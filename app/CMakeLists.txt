@@ -22,7 +22,12 @@ zahlen_enable_reflection(zahlen_host_runner)
 # Unified COM application host: ships in both full and core-only builds with
 # built-in --frames, --capture, and dynamic COM::IAppLayer --plugin loading,
 # without pulling in immediate-mode UI or optional gameplay archives.
-add_library(zahlen_application STATIC Application.cpp)
+add_library(zahlen_application STATIC
+    Application.cpp
+    PluginManifest.cpp
+    PluginManifestGraph.cpp
+    PluginManifestRegistry.cpp
+)
 set_target_properties(zahlen_application PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
