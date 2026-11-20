@@ -18,7 +18,7 @@ namespace COM {
 class LogicWorld;
 }
 
-class VisibilityList;
+class VisibilityState;
 class PhysicsContext;
 class ArticulationContext;
 struct CullingStats;
@@ -74,8 +74,7 @@ class World {
     friend class COM::LogicWorld;
     auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
-    auto VisibleEntitiesForServices() noexcept -> VisibilityList&;
-    auto VisibleShadowEntitiesForServices() noexcept -> VisibilityList&;
+    auto VisibilityForServices() noexcept -> VisibilityState&;
 
     World() = default;
 

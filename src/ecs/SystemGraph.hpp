@@ -65,7 +65,7 @@ struct SystemCall {
 // reference cannot bind to a short-lived resolved value.
 //
 // The primary template resolves a *service by its type*: a system asking for
-// `Camera` or `VisibleEntities` gets the bundle member of that type. It is
+// `Camera` or `VisibilityState` gets the bundle member of that type. It is
 // constrained on the bundle actually providing one, so a graph that offers no
 // such service cannot resolve the parameter -- and the resolver not being
 // callable is what lets AddSystem<SystemFn>() say so while compiling.

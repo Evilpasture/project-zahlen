@@ -32,7 +32,7 @@
 #include <engine/FramePlan.hpp>
 #include <engine/PoseUploads.hpp>
 #include <engine/PrefabFactory.hpp>
-#include <engine/VisibilityList.hpp>
+#include <engine/VisibilityState.hpp>
 #include <engine/World.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Input/Input.hpp>
@@ -215,8 +215,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
             .extensions    = _impl->extensions,
             .cullingStats  = _impl->world->GetCullingStats(),
             .debugSettings = _impl->world->GetDebugSettings(),
-            .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-            .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+            .visibility    = _impl->world->VisibilityForServices(),
         });
     }
     PrefabFactory::RebuildVulkanResources(Render(), _impl->world->GetRegistry());
@@ -503,8 +502,7 @@ void Engine::InitializeSystemGraphs() {
         .extensions    = _impl->extensions,
         .cullingStats  = _impl->world->GetCullingStats(),
         .debugSettings = _impl->world->GetDebugSettings(),
-        .visible       = VisibleEntities {_impl->world->VisibleEntitiesForServices()},
-        .shadow        = VisibleShadowEntities {_impl->world->VisibleShadowEntitiesForServices()},
+        .visibility    = _impl->world->VisibilityForServices(),
     });
 
     _impl->updateGraph       = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices, &MarkPendingDestroy);
@@ -610,8 +608,7 @@ void Engine::RunSceneCleanupPasses(bool all) {
 }
 
 void Engine::ClearVisibilityLists() noexcept {
-    _impl->world->VisibleEntitiesForServices().Clear();
-    _impl->world->VisibleShadowEntitiesForServices().Clear();
+    _impl->world->VisibilityForServices().Clear();
 }
 
 auto Engine::GetVisibleEntities() const noexcept -> std::span<const Entity> {

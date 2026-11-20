@@ -20,7 +20,6 @@ set(RAW_ENGINE_SOURCES
     InputContext.cpp
     KernelSession.cpp
     World.cpp
-    VisibilityList.cpp
     system/CharacterMotorSystem.cpp
     com/Engine.cpp
     com/LogicWorld.cpp

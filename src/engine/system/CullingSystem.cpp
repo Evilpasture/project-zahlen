@@ -6,7 +6,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <render/SceneData.hpp>
 #include "CullingSystem.hpp"
-#include <engine/VisibilityList.hpp>
+#include <engine/VisibilityState.hpp>
 #include "LightingSystem.hpp"
 #include <render/Render.hpp>
 #include <Zahlen/Math/Camera.hpp>
@@ -117,7 +117,7 @@ struct BatchedFrustum {
 
 
 void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
-                                VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch) {
+                                ECS::ResMut<VisibilityState> visibility, ECS::Local<CullingScratch> scratch) {
     // The pose the culler tests against is the main camera entity's: it is world
     // data, not a service. No camera entity means this frame has no view to cull
     // for -- RenderSystem reports NoMainCamera for it.
@@ -126,11 +126,11 @@ void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> rend
         return;
     }
 
-    UpdateCore(query, *render, camComp->camera, true, *scratch, *stats, visible.values, shadow.values);
+    UpdateCore(query, *render, camComp->camera, true, *scratch, *stats, *visibility);
 }
 
 void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
-                               CullingStats& stats, VisibilityList& outVisible, VisibilityList& outVisibleShadow) {
+                               CullingStats& stats, VisibilityState& visibility) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
 
     auto entities       = query.Entities<Components::MeshComponent>();
@@ -196,10 +196,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
     stats.RenderedTriangles = 0;
 
     if (!stats.EnableCulling) {
-        outVisible.Clear();
-        outVisible.AddRange(entities);
-        outVisibleShadow.Clear();
-        outVisibleShadow.AddRange(entities);
+        visibility.SetVisible(entities);
+        visibility.SetShadowVisible(entities);
 
         uint32_t tris = 0;
         for (size_t i = 0; i < entities.size(); ++i) {
@@ -213,8 +211,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
         return;
     }
 
-    outVisible.Clear();
-    outVisibleShadow.Clear();
+    visibility.Clear();
+    visibility.Reserve(entities.size(), isFullBright ? 0 : entities.size());
 
     constexpr size_t     kBatch = 4;
     const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(scratch.mainFrustum);
@@ -287,19 +285,19 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
             }
 
             if (mainVisible[j]) {
-                outVisible.Add(batchEntities[j]);
+                visibility.AddVisible(batchEntities[j]);
                 stats.RenderedTriangles += batchTris[j];
             }
 
             // A backdrop never casts a cascade shadow (see batchBackground).
             if (!isFullBright && shadowVisible[j] && !batchBackground[j]) {
-                outVisibleShadow.Add(batchEntities[j]);
+                visibility.AddShadowVisible(batchEntities[j]);
             }
         }
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(query, outVisible.AsSpan(), scratch.mainFrustum, stats);
+        ZHLN::Tests::VerifyCullingResults(query, visibility.Visible(), scratch.mainFrustum, stats);
     }
 }
 

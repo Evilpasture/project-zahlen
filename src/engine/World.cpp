@@ -9,7 +9,7 @@
 #include <engine/EngineServices.hpp>
 #include <Zahlen/Log.hpp>
 #include <engine/World.hpp>
-#include <engine/VisibilityList.hpp>
+#include <engine/VisibilityState.hpp>
 #include <ecs/ECS.hpp>
 #include <ecs/EntityCommandBuffer.hpp>
 #include <ecs/EventBus.hpp>
@@ -35,8 +35,7 @@ struct World::Impl {
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<ArticulationContext>       articulationContext;
 
-    VisibilityList visibleEntities;
-    VisibilityList visibleShadowEntities;
+    VisibilityState visibility;
     CullingStats   cullingStats {};
     DebugSettings  debugSettings {};
 
@@ -69,8 +68,7 @@ World::~World() {
         return;
     }
 
-    _impl->visibleShadowEntities.Clear();
-    _impl->visibleEntities.Clear();
+    _impl->visibility.Clear();
     _impl->articulationContext.reset();
     _impl->mainECB.reset();
 
@@ -138,18 +136,15 @@ auto World::GetDebugSettings() const noexcept -> const DebugSettings& {
     return _impl->debugSettings;
 }
 
-auto World::VisibleEntitiesForServices() noexcept -> VisibilityList& {
-    return _impl->visibleEntities;
-}
-auto World::VisibleShadowEntitiesForServices() noexcept -> VisibilityList& {
-    return _impl->visibleShadowEntities;
+auto World::VisibilityForServices() noexcept -> VisibilityState& {
+    return _impl->visibility;
 }
 
 auto World::GetVisibleEntities() const noexcept -> std::span<const Entity> {
-    return _impl->visibleEntities.AsSpan();
+    return _impl->visibility.Visible();
 }
 auto World::GetVisibleShadowEntities() const noexcept -> std::span<const Entity> {
-    return _impl->visibleShadowEntities.AsSpan();
+    return _impl->visibility.ShadowVisible();
 }
 
 }

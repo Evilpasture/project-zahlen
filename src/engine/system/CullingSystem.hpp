@@ -45,7 +45,7 @@ class CullingSystem {
     // the camera entity's pose from the registry, and writes the counters it
     // publishes into the world's CullingStats service.
     static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, ECS::ResMut<CullingStats> stats,
-                            VisibleEntities visible, VisibleShadowEntities shadow, ECS::Local<CullingScratch> scratch);
+                            ECS::ResMut<VisibilityState> visibility, ECS::Local<CullingScratch> scratch);
 
     // The freeze-frame debug view. The corners are the pass's own state now, so
     // this derives them from the same view-projection the pass froze instead of
@@ -55,7 +55,7 @@ class CullingSystem {
 
   private:
     static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
-                           CullingStats& stats, VisibilityList& outVisible, VisibilityList& outVisibleShadow);
+                           CullingStats& stats, VisibilityState& visibility);
 };
 
 // The eight world-space corners of a view-projection, in the order the debug

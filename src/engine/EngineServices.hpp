@@ -11,7 +11,7 @@
 namespace ZHLN {
 
 class RenderContext;
-class VisibilityList;
+class VisibilityState;
 struct SceneData;
 struct CullingStats;
 class AssetManager;
@@ -22,13 +22,6 @@ class InputContext;
 
 struct DebugSettings {
     int physicsDrawMode = 0;
-};
-
-struct VisibleEntities {
-    VisibilityList& values;
-};
-struct VisibleShadowEntities {
-    VisibilityList& values;
 };
 
 namespace ECS {
@@ -54,8 +47,7 @@ struct RenderServices {
     ECS::ExtensionServices& extensions;
     CullingStats&           cullingStats;
     DebugSettings&          debugSettings;
-    VisibleEntities         visible;
-    VisibleShadowEntities   shadow;
+    VisibilityState&        visibility;
 };
 
 namespace ECS {
