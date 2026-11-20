@@ -214,6 +214,10 @@ class RenderContext {
     void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices);
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
+    // Retires a previously allocated morph delta range back to the palette so
+    // it can be reused by a later AllocateMorphDeltas. Safe to call once per
+    // allocation; out-of-range or zero counts are ignored.
+    void FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept;
 
     void WriteCheckpoint(std::string_view name) noexcept;
 

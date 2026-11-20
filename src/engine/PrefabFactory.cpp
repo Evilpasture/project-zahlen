@@ -204,15 +204,22 @@ auto InstantiateMeshPart(
     );
 
     if (part.isSkinned && params.isAnimated) {
-        reg.Add(e, Components::SkeletalMeshComponent {.jointOffset = assignedJointOffset, .skeletonIndex = part.skeletonIndex});
+        const auto jointCount = static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size());
+        reg.Add(e, Components::SkeletalMeshComponent {
+            .jointOffset = assignedJointOffset,
+            .jointCount  = jointCount,
+            .skeletonIndex = part.skeletonIndex
+        });
     }
 
     if (part.activeMorphCount > 0) {
+        const auto morphDeltaCount = part.activeMorphCount * part.mesh.vertexCount * 4u;
         reg.Add(
             e, Components::MorphTargetComponent {
-                   .offset      = part.morphOffset,
-                   .activeCount = part.activeMorphCount,
-                   .weights     = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]}
+                   .offset          = part.morphOffset,
+                   .morphDeltaCount = morphDeltaCount,
+                   .activeCount     = part.activeMorphCount,
+                   .weights         = {part.defaultMorphWeights[0], part.defaultMorphWeights[1], part.defaultMorphWeights[2], part.defaultMorphWeights[3]}
                }
         );
     }

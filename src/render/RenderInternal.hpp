@@ -28,6 +28,11 @@
 #include "vulkan/graph/RenderPassDecl.hpp"
 #include "render/passes/SceneDrawResources.hpp"
 #include "render/passes/aa/AntiAliasingResources.hpp"
+
+#include <Zahlen/Threading/Mutex.hpp>
+#include <algorithm>
+#include <utility>
+#include <vector>
 #include "render/passes/culling/CullingResources.hpp"
 #include "render/passes/forward/ForwardResources.hpp"
 #include "render/passes/gbuffer/DecalResources.hpp"
@@ -321,6 +326,10 @@ struct RenderContext::Impl: Renderer {
     PipelineRegistry pipelines;
 
     uint32_t nextMorphDeltaIndex = 0;
+    // Retired morph delta ranges (offset, float count) returned by
+    // FreeMorphDeltas, kept sorted and coalesced for reuse.
+    ZHLN::Mutex                _morphDeltaMutex;
+    std::vector<std::pair<uint32_t, uint32_t>> _freeMorphDeltaRanges;
 
     float lastAspectRatio = 0.0f;
     DegF lastFov {0.0f};

@@ -48,8 +48,21 @@ void Release(Engine& engine, Components::OwnedMeshComponent& component) {
 }
 
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
+    if (component.jointCount > 0) {
+        engine.FreeJoints(component.jointOffset, component.jointCount);
+        component.jointOffset = 0;
+        component.jointCount  = 0;
+    }
     engine.Render().DestroyBuffer(std::exchange(component.skinnedScratch, BufferID::Invalid));
     component.scratchVertexCount = 0;
+}
+
+void Release(Engine& engine, Components::MorphTargetComponent& component) {
+    if (component.morphDeltaCount > 0) {
+        engine.Render().FreeMorphDeltas(component.offset, component.morphDeltaCount);
+        component.offset         = 0;
+        component.morphDeltaCount = 0;
+    }
 }
 
 } // namespace ZHLN::SceneResources

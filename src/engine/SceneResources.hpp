@@ -25,6 +25,7 @@ void Release(Engine& engine, Components::RagdollComponent& component);
 void Release(Engine& engine, Components::AudioSourceComponent& component);
 void Release(Engine& engine, Components::OwnedMeshComponent& component);
 void Release(Engine& engine, Components::SkeletalMeshComponent& component);
+void Release(Engine& engine, Components::MorphTargetComponent& component);
 
 // Engine-owned scenes go through Engine::Entities(), whose Attach/Detach call
 // the overloads above with the engine as the release owner. There is no

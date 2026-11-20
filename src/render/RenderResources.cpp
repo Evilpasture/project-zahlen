@@ -892,9 +892,31 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::M
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
-    const uint32_t offset   = _impl->nextMorphDeltaIndex;
-    const size_t   capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
-    if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
+    const uint32_t floatCount = static_cast<uint32_t>(deltas.size() / 4);
+    const size_t   capacity   = _impl->morphDeltasBuffer.Size() / sizeof(float);
+    if (deltas.size() % 4 != 0 || floatCount == 0 || floatCount > static_cast<uint32_t>(capacity)) {
+        return UINT32_MAX;
+    }
+
+    ZHLN::MutexGuard guard(_impl->_morphDeltaMutex);
+
+    // Reuse a retired range from the free list before bumping the cursor.
+    for (auto it = _impl->_freeMorphDeltaRanges.begin(); it != _impl->_freeMorphDeltaRanges.end(); ++it) {
+        if (it->second >= floatCount) {
+            const auto offset = it->first;
+            if (it->second == floatCount) {
+                _impl->_freeMorphDeltaRanges.erase(it);
+            } else {
+                it->first += floatCount;
+                it->second -= floatCount;
+            }
+            return offset;
+        }
+    }
+
+    // Fall back to monotonic bump allocation.
+    const auto offset = _impl->nextMorphDeltaIndex;
+    if (static_cast<size_t>(offset) * 4 > capacity || floatCount > static_cast<uint32_t>(capacity) - offset) {
         return UINT32_MAX;
     }
     if (!deltas.empty()) {
@@ -903,8 +925,32 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
             std::memcpy(mapped->As<float>() + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
         }
     }
-    _impl->nextMorphDeltaIndex += static_cast<uint32_t>(deltas.size() / 4);
+    _impl->nextMorphDeltaIndex += floatCount;
     return offset;
+}
+
+void RenderContext::FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept {
+    if (count == 0) {
+        return;
+    }
+    const size_t capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
+    if (static_cast<size_t>(offset) * 4 > capacity || count > static_cast<uint32_t>(capacity)) {
+        return; // out-of-range: nothing to retire
+    }
+    ZHLN::MutexGuard guard(_impl->_morphDeltaMutex);
+    _impl->_freeMorphDeltaRanges.push_back({offset, count});
+    std::sort(_impl->_freeMorphDeltaRanges.begin(), _impl->_freeMorphDeltaRanges.end(),
+              [](const std::pair<uint32_t, uint32_t>& a, const std::pair<uint32_t, uint32_t>& b) { return a.first < b.first; });
+    std::vector<std::pair<uint32_t, uint32_t>> coalesced;
+    coalesced.reserve(_impl->_freeMorphDeltaRanges.size());
+    for (const auto& range : _impl->_freeMorphDeltaRanges) {
+        if (!coalesced.empty() && coalesced.back().first + coalesced.back().second == range.first) {
+            coalesced.back().second += range.second;
+        } else {
+            coalesced.push_back(range);
+        }
+    }
+    _impl->_freeMorphDeltaRanges = std::move(coalesced);
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

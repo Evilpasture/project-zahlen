@@ -18,6 +18,10 @@
 #include <Zahlen/Render/FrameResult.hpp>
 #include <render/FrameScope.hpp>
 #include <Zahlen/Render/RenderIDs.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <algorithm>
+#include <utility>
+#include <vector>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
@@ -76,6 +80,10 @@ struct RenderContext::Impl {
     uint64_t                                  nextTextureId   = 4; // Reserve SystemTextures {0..3}.
     uint64_t                                  nextPipelineId  = 1;
     uint32_t                                  morphCursor     = 0;
+    // Retired morph delta ranges (offset, float count) returned by
+    // FreeMorphDeltas, kept sorted and coalesced for reuse.
+    ZHLN::Mutex                               _morphDeltaMutex;
+    std::vector<std::pair<uint32_t, uint32_t>> _freeMorphDeltaRanges;
     bool                                      frameOpen       = false;
     bool                                      destroyed       = false;
     std::unordered_set<uint64_t>              liveBuffers;
@@ -168,6 +176,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     _impl->resolution  = *fbSize;
     _impl->frameOpen   = true;
     _impl->morphCursor = 0;
+    _impl->_freeMorphDeltaRanges.clear();
     return std::optional<FrameScope> {FrameScope {*this}};
 }
 
@@ -479,9 +488,51 @@ void RenderContext::UpdateJointMatrices(uint32_t /*offset*/, std::span<const ZHL
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
-    const uint32_t base = _impl->morphCursor;
-    _impl->morphCursor += static_cast<uint32_t>(deltas.size() / 4);
+    const uint32_t floatCount = static_cast<uint32_t>(deltas.size() / 4);
+    if (deltas.size() % 4 != 0 || floatCount == 0) {
+        return UINT32_MAX;
+    }
+
+    ZHLN::MutexGuard guard(_impl->_morphDeltaMutex);
+
+    // Reuse a retired range from the free list before bumping the cursor.
+    for (auto it = _impl->_freeMorphDeltaRanges.begin(); it != _impl->_freeMorphDeltaRanges.end(); ++it) {
+        if (it->second >= floatCount) {
+            const auto offset = it->first;
+            if (it->second == floatCount) {
+                _impl->_freeMorphDeltaRanges.erase(it);
+            } else {
+                it->first += floatCount;
+                it->second -= floatCount;
+            }
+            return offset;
+        }
+    }
+
+    // Fall back to monotonic bump allocation.
+    const auto base = _impl->morphCursor;
+    _impl->morphCursor += floatCount;
     return base;
+}
+
+void RenderContext::FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept {
+    if (count == 0) {
+        return;
+    }
+    ZHLN::MutexGuard guard(_impl->_morphDeltaMutex);
+    _impl->_freeMorphDeltaRanges.push_back({offset, count});
+    std::sort(_impl->_freeMorphDeltaRanges.begin(), _impl->_freeMorphDeltaRanges.end(),
+              [](const std::pair<uint32_t, uint32_t>& a, const std::pair<uint32_t, uint32_t>& b) { return a.first < b.first; });
+    std::vector<std::pair<uint32_t, uint32_t>> coalesced;
+    coalesced.reserve(_impl->_freeMorphDeltaRanges.size());
+    for (const auto& range : _impl->_freeMorphDeltaRanges) {
+        if (!coalesced.empty() && coalesced.back().first + coalesced.back().second == range.first) {
+            coalesced.back().second += range.second;
+        } else {
+            coalesced.push_back(range);
+        }
+    }
+    _impl->_freeMorphDeltaRanges = std::move(coalesced);
 }
 
 void RenderContext::WriteCheckpoint(std::string_view /*name*/) noexcept {

@@ -35,11 +35,52 @@ void ArticulationContext::BindSkeleton(uint32_t jointOffset, const Skeleton& ske
 uint32_t ArticulationContext::AllocateJoints(uint32_t count) noexcept {
     const auto capacity = static_cast<uint32_t>(_jointStates.jointBlendWeights.size());
     if (count == 0 || count > capacity) return ~uint32_t {0};
-    auto offset = _nextJointOffset.load(std::memory_order::relaxed);
-    do {
-        if (offset > capacity - count) return ~uint32_t {0};
-    } while (!_nextJointOffset.compare_exchange_weak(offset, offset + count, std::memory_order::relaxed, std::memory_order::relaxed));
+
+    ZHLN::MutexGuard guard(_jointPaletteMutex);
+
+    // Reuse a retired range from the free list before bumping the cursor.
+    for (auto it = _freeJointRanges.begin(); it != _freeJointRanges.end(); ++it) {
+        if (it->count >= count) {
+            const auto offset = it->offset;
+            if (it->count == count) {
+                _freeJointRanges.erase(it);
+            } else {
+                it->offset += count;
+                it->count -= count;
+            }
+            return offset;
+        }
+    }
+
+    // Fall back to monotonic bump allocation.
+    const auto offset = _nextJointOffset.load(std::memory_order::relaxed);
+    if (offset > capacity - count) return ~uint32_t {0};
+    _nextJointOffset.store(offset + count, std::memory_order::relaxed);
     return offset;
+}
+
+void ArticulationContext::FreeJoints(uint32_t offset, uint32_t count) noexcept {
+    if (count == 0 || offset + count > _jointStates.jointBlendWeights.size()) {
+        return; // out-of-range or empty: nothing to retire
+    }
+    ZHLN::MutexGuard guard(_jointPaletteMutex);
+    _freeJointRanges.push_back({offset, count});
+    // Sort by offset and coalesce adjacent ranges so the free list stays
+    // compact and first-fit reuse remains fast.
+    std::sort(_freeJointRanges.begin(), _freeJointRanges.end(),
+              [](const JointRange& a, const JointRange& b) { return a.offset < b.offset; });
+    std::vector<JointRange> coalesced;
+    coalesced.reserve(_freeJointRanges.size());
+    for (const auto& range : _freeJointRanges) {
+        if (!coalesced.empty() && coalesced.back().offset + coalesced.back().count == range.offset) {
+            coalesced.back().count += range.count;
+        } else {
+            coalesced.push_back(range);
+        }
+    }
+    _freeJointRanges = std::move(coalesced);
+    // Clear the retired joint state so a reused range starts clean.
+    _jointStates.ResetJoints(offset, count);
 }
 
 bool ArticulationContext::AttachRagdoll(

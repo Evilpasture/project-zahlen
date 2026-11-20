@@ -238,6 +238,9 @@ class Engine {
     [[nodiscard]] auto Steps() const noexcept -> std::span<const FrameStep>;
 
     [[nodiscard]] uint32_t AllocateJoints(uint32_t count) noexcept;
+    // Retires a previously allocated joint range back to the articulation
+    // palette so it can be reused by a later AllocateJoints.
+    void               FreeJoints(uint32_t offset, uint32_t count) noexcept;
     void               PushKinematicPose(uint32_t jointOffset, std::span<const Mat4x4> modelJoints);
     void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
     [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;

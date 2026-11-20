@@ -93,13 +93,15 @@ struct Components {
 
     struct SkeletalMeshComponent {
         uint32_t     jointOffset        = 0;
+        uint32_t     jointCount         = 0; // number of palette joints allocated for this mesh
         int32_t      skeletonIndex      = -1;
         BufferID skinnedScratch     = BufferID::Invalid;
         uint32_t     scratchVertexCount = 0;
     };
 
     struct MorphTargetComponent {
-        uint32_t    offset      = 0;
+        uint32_t    offset      = 0;   // offset into the morph delta palette (floats)
+        uint32_t    morphDeltaCount = 0; // number of floats allocated at offset (for retirement)
         uint32_t    activeCount = 0;
         ZHLN::FVec4 weights    = {0.0f, 0.0f, 0.0f, 0.0f}; // literally the four lanes DrawParams carries
     };

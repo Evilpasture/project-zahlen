@@ -554,6 +554,10 @@ uint32_t Engine::AllocateJoints(uint32_t count) noexcept {
     return _impl->world->GetArticulationContext().AllocateJoints(count);
 }
 
+void Engine::FreeJoints(uint32_t offset, uint32_t count) noexcept {
+    _impl->world->GetArticulationContext().FreeJoints(offset, count);
+}
+
 void Engine::ClearScene() {
     // A replacement between stages invalidates this frame's visibility/history
     // inputs. Consume its simulation once, without rendering the replacement.
