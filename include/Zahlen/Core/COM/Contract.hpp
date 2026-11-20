@@ -23,10 +23,10 @@ template <typename T>
 [[nodiscard]] consteval auto WireContractHash() -> uint64_t {
     using Bare       = std::remove_cvref_t<T>;
     std::size_t hash = Hash64(Reflect::CanonicalTypeName<T>());
-    HashCombine(hash, std::is_const_v<std::remove_reference_t<T>>);
-    HashCombine(hash, std::is_volatile_v<std::remove_reference_t<T>>);
-    HashCombine(hash, std::is_lvalue_reference_v<T>);
-    HashCombine(hash, std::is_rvalue_reference_v<T>);
+    HashCombine(hash, static_cast<std::size_t>(std::is_const_v<std::remove_reference_t<T>>),
+                      static_cast<std::size_t>(std::is_volatile_v<std::remove_reference_t<T>>),
+                      static_cast<std::size_t>(std::is_lvalue_reference_v<T>),
+                      static_cast<std::size_t>(std::is_rvalue_reference_v<T>));
     if constexpr (!std::is_void_v<Bare>) {
         HashCombine(hash, Reflect::LayoutHash<Bare>());
         if constexpr (std::is_enum_v<Bare>) {
@@ -36,8 +36,7 @@ template <typename T>
         } else if constexpr (std::is_class_v<Bare> && std::is_standard_layout_v<Bare>) {
             Reflect::ForEachBase<Bare>([&]<typename Base>() consteval { HashCombine(hash, WireContractHash<Base>()); });
             Reflect::ForEachDeclaredFieldType<Bare>([&]<typename Field>(std::string_view name) consteval {
-                HashCombine(hash, Hash64(name));
-                HashCombine(hash, WireContractHash<Field>());
+                HashCombine(hash, Hash64(name), WireContractHash<Field>());
             });
         }
     }
@@ -52,8 +51,7 @@ template <typename Interface>
     static_assert(AuditInterfaceABI<Interface>());
     static_assert(!Reflect::HasVirtualBases<Interface>());
     std::size_t hash = Hash64(Reflect::CanonicalTypeName<Interface>());
-    HashCombine(hash, sizeof(Interface));
-    HashCombine(hash, alignof(Interface));
+    HashCombine(hash, sizeof(Interface), alignof(Interface));
     std::size_t bases = 0;
     Reflect::ForEachBase<Interface>([&]<typename Base>() consteval {
         ++bases;
@@ -63,9 +61,8 @@ template <typename Interface>
     std::size_t methods = 0;
     Reflect::ForEachNamedVirtualMethodSignature<Interface>([&]<typename Signature, typename DeclaredType>(std::string_view name) consteval {
         ++methods;
-        HashCombine(hash, Hash64(name));
-        HashCombine(hash, Signature::IsNoexcept);
-        HashCombine(hash, WireContractHash<typename Signature::ReturnType>());
+        HashCombine(hash, Hash64(name), Signature::IsNoexcept,
+                      WireContractHash<typename Signature::ReturnType>());
         [&]<typename... Args>(std::type_identity<std::tuple<Args...>>) consteval {
             using Return                  = typename Signature::ReturnType;
             constexpr bool     nt         = Signature::IsNoexcept;
@@ -83,8 +80,7 @@ template <typename Interface>
                                Return(Args...) volatile && noexcept(nt) > *11u + std::is_same_v < DeclaredType,
                                Return(Args...) const volatile && noexcept(nt) > *12u;
             static_assert(qualifiers != 0, "Unsupported virtual method type in COM contract.");
-            HashCombine(hash, qualifiers);
-            HashCombine(hash, sizeof...(Args));
+            HashCombine(hash, qualifiers, sizeof...(Args));
             (HashCombine(hash, WireContractHash<Args>()), ...);
         }(std::type_identity<typename Signature::ParameterTypes> {});
     });

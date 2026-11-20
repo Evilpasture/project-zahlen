@@ -40,9 +40,7 @@ struct MeshKey {
 struct MeshKeyHash {
     [[nodiscard]] auto operator()(const MeshKey& key) const noexcept -> size_t {
         auto h = static_cast<size_t>(key.vertexHash);
-        ZHLN::HashCombine(h, static_cast<size_t>(key.indexHash));
-        ZHLN::HashCombine(h, key.vertexCount);
-        ZHLN::HashCombine(h, key.indexCount);
+        ZHLN::HashCombine(h, static_cast<size_t>(key.indexHash), key.vertexCount, key.indexCount);
         return h;
     }
 };

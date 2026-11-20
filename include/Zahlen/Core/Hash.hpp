@@ -55,4 +55,14 @@ constexpr void HashCombine(std::size_t& seed, std::size_t value) noexcept {
     seed ^= value + static_cast<std::size_t>(kGolden32) + (seed << 6) + (seed >> 2);
 }
 
+// Variadic ergonomic wrapper: folds an arbitrary number of values into `seed`
+// with a single call site instead of a dense wall of `HashCombine(seed, x);`
+// statements. Single-argument calls resolve to the non-template overload above,
+// so there is no recursion and no ambiguity.
+template <typename... Ts>
+constexpr void HashCombine(std::size_t& seed, std::size_t first, Ts... rest) noexcept {
+    HashCombine(seed, first);
+    (HashCombine(seed, rest), ...);
+}
+
 }
