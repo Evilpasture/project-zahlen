@@ -35,9 +35,10 @@ PROG=${0##*/}
 # A released GCC 16.x, downloaded and pinned -- not whatever apt calls gcc-16.
 # jammy's PPA carries only a trunk snapshot (16-20260315) and the released 16.2.0
 # differs from it in exactly one way that matters here: it compiles Jolt (GCC PR
-# c++/125280). install-gcc-prebuilt.sh proves that by compiling the construct;
-# there is no version floor to pass along, because the branch that carries the
-# fix reports the same version as the branch that does not.
+# c++/125280). For the --build profile, install-gcc-prebuilt.sh proves that by
+# compiling the construct (ZHLN_GCC_VERIFY_JOLT=1); there is no version floor
+# to pass along, because the branch that carries the fix reports the same
+# version as the branch that does not.
 GCC_VERSION=16.2.0
 GCC_PREFIX=${ZHLN_GCC_PREFIX:-/opt/gcc16}
 PROFILE=
@@ -153,6 +154,14 @@ step "gcc ${GCC_VERSION}"
 # build dies in the PCH. Released GCC 16.2.0 compiles it; nothing in apt for this
 # distro is both new enough and released, so it is downloaded and pinned.
 if [ ! -x "${GCC_PREFIX}/bin/g++-16" ]; then
+    # Only --build ever compiles the engine, so only it asks the installer to
+    # prove the compiler survives Jolt's PR c++/125280 construct. A --consumer
+    # install compiles consumer apps against the shipped libraries; it never
+    # touches Jolt (and this script may be running from a scripts-only
+    # checkout, where cmake/probes/ does not exist).
+    if [ "${PROFILE}" = build ]; then
+        export ZHLN_GCC_VERIFY_JOLT=1
+    fi
     asroot "${script_dir}/install-gcc-prebuilt.sh" "${GCC_VERSION}" "${GCC_PREFIX}"
 fi
 export PATH="${GCC_PREFIX}/bin:${PATH}"

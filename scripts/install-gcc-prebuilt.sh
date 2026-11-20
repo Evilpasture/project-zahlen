@@ -17,6 +17,11 @@
 # property of the host rather than of a bundled sysroot.
 #
 # Usage: install-gcc-prebuilt.sh [version] [prefix]     (default 16.2.0, /opt/gcc16)
+#
+# Set ZHLN_GCC_VERIFY_JOLT=1 when the installed compiler will build the engine
+# itself: that additionally compiles the GCC PR c++/125280 (Jolt) construct,
+# which needs cmake/probes/ from a full checkout. Consumer and runtime-only
+# installs leave it unset -- they never compile Jolt.
 set -Eeuo pipefail
 trap 'printf "error: exit %s at line %s\n  command: %s\n" "$?" "${LINENO}" "${BASH_COMMAND}" >&2' ERR
 
@@ -323,25 +328,41 @@ case "${as_path}" in
         ;;
 esac
 
-# This script downloads a compiler, so it is the one place where asking before
-# CMake does is worth it: a bad download should fail here, not in someone
-# else's configure. The flags are the ones the build uses, because the bug is
-# reflection-specific -- without -freflection every compiler passes.
-step "verify: GCC PR c++/125280 (Jolt's incomplete static member)"
-repro="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../cmake/probes/pr125280-static-member.cpp"
-if [ ! -f "${repro}" ]; then
-    echo "error: missing ${repro}" >&2
-    exit 1
+# The PR c++/125280 check below is a *build-host* question -- "can this
+# compiler compile JoltPhysics" -- and most installs of this compiler never
+# build the engine: release consumers and the release workflow's render job
+# install it for its runtime and to compile a consumer app, neither of which
+# touches Jolt, and both call this script from a scripts-only checkout where
+# cmake/probes/ does not even exist. So the check is opt-in
+# (ZHLN_GCC_VERIFY_JOLT=1, which scripts/ci-ubuntu-2204-env.sh --build sets):
+# engine builders get the early failure, with the same flags the build uses
+# because the bug is reflection-specific; everyone else gets the version,
+# std::format and assembler checks above, which are the ones a consumer
+# actually depends on. Building the engine stays gated regardless:
+# scripts/build-release-toolchain.sh and CMake compile the same construct at
+# configure time, from a full checkout.
+if [ "${ZHLN_GCC_VERIFY_JOLT:-0}" = "1" ]; then
+    step "verify: GCC PR c++/125280 (Jolt's incomplete static member)"
+    repro="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../cmake/probes/pr125280-static-member.cpp"
+    if [ ! -f "${repro}" ]; then
+        echo "error: missing ${repro}" >&2
+        echo "       ZHLN_GCC_VERIFY_JOLT=1 needs a full checkout of the tree;" >&2
+        echo "       unset it for a consumer/runtime-only install." >&2
+        exit 1
+    fi
+    if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${repro}"; then
+        {
+            echo "error: the installed g++-16 (${version}) hits GCC PR c++/125280 and cannot"
+            echo "       compile JoltPhysics. Fixed in r17-498, cherry-picked to"
+            echo "       releases/gcc-16 as r16-8903 on 2026-05-13."
+        } >&2
+        exit 1
+    fi
+    log "compiles the PR 125280 construct under -freflection"
+else
+    log "skipping the PR c++/125280 (Jolt) check: this install does not build"
+    log "the engine (set ZHLN_GCC_VERIFY_JOLT=1 to run it)"
 fi
-if ! "${PREFIX}/bin/g++-16" -std=c++26 -freflection -fsyntax-only "${repro}"; then
-    {
-        echo "error: the installed g++-16 (${version}) hits GCC PR c++/125280 and cannot"
-        echo "       compile JoltPhysics. Fixed in r17-498, cherry-picked to"
-        echo "       releases/gcc-16 as r16-8903 on 2026-05-13."
-    } >&2
-    exit 1
-fi
-log "compiles the PR 125280 construct under -freflection"
 
 # One behavioural check is deliberately *not* here: whether the assembler
 # accepts the `.base64` directive. That is a question about a compiler, and
