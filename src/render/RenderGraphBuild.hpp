@@ -97,6 +97,7 @@ template <AAMode Mode>
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = frame},
         Passes::DecalPass {.decals = self.decals, .frame = frame}, Passes::ViewmodelPass {.frame = frame},
         Passes::TranslucentPrePass {.frame = frame},
+        Passes::AoDepthGeneratePass {.cull = self.culling, .frame = frame},
         Passes::ComputePass<Passes::GtaoDesc> {.frame = frame, .pc = pc}, Passes::ClusteredLightingPass {.post = self.post, .frame = frame, .pc = pc},
         Passes::RcgiCascadePass {.frame = frame}, Passes::RtgiCompositePass {.frame = frame}, Passes::EmissivePass {.forward = self.forward, .frame = frame},
         Passes::LightingMipPass {.frame = frame}, OpaqueReflectionPass {.frame = frame, .pc = pc}, TranslucentReflectionPass {.frame = frame, .pc = pc},

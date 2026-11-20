@@ -1,6 +1,5 @@
-
 import gpu_push_constants;
-import hash;
+import gtao_surface;
 import pbr_helpers;
 import uniforms;
 
@@ -8,106 +7,129 @@ import uniforms;
 GtaoPushConstants pc;
 
 Texture2D<float> texDepth;
+Texture2D<float> texAoDepth;
 Texture2D<float4> texNormalRoughness;
 SamplerState pointSampler;
 ConstantBuffer<FrameUniforms> frame;
 RWTexture2D<float> outAo;
 
-[numthreads(8, 8, 1)]
-void CSMain(uint3 tid: SV_DispatchThreadID) {
-    if (any(tid.xy >= pc.halfRes)) {
-        return;
+static const float PI = 3.14159265359f;
+static const float HALF_PI = PI * 0.5f;
+
+// Integral from 0 to h of cos(theta - n) * sin(theta) dtheta.
+float IntegrateArc(float h, float n) {
+    return 0.25f * (cos(n) + 2.0f * h * sin(n) - cos(2.0f * h - n));
+}
+
+float HorizonCos(float2 uv, uint lod, float3 P, float3 V, float3 T, float openCos) {
+    if (any(uv < 0.0f) || any(uv >= 1.0f))
+        return openCos;
+
+    float depth = 1.0f;
+    if (lod > 0u) {
+        depth = texAoDepth.SampleLevel(pointSampler, uv, float(lod));
+        // Max reduction avoids expanding foreground silhouettes. Sky in a
+        // coarse footprint must not erase an otherwise valid fine sample.
     }
+    if (depth >= 1.0f) {
+        depth = texDepth.SampleLevel(pointSampler, uv, 0.0f);
+        uv = (floor(uv / pc.rcpFullRes) + 0.5f) * pc.rcpFullRes;
+    }
+    if (depth >= 1.0f)
+        return openCos;
+
+    float3 H = ReconstructWorldPos(uv, depth, pc.invViewProj) - P;
+    float distanceToTap = length(H);
+    float towardEye = dot(H, V);
+    float alongSlice = dot(H, T);
+    if (distanceToTap < 1e-4f || alongSlice <= 1e-4f)
+        return openCos;
+
+    float rangeWeight = 1.0f - smoothstep(0.5f, 1.0f, distanceToTap / pc.aoRadius);
+    float candidate = towardEye * rsqrt(towardEye * towardEye + alongSlice * alongSlice);
+    return lerp(openCos, max(openCos, candidate), rangeWeight);
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 tid : SV_DispatchThreadID) {
+    if (any(tid.xy >= pc.halfRes))
+        return;
 
     outAo[tid.xy] = 1.0f;
-
-    const uint2 blockOrigin = tid.xy * 2u;
-    float3 normalSum = float3(0.0f, 0.0f, 0.0f);
-    float  depth     = 1.0f;
-    [unroll]
-    for (uint by = 0u; by < 2u; ++by) {
-        [unroll]
-        for (uint bx = 0u; bx < 2u; ++bx) {
-            const uint2 pixel = blockOrigin + uint2(bx, by);
-            if (float(pixel.x) >= frame.screenResolution.x || float(pixel.y) >= frame.screenResolution.y) {
-                continue;
-            }
-            const float4 nr = texNormalRoughness.Load(int3(pixel, 0));
-            normalSum += UnpackNormalOctahedron(nr.xy * 2.0f - 1.0f);
-            depth = min(depth, texDepth.Load(int3(pixel, 0)).r);
-        }
-    }
-
-    if (depth >= 1.0f) {
+    if (pc.aoRadius <= 0.0f)
         return;
-    }
 
-    const float3 N = SafeNormalize(normalSum, float3(0.0f, 1.0f, 0.0f));
+    uint2 fullSize;
+    texDepth.GetDimensions(fullSize.x, fullSize.y);
+    uint2 pixel;
+    float depth;
+    if (!GtaoSurface(texDepth, tid.xy, fullSize, pixel, depth))
+        return;
 
-    const float2 uv        = (float2(blockOrigin) + 1.0f) * pc.rcpFullRes;
-    const float3 worldPos  = ReconstructWorldPos(uv, depth, pc.invViewProj);
-    const float  viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
-
+    const float2 uv = (float2(pixel) + 0.5f) * pc.rcpFullRes;
+    const float3 P = ReconstructWorldPos(uv, depth, pc.invViewProj);
+    const float3 N = UnpackNormalOctahedron(texNormalRoughness.Load(int3(pixel, 0)).xy * 2.0f - 1.0f);
+    const float3 V = SafeNormalize(frame.camPos.xyz - P, N);
+    const float viewDepth = mul(frame.unjitteredViewProj, float4(P, 1.0f)).w;
     const float fade = saturate((50.0f - viewDepth) / 10.0f);
-    if (fade <= 0.0f) {
+    if (fade <= 0.0f)
         return;
-    }
 
-    float2 edgeFactor = smoothstep(0.0f, 0.08f, uv) * smoothstep(1.0f, 0.92f, uv);
-    float  screenFade = edgeFactor.x * edgeFactor.y;
+    uint mipWidth, mipHeight, levels;
+    texAoDepth.GetDimensions(0u, mipWidth, mipHeight, levels);
+    // Defaults: 6 slices * 2 directions * 4 steps = 48 horizon taps.
+    // Higher quality caps at 8 * 2 * 6 = 96, independent of resolution.
+    const int quality = int(min(pc.giSamples, 24u));
+    const int slices = clamp(6 + (quality - 8) / 8, 6, 8);
+    const int steps = clamp(4 + (quality - 8) / 8, 4, 6);
+    const float2 noise = frac(0.5f + float(tid.x) * float2(0.754877666f, 0.569840296f)
+                                 + float(tid.y) * float2(0.569840296f, -0.754877666f));
+    const float focalY = 1.0f / max(abs(frame.invProj[1][1]), 0.1f);
+    const float radiusY = min(0.5f * pc.aoRadius * focalY / max(viewDepth, 0.1f), 0.2f);
+    const float radiusPx = radiusY * float(fullSize.y);
+    float visible = 0.0f;
+    float unoccluded = 0.0f;
 
-    float occlusion = 0.0f;
+    for (int slice = 0; slice < slices; ++slice) {
+        float angle = (float(slice) + noise.x) * PI / float(slices);
+        float2 axis = float2(cos(angle), sin(angle));
+        float2 pixelStep = axis * pc.rcpFullRes;
+        float3 D = ReconstructWorldPos(uv + pixelStep, depth, pc.invViewProj) - P;
+        float3 sliceTangent = D - V * dot(D, V);
+        float tangentLenSq = dot(sliceTangent, sliceTangent);
+        // A collapsed reconstruction does not define a slice plane.
+        if (!(tangentLenSq > 1e-20f) || !isfinite(tangentLenSq))
+            continue;
+        float3 T = sliceTangent * rsqrt(tangentLenSq);
+        float2 projectedN = float2(dot(N, V), dot(N, T));
+        float projectedLength = length(projectedN);
+        if (projectedLength < 1e-4f)
+            continue;
+        float n = atan2(projectedN.y, projectedN.x);
 
-    const float angle        = GetStableWeylNoise(blockOrigin, pc.time) * 2.0f * 3.14159265f;
-    const int   steps        = max(int(pc.giSamples) / 6, 1);
-    const float jitterOffset = GetRotationAngle(uv, pc.time);
-
-    uint dw, dh;
-    texDepth.GetDimensions(dw, dh);
-    const float aspect      = float(dw) / max(float(dh), 1.0f);
-    const float focalLength = abs(pc.viewProj[1][1]);
-    const float uvRadius = min((pc.aoRadius * focalLength) / max(viewDepth, 0.1f), 0.2f);
-
-    for (int d = 0; d < 4; ++d) {
-        float sliceAngle  = (float(d) / 4.0f) * 3.14159265f + angle;
-        float2 rotatedDir = float2(cos(sliceAngle), sin(sliceAngle));
-        float2 uvStep     = rotatedDir * uvRadius;
-        uvStep.x /= aspect;
-
-        float max_sin_right = 0.0f;
-        float max_sin_left  = 0.0f;
-
-        for (int i = 1; i <= steps; ++i) {
-            float linearT   = (float(i) - 0.5f + (jitterOffset - 0.5f)) / float(steps);
-            float t         = linearT * linearT;
-            float2 uv_right = uv + uvStep * t;
-            float2 uv_left  = uv - uvStep * t;
-
-            if (all(uv_right >= 0.0f) && all(uv_right <= 1.0f)) {
-                float d_right = texDepth.SampleLevel(pointSampler, uv_right, 0).r;
-                if (d_right < 1.0f) {
-                    float3 pos_right = ReconstructWorldPos(uv_right, d_right, pc.invViewProj);
-                    float3 H         = pos_right - worldPos;
-                    float len        = length(H);
-                    if (len < pc.aoRadius)
-                        max_sin_right = max(max_sin_right, dot(H, N) / max(len, 0.001f));
-                }
+        [unroll]
+        for (int side = 0; side < 2; ++side) {
+            float signSide = side == 0 ? 1.0f : -1.0f;
+            float normalAngle = n * signSide;
+            float lo = clamp(normalAngle - HALF_PI, 0.0f, PI);
+            float hi = clamp(normalAngle + HALF_PI, 0.0f, PI);
+            float openCos = cos(hi);
+            float horizon = openCos;
+            for (int i = 0; i < steps; ++i) {
+                float t = (float(i) + frac(noise.y + float(slice) * 0.618033989f + float(side) * 0.5f)) / float(steps);
+                float tapDistance = max(1.5f, radiusPx * t * t);
+                // Use coarse footprints only for distant taps and cap at 8x8.
+                uint lod = min(min(levels - 1u, 3u), uint(max(0.0f, floor(log2(tapDistance)) - 2.0f)));
+                horizon = max(horizon, HorizonCos(uv + pixelStep * (signSide * tapDistance), lod, P, V, signSide * T, openCos));
             }
-            if (all(uv_left >= 0.0f) && all(uv_left <= 1.0f)) {
-                float d_left = texDepth.SampleLevel(pointSampler, uv_left, 0).r;
-                if (d_left < 1.0f) {
-                    float3 pos_left = ReconstructWorldPos(uv_left, d_left, pc.invViewProj);
-                    float3 H        = pos_left - worldPos;
-                    float len       = length(H);
-                    if (len < pc.aoRadius)
-                        max_sin_left = max(max_sin_left, dot(H, N) / max(len, 0.001f));
-                }
-            }
+            float lowerIntegral = IntegrateArc(lo, normalAngle);
+            float h = clamp(acos(clamp(horizon, -1.0f, 1.0f)), lo, hi);
+            visible += projectedLength * max(0.0f, IntegrateArc(h, normalAngle) - lowerIntegral);
+            unoccluded += projectedLength * max(0.0f, IntegrateArc(hi, normalAngle) - lowerIntegral);
         }
-
-        occlusion += saturate((max_sin_right + max_sin_left) * 0.5f - pc.aoBias);
     }
 
-    const float rawAo = 1.0f - SoftClamp(saturate((occlusion / 4.0f) * pc.aoPower * screenFade), 0.85f);
-    outAo[tid.xy]     = lerp(1.0f, rawAo, fade);
+    float occlusion = unoccluded > 1e-4f ? saturate(1.0f - visible / unoccluded - pc.aoBias) : 0.0f;
+    float2 edgeFactor = smoothstep(0.0f, 0.08f, uv) * (1.0f - smoothstep(0.92f, 1.0f, uv));
+    outAo[tid.xy] = 1.0f - fade * SoftClamp(saturate(occlusion * pc.aoPower * edgeFactor.x * edgeFactor.y), 0.85f);
 }

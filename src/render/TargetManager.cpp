@@ -50,7 +50,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Resource, Res_HdrSceneColor>) {
                 extra |= Vk::ImageUsage::TransferSrc;
             }
-            if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ>) {
+            if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ> || std::is_same_v<Resource, Res_AoDepth>) {
                 extra |= Vk::ImageUsage::Storage;
             }
             auto created = TargetT::Create(_allocator, _ctx.Device(), requested, voxelExtent, extra);

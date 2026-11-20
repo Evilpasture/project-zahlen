@@ -65,6 +65,7 @@ using Res_TransAnisotropy = Vk::GraphImage<"TransAnisotropy", Vk::Format::R8G8B8
 using Res_TransDepth      = Vk::GraphImage<"TransDepth", Vk::Format::D32_SFloat_S8_UInt>;
 using Res_TransLighting   = Vk::GraphImage<"TransLighting", Vk::Format::R16G16B16A16_SFloat, false, false, 1, false, true>;
 using Res_HiZ             = Vk::GraphImage<"HiZMap", Vk::Format::R32_SFloat, false, false, 1, false, true>;
+using Res_AoDepth         = Vk::GraphImage<"AoDepth", Vk::Format::R32_SFloat, false, false, 1, false, true>;
 
 namespace Vk {
 template <>

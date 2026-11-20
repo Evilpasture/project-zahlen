@@ -81,13 +81,11 @@ public struct BakePush {
 public struct GtaoPushConstants {
     public uint2 halfRes;
     public float2 rcpFullRes;
-    public float time;
     public float aoRadius;
     public float aoBias;
     public float aoPower;
     public uint giSamples;
     public float4x4 invViewProj;
-    public float4x4 viewProj;
 };
 
 public struct KawasePushConstants {

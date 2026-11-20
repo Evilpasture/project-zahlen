@@ -3,6 +3,7 @@ import cluster_grid;
 import cluster_math;
 import descriptor_heap_layout;
 import pbr_helpers;
+import gtao_surface;
 import uniforms;
 
 [vk::push_constant]
@@ -78,33 +79,41 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
         texDepth.GetDimensions(dw, dh);
 
         if (pc.giMode == 3 || pc.giMode == 4) {
-            uint aoW, aoH;
-            texAo.GetDimensions(aoW, aoH);
-            const float2 halfSize = float2(float(aoW), float(aoH));
-            const float2 pos      = uv * halfSize - 0.5f;
-            const float2 corner   = floor(pos);
-            const float2 blend    = pos - corner;
-
+            uint2 aoSize;
+            texAo.GetDimensions(aoSize.x, aoSize.y);
+            // Fuse a 3x3 half-res bilateral blur with upsampling. No extra
+            // target, dispatch or history; the guides match the GTAO centers.
+            const int2 center = min(int2(pixelPos / 2u), int2(aoSize) - 1);
+            const float2 samplePos = (float2(pixelPos) + 0.5f) * 0.5f - 0.5f;
+            const float planeScale = max(1e-3f, min(viewDepth * 0.02f, pc.aoRadius * 0.1f));
             float weightSum = 0.0f;
-            float aoSum     = 0.0f;
-            for (int tapY = 0; tapY <= 1; ++tapY) {
-                for (int tapX = 0; tapX <= 1; ++tapX) {
-                    const float2 tapOff = float2(float(tapX), float(tapY));
-                    const float  bilinear =
-                        lerp(1.0f - blend.x, blend.x, tapOff.x) * lerp(1.0f - blend.y, blend.y, tapOff.y);
-                    const float2 tuv    = (corner + tapOff + 0.5f) / halfSize;
-                    const float  tapAo  = texAo.SampleLevel(pointSampler, tuv, 0).r;
-                    const float  tapRaw = texDepth.SampleLevel(pointSampler, tuv, 0).r;
-                    const float3 tapPos = ReconstructWorldPos(tuv, tapRaw, pc.invViewProj);
-                    const float3 tapN   = UnpackNormalOctahedron(texNormalRoughness.SampleLevel(pointSampler, tuv, 0).xy * 2.0f - 1.0f);
-                    const float  planeDistance = abs(dot(tapPos - worldPos, N));
-                    const float  edgeStop = exp(-planeDistance / max(viewDepth * 0.02f, 1e-3f)) * pow(saturate(dot(N, tapN)), 16.0f);
-                    const float  w        = bilinear * edgeStop;
+            float aoSum = 0.0f;
+            for (int y = -1; y <= 1; ++y) {
+                for (int x = -1; x <= 1; ++x) {
+                    const int2 cell = center + int2(x, y);
+                    if (any(cell < 0) || any(cell >= int2(aoSize)))
+                        continue;
+                    uint2 tapPixel;
+                    float tapDepth;
+                    if (!GtaoSurface(texDepth, uint2(cell), uint2(dw, dh), tapPixel, tapDepth))
+                        continue;
+                    const float2 tapUv = (float2(tapPixel) + 0.5f) / float2(dw, dh);
+                    const float3 tapPos = ReconstructWorldPos(tapUv, tapDepth, pc.invViewProj);
+                    const float3 tapN = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tapPixel, 0)).xy * 2.0f - 1.0f);
+                    const float planeDistance = abs(dot(tapPos - worldPos, N));
+                    float nDot = saturate(dot(N, tapN));
+                    nDot *= nDot; // ^2
+                    nDot *= nDot; // ^4
+                    nDot *= nDot; // ^8
+                    nDot *= nDot; // ^16
+                    const float edgeStop = exp(-planeDistance / planeScale) * nDot;
+                    const float2 delta = float2(cell) - samplePos;
+                    const float w = exp(-dot(delta, delta)) * edgeStop;
                     weightSum += w;
-                    aoSum += w * tapAo;
+                    aoSum += w * texAo.Load(int3(cell, 0));
                 }
             }
-            ao = (weightSum > 0.0f) ? (aoSum / weightSum) : 1.0f;
+            ao = weightSum > 1e-4f ? aoSum / weightSum : 1.0f;
 
         } else {
             float angle    = GetRotationAngle(uv, pc.camPos.w);

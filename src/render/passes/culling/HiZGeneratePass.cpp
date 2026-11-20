@@ -15,10 +15,11 @@ static_assert(GpuAbi::ScenePassPayload<HiZPushConstants>, "a pass payload that o
 
 namespace {
 
-void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame& frame, uint32_t reduceMin) noexcept {
-    const uint32_t width  = frame.graphResources.hizMap.extent.width;
-    const uint32_t height = frame.graphResources.hizMap.extent.height;
-    const uint32_t mips   = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+template <typename Target>
+void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame& frame, Target& target, uint32_t maxMips) noexcept {
+    const uint32_t width  = target.extent.width;
+    const uint32_t height = target.extent.height;
+    const uint32_t mips   = std::min(target.mipLevels, maxMips);
 
     for (uint32_t mip = 0; mip < mips; ++mip) {
         if (mip > 0) {
@@ -36,14 +37,14 @@ void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame
             .srcWidth     = srcW,
             .srcHeight    = srcH,
             .isFirstPass  = mip == 0 ? 1u : 0u,
-            .reduceMin    = reduceMin,
+            .reduceMin    = 0u,
         };
 
         const auto inDepth = mip == 0 ?
                                  Vk::ImageWrite {frame.ActiveDepthTarget().image.View()} :
-                                 Vk::ImageWrite {frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
+                                 Vk::ImageWrite {target.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
         const auto block   = frame.renderer.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
+            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(target.image.View(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
         );
         cull.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
     }
@@ -52,7 +53,15 @@ void GenerateHiZPyramid(VkCommandBuffer cmd, CullingResources& cull, RenderFrame
 } // namespace
 
 void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
-    GenerateHiZPyramid(cmd, cull, frame, 0u);
+    GenerateHiZPyramid(cmd, cull, frame, frame.graphResources.hizMap, kMaxGeneratedHiZMips);
+}
+
+void AoDepthGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
+    const int giMode = frame.settings.post.mode;
+    if (giMode == 3 || giMode == 4) {
+        // GTAO samples at most mip 3; leave the remaining levels unused.
+        GenerateHiZPyramid(cmd, cull, frame, frame.graphResources.aoDepth, 4u);
+    }
 }
 
 } // namespace ZHLN::Passes

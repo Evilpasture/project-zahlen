@@ -22,4 +22,13 @@ struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>,
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
+// Keep the culling pyramid intact; AO needs the depth after opaque resolve
+// and viewmodel rendering, not the earlier occluder-only snapshot.
+struct AoDepthGeneratePass: Vk::RenderPass<"AoDepthGenerate", Vk::FragmentAndComputeRead<Res_Depth>, Vk::ComputeWrite<Res_AoDepth>> {
+    CullingResources& cull;
+    RenderFrame&      frame;
+
+    void operator()(VkCommandBuffer cmd) const noexcept;
+};
+
 } // namespace ZHLN::Passes

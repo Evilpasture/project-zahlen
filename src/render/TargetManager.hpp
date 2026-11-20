@@ -56,7 +56,7 @@ class TargetManager {
 
         Vk::RenderTarget<Res_TransLighting> transLightingTarget;
         Vk::RenderTarget<Res_HiZ> hizMap;
-
+        Vk::RenderTarget<Res_AoDepth> aoDepth;
     };
     static constexpr uint32_t kShadowResolution = 2048;
     static constexpr uint32_t kCascades         = 4;

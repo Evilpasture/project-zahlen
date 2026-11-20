@@ -180,8 +180,8 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // as the ambient's share of the image: the sun is kept modest and
 // ambientExposure raised so ambient dominates the shading and contact
 // darkening is measurable. SSR/RTR stay off so the deltas measure AO
-// alone, and the sample budget is raised so the GTAO branch (steps =
-// giSamples/6) gets more than its minimum.
+// alone. The sample budget exercises the high-quality GTAO tier
+// (8 slices, 6 steps per side).
 void BuildAoScene(ZHLN::COM::IEngine& engine) {
     auto& reg = *engine.Entities();
     auto& rc = *engine.Graphics();

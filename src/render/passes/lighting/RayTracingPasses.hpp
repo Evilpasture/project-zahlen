@@ -31,7 +31,8 @@ namespace ZHLN::Passes {
 
 struct GtaoDesc {
     static constexpr auto name = Vk::ResourceName("GTAO");
-    using Usages               = Vk::TypeList<Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>>;
+    using Usages = Vk::TypeList<
+        Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeRead<Res_AoDepth>, Vk::ComputeWrite<Res_Ao>>;
     using ShaderDecl           = Shaders::Gtao;
     using ShaderModule         = Shaders::Modules::GtaoCS;
     using PushConstants        = GtaoPushConstants;
@@ -50,18 +51,17 @@ struct GtaoDesc {
         const auto  push    = GtaoPushConstants {
                .halfRes     = {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height},
                .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
-               .time        = pc.camPos.w,
                .aoRadius    = pc.aoRadius,
                .aoBias      = pc.aoBias,
                .aoPower     = pc.aoPower,
                .giSamples   = static_cast<uint32_t>(pc.giSamples),
                .invViewProj = pc.invViewProj,
-               .viewProj    = pc.viewProj,
         };
 
         return MakeComputePassArgs(
             push, VkExtent3D {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1},
             Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActiveDepthTarget())),
+            Vk::Slot<"texAoDepth">(Vk::Assume<Vk::ComputeRead<Res_AoDepth>>(frame.graphResources.aoDepth)),
             Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
             Vk::Slot<"frame">(frame.frameUniformBuffers), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
         );

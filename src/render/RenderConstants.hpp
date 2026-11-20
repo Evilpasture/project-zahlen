@@ -92,6 +92,7 @@ enum class Stage : uint8_t {
     GTAO,
     RcgiCascade,
     RtgiComposite,
+    AoDepthGenerate,
 };
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
