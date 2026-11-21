@@ -80,6 +80,32 @@ struct EntityDescriptor {
 
 using ScopeDescriptor = EntityDescriptor;
 
+// Uniform visitor payloads: enclosing scopes arrive as Scope<OwnerT>
+// (OwnerT = void for namespace/other scopes) and template arguments as
+// TypeArg / TemplateArg / ValueArg / OtherValueArg. There is no named-
+// member-template visitor protocol.
+template <typename T>
+struct TypeArg {
+    using type = T;
+};
+template <typename Tag>
+struct TemplateArg {
+    using template_tag = Tag;
+};
+template <auto V>
+struct ValueArg {
+    static constexpr auto value = V;
+};
+template <typename T>
+struct OtherValueArg {
+    using other_type = T;
+};
+template <typename OwnerT = void>
+struct Scope {
+    using owner_type = OwnerT;
+    ScopeDescriptor desc;
+};
+
 namespace TemplatedDetail {
 
 template <typename T>
@@ -235,19 +261,15 @@ consteval auto DescribeEntityInfo() noexcept -> EntityDescriptor {
     };
 }
 
-template <std::meta::info Scope, typename Visitor>
+template <std::meta::info ScopeInfo, typename Visitor>
 constexpr void DispatchEnclosingScope(Visitor& visitor) {
-    constexpr std::meta::info kScope = std::meta::dealias(Scope);
+    constexpr std::meta::info kScope = std::meta::dealias(ScopeInfo);
     constexpr ScopeDescriptor kDesc  = DescribeEntityInfo<kScope>();
     if constexpr (std::meta::is_type(kScope) && (std::meta::is_class_type(kScope) || std::meta::is_union_type(kScope) || std::meta::is_enum_type(kScope))) {
         using OwnerType = typename[:kScope:];
-        if constexpr (requires { visitor.template OnTypeScope<OwnerType>(kDesc); }) {
-            visitor.template OnTypeScope<OwnerType>(kDesc);
-        } else {
-            visitor(kDesc);
-        }
+        visitor(Scope<OwnerType> {.desc = kDesc});
     } else {
-        visitor(kDesc);
+        visitor(Scope<void> {.desc = kDesc});
     }
 }
 
@@ -263,7 +285,7 @@ constexpr void WalkEnclosingScopes(Visitor& visitor) {
     }
 }
 
-// Public-facing tag passed to visitor.OnTemplate<TemplateTag>() for template
+// Public-facing tag passed to visitor as TemplateArg<TemplateTag> for template
 // template arguments. Wraps the reflected template without leaking meta::info.
 template <std::meta::info Tmpl>
 struct TemplateEntityTag {
@@ -288,20 +310,20 @@ consteval auto TemplateArgumentsArray() {
 template <std::meta::info Arg, typename Visitor>
 constexpr void DispatchTemplateArgument(Visitor& visitor) {
     if constexpr (std::meta::is_type(Arg)) {
-        visitor.template OnType<typename[:std::meta::dealias(Arg):]>();
+        visitor(TypeArg<typename[:std::meta::dealias(Arg):]> {});
     } else if constexpr (std::meta::is_template(Arg)) {
-        visitor.template OnTemplate<TemplateEntityTag<std::meta::dealias(Arg)>>();
+        visitor(TemplateArg<TemplateEntityTag<std::meta::dealias(Arg)>> {});
     } else if constexpr (std::meta::is_value(Arg)) {
         using ValueType = std::remove_cv_t<typename[:std::meta::dealias(std::meta::type_of(Arg)):]>;
         if constexpr (std::is_integral_v<ValueType> || std::is_enum_v<ValueType> || std::is_null_pointer_v<ValueType> || std::is_floating_point_v<ValueType>) {
             constexpr ValueType kValue = std::meta::extract<ValueType>(Arg);
-            visitor.template OnValue<kValue>();
+            visitor(ValueArg<kValue> {});
         } else {
-            visitor.template OnOtherValue<ValueType>();
+            visitor(OtherValueArg<ValueType> {});
         }
     } else {
         using ValueType = std::remove_cv_t<typename[:std::meta::dealias(std::meta::type_of(Arg)):]>;
-        visitor.template OnOtherValue<ValueType>();
+        visitor(OtherValueArg<ValueType> {});
     }
 }
 
@@ -352,8 +374,8 @@ template <typename T>
 }
 
 // Walks enclosing scopes of T from outermost (direct child of ::) to innermost
-// (immediate parent of T). Calls `visitor.template OnTypeScope<OwnerT>(desc)`
-// for class/union/enum owners when supported by `visitor`, otherwise `visitor(desc)`.
+// (immediate parent of T). Calls `visitor(Scope<OwnerT>{desc})` for
+// class/union/enum owners and `visitor(Scope<void>{desc})` otherwise.
 template <typename T, typename Visitor>
 constexpr void ForEachEnclosingScope(Visitor&& visitor) {
     using Bare = std::remove_cv_t<T>;
@@ -361,11 +383,11 @@ constexpr void ForEachEnclosingScope(Visitor&& visitor) {
 }
 
 // Visits each template argument of T in declaration order (including defaulted
-// arguments). Dispatches to:
-//   - visitor.template OnType<ArgT>()
-//   - visitor.template OnTemplate<TemplateTag>()
-//   - visitor.template OnValue<kVal>()       (integral, enum, nullptr_t, floating-point)
-//   - visitor.template OnOtherValue<ValueT>() (object, pointer, reference, or class NTTP)
+// arguments). Dispatches to visitor with:
+//   - TypeArg<ArgT>           (type arguments)
+//   - TemplateArg<TemplateTag> (template-template arguments)
+//   - ValueArg<kVal>          (integral, enum, nullptr_t, floating-point)
+//   - OtherValueArg<ValueT>   (object, pointer, reference, or class NTTP)
 // No-op if T is not a template specialization.
 template <typename T, typename Visitor>
 constexpr void ForEachTemplateArgument(Visitor&& visitor) {

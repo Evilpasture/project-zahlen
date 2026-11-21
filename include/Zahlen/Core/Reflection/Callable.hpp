@@ -19,16 +19,21 @@ namespace ZHLN::Reflect {
 
 #if ZHLN_REFLECTION_AVAILABLE
 
-namespace TemplatedDetail {
-
+// Function-type decomposition for plain function types. The primary
+// template covers cv/ref-qualified and otherwise unsupported forms.
 template <typename FnType>
-struct FunctionTypeTraits;
+struct FunctionTypeTraits {
+    static constexpr bool hasSignature = false;
+    static constexpr bool isNoexcept  = false;
+    static constexpr bool isCVariadic = false;
+};
 
 template <typename R, typename... Args>
 struct FunctionTypeTraits<R(Args...)> {
     using ReturnType                 = R;
     using ParameterTypes             = std::tuple<Args...>;
-    static constexpr bool isNoexcept = false;
+    static constexpr bool hasSignature = true;
+    static constexpr bool isNoexcept  = false;
     static constexpr bool isCVariadic = false;
 };
 
@@ -36,7 +41,8 @@ template <typename R, typename... Args>
 struct FunctionTypeTraits<R(Args...) noexcept> {
     using ReturnType                 = R;
     using ParameterTypes             = std::tuple<Args...>;
-    static constexpr bool isNoexcept = true;
+    static constexpr bool hasSignature = true;
+    static constexpr bool isNoexcept  = true;
     static constexpr bool isCVariadic = false;
 };
 
@@ -44,7 +50,8 @@ template <typename R, typename... Args>
 struct FunctionTypeTraits<R(Args..., ...)> {
     using ReturnType                 = R;
     using ParameterTypes             = std::tuple<Args...>;
-    static constexpr bool isNoexcept = false;
+    static constexpr bool hasSignature = true;
+    static constexpr bool isNoexcept  = false;
     static constexpr bool isCVariadic = true;
 };
 
@@ -52,11 +59,10 @@ template <typename R, typename... Args>
 struct FunctionTypeTraits<R(Args..., ...) noexcept> {
     using ReturnType                 = R;
     using ParameterTypes             = std::tuple<Args...>;
-    static constexpr bool isNoexcept = true;
+    static constexpr bool hasSignature = true;
+    static constexpr bool isNoexcept  = true;
     static constexpr bool isCVariadic = true;
 };
-
-} // namespace TemplatedDetail
 
 // Pure C++ language facts for a reflected free or static member function.
 // Exposes plain booleans, names, dealiased signature types, an opaque
@@ -82,7 +88,7 @@ struct FunctionTraits {
 
   private:
     static constexpr std::meta::info kEntity = std::meta::reflect_function(*Fn);
-    using Signature                          = TemplatedDetail::FunctionTypeTraits<std::remove_pointer_t<PointerType>>;
+    using Signature                          = FunctionTypeTraits<std::remove_pointer_t<PointerType>>;
 
     static consteval auto FunctionIdentifier() noexcept -> std::string_view {
         if constexpr (std::meta::has_identifier(kEntity)) {
