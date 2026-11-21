@@ -1,6 +1,7 @@
 # ZHLN Rendering Subsystem: Developer's Guide
 
-This document outlines the architecture, resource lifetime model, and pipeline execution flow of the ZHLN (Zero-overHead vuLkan abstractioN) rendering subsystem. It is designed to help developers understand how to safely interact with, configure, and extend the renderer.
+This guide covers renderer architecture, resource lifetimes, Vulkan dispatch,
+and pipeline execution.
 
 ---
 
@@ -30,7 +31,7 @@ Volk's dispatch tables are process-global in this build. The supported Engine pa
 
 ### Instance Creation and Context Builder
 
-`Vk::Instance::Create()` creates a zero-overhead owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
+`Vk::Instance::Create()` creates an owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
 
 ### Diagnostics Ownership (Vk::GPUDiagnostics)
 

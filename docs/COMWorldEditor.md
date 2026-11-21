@@ -1,6 +1,6 @@
 # COM world-editor consumer
 
-`zahlen-editor` now owns its custom loop, HostUI/context/atlas, document policy,
+`zahlen-editor` owns its custom loop, HostUI/context/atlas, document policy,
 selection/modal state and primitive recovery. It calls engine capabilities and
 stages frames through IFramePipeline; there is no Engine, native renderer,
 PrefabFactory service, native GUI callback or registry bridge in this host.
@@ -11,12 +11,6 @@ transforms, axis constraints, confirm/cancel and selection deletion. Public
 API: `editor/GUIEditor.hpp`. Input is copied `COM::HostInputInfo`; rotations use
 the engine-independent Quat vocabulary rather than Jolt types.
 
-`utils/editor/EditorSession.{hpp,cpp}` is the in-tree reusable host session;
-it is intentionally separate from the independently installable panel library.
-The executable links this session, application/process support, the COM scene
-and FreeCam consumers, and document parsing. No native editor/scene/freecam/UI
-target is linked into it; the transitional native GUI editor adapter has been removed.
-
 ## Frame and document behavior
 
 - Simulation starts paused. Input, picking, inspector, camera motion, font
@@ -26,17 +20,15 @@ target is linked into it; the transitional native GUI editor adapter has been re
   installed in Core. ProcessScope and FramePacer remain above COM.
 - The actual panel rectangles determine the centre viewport. Picking and modal
   unprojection use that same rectangle and Vulkan Y-down NDC convention.
-- `COM::ViewportInfo {viewport}` is a new reflected ApplySettings chain node.
+- `COM::ViewportInfo {viewport}` is a reflected ApplySettings chain node.
   It extends no vtable; the whole settings/viewport chain validates before any
   settings or viewport is committed. The existing Viewport() reads it back.
 - The five Add Shape requests use IAssetLibrary's procedural capabilities,
   honouring the host's buildBLAS policy. Empty objects also receive source
   provenance so they survive document extraction.
-- Sphere/Cylinder/Cone values are appended to ShapeKind. Existing values and
-  component field layouts are preserved. In scene documents, `extent` is the
+- In scene documents, `extent` is the
   plane extent or round-primitive radius; cylinder/cone `halfExtents.y` is their
-  half-height. All five primitives now survive TOML save/read/instantiate rather
-  than becoming boxes or disappearing.
+  half-height. Primitive shapes are preserved across TOML save/read/instantiate.
 - Primitive material source values are retained in a generation-keyed host
   document table. Cache clear rebinds live owned meshes; device loss recreates
   primitive mesh/material data through graphics capabilities, publishes only
@@ -58,25 +50,3 @@ zahlen-editor --scene scene.toml --headless --frames 2 --raster-only --validatio
 
 Headless operation requires bounded --frames. Ordinary windowed editing has no
 frame limit. --raster-only avoids BLAS creation on software Vulkan drivers.
-
-## Validation
-
-Existing GNU 16 Release VM, Vulkan llvmpipe:
-- Extras_EditorHost: 6 passed (CRUD/hierarchy cleanup, modal manipulation and UI
-  capture, all-five-shape save/reload, offset-viewport real-physics picking,
-  transactional viewport chain, actual rendered paused/simulating/recreated UI
-  plus all five primitive GPU assets, lifecycle and typed save errors).
-- Extras_SceneAssets: 5 passed.
-- Extras_CameraHosts/frame pipeline: 14 passed.
-- Extras_Application/screenshot: 20 passed.
-- Extras_TerrainHost: 5 passed; Lightning and Explosion: 4 passed each.
-- Actual editor CLI: bounded fallback and Sphere scene-document runs passed;
-  unbounded headless use was correctly rejected.
-- Installed Engine + Editor components into a separate prefix; an external
-  C++26 `find_package(ZahlenEditor)` consumer included the public headers,
-  linked only Zahlen::Editor, enumerated the real component/shape tables and
-  ran successfully. The native adapter header is not installed by this package.
-- Governance and patch apply/reverse checks are reported with the deliverable.
-
-This slice migrates the world-editor consumer, not the remaining Console,
-Benchmark, native gameplay/sample callers, or Animator/CharacterMotor runtime.

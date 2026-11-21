@@ -1,10 +1,7 @@
 # Scene documents and orchestration belong to the host
 
-Link `zahlen_scene`, include `<Scene/Scene.hpp>`. The old
-`<Zahlen/Engine/Scene.hpp>` and Core Scene.cpp are removed. All STL scene
-storage, Instantiate, Validate and Extract live in the consumer library.
-Core keeps only the small `Scene::ShapeKind`/bake ownership constants used by
-published components, in `<Zahlen/ECS/SceneValues.hpp>`.
+Link `zahlen_scene` and include `<Scene/Scene.hpp>`. The consumer library owns
+scene storage, instantiation, validation, and extraction.
 
 ## COM path
 
@@ -51,8 +48,7 @@ mesh/light entities without scene provenance remain excluded.
 The host library stores a trivially-copyable `Scene::AuthoringComponent` through
 the consumer-component path. This retains material/body/start-asleep/draw-layer/
 ambient-cube authoring values on prefab roots that have no MeshComponent.
-It does not add a document, string or vector to Core. Extract also captures
-logic-only entities and both spot-cone angles, which the old extractor omitted.
+Extraction includes logic-only entities and both spot-cone angles.
 Mesh-bearing entities still read live PBR/material values through capabilities.
 
 The document is not a lossless arbitrary ECS snapshot: runtime-only entities,
@@ -63,23 +59,11 @@ Core's bounded Name/SceneSource strings retain their existing length limits.
 
 ## Explicit primitive BLAS policy
 
-The old primitive builders always built BLAS even when CreateMesh's
-MeshBuildOptions requested raster-only geometry. The shared private builders
-now honour the option for all six geometry families. Public native mesh-builder
-symbols remain wrappers with their original BLAS-enabled behaviour.
-
-IAssetLibrary::SpawnPrimitive accepts optional MeshBuildOptions. Its default is
-**true**, preserving existing native spawn behaviour. IGraphicsDevice::CreateMesh
-keeps its existing MeshBuildOptions default **false**, now honoured for primitive
-geometry as well as raw streams. Scene::InstantiateOptions defaults to true;
-pass `{.buildBLAS = false}` explicitly for raster-only scenes/tests.
-OwnedMeshComponent records the policy so explicit renderer recreation does not
-silently re-enable BLAS. Rebuild the engine and consumers together: the POD
-component gained that field and layout checks reject stale callers.
-
-This is not a driver workaround hidden behind environment detection. The
-host chooses the policy; the NVIDIA BLAS path is not disabled. VM tests use
-explicit raster-only geometry because of the previously reported lavapipe issue.
+`IAssetLibrary::SpawnPrimitive` and `Scene::InstantiateOptions` default to
+`buildBLAS = true`. `IGraphicsDevice::CreateMesh` defaults to false. Pass
+`{.buildBLAS = false}` explicitly for raster-only scenes. The ownership component
+records this policy for renderer recreation; the host chooses it rather than
+relying on driver detection.
 
 ## Document parsing and replacement
 
@@ -93,34 +77,9 @@ Hosts needing staged replacement should orchestrate it themselves.
 
 Material/morph arenas still do not support general individual release. An
 allocation failure can consume material-arena space until renderer teardown;
-entity rollback does not claim to undo those arena allocations. Instantiate's
+entity rollback does not reclaim those arena allocations. Instantiate's
 settings/camera commit is not a general transaction across arbitrary decorators.
 
-## Core fixes exercised by the migration
+## Limitations
 
-- A process-global dynamic family name now initializes separate storage in each
-  registry. Global byte-layout metadata validates repeated registration and
-  prevents an empty second registry from converting a known typed family to raw
-  storage. Typed ownership guards and size/alignment refusal remain enforced.
-- A prefab part's valid no-node sentinel (`nodeIndex == -1`) uses identity rather
-  than indexing an empty node vector during instantiation.
-
-## COM-only surface
-
-The transitional `zahlen_native_scene` and `zahlen_native_scene_documents`
-adapters have been removed; all scene hosts, editors, and document loaders
-consume `zahlen_scene` and `zahlen_scene_documents` exclusively over COM.
-
-BSP DescribeScene moved into zahlen_bsp_assets and consumes the host document;
-a COM host no longer needs the legacy importer archive just to describe a map.
-TOML/Lua, fallback, editor/sample and tests have updated includes/link targets.
-The world editor, diagnostic scene host and fallback module are still native
-consumers behind those explicitly named adapters; this slice does not claim
-that their host loops, inspector or extension modules have been ported.
-FreeCam/Camera/Terrain/VFX/editor/Console/Benchmark host-loop ports and the
-CharacterMotor/Animator runtime cut remain subsequent work.
-
-The Scene suite validates real GPU allocation, physics, document round-trips and
-renderer-recreation **state**, without submitting scene draw frames. It does
-not resolve the separately reported intermittent skin/morph frame failure or
-claim pixel-conformance acceptance.
+Intermittent skin/morph frame failures remain unresolved.

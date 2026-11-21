@@ -6,9 +6,18 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 ## 1. Core Principles
 
-* **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
-* **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
-* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `configure/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
+* **C++26 static reflection (`std::meta`)** supplies metadata used by ECS,
+  serialization, and scripting bindings.
+* **Containers and allocation**: `ZHLN::Array`, `HashMap`, `SkipList`, and
+  `MemoryPool` provide engine storage. Allocation and synchronization behavior
+  depend on the container and operation; this is not an engine-wide
+  allocation-free guarantee.
+* **PIMPL boundaries**: Public context and window APIs hide Vulkan and Jolt
+  implementation details. The kernel resolves presentation targets through
+  `PlatformHost`; callers acquire attachments through
+  `Kernel::AcquireTarget()`/`Engine::AcquireTarget()`. Configure-time checks in
+  `configure/check_pimpl_encapsulation.py` enforce the accessor and friendship
+  restrictions on the window/platform headers.
 * **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
 
 ---
@@ -361,9 +370,8 @@ An application links `app/` and may therefore use `<Zahlen/Zahlen.hpp>`
 (`app/include/Zahlen/Zahlen.hpp`), which pulls the engine surface an
 application actually compiles against together with the host headers
 (`App.hpp`, `HostRunner.hpp`, `KernelApp.hpp`, `ConfigCli.hpp`,
-`AppOutcome.hpp`). It lives in the application layer on purpose: the engine
-itself still has no engine-wide header, and the umbrella is not visible to
-Core targets.
+`AppOutcome.hpp`). This umbrella belongs to the application layer and is not visible to Core
+targets; the engine has no engine-wide header.
 
 ---
 
@@ -776,24 +784,12 @@ genuinely does not cross, because `std::bitset` is built out of a base class
 in libstdc++ and is therefore not standard layout -- the scalar queries answer
 the same questions.
 
-**Optionality is a value, not a protocol.** `COM::Option<T>` is `T` plus a
-flag with a fixed layout, so a query that may find nothing simply returns one
-(`BodyPosition`, `BodyState`, `DescribePrefab`, `FindEnvironmentImage`). The
-older shape -- `bool` return plus a `T*` out-parameter -- is a C habit that
-survives into C++ only because the ABI forbids `std::optional`, and it is
-worse in three ways that have nothing to do with taste: the caller must
-declare storage before knowing whether anything will go in it, the result
-cannot be returned or chained, and the state of `*out` on a miss becomes prose
-in a comment instead of something the type enforces. `Option` costs the same
-bytes and none of that. It converts implicitly to `std::optional<T>` exactly
-as `COM::Result<T>` converts to `std::expected<T, ErrorCode>`: the wire type
-is what the vtable traffics in, the standard type is one conversion away in
-the caller's own TU.
-
-That is also why the ergonomic tier is thinner than it first looks. There is
-no inline `std::optional` overload beside these four, because an overload
-differing only in return type is ill-formed -- the conversion on `Option`
-itself does the job, and one spelling is better than two.
+Queries such as `BodyPosition`, `BodyState`, `DescribePrefab`, and
+`FindEnvironmentImage` return `COM::Option<T>`, a value plus a presence flag with
+a fixed layout. It converts to `std::optional<T>` in the caller's translation
+unit, as `COM::Result<T>` converts to `std::expected<T, ErrorCode>`. The COM
+wire types, not their standard-library counterparts, cross the vtable boundary.
+There is no separate overload differing only in return type.
 
 `AuditInterfaceABI` therefore inspects the virtual members only. That is not a
 loosening: a non-virtual inline member occupies no vtable slot, emits no

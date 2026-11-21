@@ -1,10 +1,8 @@
 # utils/ — the host programs
 
-This is not a junk drawer of dev scripts. Three of the eight programs here are
-**steps of the build**: no `zcook`, no `zshader`, no `ecsc` means no engine
-binary, because the build cannot produce cooked assets, generated GPU bindings
-or the ECS code without them. Run them by hand when you want to, but the
-`cmake --build` graph already does.
+Host programs include asset cooking, shader compilation, ECS code generation,
+testing, and editor tools. The engine build invokes `zcook`, `zshader`, and
+`ecsc` to generate assets and code.
 
 Scripts, shell glue and Blender-side authoring live in [`../scripts/`](../scripts/).
 Nothing here is a hardware driver; the Vulkan layer is under `src/vulkan/`.
@@ -39,10 +37,8 @@ resources/ + plugins/           assets the game ships
 | `scene/` | C++ | `zahlen_scene_documents`, `zahlen_scene_host` | no (`ZHLN_BUILD_EXTRAS`) | Scene document model plus a host that loads/watches scene files. |
 | `benchmark/` | C++ | `zahlen_benchmark_app` | no (`ZHLN_BUILD_EXTRAS`) | Windowless benchmark executable. |
 
-None of these are `install()`ed today: they exist inside the build tree only
-(`zahlen_set_bin_output` puts them next to the engine binary). That is the one
-piece of "first-class" plumbing still missing — see the note in
-`include/ARCHITECTURE.md` §1.4.
+The Cooker package installs `zcook`. See [packaging](../packaging/README.md)
+for the released package contents.
 
 ## Conventions
 

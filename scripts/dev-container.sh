@@ -34,6 +34,7 @@ case "$cmd" in
     mkdir -p "$dir"
     "$runtime" pull "$image"
     # Host networking avoids rootless Podman's /dev/net/tun requirement in Arena.
+    # It does not isolate the container network; use trusted images and code.
     # Override the entrypoint defensively; the CI builder normally has none.
     "$runtime" create --name "$name" --network host --entrypoint sleep "$image" infinity >/dev/null
     if [[ ! -e "$main" ]]; then

@@ -82,33 +82,22 @@ after a successful AdvanceFrame and before FinishFrame. A typed failure or
 RequestClose at this seam cancels the pending presentation before reverse-order
 Stop hooks, while preserving the original typed failure.
 
-FreeCam::Layer and CameraRig::Layer now implement BeforeRender instead of Tick.
-Their normal Step/Apply entry points remain explicit for bespoke hosts. This
-closes the previous one-frame committed-transform gap for normal host-layer
-orbit use. The tests cover current local target edits and a real falling
-physics body, host pose selection before projection, the resulting view/proj
-matrix and no duplicate physics step during FinishFrame.
+`FreeCam::Layer` and `CameraRig::Layer` implement `BeforeRender`. Bespoke hosts
+can call their `Step`/`Apply` entry points explicitly.
 
 ## Copied graphics diagnostics
 
-GetSettings's output chain now also accepts GraphicsDeviceInfo, which may share
-a chain with GraphicsSettings. Names are copied into fixed-capacity String64
-(renderer) and String256 (GPU), not borrowed std::string_views. The nonvirtual
-Info convenience returns that copied node. Existing IGraphicsDevice vtable
-slots are unchanged. The scene host reconstructs the previous RenderInfo Lua
-argument entirely in consumer code so graphics-profile scripts retain their
-field names and values. A recreation test verifies old diagnostic copies remain
-valid after the renderer is replaced.
+`GetSettings` accepts `GraphicsDeviceInfo` alongside `GraphicsSettings`.
+Renderer and GPU names are copied into fixed-capacity `String64` and `String256`
+values. The `Info` convenience method returns the copied node. Copies remain
+valid after renderer recreation.
 
-Before the first BeginFrame lazily allocates sceneColor, GetViewport now uses
-the actual framebuffer extent and the requested subregion/clamping. Previously
-the first camera pass saw zero dimensions and retained identity matrices. The
-fallback is only used while graph resources have no extent; normal allocated
-viewport behavior is unchanged.
+Before graph resources have an extent, `GetViewport` uses the framebuffer
+extent and clamps the requested subregion.
 
 ## Diagnostic scene host and fallback
 
-`zahlen_scene_host` is now an Application with COM document loading, host-owned
+`zahlen_scene_host` is an Application with COM document loading, host-owned
 HostUI and an instance-owned DefaultPreset. Its optional FileSystemWatcher and
 PresenceClient belong to the host layer and are retired in Stop while
 the process/task scope is alive. It neither installs engine services nor links
@@ -126,14 +115,4 @@ The CLI retains --scene and --graphics-config and adds --frames (0 unlimited)
 and --raster-only (explicit no-BLAS scene upload). BLAS remains enabled by
 default; there is no environment/device detection workaround. The fallback's
 RTR setting is disabled for its explicit raster-only build. Source prefabs must
-still be prepared by the host before a document references them; this port adds
-no implicit glTF/BSP importer hook.
-
-## Not completion of the migration
-
-Native world-editor, Project Light and large sample loops still use their
-explicit compatibility adapters. FreeCam/Camera can now run with correct host
-staging, but those loops have not magically become COM ports. Native animation
-and character substep code, Terrain, VFX, Console/Benchmark UI and editor policy
-remain to be migrated. The agreed engine-owned Animator/CharacterMotor data
-runtime is still outstanding. No bulk ECS mapping or registry escape was added.
+be prepared by the host before a document references them.

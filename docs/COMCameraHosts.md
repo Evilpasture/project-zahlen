@@ -59,18 +59,7 @@ explicitly. See COMFramePipeline.md for protocol, cancellation and failure rules
 Apply itself does not advance anything: a direct call before AdvanceFrame still
 reads the previous committed WorldTransform. Local target edits belong before
 AdvanceFrame, not between the halves, because propagation is not silently
-replayed. Physics-follow timing and current local target edits are now covered
-by real engine tests, including the same-frame projected camera matrix.
-
-## COM-only surface
-
-The transitional `NativeFreeCam` and `NativeTargetCamera` adapters have been
-removed; every editor, sample, and gameplay consumer drives `FreeCam` and
-`TargetCamera` exclusively through COM capabilities.
-
-This is a host-camera consumer slice, **not completion of the native editor,
-sample, animation, CharacterMotor, Terrain, VFX, Console or Benchmark ports**.
-No bulk ECS mapping or new COM vtable method is introduced.
+replayed.
 
 ## Tests
 
