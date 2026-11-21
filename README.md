@@ -5,6 +5,7 @@ conversion tools.
 
 ## Start here
 
+* **Requirements:** [Build tools, runtime and Vulkan](docs/REQUIREMENTS.md).
 * **Build a game:** [Consumer guide](docs/CONSUMING.md) — install signed packages
   with `zpkg` and link with CMake; no engine checkout required.
 * **Develop the engine:** [Contributor guide](docs/DEVELOPMENT.md).

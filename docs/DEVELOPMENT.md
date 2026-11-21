@@ -7,9 +7,9 @@ their release tag.
 
 ## Build requirements
 
-Use a C++26 compiler with `-freflection` (GCC 16.2 is supported). Configuration
-checks required compiler features. Source-build dependencies are listed in the
-Containerfiles under [docker/](../docker/README.md).
+See [Requirements](REQUIREMENTS.md) for compiler and runtime requirements.
+Source-build dependencies are listed in the [development container](../docker/README.md)
+configuration.
 
 ## Build Instructions
 

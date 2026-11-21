@@ -8,6 +8,7 @@ release's assets together.
 
 | Audience / task | Canonical document |
 |---|---|
+| Build and runtime requirements | [Requirements](REQUIREMENTS.md) |
 | Game developer: install, link, run | [Consuming Zahlen](CONSUMING.md) |
 | Engine contributor: source builds, containers | [Engine development](DEVELOPMENT.md) |
 | Package maintainer: exports, manifests, ABI | [Packaging](../packaging/README.md) |

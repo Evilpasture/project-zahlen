@@ -11,19 +11,8 @@ CMake compiles as part of your game.
 
 ## Prerequisites
 
-* A GCC toolchain with C++26 and `-freflection`, compatible with the release.
-  The release workflow defaults to GCC 16.2.0. A version number alone is not
-  sufficient: installed CMake configs probe the reflection construct affected by
-  GCC PR c++/125280 and check compiler family, architecture and libstdc++ ABI.
-  Use the compiler recommended by your release, not an arbitrary GCC 16 build.
-* CMake ≥ 3.28 and a build tool (Ninja recommended).
-* A Vulkan driver advertising `VK_EXT_descriptor_heap`, plus the other renderer
-  features required by the release. Headless mode does not remove Vulkan
-  requirements. The release workflow uses Mesa **26.2** or newer for lavapipe;
-  do not assume all Mesa 26.x builds support descriptor heaps.
-* The runtime dependencies documented by your release. The native release
-  workflow targets glibc 2.35; this does not make an old distribution's Vulkan
-  driver sufficient. Container images have their own runtime baseline.
+See [Requirements](REQUIREMENTS.md) for build tools, runtime libraries,
+windowing, and Vulkan driver and hardware support for this release.
 
 ## 1. Get zpkg
 
@@ -139,9 +128,8 @@ export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
 ./build/my-game --headless
 ```
 
-Verify that this file exists and the selected driver advertises
-`VK_EXT_descriptor_heap`. Installing lavapipe or passing `--headless` alone is
-not enough.
+See [Vulkan driver and hardware](REQUIREMENTS.md#vulkan-driver-and-hardware)
+for the device capability check.
 
 ## Do not use the engine-development workflow for a game
 
