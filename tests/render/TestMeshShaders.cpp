@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Verification for the VK_EXT_mesh_shader path (see MESH_SHADERS.md).
+// Verification for the VK_EXT_mesh_shader path (see src/render/MESH_SHADERS.md).
 //
 // The interesting question is not "does it run" -- a mesh pipeline that emits
 // garbage still runs -- but "does it rasterise exactly what the vertex pipeline

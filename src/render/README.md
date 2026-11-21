@@ -22,6 +22,9 @@ lifetimes, command recording, synchronization, and render-graph machinery.
 | Output targets and presentation | [FrameDestinations.hpp](FrameDestinations.hpp), [PresentationSurface.hpp](PresentationSurface.hpp), [RenderPresentation.cpp](RenderPresentation.cpp) |
 | UI | [`ui/`](ui/) |
 
+For task/mesh selection, geometry streams, and culling constraints, see
+[mesh shading](MESH_SHADERS.md).
+
 ## Frame and pass structure
 
 `Renderer` holds persistent resources. `RenderFrame` identifies the frame slot
