@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "render/passes/gbuffer/GBufferCullingPass.hpp"
-
 #include "render/RenderConstants.hpp"
 #include "render/Renderer.hpp"
 #include "render/passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
-#include <algorithm>
 #include <Zahlen/Log.hpp>
+#include <algorithm>
 
 namespace ZHLN::Passes {
 
@@ -24,7 +23,6 @@ void GBufferCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    ZHLN::Log("[CullTmp] GPU culling pass 1 recorded: drawCount={}", drawCount);
     auto& countBuf = frame.secondPassCountBuffers;
     countBuf.SyncComputeForTransferWrite(cmd);
     Vk::FillBuffer(cmd, countBuf);
@@ -59,9 +57,9 @@ void GBufferResolveCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    auto&       indirectBuf = frame.indirectCommandsBuffersPass2;
-    const auto  sceneVp     = frame.viewport;
-    const auto  hizMips     = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+    auto&                  indirectBuf = frame.indirectCommandsBuffersPass2;
+    const auto             sceneVp     = frame.viewport;
+    const auto             hizMips     = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
     const CullingConstants pc {
         .viewProj       = frame.unjitteredViewProj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
