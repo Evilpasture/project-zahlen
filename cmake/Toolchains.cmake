@@ -402,8 +402,14 @@ zhln_toolchain_source_package(Application
     CHECK_TARGET zahlen_application
     DEPENDS Engine CommandLine HostRunner Screenshot
     HEADER_FILES app/include/Zahlen/App.hpp app/include/Zahlen/ConfigCli.hpp app/include/Zahlen/Zahlen.hpp
+                 app/include/Zahlen/PluginManifest.hpp
+                 app/include/Zahlen/PluginManifestGraph.hpp
+                 app/include/Zahlen/PluginManifestRegistry.hpp
     HEADER_DEST Zahlen
     SOURCES app/Application.cpp
+            app/PluginManifest.cpp
+            app/PluginManifestGraph.cpp
+            app/PluginManifestRegistry.cpp
     PUBLIC_LINKS Zahlen::Engine Zahlen::CommandLine Zahlen::HostRunner
     PRIVATE_LINKS Zahlen::Screenshot)
 
