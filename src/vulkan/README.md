@@ -1,7 +1,10 @@
-# ZHLN Rendering Subsystem: Developer's Guide
+# Vulkan backend
 
-This guide covers renderer architecture, resource lifetimes, Vulkan dispatch,
-and pipeline execution.
+Backend reference for contributors implementing renderer features in
+[`src/render`](../render/README.md) or changing Vulkan infrastructure here.
+This directory owns device access, resource wrappers, synchronization, and graph
+execution machinery. Scene algorithms and shader integration belong to the
+[renderer guide](../render/README.md).
 
 ---
 

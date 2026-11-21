@@ -13,7 +13,8 @@ release's assets together.
 | Package maintainer: exports, manifests, ABI | [Packaging](../packaging/README.md) |
 | Package-manager user / contributor: commands, bootstrap, trust | [zpkg](../utils/zpkg/README.md) |
 | Engine architecture | [Architecture](../include/ARCHITECTURE.md) |
-| Renderer architecture and Vulkan implementation | [Rendering subsystem](../src/vulkan/RENDER.md) |
+| Renderer orchestration, algorithms, and shaders | [Renderer](../src/render/README.md) |
+| Vulkan backend and resource lifetimes | [Vulkan](../src/vulkan/README.md) |
 | Application API and lifecycle | [COMApp](COMApp.md) |
 | Tests and golden images | [Tests](../tests/README.md) |
 | Engine tools | [Host programs](../utils/README.md) |
