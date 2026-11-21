@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/RemoteAsset/URLResolver.hpp
-//
 // The half of remote fetching that is pure string work: the spellings of a URL
 // worth putting on the wire, and the name its bytes get in the disk cache. No
 // network, no filesystem -- so it runs on the frame thread, on a worker, or in

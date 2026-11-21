@@ -151,8 +151,6 @@ namespace {
 
 struct RTRPBRReflectionTestSuite {
     RTRPBRReflectionTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -160,10 +158,6 @@ struct RTRPBRReflectionTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: one engine per resolution for the whole binary, with the
-    // scene reset between tests. Creating a Vulkan instance per test is
-    // what eventually exhausts the loader's static TLS and turns the tail
-    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RTR PBR Colour", .width = 640, .height = 480

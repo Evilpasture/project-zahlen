@@ -122,10 +122,7 @@ template <AAMode Mode>
         Passes::TranslucentPrePass {.frame = frame},
         Passes::AoDepthGeneratePass {.cull = self.culling, .frame = frame},
         Passes::ComputePass<Passes::GtaoDesc> {.frame = frame, .pc = pc},
-        // The sun's shadow term, resolved before the pass that consumes it: PCSS
-        // and the contact ray belong to a dispatch, not to the lighting fragment
-        // stage's quads. Fetching Res_SunShadowMask is all that is left of that
-        // work in ClusteredLightingPass.
+        // Order matters: the mask must exist before ClusteredLightingPass reads it.
         Passes::SunShadowMaskPass {.frame = frame}, Passes::ClusteredLightingPass {.post = self.post, .frame = frame, .pc = pc},
         Passes::RcgiCascadePass {.frame = frame}, Passes::RtgiCompositePass {.frame = frame}, Passes::EmissivePass {.forward = self.forward, .frame = frame},
         Passes::LightingMipPass {.frame = frame}, OpaqueReflectionPass {.frame = frame, .pc = pc}, TranslucentReflectionPass {.frame = frame, .pc = pc},

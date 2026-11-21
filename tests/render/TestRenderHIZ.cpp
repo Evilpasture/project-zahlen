@@ -36,8 +36,6 @@ namespace {
 
 struct HiZTestSuite {
     HiZTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -45,10 +43,6 @@ struct HiZTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: the binary keeps one engine alive and the scene is what gets
-    // thrown away between tests. Creating a Vulkan instance per test is what
-    // eventually exhausts the loader's static TLS and turns the tail of a
-    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 1280, uint32_t height = 720) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Hi-Z Test",
@@ -209,9 +203,6 @@ struct HiZTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 4. Viewport Resizing & Dynamic Pyramid Rebuilding
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> hiz_dynamic_viewport_resizing() {
             auto engine      = CreateTestEngine(1280, 720);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

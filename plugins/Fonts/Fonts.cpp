@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/Fonts/Fonts.cpp
-//
 // The production baked-font loader: fontbm `.fnt`+`.png` pairs and cooked
 // 'FNT0' containers into core's BakedFontAsset. No outline-font parser exists
 // here either -- everything this file reads was baked offline.

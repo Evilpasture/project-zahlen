@@ -4,8 +4,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// plugins/BSP/BSPInteraction.hpp
-//
 // What the map says about its interactive entities, decoded.
 //
 // This is the asset half of what used to be one file in

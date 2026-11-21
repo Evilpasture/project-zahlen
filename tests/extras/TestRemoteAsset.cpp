@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestRemoteAsset.cpp
-//
 // RemoteAsset is an optional layer (extensions/net/RemoteAsset) over an optional
 // third-party library (libcurl, through extensions/net/HTTP), so this suite is built
 // only when both exist. The pure half -- URL rewrites, the GLB validator, the

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// extensions/editor/GUIEditor.cpp
-//
 // COM editor panels (Hierarchy + Inspector). See extensions/editor/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives.
 

@@ -5,8 +5,6 @@
 
 #include <Zahlen/Math/Vec3.hpp>
 
-// plugins/BSP/BSPLighting.hpp
-//
 // The lighting half of the BSP workflow: every rule that turns a compiled
 // Source map into light for the engine's PBR / RTGI / DDGI pipeline when the
 // map's own baked lighting (LUMP_LIGHTING, i.e. VRAD) is not the source of

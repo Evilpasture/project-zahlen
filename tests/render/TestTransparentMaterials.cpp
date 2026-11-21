@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestTransparentMaterials.cpp
-//
 // Alpha-blended materials skip the G-Buffer (IsForwardOnly / alphaMode 2) and
 // composite in ForwardPass with SRC_ALPHA, ONE_MINUS_SRC_ALPHA. An opaque
 // twin of the same geometry writes the G-Buffer and occludes whatever sits

@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/toml/UITOML.hpp
-//
 // Include this (not toml/TOML.hpp alone) to round-trip a GUI::UINode as a
 // document. The tree itself is format-free -- UI/UITree.hpp knows
 // nothing about TOML -- and the colours on NodeBox are JPH::Float4, so they

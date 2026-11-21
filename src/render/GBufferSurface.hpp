@@ -22,7 +22,7 @@ struct OpaqueSurface {
     OpaqueSurface(OpaqueSurface&&)                 = default;
     OpaqueSurface& operator=(const OpaqueSurface&) = default;
     OpaqueSurface& operator=(OpaqueSurface&&)      = default;
-    // Mirrors ScenePassPushConstants::translucentSurface for this G-buffer.
+    // Indices into ScenePassPushConstants' surface lanes for this G-buffer.
     static constexpr int kTranslucentSurface = 0;
 
     [[nodiscard]] static auto Resolve(RenderFrame& frame) noexcept -> GBufferSurface {

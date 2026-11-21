@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestLuaDataModel.cpp
-//
 // Exercises the DataModel adapter through the repository's existing LuaJIT
 // runtime: userdata identity, tree operations, value types, typed properties,
 // and main-thread event callbacks all round-trip to the same C++ Instance graph.

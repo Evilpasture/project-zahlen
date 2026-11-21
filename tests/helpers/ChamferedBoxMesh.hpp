@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/helpers/ChamferedBoxMesh.hpp
-//
 // Authored chamfered-box mesh for the unlit render suite.
 //
 // Replaces the Khronos UnlitTest.glb sample asset (CC-BY 4.0, (c) 2019

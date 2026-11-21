@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/HTTP/HTTP.cpp
-//
 // The whole of the libcurl dependency lives in this translation unit: HTTP.hpp
 // names no curl type, no CURLOPT and no CURLcode, so nothing that includes it
 // needs libcurl's include path and nothing outside this file is recompiled when

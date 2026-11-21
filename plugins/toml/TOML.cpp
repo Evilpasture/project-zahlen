@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/toml/TOML.cpp
-//
 // The document parser behind plugins/toml/TOML.hpp.
 //
 // Hand-written rather than vendored: the grammar the engine needs is small

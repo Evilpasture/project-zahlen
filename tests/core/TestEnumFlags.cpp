@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/core/TestEnumFlags.cpp
-//
 // The whole contract of Core/EnumFlags.hpp is opt-in: bit operators exist only
 // for enum types that switch EnableEnumFlags on, so an ordinary enum can never
 // grow silent arithmetic. The operators are found by argument-dependent lookup,

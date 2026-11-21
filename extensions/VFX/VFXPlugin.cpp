@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/VFX/VFXPlugin.cpp
-//
 // Dynamically loadable COM::IAppLayer for the VFX extension. Wraps the
 // Explosion and Lightning systems so a host can start, render and stop combat
 // FX through the standard plugin ABI (CreateAppLayer + the EntryPointWitness

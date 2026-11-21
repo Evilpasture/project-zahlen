@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestBSPLighting.cpp
-//
 // The lighting heuristics, on synthetic maps. Nothing here needs a .bsp on
 // disk: the rules under test are keyvalue-driven (classname families, the
 // `_light` colour/brightness ladder, the attenuation cutoffs, the material

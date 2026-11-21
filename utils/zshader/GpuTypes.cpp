@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// utils/zshader/GpuTypes.cpp
-//
 // Slang owns the GPU memory layout; this is the half that makes C++ listen.
 // It compiles the gpu_abi module in-process through CompileSlangEntry -- the
 // compile it shares with the catalog's reflection (SlangReflect.cpp) -- and

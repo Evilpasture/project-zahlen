@@ -4,8 +4,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// plugins/BSP/BSPGeometry.hpp
-//
 // The import step: BSP lumps in, Zahlen-native vertex streams out. The
 // streams are exactly the cooked-mesh payload layout the renderer already
 // consumes -- VertexPosition / VertexTangentFrame / VertexSurface / indices

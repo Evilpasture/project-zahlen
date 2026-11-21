@@ -3,8 +3,6 @@
 
 #pragma once
 
-// extensions/net/HTTP/HTTP.hpp
-//
 // A synchronous HTTP client over libcurl's easy interface. Optional: the
 // directory links libcurl only when it is installed, and consumers guard on
 // `if(TARGET zahlen_http)`.

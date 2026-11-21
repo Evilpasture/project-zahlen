@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/CDN/CDN.hpp
-//
 // A base URL, a disk cache, and the two verbs an asset loader needs:
 //
 //   Fetch(path)  -- a local file path for the asset via AsyncAssetFetcher::FetchSync.

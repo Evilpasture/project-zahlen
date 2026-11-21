@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// app/PluginManifestGraph.cpp
-//
 // Kahn's topological sort over "dependency starts before dependent", with a
 // lexicographic tie-break so discovery order (filesystem-dependent) never
 // changes the resolved run order. `Finalize` auto-includes required

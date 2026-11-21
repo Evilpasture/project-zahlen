@@ -118,7 +118,6 @@ struct ReflectionTestSuite {
             auto missing = ZHLN::Reflect::StringToEnum<WeaponType>("NotAnEnumerator");
             ZHLN::Test::ExpectFalse(missing.has_value());
 
-            // EnumToMessage
             std::string_view msg = ZHLN::Reflect::EnumToMessage(WeaponType::Pistol);
             ZHLN::Test::ExpectEq(msg, "Sidearm with high mobility.");
 
@@ -191,11 +190,9 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectTrue(hasDamage);
             ZHLN::Test::ExpectFalse(hasMana);
 
-            // IndexOfField
             constexpr size_t ammoIdx = ZHLN::Reflect::IndexOfField<"ammo", WeaponData>();
             ZHLN::Test::ExpectEq(ammoIdx, static_cast<size_t>(2));
 
-            // FieldNames
             constexpr auto fNames = ZHLN::Reflect::FieldNames<WeaponData>();
             ZHLN::Test::ExpectEq(fNames[0], "name");
             ZHLN::Test::ExpectEq(fNames[1], "damage");
@@ -207,7 +204,6 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectEq(ZHLN::Reflect::GetField<0>(weapon), "SVD");
             ZHLN::Test::ExpectEq(ZHLN::Reflect::GetFieldByName<"damage">(weapon), 80.0f);
 
-            // SetFieldByName
             bool setOk = ZHLN::Reflect::SetFieldByName<"ammo">(weapon, 15);
             ZHLN::Test::ExpectTrue(setOk);
             ZHLN::Test::ExpectEq(weapon.ammo, 15);
@@ -274,12 +270,10 @@ struct ReflectionTestSuite {
         std::expected<void, ZHLN::ErrorCode> tuple_and_structural_transforms() {
             WeaponData weapon {.name = "M9", .damage = 25.0f, .ammo = 15, .type = WeaponType::Pistol};
 
-            // TieFields
             auto tied = ZHLN::Reflect::TieFields(weapon);
             ZHLN::Test::ExpectEq(std::get<0>(tied), "M9");
             ZHLN::Test::ExpectEq(std::get<1>(tied), 25.0f);
 
-            // ZipFieldsWithNames
             auto zipped    = ZHLN::Reflect::ZipFieldsWithNames(weapon);
             auto firstPair = std::get<0>(zipped);
             ZHLN::Test::ExpectEq(firstPair.first, "name");
@@ -346,7 +340,6 @@ struct ReflectionTestSuite {
             });
             ZHLN::Test::ExpectEq(visitedMethods, static_cast<size_t>(2));
 
-            // CollectMethodResults
             auto resultsTuple = ZHLN::Reflect::CollectMethodResults(hero);
             ZHLN::Test::ExpectEq(std::get<0>(resultsTuple), 10);
             ZHLN::Test::ExpectEq(std::get<1>(resultsTuple), 95.0f);
@@ -360,7 +353,6 @@ struct ReflectionTestSuite {
             WeaponData w2 {.name = "MP5", .damage = 20.0f, .ammo = 30, .type = WeaponType::Pistol};
             WeaponData w3 {.name = "MP5", .damage = 25.0f, .ammo = 30, .type = WeaponType::Pistol};
 
-            // GenericEqual
             ZHLN::Test::ExpectTrue(ZHLN::Reflect::GenericEqual(w1, w2));
             ZHLN::Test::ExpectFalse(ZHLN::Reflect::GenericEqual(w1, w3));
 
@@ -369,7 +361,6 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectFalse(ZHLN::Reflect::GenericLess(w3, w1));
             ZHLN::Test::ExpectTrue(ZHLN::Reflect::GenericCompare(w1, w2) == 0);
 
-            // GenericHash
             size_t h1 = ZHLN::Reflect::GenericHash(w1);
             size_t h2 = ZHLN::Reflect::GenericHash(w2);
             size_t h3 = ZHLN::Reflect::GenericHash(w3);
@@ -392,7 +383,6 @@ struct ReflectionTestSuite {
             ZHLN::Test::ExpectEq(d.name, "G36");
             ZHLN::Test::ExpectEq(d.damage, 30.0f);
 
-            // ToDebugString
             std::string debugStr = ZHLN::Reflect::ToDebugString(w1);
             ZHLN::Test::ExpectTrue(!debugStr.empty());
             ZHLN::Test::ExpectTrue(debugStr.find("MP5") != std::string::npos);

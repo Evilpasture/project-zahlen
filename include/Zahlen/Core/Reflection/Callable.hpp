@@ -126,9 +126,8 @@ struct CallableInspector {
   private:
     static consteval auto FunctionEntity() -> std::meta::info {
         if constexpr (std::is_pointer_v<Callable> && std::is_function_v<std::remove_pointer_t<Callable>>) {
-            // Compare via NTTP type identity rather than `Fn != nullptr`: under
-            // `-fsanitize=address,undefined` with `-fvisibility=hidden`, GCC
-            // refuses to constant-fold external function-pointer null checks (PR 71962).
+            // Same NTTP-identity comparison as FunctionTraits, and for the same
+            // GCC reason (PR 71962).
             static_assert(
                 !std::is_same_v<std::integral_constant<Callable, Fn>, std::integral_constant<Callable, nullptr>>,
                 "Cannot inspect a null function"

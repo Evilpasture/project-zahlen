@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extensions/Scripting/ScriptValueTypes.hpp
-//
 // Teaches ScriptBinder the value types the engine's scripting surface actually
 // passes around: Entity and Zahlen's FVec3/DVec3/Quat/FVec4.
 //

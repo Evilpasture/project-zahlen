@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestRenderDistanceStability.cpp
-//
 // PBR distance robustness: surfaces rendered across two orders of magnitude
 // of viewer distance must shade, stay visible and stay temporally stable.
 // "Flicker" at distance is how real engine defects surface:
@@ -78,7 +76,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
 
 // ============================================================================
 // Test Error Types
@@ -447,10 +444,6 @@ namespace {
 
 struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
     DistanceStabilitySuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp). A raw
-        // TaskSystem::Shutdown here would take the task system out from under
-        // the suites that run after it.
         ZHLN::Test::Headless::BeginSession();
     }
 

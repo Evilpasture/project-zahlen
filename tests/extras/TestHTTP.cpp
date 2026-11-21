@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestHTTP.cpp
-//
 // HTTP is an optional layer (extensions/net/HTTP) with an optional third-party library
 // behind it, so this suite is built only when extensions/net/HTTP/CMakeLists.txt found
 // libcurl and defined zahlen_http. No libcurl, no target, no test: see

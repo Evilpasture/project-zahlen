@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// utils/zcook/FontBake.cpp
-//
 // `zcook font` -- the ONLY place in the tree that parses outline fonts.
 //
 // Core used to carry stb_truetype plus a scraper for OS font directories so it

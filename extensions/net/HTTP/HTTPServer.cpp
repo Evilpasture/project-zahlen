@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/HTTP/HTTPServer.cpp
-//
 // The loopback fixture uses zahlen_socket for every socket operation. This
 // translation unit owns the listener and the accepted connection values; the
 // POSIX/Win32 details and Winsock lifetime stay inside the socket extension.

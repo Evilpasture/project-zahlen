@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestTOML.cpp
-//
 // The TOML layer is reflection-driven end to end: the struct declaration is
 // the schema, the serialiser walks it, and the parser fills it back in. So the
 // assertions here are mostly round trips -- a value that survives

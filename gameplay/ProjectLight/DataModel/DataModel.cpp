@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// gameplay/ProjectLight/DataModel/DataModel.cpp
-
 #include <DataModel/DataModel.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Core/Defer.hpp>

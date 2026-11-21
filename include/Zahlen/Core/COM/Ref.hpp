@@ -3,12 +3,9 @@
 
 #pragma once
 
-// Zahlen/Core/COM/Ref.hpp
-//
-// An owning reference, not a pointer alias. It increments and decrements the
-// object's own refcount, so the count and the delete live in the binary that
-// created the object. `Adopt` takes ownership of a reference QueryRaw already
-// added; the explicit constructor adds one of its own.
+// An owning reference, not a pointer alias: the count and the delete live in the
+// binary that created the object, so a Ref is only valid against a COM object
+// whose vtable is still alive.
 
 #include <Zahlen/Core/COM/IObject.hpp>
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// app/PluginManifestRegistry.cpp
-//
 // Plugin discovery and load-order resolution. See Zahlen/PluginManifestRegistry.hpp.
 
 #include <Zahlen/PluginManifestRegistry.hpp>

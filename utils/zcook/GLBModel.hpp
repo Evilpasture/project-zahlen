@@ -1,11 +1,8 @@
-// utils/zcook/GLBModel.hpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
 
-// utils/zcook/GLBModel.hpp
-//
 // The reflected glTF 2.0 document model the GLB emitter serialises with
 // ZHLN::ReflectJSON::Serialize. The struct declarations are the schema:
 // field names are the glTF keys, so nothing here hand-builds a brace, a comma

@@ -39,8 +39,6 @@ namespace {
 
 struct DecalTestSuite {
     DecalTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -48,10 +46,6 @@ struct DecalTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: one engine per resolution for the whole binary, with the
-    // scene reset between tests. Creating a Vulkan instance per test is
-    // what eventually exhausts the loader's static TLS and turns the tail
-    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless Decal Test", .width = width, .height = height
@@ -247,9 +241,6 @@ struct DecalTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 3. Decal Bounding Box Volume Clipping Invariants
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> decal_bounding_box_volume_clipping() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

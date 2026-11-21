@@ -3,8 +3,6 @@
 
 #pragma once
 
-// utils/fidelity/FidelityCore.hpp
-//
 // Dependency-free core of the fidelity runner: the pixelmatch YIQ metric, the
 // P6 PPM reader for engine captures, and the area-average downscale used to
 // reconcile candidate/golden sizes. Nothing in this header names the engine,

@@ -53,8 +53,6 @@ namespace {
 
 struct PBRTestSuite {
     PBRTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -62,10 +60,6 @@ struct PBRTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: one engine per resolution for the whole binary, with the
-    // scene reset between tests. Creating a Vulkan instance per test is
-    // what eventually exhausts the loader's static TLS and turns the tail
-    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless PBR Test", .width = width, .height = height

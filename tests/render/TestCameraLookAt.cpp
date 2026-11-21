@@ -48,8 +48,6 @@ namespace {
 
 struct CameraLookAtTestSuite {
     CameraLookAtTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 

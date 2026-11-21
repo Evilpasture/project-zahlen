@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Viewer/FrameTelemetry.cpp
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
 #include <optional>
 #include <Zahlen/FileSystem/Paths.hpp>

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Benchmark.hpp
-//
 // The headless half of the logic benchmark (zahlen_benchmark).
 //
 // What it times is a standalone engine-owned COM logic world, stepped at a

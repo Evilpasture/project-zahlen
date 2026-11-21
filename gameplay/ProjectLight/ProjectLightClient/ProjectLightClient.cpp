@@ -1,4 +1,3 @@
-// gameplay/ProjectLight/ProjectLightClient/ProjectLightClient.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -324,7 +323,6 @@ auto ReadPropertyName(
     if (!remotePropertyNameOverrides[channel].empty()) return remotePropertyNameOverrides[channel];
     return PropertyChannelName(channel);
 }
-
 
 } // namespace
 

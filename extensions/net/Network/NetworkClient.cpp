@@ -1,4 +1,3 @@
-// extensions/net/Network/NetworkClient.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -348,10 +347,6 @@ struct Client::Impl {
         return {};
     }
 };
-
-// ============================================================================
-// Client
-// ============================================================================
 
 Client::Client(): _impl(std::make_unique<Impl>()) {
 }

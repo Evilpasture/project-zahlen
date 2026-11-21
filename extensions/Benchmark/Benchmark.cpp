@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Benchmark.cpp
 #include <Benchmark/Benchmark.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Error.hpp>

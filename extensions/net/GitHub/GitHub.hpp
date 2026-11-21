@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/GitHub/GitHub.hpp
-//
 // The mechanism half of "browse a GitHub repository for files": the git trees
 // API call, the URL spellings GitHub uses for pages and raw bytes, and the
 // reverse mapping from a pasted URL back to a repository path. Policy lives

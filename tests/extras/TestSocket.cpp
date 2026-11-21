@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestSocket.cpp
-//
 // Exercises TCP and UDP using only the platform-neutral socket value API. Every
 // peer stays on 127.0.0.1 and uses an ephemeral port; no network egress or
 // platform socket headers are involved in this suite.

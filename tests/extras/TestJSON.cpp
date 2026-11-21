@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestJSON.cpp
-//
 // JSON is an optional layer (plugins/json), so its suite lives here rather than
 // in tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 

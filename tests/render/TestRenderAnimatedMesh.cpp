@@ -58,8 +58,6 @@ namespace {
 
 struct RenderAnimatedMeshTestSuite {
     RenderAnimatedMeshTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 

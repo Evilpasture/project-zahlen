@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestDataModel.cpp
-//
 // Exercises the C++ DataModel OOP wrappers: stable identity, service lookup,
 // tree operations, typed wrappers, reference validation and destruction.
 

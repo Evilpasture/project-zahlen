@@ -35,7 +35,6 @@ auto BuildSyntheticBspWithStaticProps(
 ) -> std::vector<std::byte> {
     BinaryWriter fileBytes;
 
-    // 1. BSP Header
     ZHLN::BSP::Header header {};
     header.ident = (('P' << 24) | ('S' << 16) | ('B' << 8) | 'V');
     header.version = 20;

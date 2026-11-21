@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestRayTracedShadows.cpp
-//
 // Ray-traced sun shadow occlusion and its frame-to-frame stability.
 //
 // Split out of TestLightingRayTraced.cpp; the shared error enum, frame I/O
@@ -23,8 +21,6 @@ namespace {
 
 struct RayTracedShadowsTestSuite {
     RayTracedShadowsTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -33,9 +29,6 @@ struct RayTracedShadowsTestSuite {
     }
 
     struct Tests {
-        // ====================================================================
-        // 4. Ray-Traced Shadow Occlusion & Stability
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> raytraced_shadow_occlusion_and_stability() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

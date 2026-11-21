@@ -5,31 +5,19 @@ import gpu_push_constants;
 import pbr_helpers;
 import uniforms;
 
-// The sun shadow mask prepass.
+// The sun shadow mask prepass: Cascade PCSS plus the contact ray, resolved once
+// per pixel in a dispatch instead of per quad in the lighting fragment stage.
+// A quad cannot retire a pixel before its Poisson taps issue, so the deferred
+// full-screen path paid the whole fan-out even where the surface always
+// resolves to 1.0; a wave retires a tile, and a thread with no sun response
+// (back-facing, zero-length sun, sky) returns 1.0 without touching the shadow
+// map or the BVH.
 //
-// Broad scene shadows are Cascade PCSS: an unjittered blocker search plus a
-// dithered Poisson PCF, evaluated per lit pixel. That is affordable for one
-// pixel and ruinous for a full screen of them. The fragment stage fans out
-// across quads that shade together and cannot retire a pixel before the POISSON
-// taps are issued, so a deferred full-screen pass pays the whole PCSS cost plus
-// the quad's register footprint even where the surface is the caster's own
-// straight-on face and always resolves to 1.0 -- and straight-on faces are half
-// of a lit frame.
-//
-// A compute dispatch has no quads to protect: a wave retires a whole tile of
-// pixels, and a thread with no sun response -- back-facing, zero-length sun,
-// sky -- returns 1.0 without touching the shadow map or the BVH at all. The
-// result is one R8_UNORM texel per pixel that the lighting pass multiplies in,
-// so its fragment stage is free of both the PCSS fan-out and the divergent
-// hardware traversal of the contact ray.
-//
-// This pass is also where a spatial denoiser for soft ray-traced sun shadows
-// belongs: it runs after the depth and normal the G-buffer wrote and before the
-// single consumer that reads the mask, so filtering the mask would need no new
-// target, no history, and no change to lighting.slang.
+// A spatial denoiser for soft ray-traced sun shadows belongs here too: after the
+// G-buffer's depth and normals, before the mask's only consumer.
 //
 // Deterministic by construction: the PCSS dither is InterleavedGradientNoise of
-// the *pixel centre*, not of gl_FragCoord, so a compute thread at pixel (x, y)
+// the *pixel centre*, not of gl_FragCoord, so a compute thread at (x, y)
 // dithers exactly as the fragment at that pixel did.
 
 [vk::push_constant]

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Viewer/FrameTelemetry.hpp
-//
 // Host-frame telemetry for the benchmark overlay: what the host's frames cost,
 // next to what the benchmark's ticks cost.
 //
@@ -272,8 +270,6 @@ class ZHLN_STATIC_API FrameTelemetry {
     // the panel and the CSV header read GPU-first without a second list.
     std::vector<FrameStageRow> m_stages;
     size_t                     m_gpuCount = 0;
-
-
 
     // The machine's counters: CPU and per-core usage and clocks, the GPU's
     // utilization and clock. Fed by Tick(), read by the panel and the capture.

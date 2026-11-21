@@ -3,8 +3,6 @@
 
 #pragma once
 
-// extensions/net/HTTP/HTTPServer.hpp
-//
 // A loopback HTTP/1.1 server for tests that fetch: this extra's own suite in
 // tests/extras/TestHTTP.cpp, and any consumer's test that would otherwise need
 // a host out on the internet to assert against. No engine header and nothing

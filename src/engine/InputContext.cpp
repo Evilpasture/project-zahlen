@@ -915,10 +915,6 @@ void InputActionMap::ResetToDefaults() {
     }
 }
 
-// =============================================================================
-// InputContext
-// =============================================================================
-
 InputContext::InputContext() {
     for (size_t i = 0; i < kMaxPlayerSeats; ++i) {
         const PlayerSeat seat {static_cast<uint8_t>(i)};

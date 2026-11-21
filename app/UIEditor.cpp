@@ -2,8 +2,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// app/UIEditor.cpp
-//
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //

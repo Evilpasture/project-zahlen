@@ -345,7 +345,6 @@ class Store {
         return m_env.root;
     }
 
-    // Toolchains
     auto     Toolchains() const -> std::expected<std::vector<std::string>, Fail>;
     auto     Active() const -> std::expected<std::optional<std::string>, Fail>;
     auto     SetActive(const std::string& id) -> std::expected<void, Fail>;

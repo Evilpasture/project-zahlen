@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/net/RemoteAsset/DiskCache.hpp
-//
 // A directory of complete downloads, shared between runs. Writes stage in a
 // sibling temp file and rename into place, so a reader never sees a partial
 // download. Expiry and disk-space management belong here, not to callers:

@@ -3,8 +3,6 @@
 
 #pragma once
 
-// tests/helpers/CookerFixture.hpp
-//
 // Everything the zcook suites need to build a compiler input, run the cooker
 // binary, and read back what it emitted: the RAII sandbox, the .zmet binary
 // writer, the executable lookup, and the constants both suites assert against.

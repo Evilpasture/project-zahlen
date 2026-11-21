@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestCookerGLB.cpp
-//
 // The glTF container check for the offline cooker. It lived in
 // tests/assets/TestCooker.cpp until reading the emitted JSON chunk back turned
 // out to be the one thing in that suite an extras-free build cannot do: JSON is

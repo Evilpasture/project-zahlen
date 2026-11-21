@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestCDN.cpp
-//
 // extensions/net/CDN is built over the remote-asset layer and libcurl, so this suite
 // is built only when zahlen_cdn exists. Every assertion runs against the loopback
 // server of extensions/net/HTTP (HTTPServer.hpp) on 127.0.0.1, so no test depends

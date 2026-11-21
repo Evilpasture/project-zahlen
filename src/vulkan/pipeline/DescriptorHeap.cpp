@@ -27,10 +27,6 @@ inline constexpr uint32_t kDescriptorWriteChunk = 16;
 
 } // namespace
 
-// =============================================================================
-// DescriptorHeap
-// =============================================================================
-
 DescriptorHeap::~DescriptorHeap() noexcept {
     Cleanup();
 }

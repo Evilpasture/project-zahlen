@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestClusteredLighting.cpp
-//
 // Point-light clustering: static frame stability, cluster culling sweep,
 // static reference with no history, and multi-light clustered accumulation
 // with chromatic interaction.
@@ -27,8 +25,6 @@ namespace {
 
 struct ClusteredLightingTestSuite {
     ClusteredLightingTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -37,9 +33,6 @@ struct ClusteredLightingTestSuite {
     }
 
     struct Tests {
-        // ====================================================================
-        // 1. Lit Scene Static Frame Stability
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -219,9 +212,6 @@ struct ClusteredLightingTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 2. Point Light Cluster Culling Sweep
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> point_light_cluster_culling_sweep() {
             auto engine      = CreateTestEngine(320, 240);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -450,9 +440,6 @@ struct ClusteredLightingTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 3. Point Light Static Reference (No History)
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> point_light_static_reference_no_history() {
             auto engine      = CreateTestEngine(320, 240);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -581,9 +568,6 @@ struct ClusteredLightingTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 6. Multi-Light Clustered Accumulation & Chromatic Interaction
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> multi_light_cluster_accumulation_and_chromatic_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestGLTFSampleAssets.cpp
-//
 // Renders real Khronos glTF-Sample-Assets models without committing any GLB:
 // the checkout lives outside the repo (build/sample-assets/ via
 // -DZHLN_FETCH_SAMPLE_ASSETS=ON, or any path in $ZHLN_SAMPLE_ASSETS) and the
@@ -120,8 +118,6 @@ namespace {
 
 struct GLTFSampleAssetsTestSuite {
     GLTFSampleAssetsTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 

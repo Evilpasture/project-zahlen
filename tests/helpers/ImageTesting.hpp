@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/helpers/ImageTesting.hpp
-//
 // Frame I/O and pixel statistics shared by the GPU test suites.
 //
 // Every render test that inspects a capture had grown its own copy of this:
@@ -689,7 +687,6 @@ struct BBox {
     }
     return std::sqrt(acc / static_cast<double>(b.Width() * b.Height()));
 }
-
 
 // ---------------------------------------------------------------------------
 // Temporal noise magnitude.

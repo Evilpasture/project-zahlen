@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// extensions/Scripting/ScriptBinderRegistry.hpp
-//
 // Populates the ScriptBinder registry from core's Components.
 //
 // ScriptBinder is reflection-driven: Register<T>() walks T's fields and methods

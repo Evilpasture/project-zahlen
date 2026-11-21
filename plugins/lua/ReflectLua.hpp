@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/lua/ReflectLua.hpp
-//
 // Reflection-driven Lua state evaluation and transactional patching.
 //
 // Same architectural contract as plugins/toml/TOML.hpp:

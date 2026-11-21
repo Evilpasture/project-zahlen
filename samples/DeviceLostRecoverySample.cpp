@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// samples/DeviceLostRecoverySample.cpp
-//
 // Exercises synchronous graphics device recreation and device-lost callback recovery over COM.
 
 #include <FreeCam/FreeCam.hpp>

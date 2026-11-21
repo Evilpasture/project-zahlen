@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/BSP/BSPRead.cpp
-//
 // Container parsing: the lump directory, the entity text lump, and the string
 // table that gives every DTexData its material name. Struct payloads are read
 // through the reflection-driven ReadStruct in BSPRead.hpp.

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// cmake/probes/pr125280-static-member.cpp
-//
 // GCC PR c++/125280 -- "[reflection] -freflection flag causes incomplete type
 // errors on class members that reference their owning type within a template
 // class parameter".

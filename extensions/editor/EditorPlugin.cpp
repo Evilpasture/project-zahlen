@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/editor/EditorPlugin.cpp
-//
 // Dynamically loadable COM::IAppLayer for the Editor extension. Wraps an
 // application-owned ZHLN::Editor::State so a host can run the Hierarchy and
 // Inspector panels through the standard plugin ABI (CreateAppLayer + the

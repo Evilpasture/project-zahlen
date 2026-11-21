@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// utils/fidelity/main.cpp
-//
 // The fidelity runner's host tool. Three subcommands, each a separate surface
 // so the heavy lifting can be dropped into a make/Ninja graph instead of a
 // long-lived process:

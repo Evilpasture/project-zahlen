@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestAmbientOcclusion.cpp
-//
 // Ambient occlusion / GI mode comparison. Exercises every giMode against the
 // same static contact scene and reports per-mode deltas versus the giMode 0
 // baseline, so a run tells you numerically -- without eyeballing frames --
@@ -254,8 +252,6 @@ namespace {
 
 struct AmbientOcclusionTestSuite {
     AmbientOcclusionTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 

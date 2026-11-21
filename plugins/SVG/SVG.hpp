@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/SVG/SVG.hpp
-//
 // SVG rasterization: an owning C++ layer over resvg's C API (resvg.h). This is
 // an extra, not core -- turning an .svg into pixels means linking a Rust
 // library (resvg/usvg/tiny-skia) that the engine needs nothing from, so the

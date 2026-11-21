@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/BSP/BSPRead.hpp
-//
 // Bounds-checked lump reading for the mainline BSP format. The structural
 // reading is reflection-driven: ZHLN::Reflect::ForEachField walks a packed
 // on-disk aggregate once per type, so there is exactly one reader for every

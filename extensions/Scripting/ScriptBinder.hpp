@@ -3,8 +3,6 @@
 
 #pragma once
 
-// extensions/Scripting/ScriptBinder.hpp
-//
 // Reflection-driven property inspector for C++ structs and ECS components.
 // Used by ConsoleDebugger (`types`, `type`, `get`, `set`) without pulling in
 // any Lua or FFI dependency. Imperative method invocation (`ScriptMethod`) and

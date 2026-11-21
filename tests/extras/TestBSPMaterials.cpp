@@ -53,7 +53,6 @@ auto BuildSyntheticMap() -> ZHLN::BSP::Map {
     map.vertices.push_back(ZHLN::BSP::DVertex {{256.0f, 256.0f, 0.0f}});
     map.vertices.push_back(ZHLN::BSP::DVertex {{0.0f, 256.0f, 0.0f}});
 
-    // Edges
     map.edges.push_back(ZHLN::BSP::DEdge {{0, 1}});
     map.edges.push_back(ZHLN::BSP::DEdge {{1, 2}});
     map.edges.push_back(ZHLN::BSP::DEdge {{2, 3}});

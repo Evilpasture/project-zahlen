@@ -36,6 +36,12 @@
 
 namespace ZHLN::Test::Headless {
 
+// Why suites use a session and a pooled engine instead of building one per test:
+// a Vulkan instance per test eventually exhausts the loader's static TLS and the
+// tail of the group dies with "vkCreateInstance: Found no drivers!". One engine
+// per resolution lives for the whole binary and the scene is what gets thrown
+// away between tests, so a suite nests its session rather than owning it.
+
 struct EngineOptions {
     std::string_view appName               = "Headless Test";
     uint32_t         width                 = 640;

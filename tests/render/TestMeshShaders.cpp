@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestMeshShaders.cpp
-//
 // Verification for the VK_EXT_mesh_shader path (see MESH_SHADERS.md).
 //
 // The interesting question is not "does it run" -- a mesh pipeline that emits
@@ -196,8 +194,6 @@ struct MeshShaderTestSuite {
         // that have nothing to do with mesh shading.
         setenv("ZHLN_NO_GPU_CULLING", "1", 1);
 
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -205,10 +201,6 @@ struct MeshShaderTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: the binary keeps one engine alive and the scene is what gets
-    // thrown away between tests. Creating a Vulkan instance per test is what
-    // eventually exhausts the loader's static TLS and turns the tail of a
-    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Mesh Shader Test",

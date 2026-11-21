@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Animation/AnimationPlugin.cpp
-//
 // Dynamically loadable COM::IAppLayer for the Animation extension. Wraps
 // ZHLN::Animation::Layer so a host can start, tick and stop animation through
 // the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).

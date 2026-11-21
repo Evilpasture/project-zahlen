@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestMorphPosePass.cpp
-//
 // Guards the morph half of AnimationSystem's parallel pose pass -- the only
 // part of it that touches the registry.
 //
@@ -126,8 +124,6 @@ struct MorphPosePassSuite {
     static inline ZHLN::Animation::Context s_animCtx {};
 
     MorphPosePassSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -342,9 +338,6 @@ struct MorphPosePassSuite {
             return {};
         }
 
-        // ====================================================================
-        // 1. The pose pass writes weights; it never inserts components.
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> parallel_pose_pass_writes_weights_without_inserting_components() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -407,9 +400,6 @@ struct MorphPosePassSuite {
             return {};
         }
 
-        // ====================================================================
-        // 2. A weights channel with no key times is skipped, not divided by.
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> weights_channel_without_key_times_is_skipped_not_divided() {
             auto engine = MorphPosePassSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

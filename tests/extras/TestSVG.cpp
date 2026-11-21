@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestSVG.cpp
-//
 // SVG is an optional layer (plugins/SVG) with an optional third-party library
 // behind it, so this suite is built only when plugins/SVG/CMakeLists.txt found
 // resvg and defined zahlen_svg. No resvg, no target, no test: see

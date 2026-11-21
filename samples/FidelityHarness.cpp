@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// samples/FidelityHarness.cpp
-//
 // Headless renderer for the Khronos glTF-Render-Fidelity-Generator suite.
 //
 // The contract, in one sentence: illuminate one glTF asset with the scenario's

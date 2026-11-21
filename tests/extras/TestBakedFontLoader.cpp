@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestBakedFontLoader.cpp
-//
 // plugins/Fonts' fontbm path: the BMFont JSON descriptor scan and the bake
 // assembly that turns (descriptor, RGBA page) into core's GUI::BakedFontAsset.
 // Only JSON .fnt is supported (fontbm --data-format json, the default of

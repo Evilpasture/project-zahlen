@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/json/JSONSchema.hpp
-//
 // The serialisation / schema layer for JSON. Two halves:
 //
 //   * Runtime, reflection-driven: GetValue, ParseObject, Parse and
@@ -270,7 +268,6 @@ namespace TemplatedDetail {
             return false;
         }
     }
-
 
     inline void AppendJSONString(std::string& out, std::string_view text) {
         static constexpr std::string_view kHexDigits {"0123456789abcdef"};

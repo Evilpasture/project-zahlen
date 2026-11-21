@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Terrain/TerrainPlugin.cpp
-//
 // Dynamically loadable COM::IAppLayer for the Terrain extension. Wraps
 // ZHLN::Terrain::System so a host can start, render and stop tile-based terrain
 // through the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).

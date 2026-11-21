@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/scripting/TestScriptValueTypes.cpp
-//
 // Covers ScriptValueTypes.hpp: the conversions that let the engine's own value
 // types cross the script boundary, which is what makes the reflection-driven
 // binder usable for engine calls at all.

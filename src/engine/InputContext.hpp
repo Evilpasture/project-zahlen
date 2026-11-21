@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/InputContext.hpp
-//
 // The input router's storage. Engine-private on purpose: this header used to be
 // include/Zahlen/Input/InputContext.hpp, which made InputActionMap&,
 // InputAction&, InputState& and every Inject* entry point part of the engine's

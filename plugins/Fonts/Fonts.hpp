@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/Fonts/Fonts.hpp
-//
 // The production baked-font path. The engine consumes pre-baked atlases only
 // (include/Zahlen/gui/FontLoader.hpp); this extra is what feeds them from the
 // formats shops actually bake:

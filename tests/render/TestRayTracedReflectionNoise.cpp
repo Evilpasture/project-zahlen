@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestRayTracedReflectionNoise.cpp
-//
 // GPU-side verification of the deterministic 3-tier reflection pipeline:
 //   - Tier 1 (roughness < 0.20): 1 unjittered mirror BVH ray, cache LOD 0
 //   - Tier 2 (0.20 <= roughness <= 0.40): same BVH ray + cone-traced cache LOD
@@ -111,8 +109,6 @@ namespace {
 
 struct RayTracedReflectionNoiseTestSuite {
     RayTracedReflectionNoiseTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -120,10 +116,6 @@ struct RayTracedReflectionNoiseTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: one engine per resolution for the whole binary, with the
-    // scene reset between tests. Creating a Vulkan instance per test is
-    // what eventually exhausts the loader's static TLS and turns the tail
-    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RTR Noise", .width = kWidth, .height = kHeight

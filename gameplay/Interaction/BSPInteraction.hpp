@@ -3,8 +3,6 @@
 
 #pragma once
 
-// gameplay/Interaction/BSPInteraction.hpp
-//
 // The gameplay half of the map's interactive entities: what a door *does*, and
 // the runtime dispatch that makes it do it, driven purely through COM.
 

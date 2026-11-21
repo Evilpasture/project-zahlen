@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/TestsAutoCollect.hpp
-//
 // Zero-boilerplate translation-unit epilogue collector used by cmake/ZTest.cmake.
 // Consumes the domain-agnostic C++26 namespace reflection primitives in
 // <Zahlen/Core/Reflection/Namespace.hpp> using `ZHLN::Test::Scope` as the O(1)

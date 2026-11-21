@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestConsoleDebugger.cpp
-//
 // ConsoleDebugger is an extensions/Console command dispatcher. It talks to
 // ScriptBinder / ScriptECSBridge, so the suite lives here rather than in
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.

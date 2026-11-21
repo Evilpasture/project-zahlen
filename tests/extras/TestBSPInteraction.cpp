@@ -187,7 +187,6 @@ struct BSPInteractionTestSuite {
             // worldspawn + door_main + door_rot + btn_entry + trig_entrance + trig_secret = 6 entities
             ZHLN::Test::ExpectEq(scene.entities.size(), size_t {6});
 
-            // 1. worldspawn
             ZHLN::Test::ExpectEq(scene.entities[0].name, std::string {"worldspawn"});
             ZHLN::Test::ExpectTrue(scene.entities[0].body == ZHLN::Scene::BodyKind::Static);
 
@@ -648,7 +647,6 @@ struct BSPInteractionTestSuite {
                     .halfExtents = FVec3{2.0f, 2.0f, 2.0f},
                 }}));
 
-            // Update interaction system
             ZHLN::Interaction::InteractionSystem::Update(reg);
 
             auto trig = reg.Get<ZHLN::Interaction::TriggerComponent>(trigEnt);

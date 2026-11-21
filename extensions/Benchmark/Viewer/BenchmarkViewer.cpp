@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Viewer/BenchmarkViewer.cpp
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Widget/BarStrip.hpp>
 #include <Widget/HoverCard.hpp>

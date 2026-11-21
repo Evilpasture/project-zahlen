@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestPresentPacing.cpp
-//
 // The presentation pacer's headless contract. The headless fixture builds
 // with vsync=false and no surface, so the pacer must resolve Decoupled and
 // report no paced timing, no margin and no paced dt -- "unknown" everywhere

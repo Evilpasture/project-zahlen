@@ -591,10 +591,6 @@ auto Value::WithElement(
     return res;
 }
 
-// ----------------------------------------------------------------------------
-// Builder
-// ----------------------------------------------------------------------------
-
 void Builder::PushNil() noexcept {
     if (_state != nullptr && lua_checkstack(_state, 2)) {
         lua_pushnil(_state);

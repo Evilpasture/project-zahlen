@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/BSP/BSPScene.cpp
-//
 // Entity lump -> ZHLN::Scene::Document. One world prefab entity carries the map
 // geometry (source = the .bsp virtual path), lights become SceneLights, and
 // point entities with models become prefab entities. No spawning happens

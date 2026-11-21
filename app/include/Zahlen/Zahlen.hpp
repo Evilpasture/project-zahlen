@@ -26,12 +26,10 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 
-// --- math -------------------------------------------------------------------
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 
-// --- threading --------------------------------------------------------------
 #include <Zahlen/Threading/TaskSystem.hpp>
 
 // --- fixed-layout engine vocabulary and COM capabilities ---------------------

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Terrain/TerrainComponents.hpp
-//
 // Procedural terrain: the heightmap store, the ECS component and the handle
 // type. Core keeps the generic pieces this is built on (the heightfield
 // collider in PhysicsContext, meshlet/indexed rendering in RenderContext);

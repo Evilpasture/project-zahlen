@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestEmissiveShading.cpp
-//
 // Emission has to be additive, not reflectance.
 //
 // The compact deferred G-Buffer has no dedicated emissive attachment. Ordinary
@@ -226,8 +224,6 @@ namespace {
 
 struct EmissiveShadingTestSuite {
     EmissiveShadingTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 

@@ -3,8 +3,6 @@
 
 #pragma once
 
-// Zahlen/Core/COM/ItaniumMangle.hpp
-//
 // Compile-time Itanium C++ ABI (§5.1) symbol mangler and typed DSO symbol
 // lookup for COM-compliant free and static member functions.
 //

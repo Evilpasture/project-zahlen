@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestReflectLua.cpp
-//
 // Exercises plugins/lua/ReflectLua.hpp + SceneLua.hpp:
 //   * Reflection-driven evaluation into scalars, FixedString<N>, std::array,
 //     std::vector, maps, Optional, enums, ZHLN::FVec3/FVec3/FVec4/Quat,
@@ -446,7 +444,6 @@ struct ReflectLuaSuite {
                 lowGfx->shadows.resolution != 1024) {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }
-
 
             return {};
         }

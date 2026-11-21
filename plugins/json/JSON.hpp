@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/json/JSON.hpp
-//
 // The opaque document layer for JSON: JSONError, Document and ValueReader
 // wrap simdjson behind a non-template interface (implementation in
 // plugins/json/JSON.cpp). Reflection-driven serialisation -- reading a JSON

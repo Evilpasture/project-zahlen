@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// samples/GlTFInspectorSample.cpp
-//
 // Minimal COM host for inspecting glTF / GLB assets. Drop a .glb / .gltf file
 // onto the window (or pass --model <path>) to upload, animate, and orbit it.
 

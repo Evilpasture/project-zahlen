@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/SVG/SVG.cpp
-//
 // The whole of the resvg dependency lives in this translation unit: SVG.hpp
 // names no resvg type and no resvg constant, so nothing that includes it needs
 // resvg's include path and nothing outside this file is recompiled when resvg is

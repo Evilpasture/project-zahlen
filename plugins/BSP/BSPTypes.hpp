@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/BSP/BSPTypes.hpp
-//
 // On-disk Source engine BSP structures for the mainline formats (HL2 episodes,
 // CS:S, Portal 1/2, L4D/2, CS:GO-era: BSP versions 19-21). Field order and
 // widths follow the format byte-for-byte; exotic forks (Titanfall's XOR'd
@@ -305,6 +303,5 @@ static_assert(sizeof(DBrush) == 12);
 static_assert(sizeof(DBrushSide) == 8);
 static_assert(sizeof(DOverlay) == 352);
 static_assert(sizeof(DGameLump) == 16);
-
 
 } // namespace ZHLN::BSP

@@ -275,8 +275,7 @@ struct MaterialDesc {
     // See Material: `specularEnabled` is the extension's presence on this
     // material, not a deviation of the factors from their defaults.
     bool specularEnabled = false;
-    // Scale the deferred image-based reflection independently of the glTF
-    // specular extension; optionally gate it with base-color texture alpha.
+    // The reflection lane set, described once on Material above.
     bool                      environmentReflectionEnabled   = false;
     bool                      environmentReflectionAlphaMask = false;
     float                     environmentReflectionFactor    = 1.0f;

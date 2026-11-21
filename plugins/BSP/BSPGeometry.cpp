@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/BSP/BSPGeometry.cpp
-//
 // Face windings from surfedges, texture axes applied forward (texinfo is
 // already the projection matrix -- none of the VMF inverse-recovery problem),
 // displacement grids bilinearly interpolated from their four base corners,
@@ -115,7 +113,6 @@ struct FaceProjection {
     float     tOffset = 0.0f;
     float     width   = 512.0f;
     float     height  = 512.0f;
-
 
 };
 
@@ -1102,7 +1099,6 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                 ++result.stats.droppedNoProjection;
                 continue;
             }
-
 
             const std::string_view materialName = MaterialNameFor(map, face);
             // Phase one keeps the old static skybox placement path intact;

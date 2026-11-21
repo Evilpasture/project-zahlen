@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/TestNetworkWire.cpp
-//
 // Exercises the dependency-free ZHLN.Wire serialization stack and the
 // ZHLN.Network protocol layer end-to-end: annotated reflection round-trips,
 // hostile/truncated/corrupted input handling, quantization codecs, framing,
@@ -148,9 +146,6 @@ namespace {
 
 struct TestNetworkWireSuite {
     struct Tests {
-        // ------------------------------------------------------------------
-        // Primitives
-        // ------------------------------------------------------------------
         std::expected<void, ZHLN::ErrorCode> primitives_roundtrip() {
             CheckRoundTrip(true);
             CheckRoundTrip(false);
@@ -565,9 +560,6 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        // ------------------------------------------------------------------
-        // CRC32
-        // ------------------------------------------------------------------
         std::expected<void, ZHLN::ErrorCode> crc32_known_vectors() {
             const std::vector<uint8_t> empty;
             ZHLN::Test::ExpectEq(ZHLN::Wire::Checksum::Crc32(empty), uint32_t {0x00000000});

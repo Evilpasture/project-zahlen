@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// plugins/BSP/BSPInteraction.cpp
-//
 // The interactive half of the entity lump, decoded. The registry is read to
 // resolve names and never written: this file answers "what does the map say
 // about this door", and the caller answers "what does a door do".

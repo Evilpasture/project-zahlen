@@ -140,22 +140,6 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 // Light entity classification
 // ---------------------------------------------------------------------------
 
-// Classnames this pass reads, and the kind each one is. The list is
-// deliberately wider than "the three the old code knew": a compiled map
-// carries several light families, and a mapper only has to use one of them for
-// the old code to see nothing.
-//
-//   light                  point, `_light` colour + brightness
-//   light_spot             spot, `_light`, `_cone` / `_inner_cone`
-//   light_environment      sun + ambient, `_light` / `_ambient`
-//   point_spotlight        beam sprite; light at the beam END when the
-//                          "No Dynamic Light" flag is clear
-//   light_dynamic          CS:GO's toggleable light; `_light` + `distance`
-//   env_projectedtexture   projected-texture spot; `lightcolor` + `lightfov`
-//
-// Deliberately absent: `env_fog_controller` (volumetrics, not a light),
-// `info_lighting` (an entity-side hint for VRAD with no runtime light of its
-// own), and `light_spot`-shaped decoys some mods ship.
 } // namespace
 
 // Classnames this pass reads, and the kind each one is. The list is

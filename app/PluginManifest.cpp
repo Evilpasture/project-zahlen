@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// app/PluginManifest.cpp
-//
 // Manifest grammar and reader. See Zahlen/PluginManifest.hpp for the format and
 // for why it is parsed here instead of through plugins/toml.
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Benchmark/Viewer/SystemTelemetry.hpp
-//
 // What the machine was doing while the frames were being drawn: CPU usage and
 // clocks per logical core, machine-wide CPU usage and clock, and the GPU's
 // utilization and core clock -- sampled from whatever the platform exposes.

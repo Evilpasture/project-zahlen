@@ -180,14 +180,9 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     return float4(indirectLight, ao);
 }
 
-// The sun's shadowing term is no longer this shader's to compute. SunShadowMaskPass
-// traces Cascade PCSS and the hardware contact ray once per pixel in compute and
-// leaves the product in Res_SunShadowMask (R8_UNORM); a fragment stage fans a
-// whole quad out over the PCSS Poisson taps and cannot retire a pixel early,
-// while a compute wave retires a tile and skips the sunless pixels entirely.
-// Sampling the mask here costs one fetch and keeps every term below unchanged:
-// `shadow` was, and still is, `cascadeShadow * rtContactShadow` in [0, 1], and
-// `1.0` is "nothing occluded the sun", which is what the mask holds wherever no
+// SunShadowMaskPass resolved this pixel's whole sun shadowing term into
+// Res_SunShadowMask; see sun_shadow_mask.slang for why it is not computed here.
+// `1.0` is "nothing occluded the sun", the value the mask holds wherever no
 // caster could reach the pixel.
 Texture2D<float> texSunShadowMask;
 

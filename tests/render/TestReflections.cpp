@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestReflections.cpp
-//
 // Reflections: ray-traced reflection coverage and artifacts, multi-emissive
 // sources on a mirrored surface, and dense multi-light interaction with
 // emissive materials.
@@ -25,8 +23,6 @@ namespace {
 
 struct ReflectionsTestSuite {
     ReflectionsTestSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -35,9 +31,6 @@ struct ReflectionsTestSuite {
     }
 
     struct Tests {
-        // ====================================================================
-        // 5. Ray-Traced Reflection Coverage & Artifacts
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> raytraced_reflection_coverage_and_artifacts() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -196,9 +189,6 @@ struct ReflectionsTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 7. Multi-Emissive Sources & Surface Reflection Interaction
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> multi_emissive_sources_and_surface_reflection_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {
@@ -475,9 +465,6 @@ struct ReflectionsTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 8. Dense Multi-Light & Emissive Materials Cross-Interaction
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> dense_multi_light_emissive_materials_cross_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine.Valid())) {

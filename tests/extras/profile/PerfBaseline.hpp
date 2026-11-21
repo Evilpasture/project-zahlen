@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/extras/profile/PerfBaseline.hpp
-//
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
 // built on the JSON extra (ReflectJSON::Parse to read,
 // ReflectJSON::Serialize to write), ZHLN::Mutex and ZHLN::Println.

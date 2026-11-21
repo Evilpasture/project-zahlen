@@ -111,9 +111,6 @@ struct CombatFXTestSuite {
             return {};
         }
 
-        // ====================================================================
-        // 2. Ballistic Tracer Propagation & Distance Termination
-        // ====================================================================
         std::expected<void, ZHLN::ErrorCode> ballistic_tracer_progression_and_termination() {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(static_cast<bool>(engine))) {

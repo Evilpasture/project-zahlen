@@ -4,8 +4,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// gameplay/ProjectLight/DataModel/DataModel.hpp
-//
 // Project-light's native, C++-owned DataModel object graph. This layer is
 // intentionally separate from both the LuaJIT runtime and ECS component
 // storage: script-facing Instance identities and parentage are stable, while
@@ -504,7 +502,8 @@ class BasePart: public Instance {
   private:
     friend class DataModel;
     FVec3 m_position = FVec3::Zero();
-    // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
+    // Protocol-facing Euler degrees, as is m_orientation below; convert only in
+    // the physics/ECS adapter.
     FVec3             m_rotationEuler = FVec3::Zero();
     FVec3             m_size          = {4.0f, 1.0f, 2.0f};
     FVec3             m_color         = {0.75f, 0.75f, 0.75f};

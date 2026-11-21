@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// samples/RemoteGLBSample.cpp
-//
 // Remote assets, end to end: fetch .glb files over HTTP, cache them on disk,
 // import them, and put them on a turntable.
 //
@@ -127,8 +125,6 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <glTF/GLTFAssets.hpp>
 #include <glTF/GLTFDocument.hpp>
-
-
 
 #include <algorithm>
 #include <array>
@@ -438,7 +434,6 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
         catalog->phase.store(count > 0 ? CatalogPhase::Ready : CatalogPhase::Failed, std::memory_order::release);
     });
 }
-
 
 // ============================================================================
 // THE SUBJECT

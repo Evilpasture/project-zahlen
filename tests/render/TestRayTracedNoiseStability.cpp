@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestRayTracedNoiseStability.cpp
-//
 // GPU-side verification of deterministic hybrid sun shadows:
 //   Shadow = CascadePCSS * RtContactShadow (0 -> 3.0m inline RayQuery)
 //

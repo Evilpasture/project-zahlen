@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Console/ConsolePlugin.cpp
-//
 // Dynamically loadable COM::IAppLayer for the Console extension. Wraps an
 // application-owned ZHLN::GameConsole so a host can expose an in-game console
 // through the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).

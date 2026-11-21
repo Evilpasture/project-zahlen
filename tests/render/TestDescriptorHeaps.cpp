@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/render/TestDescriptorHeaps.cpp
-//
 // Exercises the VK_EXT_descriptor_heap scene binding model:
 //   1. The bindless globalTextures[] region: 64 materials, each sampling a
 //      distinct procedural texture, must all resolve through the
@@ -56,8 +54,6 @@ struct DescriptorHeapsSuite {
     static constexpr uint32_t kGridRows     = 8;
 
     DescriptorHeapsSuite() {
-        // Nested in the group binary's session: the task system and the pooled
-        // engine outlive this suite (see HeadlessEngineFixture.hpp).
         ZHLN::Test::Headless::BeginSession();
     }
 
@@ -65,10 +61,6 @@ struct DescriptorHeapsSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    // Pooled: the binary keeps one engine alive and the scene is what gets
-    // thrown away between tests. Creating a Vulkan instance per test is what
-    // eventually exhausts the loader's static TLS and turns the tail of a
-    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineView {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Descriptor Heap Test",
@@ -320,7 +312,6 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
             auto& rc = *engine->Graphics();
-
 
             std::array<uint32_t, 16> texels {};
             texels.fill(0xFF3366CCu);

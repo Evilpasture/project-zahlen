@@ -3,8 +3,6 @@
 
 #pragma once
 
-// plugins/toml/SceneTOML.hpp
-//
 // Jolt vector bindings for the reflection-driven TOML layer.
 //
 // JPH::Float2/3/4 are plain structs to C++ and coordinates to a reader, so

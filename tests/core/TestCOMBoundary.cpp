@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// tests/core/TestCOMBoundary.cpp
-//
 // The public API as a consumer sees it. Apart from the test framework this
 // file includes only Zahlen/COM, Zahlen/Core/COM and pure value headers -- no
 // engine header, no PIMPL, no internal access -- and every engine call it

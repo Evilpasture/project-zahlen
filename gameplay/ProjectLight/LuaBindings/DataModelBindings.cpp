@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// gameplay/ProjectLight/LuaBindings/DataModelBindings.cpp
-//
 // The DataModel-facing Roblox-style surface sits on the existing LuaJIT state.
 // It is deliberately an adapter: Instance userdata retain the canonical C++
 // objects, while value userdata and event connections are Lua-boundary details.

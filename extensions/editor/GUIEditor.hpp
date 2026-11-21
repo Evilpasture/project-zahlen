@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// extensions/editor/GUIEditor.hpp
-//
 // The self-hosting editor's COM panels: a scene Hierarchy and a
 // reflection-driven Inspector, built from ZHLN::GUI primitives. The editor is an
 // ordinary UI scene that edits another UI scene.

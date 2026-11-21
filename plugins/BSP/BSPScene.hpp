@@ -4,8 +4,6 @@
 #pragma once
 
 #include <Zahlen/Math/Vec3.hpp>
-// plugins/BSP/BSPScene.hpp
-//
 // The other half of "import down to native representation, let the
 // instantiator do the rest": this turns the entity lump into a plain
 // ZHLN::Scene::Document description -- the same document the reflection TOML
