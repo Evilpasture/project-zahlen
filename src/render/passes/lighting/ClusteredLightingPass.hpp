@@ -20,7 +20,10 @@ struct ClusteredLightingPass:
         Vk::FragmentAndComputeRead<Res_NormRough>,
         Vk::FragmentAndComputeRead<Res_BakedMask>,
         Vk::FragmentAndComputeRead<Res_Depth>,
-        Vk::ShaderRead<Res_ShadowMap>,
+        // The sun's mask, resolved by SunShadowMaskPass (which is what reads
+        // Res_ShadowMap now). Cascade PCSS and the contact ray do not run here;
+        // this pass fetches their answer.
+        Vk::FragmentAndComputeRead<Res_SunShadowMask>,
         Vk::ShaderRead<Res_ShadowAtlas>,
         Vk::ShaderRead<Res_Ao>,
         Vk::ColorWrite<Res_Lighting>,

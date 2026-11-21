@@ -88,6 +88,22 @@ public struct GtaoPushConstants {
     public float4x4 invViewProj;
 };
 
+// The sun shadow mask prepass: one dispatch that resolves Cascade PCSS and the
+// hardware contact ray per pixel and stores the product in Res_SunShadowMask.
+// The payload is exactly what the lighting pass would have needed to do the same
+// work in its fragment stage: the view-projection the world position was
+// reconstructed with, and the contact-ray bias policy.
+public struct SunShadowPushConstants {
+    public float4x4 invViewProj;
+    // x: 0.005 m base, y: 0.00025 slope per metre of view depth, z: 0.004
+    // grazing term -- the same numbers lighting.slang used inline, carried here
+    // so the ray trace and its range read as one authored policy.
+    public float4   contactBias;
+    // x: full-occlusion distance, y: handoff distance (where Cascade PCSS's
+    // penumbra fully owns the pixel), z: far view-depth fade start, w: fade end.
+    public float4   contactRange;
+};
+
 public struct KawasePushConstants {
     public int mode;
     public float rcpWidth;

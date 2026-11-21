@@ -300,6 +300,19 @@ add_shader_target(ao_gtao_shader
     STAGES "${SHADER_SRC_DIR}/ao_gtao.slang|CSMain|cs_6_0|SHADER_AO_GTAO_SLANG_CS_PATH"
 )
 
+# The sun shadow mask prepass: Cascade PCSS plus the hardware contact ray, once
+# per pixel into an R8_UNORM mask the lighting pass samples. Two variants for
+# the same reason lighting.slang has two: the RT one declares the TLAS, the
+# no-RT one is what a device without rayQuery can compile and run.
+add_shader_target(sun_shadow_mask_shader
+    STAGES "${SHADER_SRC_DIR}/sun_shadow_mask.slang|CSMain|cs_6_0|SHADER_SUN_SHADOW_MASK_SLANG_CS_PATH"
+)
+
+add_shader_target(sun_shadow_mask_nort_shader
+    STAGES "${SHADER_SRC_DIR}/sun_shadow_mask.slang|CSMain|cs_6_0|SHADER_SUN_SHADOW_MASK_NORT_SLANG_CS_PATH"
+    EXTRA_ARGS -DDISABLE_RTR
+)
+
 # Per-pass scene variants. Each pass compiles its own named entry points
 # against its own varying struct (common.slang), so the geometry and fragment
 # stages of one pipeline agree on the SPIR-V interface by construction.
@@ -528,6 +541,8 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "RcgiCascadeTraceMergeCS=SHADER_RCGI_CASCADE_TRACE_MERGE_SLANG_CS_PATH"
     "RcgiResolveCS=SHADER_RCGI_RESOLVE_SLANG_CS_PATH"
     "GtaoCS=SHADER_AO_GTAO_SLANG_CS_PATH"
+    "SunShadowMaskCS=SHADER_SUN_SHADOW_MASK_SLANG_CS_PATH"
+    "SunShadowMaskNortCS=SHADER_SUN_SHADOW_MASK_NORT_SLANG_CS_PATH"
     "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
     "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
     "VolumetricIntegrationCS=SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
@@ -599,6 +614,7 @@ set(ZHLN_SHADER_CATALOG_SETS
     "RcgiCascadeTraceMerge=RcgiCascadeTraceMergeCS"
     "RcgiResolve=RcgiResolveCS"
     "Gtao=GtaoCS"
+    "SunShadowMask=SunShadowMaskCS,SunShadowMaskNortCS"
     "Fxaa=FxaaPS"
     "SmaaEdge=SmaaEdgePS"
     "SmaaWeight=SmaaWeightPS"

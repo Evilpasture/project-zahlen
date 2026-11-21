@@ -90,6 +90,10 @@ enum class Stage : uint8_t {
     OpaqueSceneCopy,
     LightingMip,
     GTAO,
+    // The sun shadow mask prepass: Cascade PCSS plus the contact ray, once per
+    // pixel, in compute. Owned by the lighting stack, timed like every other
+    // dispatch in it.
+    SunShadowMask,
     RcgiCascade,
     RtgiComposite,
     AoDepthGenerate,

@@ -520,7 +520,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     frame.probeMax               = gfx.environment.probeMax;
     frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
-    frame.enableRTR              = gfx.rayTracing.enableReflections ? 1 : 0;
+    // `enableRTR` is "may a shader trace against the BVH this frame?", the same
+    // question RenderGraphDetail::AssembleScenePushConstants answers for the push
+    // block -- and now with the same answer. It used to be reflections-only, which
+    // quietly made the sun contact ray a function of the reflection toggle. The
+    // TLAS-availability half of that test is the renderer's (the engine cannot
+    // know it here); the flags' half is the engine's, and it is both of them.
+    frame.enableRTR              = (gfx.rayTracing.enableReflections || gfx.rayTracing.enableShadows) ? 1 : 0;
     frame.fullBright             = gfx.environment.fullBright;
     frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());
     frame.shadowWidth            = gfx.shadows.width;

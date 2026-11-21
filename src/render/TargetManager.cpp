@@ -50,8 +50,20 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Resource, Res_HdrSceneColor>) {
                 extra |= Vk::ImageUsage::TransferSrc;
             }
-            if constexpr (std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ> || std::is_same_v<Resource, Res_AoDepth>) {
+            if constexpr (
+                std::is_same_v<Resource, Res_LightingGI> || std::is_same_v<Resource, Res_HiZ> || std::is_same_v<Resource, Res_AoDepth> ||
+                std::is_same_v<Resource, Res_SunShadowMask>
+            ) {
+                // The sun shadow mask is full-resolution and written by a compute
+                // dispatch, so scale_divisor cannot give it STORAGE the way it
+                // does for Res_Ao; it has to ask for it here.
                 extra |= Vk::ImageUsage::Storage;
+            }
+            if constexpr (std::is_same_v<Resource, Res_SunShadowMask>) {
+                // The mask is also cleared once to 1.0 at RecordInitialLayouts
+                // (see the sun-shadow clear there), and vkCmdClearColorImage
+                // requires TRANSFER_DST.
+                extra |= Vk::ImageUsage::TransferDst;
             }
             auto created = TargetT::Create(_allocator, _ctx.Device(), requested, voxelExtent, extra);
             if (!created) {
@@ -238,6 +250,15 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     _graph.transDepthBuffer.Transition<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
 
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
+    // The sun shadow mask clears to 1.0 -- "nothing occluded the sun" -- and not
+    // to the graph's default opaque black. A frame that skips the mask dispatch
+    // (full bright, a sun with no intensity, a scene-less frame) then reads an
+    // unshadowed sun instead of a blacked-out one, and so does the first frame
+    // after a resize, before the dispatch has run at the new extent. This is a
+    // clear, not a per-frame fill: the dispatch overwrites every texel it owns.
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+        cmd, _graph.sunShadowMask, Color4 {.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f}
+    );
 }
 
 void TargetManager::Clear() noexcept {

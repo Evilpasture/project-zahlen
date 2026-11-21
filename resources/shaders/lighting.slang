@@ -15,7 +15,8 @@ Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 StructuredBuffer<Light> lights;
 ConstantBuffer<FrameUniforms> frame;
-Texture2DArray<float> shadowMap;
+// The punctual atlas' comparison sampler. The sun's cascade sampler and the
+// cascade image both moved to SunShadowMaskPass, which owns that comparison now.
 SamplerComparisonState shadowSampler;
 Texture2D ltc_mat;
 Texture2D ltc_amp;
@@ -179,37 +180,16 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     return float4(indirectLight, ao);
 }
 
-#ifndef DISABLE_RTR
-// Deterministic short-range (0 -> 3.0m) sun contact shadow ray along exact L_sun.
-// Cascade PCSS owns broad scene shadows and distant soft penumbras with zero
-// temporal lag; this unjittered ray closes the Peter-Panning / sub-texel contact
-// gap right at caster bases with zero stochastic noise and zero history buffers.
-float TraceSunContactShadow(float3 worldPos, float3 N, float3 L_sun, float NdotL_sun, float viewDepth) {
-    float contactBias = 0.005f + 0.00025f * max(viewDepth, 0.0f) + 0.004f * (1.0f - NdotL_sun);
-
-    RayDesc ray;
-    ray.Origin    = worldPos + N * contactBias;
-    ray.Direction = L_sun;
-    ray.TMin      = 0.005f;
-    ray.TMax      = 3.0f;
-
-    RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> q;
-    // Main world only (kRayMaskWorld): Source's scaled skybox world never shadows the map.
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
-    while (q.Proceed()) {
-    }
-
-    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-        return 1.0f;
-    }
-
-    // Full contact occlusion over [0 .. 1.2m] seals all CSM Peter-Panning and
-    // grounds thin sub-texel geometry; smooth handoff over [1.2m .. 3.0m] lets
-    // Cascade PCSS's distance-hardening penumbra take over seamlessly.
-    float rtContact = smoothstep(1.2f, 3.0f, q.CommittedRayT());
-    return lerp(rtContact, 1.0f, smoothstep(80.0f, 100.0f, viewDepth));
-}
-#endif
+// The sun's shadowing term is no longer this shader's to compute. SunShadowMaskPass
+// traces Cascade PCSS and the hardware contact ray once per pixel in compute and
+// leaves the product in Res_SunShadowMask (R8_UNORM); a fragment stage fans a
+// whole quad out over the PCSS Poisson taps and cannot retire a pixel early,
+// while a compute wave retires a tile and skips the sunless pixels entirely.
+// Sampling the mask here costs one fetch and keeps every term below unchanged:
+// `shadow` was, and still is, `cascadeShadow * rtContactShadow` in [0, 1], and
+// `1.0` is "nothing occluded the sun", which is what the mask holds wherever no
+// caster could reach the pixel.
+Texture2D<float> texSunShadowMask;
 
 struct LightingOutput {
     float4 color : SV_Target0;
@@ -279,66 +259,22 @@ LightingOutput PSMain(VSOutput input) {
     // on a lightmapped surface has to come from here or not at all.
     const float  sunDiffuseOwnership = 1.0f - bakedDirect;
     const float3 unshadowedSun       = (kD_sun * albedoRaw.rgb / 3.14159265f * sunDiffuseOwnership + spec) * sunRadiance * NdotL_sun;
-    // Skip cascade PCSS and hardware contact-shadow ray traversal whenever the
-    // unshadowed sun response is negligible (sun disabled, back-facing, pure
-    // metal outside the GGX sun highlight, or diffuse-baked pixel outside the
-    // highlight): `0 * shadow == 0`.
+    // Skip the mask fetch whenever the unshadowed sun response is negligible
+    // (sun disabled, back-facing, pure metal outside the GGX sun highlight, or
+    // diffuse-baked pixel outside the highlight): `0 * shadow == 0`. The gate is
+    // the one the in-fragment path used to skip PCSS and the ray with, so the
+    // same pixels take the same branch as before -- the compiler just hoists it
+    // above a texture fetch instead of above a 32-tap search and a BVH walk.
     const bool hasSunContribution = max(unshadowedSun.r, max(unshadowedSun.g, unshadowedSun.b)) > 1e-4f;
 
-    float cascadeShadow = 1.0f;
+    float shadow = 1.0f;
     if (hasSunContribution) {
-        uint cascadeIndex = 0;
-        if (viewDepth > frame.cascadeSplits.x)
-            cascadeIndex = 1;
-        if (viewDepth > frame.cascadeSplits.y)
-            cascadeIndex = 2;
-        if (viewDepth > frame.cascadeSplits.z)
-            cascadeIndex = 3;
-
-        float4x4 cascadeM       = frame.lightSpaceMatrices[cascadeIndex];
-        float3   rowX           = mul(float4(1.0f, 0.0f, 0.0f, 0.0f), cascadeM).xyz;
-        float3   rowY           = mul(float4(0.0f, 1.0f, 0.0f, 0.0f), cascadeM).xyz;
-        float3   rowZ           = mul(float4(0.0f, 0.0f, 1.0f, 0.0f), cascadeM).xyz;
-        float    rowXLenSq      = max(dot(rowX, rowX), 1e-12f);
-        float    rowYLenSq      = max(dot(rowY, rowY), 1e-12f);
-        float    rowZLen        = max(length(rowZ), 1e-8f);
-        float    ndcPerWorldX   = sqrt(rowXLenSq);
-        float    texelSizeWorld = 2.0f / (ndcPerWorldX * float(frame.shadowResolution));
-        float    worldDepthPerNdc = 1.0f / rowZLen;
-
-        // Exact receiver tangent-plane slope in [0..1] shadow UV coordinates:
-        // e_u, e_v, e_z are the world-space vectors for +1 step in (u, v, z_ndc).
-        float3   eu             = (2.0f / rowXLenSq) * rowX;
-        float3   ev             = (2.0f / rowYLenSq) * rowY;
-        float3   wHat           = rowZ * worldDepthPerNdc;
-        float    nDotW          = dot(N, wHat);
-        float    safeNDotW      = (nDotW < 0.0f ? -1.0f : 1.0f) * max(abs(nDotW), 0.15f);
-        float    denomEz        = safeNDotW * worldDepthPerNdc;
-        float2   dzDuv          = -float2(dot(N, eu), dot(N, ev)) / denomEz;
-
-        float    normalBias     = saturate(1.0f - NdotL_sun) * 1.25f + 0.35f;
-        float3   biasedWorldPos = worldPos + N * (normalBias * texelSizeWorld);
-
-        float4 shadowPos = mul(cascadeM, float4(biasedWorldPos, 1.0f));
-
-        shadowPos.xy = shadowPos.xy * 0.5f + 0.5f * shadowPos.w;
-
-        cascadeShadow = CalculateShadowPCSS(
-            shadowPos, N, L_sun, input.pos.xy, shadowMap, shadowSampler, pointSampler, frame.shadowResolution, cascadeIndex, worldDepthPerNdc, texelSizeWorld,
-            dzDuv, frame.sunSize, false
-        );
+        // Point-sampled by pixel centre: the mask was written one texel per pixel
+        // from that pixel's own depth and normal, so a filtered read would mix a
+        // neighbour's surface into this one's shadow.
+        shadow = texSunShadowMask.SampleLevel(pointSampler, input.uv, 0);
     }
 
-    float rtContactShadow = 1.0f;
-#ifndef DISABLE_RTR
-    // Pixels already in Cascade PCSS umbra (`cascadeShadow <= 0.001f`) or with
-    // no direct sun contribution skip the hardware ray completely (`0 * rtContact = 0`).
-    if (ENABLE_RTR != 0 && pc.enableRTR != 0 && hasSunContribution && cascadeShadow > 0.001f && viewDepth < 100.0f) {
-        rtContactShadow = TraceSunContactShadow(worldPos, N, L_sun, NdotL_sun, viewDepth);
-    }
-#endif
-
-    float  shadow    = cascadeShadow * rtContactShadow;
     float3 directSun = unshadowedSun * shadow;
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);

@@ -83,6 +83,7 @@ set(RAW_RENDER_SOURCES
     passes/lighting/EmissivePass.cpp
     passes/lighting/RtgiCompositePass.cpp
     passes/lighting/ShadowPass.cpp
+    passes/lighting/SunShadowMaskPass.cpp
     passes/lighting/ReflectionInputs.cpp
     passes/postprocess/BloomPass.cpp
     passes/simulation/MeshParticleUpdatePass.cpp

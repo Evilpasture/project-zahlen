@@ -14,7 +14,9 @@ using MeshParticleRenderPush = Slang::MeshParticleRenderPushConstants;
 using SkinningConstants = Slang::SkinningConstants;
 using BakePush = Slang::BakePush;
 
-using GtaoPushConstants = Slang::GtaoPushConstants;
+using GtaoPushConstants      = Slang::GtaoPushConstants;
+using SunShadowPushConstants = Slang::SunShadowPushConstants;
+static_assert(GpuAbi::ScenePassPayload<SunShadowPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 using KawasePushConstants = Slang::KawasePushConstants;
 using ThresholdPushConstants = Slang::ThresholdPushConstants;
 using BlitPushConstants = Slang::BlitPushConstants;
@@ -47,7 +49,7 @@ static_assert(
     (GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants> &&
      GpuAbi::ScenePassPayload<CullingConstants> && GpuAbi::ScenePassPayload<MeshParticleRenderPush> &&
      GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> &&
-     GpuAbi::ScenePassPayload<GtaoPushConstants> &&
+     GpuAbi::ScenePassPayload<GtaoPushConstants> && GpuAbi::ScenePassPayload<SunShadowPushConstants> &&
      GpuAbi::ScenePassPayload<KawasePushConstants> && GpuAbi::ScenePassPayload<ThresholdPushConstants> &&
      GpuAbi::ScenePassPayload<BlitPushConstants> &&
      GpuAbi::ScenePassPayload<ScenePassPushConstants>),

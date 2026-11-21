@@ -31,6 +31,7 @@ public struct GpuAbiTypes {
     public SkinningConstants skinningConstants;
     public BakePush bakePush;
     public GtaoPushConstants gtaoPush;
+    public SunShadowPushConstants sunShadowPush;
     public KawasePushConstants kawasePush;
     public ThresholdPushConstants thresholdPush;
     public BlitPushConstants blitPush;
@@ -96,6 +97,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += abi.bakePush.width;
     acc += abi.gtaoPush.halfRes.x;
     acc += asuint(abi.gtaoPush.rcpFullRes.x);
+    acc += asuint(abi.sunShadowPush.contactRange.x);
+    acc += asuint(abi.sunShadowPush.invViewProj[0][0]);
     acc += uint(abi.kawasePush.mode);
     acc += asuint(abi.thresholdPush.exposure);
     acc += asuint(abi.blitPush.colorFilter.x);

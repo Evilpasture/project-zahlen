@@ -101,6 +101,14 @@ auto BuildBoundDynamic(RenderContext::Impl& impl, Vk::BoundComputePass<Vk::Dynam
 
 auto RenderContext::Impl::BuildLightingResources() -> std::expected<void, ErrorCode> {
     return std::expected<void, ErrorCode> {}
+        .and_then([&]() -> std::expected<void, ErrorCode> {
+            // The sun shadow mask ships two modules -- the RT one declares the TLAS,
+            // the NORT one compiles without rayQuery -- and which of them a device
+            // can run is a runtime answer, so the bundle is built from bytes rather
+            // than from a compile-time module type.
+            const auto maskSpirv = ctx.RayTracingSupported() ? Shaders::Modules::SunShadowMaskCS::Bytes() : Shaders::Modules::SunShadowMaskNortCS::Bytes();
+            return BuildBoundDynamic(*this, lighting.sunShadowMask, maskSpirv);
+        })
         .and_then([&]() -> std::expected<void, ErrorCode> { return BuildBoundTyped(*this, lighting.gtao); })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildBoundDynamic(*this, lighting.rcgiResolve, Shaders::Modules::RcgiResolveCS::Bytes());
@@ -282,8 +290,8 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Ray Traced Lighting", [this]() -> std::expected<void, ErrorCode> { return BuildLightingResources(); },
-                {Shaders::Modules::GtaoCS::Path, Shaders::Modules::RcgiProbeSetupCS::Path,
-                 Shaders::Modules::RcgiCascadeTraceMergeCS::Path, Shaders::Modules::RcgiResolveCS::Path}
+                {Shaders::Modules::GtaoCS::Path, Shaders::Modules::SunShadowMaskCS::Path, Shaders::Modules::SunShadowMaskNortCS::Path,
+                 Shaders::Modules::RcgiProbeSetupCS::Path, Shaders::Modules::RcgiCascadeTraceMergeCS::Path, Shaders::Modules::RcgiResolveCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

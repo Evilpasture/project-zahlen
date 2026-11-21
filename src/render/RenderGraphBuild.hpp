@@ -30,6 +30,7 @@
 #include "render/passes/lighting/ReflectionPass.hpp"
 #include "render/passes/lighting/RtgiCompositePass.hpp"
 #include "render/passes/lighting/ShadowPass.hpp"
+#include "render/passes/lighting/SunShadowMaskPass.hpp"
 #include "render/passes/postprocess/BloomPass.hpp"
 #include "render/passes/postprocess/TonemapBlitPass.hpp"
 #include <ShaderBindings.hpp>
@@ -56,8 +57,30 @@ using ScenePushConstants = Slang::ScenePassPushConstants;
         .giIntensity = settings.post.giIntensity,
         .giSamples   = settings.post.giSamples,
         .enableSSR   = settings.post.enableSSR,
-        .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows)) ?
-                           (settings.rayTracing.enableReflections ? 1 : 0) :
+        // `enableRTR` is this frame's answer to "may a shader trace against the
+        // BVH at all?". It used to answer a narrower question -- "did the user
+        // enable ray-traced *reflections*?" -- and the narrowing broke both of its
+        // consumers:
+        //
+        //   * lighting.slang gated the sun contact ray on it, so a frame with
+        //     enableShadows set and enableReflections clear traced no sun contact
+        //     shadows: the shadow switch was dead, and the stability test that
+        //     toggles enableReflections to observe the contact term was measuring
+        //     a coupling between two settings that have nothing to do with each
+        //     other;
+        //   * it tested `frames.tlas[...]` (the acceleration structure) where the
+        //     presence test belongs on `frames.tlasAddresses[...]` (the device
+        //     address a shader actually traces through), so a built TLAS with no
+        //     address still reported rays as live.
+        //
+        // A sun contact ray is a sun shadow, so it is live when *either switch is
+        // on, and this is the one place that decides it. The TLAS stays the hard
+        // requirement -- no acceleration structure, no rays, whatever the settings
+        // say -- and `tlasAddresses` rather than `tlas` is what proves it, because
+        // the address is what a shader traces through.
+        .enableRTR   = (impl.frames.tlasAddresses[impl.presenter.frameIndex] &&
+                        (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows)) ?
+                           1 :
                            0,
     };
 }
@@ -98,7 +121,12 @@ template <AAMode Mode>
         Passes::DecalPass {.decals = self.decals, .frame = frame}, Passes::ViewmodelPass {.frame = frame},
         Passes::TranslucentPrePass {.frame = frame},
         Passes::AoDepthGeneratePass {.cull = self.culling, .frame = frame},
-        Passes::ComputePass<Passes::GtaoDesc> {.frame = frame, .pc = pc}, Passes::ClusteredLightingPass {.post = self.post, .frame = frame, .pc = pc},
+        Passes::ComputePass<Passes::GtaoDesc> {.frame = frame, .pc = pc},
+        // The sun's shadow term, resolved before the pass that consumes it: PCSS
+        // and the contact ray belong to a dispatch, not to the lighting fragment
+        // stage's quads. Fetching Res_SunShadowMask is all that is left of that
+        // work in ClusteredLightingPass.
+        Passes::SunShadowMaskPass {.frame = frame}, Passes::ClusteredLightingPass {.post = self.post, .frame = frame, .pc = pc},
         Passes::RcgiCascadePass {.frame = frame}, Passes::RtgiCompositePass {.frame = frame}, Passes::EmissivePass {.forward = self.forward, .frame = frame},
         Passes::LightingMipPass {.frame = frame}, OpaqueReflectionPass {.frame = frame, .pc = pc}, TranslucentReflectionPass {.frame = frame, .pc = pc},
         Passes::OpaqueSceneCopyPass {.frame = frame}, Passes::ForwardPass {.forward = self.forward, .frame = frame}, Passes::BloomPass {.frame = frame}

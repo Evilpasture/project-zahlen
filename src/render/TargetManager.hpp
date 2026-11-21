@@ -35,6 +35,7 @@ class TargetManager {
         Vk::RenderTarget<Res_LightingGI> lightingGI;
         Vk::RenderTarget<Res_LightingAo> lightingAo;
         Vk::RenderTarget<Res_Ao> ao;
+        Vk::RenderTarget<Res_SunShadowMask> sunShadowMask;
         Vk::RenderTarget<Res_BloomThresh> bloomThresholdTarget;
         Vk::RenderTarget<Res_BloomDown1> bloomDown1;
         Vk::RenderTarget<Res_BloomDown2> bloomDown2;

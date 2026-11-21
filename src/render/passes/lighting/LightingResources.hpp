@@ -14,6 +14,11 @@ namespace ZHLN {
 // Global Illumination (RCGI). Each field bundles the pipeline and its
 // reflected descriptor-heap bindings together.
 struct LightingResources {
+    // Reflected at build time from whichever variant of sun_shadow_mask.slang the
+    // device can run (the RT one declares the TLAS, the NORT one does not), so
+    // the bundle is a runtime-built dynamic pass rather than a typed one: the
+    // module behind it is not a compile-time constant.
+    Vk::BoundComputePass<Vk::DynamicComputePass>                                            sunShadowMask;
     Vk::BoundComputePass<Vk::TypedComputePass<Shaders::Modules::GtaoCS, GtaoPushConstants>> gtao;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                            rcgiProbeSetup;
     Vk::BoundComputePass<Vk::DynamicComputePass>                                            rcgiCascadeTraceMerge;

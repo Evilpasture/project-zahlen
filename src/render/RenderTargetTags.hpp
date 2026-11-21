@@ -46,6 +46,17 @@ using Res_RcgiCascadeB    = Vk::GraphImage<"RcgiCascadeB", Vk::Format::R16G16B16
 using Res_LightingGI      = Vk::GraphImage<"LightingGI", Vk::Format::R16G16B16A16_SFloat, false, false, 1, false, true>;
 using Res_LightingAo      = Vk::GraphImage<"LightingAo", Vk::Format::R8_UNorm>;
 using Res_Ao              = Vk::GraphImage<"Ao", Vk::Format::R8_UNorm, false, false, 2>;
+// The sun's shadowing term, resolved once per pixel by SunShadowMaskPass:
+// Cascade PCSS times the hardware contact ray, which is exactly the `shadow`
+// lighting.slang used to compute inline. Full resolution and not divided down:
+// PCSS's filter radius is expressed in cascade texels and the contact ray is
+// what seals sub-texel contact, so a half-res mask would reintroduce the very
+// seam this prepass exists to remove. R8_UNORM because the value is a
+// visibility in [0, 1] and 8 bits of it is already more than the dithered
+// Poisson average carries. Storage, not a colour attachment: the pass that
+// writes it is a compute dispatch, so the target is created with STORAGE (see
+// TargetManager::Recreate) and the graph transitions it to GENERAL for it.
+using Res_SunShadowMask   = Vk::GraphImage<"SunShadowMask", Vk::Format::R8_UNorm>;
 using Res_BloomThresh     = Vk::GraphImage<"BloomThresh", Vk::Format::R16G16B16A16_SFloat, false, false, 2>;
 using Res_BloomDown1      = Vk::GraphImage<"BloomDown1", Vk::Format::R16G16B16A16_SFloat, false, false, 4>;
 using Res_BloomDown2      = Vk::GraphImage<"BloomDown2", Vk::Format::R16G16B16A16_SFloat, false, false, 8>;

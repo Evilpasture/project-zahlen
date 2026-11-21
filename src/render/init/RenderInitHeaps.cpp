@@ -240,6 +240,12 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"shadowSampler">(shadowSampler),
         Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)
     );
+    // The sun shadow mask pass compares against the cascade atlas with the same
+    // comparison sampler the lighting pass used to: one sampler, one filtering
+    // policy, whichever stage runs the PCSS.
+    Vk::InitHeapPassSamplers<Shaders::SunShadowMask>(
+        heapManager, lighting.sunShadowMask.Bindings(), Vk::SamplerSlot<"shadowSampler">(shadowSampler), Vk::SamplerSlot<"pointSampler">(pointSampler)
+    );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultSampler), Vk::SamplerSlot<"pointSampler">(pointSampler),
         Vk::SamplerSlot<"clampSampler">(clampSampler), Vk::SamplerSlot<"skySampler">(skySampler)
