@@ -33,8 +33,6 @@ PRESETS = {
         "resources/shaders",
         "modules/zahlen-render.cppm",
         "cmake/ShaderCompilation.cmake",
-        "DESCRIPTOR_HEAPS.md",
-        "MESH_SHADERS.md",
     ],
     "physics": [
         "include/Zahlen/Physics",

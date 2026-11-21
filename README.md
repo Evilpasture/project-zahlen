@@ -7,7 +7,7 @@ conversion tools.
 
 * **Build a game:** [Consumer guide](docs/CONSUMING.md) — install signed packages
   with `zpkg` and link with CMake; no engine checkout required.
-* **Develop the engine:** [Contributor guide](DEVELOPMENT.md).
+* **Develop the engine:** [Contributor guide](docs/DEVELOPMENT.md).
 * **Understand the renderer:** [Rendering architecture](src/render/README.md).
 * **Find everything else:** [Documentation index](docs/README.md) — API guides,
   packaging, package-manager reference, tests, and containers.

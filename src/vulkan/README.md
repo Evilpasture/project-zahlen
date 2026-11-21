@@ -252,13 +252,17 @@ operation enables stencil testing, and `CreateGraphicsPipeline` rejects stencil
 state when the configured depth format has no stencil aspect. A pass may still
 attach a stencil-capable view without testing it — the dynamic-rendering format
 member describes the attachment, while `dynamicRenderingUnusedAttachments`
-covers the unused aspect (`DESCRIPTOR_HEAPS.md`).
+covers the unused aspect ([descriptor heap reference](pipeline/DESCRIPTOR_HEAPS.md)).
 
 Blend presets are also builder operations (`AlphaBlend()` and
 `AdditiveBlend()`); the pipeline implementation builds the attachment states
 from the configured color formats and write mask.
 
 ### Descriptor Heaps (VK_EXT_descriptor_heap)
+
+See the [heap reference](pipeline/DESCRIPTOR_HEAPS.md) for allocation,
+command-stream state, and mapping APIs.
+
 The scene binding model no longer uses descriptor sets, pools, or set layouts.
 Instead the engine owns **one resource heap and one sampler heap** — plain,
 device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT`

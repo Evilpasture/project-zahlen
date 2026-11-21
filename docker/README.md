@@ -36,7 +36,7 @@ export ZHLN_DEV_IMAGE=ghcr.io/evilpasture/project-zahlen-builder@sha256:<digest>
 scripts/dev-container.sh init
 ```
 
-See [entry-point iteration](../DEVELOPMENT.md#prebuilt-entry-point-development-container)
+See [entry-point iteration](../docs/DEVELOPMENT.md#prebuilt-entry-point-development-container)
 for build/run commands. The image contains its own source and configured build;
 it may differ from your checkout.
 

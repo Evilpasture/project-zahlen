@@ -9,7 +9,7 @@ release's assets together.
 | Audience / task | Canonical document |
 |---|---|
 | Game developer: install, link, run | [Consuming Zahlen](CONSUMING.md) |
-| Engine contributor: source builds, containers | [Engine development](../DEVELOPMENT.md) |
+| Engine contributor: source builds, containers | [Engine development](DEVELOPMENT.md) |
 | Package maintainer: exports, manifests, ABI | [Packaging](../packaging/README.md) |
 | Package-manager user / contributor: commands, bootstrap, trust | [zpkg](../utils/zpkg/README.md) |
 | Engine architecture | [Architecture](../include/ARCHITECTURE.md) |

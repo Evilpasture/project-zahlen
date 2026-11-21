@@ -1,7 +1,7 @@
 # Developing Zahlen itself
 
 Audience: engine contributors working in this repository. Game developers should
-start with [Consuming Zahlen](docs/CONSUMING.md), not these source-build steps.
+start with [Consuming Zahlen](CONSUMING.md), not these source-build steps.
 These notes describe the current branch; release consumers must use docs for
 their release tag.
 
@@ -9,7 +9,7 @@ their release tag.
 
 Use a C++26 compiler with `-freflection` (GCC 16.2 is supported). Configuration
 checks required compiler features. Source-build dependencies are listed in the
-Containerfiles under [docker/](docker/README.md).
+Containerfiles under [docker/](../docker/README.md).
 
 ## Build Instructions
 
@@ -26,7 +26,7 @@ Run scripts/build.sh and fix every error you go along the way if you're missing 
 ### Configuring the build (TUI)
 
 `ccmake` is not the only way to browse the options. The tree carries a
-[Kconfiglib](https://github.com/ulfalizer/Kconfiglib) menu for the `ZHLN_*`
+[Kconfiglib](../https://github.com/ulfalizer/Kconfiglib) menu for the `ZHLN_*`
 switches, wired in as a preset:
 
 ```sh
@@ -49,24 +49,24 @@ then CMake option defaults.
 
 ### Runtime data
 
-See [runtime directories](include/ARCHITECTURE.md#9-runtime-directories--distribution)
-for data and cache paths, and [CDN caching](extensions/net/CDN/README.md) for
+See [runtime directories](../include/ARCHITECTURE.md#9-runtime-directories--distribution)
+for data and cache paths, and [CDN caching](../extensions/net/CDN/README.md) for
 remote-cache configuration.
 
 ## Architecture
 
 The optional source tree is split by role: `plugins/` contains asset formats and codecs, `extensions/` contains reusable engine subsystems plus network/platform I/O, and `gameplay/` contains domain-specific systems and project integrations. The existing top-level `modules/` remains reserved for Core C++ module interfaces.
 
-For a detailed breakdown of the engine's architecture, frame loop execution order and deferred render graph topology, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
+For a detailed breakdown of the engine's architecture, frame loop execution order and deferred render graph topology, see [include/ARCHITECTURE.md](../include/ARCHITECTURE.md).
 
 ## Tools
 
-See the [host-program reference](utils/README.md) for engine tools and the
-[test guide](tests/README.md) for running tests.
+See the [host-program reference](../utils/README.md) for engine tools and the
+[test guide](../tests/README.md) for running tests.
 
 ## Prebuilt entry-point development container
 
-See [container usage](docker/README.md) for image selection and local builds.
+See [container usage](../docker/README.md) for image selection and local builds.
 
 With Podman or Docker installed, from a checkout of this repository:
 
@@ -91,6 +91,6 @@ The `zahlen` executable can capture the sandbox scene to a PNG and exit:
   --capture frame.png --frames 10
 ```
 
-For capture flag semantics, see [Application CLI flags](docs/COMApp.md#built-in-cli-flags).
+For capture flag semantics, see [Application CLI flags](COMApp.md#built-in-cli-flags).
 With the persistent container, capture to `/workspace/frame.png` and copy it out
 with `podman cp zahlen-dev:/workspace/frame.png ./frame.png` (or `docker cp`).
