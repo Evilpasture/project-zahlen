@@ -35,6 +35,7 @@
 #include <Zahlen/Core/Reflection/Callable.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
 #include <Zahlen/Core/Reflection/Entity.hpp>
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
