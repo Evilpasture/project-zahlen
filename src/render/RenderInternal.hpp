@@ -11,6 +11,7 @@
 #include "render/DrawCommands.hpp"
 #include "render/FrameDestinations.hpp"
 #include "render/FrameResources.hpp"
+#include "render/JointRangeAllocator.hpp"
 #include "render/GeometryManager.hpp"
 #include "render/GpuLayout.hpp"
 #include "render/PipelineRegistry.hpp"
@@ -325,6 +326,7 @@ struct RenderContext::Impl: Renderer {
 
     PipelineRegistry pipelines;
 
+    JointRangeAllocator jointAllocator {FrameResources::kJointPaletteCapacity};
     uint32_t nextMorphDeltaIndex = 0;
     // Retired morph delta ranges (offset, float count) returned by
     // FreeMorphDeltas, kept sorted and coalesced for reuse.

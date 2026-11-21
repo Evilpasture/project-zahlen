@@ -157,7 +157,11 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, SceneData& scene) {
 
 // The palettes the simulation pushed this frame, applied in order.
 void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
-    poseUploads.Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
+    poseUploads.Drain([&](const PoseUpload& upload) {
+        if (auto res = rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); !res) {
+            ZHLN::LogWarning("[RenderSystem] UpdateJointMatrices failed at offset {}: {}", upload.jointOffset, res.error());
+        }
+    });
 }
 
 using MeshSubmitQuery = ECS::Query<

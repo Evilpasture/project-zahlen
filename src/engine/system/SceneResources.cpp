@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <audio/Audio.hpp>
+#include <engine/ArticulationContext.hpp>
 #include <engine/SceneResources.hpp>
+#include <engine/World.hpp>
 #include <physics/Physics.hpp>
 #include <render/RenderContext.hpp>
 #include <span>
@@ -32,6 +34,8 @@ void Release(Engine& engine, Components::PhysicsComponent& component) {
 }
 
 void Release(Engine& engine, Components::RagdollComponent& component) {
+    // Drop per-ragdoll CPU state before ragdollID is exchanged to Invalid.
+    engine.GetWorld().GetArticulationContext().RemoveJointState(component.ragdollID);
     Release(engine.Physics(), component);
 }
 
@@ -49,7 +53,7 @@ void Release(Engine& engine, Components::OwnedMeshComponent& component) {
 
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
     if (component.jointCount > 0) {
-        engine.FreeJoints(component.jointOffset, component.jointCount);
+        engine.Render().FreeJoints(component.jointOffset, component.jointCount);
         component.jointOffset = 0;
         component.jointCount  = 0;
     }

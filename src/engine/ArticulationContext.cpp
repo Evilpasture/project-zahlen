@@ -26,73 +26,24 @@
 
 namespace ZHLN {
 
-void ArticulationContext::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
-    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        _jointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
-    }
-}
-
-uint32_t ArticulationContext::AllocateJoints(uint32_t count) noexcept {
-    const auto capacity = static_cast<uint32_t>(_jointStates.jointBlendWeights.size());
-    if (count == 0 || count > capacity) return ~uint32_t {0};
-
-    ZHLN::MutexGuard guard(_jointPaletteMutex);
-
-    // Reuse a retired range from the free list before bumping the cursor.
-    for (auto it = _freeJointRanges.begin(); it != _freeJointRanges.end(); ++it) {
-        if (it->count >= count) {
-            const auto offset = it->offset;
-            if (it->count == count) {
-                _freeJointRanges.erase(it);
-            } else {
-                it->offset += count;
-                it->count -= count;
-            }
-            return offset;
-        }
-    }
-
-    // Fall back to monotonic bump allocation.
-    const auto offset = _nextJointOffset.load(std::memory_order::relaxed);
-    if (offset > capacity - count) return ~uint32_t {0};
-    _nextJointOffset.store(offset + count, std::memory_order::relaxed);
-    return offset;
-}
-
-void ArticulationContext::FreeJoints(uint32_t offset, uint32_t count) noexcept {
-    if (count == 0 || offset + count > _jointStates.jointBlendWeights.size()) {
-        return; // out-of-range or empty: nothing to retire
-    }
-    ZHLN::MutexGuard guard(_jointPaletteMutex);
-    _freeJointRanges.push_back({offset, count});
-    // Sort by offset and coalesce adjacent ranges so the free list stays
-    // compact and first-fit reuse remains fast.
-    std::sort(_freeJointRanges.begin(), _freeJointRanges.end(),
-              [](const JointRange& a, const JointRange& b) { return a.offset < b.offset; });
-    std::vector<JointRange> coalesced;
-    coalesced.reserve(_freeJointRanges.size());
-    for (const auto& range : _freeJointRanges) {
-        if (!coalesced.empty() && coalesced.back().offset + coalesced.back().count == range.offset) {
-            coalesced.back().count += range.count;
-        } else {
-            coalesced.push_back(range);
-        }
-    }
-    _freeJointRanges = std::move(coalesced);
-    // Clear the retired joint state so a reused range starts clean.
-    _jointStates.ResetJoints(offset, count);
+void ArticulationContext::BindSkeleton(Physics::RagdollID id, const Skeleton& skeleton) noexcept {
+    RagdollJointState state;
+    const size_t count = skeleton.joints.size();
+    state.blendWeights.assign(count, 0.0f);
+    state.stiffness.assign(count, 1.0f);
+    state.blendDecay.assign(count, 0.0f);
+    state.inverseBindMatrices.reserve(count);
+    for (const auto& joint : skeleton.joints) state.inverseBindMatrices.push_back(joint.inverseBindMatrix);
+    _ragdollStates[id] = std::move(state);
 }
 
 bool ArticulationContext::AttachRagdoll(
     Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
     uint32_t jointOffset
 ) {
-    // Validate once at the authoring boundary, not by scanning every ragdoll
-    // every development frame. No skeleton or joint slice may index outside
-    // the context's storage.
-    const size_t capacity = _jointStates.inverseBindMatrices.size();
-    if (skeleton.joints.empty() || authoredParts.empty() || jointOffset > capacity ||
-        skeleton.joints.size() > capacity - jointOffset) {
+    // Validate once at the authoring boundary. Per-ragdoll CPU state is
+    // sized from the skeleton itself; GPU palette budget is the renderer's.
+    if (skeleton.joints.empty() || authoredParts.empty()) {
         return false;
     }
     for (const auto& joint: skeleton.joints) {
@@ -119,7 +70,7 @@ bool ArticulationContext::AttachRagdoll(
         return false;
     }
 
-    BindSkeleton(jointOffset, skeleton);
+    BindSkeleton(ragdollID, skeleton);
 
     SceneResources::Attach(
         pc, reg, rootEntity, Components::RagdollComponent {

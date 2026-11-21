@@ -4,14 +4,11 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <physics/Physics.hpp>
-#include <algorithm>
-#include <array>
+#include <functional>
 #include <span>
-#include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace ZHLN {
@@ -19,26 +16,14 @@ class PhysicsContext;
 struct Skeleton;
 namespace ECS { class Registry; }
 
-// A retired joint range returned to the palette by FreeJoints. Kept sorted and
-// coalesced so AllocateJoints can reuse it without growing the monotonic cursor.
-struct JointRange {
-    uint32_t offset;
-    uint32_t count;
-
-    [[nodiscard]] auto operator<=>(const JointRange&) const noexcept = default;
-};
-
-struct alignas(64) JointStateBuffer {
-    std::array<float, 8192>      jointBlendWeights;
-    std::array<float, 8192>      jointStiffness;
-    std::array<float, 8192>      jointBlendDecay;
-    std::array<Mat4x4, 8192> inverseBindMatrices;
-
-    void ResetJoints(uint32_t offset, uint32_t count) noexcept {
-        std::fill_n(jointBlendWeights.begin() + offset, count, 0.0f);
-        std::fill_n(jointStiffness.begin() + offset, count, 1.0f);
-        std::fill_n(jointBlendDecay.begin() + offset, count, 0.0f);
-    }
+// Per-ragdoll CPU articulation state, sized to that ragdoll's skeleton.
+// GPU palette indexing is owned by the renderer (JointRangeAllocator);
+// this state is keyed by RagdollID and never indexes by jointOffset.
+struct RagdollJointState {
+    std::vector<float>  blendWeights;
+    std::vector<float>  stiffness;
+    std::vector<float>  blendDecay;
+    std::vector<Mat4x4> inverseBindMatrices;
 };
 
 // World-owned articulation state. Scheduled systems borrow it as a resource;
@@ -54,24 +39,26 @@ class ArticulationContext {
         uint32_t jointOffset
     );
 
-    // Allocates `count` contiguous joints from the palette. Reuses retired
-    // ranges from FreeJoints before bumping the monotonic cursor, so spawning
-    // and despawning skinned characters over a long session cannot exhaust the
-    // 8192-joint palette. Returns ~uint32_t{0} when no range is available.
-    [[nodiscard]] uint32_t AllocateJoints(uint32_t count) noexcept;
-
-    // Retires a previously allocated joint range back to the palette. Safe to
-    // call once per allocation; double-free or out-of-range offsets are ignored.
-    void FreeJoints(uint32_t offset, uint32_t count) noexcept;
+    [[nodiscard]] auto JointState(Physics::RagdollID id) noexcept -> RagdollJointState* {
+        auto it = _ragdollStates.find(id);
+        return it != _ragdollStates.end() ? &it->second : nullptr;
+    }
+    [[nodiscard]] auto JointState(Physics::RagdollID id) const noexcept -> const RagdollJointState* {
+        auto it = _ragdollStates.find(id);
+        return it != _ragdollStates.end() ? &it->second : nullptr;
+    }
+    void RemoveJointState(Physics::RagdollID id) noexcept { _ragdollStates.erase(id); }
 
   private:
     friend class ArticulationSystem;
-    void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
+    void BindSkeleton(Physics::RagdollID id, const Skeleton& skeleton) noexcept;
 
-    JointStateBuffer            _jointStates;
-    ZHLN::Atomic<uint32_t>      _nextJointOffset {0};
-    ZHLN::Mutex                 _jointPaletteMutex;
-    std::vector<JointRange>     _freeJointRanges;
+    struct RagdollIDHash {
+        [[nodiscard]] auto operator()(Physics::RagdollID id) const noexcept -> size_t {
+            return std::hash<uint64_t> {}(static_cast<uint64_t>(id));
+        }
+    };
+    std::unordered_map<Physics::RagdollID, RagdollJointState, RagdollIDHash> _ragdollStates;
 };
 
 } // namespace ZHLN

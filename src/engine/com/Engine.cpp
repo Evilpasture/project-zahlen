@@ -492,14 +492,16 @@ class Engine final:
     }
 
     Result<uint32_t> AllocateJoints(uint32_t count) noexcept override {
-        const auto offset = m_engine->AllocateJoints(count);
+        const auto offset = Device().AllocateJoints(count);
         if (offset == UINT32_MAX) return Error::InvalidArgument;
         return offset;
     }
     Result<void> UpdateJointMatrices(uint32_t offset, Span<const Mat4x4> matrices) noexcept override {
         if (!Valid(matrices)) return Error::NullArgument;
-        if (offset > 8192 || matrices.size > 8192 - offset) return Error::InvalidArgument;
-        if (matrices.size) Device().UpdateJointMatrices(offset, matrices);
+        // Bounds are validated by RenderContext against its own joint buffers.
+        if (matrices.size) {
+            if (auto res = Device().UpdateJointMatrices(offset, {matrices.data, matrices.size}); !res) return res.error();
+        }
         return {};
     }
     Result<uint32_t> AllocateMorphDeltas(Span<const float> deltas) noexcept override {
@@ -1864,7 +1866,7 @@ class Engine final:
             }
         }
         for (const auto& skeleton: std::span<const PrefabSkeletonInfo>(desc.skeletons)) {
-            if (!slice(skeleton.joints, desc.joints.size) || skeleton.joints.count > 8192) return Error::InvalidArgument;
+            if (!slice(skeleton.joints, desc.joints.size)) return Error::InvalidArgument;
             for (uint32_t j = 0; j < skeleton.joints.count; ++j) {
                 const auto& joint = desc.joints.data[skeleton.joints.first + j];
                 if (!index(joint.nodeIndex, desc.nodes.size) || !index(joint.parentIndex, skeleton.joints.count))

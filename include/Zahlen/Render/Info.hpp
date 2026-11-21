@@ -14,6 +14,7 @@ namespace ZHLN {
 enum class RenderFeatureError : uint8_t {
     FeatureNotSupported  ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device"> {})              = 1,
     UnresolvedMeshID ZHLN_ANNOTATION(ZHLN::Description<"The mesh names a buffer ID that does not resolve to a live GPU buffer"> {}) = 2,
+    JointPaletteOutOfRange ZHLN_ANNOTATION(ZHLN::Description<"The joint palette range exceeds the renderer joint buffer capacity"> {}) = 3,
 };
 
 namespace Shadows {

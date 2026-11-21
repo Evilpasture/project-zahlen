@@ -202,7 +202,7 @@ struct IGraphicsDevice : IObject {
         return BuildMeshBLAS(InChain(mesh), OutChain(mesh));
     }
 
-    // Monotonic allocations share the engine palette (8192 joints total).
+    // Allocations share the renderer-owned joint palette.
     // Exhaustion fails without wrapping; allocations last for the engine lifetime.
     virtual Result<uint32_t> AllocateJoints(uint32_t count) noexcept = 0;
     virtual Result<void> UpdateJointMatrices(uint32_t offset, Span<const Mat4x4> matrices) noexcept = 0;

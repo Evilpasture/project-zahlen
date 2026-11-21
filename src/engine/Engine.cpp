@@ -447,7 +447,7 @@ auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<Mo
 }
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
     return InstantiatePrefabInternal(
-        engine.Render(), engine.Registry(), engine.Physics(), engine.GetWorld().GetArticulationContext(), prefab, params, outBuffer, maxCount,
+        engine.Render(), engine.Registry(), engine.Physics(), prefab, params, outBuffer, maxCount,
         nullptr, nullptr
     );
 }
@@ -548,14 +548,6 @@ void Engine::ReleaseSceneContents() {
     if (_impl->renderGraph != nullptr) {
         _impl->renderGraph->ResetLocals();
     }
-}
-
-uint32_t Engine::AllocateJoints(uint32_t count) noexcept {
-    return _impl->world->GetArticulationContext().AllocateJoints(count);
-}
-
-void Engine::FreeJoints(uint32_t offset, uint32_t count) noexcept {
-    _impl->world->GetArticulationContext().FreeJoints(offset, count);
 }
 
 void Engine::ClearScene() {

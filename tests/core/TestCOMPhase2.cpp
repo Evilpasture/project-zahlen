@@ -10,7 +10,9 @@
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/LogLevel.hpp>
 #include <Zahlen/Config.hpp>
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <vector>
 #include <expected>
 #include <filesystem>
@@ -75,10 +77,10 @@ struct COMPhase2Suite {
             ExpectTrue(!graphics->SetEnvironmentRadiance(InChain(EnvironmentRadianceInfo {})).HasValue());
             ExpectTrue(!graphics->CaptureFrame(nullptr, {}).HasValue());
             ExpectTrue(!graphics->AllocateJoints(0).HasValue());
-            ExpectTrue(!graphics->AllocateJoints(8193).HasValue());
+            ExpectTrue(!graphics->AllocateJoints(UINT32_MAX).HasValue());
             const auto joints = graphics->AllocateJoints(2);
             ExpectTrue(joints.HasValue());
-            ExpectTrue(!graphics->UpdateJointMatrices(8192, {nullptr, 1}).HasValue());
+            ExpectTrue(!graphics->UpdateJointMatrices(UINT32_MAX, {nullptr, 1}).HasValue());
             ExpectTrue(!graphics->AllocateMorphDeltas({nullptr, 1}).HasValue());
             const std::array<float, 3> malformedMorph {};
             ExpectTrue(!graphics->AllocateMorphDeltas(malformedMorph).HasValue());
@@ -153,8 +155,22 @@ struct COMPhase2Suite {
                 ExpectTrue(description.HasValue() && description.value.nodeCount == 1);
                 ExpectTrue(!assets->RegisterPrefab(InChain(prefab)).HasValue());
             }
-            const auto remainingJoints = graphics->AllocateJoints(8190);
-            ExpectTrue(remainingJoints.HasValue());
+            // Joint-palette exhaustion is behavioral: allocation succeeds
+            // until the palette reports failure, and the failure is terminal --
+            // it must never wrap back onto live ranges.
+            std::vector<uint32_t> paletteLiveOffsets;
+            for (uint32_t attempt = 0; attempt < 100000; ++attempt) {
+                const auto live = graphics->AllocateJoints(1);
+                if (!live.HasValue()) {
+                    break;
+                }
+                paletteLiveOffsets.push_back(live.value);
+            }
+            ExpectTrue(paletteLiveOffsets.size() >= 2);
+            // All live offsets are distinct: allocation never hands an index
+            // to two owners while the palette is full.
+            std::sort(paletteLiveOffsets.begin(), paletteLiveOffsets.end());
+            ExpectTrue(std::adjacent_find(paletteLiveOffsets.begin(), paletteLiveOffsets.end()) == paletteLiveOffsets.end());
             ExpectTrue(!graphics->AllocateJoints(1).HasValue());
             // Exhaustion must stay exhausted, never wrap back onto live joints.
             ExpectTrue(!graphics->AllocateJoints(1).HasValue());

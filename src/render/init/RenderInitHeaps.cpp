@@ -274,10 +274,10 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         }
         allocator.DestroyBuffer(morphDeltasBuffer);
     });
-    std::vector<Mat4x4> identities(8192, Mat4x4::Identity());
+    std::vector<Mat4x4> identities(FrameResources::kJointPaletteCapacity, Mat4x4::Identity());
     for (uint32_t i = 0; i < FrameResources::kJointBufferRingSize; ++i) {
         auto jb_res = Vk::Buffer::Create(
-            allocator, sizeof(Mat4x4) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+            allocator, sizeof(Mat4x4) * FrameResources::kJointPaletteCapacity, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
             return std::unexpected(ErrorCode(jb_res.error()));

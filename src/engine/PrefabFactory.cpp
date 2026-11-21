@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "ArticulationContext.hpp"
 #include "PrefabFactoryInternal.hpp"
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Log.hpp>
@@ -112,7 +111,6 @@ auto InstantiateMeshPart(
     RenderContext&                         gfx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
-    ArticulationContext&                   art,
     const ModelPrefab&                     prefab,
     const ModelPart&                       part,
     const PreparedPart&                    prep,
@@ -140,8 +138,13 @@ auto InstantiateMeshPart(
         auto it = allocatedSkeletons.find(part.skeletonIndex);
         if (it != allocatedSkeletons.end()) {
             assignedJointOffset = it->second;
+            // Every part sharing this skeleton holds one allocator ref, so
+            // SceneResources releasing per-component cannot double-free.
+            if (!gfx.RetainJoints(assignedJointOffset)) {
+                return Entity::Null();
+            }
         } else {
-            assignedJointOffset = art.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
+            assignedJointOffset = gfx.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
             if (assignedJointOffset == UINT32_MAX) {
                 return Entity::Null();
             }
@@ -523,7 +526,6 @@ auto InstantiatePrefabInternal(
     RenderContext&       gfx,
     ECS::Registry&       reg,
     PhysicsContext&      pc,
-    ArticulationContext& art,
     const ModelPrefab&   prefab,
     const SpawnParams&   params,
     Entity*              outBuffer,
@@ -565,7 +567,7 @@ auto InstantiatePrefabInternal(
     std::unordered_map<std::string, Entity> instantiatedParts;
 
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
-        Entity meshEnt = InstantiateMeshPart(gfx, reg, pc, art, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
+        Entity meshEnt = InstantiateMeshPart(gfx, reg, pc, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
 
         if (meshEnt == Entity::Null())
             continue;

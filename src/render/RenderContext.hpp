@@ -17,6 +17,7 @@
 #include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <render/FrameScope.hpp>
+#include <render/JointRangeAllocator.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
@@ -211,7 +212,20 @@ class RenderContext {
         return CreateTexture(std::span {pixels}, extent, isSRGB);
     }
 
-    void UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices);
+    // Validates against this renderer's own joint buffers; no caller-side
+    // palette bound check is needed (or permitted to duplicate it).
+    [[nodiscard]] auto UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) -> RenderResult;
+    // GPU joint palette, owned by this renderer (see JointRangeAllocator).
+    [[nodiscard]] auto AllocateJoints(uint32_t count) noexcept -> uint32_t;
+    [[nodiscard]] auto RetainJoints(uint32_t offset) noexcept -> bool;
+    void               FreeJoints(uint32_t offset, uint32_t count) noexcept;
+    // Device-lost transfer: KernelSession moves allocator state across
+    // RenderContext recreation so jointOffset values survive it.
+    [[nodiscard]] auto ExtractJointAllocator() noexcept -> JointRangeAllocator;
+    void               AdoptJointAllocator(JointRangeAllocator allocator) noexcept;
+    // BeginFrame hook (renderer-internal): resets retiring ranges in the
+    // now-GPU-idle CurrentJointBuffer and promotes fully cleared ranges.
+    void               ClearRetiringJointRanges() noexcept;
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
     // Retires a previously allocated morph delta range back to the palette so

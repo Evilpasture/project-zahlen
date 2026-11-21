@@ -16,7 +16,6 @@
 
 namespace ZHLN {
 class Engine;
-class ArticulationContext;
 class AssetManager;
 class PhysicsContext;
 class RenderContext;
@@ -92,7 +91,6 @@ auto InstantiatePrefabInternal(
     RenderContext&       gfx,
     ECS::Registry&       reg,
     PhysicsContext&      pc,
-    ArticulationContext& art,
     const ModelPrefab&   prefab,
     const SpawnParams&   params,
     Entity*              outBuffer,

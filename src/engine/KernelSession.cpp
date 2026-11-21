@@ -481,12 +481,17 @@ auto KernelSession::GetConfig() const noexcept -> const EngineConfig& {
 auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->assetManager->InvalidateGPUMeshes();
     _impl->StopShaderObservation();
+    // jointOffset must survive device loss (IAssetLibrary contract): move
+    // the tiny allocator state across RenderContext recreation here, in the
+    // owner of RenderContext lifetime, instead of putting it back in World.
+    auto jointAllocator = _impl->renderContext->ExtractJointAllocator();
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
+    rc_res.value()->AdoptJointAllocator(std::move(jointAllocator));
     _impl->renderContext = std::move(rc_res.value());
     _impl->BeginShaderObservation();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);

@@ -75,15 +75,18 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             continue;
         }
 
-        uint32_t offset = ragComp.jointOffset;
-        uint32_t count  = ragComp.jointCount;
+        const uint32_t offset = ragComp.jointOffset; // GPU upload destination only
+        const uint32_t count  = ragComp.jointCount;
+        auto* jointState = context.JointState(ragComp.ragdollID);
+        if (jointState == nullptr || jointState->blendWeights.size() < count) {
+            continue;
+        }
 
         if (auto hitCmd = query.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
-                uint32_t globalIdx                         = offset + hitCmd->jointIndex;
-                context._jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
-                context._jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
-                context._jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
+                jointState->blendWeights[hitCmd->jointIndex] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
+                jointState->stiffness[hitCmd->jointIndex]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
+                jointState->blendDecay[hitCmd->jointIndex]   = std::max(0.0f, hitCmd->decayRate);
 
                 ragComp.state = RagdollState::PartialBlend;
             }
@@ -97,21 +100,13 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
-            uint32_t globalIdx = offset + j;
-            float    decay     = context._jointStates.jointBlendDecay[globalIdx];
-
+            const float decay = jointState->blendDecay[j];
             if (decay > 0.0f) {
-                context._jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, context._jointStates.jointBlendWeights[globalIdx] - decay * dt);
-                context._jointStates.jointStiffness[globalIdx]    = std::min(1.0f, context._jointStates.jointStiffness[globalIdx] + dt * 1.5f);
-
-                if (context._jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
-                    context._jointStates.jointBlendDecay[globalIdx] = 0.0f;
-                }
+                jointState->blendWeights[j] = std::max(0.0f, jointState->blendWeights[j] - decay * dt);
+                jointState->stiffness[j]    = std::min(1.0f, jointState->stiffness[j] + dt * 1.5f);
+                if (jointState->blendWeights[j] <= 0.0f) jointState->blendDecay[j] = 0.0f;
             }
-
-            if (context._jointStates.jointBlendWeights[globalIdx] > 0.001f) {
-                hasActiveBlend = true;
-            }
+            if (jointState->blendWeights[j] > 0.001f) hasActiveBlend = true;
         }
 
         if (hasActiveBlend && ragComp.state == RagdollState::Inactive) {
@@ -139,7 +134,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
         std::vector<Mat4x4> localJoints(count, Mat4x4::Identity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = Inverse(context._jointStates.inverseBindMatrices[offset + j]);
+            localJoints[j] = Inverse(jointState->inverseBindMatrices[j]);
         }
 
         std::vector<Mat4x4> modelJoints(count, Mat4x4::Identity());
@@ -210,11 +205,11 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             const auto invRoot = CreateTranslation(-rootPosition);
 
             for (uint32_t j = 0; j < count; ++j) {
-                const auto& ibm = context._jointStates.inverseBindMatrices[offset + j];
+                const auto& ibm = jointState->inverseBindMatrices[j];
                 const auto physModel = invRoot * FromJolt(physicalWorldJoints[j]);
                 const auto& animModel = modelJoints[j];
 
-                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : context._jointStates.jointBlendWeights[offset + j];
+                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : jointState->blendWeights[j];
 
                 if (blendWeight <= 0.001f) {
                     finalSkinningMatrices[j] = animModel * ibm;

@@ -459,6 +459,10 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         }
     }
 
+    // WaitSlotIdle above proves CurrentJointBuffer() is GPU-idle: safe to
+    // reset retiring joint ranges in it (once per frame, one Map total).
+    ClearRetiringJointRanges();
+
     auto& submittedStaging = _impl->submittedStaging;
     auto& frame_index      = _impl->presenter.frameIndex;
     auto& deletionQueue    = _impl->deletionQueue;

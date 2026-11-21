@@ -875,21 +875,45 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
     Draw(material, debugMesh, {.transform = Mat4x4::Identity(), .prevTransform = Mat4x4::Identity(), .cullRadius = 10000.0f});
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) {
-    if (matrices.empty()) {
-        return;
-    }
+auto RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) -> RenderResult {
+    if (matrices.empty()) return {};
     auto& buffer = _impl->frames.CurrentJointBuffer();
-    if (offset > buffer.Size() / sizeof(Mat4x4) || matrices.size() > buffer.Size() / sizeof(Mat4x4) - offset) {
-        ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
-        return;
+    const auto capacity = buffer.Size() / sizeof(Mat4x4);
+    if (offset > capacity || matrices.size() > capacity - offset) {
+        return std::unexpected(ErrorCode {RenderFeatureError::JointPaletteOutOfRange});
     }
     auto mapped = buffer.Map(_impl->allocator);
-    if (!mapped) {
-        return;
-    }
+    if (!mapped) return std::unexpected(mapped.error());
     std::memcpy(mapped->As<Mat4x4>() + offset, matrices.data(), matrices.size_bytes());
+    return {};
 }
+
+auto RenderContext::AllocateJoints(uint32_t count) noexcept -> uint32_t {
+    // Never map jointBuffers here: allocation can happen between frames
+    // while the GPU still reads in-flight ring slots. Fresh bump ranges are
+    // already Identity from InitSkeletalAnimationResources; reused ranges
+    // were reset to Identity by ClearRetiringJointRanges() before promotion.
+    return _impl->jointAllocator.Allocate(count);
+}
+void RenderContext::ClearRetiringJointRanges() noexcept {
+    auto& allocator = _impl->jointAllocator;
+    if (!allocator.HasRetiring()) return;
+    auto& buffer = _impl->frames.CurrentJointBuffer();
+    if (buffer.Size() == 0) return;
+    // CurrentJointBuffer() is GPU-idle here (BeginFrame's WaitSlotIdle):
+    // map it once and reset every retiring range not yet cleared in it.
+    auto mapped = buffer.Map(_impl->allocator);
+    if (!mapped) return;
+    auto* dst = mapped->As<Mat4x4>();
+    allocator.ClearRetiringForSlot(_impl->frames.currentJointSlot, FrameResources::kJointBufferRingSize,
+                                   [dst](uint32_t offset, uint32_t count) noexcept {
+                                       for (uint32_t i = 0; i < count; ++i) dst[offset + i] = Mat4x4::Identity();
+                                   });
+}
+auto RenderContext::RetainJoints(uint32_t offset) noexcept -> bool { return _impl->jointAllocator.Retain(offset); }
+void RenderContext::FreeJoints(uint32_t offset, uint32_t count) noexcept { _impl->jointAllocator.Release(offset, count); }
+auto RenderContext::ExtractJointAllocator() noexcept -> JointRangeAllocator { return std::move(_impl->jointAllocator); }
+void RenderContext::AdoptJointAllocator(JointRangeAllocator allocator) noexcept { _impl->jointAllocator = std::move(allocator); }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
     const uint32_t floatCount = static_cast<uint32_t>(deltas.size() / 4);

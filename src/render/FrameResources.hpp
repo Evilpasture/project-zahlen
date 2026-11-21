@@ -8,12 +8,15 @@
 #include "vulkan/Rendering.hpp"
 #include "vulkan/core/FrameStorage.hpp"
 #include <Zahlen/Render/RenderIDs.hpp>
+#include <render/JointRangeAllocator.hpp>
 #include <cstdint>
 
 namespace ZHLN {
 
 struct FrameResources {
     static constexpr uint32_t kJointBufferRingSize = Vk::kFramesInFlight + 1;
+    // Renderer-owned GPU joint palette capacity (joints, all ring slots).
+    static constexpr uint32_t kJointPaletteCapacity = kDefaultJointPaletteCapacity;
 
     PerFrame<Vk::Buffer>      lineVbos;
     PerFrame<VkDeviceAddress> lineVboAddresses;

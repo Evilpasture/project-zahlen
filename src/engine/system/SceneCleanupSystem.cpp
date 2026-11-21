@@ -7,7 +7,9 @@
 #include <ecs/ECS.hpp>
 #include <ecs/EntityCommandBuffer.hpp>
 #include <ecs/SystemParameters.hpp>
+#include <engine/ArticulationContext.hpp>
 #include <engine/Engine.hpp>
+#include <engine/World.hpp>
 #include <engine/SceneResources.hpp>
 #include <physics/Physics.hpp>
 #include <span>
@@ -58,6 +60,7 @@ void ReleasePhysics(Engine& engine, PhysicsCleanupQuery query, bool all) {
         auto components = query.Raw<Components::RagdollComponent>();
         for (size_t i = 0; i < ragdollOwners.size(); ++i) {
             if (all || query.Get<Components::PendingDestroy>(ragdollOwners[i]).has_value()) {
+                engine.GetWorld().GetArticulationContext().RemoveJointState(components[i].ragdollID);
                 ragdolls.push_back(std::exchange(components[i].ragdollID, Physics::RagdollID::Invalid));
                 components[i].isAddedToPhysics = false;
             }

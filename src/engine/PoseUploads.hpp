@@ -88,6 +88,7 @@ class PoseUploadQueue {
         return _uploads.size();
     }
 
+    // Keyed by jointOffset purely as the GPU upload destination ID.
     // Model-space joint transforms published ahead of ArticulationSystem for
     // skeletons that also drive a ragdoll. Stored in the same frame arena as
     // skinning palettes so ECS components never carry matrix arrays.

@@ -79,6 +79,7 @@ struct RenderContext::Impl {
     uint64_t                                  nextBufferId    = 1;
     uint64_t                                  nextTextureId   = 4; // Reserve SystemTextures {0..3}.
     uint64_t                                  nextPipelineId  = 1;
+    JointRangeAllocator                       jointAllocator {kDefaultJointPaletteCapacity};
     uint32_t                                  morphCursor     = 0;
     // Retired morph delta ranges (offset, float count) returned by
     // FreeMorphDeltas, kept sorted and coalesced for reuse.
@@ -166,6 +167,8 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
 }
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
+    // No GPU ring to fence: retiring ranges are reusable immediately.
+    for (uint32_t slot = 0; slot < 3; ++slot) _impl->jointAllocator.ClearRetiringForSlot(slot, 3, [](uint32_t, uint32_t) noexcept {});
     if (_impl->destroyed) {
         return std::optional<FrameScope> {};
     }
@@ -484,8 +487,19 @@ void RenderContext::UnloadTexture(TextureID handle) {
     }
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t /*offset*/, std::span<const ZHLN::Mat4x4> /*matrices*/) {
+auto RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::Mat4x4> matrices) -> RenderResult {
+    const auto capacity = _impl->jointAllocator.Capacity();
+    if (offset > capacity || matrices.size() > capacity - offset) {
+        return std::unexpected(ErrorCode {RenderFeatureError::JointPaletteOutOfRange});
+    }
+    return {};
 }
+auto RenderContext::AllocateJoints(uint32_t count) noexcept -> uint32_t { return _impl->jointAllocator.Allocate(count); }
+auto RenderContext::RetainJoints(uint32_t offset) noexcept -> bool { return _impl->jointAllocator.Retain(offset); }
+void RenderContext::FreeJoints(uint32_t offset, uint32_t count) noexcept { _impl->jointAllocator.Release(offset, count); }
+void RenderContext::ClearRetiringJointRanges() noexcept {}
+auto RenderContext::ExtractJointAllocator() noexcept -> JointRangeAllocator { return std::move(_impl->jointAllocator); }
+void RenderContext::AdoptJointAllocator(JointRangeAllocator allocator) noexcept { _impl->jointAllocator = std::move(allocator); }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
     const uint32_t floatCount = static_cast<uint32_t>(deltas.size() / 4);
