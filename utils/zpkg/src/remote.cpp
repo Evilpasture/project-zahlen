@@ -236,16 +236,31 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
     auto remotes = store.Remotes();
     if (!remotes)
         return std::unexpected(std::move(remotes.error()));
-    const auto found = remotes->find(name);
-    if (found == remotes->end()) {
-        return std::unexpected(Fail {
-            "no remote named '" + name +
-            "'. 'zpkg remote list' shows the configured ones, "
-            "'zpkg remote add " +
-            name + " <url>' adds it."
-        });
+    std::string baseUrl;
+    if (name == "official") {
+        auto url = OfficialReleaseUrl(options.release);
+        if (!url)
+            return std::unexpected(std::move(url.error()));
+        baseUrl = *url;
+        // The official shortcut never falls back to unsigned installation.
+        requireSignatures = true;
+        auto keys = store.Keys();
+        if (!keys)
+            return std::unexpected(std::move(keys.error()));
+        if (keys->empty())
+            return std::unexpected(Fail {
+                "trust the release publisher before installing: verify its public key fingerprint, then run "
+                "'zpkg key add <release-key.pub>'. No key is downloaded or trusted automatically."
+            });
+    } else {
+        if (!options.release.empty())
+            return std::unexpected(Fail {"--version selects an official release; omit --from or use --from official", 2});
+        const auto found = remotes->find(name);
+        if (found == remotes->end())
+            return std::unexpected(Fail {"no remote named '" + name + "'; use 'zpkg remote list' or 'zpkg remote add " + name + " <url>'"});
+        baseUrl = found->second;
     }
-    const std::string indexUrl = UrlJoin(found->second, "index.json");
+    const std::string indexUrl = UrlJoin(baseUrl, "index.json");
     auto              fetched  = FetchToString(indexUrl);
     if (!fetched)
         return std::unexpected(std::move(fetched.error()));
@@ -287,7 +302,8 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
             failure += "\n       key " + signature.fingerprint + " does not verify the index";
         }
         if (!verified) {
-            return std::unexpected(Fail {"no trusted signature covers " + indexUrl + ":" + failure});
+            return std::unexpected(Fail {"no trusted signature covers " + indexUrl + ":" + failure +
+                "\n       verify the publisher key fingerprint, then use zpkg key add <release-key.pub>"});
         }
     } else if (signatureText->has_value()) {
         auto signatures = ParseSignatureFile(**signatureText);
@@ -313,7 +329,7 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
     if (!index)
         return std::unexpected(std::move(index.error()));
     RemoteSelection selection;
-    selection.baseUrl = found->second;
+    selection.baseUrl = baseUrl;
 
     std::optional<IndexToolchain> chosen;
     for (const auto& toolchain: index->toolchains) {
@@ -381,6 +397,21 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
 // ---------------------------------------------------------------------------
 // Selection and resolution
 // ---------------------------------------------------------------------------
+auto OfficialReleaseUrl(std::string_view tag) -> std::expected<std::string, Fail> {
+    constexpr std::string_view base = "https://github.com/Evilpasture/project-zahlen/releases/";
+    if (tag.empty() || tag == "latest")
+        return std::string(base) + "latest/download";
+    // Tags are one path segment, not URLs or relative paths.
+    if (tag == "." || tag == "..")
+        return std::unexpected(Fail {"invalid release tag; use a release name such as v0.1.0", 2});
+    for (const char c: tag) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+            return std::unexpected(Fail {"invalid release tag; only letters, digits, '.', '-' and '_' are supported", 2});
+    }
+    return std::string(base) + "download/" + std::string(tag);
+}
+
 bool PackageMatches(const IndexPackage& package, std::string_view want) {
     if (want.empty())
         return false;
@@ -574,6 +605,7 @@ auto InstallFromRemote(Store& store, const std::string& name, const InstallOptio
     }
 
     InstallReport report;
+    report.toolchain = selection.toolchain.id;
     for (const auto& package: resolution.packages) {
         if (present.count(package.package) != 0 && !options.force) {
             log::Say("  present    " + package.package);

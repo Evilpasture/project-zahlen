@@ -4,6 +4,32 @@ zpkg installs engine packages into a per-user store and selects the active
 toolchain. For game setup, see the [consumer guide](../../docs/CONSUMING.md).
 For command syntax, see [Commands](#commands).
 
+## Install a release
+
+After trusting the release publisher key, run `zpkg install` to get Application
+and its dependencies. Component names can be shortened:
+
+```sh
+zpkg install application
+zpkg install application image --version v0.1.0
+zpkg install application --from studio
+```
+
+The built-in `official` source uses GitHub Releases, with `latest` as the default
+release. `--version` selects an exact release tag. Official installs and
+`--from` component installs require a trusted signature over the index and
+verify archive hashes. Keys are never downloaded or trusted automatically.
+
+Existing local paths take precedence over component names. A bare configured
+remote installs its whole toolchain; `remote:component` retains the explicit
+remote syntax. Those advanced forms retain their existing verification flags.
+Use `./name` to disambiguate a local path, or `--from official` to force release
+component selection. `official` is a built-in source, not a configurable remote.
+
+The first successful installation activates its toolchain; subsequent installs
+preserve the active selection. Use `zpkg use <id>` to switch. `zpkg install
+--help` lists install options. Unknown options and missing values are errors.
+
 ## Build isolation
 
 `utils/zpkg` is a standalone C++23 CMake project. It does not link the engine or
@@ -105,6 +131,7 @@ Store behavior:
 
 | Command | Effect |
 |---|---|
+| `install [component ...] [--version <tag>] [--from <remote>]` | signed component install (default: Application from the latest official release) |
 | `install <path\|dir>...` | verify, extract into `store/<id>/`, record the package |
 | `install <remote>` | install that remote's whole toolchain |
 | `install <remote>:<name>` | install that package and everything it requires |
@@ -121,7 +148,7 @@ Store behavior:
 | `key add/list/remove` | trust a publisher's ed25519 key |
 | `remote add/list/remove` | register a path, `file://` or `https://` remote |
 
-Install options: `--only a,b`, `--toolchain <id>`, `--require-checksums`,
+Install options: `--from <remote>`, `--version <tag>`, `--only a,b`, `--toolchain <id>`, `--require-checksums`,
 `-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
 
 ## What a name selects

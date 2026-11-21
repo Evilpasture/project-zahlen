@@ -939,6 +939,14 @@ void TestRemote() {
     // The download is content-addressed, so a second install needs no fetch.
     Expect(ZHLN::PathExists(store.CacheDir() / Take(ZHLN::Sha256FileHex(published / engineArchive.filename()))));
 
+    // Reinstall reports its toolchain, validates it, and preserves activation.
+    auto again = Take(ZHLN::InstallFromRemote(store, "local", options));
+    Expect(again.installed.empty());
+    Expect(again.toolchain == engine.id);
+    again = Take(store.Finish(std::move(again)));
+    Expect(again.missing.empty());
+    Expect(Take(store.Active()).value() == engine.id);
+
     // A remote whose index lies about a hash must be refused, not trusted.
     {
         ZHLN::Env   freshEnv = TestEnv(directory / "fresh");
@@ -1090,6 +1098,7 @@ void TestRemoteClosure() {
         Expect(report.installed.size() == 1);
         // The store still refuses to call the result buildable.
         ExpectError(store.Finish(report, false));
+        Expect(!Take(store.Active()).has_value());
         const auto tolerated = Take(store.Finish(report, true));
         Expect(tolerated.missing.size() == 1);
         Expect(tolerated.missing[0] == "zahlen-nowhere");
@@ -1129,6 +1138,26 @@ void TestRemoteClosure() {
         Require(ZHLN::WriteFile(published / "index.json", ZHLN::BuildIndexJson(index)));
     }
 
+    Discard(directory);
+}
+
+void TestOfficialRelease() {
+    Expect(Take(ZHLN::OfficialReleaseUrl("")) == "https://github.com/Evilpasture/project-zahlen/releases/latest/download");
+    Expect(Take(ZHLN::OfficialReleaseUrl("latest")) == Take(ZHLN::OfficialReleaseUrl("")));
+    Expect(Take(ZHLN::OfficialReleaseUrl("v0.1.0")) == "https://github.com/Evilpasture/project-zahlen/releases/download/v0.1.0");
+    for (const auto* invalid: {"..", ".", "../other", "a/b", "v1?token=x", "https://example.com", "v1#x", "v1%2fother", "v1 beta"})
+        ExpectError(ZHLN::OfficialReleaseUrl(invalid));
+    const fs::path directory = MakeTemp("official");
+    ZHLN::Store store(TestEnv(directory));
+    ExpectError(store.RemoteAdd("official", "file:///tmp/untrusted"));
+    // Empty trust store fails before attempting a network request.
+    auto refused = ZHLN::InstallFromRemote(store, "official", {});
+    ExpectError(refused);
+    if (!refused)
+        Expect(refused.error().message.find("zpkg key add") != std::string::npos);
+    ZHLN::InstallOptions invalidVersion;
+    invalidVersion.release = "../other";
+    ExpectError(ZHLN::InstallFromRemote(store, "official", invalidVersion));
     Discard(directory);
 }
 
@@ -1172,6 +1201,7 @@ int main() {
     Run("checksum-and-signature-policy", TestChecksumAndSignaturePolicy);
     Run("remote", TestRemote);
     Run("remote-closure", TestRemoteClosure);
+    Run("official-release", TestOfficialRelease);
     Run("path-rules", TestEnvRules);
 
     std::printf("%s: %d checks, %d failure(s)\n", failures == 0 ? "PASS" : "FAIL", checks, failures);

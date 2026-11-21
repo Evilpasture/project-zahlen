@@ -311,6 +311,7 @@ struct InstallOptions {
     // the per-archive SHA256SUMS is neither required nor meaningful.
     bool        prehashed = false;
     std::string toolchain; // remote selection
+    std::string release;   // official GitHub release tag (empty: latest)
     // A package that needs one the toolchain does not ship is a refusal, not a
     // warning: the prefix would install and then fail at find_package(). This
     // escape hatch exists for the one legitimate case -- installing a package
@@ -406,8 +407,11 @@ std::string UrlJoin(std::string_view base, std::string_view leaf);
 auto        FetchToFile(std::string_view url, const fs::path& dest) -> std::expected<void, Fail>;
 auto        FetchToString(std::string_view url) -> std::expected<std::optional<std::string>, Fail>;
 
-// Installs every selected package of a remote's toolchain, verifying content
-// against the (optionally signed) index before anything is extracted.
+// Resolve a supported tag to the built-in GitHub release download directory.
+auto OfficialReleaseUrl(std::string_view tag) -> std::expected<std::string, Fail>;
+
+// Installs selected packages and dependencies. The official source always
+// requires a trusted signature; configured remotes follow InstallOptions.
 auto InstallFromRemote(Store& store, const std::string& name, const InstallOptions& options) -> std::expected<InstallReport, Fail>;
 // Verifies a remote without installing; returns how many packages were checked.
 auto VerifyRemote(Store& store, const std::string& name, const InstallOptions& options) -> std::expected<size_t, Fail>;
