@@ -23,9 +23,7 @@ it does not add an animation interface or hidden native accessor to IEngine.
 play/restart, seek, pause/speed and validated IK input. Runtime types are owned
 by `<Animation/Components.hpp>` (`Animation::AnimatorComponent` and
 `Animation::AnimatorControlComponent`), not by core's `Components` container.
-IK controls and AnimationID are likewise extension headers. The erroneous
-`Zahlen/Animation/Native*` headers have been removed, not retained as core-to-
-extension forwarding dependencies.
+IK controls and AnimationID are also declared in extension headers.
 
 The engine supplies generic native module composition, optional component
 publication and prefab notification mechanisms. It has no animation-specific
@@ -49,11 +47,8 @@ supply POD desired velocity, acceleration/deceleration, gravity, jump and facing
 controls. Input routing, camera-relative movement and gait decisions are host
 policy. See [COMCharacterHost](COMCharacterHost.md).
 
-## Unresolved and remaining work
+## Known limitations
 
-The full Uzi rendered workload previously faulted/timed out on the second
-rendered tick. Its cause remains unknown. Simulation-only success is not
-presentation proof, and this extraction does not claim to fix that failure.
-ProceduralAnimation, Locomotion and Rig remain native extension workloads,
-not completed capability-only COM ports. The VM's Clang 22.1.8 rejects
-`-freflection`; no Clang integration success is claimed.
+The Uzi rendered workload has an unresolved fault/timeout on the second
+rendered tick. ProceduralAnimation, Locomotion and Rig use native extension
+APIs. Clang 22.1.8 rejects the required `-freflection` option.

@@ -62,14 +62,9 @@ arenas without individual release APIs; their arena space is not reclaimed by
 this rollback. Collision entries remain cache-owned until cache clear.
 Registration is not an atomic transaction across those arenas/caches.
 
-RegisterPrefab now explicitly binds the cache's graphics owner before transfer
-(also applies to BSP/Studio registration). The COM joint validator accepts
-non-parent-first joint arrays while still rejecting invalid indices/cycles.
-Both sides must rebuild for the extended POD `PrefabInfo` layout.
-
 ## GPU recovery
 
-GPU replacement and glTF host recovery are now provided by
+GPU replacement and glTF host recovery use
 `IAssetLibrary::ReplacePrefabGPUResources` and `GLTF::RebuildGPUResources`.
 Retain the owning Asset and original Document, poll DeviceGeneration in the
 host loop, and rebuild before the next frame. The operation keeps CPU prefab
@@ -79,11 +74,7 @@ republished by the normal animation step/explicit graphics upload.
 
 See [COMPrefabGPURecovery.md](COMPrefabGPURecovery.md) for generation/revision
 validation, texture ownership, controlled resets and failure limitations.
-RGBA8 glTF capability textures now use independent anonymous uploads.
+RGBA8 glTF capability textures use independent anonymous uploads.
 
-## Remaining consumer migration
-
-Scene documents/orchestration and inspector/editor/sample/extension host ports
-are still outstanding. This is not a claim that the whole consumer migration
-is complete. Native recovery entry points remain compatibility-only; do not
-mix them with a COM owning lease for the same prefab path.
+Do not mix native recovery entry points with a COM owning lease for the same
+prefab path.

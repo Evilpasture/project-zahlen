@@ -1,6 +1,10 @@
-# ZHLN Rendering Subsystem: Developer's Guide
+# Vulkan backend
 
-This document outlines the architecture, resource lifetime model, and pipeline execution flow of the ZHLN (Zero-overHead vuLkan abstractioN) rendering subsystem. It is designed to help developers understand how to safely interact with, configure, and extend the renderer.
+Backend reference for contributors implementing renderer features in
+[`src/render`](../render/README.md) or changing Vulkan infrastructure here.
+This directory owns device access, resource wrappers, synchronization, and graph
+execution machinery. Scene algorithms and shader integration belong to the
+[renderer guide](../render/README.md).
 
 ---
 
@@ -30,7 +34,7 @@ Volk's dispatch tables are process-global in this build. The supported Engine pa
 
 ### Instance Creation and Context Builder
 
-`Vk::Instance::Create()` creates a zero-overhead owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
+`Vk::Instance::Create()` creates an owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
 
 ### Diagnostics Ownership (Vk::GPUDiagnostics)
 

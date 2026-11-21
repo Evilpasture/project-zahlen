@@ -1,6 +1,6 @@
 # Lightning and Explosion capability hosts
 
-The `zahlen_vfx` / installed `Zahlen::VFX` target now provides three ordinary
+The `zahlen_vfx` / installed `Zahlen::VFX` target provides three ordinary
 host-owned COM policies: CombatFX, `Lightning::System`, and
 `Explosion::System`. New public entry points are `VFX/Lightning.hpp` and
 `VFX/Explosion.hpp`. They retain their engine reference and expose no
@@ -33,8 +33,7 @@ as supplied, rather than silently discarding cloud X/Z.
 The host preserves the real particle distributions, drag/gravity, fire/smoke
 billboard batches, four air fronts and ground ring, fading flash light,
 48-particle mesh-debris emitter, procedural DSP audio, and autonomous crater
-projection/fade. No blast impulse is claimed: the original implementation did
-not apply one.
+projection/fade. Explosions do not apply blast impulses.
 
 The STL simulation vectors and procedural texture policy stay in private host
 storage, not Core or an ECS component. Only POD `EmitterState` and `CraterState`
@@ -51,33 +50,11 @@ move assignment, pending destruction and scene replacement affect only owned
 entities/resources. Audio events are best effort (as in the native demo);
 graphics and draw-submission failures propagate to Application cleanup.
 
-## Real consumer and validation
+## Scene host
 
-`zahlen-scene-host --terrain-demo --raster-only` now combines the snow
+`zahlen-scene-host --terrain-demo --raster-only` combines the snow
 heightfield/falling-body host with Lightning and Explosion as well as CombatFX.
 HostUI owns the panel and pause/quit controls. Pausing freezes effect clocks;
 resource rebinding and rendering continue.
 
-Existing GNU 16 VM, Release, Vulkan llvmpipe:
-- Extras_LightningHost: 4 passed.
-- Extras_ExplosionHost: 4 passed.
-- Extras_TerrainHost: 5 passed; rendered Application test now asserts live
-  lightning, explosions and craters before/after graphics recreation and reads
-  back lit frames with host UI.
-- Extras_CombatHost: 4 passed.
-- Extras_CameraHosts (including frame pipeline): 14 passed.
-- Extras_Application (including screenshot): 20 passed.
-- Actual terrain/VFX CLI: 60 headless raster frames, exit 0.
-- Native compatibility VFX target builds; it is not linked into COM consumers.
-
-The previous Terrain/Combat host report describes the preceding slice; its
-statement that Lightning/Explosion hosts are unported is superseded here.
-The **legacy callers/adapters** remain explicitly native. This is not completion
-of editor, Console, Benchmark, or Animator/CharacterMotor runtime migration.
-
-Installed-package check also passed: install Engine + VFX components into a
-separate prefix, configure an external C++26 consumer with `find_package(ZahlenVFX)`,
-include all three public host headers, link `Zahlen::VFX`, construct/destruct the
-hosts and run the resulting executable. Set `CMAKE_CXX_STANDARD` to 26 before
-`find_package`, so the package's compiler/reflection checks use C++26 too.
-No private policy header or source-tree include path is required.
+For an installed consumer, find `ZahlenVFX` and link `Zahlen::VFX`.

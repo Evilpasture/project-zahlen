@@ -2,7 +2,7 @@
 
 ## Ownership and composition
 
-`zahlen_character_controller` / installed `Zahlen::CharacterController` is now
+`zahlen_character_controller` / installed `Zahlen::CharacterController` is
 a capability-only host library. Include
 `<CharacterController/CharacterController.hpp>` and explicitly compose
 `Character::Layer` into an Application, or call `Character::Step` before
@@ -57,7 +57,7 @@ Include `<Animation/Animator.hpp>` and link `zahlen_animation_controls` /
 `Zahlen::AnimationControls`. The playback evaluator belongs to the optional AnimationControls runtime.
 Compose it explicitly via `<Animation/Context.hpp>` and
 `Animation::CreateEngineRef`, or native `Animation::Install`/`IK::Install`;
-this archive's new helpers only author published POD controls:
+the helpers author published POD controls:
 
 - `Animator::Attach` starts from the root's existing playback settings.
 - `Play` requests a track and restart at time zero, including repeat calls for
@@ -70,65 +70,18 @@ this archive's new helpers only author published POD controls:
 Clip/gait selection stays in the host. These helpers do not acquire an
 Context or export native animation containers across COM.
 
-## COM-only surface
+## Composition constraints
 
-The transitional `NativeCharacterController` adapter has been removed; samples,
-ProjectLight, Interaction, and tests all use `CharacterHost` (`Zahlen::CharacterController`)
-exclusively through COM. Do not install duplicate controllers
-movement drivers in the same world. A native typed Movement family is refused
-by the COM dynamic-component path instead of becoming duplicate unread state.
+Use one movement driver per character. The COM dynamic-component path rejects
+a native typed Movement family.
 
-The existing procedural-animation, locomotion, Rig and gameplay demos remain
-native compatibility workloads. Their algorithms were not replaced with a toy
-COM demo, and their successful native compilation is not claimed as a complete
-procedural COM port. A full procedural host needs explicit metadata/pose and
-articulation output contracts and remains separate work.
-
-## Verification
-
-- Six COM character-host tests cover snapshot rules, attach/freeze/pause,
-  real ground/jump/wall sliding, dynamic prop impulses, 30/144 Hz motion,
-  Application composition and scene retirement.
-- Three non-rendering runtime-control tests cover actual motor movement,
-  published typed playback/IK storage and Animator helper validation.
-- Seventeen existing native character/input tests pass, including ledges,
-  slopes, acceleration, interpolation, jump/landing and dynamic-body pushing.
-- An installed C++26 GNU consumer finds CharacterController/AnimationControls,
-  checks the host's exported dependencies exclude Native/Jolt adapters, drives
-  an actual character through the staged engine pipeline, and validates
-  Animator controls and cleanup without source-tree include paths.
-- The VM's Clang 22.1.8 rejects `-freflection`; no Clang/libc++ integration pass
-  is claimed.
-
-The real Uzi rendered animation test is retained, not skipped in source or
-changed to synthetic geometry. Its prior llvmpipe worker fault/timeout remains
-an unresolved rendering gate. The focused non-rendering regression explicitly
-filters that one test; those passing counts do not include it.
-
-### Historical verification before runtime extraction
-
-The broad host/native-character regression passed 135 tests with zero failures.
-A separate real-Uzi simulation-stage test passed 12 AdvanceFrame/CancelFrame
-updates, paused seek, handle stability, scene clear and recreation with a new
-handle. This deliberately does not call FinishFrame and is not rendered proof.
-The native GPU_Application lifecycle suite passed 16 tests after removing
-animation's implicit application-module installation. That checkpoint used core-owned animation and was superseded: the optional
-extension now owns the evaluator, IK nodes and cleanup. Native Install calls
-are explicit and idempotent.
-CancelFrame and scene clear discard unpublished palette uploads.
-
-The installed GNU C++26 Engine/CharacterController/AnimationControls consumer
-was rebuilt and ran successfully. VM Clang 22.1.8 rejects `-freflection`; no
-Clang integration success is claimed. An additional native procedural test
-translation unit was stopped after over 15 minutes of compilation; no test-run
-success is claimed for that optional suite. Its compatibility library built.
-The original full rendered real-skinned second-tick failure remains unresolved.
-
-## Animation extraction follow-up
-
-Engine no longer contains animation evaluation/state/IK or implicit module
-installation. Animator data types are now `Animation::AnimatorComponent` and
+Animator components are `Animation::AnimatorComponent` and
 `Animation::AnimatorControlComponent` from `<Animation/Components.hpp>`.
-See [COMRuntimeControls](COMRuntimeControls.md) for explicit optional-runtime
-composition and the ownership boundary. Earlier verification above is historical;
-consult the extraction delivery report for reruns on the extracted runtime.
+See [COMRuntimeControls](COMRuntimeControls.md) for runtime composition and
+ownership.
+
+## Known limitations
+
+The procedural-animation, locomotion, Rig and gameplay demos use native APIs.
+The Uzi rendered animation workload has an unresolved llvmpipe fault/timeout on
+the second rendered tick.

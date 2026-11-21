@@ -1,8 +1,6 @@
 # Capability world BSP authoring
 
-This continuation adds real world and moving-brush authoring to the existing
-`zahlen_bsp_assets` archive. It does not claim that the native BSP sample,
-Scene runner or editor has already been ported.
+`zahlen_bsp_assets` provides world and moving-brush authoring.
 
 ## Host-owned import documents
 
@@ -84,24 +82,9 @@ Collision cache entries are copied engine data, owned until ClearCache; they
 are not rolled back if a later prefab-registration step fails. No success is
 reported for that failed prefab.
 
-The embedded-pak support uses SourceVFS's existing stored-entry ZIP policy; it
-is not a newly claimed general-purpose compressed ZIP implementation.
+## Limitations
 
-## Scope and validation limits
-
-The new archive does not link the legacy native BSP/Interaction archive.
-Capability tests cover parsed and byte-backed preparation, moving-brush
-separation/rebasing, retained embedded pak bytes, deduplicated prop requests,
-real HDR texture/mesh upload, baked-material selection, background layers,
-compound tool collision raycasts, the independent box choice, cache reuse and
-resource rollback. Existing native BSP suites remain enabled against the shared
-material/preparation helpers.
-
-Positive GPU upload tests explicitly use buildBLAS=false on the VM. Production
-defaults remain true; this does not fix the historical lavapipe BLAS crash or
-claim hardware rendering. Transparent device-loss recovery, installed-package
-integration and native consumer removal are not completed by this cut.
-
-Next: glTF authoring and recovery, consumer-side Scene orchestration/documents,
-and host-driven extension/editor/sample ports. Retained native entry points do
-not count as migrated consumers.
+Embedded pak files support stored ZIP entries, not compressed entries.
+BLAS is enabled by default; select `buildBLAS = false` for raster-only uploads.
+The lavapipe BLAS crash remains unresolved. Device-loss recovery requires
+explicit host orchestration.

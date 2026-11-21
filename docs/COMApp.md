@@ -1,10 +1,7 @@
 # Unified `ZHLN::App` & COM Plugin ABI
 
-`app/include/Zahlen/App.hpp` provides `ZHLN::App`, the single application host
-and fluent builder over `libzahlen_engine.so` (`Zahlen::Engine`). Link
-`zahlen_application` in-tree, or `find_package(ZahlenApplication CONFIG REQUIRED)`
-and link `Zahlen::Application` in an installed toolchain consumer. Neither
-`libzahlen_engine.so` nor `ZHLN::App` depends on Clay or `extensions/UI/`.
+Include `<Zahlen/App.hpp>`, find `ZahlenApplication`, and link
+`Zahlen::Application`. `ZHLN::App` configures and runs the application host.
 
 ## Minimal Application
 
@@ -62,12 +59,9 @@ template <>
 ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
 ```
 
-The host uses `COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(library)`.
-This checks the witness by name (it never calls it) before resolving the
-factory. The witness name includes the factory signature and the fingerprint
-of its wire types and exposed interfaces. The factory's own symbol and
-by-value calling convention do not change. Older plugins without a matching
-witness fail with `AppError::PluginAbiMismatch` and must be rebuilt.
+Plugins must export a matching ABI witness. A missing or incompatible witness
+fails with `AppError::PluginAbiMismatch`; rebuild the plugin against the
+installed toolchain.
 
 - `app.AddPlugin(COM::Ref<COM::IAppLayer>)` attaches an in-process COM layer.
 - `app.LoadPlugin("freecam", COM::InChain(FreeCam::Component{...}))` loads a
@@ -83,9 +77,9 @@ witness fail with `AppError::PluginAbiMismatch` and must be rebuilt.
   is still alive, destroys all layer objects (releasing `Ref<IAppLayer>`), drops
   `IEngine`, and only then closes plugin `SharedLibrary` handles.
 
-## Optional Immediate-Mode UI (`extensions/UI/`)
+## Optional immediate-mode UI
 
-Applications and tools that render immediate-mode Clay panels link `zahlen_ui`
-(`Zahlen::UI`), include `<UI/HostUI.hpp>`, construct `HostUI(engine)` inside
+Applications and tools that render immediate-mode Clay panels find `ZahlenUI`
+and link `Zahlen::UI`, include `<UI/HostUI.hpp>`, construct `HostUI(engine)` inside
 their layer's `Start`, call `ui.BeginFrame()` + `ui.Submit(...)` in `Tick`, and
 destroy `HostUI` in `Stop` before `IEngine` shuts down.
