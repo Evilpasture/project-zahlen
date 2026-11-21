@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Optional config/launch parsing tests for the native project-light client.
 if(TARGET zahlen_project_light_client)
     # The replication bridge on its own: components, the uid -> entity index, the

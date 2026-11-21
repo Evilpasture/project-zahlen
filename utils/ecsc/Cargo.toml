@@ -2,7 +2,7 @@
 name = "ecsc"
 version = "0.1.0"
 edition = "2024"
-authors = ["Evilpasture <evilpasture+github@proton.me>"]
+authors = ["Evilpasture <housemaster@evilpasture.org>"]
 description = "Zahlen Engine ECS DSL Compiler and LSP Server"
 
 [dependencies]

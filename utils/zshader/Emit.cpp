@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: utils/zshader/Emit.cpp
@@ -111,7 +111,7 @@ auto ModuleList(std::span<const std::string> types) -> std::string {
 }
 
 // ShaderBindings.hpp up to the byte spans, which are one per input.
-constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: <build>/generated_shaders/ShaderBindings.hpp
@@ -194,7 +194,7 @@ constexpr std::string_view kHeaderClose = R"ZHLN(
 )ZHLN";
 
 // ShaderBytecode.cpp up to the embedded modules.
-constexpr std::string_view kSourcePreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+constexpr std::string_view kSourcePreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: <build>/generated_shaders/ShaderBytecode.cpp

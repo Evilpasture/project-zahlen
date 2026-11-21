@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # CMake invokes a compiler launcher as:
 #   launcher <configured-compiler> <compiler-arguments...>
 # The selected Blocks-capable compiler is appended to the launcher property;

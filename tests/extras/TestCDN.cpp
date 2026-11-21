@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // extensions/net/CDN is built over the remote-asset layer and libcurl, so this suite

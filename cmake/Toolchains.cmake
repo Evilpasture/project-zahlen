@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Installed interfaces for Zahlen engine packages, independent of the OS package
 # manager. ZahlenEngine ships the single shared library (libzahlen_engine.so)
 # and the stripped public COM/Core headers; all optional extensions and plugins

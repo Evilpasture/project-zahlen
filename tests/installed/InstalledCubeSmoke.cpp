@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Lifecycle/capture helper owned by the standalone installed-package consumer.
 #include "InstalledCubeSmoke.hpp"
 #include <Zahlen/Zahlen.hpp>

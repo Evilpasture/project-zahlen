@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Audit libzahlen_engine symbol visibility, export allowlist, and linked DSO .dynsym.
 

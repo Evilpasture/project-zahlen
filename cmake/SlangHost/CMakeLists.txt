@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # A directory-scoped package probe: rejected imported targets stay in this
 # directory and cannot poison the fallback source build in a sibling directory.
 # Only libslang is requested -- the shared library and its public headers. No

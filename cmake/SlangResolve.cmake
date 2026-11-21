@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # One provenance decision for libslang: its public headers and its shared
 # library. Order: host config package -> slangpy wheel -> Linux release ->
 # pinned source.

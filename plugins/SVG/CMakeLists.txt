@@ -1,4 +1,4 @@
-# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # plugins/SVG -- the resvg-backed SVG rasterizer (zahlen_svg).

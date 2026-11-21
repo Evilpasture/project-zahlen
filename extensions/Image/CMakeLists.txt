@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Engine-independent build-tool and consumer codec; never link Core here.
 add_library(zahlen_image STATIC Image.cpp)
 set_target_properties(zahlen_image PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)

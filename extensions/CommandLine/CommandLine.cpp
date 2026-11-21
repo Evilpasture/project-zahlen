@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <CommandLine/CommandLine.hpp>
@@ -155,7 +155,7 @@ void PrintBuildVersion(std::string_view programTitle) {
     std::println("  {}Compiler:{}       {}", Color::Gray, Color::Reset, Compiler);
     std::println("  {}Compile Flags:{}  {}", Color::Gray, Color::Reset, ZHLN_COMPILER_FLAGS);
     std::println("  {}Metabuild:{}      {} | Build Tool: {}", Color::Gray, Color::Reset, ZHLN_META_BUILDER, ZHLN_BUILD_TOOL);
-    std::println("  {}Copyright (C){}   2026 Evilpasture <evilpasture+github@proton.me>", Color::Gray, Color::Reset);
+    std::println("  {}Copyright (C){}   2026 Evilpasture <housemaster@evilpasture.org>", Color::Gray, Color::Reset);
 
     std::println(
         "\n{}License GPLv3+:{} GNU GPL version 3 or later {}<https://gnu.org/licenses/gpl.html>{}.", Color::BCyan, Color::Reset, Color::Cyan, Color::Reset

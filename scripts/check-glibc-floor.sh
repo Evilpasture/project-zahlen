@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Fail when a shipped ELF requires a newer glibc symbol version than the

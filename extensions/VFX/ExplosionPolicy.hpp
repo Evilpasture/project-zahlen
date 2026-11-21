@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 // Private host policy. CPU state stays outside Core and outside ECS components.

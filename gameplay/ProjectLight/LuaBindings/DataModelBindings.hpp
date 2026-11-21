@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // ProjectLight's binding of the DataModel into a LuaJIT state. It carries

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Helper script to safely create symlinks, handling existing paths gracefully
 # Usage: cmake -D SRC=<source> -D DST=<destination> -P CreateSymlinks.cmake
 

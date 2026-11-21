@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 cmake_minimum_required(VERSION 3.28)
 project(installed_cube LANGUAGES CXX)
 find_package(ZahlenApplication CONFIG REQUIRED)

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 // BatchResult<T, E>: the outcome of a batch operation, split into successes and errors.

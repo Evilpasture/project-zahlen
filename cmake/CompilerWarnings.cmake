@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # cmake/CompilerWarnings.cmake
 #
 # One candidate set, probed flag by flag: a flag is applied when the probe

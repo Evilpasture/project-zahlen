@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // This standalone consumer owns its scene; it uses installed public APIs only.
 #include <Zahlen/Zahlen.hpp>
 #include "InstalledCubeSmoke.hpp"

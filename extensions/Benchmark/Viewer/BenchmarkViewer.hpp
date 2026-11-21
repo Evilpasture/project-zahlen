@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 // COM benchmark/telemetry panels. The host owns its GUI context, font atlas,
 // input consumption and UI submission. This library installs no callbacks.
