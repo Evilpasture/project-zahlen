@@ -468,6 +468,8 @@ auto Store::TrustedKey(const std::string& fingerprint) const -> std::expected<st
 // Remotes
 // ---------------------------------------------------------------------------
 auto Store::RemoteAdd(std::string_view name, std::string_view url) -> std::expected<void, Fail> {
+    if (name == "official")
+        return std::unexpected(Fail {"'official' is the built-in release source; choose another remote name"});
     if (!ValidName(std::string(name)))
         return std::unexpected(Fail {"invalid remote name '" + std::string(name) + "'"});
     std::string target(url);
@@ -672,10 +674,13 @@ auto Store::VerifyArchive(const fs::path& archivePath, const InstallOptions& opt
 }
 
 auto Store::Finish(InstallReport report, bool ignoreMissing) -> std::expected<InstallReport, Fail> {
-    if (report.installed.empty()) {
-        log::Warn("nothing installed");
+    if (report.installed.empty() && report.toolchain.empty()) {
+        log::Say("No packages selected.");
         return report;
     }
+
+    if (report.installed.empty())
+        log::Say("Already installed: " + report.toolchain);
 
     // Dependencies are stated, never solved -- but they are also never ignored.
     // An incomplete prefix installs fine and then fails at find_package(), which
@@ -699,24 +704,6 @@ auto Store::Finish(InstallReport report, bool ignoreMissing) -> std::expected<In
     }
     report.missing = missing;
 
-    // Activate and print the prefix first: a refused install still leaves a
-    // consistent store, and the path it prints is where the missing package goes.
-    auto active = Active();
-    if (!active)
-        return std::unexpected(std::move(active.error()));
-    if (!active->has_value()) {
-        auto activated = SetActive(report.toolchain);
-        if (!activated)
-            return std::unexpected(std::move(activated.error()));
-        log::Say("active toolchain: " + report.toolchain);
-    } else {
-        log::Say("active toolchain: " + **active + " (unchanged; 'zpkg use <id>' to switch)");
-    }
-    auto prefix = Prefix();
-    if (!prefix)
-        return std::unexpected(std::move(prefix.error()));
-    log::Say("prefix: " + ToUtf8(*prefix));
-
     if (!missing.empty()) {
         for (const auto& package: *installed) {
             for (const auto& requirement: package.info.dependencies) {
@@ -733,6 +720,23 @@ auto Store::Finish(InstallReport report, bool ignoreMissing) -> std::expected<In
         }
         log::Warn("--ignore-missing: the prefix will not configure against the packages listed above");
     }
+    // Only activate a completed install; preserve an existing active toolchain.
+    auto active = Active();
+    if (!active)
+        return std::unexpected(std::move(active.error()));
+    if (!active->has_value()) {
+        auto activated = SetActive(report.toolchain);
+        if (!activated)
+            return std::unexpected(std::move(activated.error()));
+        log::Say("active toolchain: " + report.toolchain);
+    } else {
+        log::Say("active toolchain: " + **active + " (unchanged; 'zpkg use <id>' to switch)");
+    }
+    auto prefix = Prefix();
+    if (!prefix)
+        return std::unexpected(std::move(prefix.error()));
+    log::Say("prefix: " + ToUtf8(*prefix));
+
     return report;
 }
 

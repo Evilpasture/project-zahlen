@@ -22,7 +22,15 @@ constexpr int UsageError = 2;
 void Usage() {
     std::puts(R"(Usage: zpkg <command> [options]
 
-Packages (the common case)
+Quick start (signed releases; trust the publisher key once with 'key add')
+  install application         Install Application and its dependencies
+  install application --version <tag>
+                               Install from a specific official release
+  install application --from <remote>
+                               Install from a configured remote
+  install                     Install Application from the latest release
+
+Local packages and remotes
   install <path|dir>...        Install archives from a directory or file
   install <remote>             Install a configured remote's whole toolchain
   install <remote>:<name>      Install that package and what it requires
@@ -48,6 +56,8 @@ Publishing and trust
   remote remove <name>         Forget a remote
 
 Install options
+  --from <remote>        Source for component names (default: official)
+  --version <tag>        Official release tag (default: latest)
   --only <a,b,...>        Only these packages or components, with what they require
   --toolchain <id>        Which toolchain to take from a remote
   --require-checksums     Fail unless SHA256SUMS covers every archive
@@ -66,6 +76,30 @@ Environment
 Nothing zpkg does requires privileges. It refuses to run elevated unless
 ZHLN_ROOT is set explicitly, and refuses /usr, /opt, Program Files and other
 system paths as a store root even then.)");
+}
+
+void InstallUsage() {
+    std::puts(R"(Usage: zpkg install [component ...] [options]
+
+  zpkg install                         Application from the latest official release
+  zpkg install application image       Select components and their dependencies
+  zpkg install application --version <tag>
+  zpkg install application --from <remote>
+
+Trust the publisher once with 'zpkg key add <release-key.pub>' after verifying
+its fingerprint. Component installs require signed metadata and archive hashes.
+The first toolchain becomes active; later installs preserve your selection.
+
+Advanced sources
+  zpkg install <directory|archive> [--only a,b]
+  zpkg install <remote>[:component] [--toolchain <id>]
+  --require-checksums --require-signatures   Enforce verification on advanced sources
+  --force                                   Reinstall existing packages
+  --ignore-missing                          Permit incomplete dependencies
+  -q, --quiet                               Suppress progress
+
+Use 'zpkg list' to see toolchain ids and 'zpkg use <id>' to switch.
+)");
 }
 
 std::string Join(const std::vector<std::string>& items, std::string_view separator) {
@@ -109,24 +143,35 @@ struct Args {
     }
 };
 
-// Options that carry a value; everything else starting with '-' is a flag.
-auto ParseArgs(int argc, char** argv, int from, const std::set<std::string>& valued) -> std::expected<Args, Fail> {
+// Reject unknown options before opening a store or doing network I/O.
+auto ParseArgs(int argc, char** argv, int from, const std::set<std::string>& valued,
+               const std::set<std::string>& flags) -> std::expected<Args, Fail> {
     Args args;
+    bool positionalOnly = false;
     for (int i = from; i < argc; ++i) {
         std::string argument = argv[i];
-        if (argument.size() > 1 && argument[0] == '-') {
-            if (StartsWith(argument, "--") && argument.find('=') != std::string::npos) {
-                const size_t equals                         = argument.find('=');
-                args.values[argument.substr(2, equals - 2)] = argument.substr(equals + 1);
-                continue;
-            }
-            const std::string key = StartsWith(argument, "--") ? argument.substr(2) : argument.substr(1);
+        if (!positionalOnly && argument == "--") {
+            positionalOnly = true;
+            continue;
+        }
+        if (!positionalOnly && argument.size() > 1 && argument[0] == '-') {
+            const size_t prefix = StartsWith(argument, "--") ? 2 : 1;
+            const size_t equals = argument.find('=');
+            const std::string key = argument.substr(prefix, equals == std::string::npos ? equals : equals - prefix);
             if (valued.count(key) != 0) {
-                if (i + 1 >= argc)
+                std::string value;
+                if (equals != std::string::npos)
+                    value = argument.substr(equals + 1);
+                else if (i + 1 < argc && argv[i + 1][0] != '-')
+                    value = argv[++i];
+                if (value.empty())
                     return std::unexpected(Fail {"option '--" + key + "' needs a value", UsageError});
-                args.values[key] = argv[++i];
-            } else {
+                if (!args.values.emplace(key, value).second)
+                    return std::unexpected(Fail {"option '--" + key + "' was supplied more than once", UsageError});
+            } else if (flags.count(key) != 0 && equals == std::string::npos) {
                 args.flags.insert(key);
+            } else {
+                return std::unexpected(Fail {"unknown option '" + argument + "'; use 'zpkg help'", UsageError});
             }
         } else {
             args.positional.push_back(argument);
@@ -181,15 +226,48 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
     options.force             = args.Has("force");
     options.ignoreMissing     = args.Has("ignore-missing");
     options.toolchain         = args.Value("toolchain");
-    if (args.positional.empty())
-        return std::unexpected(Fail {
-            "install needs at least one archive, directory or "
-            "remote:<name>",
-            UsageError
-        });
+    options.release = args.Value("version");
+    std::vector<std::string> inputs = args.positional;
+    auto remotes = store.Remotes();
+    if (!remotes)
+        return std::unexpected(std::move(remotes.error()));
+    const auto bareName = [](const std::string& text) {
+        return !text.empty() && text.find_first_of("/\\:.") == std::string::npos;
+    };
+    // Existing local paths and registered remotes retain their meaning. Bare
+    // component names use the official release, or the explicit --from remote.
+    bool shorthand = inputs.empty() || !args.Value("from").empty();
+    if (!shorthand && inputs.size() == 1 && bareName(inputs[0]) &&
+        !PathExists(FromUtf8(inputs[0]))) {
+        if (remotes->count(inputs[0]) != 0 || inputs[0] == "official")
+            inputs[0] += ":";
+        else
+            shorthand = true;
+    }
+    if (!shorthand && inputs.size() > 1 && std::all_of(inputs.begin(), inputs.end(), [&](const auto& input) {
+            return bareName(input) && !PathExists(FromUtf8(input)) && remotes->count(input) == 0;
+        }))
+        shorthand = true;
+    if (shorthand) {
+        if (!options.only.empty() && !inputs.empty())
+            return std::unexpected(Fail {"name components directly or use --only, not both", UsageError});
+        for (const auto& input: inputs) {
+            if (!bareName(input))
+                return std::unexpected(Fail {"--from accepts component names, not paths or remote:name; use 'zpkg install <directory>' for local archives", UsageError});
+        }
+        if (!inputs.empty())
+            options.only = inputs;
+        else if (options.only.empty())
+            options.only = {"application"};
+        inputs = {args.Value("from", "official") + ":"};
+        options.requireSignatures = true;
+        options.requireChecksums = true;
+    }
+    if (!options.release.empty() && (inputs.size() != 1 || inputs[0] != "official:"))
+        return std::unexpected(Fail {"--version selects an official release; use component names without a path or custom remote", UsageError});
 
     InstallReport report;
-    for (const auto& text: args.positional) {
+    for (const auto& text: inputs) {
         const Source source = Classify(text);
         if (source.kind == Source::Kind::Remote && !source.packages.empty()) {
             // `remote:pkg` and `--only pkg` are the same request written twice.
@@ -220,7 +298,7 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
                 break;
             }
             case Source::Kind::Remote: {
-                if (args.positional.size() > 1) {
+                if (inputs.size() > 1) {
                     return std::unexpected(Fail {"install one remote at a time", UsageError});
                 }
                 auto next = InstallFromRemote(store, source.value, options);
@@ -234,6 +312,13 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
     auto finished = store.Finish(std::move(report), options.ignoreMissing);
     if (!finished)
         return std::unexpected(std::move(finished.error()));
+    if (shorthand && !finished->toolchain.empty()) {
+        auto prefix = store.Prefix(finished->toolchain);
+        if (!prefix)
+            return std::unexpected(std::move(prefix.error()));
+        log::Say("Build your game with:");
+        log::Say("  cmake -S . -B build -DCMAKE_PREFIX_PATH=\"" + ToUtf8(*prefix) + "\"");
+    }
     return {};
 }
 
@@ -242,6 +327,7 @@ auto CommandVerify(Store& store, const Args& args) -> std::expected<void, Fail> 
     options.only              = SplitList(args.Value("only"));
     options.requireChecksums  = args.Has("require-checksums");
     options.requireSignatures = args.Has("require-signatures") || args.Has("s");
+    options.toolchain = args.Value("toolchain");
     if (args.positional.empty())
         return std::unexpected(Fail {"verify needs a path or remote:<name>", UsageError});
 
@@ -550,11 +636,14 @@ auto CommandRemote(Store& store, const Args& args) -> std::expected<void, Fail> 
 auto Run(int argc, char** argv) -> std::expected<void, Fail> {
     if (argc < 2) {
         Usage();
-        return std::unexpected(Fail {"no command given", UsageError});
+        return {};
     }
     const std::string command = argv[1];
     if (command == "-h" || command == "--help" || command == "help") {
-        Usage();
+        if (command == "help" && argc == 3 && std::string_view(argv[2]) == "install")
+            InstallUsage();
+        else
+            Usage();
         return {};
     }
     if (command == "--version" || command == "version") {
@@ -562,9 +651,30 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
         return {};
     }
 
-    // Options that take a value. Everything else that starts with '-' is a flag.
-    const std::set<std::string> valued = {"only", "toolchain", "shell", "out", "name", "package"};
-    auto                        parsed = ParseArgs(argc, argv, 2, valued);
+    if (argc == 3 && (std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h")) {
+        if (command == "install") InstallUsage();
+        else Usage();
+        return {};
+    }
+    const std::set<std::string> commands = {"install", "verify", "list", "info", "use", "prefix", "env", "which", "remove", "shims", "index", "key", "remote"};
+    if (commands.count(command) == 0)
+        return std::unexpected(Fail {"unknown command '" + command + "'; use 'zpkg help'", UsageError});
+    std::set<std::string> valued;
+    std::set<std::string> flags = {"quiet", "q"};
+    if (command == "install" || command == "verify") {
+        valued = {"only", "toolchain"};
+        flags.insert({"require-checksums", "require-signatures", "s"});
+    }
+    if (command == "install") {
+        valued.insert({"from", "version"});
+        flags.insert({"force", "ignore-missing"});
+    }
+    if (command == "list") flags.insert({"files", "json"});
+    if (command == "remove") { valued.insert("package"); flags.insert("force"); }
+    if (command == "env") valued.insert("shell");
+    if (command == "index") valued.insert("out");
+    if (command == "key") valued.insert("name");
+    auto parsed = ParseArgs(argc, argv, 2, valued, flags);
     if (!parsed)
         return std::unexpected(std::move(parsed.error()));
     const Args& args = *parsed;

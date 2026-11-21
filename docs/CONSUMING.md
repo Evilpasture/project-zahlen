@@ -39,35 +39,34 @@ for signature verification. zstd and libcurl enable additional formats and
 HTTPS remotes. See the [zpkg build reference](../utils/zpkg/README.md#building)
 if you choose that path.
 
-## 2. Install verified packages
+## 2. Install the engine
 
-Download these assets from the **same release** into `release-tarballs/`:
-
-* The `zahlen-*.tar.gz` package archives (including the requested dependencies).
-* `SHA256SUMS` and `SHA256SUMS.ed25519`.
-* `zahlen-release-key.pub`.
-
-Validate the publisher key through a trusted channel before importing it.
-A key downloaded beside the archives does not independently authenticate them.
+Download `zahlen-release-key.pub` from your release and verify its fingerprint
+through a trusted channel. Trust the publisher once, then install:
 
 ```sh
-zpkg key add ./release-tarballs/zahlen-release-key.pub --name "zahlen release"
-zpkg install ./release-tarballs --only zahlen-application \
-    --require-checksums --require-signatures
-zpkg list
-zpkg prefix
+zpkg key add zahlen-release-key.pub --name "zahlen release"
+zpkg install
 ```
 
-`--only` resolves the package dependency closure. Application brings Engine,
-CommandLine, HostRunner, Screenshot, Signal and Image. Keep those dependency
-archives available in the input directory; missing requirements are errors.
-Omit `--only` to install the whole release. Strict verification refuses missing
-checksums, unsigned/untrusted metadata and modified archives.
+`install` selects Application and its dependencies from the latest official
+GitHub release. It downloads packages and requires a trusted signature and
+matching archive hashes. A changed signing key requires explicit trust setup.
 
-`zpkg prefix` prints the active toolchain's `usr` directory, normally under
-`${XDG_DATA_HOME:-$HOME/.local/share}/zahlen/store/<toolchain-id>/usr`.
-Record the toolchain id for reproducible builds; use `zpkg prefix <id>` to avoid
-implicitly following later changes to the active toolchain.
+To select components or pin a release:
+
+```sh
+zpkg install application image
+zpkg install application --version <release-tag>
+```
+
+The first installed toolchain becomes active. Later installs preserve the active
+toolchain; use `zpkg use <id>` to switch. Repeated installs keep packages already
+present. `zpkg list` shows installed toolchains and `zpkg prefix` prints the active
+prefix. For reproducible builds, use `zpkg prefix <id>`.
+
+For offline archives and custom remotes, see the
+[zpkg reference](../utils/zpkg/README.md#commands).
 
 ## 3. Build your game
 
