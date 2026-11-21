@@ -90,24 +90,23 @@ class AudioContext {
     [[nodiscard]] auto GetReverbConfig() const noexcept -> AudioReverbConfig;
 
     // Persistent & streamed voices. Returned handles borrow context-owned slots; ECS users store
-    // them in Components::AudioSourceComponent for Engine scene cleanup.
+    // them in Components::AudioSourceComponent for Engine scene cleanup. Voices are created from
+    // the encoded audio bytes (WAV/MP3/FLAC as decoded by the miniaudio backend) instead of a
+    // file path, so callers that only know an asset name read the bytes from the asset layer.
     [[nodiscard]] auto CreateVoice(
-        std::string_view filepath,
-        bool             spatialized = true,
-        bool             looping     = false,
-        float            volume      = 1.0f
-    ) -> VoiceID;
-    [[nodiscard]] auto CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> VoiceID;
-    [[nodiscard]] auto CreateStreamVoice(
-        std::string_view filepath,
-        AudioBusID       bus         = AudioBus::Music,
-        bool             looping     = true,
-        float            volume      = 1.0f,
-        bool             spatialized = false
-    ) -> VoiceID;
-    [[nodiscard]] auto CreateVoiceFromMemory(
         std::span<const uint8_t> encodedBytes,
-        const VoiceDesc&         desc = {}
+        bool                     spatialized = true,
+        bool                     looping     = false,
+        float                    volume      = 1.0f,
+        float                    pitch       = 1.0f
+    ) -> VoiceID;
+    [[nodiscard]] auto CreateVoice(std::span<const uint8_t> encodedBytes, const VoiceDesc& desc) -> VoiceID;
+    [[nodiscard]] auto CreateStreamVoice(
+        std::span<const uint8_t> encodedBytes,
+        AudioBusID               bus         = AudioBus::Music,
+        bool                     looping     = true,
+        float                    volume      = 1.0f,
+        bool                     spatialized = false
     ) -> VoiceID;
 
     void               PlayVoice(VoiceID handle);

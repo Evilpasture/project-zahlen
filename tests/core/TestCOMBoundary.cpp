@@ -365,7 +365,7 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
 void CheckAudio(ZHLN::COM::IAudioDevice& audio) {
     ZHLN::Test::ExpectTrue(!audio.IsVoiceValid(ZHLN::VoiceID::Invalid));
 
-    const ZHLN::VoiceID missing = audio.CreateVoice("zahlen://does-not-exist.wav", false);
+    const ZHLN::VoiceID missing = audio.CreateVoice(ZHLN::COM::Span<const uint8_t> {}, false);
     ZHLN::Test::ExpectTrue(missing == ZHLN::VoiceID::Invalid || audio.IsVoiceValid(missing));
 
     audio.SetVoiceVolume(ZHLN::VoiceID::Invalid, 0.5F);

@@ -32,9 +32,9 @@ struct IAudioDevice : IObject {
     virtual Result<void> PostEvent(const ChainInNode* eventChain) noexcept = 0;
 
     // Supported node: VoiceDesc (nullptr uses default VoiceDesc). Returns
-    // VoiceID::Invalid inside the Result when the file is missing or every
-    // voice slot is taken; returns a Error on chain validation failure.
-    virtual Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept = 0;
+    // VoiceID::Invalid inside the Result when the encoded bytes are empty or
+    // every voice slot is taken; returns a Error on chain validation failure.
+    virtual Result<VoiceID> CreateVoice(Span<const uint8_t> encodedBytes, const ChainInNode* voiceChain) noexcept = 0;
 
     virtual void               PlayVoice(VoiceID voice) noexcept = 0;
     virtual void               StopVoice(VoiceID voice, float fadeOutSeconds) noexcept = 0;
@@ -52,18 +52,19 @@ struct IAudioDevice : IObject {
         (void)PostEvent(InChain(event));
     }
 
-    [[nodiscard]] auto CreateVoice(StringView filepath, const VoiceDesc& desc) noexcept -> VoiceID {
-        const Result<VoiceID> created = CreateVoice(filepath, InChain(desc));
+    [[nodiscard]] auto CreateVoice(Span<const uint8_t> encodedBytes, const VoiceDesc& desc) noexcept -> VoiceID {
+        const Result<VoiceID> created = CreateVoice(encodedBytes, InChain(desc));
         return created.HasValue() ? created.value : VoiceID::Invalid;
     }
 
-    [[nodiscard]] auto CreateVoice(StringView filepath, bool spatialized, bool looping = false,
-                                   float volume = 1.0F) noexcept -> VoiceID {
+    [[nodiscard]] auto CreateVoice(Span<const uint8_t> encodedBytes, bool spatialized, bool looping = false,
+                                   float volume = 1.0F, float pitch = 1.0F) noexcept -> VoiceID {
         VoiceDesc desc {};
         desc.spatialized = spatialized;
         desc.looping     = looping;
         desc.volume      = volume;
-        return CreateVoice(filepath, desc);
+        desc.pitch       = pitch;
+        return CreateVoice(encodedBytes, desc);
     }
 
 protected:

@@ -1438,7 +1438,7 @@ class Engine final:
         return {};
     }
 
-    Result<VoiceID> CreateVoice(StringView filepath, const ChainInNode* voiceChain) noexcept override {
+    Result<VoiceID> CreateVoice(Span<const uint8_t> encodedBytes, const ChainInNode* voiceChain) noexcept override {
         VoiceDesc desc {};
         if (voiceChain != nullptr) {
             const Result<void> chainRes =
@@ -1448,7 +1448,7 @@ class Engine final:
                 });
             if (!chainRes.HasValue()) return chainRes.error;
         }
-        return Sound().CreateVoice(std::string_view(filepath), desc);
+        return Sound().CreateVoice(std::span<const uint8_t>(encodedBytes.data, encodedBytes.size), desc);
     }
 
     void PlayVoice(VoiceID voice) noexcept override {

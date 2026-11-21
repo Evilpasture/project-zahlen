@@ -113,14 +113,10 @@ void AudioSystem(
                 .occlusion    = src.occlusion,
             };
 
-            const std::string_view pathView(src.filepath);
-            src.voiceID                 = device.CreateVoice(pathView, desc);
-            // The file may live in a pak rather than on disk, so the engine's
-            // virtual layer is asked for the bytes before giving up.
-            if (src.voiceID == VoiceID::Invalid) {
-                if (auto encodedBytes = assets->ReadVirtualFile(pathView); encodedBytes && !encodedBytes->empty()) {
-                    src.voiceID = device.CreateVoiceFromMemory(*encodedBytes, desc);
-                }
+            // Voices are created from the encoded asset bytes; the virtual
+            // layer resolves the path on disk or in a pak archive.
+            if (auto encodedBytes = assets->ReadVirtualFile(std::string_view(src.filepath)); encodedBytes && !encodedBytes->empty()) {
+                src.voiceID = device.CreateVoice(*encodedBytes, desc);
             }
 
             if (src.voiceID != VoiceID::Invalid && !src.isPaused) {

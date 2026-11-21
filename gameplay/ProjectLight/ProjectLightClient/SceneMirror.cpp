@@ -473,6 +473,23 @@ void UpdateRemoteCharacterParts(COM::IEngine& engine, SceneMirrorState& state, f
         }
     }
 }
+// Reads a whole virtual-layer asset (disk or pak) into memory for CreateVoice.
+[[nodiscard]] static auto ReadVirtualAsset(COM::IEngine& engine, const std::string& path) -> std::vector<uint8_t> {
+    auto* assets = engine.Assets();
+    if (assets == nullptr) {
+        return {};
+    }
+    const auto sizeRes = assets->ReadVirtualFile(COM::StringView(path), {});
+    if (!sizeRes.HasValue() || sizeRes.value == 0) {
+        return {};
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(sizeRes.value));
+    if (assets->ReadVirtualFile(COM::StringView(path), COM::Span<uint8_t>(bytes.data(), bytes.size())).HasValue()) {
+        return bytes;
+    }
+    return {};
+}
+
 void UpdateSoundVoices(COM::IEngine& engine, SceneMirrorState& state) {
     for (auto& [uid, object]: state.objects) {
         (void)uid;
@@ -481,7 +498,9 @@ void UpdateSoundVoices(COM::IEngine& engine, SceneMirrorState& state) {
         if (object.playing) {
             if (object.audioID == VoiceID::Invalid || !audio.IsVoiceValid(object.audioID)) {
                 if (object.soundId.empty()) continue;
-                object.audioID = audio.CreateVoice(COM::StringView(object.soundId), true, object.loops, object.volume);
+                if (auto bytes = ReadVirtualAsset(engine, object.soundId); !bytes.empty()) {
+                    object.audioID = audio.CreateVoice(COM::Span<const uint8_t>(bytes.data(), bytes.size()), true, object.loops, object.volume);
+                }
                 if (object.audioID == VoiceID::Invalid) {
                     continue; // asset may not be present in the local Zahlen installation
                 }

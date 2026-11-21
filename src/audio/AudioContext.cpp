@@ -1854,9 +1854,9 @@ auto AudioContext::GetReverbConfig() const noexcept -> AudioReverbConfig {
     return Lock(_impl->busMutex, [&]() noexcept -> AudioReverbConfig { return _impl->reverbConfig; });
 }
 
-auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> VoiceID {
+auto AudioContext::CreateVoice(std::span<const uint8_t> encodedBytes, bool spatialized, bool looping, float volume, float pitch) -> VoiceID {
     return CreateVoice(
-        filepath,
+        encodedBytes,
         VoiceDesc {
             .bus          = AudioBus::SFX,
             .playbackMode = AudioPlaybackMode::Decompressed,
@@ -1864,19 +1864,20 @@ auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool
             .looping      = looping,
             .startPaused  = false,
             .volume       = volume,
+            .pitch        = pitch,
         }
     );
 }
 
 auto AudioContext::CreateStreamVoice(
-    std::string_view filepath,
-    AudioBusID       bus,
-    bool             looping,
-    float            volume,
-    bool             spatialized
+    std::span<const uint8_t> encodedBytes,
+    AudioBusID               bus,
+    bool                     looping,
+    float                    volume,
+    bool                     spatialized
 ) -> VoiceID {
     return CreateVoice(
-        filepath,
+        encodedBytes,
         VoiceDesc {
             .bus          = bus,
             .playbackMode = AudioPlaybackMode::Streamed,
@@ -1888,56 +1889,7 @@ auto AudioContext::CreateStreamVoice(
     );
 }
 
-auto AudioContext::CreateVoice(std::string_view filepath, const VoiceDesc& desc) -> VoiceID {
-    if (!_impl->initialized || filepath.empty()) {
-        return VoiceID::Invalid;
-    }
-
-    const std::string pathStr(filepath);
-    if (!FileExistsNoThrow(pathStr.c_str())) {
-        return VoiceID::Invalid;
-    }
-
-    const AudioBusID resolvedBus = Lock(_impl->busMutex, [&]() noexcept -> AudioBusID { return _impl->ResolveBusLocked(desc.bus); });
-
-    return Lock(_impl->voiceMutex, [&]() -> VoiceID {
-        for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
-            auto& slot = _impl->voiceSlots[i];
-            if (!slot.inUse.load(std::memory_order::relaxed)) {
-                if (!_impl->PrepareVoiceSendNodeLocked(slot, resolvedBus, desc)) {
-                    return VoiceID::Invalid;
-                }
-
-                ma_uint32 flags = desc.spatialized ? 0u : static_cast<ma_uint32>(MA_SOUND_FLAG_NO_SPATIALIZATION);
-                flags |= (desc.playbackMode == AudioPlaybackMode::Streamed)
-                    ? static_cast<ma_uint32>(MA_SOUND_FLAG_STREAM)
-                    : static_cast<ma_uint32>(MA_SOUND_FLAG_DECODE);
-
-                ma_sound_config soundCfg                  = ma_sound_config_init_2(&_impl->engine);
-                soundCfg.pFilePath                        = pathStr.c_str();
-                soundCfg.flags                            = flags;
-                soundCfg.pInitialAttachment               = &slot.sendNode.base;
-                soundCfg.initialAttachmentInputBusIndex   = 0;
-                soundCfg.isLooping                        = desc.looping ? MA_TRUE : MA_FALSE;
-
-                if (ma_sound_init_ex(&_impl->engine, &soundCfg, &slot.sound) != MA_SUCCESS) {
-                    ma_node_uninit(&slot.sendNode.base, nullptr);
-                    slot.sendNode.nodeInit = false;
-                    return VoiceID::Invalid;
-                }
-                _impl->DrainHeadlessResourceManagerJobs();
-
-                slot.hasMemoryDecoder = false;
-                _impl->FinalizeVoiceSlotStateLocked(slot, i, resolvedBus, desc);
-                const uint32_t gen = slot.generation.load(std::memory_order::relaxed);
-                return static_cast<VoiceID>(PackID(i, gen));
-            }
-        }
-        return VoiceID::Invalid;
-    });
-}
-
-auto AudioContext::CreateVoiceFromMemory(std::span<const uint8_t> encodedBytes, const VoiceDesc& desc) -> VoiceID {
+auto AudioContext::CreateVoice(std::span<const uint8_t> encodedBytes, const VoiceDesc& desc) -> VoiceID {
     if (!_impl->initialized || encodedBytes.empty()) {
         return VoiceID::Invalid;
     }

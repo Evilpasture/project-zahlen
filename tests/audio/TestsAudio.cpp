@@ -57,8 +57,8 @@ struct AudioTestSuite {
                 .duration = 0.05f,
             });
 
-            // Missing file returns VoiceID::Invalid without crashing; mutators on invalid voice are safe no-ops.
-            const ZHLN::VoiceID missing = audio.CreateVoice("nonexistent/test_sound_missing.wav", true, false, 0.5f);
+            // Empty data returns VoiceID::Invalid without crashing; mutators on invalid voice are safe no-ops.
+            const ZHLN::VoiceID missing = audio.CreateVoice(ZHLN::COM::Span<const uint8_t> {}, true, false, 0.5f);
             ZHLN::Test::ExpectEq(missing, ZHLN::VoiceID::Invalid);
             ZHLN::Test::ExpectFalse(audio.IsVoiceValid(ZHLN::VoiceID::Invalid));
             audio.PlayVoice(missing);
