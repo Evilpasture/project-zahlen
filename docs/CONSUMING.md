@@ -79,9 +79,11 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-This minimal host is not a complete game or asset pipeline. Add gameplay and
-compose optional layers explicitly; Application does not auto-install every
-optional module that happened to be present in the engine builder.
+This minimal host is not a complete game or asset pipeline. After building and
+running it below, follow [From an empty host to a first scene](FIRST_GAME.md)
+to add a layer, scene, physics and input. Compose optional layers explicitly;
+Application does not auto-install every optional module that happened to be
+present in the engine builder.
 
 ```sh
 cmake -S my-game -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
