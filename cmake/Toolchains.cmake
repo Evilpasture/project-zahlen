@@ -67,7 +67,12 @@ function(zhln_toolchain_interface target)
         if(dirs)
             set(new_dirs "")
             foreach(dir IN LISTS dirs)
-                if(IS_ABSOLUTE "${dir}" AND dir MATCHES "^${PROJECT_SOURCE_DIR}/")
+                # Two build-tree-only directories: the source headers, and the
+                # generated ones (include/Zahlen/Version.hpp). Both are spelled
+                # $<BUILD_INTERFACE:...> so the exported target never names this
+                # machine's paths; the installed copy comes from INSTALL_INTERFACE.
+                if(IS_ABSOLUTE "${dir}" AND (dir MATCHES "^${PROJECT_SOURCE_DIR}/"
+                                             OR dir MATCHES "^${ZHLN_GENERATED_INCLUDE_DIR}(/|$)"))
                     list(APPEND new_dirs "$<BUILD_INTERFACE:${dir}>")
                 else()
                     list(APPEND new_dirs "${dir}")
@@ -205,6 +210,10 @@ function(zhln_toolchain_source_package name)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/${dir}/"
             DESTINATION "${_hdest}" COMPONENT Zahlen${name}
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "*.inl")
+        # The .in is a template, not a header: a consumer that installed it as a
+        # header would read a version that was never configured.
+        install(CODE "file(REMOVE \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${_hdest}/Zahlen/Version.hpp.in\")"
+            COMPONENT Zahlen${name})
     endforeach()
     if(P_HEADER_FILES)
         set(_fdest "${CMAKE_INSTALL_INCLUDEDIR}")
@@ -347,6 +356,11 @@ if(ZHLN_NO_ANNOTATION_EXTRACT)
     target_compile_definitions(zahlen_engine INTERFACE ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
 zhln_toolchain_binary_package(Engine TARGETS zahlen_engine HEADERS include)
+# <Zahlen/Version.hpp> is generated, so it is not in include/ for the rule above
+# to pick up. It ships with the headers that include it, in every package that
+# can see <Zahlen/Config.hpp>.
+install(FILES "${ZHLN_GENERATED_INCLUDE_DIR}/Zahlen/Version.hpp"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/Zahlen COMPONENT ZahlenEngine)
 if(TARGET zahlen_sanitizer_options)
     install(FILES $<TARGET_OBJECTS:zahlen_sanitizer_options>
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen

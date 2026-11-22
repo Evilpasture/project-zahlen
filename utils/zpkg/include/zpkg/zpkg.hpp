@@ -30,7 +30,15 @@ namespace fs = std::filesystem;
 // and format 2 is the one that does -- see IndexPackage below.
 inline constexpr int              PackageFormat = 1;
 inline constexpr int              IndexFormat   = 2;
-inline constexpr std::string_view ToolVersion   = "2.0.0";
+
+// The Zahlen version this zpkg ships with, defined by utils/zpkg/CMakeLists.txt
+// from the engine's PROJECT_VERSION. Never a literal: zpkg is part of a release,
+// so `zpkg --version` has to agree with the release tag and with what
+// `zpkg info` prints for the toolchain it installed.
+#ifndef ZPKG_TOOL_VERSION
+#error "ZPKG_TOOL_VERSION is set by utils/zpkg/CMakeLists.txt; do not compile zpkg by hand"
+#endif
+inline constexpr std::string_view ToolVersion   = ZPKG_TOOL_VERSION;
 inline constexpr std::string_view SignatureFile = "SHA256SUMS.ed25519";
 inline constexpr std::string_view SumsFile      = "SHA256SUMS";
 

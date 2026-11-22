@@ -13,16 +13,19 @@
 *.slang-module
 
 # --- Build Artifacts ---
+# Every CMake preset writes build/<preset>, and every scratch configure writes
+# build-<something> (build-zpkg for the manager, named in utils/zpkg/CMakeLists.txt).
 build/
-# zpkg is a standalone project, so it gets its own build directory; see
-# utils/zpkg/CMakeLists.txt for why it is not part of the engine build.
-build-zpkg*/
+build-*/
 dist/
 target/
 bin/
 import/
 obj/
-out/
+# Anchored on purpose: an unanchored out/ matches any directory named out at any
+# depth, which includes app/out -- a tracked directory, whose files git would
+# then silently accept edits to without ever reporting a change.
+/out/
 *.exe
 *.dll
 *.so
@@ -125,3 +128,79 @@ repomix-output.*
 
 # Local entry-point development workspace
 .zahlen-dev/
+
+# ==========================================
+# Release and package artifacts
+# ==========================================
+#
+# Everything below is produced by a build, a release, or makepkg, and none of it
+# belongs in a commit. Every rule is narrow on purpose -- a bare *.json, *.png or
+# *.so here would swallow tracked files (third_party/vulkan_sandbox ships shared
+# libraries, src/render ships PNGs, the tree ships toolchain.json manifests) -- so
+# they name the shapes the project actually writes. Adding one is a two-step job:
+# add the rule, then prove `git ls-files -ci --exclude-standard` is still empty.
+
+# --- What a release directory contains ---
+# scripts/package-toolchain.sh writes <out>/packages/ and <out>/tools/, and a
+# release flattened by hand is the same content in one directory -- which is
+# exactly what `zpkg install .` is pointed at: the component archives, the sums
+# files, zpkg's signature over those sums (SHA256SUMS.ed25519; the extension
+# reads like a key and is not one), the published index, the publisher key.
+*.tar.gz
+*.tar.xz
+*.tar.zst
+*.tar.bz2
+*.tbz2
+*.tgz
+SHA256SUMS
+SHA256SUMS.*
+index.json
+index.json.*
+toolchain.json
+zahlen-release-key.pub
+release-key.raw
+KEY-FINGERPRINT.txt
+# The manager binary, after dist/ has been flattened by hand: no extension to
+# recognise it by, so it is named.
+zpkg-linux-*
+# Written into dist/ by the release workflow (release notes, the per-run window
+# backend probe, the rendered frame from the render lane).
+release-notes.md
+window-backends.txt
+zahlen-cube-*.png
+
+# --- makepkg (packaging/arch) ---
+# `makepkg -si` leaves four things: the PKGBUILD's work directory `src/`, the
+# package in `pkg/`, the .pkg.tar.zst, and the downloaded source tarball.
+# PKGBUILD is checksum-stamped in place too, under the same filename, so git
+# shows the original as clean at exactly the moment the package is built.
+#
+# The directories are named per-directory because git has no "anything below the
+# .gitignore that declared this" syntax: an anchored /src/ matches the repository
+# root only and never packaging/arch/src, while an unanchored src/ would hide the
+# engine's src/. Neither is what makepkg leaves behind.
+packaging/*/src/
+packaging/*/pkg/
+*.pkg.tar
+*.pkg.tar.*
+zahlen-*.tar.gz
+zahlen-*.tar.xz
+zahlen-*.tar.zst
+# A checkout of the pinned commit, from makepkg -C or a failed extraction.
+project-zahlen-*/
+# makepkg backups of an edited PKGBUILD.
+PKGBUILD.orig
+PKGBUILD.rej
+PKGBUILD.pacsave
+PKGBUILD.pacnew
+
+# --- CPack ---
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/
+*.cpio
+*.7z
+
+# --- Build-time caches that live in the tree ---
+# .github/workflows/release.yml mounts ${PWD}/.ccache into the build container.
+.ccache/

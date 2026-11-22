@@ -1,0 +1,13 @@
+// Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// GENERATED -- do not edit, do not commit. Configured from PROJECT_VERSION in
+// the top-level CMakeLists.txt, which is the only place the Zahlen version is
+// written by hand. Lives in the build tree rather than the source tree so a
+// stale copy cannot be read by a build that did not write it.
+
+#pragma once
+
+#define ZHLN_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define ZHLN_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define ZHLN_VERSION_PATCH @PROJECT_VERSION_PATCH@

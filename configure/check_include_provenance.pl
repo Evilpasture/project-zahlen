@@ -448,10 +448,15 @@ my %tree_files;
 # when the including sources have unchanged mtimes. Invalidate the whole cache
 # when the first-party header inventory changes; individual file stats still
 # handle content edits without forcing a full scan.
-my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n", sort grep {
-    my ($suffix) = /(\.[^.]*)$/;
-    defined $suffix && $HEADER_SUFFIXES{lc $suffix};
-} keys %tree_files));
+# The configured-headers directory is part of the layout too: a cached closure
+# that resolved <Zahlen/Version.hpp> against a build tree must not be reused by a
+# run that was not told where that tree is, or the other way round.
+my $HEADER_LAYOUT = Digest::SHA::sha1_hex(join("\n",
+    ($ENV{ZHLN_GENERATED_INCLUDE_DIR} // ''),
+    sort grep {
+        my ($suffix) = /(\.[^.]*)$/;
+        defined $suffix && $HEADER_SUFFIXES{lc $suffix};
+    } keys %tree_files));
 my $CACHE_SCHEMA = 4;
 
 my %resolvable = map { $tree_files{$_} => 1 } keys %tree_files;
@@ -494,6 +499,33 @@ for my $root (@search_roots) {
         $entries{$root}{$name} = 1;
     }
     closedir($dh);
+}
+
+# Generated headers live in the build tree, not next to their template:
+# include/Zahlen/Version.hpp.in is configured into <build>/include/Zahlen/
+# Version.hpp, which is what <Zahlen/Config.hpp> includes. CMake passes that
+# directory in. Without it every file including Config.hpp would be reported as
+# naming a first-party header that does not resolve -- true of the source tree,
+# and wrong about the build.
+if (defined $ENV{ZHLN_GENERATED_INCLUDE_DIR} && $ENV{ZHLN_GENERATED_INCLUDE_DIR} ne ''
+    && -d $ENV{ZHLN_GENERATED_INCLUDE_DIR}) {
+    my $generated = normpath($ENV{ZHLN_GENERATED_INCLUDE_DIR});
+    # Before include/, so a generated name wins over a same-named source file.
+    unshift @search_roots, $generated;
+    my @queue = ($generated);
+    while (my $dir = shift @queue) {
+        opendir(my $dh, $dir) or next;
+        for my $name (grep { !/^\.{1,2}$/ } readdir($dh)) {
+            my $abs = "$dir/$name";
+            $entries{$dir}{$name} = 1;
+            if (-d $abs) {
+                push @queue, $abs;
+            } else {
+                $resolvable{$abs} = 1;
+            }
+        }
+        closedir($dh);
+    }
 }
 
 # Basenames of every header in include/ and src/: how a broken first-party

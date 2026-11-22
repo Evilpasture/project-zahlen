@@ -18,7 +18,31 @@
 #     cmake -S utils/zpkg -B build-zpkg -G Ninja -DCMAKE_BUILD_TYPE=Release
 #     cmake --build build-zpkg && build-zpkg/zpkg --version
 cmake_minimum_required(VERSION 3.28)
-project(zpkg LANGUAGES CXX VERSION 2.0.0)
+
+# zpkg has no version of its own: it reports the Zahlen version it ships with,
+# because that is the number a user compares against `zpkg info` and the release
+# tag. The engine's CMakeLists.txt is read here -- not add_subdirectory()-ed, only
+# its project() line -- so the number is never written twice. ZPKG_VERSION
+# overrides it for a build that has no engine tree next to it (a CWD build of
+# utils/zpkg alone, or the Windows CI job).
+set(ZPKG_ENGINE_CMAKE "${CMAKE_CURRENT_SOURCE_DIR}/../../CMakeLists.txt")
+if(ZPKG_VERSION)
+    project(zpkg LANGUAGES CXX VERSION ${ZPKG_VERSION})
+elseif(EXISTS "${ZPKG_ENGINE_CMAKE}")
+    file(READ "${ZPKG_ENGINE_CMAKE}" _zpkg_engine_cmake)
+    string(REGEX MATCH "project\\(zahlen[ \t]+VERSION[ \t]+[0-9]+\\.[0-9]+\\.[0-9]+" _zpkg_engine_project "${_zpkg_engine_cmake}")
+    if(NOT _zpkg_engine_project)
+        message(FATAL_ERROR "${ZPKG_ENGINE_CMAKE} has no project(zahlen VERSION x.y.z) line to take zpkg's version from")
+    endif()
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" _zpkg_engine_version "${_zpkg_engine_project}")
+    set(_zpkg_engine_version "${CMAKE_MATCH_0}")
+    project(zpkg LANGUAGES CXX VERSION ${_zpkg_engine_version})
+    message(STATUS "zpkg: version ${PROJECT_VERSION} (from ${ZPKG_ENGINE_CMAKE})")
+else()
+    message(FATAL_ERROR
+        "zpkg takes its version from the engine's CMakeLists.txt, which is not at "
+        "${ZPKG_ENGINE_CMAKE}. Pass -DZPKG_VERSION=<x.y.z> when building utils/zpkg on its own.")
+endif()
 
 # C++23, not C++20: the error path is std::expected (see include/zpkg/zpkg.hpp),
 # and this project does not throw. Where the engine is conservative about the
@@ -44,6 +68,7 @@ add_library(zpkg_core OBJECT
     src/sign.cpp
     src/remote.cpp)
 target_include_directories(zpkg_core PUBLIC include)
+target_compile_definitions(zpkg_core PUBLIC ZPKG_TOOL_VERSION="${PROJECT_VERSION}")
 
 # --- JSON -----------------------------------------------------------------
 # simdjson is already a hard dependency of the engine's Serialization package, so

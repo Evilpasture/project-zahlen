@@ -16,9 +16,10 @@
 #include <TargetConditionals.h>
 #endif
 
-#define ZHLN_VERSION_MAJOR 0
-#define ZHLN_VERSION_MINOR 1
-#define ZHLN_VERSION_PATCH 0
+// ZHLN_VERSION_MAJOR/MINOR/PATCH come from the generated <Zahlen/Version.hpp>,
+// which the top-level CMakeLists.txt configures from PROJECT_VERSION -- the one
+// hand-written version number in the tree. Nothing here names a version.
+#include <Zahlen/Version.hpp>
 
 #define ZHLN_STR_HELPER(x) #x
 #define ZHLN_STR(x)        ZHLN_STR_HELPER(x)

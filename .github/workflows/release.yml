@@ -45,9 +45,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to create or update'
-        required: true
-        default: 'v0.1.0-baseline'
+        description: 'Release tag to create or update (default: v + PROJECT_VERSION from CMakeLists.txt)'
+        required: false
+        default: ''
       gcc_version:
         description: 'GCC version to download and build with (released 16.x; reflection needs 16)'
         required: false
@@ -58,7 +58,11 @@ permissions:
   contents: write
 
 env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # RELEASE_TAG is per job, not here: it comes from the `version` job's outputs
+  # (PROJECT_VERSION in CMakeLists.txt -- the one hand-written version number in
+  # the tree), and the `needs` context is not available at workflow level. A
+  # manual run may override it with `tag`, and a tag push must already agree with
+  # the tree or the run stops before anything is built.
   GCC_VERSION: ${{ inputs.gcc_version || '16.2.0' }}
   # The installed binaries are named after the major (gcc-16 / g++-16), so the
   # pin above can move to 16.3 without touching a single CMake flag.
@@ -74,10 +78,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # One source of truth for the version, and everything downstream reads it here.
+  # scripts/release-tag.sh is the same logic a release engineer runs by hand, and
+  # tests/version_test.py (configure-time on Linux, here on every release) is the
+  # copy check.
+  version:
+    name: Version (from CMakeLists.txt)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Resolve the version and the release tag
+        id: version
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+            version="${tag#v}"
+          else
+            version=$(scripts/release-tag.sh --print-version)
+            tag=$(scripts/release-tag.sh)
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "release ${tag} (engine version ${version})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: A tag push must agree with the tree
+        if: github.event_name == 'push'
+        env:
+          RESOLVED_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          expected=$(scripts/release-tag.sh)
+          if [ "${expected}" != "${RESOLVED_TAG}" ]; then
+            echo "error: tag ${RESOLVED_TAG} does not match PROJECT_VERSION ${expected}." >&2
+            echo "       Bump CMakeLists.txt, or delete the tag and re-create it from that commit." >&2
+            exit 1
+          fi
+          # The other copies of the number: the PKGBUILD's pkgver, the toolchain
+          # id in packaging/README.md, zpkg's example tag. A release built from a
+          # tree where those disagree would publish two versions of one release.
+          python3 tests/version_test.py --check --tag "${RESOLVED_TAG}"
+
   toolchain:
     name: Toolchain (native Ubuntu 22.04, glibc 2.35)
+    needs: version
     runs-on: ubuntu-22.04
     timeout-minutes: 240
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -327,9 +382,11 @@ jobs:
 
   consume:
     name: Consume the release (bare jammy, no container)
-    needs: toolchain
+    needs: [version, toolchain]
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
       # This job deliberately downloads nothing but the release: the whole point
       # is that the published artifacts are sufficient. The repository is here
@@ -431,13 +488,15 @@ jobs:
 
   render:
     name: Render the frame (driver above the engine's floor)
-    needs: consume
+    needs: [version, consume]
     # noble, because it is the only LTS with a Mesa new enough to run this
     # engine on a CPU: lavapipe implements VK_EXT_descriptor_heap first in Mesa
     # 26.2, and kisak-mesa publishes 26.2.x for noble but not for jammy. The
     # artifact under test is unchanged -- the release built on jammy, installed
     # by the same zpkg, running the binary the consume job compiled.
     runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     timeout-minutes: 30
     steps:
       # Everything the release runs is looked up through the dynamic loader, so

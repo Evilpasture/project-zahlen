@@ -35,8 +35,14 @@ include(PythonProbe)
 find_program(ZHLN_PERL_EXECUTABLE NAMES perl REQUIRED)
 
 if(ZHLN_HAS_PYTHON)
+  # ZHLN_GENERATED_INCLUDE_DIR tells the include-provenance check where the
+  # configured headers are (include/Zahlen/Version.hpp): they exist in the build
+  # tree only, so the source tree alone cannot resolve them. The variable reaches
+  # the Perl check through this process's environment.
   execute_process(
     COMMAND
+      "${CMAKE_COMMAND}" -E env
+      "ZHLN_GENERATED_INCLUDE_DIR=${ZHLN_GENERATED_INCLUDE_DIR}"
       "${Python3_EXECUTABLE}"
       "${CMAKE_SOURCE_DIR}/configure/run_governance_checks.py"
       --perl "${ZHLN_PERL_EXECUTABLE}"

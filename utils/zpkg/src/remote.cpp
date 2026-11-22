@@ -128,7 +128,7 @@ auto FetchToFile(std::string_view url, const fs::path& destination) -> std::expe
         if (source.lexically_normal() == destination.lexically_normal())
             return {};
         if (auto dir = EnsureDirectories(destination.parent_path()); !dir)
-            return std::unexpected(dir.error());
+            return std::unexpected(std::move(dir.error()));
         fs::copy_file(Native(source), Native(destination), fs::copy_options::overwrite_existing, ec);
         if (ec)
             return std::unexpected(Fail {"cannot copy " + ToUtf8(source) + ": " + ec.message()});
@@ -403,7 +403,7 @@ auto OfficialReleaseUrl(std::string_view tag) -> std::expected<std::string, Fail
         return std::string(base) + "latest/download";
     // Tags are one path segment, not URLs or relative paths.
     if (tag == "." || tag == "..")
-        return std::unexpected(Fail {"invalid release tag; use a release name such as v0.1.0", 2});
+        return std::unexpected(Fail {"invalid release tag; use a release name such as v0.4.0", 2});
     for (const char c: tag) {
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
               (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))

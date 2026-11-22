@@ -22,18 +22,9 @@ constexpr int UsageError = 2;
 void Usage() {
     std::puts(R"(Usage: zpkg <command> [options]
 
-Quick start (signed releases; trust the publisher key once with 'key add')
-  install application         Install Application and its dependencies
-  install application --version <tag>
-                               Install from a specific official release
-  install application --from <remote>
-                               Install from a configured remote
-  install                     Install Application from the latest release
-
-Local packages and remotes
+Packages
   install <path|dir>...        Install archives from a directory or file
-  install <remote>             Install a configured remote's whole toolchain
-  install <remote>:<name>      Install that package and what it requires
+  install <remote>[:<name>]    Install a toolchain, or one package, from a remote
   verify <path|dir|remote>     Check archives without installing anything
   list [--files] [--json]      Installed toolchains, active one marked
   info <toolchain-id>          Compiler, profile, ABI, packages, requirements
@@ -56,9 +47,7 @@ Publishing and trust
   remote remove <name>         Forget a remote
 
 Install options
-  --from <remote>        Source for component names (default: official)
-  --version <tag>        Official release tag (default: latest)
-  --only <a,b,...>        Only these packages or components, with what they require
+  --only <a,b,...>        Only these packages or components
   --toolchain <id>        Which toolchain to take from a remote
   --require-checksums     Fail unless SHA256SUMS covers every archive
   -s, --require-signatures
@@ -73,33 +62,8 @@ Environment
                           Windows %LOCALAPPDATA%\zahlen
   ZHLN_BIN_DIR   Shim directory (POSIX default: $HOME/.local/bin)
 
-Nothing zpkg does requires privileges. It refuses to run elevated unless
-ZHLN_ROOT is set explicitly, and refuses /usr, /opt, Program Files and other
-system paths as a store root even then.)");
-}
-
-void InstallUsage() {
-    std::puts(R"(Usage: zpkg install [component ...] [options]
-
-  zpkg install                         Application from the latest official release
-  zpkg install application image       Select components and their dependencies
-  zpkg install application --version <tag>
-  zpkg install application --from <remote>
-
-Trust the publisher once with 'zpkg key add <release-key.pub>' after verifying
-its fingerprint. Component installs require signed metadata and archive hashes.
-The first toolchain becomes active; later installs preserve your selection.
-
-Advanced sources
-  zpkg install <directory|archive> [--only a,b]
-  zpkg install <remote>[:component] [--toolchain <id>]
-  --require-checksums --require-signatures   Enforce verification on advanced sources
-  --force                                   Reinstall existing packages
-  --ignore-missing                          Permit incomplete dependencies
-  -q, --quiet                               Suppress progress
-
-Use 'zpkg list' to see toolchain ids and 'zpkg use <id>' to switch.
-)");
+zpkg never needs root: it refuses to run elevated unless ZHLN_ROOT is set, and
+refuses /usr, /opt, Program Files and other system paths as a store root.)");
 }
 
 std::string Join(const std::vector<std::string>& items, std::string_view separator) {
@@ -640,10 +604,7 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
     }
     const std::string command = argv[1];
     if (command == "-h" || command == "--help" || command == "help") {
-        if (command == "help" && argc == 3 && std::string_view(argv[2]) == "install")
-            InstallUsage();
-        else
-            Usage();
+        Usage();
         return {};
     }
     if (command == "--version" || command == "version") {
@@ -652,8 +613,7 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
     }
 
     if (argc == 3 && (std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h")) {
-        if (command == "install") InstallUsage();
-        else Usage();
+        Usage();
         return {};
     }
     const std::set<std::string> commands = {"install", "verify", "list", "info", "use", "prefix", "env", "which", "remove", "shims", "index", "key", "remote"};

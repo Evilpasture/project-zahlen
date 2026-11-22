@@ -8,9 +8,24 @@
 # zpkg is built from source here rather than shipped as a script. It is a
 # standalone CMake project (utils/zpkg) with no engine dependency, so it builds
 # with the distribution's compiler and does not need the reflection-capable
-# toolchain the engine itself requires.
+# toolchain the engine itself requires. simdjson comes from the distro so this
+# recipe does not need the engine's extern/ submodules.
+#
+# VERSIONING
+#   pkgver is the engine's PROJECT_VERSION (CMakeLists.txt), not a number of its
+#   own: zpkg reports the version of the release it belongs to. Both are bumped
+#   together, and tests/version_test.py fails the engine's configure when they
+#   disagree.
+#
+# SOURCE
+#   Pinned to one commit, not to a tag. A tag can be moved or re-created, a
+#   commit cannot; source() therefore names _commit and extracts into
+#   project-zahlen-${_commit}. Bump _commit and pkgver together, then run
+#   `updpkgsums` -- a commit-pinned tarball has a stable checksum, so there is no
+#   reason to ship sha256sums=('SKIP').
 pkgname=zahlen-zpkg
-pkgver=0.1.0
+_commit=463272df330c9b3b49d20905da1b9a65b3987e59
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Per-user package manager for Zahlen engine packages'
 # zpkg is ISA-baseline: no -mavx2, no -mfma, no CPU dispatch. The engine packages
@@ -21,12 +36,12 @@ license=('GPL-3.0-or-later')
 depends=('gcc-libs' 'zlib' 'zstd' 'openssl' 'curl')
 makedepends=('cmake' 'ninja' 'gcc' 'simdjson')
 options=('!strip')
-_src="https://github.com/Evilpasture/project-zahlen/archive/v${pkgver}.tar.gz"
-source=("zahlen-${pkgver}.tar.gz::${_src}")
-sha256sums=('SKIP') # Run updpkgsums before distributing this recipe.
+_src="https://github.com/Evilpasture/project-zahlen/archive/${_commit}.tar.gz"
+source=("zahlen-${_commit}.tar.gz::${_src}")
+sha256sums=('d428abd3b54e79e2c9071f3076fb6fd4d10338ca2d42ca4c2b6f8368749222da')
 
 build() {
-    cmake -S "${srcdir}/project-zahlen-${pkgver}/utils/zpkg" -B build -G Ninja \
+    cmake -S "${srcdir}/project-zahlen-${_commit}/utils/zpkg" -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DZPKG_BUILD_TESTS=OFF
     cmake --build build
@@ -35,7 +50,7 @@ build() {
 check() {
     # Reconfigure with the tests on; they cover archive validation, signatures
     # and the store, which is the part a user cannot debug from the outside.
-    cmake -S "${srcdir}/project-zahlen-${pkgver}/utils/zpkg" -B build-test -G Ninja \
+    cmake -S "${srcdir}/project-zahlen-${_commit}/utils/zpkg" -B build-test -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DZPKG_BUILD_TESTS=ON
     cmake --build build-test
     (cd build-test && ctest --output-on-failure)

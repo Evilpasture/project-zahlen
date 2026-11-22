@@ -26,10 +26,12 @@ with tempfile.TemporaryDirectory(prefix="zpkg-cli-") as tmp:
             assert contains in result.stdout + result.stderr, (args, result.stdout, result.stderr)
         return result.stdout
 
-    run(contains="Quick start")
-    run("install", "--help", contains="--from")
-    run("help", "install", contains="--from")
-    run("help", contains="--version <tag>")
+    # One help text, whatever asked for it.
+    usage = run(contains="Usage: zpkg")
+    assert run("install", "--help") == usage
+    assert run("help", "install") == usage
+    assert run("--help") == usage
+    assert "--only <a,b,...>" in usage and "--from" not in usage
     run("instal", code=2, contains="unknown command")
     for args in [("install", "--require-signaturs"),
                  ("install", "--require-signatures=no"),

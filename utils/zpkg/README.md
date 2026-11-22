@@ -11,7 +11,7 @@ and its dependencies. Component names can be shortened:
 
 ```sh
 zpkg install application
-zpkg install application image --version v0.1.0
+zpkg install application image --version v0.4.0
 zpkg install application --from studio
 ```
 

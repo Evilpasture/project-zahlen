@@ -35,7 +35,13 @@ if(APPLE)
 endif()
 
 
-project(zahlen VERSION 0.1.0 LANGUAGES C CXX ASM)
+# The engine version, and the only place a version number is written by hand.
+#
+# Everything else derives from PROJECT_VERSION: include/Zahlen/Version.hpp.in is
+# configured from it, cmake/Toolchains.cmake uses it for the toolchain id and the
+# exported package version, .github/workflows/release.yml takes the release tag
+# from it, and tests/version_test.py fails the build when a copy disagrees.
+project(zahlen VERSION 0.4.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
 
@@ -195,6 +201,32 @@ include(Sanitizers)
 include(VulkanSandbox)
 include(PythonProbe)
 include(BlenderProbe)
+
+# The generated half of <Zahlen/Config.hpp>. Every target that can see
+# include/Zahlen/Config.hpp gets this directory first on its include path: it is
+# the engine's own targets through the existing `include` entry below, and it is
+# the toolchain packages through _zhln_toolchain_include() in cmake/Toolchains.cmake.
+set(ZHLN_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Version.hpp.in"
+    "${ZHLN_GENERATED_INCLUDE_DIR}/Zahlen/Version.hpp" @ONLY)
+include_directories(BEFORE SYSTEM "${ZHLN_GENERATED_INCLUDE_DIR}")
+
+# PROJECT_VERSION is the only hand-written version number; the copies other tools
+# need (zpkg's ToolVersion, the PKGBUILD, packaging/README.md) are checked here
+# rather than trusted. The check is cheap and errors at configure time, which is
+# the last moment before a wrong number ends up inside a published package.
+if(ZHLN_HAS_PYTHON)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/version_test.py" --check
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        RESULT_VARIABLE _zhln_version_result
+        OUTPUT_VARIABLE _zhln_version_output
+        ERROR_VARIABLE _zhln_version_error)
+    if(NOT _zhln_version_result EQUAL 0)
+        message(FATAL_ERROR "version copies disagree with PROJECT_VERSION ${PROJECT_VERSION}:\n${_zhln_version_output}${_zhln_version_error}")
+    endif()
+endif()
+
 include(GovernanceChecks)
 include(ReflectionConfig)
 
@@ -639,7 +671,7 @@ target_include_directories(
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics
           ${CMAKE_CURRENT_SOURCE_DIR}/third_party/renderdoc)
 target_include_directories(
-  zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  zahlen_engine SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${ZHLN_GENERATED_INCLUDE_DIR})
 target_include_directories(
   zahlen_engine SYSTEM
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf

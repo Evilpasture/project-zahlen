@@ -794,7 +794,7 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
                 });
             }
             if (auto skipped = reader.Skip(padded); !skipped)
-                return std::unexpected(skipped.error());
+                return std::unexpected(std::move(skipped.error()));
         } else if (kind == '1') {
             const fs::path source = destination / FromUtf8(rawLink);
             if (!IsWithin(destination, source)) {
@@ -810,7 +810,7 @@ auto Archive::Walk(bool extract, const fs::path& destination) -> std::expected<v
                     return std::unexpected(Fail {"cannot link '" + path + "': " + ec.message()});
             }
             if (auto skipped = reader.Skip(padded); !skipped)
-                return std::unexpected(skipped.error());
+                return std::unexpected(std::move(skipped.error()));
         }
         ++expectedIndex;
     }

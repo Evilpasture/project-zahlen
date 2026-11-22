@@ -37,7 +37,7 @@ zahlen-<component>-<toolchain-id>.tar.gz  # one per component
 SHA256SUMS
 ```
 
-`<toolchain-id>` looks like `0.1.0-7c6e062-gcc-16.2.1-x86_64-release` and is
+`<toolchain-id>` looks like `0.4.0-7c6e062-gcc-16.2.1-x86_64-release` and is
 derived from the same inputs as the ABI hash. Use separate toolchain ids for
 sanitized builds.
 
