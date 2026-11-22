@@ -67,7 +67,15 @@ struct COMPhase2Suite {
 
             ExpectTrue(!engine->AddWindow(WindowCreateInfo {.title = {nullptr, 2}}).HasValue());
             ExpectTrue(!engine->SetClipboardText({nullptr, 1}).HasValue());
-            ExpectTrue(!engine->ClipboardText(nullptr, 1).HasValue());
+            ExpectTrue(!engine->ClipboardTextRaw(nullptr, 1).HasValue());
+            // Collect delegates agree with the raw count-then-fill seam.
+            ExpectEq(engine->Windows().size(), static_cast<size_t>(engine->WindowsRaw(nullptr, 0)));
+            if (const auto rawClip = engine->ClipboardTextRaw(nullptr, 0); rawClip.HasValue()) {
+                const auto clip = engine->ClipboardText();
+                ExpectTrue(clip.has_value() && clip->size() == static_cast<size_t>(rawClip.value));
+            } else {
+                ExpectTrue(!engine->ClipboardText().has_value());
+            }
             ExpectTrue(!engine->SetFileDropCallback(static_cast<WindowID>(0x7fffffffu), nullptr, nullptr).HasValue());
             ExpectTrue(engine->SetFileDropCallback(WindowID::Primary, nullptr, nullptr).HasValue());
             ExpectTrue(!engine->SubmitUI(WindowID::Primary, UISubmitInfo {.positions = {nullptr, 1}}).HasValue());
@@ -85,16 +93,18 @@ struct COMPhase2Suite {
             const std::array<float, 3> malformedMorph {};
             ExpectTrue(!graphics->AllocateMorphDeltas(malformedMorph).HasValue());
 
-            ExpectTrue(!actions->SerializeBindings(nullptr, 1).HasValue());
+            ExpectTrue(!actions->SerializeBindingsRaw(nullptr, 1).HasValue());
             ExpectTrue(!actions->DeserializeBindings({nullptr, 1}).HasValue());
-            const auto size = actions->SerializeBindings(nullptr, 0);
+            const auto size = actions->SerializeBindingsRaw(nullptr, 0);
             if (ExpectTrue(size.HasValue() && size.value > 1)) {
                 char sentinel = 'Q';
-                const auto shortCopy = actions->SerializeBindings(&sentinel, 1);
+                const auto shortCopy = actions->SerializeBindingsRaw(&sentinel, 1);
                 ExpectTrue(shortCopy.HasValue() && shortCopy.value == size.value && sentinel == 'Q');
                 std::vector<char> text(size.value);
-                ExpectTrue(actions->SerializeBindings(text.data(), size.value).HasValue());
+                ExpectTrue(actions->SerializeBindingsRaw(text.data(), size.value).HasValue());
                 ExpectTrue(actions->DeserializeBindings({text.data(), text.size()}).HasValue());
+                const auto collectedText = actions->SerializeBindings();
+                ExpectTrue(collectedText.has_value() && collectedText->size() == static_cast<size_t>(size.value));
             }
             actions->BeginBindingCapture(kPrimarySeat, false, KeyCode::Escape);
             actions->CancelBindingCapture();

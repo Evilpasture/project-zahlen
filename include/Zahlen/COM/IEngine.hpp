@@ -10,10 +10,12 @@
 // subobject of the same allocation and a capability costs nothing to obtain.
 
 #include <cstdint>
+#include <expected>
 #include <vector>
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/HostTypes.hpp>
+#include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 
 namespace ZHLN::COM {
@@ -81,15 +83,12 @@ struct IEngine : IObject {
     // the total count, so a caller sizes its buffer from the first answer. Same
     // shape as IEntities::EntitiesWithRaw; nothing is allocated on either side
     // of the boundary.
-    [[nodiscard]] virtual uint32_t Windows(WindowID* outWindows, uint32_t capacity) const noexcept = 0;
+    [[nodiscard]] virtual uint32_t WindowsRaw(WindowID* outWindows, uint32_t capacity) const noexcept = 0;
 
-    // Owning convenience wrapper over the count-then-fill seam above:
+    // Owning wrapper over the count-then-fill seam above (see Collect):
     // application-facing code just writes `for (WindowID w : engine->Windows())`.
     [[nodiscard]] auto Windows() const -> std::vector<WindowID> {
-        const uint32_t count = Windows(nullptr, 0);
-        std::vector<WindowID> result(count);
-        result.resize(Windows(result.data(), count));
-        return result;
+        return Collect<&IEngine::WindowsRaw>(*this);
     }
 
     // The drawable extent of a window. A zero extent means the window is
@@ -111,7 +110,11 @@ struct IEngine : IObject {
     [[nodiscard]] virtual bool IsMouseCaptured(WindowID window) const noexcept = 0;
     virtual Result<void> SetClipboardText(StringView text) noexcept = 0;
     // Exact bytes, no NUL. Null/zero queries size; short buffers are untouched.
-    virtual Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept = 0;
+    virtual Result<uint32_t> ClipboardTextRaw(char* buffer, uint32_t capacity) const noexcept = 0;
+
+    [[nodiscard]] auto ClipboardText() const -> std::expected<std::string, ErrorCode> {
+        return Collect<&IEngine::ClipboardTextRaw>(*this);
+    }
     // Views and their nested spans live only during callback. Null clears it.
     virtual Result<void> SetFileDropCallback(WindowID window, FileDropCallback callback, void* userdata) noexcept = 0;
     // Physical snapshot; consume clears only this window's queued UI keys/text

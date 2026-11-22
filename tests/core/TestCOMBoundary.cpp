@@ -288,8 +288,8 @@ void CheckGraphics(ZHLN::COM::IGraphicsDevice& graphics, ZHLN::COM::IAssetLibrar
 
 void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     ZHLN::Physics::BodyID found[4] {};
-    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, found, 4), uint32_t {0});
-    ZHLN::Test::ExpectEq(simulation.BodiesInSphere(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, nullptr, 0), uint32_t {0});
+    ZHLN::Test::ExpectEq(simulation.BodiesInSphereRaw(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, found, 4), uint32_t {0});
+    ZHLN::Test::ExpectEq(simulation.BodiesInSphereRaw(ZHLN::DVec3 {0.0, 0.0, 0.0}, 50.0F, nullptr, 0), uint32_t {0});
 
     const ZHLN::COM::Option<ZHLN::DVec3> noPosition = simulation.BodyPosition(ZHLN::Physics::BodyID::Null());
     ZHLN::Test::ExpectTrue(!noPosition.HasValue());
@@ -392,7 +392,7 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
     ZHLN::Test::ExpectTrue(!info.HasValue());
 
     char path[64] {};
-    ZHLN::Test::ExpectEq(assets.PrefabVirtualPath(hash, path, sizeof(path)), uint32_t {0});
+    ZHLN::Test::ExpectEq(assets.PrefabVirtualPathRaw(hash, path, sizeof(path)), uint32_t {0});
     ZHLN::Test::ExpectTrue(!assets.FindEnvironmentImage("no-such-sky").HasValue());
 
     const std::optional<ZHLN::COM::EnvironmentImageInfo> asStd = assets.FindEnvironmentImage("no-such-sky");

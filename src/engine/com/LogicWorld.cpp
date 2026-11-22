@@ -242,7 +242,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
 
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
-    [[nodiscard]] uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies, uint32_t capacity) const noexcept override {
+    [[nodiscard]] uint32_t BodiesInSphereRaw(DVec3 center, float radius, Physics::BodyID* bodies, uint32_t capacity) const noexcept override {
         const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
         if (bodies != nullptr && capacity > 0) {

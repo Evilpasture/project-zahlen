@@ -424,7 +424,7 @@ class Engine final:
         Session().SetClipboard(Text(text));
         return {};
     }
-    Result<uint32_t> ClipboardText(char* buffer, uint32_t capacity) const noexcept override {
+    Result<uint32_t> ClipboardTextRaw(char* buffer, uint32_t capacity) const noexcept override {
         if (buffer == nullptr && capacity != 0) return Error::NullArgument;
         const auto text = Session().Clipboard();
         if (text.size() > UINT32_MAX) return Error::InvalidArgument;
@@ -617,7 +617,7 @@ class Engine final:
         return WindowID::Primary;
     }
 
-    [[nodiscard]] uint32_t Windows(WindowID* outWindows, uint32_t capacity) const noexcept override {
+    [[nodiscard]] uint32_t WindowsRaw(WindowID* outWindows, uint32_t capacity) const noexcept override {
         const auto windows = m_engine->WindowIDs();
         if (outWindows) std::copy_n(windows.begin(), std::min<size_t>(capacity, windows.size()), outWindows);
         return static_cast<uint32_t>(windows.size());
@@ -1177,7 +1177,7 @@ class Engine final:
 
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
-    [[nodiscard]] uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies,
+    [[nodiscard]] uint32_t BodiesInSphereRaw(DVec3 center, float radius, Physics::BodyID* bodies,
                                           uint32_t capacity) const noexcept override {
         const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
@@ -1645,7 +1645,7 @@ class Engine final:
             });
     }
 
-    [[nodiscard]] uint32_t PrefabVirtualPath(uint64_t hash, char* buffer, uint32_t capacity) const noexcept override {
+    [[nodiscard]] uint32_t PrefabVirtualPathRaw(uint64_t hash, char* buffer, uint32_t capacity) const noexcept override {
         const ModelPrefab* prefab = Library().BorrowCachedPrefab(hash);
         if (prefab == nullptr) return 0;
 
@@ -2313,7 +2313,7 @@ class Engine final:
         return *captured;
     }
     [[nodiscard]] BindingCaptureStatus CaptureStatus() const noexcept override { return Inputs().CaptureStatus(); }
-    Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept override {
+    Result<uint32_t> SerializeBindingsRaw(char* buffer, uint32_t capacity) const noexcept override {
         if (buffer == nullptr && capacity != 0) return Error::NullArgument;
         const auto text = Inputs().SerializeBindings();
         if (text.size() > std::numeric_limits<uint32_t>::max()) return Error::InvalidArgument;

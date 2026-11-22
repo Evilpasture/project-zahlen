@@ -18,6 +18,7 @@
 // on replacement and detach.
 
 #include <Zahlen/COM/Types.hpp>
+#include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/Reflection/CanonicalName.hpp>
 #include <Zahlen/Core/Reflection/LayoutHash.hpp>
@@ -102,12 +103,7 @@ struct IEntities : IObject {
     }
 
     [[nodiscard]] auto EntitiesWith(StringView typeName) const -> std::vector<Entity> {
-        const uint32_t total = EntitiesWithRaw(typeName, nullptr, 0);
-        if (total == 0) return {};
-
-        std::vector<Entity> found(total);
-        found.resize(EntitiesWithRaw(typeName, found.data(), total));
-        return found;
+        return Collect<&IEntities::EntitiesWithRaw>(*this, typeName);
     }
 
     template <Component T>

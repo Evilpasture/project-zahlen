@@ -17,6 +17,7 @@
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -86,7 +87,7 @@ struct IAssetLibrary : IObject {
     // Copies the prefab's virtual path into `buffer` and null-terminates it
     // when there is room. Returns the length the path actually needs, which
     // may exceed `capacity`; zero means nothing is cached under that hash.
-    [[nodiscard]] virtual uint32_t PrefabVirtualPath(uint64_t hash, char* buffer, uint32_t capacity) const noexcept = 0;
+    [[nodiscard]] virtual uint32_t PrefabVirtualPathRaw(uint64_t hash, char* buffer, uint32_t capacity) const noexcept = 0;
 
     // Spawns the cached prefab and records the entities it created into
     // `entities`, up to `capacity`. `spawnChain` accepts nullptr (defaults) or
@@ -145,12 +146,7 @@ struct IAssetLibrary : IObject {
     }
 
     [[nodiscard]] auto PrefabVirtualPath(uint64_t hash) const -> std::string {
-        const uint32_t length = PrefabVirtualPath(hash, nullptr, 0);
-        if (length == 0) return {};
-
-        std::string path(length, '\0');
-        PrefabVirtualPath(hash, path.data(), length + 1);
-        return path;
+        return Collect<&IAssetLibrary::PrefabVirtualPathRaw>(*this, hash);
     }
 
     auto Instantiate(uint64_t hash, const PrefabFactory::SpawnParams& params = {}) -> std::vector<Entity> {

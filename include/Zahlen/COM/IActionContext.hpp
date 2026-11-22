@@ -20,11 +20,14 @@
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Input/ActionValues.hpp>
 #include <Zahlen/Input/Input.hpp>
 
 #include <cstdint>
+#include <expected>
+#include <string>
 #include <type_traits>
 
 namespace ZHLN::COM {
@@ -115,7 +118,11 @@ struct IActionContext : IObject {
     // size. A short buffer is left untouched; pass the returned size to retry.
     // Successful copies are exact bytes with no trailing NUL. No allocator or
     // std::string crosses the boundary. Null with nonzero capacity is invalid.
-    virtual Result<uint32_t> SerializeBindings(char* buffer, uint32_t capacity) const noexcept = 0;
+    virtual Result<uint32_t> SerializeBindingsRaw(char* buffer, uint32_t capacity) const noexcept = 0;
+
+    [[nodiscard]] auto SerializeBindings() const -> std::expected<std::string, ErrorCode> {
+        return Collect<&IActionContext::SerializeBindingsRaw>(*this);
+    }
     virtual Result<void> DeserializeBindings(StringView text) noexcept = 0;
 
     // --- Ergonomics & derived reads: not in the vtable ----------------------

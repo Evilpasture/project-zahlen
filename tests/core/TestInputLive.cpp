@@ -50,10 +50,10 @@ struct InputLiveTestSuite {
             actions.SnapshotDefaults();
 
             // Serialize, clear, deserialize, and verify round-trip.
-            const auto sizeRes = actions.SerializeBindings(nullptr, 0);
+            const auto sizeRes = actions.SerializeBindingsRaw(nullptr, 0);
             ZHLN::Test::ExpectTrue(sizeRes.HasValue() && sizeRes.value > 0u);
             std::string json(sizeRes.value, '\0');
-            const auto writeRes = actions.SerializeBindings(json.data(), static_cast<uint32_t>(json.size()));
+            const auto writeRes = actions.SerializeBindingsRaw(json.data(), static_cast<uint32_t>(json.size()));
             ZHLN::Test::ExpectTrue(writeRes.HasValue() && writeRes.value == sizeRes.value);
 
             ZHLN::Test::ExpectTrue(actions.ClearBindings("Gameplay", jumpRes.value));

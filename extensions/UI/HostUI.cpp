@@ -59,21 +59,15 @@ auto HostUI::ConsumeInput(float dt, WindowID window) -> GUI::UIInput {
             .set = +[](void* data, std::string_view text) { (void)static_cast<COM::IEngine*>(data)->SetClipboardText(text); },
             .get = +[](void* data) -> std::string {
                 auto& engine = *static_cast<COM::IEngine*>(data);
-                auto size = engine.ClipboardText(nullptr, 0);
-                if (!size.HasValue()) return {};
-                std::string text(size.value, '\0');
-                auto copied = engine.ClipboardText(text.data(), static_cast<uint32_t>(text.size()));
-                if (!copied.HasValue() || copied.value > text.size()) return {};
-                text.resize(copied.value); return text;
+                auto  text   = engine.ClipboardText();
+                if (!text.has_value()) return {};
+                return std::move(*text);
             },
         },
     };
 }
 void HostUI::BeginFrame() {
-    std::vector<WindowID> windows(_engine.Windows(nullptr, 0));
-    const auto total = _engine.Windows(windows.data(), static_cast<uint32_t>(windows.size()));
-    windows.resize(std::min<size_t>(total, windows.size()));
-    for (const auto id: windows) {
+    for (const auto id: _engine.Windows()) {
         (void)_engine.SubmitUI(id, COM::UISubmitInfo {});
     }
 }

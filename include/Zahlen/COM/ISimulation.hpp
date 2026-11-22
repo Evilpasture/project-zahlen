@@ -14,6 +14,7 @@
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Matrix.hpp>
@@ -43,7 +44,7 @@ struct ISimulation : IObject {
     // the sphere, which may be more. A caller that wants them all sizes its
     // buffer from the first answer and asks again; nothing is allocated on
     // either side of the boundary.
-    [[nodiscard]] virtual uint32_t BodiesInSphere(DVec3 center, float radius, Physics::BodyID* bodies,
+    [[nodiscard]] virtual uint32_t BodiesInSphereRaw(DVec3 center, float radius, Physics::BodyID* bodies,
                                                   uint32_t capacity) const noexcept = 0;
 
     // COM::Option is the boundary's spelling of the facade's std::optional:
@@ -118,16 +119,11 @@ struct ISimulation : IObject {
         return DebugGeometry(true, true, true);
     }
 
-    // Count, then fill. Safe to ask twice because this is a pure query: the
-    // vector is allocated by the caller's allocator, the library writes
-    // through the bare pointer, and the caller's allocator frees it.
+    // Count, then fill (see Collect). Safe to ask twice because this is a
+    // pure query: the vector is allocated by the caller's allocator, the
+    // library writes through the bare pointer, and the caller's allocator frees it.
     [[nodiscard]] auto BodiesInSphere(DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
-        const uint32_t total = BodiesInSphere(center, radius, nullptr, 0);
-        if (total == 0) return {};
-
-        std::vector<Physics::BodyID> bodies(total);
-        bodies.resize(BodiesInSphere(center, radius, bodies.data(), total));
-        return bodies;
+        return Collect<&ISimulation::BodiesInSphereRaw>(*this, center, radius);
     }
 
 protected:
