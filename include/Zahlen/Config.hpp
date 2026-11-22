@@ -185,6 +185,13 @@ struct EngineConfig {
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
     bool           enableMeshShading = true;
+    // Vulkan pipeline binaries (VK_KHR_pipeline_binary) are only a cache:
+    // pipeline creation falls back to full compilation when the store is
+    // disabled. Turning this off skips the global-key query at renderer
+    // startup, the on-disk cache load/persist in KernelSession, and all
+    // store lookups -- the escape hatch for driver stacks where the
+    // pipeline-binary entry points misbehave.
+    bool           enablePipelineBinaries = true;
     // Non-owning input: Kernel copies these bytes into its own storage before
     // creating a renderer, including for later device-lost recovery.
     std::span<const uint8_t> initialPipelineBinaryData;

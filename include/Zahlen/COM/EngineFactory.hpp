@@ -53,6 +53,7 @@ struct WindowConfig {
 struct RenderConfig {
     ValidationMode      validationMode        = ValidationMode::On;
     bool                enableMeshShading     = true;
+    bool                enablePipelineBinaries = true;
     Span<const uint8_t> initialPipelineBinary = {};
 };
 
@@ -98,6 +99,7 @@ inline auto CreateEngine() noexcept -> Result<IEngine*> {
         RenderConfig {
             .validationMode        = cfg.validationMode,
             .enableMeshShading     = cfg.enableMeshShading,
+            .enablePipelineBinaries = cfg.enablePipelineBinaries,
             .initialPipelineBinary = Span<const uint8_t>(cfg.initialPipelineBinaryData.data(), cfg.initialPipelineBinaryData.size()),
         },
         cfg.physics));

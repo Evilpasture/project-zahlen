@@ -2436,6 +2436,7 @@ auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
                 } else if constexpr (std::is_same_v<NodeT, RenderConfig>) {
                     config.validationMode            = node.validationMode;
                     config.enableMeshShading         = node.enableMeshShading;
+                    config.enablePipelineBinaries    = node.enablePipelineBinaries;
                     config.initialPipelineBinaryData = std::span<const uint8_t>(node.initialPipelineBinary);
                 } else if constexpr (std::is_same_v<NodeT, PhysicsConfig>) {
                     config.physics = node;

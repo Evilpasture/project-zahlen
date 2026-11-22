@@ -206,7 +206,7 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
 
     // Own caller-supplied bytes as well as on-disk bytes: the config's span
     // must remain valid if a device is recreated after the caller returns.
-    if (_impl->config.initialPipelineBinaryData.empty()) {
+    if (_impl->config.initialPipelineBinaryData.empty() && cfg.enablePipelineBinaries) {
         _impl->pipelineBinaryData      = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
         _impl->persistPipelineBinaries = true;
     } else {
