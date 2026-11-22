@@ -30,8 +30,7 @@ Packages
   info <toolchain-id>          Compiler, profile, ABI, packages, requirements
   use <toolchain-id>           Make a toolchain active (future builds only)
   prefix [toolchain-id]        The prefix to hand to CMake
-  env [toolchain-id] [--shell posix|cmd|powershell]
-                               Exports for building and running
+  env [toolchain-id]           Exports for building and running
   which <tool>                 Resolve an engine tool, active or not
   remove <toolchain-id>        Delete a whole toolchain
   remove --package <name>      Delete one package from a toolchain
@@ -57,13 +56,15 @@ Install options
   -q, --quiet             Suppress per-file progress
 
 Environment
-  ZHLN_ROOT      Store root.
-                 default: POSIX   ${XDG_DATA_HOME:-$HOME/.local/share}/zahlen
-                          Windows %LOCALAPPDATA%\zahlen
-  ZHLN_BIN_DIR   Shim directory (POSIX default: $HOME/.local/bin)
-
-zpkg never needs root: it refuses to run elevated unless ZHLN_ROOT is set, and
-refuses /usr, /opt, Program Files and other system paths as a store root.)");
+  ZHLN_ROOT      Store root.  default: )"
+#if defined(_WIN32)
+                  R"(%LOCALAPPDATA%\zahlen
+  ZHLN_BIN_DIR   Shim directory.  default: %LOCALAPPDATA%\zahlen\bin)"
+#else
+                  R"(${XDG_DATA_HOME:-$HOME/.local/share}/zahlen
+  ZHLN_BIN_DIR   Shim directory.  default: $HOME/.local/bin)"
+#endif
+                  R"()");
 }
 
 std::string Join(const std::vector<std::string>& items, std::string_view separator) {
