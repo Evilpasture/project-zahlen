@@ -34,8 +34,10 @@
 # -DZHLN_SHARED_ASSET_DIR=/some/absolute/path and get exactly that, explicitly.
 set(ZHLN_SHARED_ASSET_DIR "${CMAKE_BINARY_DIR}/shared_assets" CACHE PATH "Shared cooked asset cache")
 
-add_subdirectory(plugins/AssetCooking)
-add_subdirectory(utils/zcook)
+# This module is included only for the opt-in in-tree cook
+# (ZHLN_COOK_IN_TREE_ASSETS=ON): it owns ZHLN_SHARED_ASSET_DIR and
+# zahlen_configure_game_assets(). The zcook target itself is an extras
+# tool configured from the root CMakeLists next to utils/scene.
 
 function(zahlen_configure_game_assets GAME_SOURCE_DIR)
     file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")
@@ -43,7 +45,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
     # The POST_BUILD symlink below is attached in utils/zcook/CMakeLists.txt:
     # add_custom_command(TARGET ...) has to run in the directory that created
     # the target, and this function is called from the root CMakeLists.
-    set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook${CMAKE_EXECUTABLE_SUFFIX}")
+    set(SHARED_ZCOOK "$<TARGET_FILE:zcook>")
 
     # Blender is optional (cmake/BlenderProbe.cmake): without it the graph has no
     # blender_extract edge at all, rather than an edge per .blend source that no
@@ -56,8 +58,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         set(ZHLN_BLENDER_ARG --no-blender)
     endif()
 
-    # 1. The symlink that puts the current build's zcook at a stable location
-    #    was attached as a POST_BUILD step when utils/zcook declared the target.
+    # 1. zcook is invoked through its own target file; no POST_BUILD symlink.
 
     # 2. Generate assets.ninja with zcook itself, through the FIXED path: the
     #    cooker writes the graph of its own invocations, so the rules and the

@@ -1,0 +1,18 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# ZahlenCooker: the zcook CLI as an IMPORTED executable (Zahlen::zcook), so a
+# consumer's own build graph can cook assets without knowing install layout.
+# The reusable baking functions themselves ship as Zahlen::AssetCooking
+# (the AssetCooking source package), a separate package from this tool.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(ZahlenEngine @PROJECT_VERSION@ CONFIG)
+
+if(NOT TARGET Zahlen::zcook)
+    add_executable(Zahlen::zcook IMPORTED GLOBAL)
+    set_target_properties(Zahlen::zcook PROPERTIES
+        IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/zcook@CMAKE_EXECUTABLE_SUFFIX@")
+endif()

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: utils/zcook/Transform.cpp
-#include "Transform.hpp"
+#include <AssetCooking/MeshCook.hpp>
+#include <Zahlen/Render/CookedFormats.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
@@ -55,39 +56,25 @@ struct RawLoopVertexHash {
 
 } // namespace
 
-namespace ZHLN {
+namespace ZHLN::AssetCooking {
 
-CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPath) {
+CompiledMesh CompileMesh(const RawMeshInput& input) {
     CompiledMesh result;
 
-    const std::string binPathStr(binPath);
-    FILE*             bf = std::fopen(binPathStr.c_str(), "rb");
-    if (bf == nullptr) {
-        std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file '{}': {}", binPath, std::strerror(errno));
-        return result;
-    }
+    const std::span<const float> rawFloats = input.loopVertices;
 
-    std::fseek(bf, 0, SEEK_END);
-    long binSize = std::ftell(bf);
-    std::fseek(bf, 0, SEEK_SET);
-    std::vector<float> rawFloats(binSize / sizeof(float));
-    if (!rawFloats.empty()) {
-        std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
-    }
-    std::fclose(bf);
-
-    bool hasSkin     = mesh.layout.contains("_J4W4");
+    const bool hasSkin = input.skinned;
     result.isSkinned = hasSkin;
     size_t stride    = hasSkin ? 21 : 13;
 
     std::unordered_map<RawLoopVertex, uint32_t, RawLoopVertexHash> uniqueMap;
     std::vector<RawLoopVertex>                                     rawVerts;
 
-    for (const auto& prim: mesh.primitives) {
+    for (const auto& prim: input.primitives) {
         uint32_t startLoop = prim.vertexOffset;
         uint32_t loopCount = prim.vertexCount;
 
-        Compiler::IRPrimitive outPrim;
+        MeshPrimitive outPrim;
         outPrim.materialId   = prim.materialId;
         outPrim.vertexOffset = static_cast<uint32_t>(result.indices.size() * sizeof(uint32_t));
         outPrim.vertexCount  = loopCount;
@@ -237,10 +224,84 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPa
     // an additional index view over the same vertex pool.
     result.meshlets = BuildMeshlets(result.indices, result.positions);
     if (result.meshlets.Empty() && !result.indices.empty()) {
-        std::println(stderr, "[zcook] WARNING: meshlet generation produced no clusters for mesh '{}'.", mesh.id);
+        std::println(stderr, "[AssetCooking] WARNING: meshlet generation produced no clusters for this mesh.");
     }
 
     return result;
 }
 
-} // namespace ZHLN
+
+namespace {
+
+template <typename T>
+void AppendPod(std::vector<std::byte>& out, const T& value) {
+    const auto* first = reinterpret_cast<const std::byte*>(&value);
+    out.insert(out.end(), first, first + sizeof(T));
+}
+
+template <typename T>
+void AppendSpan(std::vector<std::byte>& out, std::span<const T> values) {
+    if (values.empty()) return;
+    const auto* first = reinterpret_cast<const std::byte*>(values.data());
+    out.insert(out.end(), first, first + values.size_bytes());
+}
+
+} // namespace
+
+auto SerializeCookedMesh(const CompiledMesh& compiled) -> std::vector<std::byte> {
+    CookedMeshHeader meshHeader {};
+    meshHeader.magic   = 0x3048534D;
+    meshHeader.version = 8; // Version 8: serialize logical MeshletDesc records (60B) instead of GPU wire structs
+
+    if (compiled.positions.empty()) {
+        meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =
+            meshHeader.boundingBoxMax[2]                                                           = 0.0f;
+        meshHeader.vertexCount = meshHeader.indexCount = 0;
+        meshHeader.hasSkin                             = 0;
+    } else {
+        meshHeader.boundingBoxMin[0] = compiled.minB[0];
+        meshHeader.boundingBoxMin[1] = compiled.minB[1];
+        meshHeader.boundingBoxMin[2] = compiled.minB[2];
+        meshHeader.boundingBoxMax[0] = compiled.maxB[0];
+        meshHeader.boundingBoxMax[1] = compiled.maxB[1];
+        meshHeader.boundingBoxMax[2] = compiled.maxB[2];
+        meshHeader.vertexCount       = static_cast<uint32_t>(compiled.positions.size());
+        meshHeader.indexCount        = static_cast<uint32_t>(compiled.indices.size());
+        meshHeader.hasSkin           = compiled.isSkinned ? 1 : 0;
+    }
+
+    meshHeader.meshletCount        = static_cast<uint32_t>(compiled.meshlets.meshlets.size());
+    meshHeader.meshletVertexCount  = static_cast<uint32_t>(compiled.meshlets.vertices.size());
+    meshHeader.meshletTriByteCount = static_cast<uint32_t>(compiled.meshlets.triangles.size());
+
+    std::vector<std::byte> out;
+    AppendPod(out, meshHeader);
+    AppendSpan<VertexPosition>(out, compiled.positions);
+    AppendSpan<VertexTangentFrame>(out, compiled.tangentFrames);
+    AppendSpan<VertexSurface>(out, compiled.surfaces);
+    if (compiled.isSkinned) {
+        AppendSpan<VertexSkin>(out, compiled.skins);
+    }
+    AppendSpan<uint32_t>(out, compiled.indices);
+    if (!compiled.meshlets.Empty()) {
+        AppendSpan<MeshletDesc>(out, compiled.meshlets.meshlets);
+        AppendSpan<uint32_t>(out, compiled.meshlets.vertices);
+        AppendSpan<uint8_t>(out, compiled.meshlets.triangles);
+    }
+    return out;
+}
+
+auto CookMesh(const RawMeshInput& input) -> std::expected<std::vector<std::byte>, ErrorCode> {
+    const size_t stride = input.skinned ? 21 : 13;
+    if (!input.loopVertices.empty() && input.loopVertices.size() % stride != 0) {
+        return std::unexpected(ErrorCode(CookError::InvalidInput));
+    }
+    for (const auto& prim: input.primitives) {
+        if (static_cast<size_t>(prim.vertexOffset) + prim.vertexCount > input.loopVertices.size() / stride) {
+            return std::unexpected(ErrorCode(CookError::InvalidInput));
+        }
+    }
+    return SerializeCookedMesh(CompileMesh(input));
+}
+
+} // namespace ZHLN::AssetCooking

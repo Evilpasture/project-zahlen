@@ -26,7 +26,7 @@ def main():
             name = p.relative_to(ROOT).as_posix()
             text = p.read_text()
             if 'zahlen_stb_image' in text: errors.append(f'{name}: removed raw codec target')
-            if 'extern/stb' in text and name not in ('extensions/Image/CMakeLists.txt','utils/zcook/CMakeLists.txt','cmake/Toolchains.cmake'):
+            if 'extern/stb' in text and name not in ('extensions/Image/CMakeLists.txt','plugins/AssetCooking/CMakeLists.txt','cmake/Toolchains.cmake'):
                 errors.append(f'{name}: leaked STB search root')
     if errors:
         print('\n'.join(errors)); return 1

@@ -284,7 +284,7 @@ LooseAssets DiscoverLooseAssets(std::string_view assetsRoot) {
             }
             continue;
         }
-        if (EndsWith(lower, ".png") || EndsWith(lower, ".jpg") || EndsWith(lower, ".jpeg") || EndsWith(lower, ".tga")) {
+        if (EndsWith(lower, ".png") || EndsWith(lower, ".jpg") || EndsWith(lower, ".jpeg") || EndsWith(lower, ".tga") || EndsWith(lower, ".hdr")) {
             assets.textures.push_back(path);
         } else if (EndsWith(lower, ".glb")) {
             assets.models.push_back(path);

@@ -5,9 +5,10 @@
 # third-party dependencies; this file only establishes the shared serializer
 # target and the dependency order between plugins.
 #
-# AssetCooking is configured separately by cmake/AssetPipeline.cmake because
-# zcook requires its host-side codecs even when ZHLN_BUILD_EXTRAS=OFF.
-#
+# AssetCooking lives here like every other plugin; the cooker library links
+# it, and Toolchains.cmake ships it as a source package so applications can
+# decode/encode Radiance formats without the CLI.
+
 # Plugins may consume the engine's public API, but the reverse dependency is
 # forbidden. The configure-time layer-boundary check scans plugins/,
 # extensions/, and gameplay/ and enforces that one-way rule.
@@ -15,6 +16,7 @@
 # JSON and TOML share one target because TOML scene/UI adapters consume the JSON
 # document layer, while neither format should define a second serializer
 # library. Their own subdirectories list the implementation sources.
+add_subdirectory(AssetCooking)
 add_subdirectory(Scene)
 
 add_library(zahlen_serialization STATIC)

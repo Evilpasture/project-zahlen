@@ -200,7 +200,17 @@ include(LinkerConfig)
 include(Sanitizers)
 include(VulkanSandbox)
 include(PythonProbe)
-include(BlenderProbe)
+# The in-tree asset pipeline (Blender probe + cook_assets graph) is opt-in:
+# the default engine build compiles no game assets and never probes for
+# Blender. Turn it on only for the demo/host binaries that consume
+# data/base.pak from this tree.
+option(ZHLN_COOK_IN_TREE_ASSETS "Cook this tree's game assets during the engine build (requires the cooker CLI)" OFF)
+option(ZHLN_BUILD_COOKER "Build the optional zcook CLI (cooking library: Zahlen::AssetCooking)" ON)
+if(ZHLN_COOK_IN_TREE_ASSETS)
+    include(BlenderProbe)
+else()
+    set(ZHLN_HAS_BLENDER FALSE)
+endif()
 
 # The generated half of <Zahlen/Config.hpp>. Every target that can see
 # include/Zahlen/Config.hpp gets this directory first on its include path: it is
@@ -715,11 +725,6 @@ zahlen_set_bin_output(zahlen_cube)
 
 
 include(ECSCompiler)
-include(AssetPipeline)
-
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NOT ZHLN_SYNTAX_ONLY)
-    zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
-endif()
 
 add_custom_target(
   link_resources ALL
@@ -745,7 +750,6 @@ zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_cube)
-zahlen_enable_reflection(zcook)
 
 if(ZHLN_BUILD_RENDER)
     zahlen_enable_reflection(zahlen_vulkan)
@@ -870,6 +874,12 @@ target_link_libraries(zahlen_cube PRIVATE zahlen_application zahlen_warnings)
 # produces a callable-driven game; extras add standalone editor, scene host and
 # windowless benchmark executables instead of bloating app/main.cpp.
 if(ZHLN_BUILD_EXTRAS)
+    # The cooker CLI is an extras tool like utils/scene and utils/fidelity:
+    # it links plugins/ targets (zahlen_asset_cooking, zahlen_serialization)
+    # that only exist in this configuration.
+    if(ZHLN_BUILD_COOKER AND TARGET zahlen_asset_cooking AND TARGET zahlen_serialization)
+        add_subdirectory(utils/zcook)
+    endif()
     if(TARGET zahlen_serialization)
         add_subdirectory(utils/scene)
     endif()
@@ -885,6 +895,16 @@ if(ZHLN_BUILD_TESTS)
     include(cmake/ZTest.cmake)
     add_subdirectory(tests)
     zahlen_finalize_ztest_manifest()
+endif()
+
+# Opt-in in-tree asset cooking: purely the AssetPipeline helper graph.
+# zcook (above) is its only tool dependency, and it must exist by now.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND NOT ZHLN_SYNTAX_ONLY AND ZHLN_COOK_IN_TREE_ASSETS)
+    if(NOT TARGET zcook)
+        message(FATAL_ERROR "ZHLN_COOK_IN_TREE_ASSETS requires ZHLN_BUILD_EXTRAS=ON and ZHLN_BUILD_COOKER=ON")
+    endif()
+    include(AssetPipeline)
+    zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
@@ -909,7 +929,10 @@ endif()
 # ZHLN_GLIBC_BASELINE set -- the release lane sets it -- `--target glibc-floor`
 # holds them to the floor they ship with, before anything is packaged or signed.
 include(GlibcFloor)
-set(_zhln_glibc_targets zahlen_engine zcook)
+set(_zhln_glibc_targets zahlen_engine)
+if(TARGET zcook)
+    list(APPEND _zhln_glibc_targets zcook)
+endif()
 foreach(_zhln_plugin_target IN ITEMS zahlen_plugin_freecam zahlen_plugin_screenshot)
     if(TARGET ${_zhln_plugin_target})
         list(APPEND _zhln_glibc_targets ${_zhln_plugin_target})

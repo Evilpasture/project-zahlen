@@ -11,7 +11,7 @@
 // must stay hand-assembled.
 #include "GLB.hpp"
 #include "GLBModel.hpp"
-#include "Transform.hpp"
+#include <AssetCooking/MeshCook.hpp>
 #include <Image/Image.hpp>
 #include <algorithm>
 #include <array>
@@ -426,8 +426,28 @@ bool EmitGLB(const Compiler::IRManifest& manifest, std::string_view levelFolder,
     }
 
     for (const auto& mesh: manifest.meshes) {
-        std::string  binPath  = std::format("{}/{}", levelFolder, mesh.binFile);
-        CompiledMesh compiled = CompileRawMesh(mesh, binPath);
+        std::string binPath = std::format("{}/{}", levelFolder, mesh.binFile);
+        // Blender-IR bridge: payload floats are read here; the compile itself
+        // is AssetCooking's span-based baker.
+        std::vector<float> rawFloats;
+        if (FILE* bf = std::fopen(binPath.c_str(), "rb")) {
+            std::fseek(bf, 0, SEEK_END);
+            const long binSize = std::ftell(bf);
+            std::fseek(bf, 0, SEEK_SET);
+            if (binSize > 0) rawFloats.resize(static_cast<size_t>(binSize) / sizeof(float));
+            if (!rawFloats.empty()) std::fread(rawFloats.data(), sizeof(float), rawFloats.size(), bf);
+            std::fclose(bf);
+        }
+        std::vector<AssetCooking::MeshPrimitive> glbPrimitives;
+        glbPrimitives.reserve(mesh.primitives.size());
+        for (const auto& prim: mesh.primitives) {
+            glbPrimitives.push_back({prim.materialId, prim.vertexOffset, prim.vertexCount});
+        }
+        AssetCooking::CompiledMesh compiled = AssetCooking::CompileMesh(AssetCooking::RawMeshInput {
+            .loopVertices = rawFloats,
+            .skinned      = mesh.layout.contains("_J4W4"),
+            .primitives   = glbPrimitives,
+        });
         if (compiled.positions.empty()) {
             continue;
         }

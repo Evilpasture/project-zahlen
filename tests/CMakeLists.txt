@@ -113,7 +113,10 @@ if(USE_SANITIZERS)
 endif()
 
 zahlen_enable_reflection(ztest_cpu)
-add_dependencies(ztest_cpu zcook ztest_mangle_fixture)
+add_dependencies(ztest_cpu ztest_mangle_fixture)
+if(TARGET zcook)
+    add_dependencies(ztest_cpu zcook)
+endif()
 
 if(USE_SANITIZERS)
     target_compile_options(ztest_cpu PRIVATE

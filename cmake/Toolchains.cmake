@@ -661,6 +661,21 @@ zhln_toolchain_source_package(Animation
                  Zahlen::Camera
                  Zahlen::FreeCam)
 
+zhln_toolchain_source_package(AssetCooking
+    CHECK_TARGET zahlen_asset_cooking
+    DEPENDS Engine Image
+    HEADER_DIRS plugins/AssetCooking
+    SOURCES plugins/AssetCooking/EnvironmentPreparation.cpp
+            plugins/AssetCooking/RadianceDecoder.cpp
+            plugins/AssetCooking/RadianceEncoder.cpp
+            plugins/AssetCooking/MeshCook.cpp
+            plugins/AssetCooking/AnimCook.cpp
+            plugins/AssetCooking/PakWriter.cpp
+            plugins/AssetCooking/FontBake.cpp
+    VENDORED_HEADERS extern/stb/stb_truetype.h
+    PUBLIC_LINKS Zahlen::Engine
+    PRIVATE_LINKS Zahlen::Image)
+
 # --- 5. Offline cooker tool -------------------------------------------------
 if(TARGET zcook)
     set_target_properties(zcook PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
@@ -669,4 +684,15 @@ if(TARGET zcook)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zahlen/tools COMPONENT ZahlenCooker)
     zhln_toolchain_manifest(zahlen-cooker Cooker
         REQUIRES zahlen-engine PROVIDES zcook)
+    # find_package(ZahlenCooker) gives consumers Zahlen::zcook, an IMPORTED
+    # executable they can drive from their own asset graph.
+    configure_package_config_file(${PROJECT_SOURCE_DIR}/cmake/toolchain/CookerConfig.cmake.in
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenCookerConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZahlenCooker)
+    write_basic_package_version_file(${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenCookerConfigVersion.cmake
+        VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+    install(FILES
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenCookerConfig.cmake
+        ${ZHLN_TOOLCHAIN_METADATA_DIR}/ZahlenCookerConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZahlenCooker COMPONENT ZahlenCooker)
 endif()
