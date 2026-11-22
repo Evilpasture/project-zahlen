@@ -12,6 +12,7 @@ set(SAMPLE_SOURCES
     CDNMapSample.cpp
     DeviceLostRecoverySample.cpp
     FidelityHarness.cpp
+    FirstGameSample.cpp
     GlTFInspectorSample.cpp
     ProceduralAnimationSample.cpp
     RemoteGLBSample.cpp
