@@ -259,7 +259,7 @@ struct COMTestSuite {
                 return std::unexpected(COMTestError::UnknownInterface);
             }
 
-            Ref<ITestExtended> extended = buffer.As<ITestExtended>();
+            Ref<ITestExtended> extended = buffer.cast<ITestExtended>();
             if (!ZHLN::Test::ExpectTrue(static_cast<bool>(extended))) {
                 return std::unexpected(COMTestError::UnknownInterface);
             }
@@ -267,18 +267,18 @@ struct COMTestSuite {
 
             // ITestMath is not a direct base of TestObject. Reflection has to
             // walk ITestExtended to find it.
-            Ref<ITestMath> math = extended.As<ITestMath>();
+            Ref<ITestMath> math = extended.cast<ITestMath>();
             if (!ZHLN::Test::ExpectTrue(static_cast<bool>(math))) {
                 return std::unexpected(COMTestError::UnknownInterface);
             }
             ZHLN::Test::ExpectEq(math->Add(20, 22), 42);
             ZHLN::Test::ExpectEq(std::string_view(math->Name()), std::string_view("test-object"));
 
-            Ref<ZHLN::COM::IObject> root = buffer.As<ZHLN::COM::IObject>();
+            Ref<ZHLN::COM::IObject> root = buffer.cast<ZHLN::COM::IObject>();
             ZHLN::Test::ExpectTrue(static_cast<bool>(root));
             ZHLN::Test::ExpectTrue(root.Get() != nullptr);
 
-            Ref<ITestMissing> missing = buffer.As<ITestMissing>();
+            Ref<ITestMissing> missing = buffer.cast<ITestMissing>();
             ZHLN::Test::ExpectFalse(static_cast<bool>(missing));
             return {};
         }
@@ -314,16 +314,16 @@ struct COMTestSuite {
 
             const ZHLN::COM::Result<int32_t> bad = COMTestError::DivisionByZero;
             ZHLN::Test::ExpectFalse(bad.HasValue());
-            ZHLN::Test::ExpectTrue(bad.error.Is(COMTestError::DivisionByZero));
+            ZHLN::Test::ExpectTrue(bad.error == COMTestError::DivisionByZero);
             const std::expected<int32_t, ZHLN::ErrorCode> asError = bad;
             ZHLN::Test::ExpectFalse(asError.has_value());
-            ZHLN::Test::ExpectTrue(asError.error().Is(COMTestError::DivisionByZero));
+            ZHLN::Test::ExpectTrue(asError.error() == COMTestError::DivisionByZero);
 
             const ZHLN::COM::Result<void> fine;
             ZHLN::Test::ExpectTrue(fine.HasValue());
             const ZHLN::COM::Result<void> failed = COMTestError::UnknownInterface;
             ZHLN::Test::ExpectFalse(failed.HasValue());
-            ZHLN::Test::ExpectTrue(failed.error.Is(COMTestError::UnknownInterface));
+            ZHLN::Test::ExpectTrue(failed.error == COMTestError::UnknownInterface);
             return {};
         }
 
@@ -406,7 +406,7 @@ struct COMTestSuite {
 
             // owner + assigned are the two remaining references; a query adds
             // and releases one more without disturbing them.
-            Ref<ITestMath> queried = owner.As<ITestMath>();
+            Ref<ITestMath> queried = owner.cast<ITestMath>();
             ZHLN::Test::ExpectTrue(static_cast<bool>(queried));
             queried = Ref<ITestMath> {};
             ZHLN::Test::ExpectFalse(static_cast<bool>(queried));
@@ -455,7 +455,7 @@ struct COMTestSuite {
                 ZHLN::COM::InChain(ChainNodeA {.width = 1, .height = 1}, ChainNodeUnknown {}),
                 [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(unknownOutcome.HasValue());
-            ZHLN::Test::ExpectTrue(unknownOutcome.error.Is(ZHLN::COM::Error::UnsupportedExtension));
+            ZHLN::Test::ExpectTrue(unknownOutcome.error == ZHLN::COM::Error::UnsupportedExtension);
 
             // Duplicate node type in manual chain is rejected with Error::DuplicateExtension.
             ChainNodeA             dupPayload {.width = 1, .height = 1};
@@ -472,7 +472,7 @@ struct COMTestSuite {
             const ZHLN::COM::Result<void> dupOutcome = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &headNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(dupOutcome.HasValue());
-            ZHLN::Test::ExpectTrue(dupOutcome.error.Is(ZHLN::COM::Error::DuplicateExtension));
+            ZHLN::Test::ExpectTrue(dupOutcome.error == ZHLN::COM::Error::DuplicateExtension);
 
             // Tampered layoutHash or size is rejected with Error::LayoutMismatch.
             ZHLN::COM::ChainInNode driftedNode = tailNode;
@@ -480,14 +480,14 @@ struct COMTestSuite {
             const ZHLN::COM::Result<void> hashMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(hashMismatch.HasValue());
-            ZHLN::Test::ExpectTrue(hashMismatch.error.Is(ZHLN::COM::Error::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(hashMismatch.error == ZHLN::COM::Error::LayoutMismatch);
 
             driftedNode.layoutHash = tailNode.layoutHash;
             driftedNode.size       = sizeof(ChainNodeA) + 4U;
             const ZHLN::COM::Result<void> sizeMismatch = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(sizeMismatch.HasValue());
-            ZHLN::Test::ExpectTrue(sizeMismatch.error.Is(ZHLN::COM::Error::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(sizeMismatch.error == ZHLN::COM::Error::LayoutMismatch);
 
             // Null payload pointer is rejected with Error::NullArgument.
             driftedNode.size = sizeof(ChainNodeA);
@@ -495,13 +495,13 @@ struct COMTestSuite {
             const ZHLN::COM::Result<void> nullData = ZHLN::COM::DispatchInChain<ChainNodeA>(
                 &driftedNode, [&](const ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(nullData.HasValue());
-            ZHLN::Test::ExpectTrue(nullData.error.Is(ZHLN::COM::Error::NullArgument));
+            ZHLN::Test::ExpectTrue(nullData.error == ZHLN::COM::Error::NullArgument);
 
             // Output chain rejects null head and populates caller-owned nodes in place.
             const ZHLN::COM::Result<void> nullOutHead = ZHLN::COM::DispatchOutChain<ChainNodeA>(
                 nullptr, [&](ChainNodeA&) -> ZHLN::COM::Result<void> { return {}; });
             ZHLN::Test::ExpectFalse(nullOutHead.HasValue());
-            ZHLN::Test::ExpectTrue(nullOutHead.error.Is(ZHLN::COM::Error::NullArgument));
+            ZHLN::Test::ExpectTrue(nullOutHead.error == ZHLN::COM::Error::NullArgument);
 
             ChainNodeA outA {};
             ChainNodeB outB {};

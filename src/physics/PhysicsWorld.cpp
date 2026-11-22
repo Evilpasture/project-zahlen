@@ -306,7 +306,7 @@ auto BodyTable::ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH
     return BodyID {.index = slot, .generation = gen};
 }
 
-auto BodyTable::TryMarkPendingDestroy(BodyID handle) noexcept -> bool {
+auto BodyTable::MarkPendingDestroy(BodyID handle) noexcept -> bool {
     const uint32_t slot = handle.index;
     if (slot >= slotCapacity || generations[slot].load(std::memory_order::acquire) != handle.generation) {
         return false;

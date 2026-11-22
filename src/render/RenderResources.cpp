@@ -851,7 +851,7 @@ void RenderContext::DrawDebugTriangles(std::span<const VertexPosition> positions
     if (!mapped) {
         return;
     }
-    char* basePtr = mapped->As<char>();
+    char* basePtr = mapped->cast<char>();
 
     const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
     if (count > 0) {
@@ -884,7 +884,7 @@ auto RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const ZHLN::M
     }
     auto mapped = buffer.Map(_impl->allocator);
     if (!mapped) return std::unexpected(mapped.error());
-    std::memcpy(mapped->As<Mat4x4>() + offset, matrices.data(), matrices.size_bytes());
+    std::memcpy(mapped->cast<Mat4x4>() + offset, matrices.data(), matrices.size_bytes());
     return {};
 }
 
@@ -904,7 +904,7 @@ void RenderContext::ClearRetiringJointRanges() noexcept {
     // map it once and reset every retiring range not yet cleared in it.
     auto mapped = buffer.Map(_impl->allocator);
     if (!mapped) return;
-    auto* dst = mapped->As<Mat4x4>();
+    auto* dst = mapped->cast<Mat4x4>();
     allocator.ClearRetiringForSlot(_impl->frames.currentJointSlot, FrameResources::kJointBufferRingSize,
                                    [dst](uint32_t offset, uint32_t count) noexcept {
                                        for (uint32_t i = 0; i < count; ++i) dst[offset + i] = Mat4x4::Identity();
@@ -946,7 +946,7 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
     if (!deltas.empty()) {
         auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator);
         if (mapped) {
-            std::memcpy(mapped->As<float>() + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
+            std::memcpy(mapped->cast<float>() + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
         }
     }
     _impl->nextMorphDeltaIndex += floatCount;
@@ -1198,7 +1198,7 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             return std::unexpected(mapped.error());
         }
 
-        const auto* const rgba   = mapped->As<const uint8_t>();
+        const auto* const rgba   = mapped->cast<const uint8_t>();
         const size_t      pixels = static_cast<size_t>(extent.width) * extent.height;
 
         CapturedFrame result {
@@ -1258,7 +1258,7 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
         return std::unexpected(mapped.error());
     }
 
-    const auto* const halfFloats   = mapped->As<const uint16_t>();
+    const auto* const halfFloats   = mapped->cast<const uint16_t>();
     const bool        isFullBright = impl->currentUniforms.fullBright != 0;
     const size_t      pixels       = static_cast<size_t>(extent.width) * extent.height;
 

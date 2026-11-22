@@ -50,7 +50,8 @@ class Channel {
         Push(std::move(copy));
     }
 
-    T Pop() {
+    // Blocking receive: synchronously waits (or fiber-yields) for an item.
+    T Wait() {
         Fiber* self = Fiber::GetCurrent();
 
         if ((self == nullptr) || self->isMain) {
@@ -83,10 +84,9 @@ class Channel {
         return result;
     }
 
-    // TryPop keeps its name: `Try` states the waiting policy -- hand back
-    // empty instead of waiting for an item (the blocking counterpart waits).
-    // The optional is what the queue produced, not a duplicate of that policy.
-    auto TryPop() -> std::optional<T> {
+    // Non-blocking receive: `Poll` names the waiting policy, the optional
+    // names data presence.
+    [[nodiscard]] auto Poll() -> std::optional<T> {
         return ZHLN::Lock(_mutex, [&] -> std::optional<T> {
             if (_queue.empty()) {
                 return std::nullopt;

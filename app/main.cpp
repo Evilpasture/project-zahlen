@@ -163,6 +163,6 @@ int main(int argc, char* argv[]) {
         .Title("Zahlen Sandbox")
         .WithConfig(launch)
         .AddLayer(SandboxGame {.launch = launch})
-        .TryLoadPlugin("freecam")
+        .LoadPlugin("freecam", nullptr, false)
         .Main(argc, argv);
 }

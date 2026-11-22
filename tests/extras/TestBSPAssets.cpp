@@ -139,7 +139,7 @@ struct BSPAssetsSuite {
             graphics.failMaterial = true;
             auto failed = BSP::UploadStudioAsset(assets, graphics, vfs, data, "studio/rollback", raster);
             ExpectTrue(!failed.has_value());
-            if (!failed) ExpectTrue(failed.error().Is(COM::Error::InvalidArgument));
+            if (!failed) ExpectTrue(failed.error() == COM::Error::InvalidArgument);
             ExpectEq(graphics.createdMeshes, 1u);
             ExpectEq(graphics.destroyedMeshes, 1u);
             ExpectEq(graphics.createdTextures, 1u);

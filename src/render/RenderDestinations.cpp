@@ -197,7 +197,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
 
     const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
     if (!acquired) {
-        if (acquired.error().Is(FrameResult::DeviceLost)) {
+        if (acquired.error() == FrameResult::DeviceLost) {
             NoteDeviceLost("AcquireDestinationImage");
         }
         return std::unexpected(acquired.error());

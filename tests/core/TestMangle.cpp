@@ -251,7 +251,7 @@ void test_mangle_dso_symbol_resolution_and_invocation() {
 
         const auto err = fn(COM::InChain(UnknownMangleExt {}), 9);
         ExpectFalse(err.HasValue());
-        if (!err.HasValue()) ExpectTrue(err.error.Is(COM::Error::UnsupportedExtension));
+        if (!err.HasValue()) ExpectTrue(err.error == COM::Error::UnsupportedExtension);
     }
 
     // 4. Layered cv + pointer + reference substitutions (K, V, VK, P, PK, R).

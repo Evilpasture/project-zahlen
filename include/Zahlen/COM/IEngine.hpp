@@ -9,6 +9,9 @@
 // interface, so Graphics() and Query<IGraphicsDevice>() reach the same
 // subobject of the same allocation and a capability costs nothing to obtain.
 
+#include <cstdint>
+#include <vector>
+
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/HostTypes.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
@@ -79,6 +82,15 @@ struct IEngine : IObject {
     // shape as IEntities::EntitiesWithRaw; nothing is allocated on either side
     // of the boundary.
     [[nodiscard]] virtual uint32_t Windows(WindowID* outWindows, uint32_t capacity) const noexcept = 0;
+
+    // Owning convenience wrapper over the count-then-fill seam above:
+    // application-facing code just writes `for (WindowID w : engine->Windows())`.
+    [[nodiscard]] auto Windows() const -> std::vector<WindowID> {
+        const uint32_t count = Windows(nullptr, 0);
+        std::vector<WindowID> result(count);
+        result.resize(Windows(result.data(), count));
+        return result;
+    }
 
     // The drawable extent of a window. A zero extent means the window is
     // minimized or not presentable; drawing into it is a no-op, not an error.

@@ -56,7 +56,7 @@ struct EditorHostSuite {
             state.selectedEntity = root;
             Editor::DestroySelected(*engine.Get(), state);
             ExpectTrue(state.selectedEntity == Entity::Null());
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             ExpectTrue(pipeline->AdvanceFrame(0).HasValue());
             ExpectTrue(pipeline->CancelFrame().HasValue());
             ExpectTrue(!entities.IsAlive(root));
@@ -202,7 +202,7 @@ struct EditorHostSuite {
             auto badSave = session.Save(*engine.Get(), "/proc/zahlen-editor-forbidden/scene.toml");
             ExpectTrue(!badSave.has_value());
             if (!badSave)
-                ExpectTrue(badSave.error().Is(Editor::SessionError::WriteFailed));
+                ExpectTrue(badSave.error() == Editor::SessionError::WriteFailed);
             for (int kind = 1; kind < 5; ++kind)
                 ExpectTrue(session.SpawnShape(*engine.Get(), kind, {float(kind * 3), 5, 0}).has_value());
             auto body   = engine->Entities()->Get<Components::PhysicsComponent>(instance->entities[0])->physicsID;
@@ -241,7 +241,7 @@ struct EditorHostSuite {
             session.Stop(*engine.Get());
             ExpectEq(engine->Graphics()->Viewport().x, originalViewport.x);
             ExpectEq(engine->Graphics()->Viewport().width, originalViewport.width);
-            ExpectTrue(!engine.As<COM::IFramePipeline>()->FramePending());
+            ExpectTrue(!engine.cast<COM::IFramePipeline>()->FramePending());
             return {};
         }
     };

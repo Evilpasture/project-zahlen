@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 
@@ -126,22 +127,16 @@ struct ErrorCode {
         return value != 0;
     }
 
+    // Monadic extraction (mirrors std::get_if / any_cast): engaged iff this
+    // code's category is E. Value matching is plain equality
+    // (`code == E::Member` or `code.get<E>() == E::Member`).
     template <typename E>
         requires std::is_enum_v<E>
-    [[nodiscard]] constexpr bool Is() const noexcept {
-        return category == Hash32(Reflect::ScopedTypeName<E>());
-    }
-
-    template <typename E>
-        requires std::is_enum_v<E>
-    [[nodiscard]] constexpr bool Is(E val) const noexcept {
-        return Is<E>() && value == static_cast<uint32_t>(val);
-    }
-
-    template <typename E>
-        requires std::is_enum_v<E>
-    [[nodiscard]] constexpr E As() const noexcept {
-        return static_cast<E>(value);
+    [[nodiscard]] constexpr auto get() const noexcept -> std::optional<E> {
+        if (category == Hash32(Reflect::ScopedTypeName<E>())) {
+            return static_cast<E>(value);
+        }
+        return std::nullopt;
     }
 
     constexpr auto operator==(const ErrorCode& other) const noexcept -> bool = default;

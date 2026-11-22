@@ -85,7 +85,7 @@ struct PhysicsWorld {
 
     static constexpr uint32_t kStepGateSteppingBit = 0x80000000u;
 
-    [[nodiscard]] auto TryEnterIdleJoltMutation() noexcept -> bool {
+    [[nodiscard]] auto EnterIdleJoltMutation() noexcept -> bool {
         uint32_t cur = stepGate.load(std::memory_order::relaxed);
         while ((cur & kStepGateSteppingBit) == 0u) {
             if (stepGate.compare_exchange_weak(cur, cur + 1u, std::memory_order::acquire, std::memory_order::relaxed)) {

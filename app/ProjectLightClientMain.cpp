@@ -106,9 +106,9 @@ int main(int argc, char* argv[]) {
                             .AddLayer(ZHLN::CameraRig::Layer {})
                             .Run(std::span<char* const>(filteredArgPointers));
     if (!result) {
-        if (result.error().Is<ZHLN::CommandLineError>()) {
+        if (result.error().get<ZHLN::CommandLineError>()) {
             PrintConfigError(std::format("invalid command line ({}); use --help for engine options", result.error().ToError().Message()));
-        } else if (!result.error().Is<ProjectLightStartupError>()) {
+        } else if (!result.error().get<ProjectLightStartupError>()) {
             std::println(stderr, "Fatal project-light client error: {}", result.error().ToError().Message());
         }
         return EXIT_FAILURE;

@@ -78,7 +78,7 @@ struct ScriptValueTypesTestSuite {
         if (!ZHLN::Test::ExpectTrue(!bad.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
-        ZHLN::Test::ExpectTrue(bad.error().Is(ZHLN::ScriptError::TypeMismatch));
+        ZHLN::Test::ExpectTrue(bad.error() == ZHLN::ScriptError::TypeMismatch);
         return {};
     }
 
@@ -109,7 +109,7 @@ struct ScriptValueTypesTestSuite {
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
-        ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
+        ZHLN::Test::ExpectTrue(res.error() == ZHLN::ScriptError::TypeMismatch);
         return {};
     }
 
@@ -230,7 +230,7 @@ struct ScriptValueTypesTestSuite {
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
-        ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
+        ZHLN::Test::ExpectTrue(res.error() == ZHLN::ScriptError::TypeMismatch);
         return {};
     }
 
@@ -242,7 +242,7 @@ struct ScriptValueTypesTestSuite {
         }
         // Two numbers for a three-component vector is a shape problem, not a
         // type problem; scripts get told which.
-        ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::ArityMismatch));
+        ZHLN::Test::ExpectTrue(res.error() == ZHLN::ScriptError::ArityMismatch);
         return {};
     }
 
@@ -257,7 +257,7 @@ struct ScriptValueTypesTestSuite {
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
             return std::unexpected(ScriptValueTypeTestError::BadInputAccepted);
         }
-        ZHLN::Test::ExpectTrue(res.error().Is(ZHLN::ScriptError::TypeMismatch));
+        ZHLN::Test::ExpectTrue(res.error() == ZHLN::ScriptError::TypeMismatch);
         return {};
     }
 

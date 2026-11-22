@@ -160,13 +160,13 @@ void Manager::Cancel(ZHLN::Remote::FetchID handle) {
 }
 
 [[nodiscard]] auto TranslateRemote(ZHLN::ErrorCode code, std::string_view url) -> ZHLN::ErrorCode {
-    if (code.Is(ZHLN::Remote::FetchError::NotFound)) {
+    if (code == ZHLN::Remote::FetchError::NotFound) {
         return Refuse(Error::NotFound, url);
     }
-    if (code.Is(ZHLN::Remote::FetchError::HTTPStatus)) {
+    if (code == ZHLN::Remote::FetchError::HTTPStatus) {
         return Refuse(Error::HTTPStatus, 0, url);
     }
-    if (code.Is(ZHLN::Remote::FetchError::Rejected)) {
+    if (code == ZHLN::Remote::FetchError::Rejected) {
         return Refuse(Error::Rejected, url, 0);
     }
     return code;

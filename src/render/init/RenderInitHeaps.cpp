@@ -333,7 +333,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
             return std::unexpected(mapped.error());
         }
         std::memcpy(mapped->Data(), ltc_mat.data() + kDdsHeaderBytes, matRawSize);
-        std::memcpy(mapped->As<std::byte>() + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
+        std::memcpy(mapped->cast<std::byte>() + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;

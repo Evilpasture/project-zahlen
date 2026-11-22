@@ -179,7 +179,7 @@ auto GeometryManager::Update(BufferID handle, const void* data, size_t size) noe
         if (!mapped) {
             return std::unexpected(mapped.error());
         }
-        std::memcpy(mapped->As<std::byte>() + alignedOffset, data, size);
+        std::memcpy(mapped->cast<std::byte>() + alignedOffset, data, size);
     }
     slot.offset = alignedOffset + size;
 

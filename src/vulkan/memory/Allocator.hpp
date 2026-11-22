@@ -310,7 +310,7 @@ class Buffer {
             return _size;
         }
         template <typename T>
-        [[nodiscard]] auto As() const noexcept -> T* {
+        [[nodiscard]] auto cast() const noexcept -> T* {
             return static_cast<T*>(_ptr);
         }
 

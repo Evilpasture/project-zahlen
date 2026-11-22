@@ -110,8 +110,8 @@ struct CDNTestSuite {
         std::expected<void, ZHLN::ErrorCode> the_errors_are_annotated_enumerators_that_format_like_wire() {
             // An enumerator converts to ErrorCode and back without losing its identity.
             const ZHLN::ErrorCode code = ZHLN::CDN::Error::NotFound;
-            ZHLN::Test::ExpectTrue(code.Is(ZHLN::CDN::Error::NotFound));
-            ZHLN::Test::ExpectFalse(code.Is(ZHLN::CDN::Error::HTTPStatus));
+            ZHLN::Test::ExpectTrue(code == ZHLN::CDN::Error::NotFound);
+            ZHLN::Test::ExpectFalse(code == ZHLN::CDN::Error::HTTPStatus);
 
             // Message() is the annotated template, read back through reflection.
             ZHLN::Test::ExpectEq(std::string(ZHLN::Error(code).Message()), std::string("the CDN has no asset at '{}' (HTTP 404)."));
@@ -133,7 +133,7 @@ struct CDNTestSuite {
                 auto                       made   = ZHLN::CDN::Manager::Create(config);
                 ZHLN::Test::ExpectFalse(made.has_value());
                 if (!made.has_value()) {
-                    ZHLN::Test::ExpectTrue(made.error().Is(ZHLN::CDN::Error::InvalidConfig));
+                    ZHLN::Test::ExpectTrue(made.error() == ZHLN::CDN::Error::InvalidConfig);
                 }
             }
             return {};
@@ -193,7 +193,7 @@ struct CDNTestSuite {
                 auto refused = cdn.GetURL(path);
                 ZHLN::Test::ExpectFalse(refused.has_value());
                 if (!refused.has_value()) {
-                    ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::Error::InvalidPath));
+                    ZHLN::Test::ExpectTrue(refused.error() == ZHLN::CDN::Error::InvalidPath);
                 }
             }
             return {};
@@ -283,7 +283,7 @@ struct CDNTestSuite {
             auto refused = cdn.Fetch("ok", RejectAll);
             ZHLN::Test::ExpectFalse(refused.has_value());
             if (!refused.has_value()) {
-                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::Error::Rejected));
+                ZHLN::Test::ExpectTrue(refused.error() == ZHLN::CDN::Error::Rejected);
             }
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("ok").value_or(std::string())).cacheFileName));
             return {};
@@ -451,7 +451,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("binary"); // Fetch specifically promises an on-disk file
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path) {
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error() == ZHLN::CDN::Error::CacheWrite);
             }
             const auto request = made->RequestAsset("binary");
             if (ZHLN::Test::ExpectTrue(request.has_value())) {
@@ -481,7 +481,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("ok", IsHello);
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path) {
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error() == ZHLN::CDN::Error::CacheWrite);
             }
             return {};
         }
@@ -508,7 +508,7 @@ struct CDNTestSuite {
             auto       loaded = made->Load("notfound", IsHello);
             ZHLN::Test::ExpectFalse(loaded.has_value());
             if (!loaded) {
-                ZHLN::Test::ExpectTrue(loaded.error().Is(ZHLN::CDN::Error::NotFound));
+                ZHLN::Test::ExpectTrue(loaded.error() == ZHLN::CDN::Error::NotFound);
             }
             ZHLN::Test::ExpectEq(server.Requests(), before + 1);
             ZHLN::Test::ExpectFalse(std::filesystem::exists(dir / key));
@@ -746,7 +746,7 @@ struct CDNTestSuite {
             auto path = made->Fetch("asset", IsHello);
             ZHLN::Test::ExpectFalse(path.has_value());
             if (!path)
-                ZHLN::Test::ExpectTrue(path.error().Is(ZHLN::CDN::Error::CacheWrite));
+                ZHLN::Test::ExpectTrue(path.error() == ZHLN::CDN::Error::CacheWrite);
             return {};
         }
 
@@ -759,15 +759,15 @@ struct CDNTestSuite {
             ExpectBody(*made, "asset", "hello");
             server.SetResource("/asset", {.body = "bad", .etag = "\"v2\""});
             auto rejected = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!rejected && rejected.error().Is(ZHLN::CDN::Error::Rejected));
+            ZHLN::Test::ExpectTrue(!rejected && rejected.error() == ZHLN::CDN::Error::Rejected);
             server.SetResource("/asset", {.body = "error", .status = 500});
             auto failed = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!failed && failed.error().Is(ZHLN::CDN::Error::HTTPStatus));
+            ZHLN::Test::ExpectTrue(!failed && failed.error() == ZHLN::CDN::Error::HTTPStatus);
             server.SetResource("/asset", {.body = "world", .etag = "\"v2\""});
             ExpectBody(*made, "asset", "world");
             server.SetResource("/asset", {.status = 404});
             auto removed = made->Load("asset", IsHello);
-            ZHLN::Test::ExpectTrue(!removed && removed.error().Is(ZHLN::CDN::Error::NotFound));
+            ZHLN::Test::ExpectTrue(!removed && removed.error() == ZHLN::CDN::Error::NotFound);
             ZHLN::Test::ExpectFalse(made->Cache().Exists(ZHLN::Remote::ResolveURL(server.Url("/asset")).cacheFileName));
             return {};
         }
@@ -780,7 +780,7 @@ struct CDNTestSuite {
                 if (!ZHLN::Test::ExpectTrue(server.IsListening() && made.has_value()))
                     return std::unexpected(CDNTestError::ManagerRefused);
                 auto bytes = made->Load("asset", IsHello);
-                ZHLN::Test::ExpectTrue(!bytes && bytes.error().Is(ZHLN::CDN::Error::HTTPStatus));
+                ZHLN::Test::ExpectTrue(!bytes && bytes.error() == ZHLN::CDN::Error::HTTPStatus);
                 ZHLN::Test::ExpectEq(server.Requests(), uint64_t {1}); // bounded: no retry loop
                 ZHLN::Test::ExpectFalse(made->Cache().Exists(ZHLN::Remote::ResolveURL(server.Url("/asset")).cacheFileName));
             }
@@ -874,13 +874,13 @@ struct CDNTestSuite {
             auto missing = cdn.Fetch("notfound");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing.has_value()) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::CDN::Error::NotFound));
+                ZHLN::Test::ExpectTrue(missing.error() == ZHLN::CDN::Error::NotFound);
             }
 
             auto broken = cdn.Load("servererror");
             ZHLN::Test::ExpectFalse(broken.has_value());
             if (!broken.has_value()) {
-                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::CDN::Error::HTTPStatus));
+                ZHLN::Test::ExpectTrue(broken.error() == ZHLN::CDN::Error::HTTPStatus);
             }
 
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("notfound").value_or(std::string())).cacheFileName));

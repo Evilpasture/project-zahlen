@@ -447,8 +447,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     const int              physicsDrawMode = engine.PhysicsDrawMode();
 
     sceneData.dt = dt;
-    SubmitParticleEmitters(query.As<ParticleSubmitQuery>(), sceneData);
-    RenderDebug(engine, engine.CullingStatsSnapshot(), query.As<RenderDebugQuery>(), physicsDrawMode);
+    SubmitParticleEmitters(query.Project<ParticleSubmitQuery>(), sceneData);
+    RenderDebug(engine, engine.CullingStatsSnapshot(), query.Project<RenderDebugQuery>(), physicsDrawMode);
 
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
@@ -458,7 +458,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return FrameSkipped {};
     }
     FrameScope gpuFrame = std::move(**begin_res);
-    if (auto env = SyncEnvironmentMap(query.As<EnvironmentQuery>(), rc, engine.Assets()); !env) {
+    if (auto env = SyncEnvironmentMap(query.Project<EnvironmentQuery>(), rc, engine.Assets()); !env) {
         return std::unexpected(env.error());
     }
     Entity cameraEntity = cameraEntities[0];
@@ -471,8 +471,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    auto sun = LightingSystem::GetSun(query.As<LightingSystem::SunQuery>());
-    if (const auto env = query.GetSingleton<Components::EnvironmentMapComponent>(); env && !HasSceneSun(query.As<SceneSunQuery>())) {
+    auto sun = LightingSystem::GetSun(query.Project<LightingSystem::SunQuery>());
+    if (const auto env = query.GetSingleton<Components::EnvironmentMapComponent>(); env && !HasSceneSun(query.Project<SceneSunQuery>())) {
         if (!env->source.empty()) {
             sun.intensity = 0.0f;
         }
@@ -546,7 +546,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     UploadPosePalettes(rc, poseUploads);
 
     if (physicsDrawMode == 0) {
-        SubmitVisibleMeshes(query.As<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+        SubmitVisibleMeshes(query.Project<MeshSubmitQuery>(), rc, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
     if (auto sim_res = gpuFrame.DispatchSimulations(sceneData, dt); !sim_res) {
@@ -562,7 +562,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return {};
     }
     const FrameTarget attachment = **target;
-    const auto       sceneView   = MakeViewFor(query.As<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
+    const auto       sceneView   = MakeViewFor(query.Project<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
     if (!sceneView) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }

@@ -7,7 +7,7 @@ loop and input/UI composition.
 
 ```cpp
 #include <Zahlen/COM/IFramePipeline.hpp>
-auto pipeline = engine.As<ZHLN::COM::IFramePipeline>();
+auto pipeline = engine.cast<ZHLN::COM::IFramePipeline>();
 if (!pipeline) { /* engine does not support staged frames */ }
 engine->ProcessEvents();
 // host gameplay, animation authoring and explicit SubmitUI

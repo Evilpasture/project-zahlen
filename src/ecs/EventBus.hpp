@@ -650,22 +650,12 @@ class EventWriter {
         return Visit([](EventBus&) {});
     }
 
-    [[nodiscard]] auto TryPush(const T& event) const -> bool
-        requires std::copy_constructible<T>
-    {
-        return Visit([&](EventBus& bus) { bus.Push<T>(event); });
-    }
-
-    [[nodiscard]] auto TryPush(T&& event) const -> bool
-        requires std::move_constructible<T>
-    {
-        return Visit([&](EventBus& bus) { bus.Push<T>(std::move(event)); });
-    }
-
+    // An expired/moved-from writer is a programmer invariant violation, not
+    // an environmental failure: Push panics instead of offering a `Try` twin.
     void Push(const T& event) const
         requires std::copy_constructible<T>
     {
-        if (!TryPush(event)) {
+        if (!Visit([&](EventBus& bus) { bus.Push<T>(event); })) {
             Panic("EventWriter<T>::Push called with an expired or moved-from writer");
         }
     }
@@ -673,7 +663,7 @@ class EventWriter {
     void Push(T&& event) const
         requires std::move_constructible<T>
     {
-        if (!TryPush(std::move(event))) {
+        if (!Visit([&](EventBus& bus) { bus.Push<T>(std::move(event)); })) {
             Panic("EventWriter<T>::Push called with an expired or moved-from writer");
         }
     }
@@ -682,71 +672,38 @@ class EventWriter {
     // such a reference would become invalid after a push, drain, or Clear().
     template <typename... Args>
         requires std::constructible_from<T, Args...>
-    [[nodiscard]] auto TryEmplace(Args&&... args) const -> bool {
-        return Visit([&](EventBus& bus) { bus.Emplace<T>(std::forward<Args>(args)...); });
-    }
-
-    template <typename... Args>
-        requires std::constructible_from<T, Args...>
     void Emplace(Args&&... args) const {
-        if (!TryEmplace(std::forward<Args>(args)...)) {
+        if (!Visit([&](EventBus& bus) { bus.Emplace<T>(std::forward<Args>(args)...); })) {
             Panic("EventWriter<T>::Emplace called with an expired or moved-from writer");
         }
-    }
-
-    [[nodiscard]] auto TryPushRange(std::span<const T> events) const -> bool
-        requires std::copy_constructible<T>
-    {
-        return Visit([&](EventBus& bus) { bus.PushRange<T>(events); });
     }
 
     void PushRange(std::span<const T> events) const
         requires std::copy_constructible<T>
     {
-        if (!TryPushRange(events)) {
+        if (!Visit([&](EventBus& bus) { bus.PushRange<T>(events); })) {
             Panic("EventWriter<T>::PushRange called with an expired or moved-from writer");
         }
     }
 
     template <typename Fn>
-    [[nodiscard]] auto TryDrain(Fn&& fn) const -> std::optional<size_t> {
+    auto Drain(Fn&& fn) const -> size_t {
         std::optional<size_t> result;
         if (!Visit([&](EventBus& bus) { result = bus.Drain<T>(std::forward<Fn>(fn)); })) {
-            return std::nullopt;
-        }
-        return result;
-    }
-
-    template <typename Fn>
-    auto Drain(Fn&& fn) const -> size_t {
-        auto result = TryDrain(std::forward<Fn>(fn));
-        if (!result.has_value()) {
             Panic("EventWriter<T>::Drain called with an expired or moved-from writer");
         }
         return *result;
     }
 
-    [[nodiscard]] auto TryClear() const noexcept -> bool {
-        return Visit([](EventBus& bus) { bus.ClearChannel<T>(); });
-    }
-
     void Clear() const noexcept {
-        if (!TryClear()) {
+        if (!Visit([](EventBus& bus) { bus.ClearChannel<T>(); })) {
             Panic("EventWriter<T>::Clear called with an expired or moved-from writer");
         }
     }
 
-    [[nodiscard]] auto TryPendingCount() const noexcept -> std::optional<size_t> {
+    [[nodiscard]] auto PendingCount() const noexcept -> size_t {
         std::optional<size_t> count;
         if (!Visit([&](EventBus& bus) { count = bus.Count<T>(); })) {
-            return std::nullopt;
-        }
-        return count;
-    }
-
-    [[nodiscard]] auto PendingCount() const noexcept -> size_t {
-        const auto count = TryPendingCount();
-        if (!count.has_value()) {
             Panic("EventWriter<T>::PendingCount called with an expired or moved-from writer");
         }
         return *count;

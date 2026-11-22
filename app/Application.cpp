@@ -155,20 +155,10 @@ auto App::AddPlugin(COM::Ref<COM::IAppLayer> plugin) -> App& {
     return *this;
 }
 
-auto App::LoadPlugin(std::string_view spec, const COM::ChainInNode* config) -> App& {
+auto App::LoadPlugin(std::string_view spec, const COM::ChainInNode* config, bool required) -> App& {
     _entries.push_back(
         LayerEntry {
-            .plugin   = CapturePluginRequest(spec, true, config),
-            .isPlugin = true,
-        }
-    );
-    return *this;
-}
-
-auto App::TryLoadPlugin(std::string_view spec, const COM::ChainInNode* config) -> App& {
-    _entries.push_back(
-        LayerEntry {
-            .plugin   = CapturePluginRequest(spec, false, config),
+            .plugin   = CapturePluginRequest(spec, required, config),
             .isPlugin = true,
         }
     );
@@ -179,7 +169,7 @@ auto App::ExitStatus(const AppRunResult& result) -> int {
     if (result.has_value()) {
         return EXIT_SUCCESS;
     }
-    if (!result.error().Is<CommandLineError>()) {
+    if (!result.error().get<CommandLineError>()) {
         std::println(stderr, "Error: {}", result.error());
     }
     return EXIT_FAILURE;
@@ -541,7 +531,7 @@ auto App::RunConfigured(
         return std::unexpected(created.error());
     }
     COM::Ref<COM::IEngine> engine   = std::move(*created);
-    auto                   pipeline = engine.As<COM::IFramePipeline>();
+    auto                   pipeline = engine.cast<COM::IFramePipeline>();
     if (!pipeline) {
         layers.clear();
         pipeline = {};

@@ -102,7 +102,7 @@ struct CharacterHostSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto engine   = std::move(*made);
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
             auto& entities = *engine->Entities();
@@ -158,7 +158,7 @@ struct CharacterHostSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto engine   = std::move(*made);
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
             auto&      entities = *engine->Entities();
@@ -191,7 +191,7 @@ struct CharacterHostSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto engine   = std::move(*made);
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
             const auto run = [&](int hz) -> double {

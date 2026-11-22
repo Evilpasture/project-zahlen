@@ -266,7 +266,7 @@ struct BSPWorldAssetsSuite {
             auto failed           = BSP::UploadAsset(assets, graphics, source, document, raster);
             ExpectTrue(!failed.has_value());
             if (!failed)
-                ExpectTrue(failed.error().Is(COM::Error::InvalidArgument));
+                ExpectTrue(failed.error() == COM::Error::InvalidArgument);
             ExpectEq(graphics.createdMeshes, 1u);
             ExpectEq(graphics.destroyedMeshes, 1u);
             ExpectEq(graphics.createdTextures, 1u);

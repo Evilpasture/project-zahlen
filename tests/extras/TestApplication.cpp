@@ -121,7 +121,7 @@ template <typename E>
     requires std::is_enum_v<E>
 void ExpectError(const AppRunResult& result, E expected) {
     Expect(!result.has_value());
-    if (!result) Expect(result.error().Is(expected));
+    if (!result) Expect(result.error() == expected);
 }
 } // namespace
 
@@ -377,13 +377,13 @@ void test_engine_config_is_reflected_including_nested_physics_and_rejects_collis
     char* bad[] = {program, invalid};
     auto failed = ParseEngineConfig(std::span<char* const>(bad), config);
     Expect(!failed.has_value());
-    if (!failed) Expect(failed.error().Is(CommandLineError::InvalidValue));
+    if (!failed) Expect(failed.error() == CommandLineError::InvalidValue);
     Expect(config.physics.maxBodies == 4096u);
 
     const std::array colliding = {CliFlag {.key = "--width", .action = [](std::string_view) -> std::expected<void, CommandLineError> { return {}; }}};
     auto duplicate = ParseEngineConfig(std::span<char* const>(args), config, colliding);
     Expect(!duplicate.has_value());
-    if (!duplicate) Expect(duplicate.error().Is(CommandLineError::DuplicateFlag));
+    if (!duplicate) Expect(duplicate.error() == CommandLineError::DuplicateFlag);
 }
 
 struct ConflictingGameConfig { bool headless = false; };
@@ -479,7 +479,7 @@ void test_layer_tick_precedes_update_and_stops_on_host_error() {
         return std::unexpected(PreparationFailure::Refused);
     });
     Expect(!result.has_value());
-    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
+    if (!result) Expect(result.error() == PreparationFailure::Refused);
     Expect(calls == std::vector<std::string_view> {"start", "tick", "update", "stop"});
 }
 
@@ -509,7 +509,7 @@ void test_layer_tick_errors_stop_entered_layers_in_reverse() {
                             .AddLayer(Layer {2, &calls})
                             .Run();
     Expect(!result.has_value());
-    if (!result) Expect(result.error().Is(PreparationFailure::Refused));
+    if (!result) Expect(result.error() == PreparationFailure::Refused);
     Expect(calls == std::vector<int> {1, 2, 11, -2, -1});
 }
 

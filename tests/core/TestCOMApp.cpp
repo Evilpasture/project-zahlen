@@ -135,8 +135,8 @@ void test_com_app_max_frames_after_tick_and_iapp_layer() {
     std::vector<std::string> events;
     bool                     pluginDestroyed = false;
     auto                     plugin          = COM::Ref<COM::IAppLayer>::Adopt(new InlinePlugin(&events, &pluginDestroyed));
-    ExpectTrue(plugin.As<COM::IObject>().Get() != nullptr);
-    ExpectTrue(plugin.As<COM::IAppLayer>().Get() != nullptr);
+    ExpectTrue(plugin.cast<COM::IObject>().Get() != nullptr);
+    ExpectTrue(plugin.cast<COM::IAppLayer>().Get() != nullptr);
 
     const auto result = App()
                             .Title("Unified App frame limit")

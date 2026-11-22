@@ -574,10 +574,9 @@ struct ContainersTestSuite {
             // Test power-of-two circular buffer wrapping
             for (int i = 0; i < 20; ++i) {
                 q.push(i);
-                int  popped = -1;
-                bool ok     = q.try_pop(popped);
-                ZHLN::Test::ExpectTrue(ok);
-                ZHLN::Test::ExpectEq(popped, i);
+                auto popped = q.Pop();
+                ZHLN::Test::ExpectTrue(popped.has_value());
+                ZHLN::Test::ExpectEq(popped.value_or(-1), i);
             }
             ZHLN::Test::ExpectTrue(q.empty());
 
@@ -598,17 +597,15 @@ struct ContainersTestSuite {
 
             // Consume in parallel
             ZHLN::TaskSystem::ParallelFor(kConcurrentItems, 128, [&](uint32_t, uint32_t, uint32_t) {
-                int outVal = 0;
-                if (concurrentQ.try_pop(outVal)) {
-                    totalPoppedSum.fetch_add(outVal, std::memory_order::relaxed);
+                if (auto outVal = concurrentQ.Pop()) {
+                    totalPoppedSum.fetch_add(*outVal, std::memory_order::relaxed);
                     popCount.fetch_add(1, std::memory_order::relaxed);
                 }
             });
 
             // Drain any remainder sequentially
-            int val = 0;
-            while (concurrentQ.try_pop(val)) {
-                totalPoppedSum.fetch_add(val, std::memory_order::relaxed);
+            while (auto val = concurrentQ.Pop()) {
+                totalPoppedSum.fetch_add(*val, std::memory_order::relaxed);
                 popCount.fetch_add(1, std::memory_order::relaxed);
             }
 

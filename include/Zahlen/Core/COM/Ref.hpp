@@ -58,8 +58,10 @@ public:
         return *this;
     }
 
+    // Interface cast (any_cast-style name; Query<T> carries the result):
+    // empty Ref when the object does not expose Target.
     template <typename Target>
-    [[nodiscard]] auto As() const noexcept -> Ref<Target> {
+    [[nodiscard]] auto cast() const noexcept -> Ref<Target> {
         if (m_ptr == nullptr) return {};
         return Ref<Target>::Adopt(m_ptr->template Query<Target>());
     }

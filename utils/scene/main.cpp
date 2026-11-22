@@ -64,7 +64,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesyst
 
     const auto applyOverlay = [&](ZHLN::GraphicsSettings& dst) -> std::expected<void, ZHLN::ErrorCode> {
         auto callRes = ZHLN::ReflectLua::ApplyCallPatchString(dst, *source, chunkName, ZHLN::LuaBudget {}, hw);
-        if (!callRes && callRes.error().Is(ZHLN::LuaError::NotAFunction)) {
+        if (!callRes && callRes.error() == ZHLN::LuaError::NotAFunction) {
             return ZHLN::ReflectLua::ApplyPatchString(dst, *source, chunkName);
         }
         return callRes;

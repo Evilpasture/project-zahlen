@@ -40,7 +40,8 @@ class BoundedFiberQueue {
         _dequeuePos.store(0, std::memory_order::relaxed);
     }
 
-    auto TryPush(Fiber* fiber) noexcept -> bool {
+    // Fullness is in the bool return; no `Try` verb needed.
+    auto Push(Fiber* fiber) noexcept -> bool {
         Cell*  cell = nullptr;
         size_t pos  = _enqueuePos.load(std::memory_order::relaxed);
         for (;;) {
@@ -62,7 +63,8 @@ class BoundedFiberQueue {
         return true;
     }
 
-    [[nodiscard]] auto TryPop() noexcept -> Fiber* {
+    // Empty queue yields nullptr; the pointer is the optional.
+    [[nodiscard]] auto Pop() noexcept -> Fiber* {
         Cell*  cell = nullptr;
         size_t pos  = _dequeuePos.load(std::memory_order::relaxed);
         for (;;) {
@@ -161,7 +163,7 @@ enum class EnqueueResult : uint8_t {
     if (!wasEmpty) {
         return EnqueueResult::AlreadyQueued;
     }
-    while (!queue.TryPush(fiber)) {
+    while (!queue.Push(fiber)) {
         // Every ring is sized at twice the fiber count and a fiber owns at most
         // one entry per ring, so it can only be full for a few instructions.
         CPURelax();
@@ -170,7 +172,7 @@ enum class EnqueueResult : uint8_t {
 }
 
 [[nodiscard]] auto DequeueFiber(BoundedFiberQueue& queue) noexcept -> Fiber* {
-    Fiber* fiber = queue.TryPop();
+    Fiber* fiber = queue.Pop();
     if (fiber != nullptr) {
         fiber->queued.store(false, std::memory_order::release);
     }
@@ -236,12 +238,12 @@ enum class EnqueueResult : uint8_t {
         return nullptr;
     }
     const uint32_t base = ClampSlot(preferredSlot, totalWorkers);
-    if (Fiber* local = s_workerSlots[base].freeQueue.TryPop()) {
+    if (Fiber* local = s_workerSlots[base].freeQueue.Pop()) {
         return local;
     }
     for (uint32_t offset = 1; offset < totalWorkers; ++offset) {
         const uint32_t donor = (base + offset) % totalWorkers;
-        if (Fiber* stolen = s_workerSlots[donor].freeQueue.TryPop()) {
+        if (Fiber* stolen = s_workerSlots[donor].freeQueue.Pop()) {
             return stolen;
         }
     }
@@ -259,7 +261,7 @@ void RecycleFiber(Fiber* fiber, uint32_t preferredSlot, uint32_t totalWorkers) n
         return;
     }
     if (totalWorkers > 0 && s_workerSlots) {
-        s_workerSlots[ClampSlot(preferredSlot, totalWorkers)].freeQueue.TryPush(fiber);
+        s_workerSlots[ClampSlot(preferredSlot, totalWorkers)].freeQueue.Push(fiber);
     }
 }
 
@@ -411,7 +413,7 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     for (uint32_t i = 0; i < numFibers; ++i) {
         s_fiberData[i] = {};
         s_fiberPool[i] = Fiber::Create(stackSize, FiberMain, &s_fiberData[i]);
-        s_workerSlots[i % totalWorkers].freeQueue.TryPush(s_fiberPool[i]);
+        s_workerSlots[i % totalWorkers].freeQueue.Push(s_fiberPool[i]);
     }
 
     s_workerCount.store(totalWorkers, std::memory_order::release);
@@ -465,7 +467,7 @@ auto DispatchBackground(const Task task, Counter* counter) noexcept
         }
         data->task = {};
         data->counter = nullptr;
-        s_workerSlots[targetSlot].freeQueue.TryPush(fiber);
+        s_workerSlots[targetSlot].freeQueue.Push(fiber);
         return std::unexpected(BackgroundDispatchError::QueueFull);
     }
 

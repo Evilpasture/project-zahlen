@@ -71,7 +71,7 @@ struct FramePipelineSuite {
                               .Run();
             ExpectTrue(!result.has_value());
             if (!result)
-                ExpectTrue(result.error().Is(Test::StageFailure::Refused));
+                ExpectTrue(result.error() == Test::StageFailure::Refused);
             ExpectTrue(order == std::vector<int>({1, 2, 4, 5}));
             return {};
         }
@@ -102,7 +102,7 @@ struct FramePipelineSuite {
                               .Run();
             ExpectTrue(!result.has_value());
             if (!result)
-                ExpectTrue(result.error().Is(Test::StageFailure::Refused));
+                ExpectTrue(result.error() == Test::StageFailure::Refused);
             ExpectEq(later, 0);
             ExpectEq(stopped, 1);
             return {};
@@ -132,21 +132,21 @@ struct FramePipelineSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto engine   = std::move(*created);
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
-            auto root = pipeline.As<COM::IEngine>();
+            auto root = pipeline.cast<COM::IEngine>();
             ExpectEq(root.Get(), engine.Get());
             ExpectTrue(!pipeline->FramePending());
             const auto initialViewport = engine->Graphics()->Viewport();
             ExpectEq(initialViewport.width, uint32_t {160});
             ExpectEq(initialViewport.height, uint32_t {120});
             const auto noFrame = pipeline->FinishFrame();
-            ExpectTrue(!noFrame.HasValue() && noFrame.error.Is(COM::FramePipelineError::NoPendingFrame));
+            ExpectTrue(!noFrame.HasValue() && noFrame.error == COM::FramePipelineError::NoPendingFrame);
             ExpectTrue(!pipeline->CancelFrame().HasValue());
             for (const float dt: {-1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
                 const auto bad = pipeline->AdvanceFrame(dt);
-                ExpectTrue(!bad.HasValue() && bad.error.Is(COM::FramePipelineError::InvalidDeltaTime));
+                ExpectTrue(!bad.HasValue() && bad.error == COM::FramePipelineError::InvalidDeltaTime);
             }
             ExpectEq(engine->CurrentFrame(), uint64_t {0});
             ExpectTrue(pipeline->AdvanceFrame(0).HasValue());
@@ -156,7 +156,7 @@ struct FramePipelineSuite {
             if (camera)
                 ExpectEq(camera->frameCounter, uint32_t {0});
             const auto duplicate = pipeline->AdvanceFrame(10.0f);
-            ExpectTrue(!duplicate.HasValue() && duplicate.error.Is(COM::FramePipelineError::FrameInProgress));
+            ExpectTrue(!duplicate.HasValue() && duplicate.error == COM::FramePipelineError::FrameInProgress);
             ExpectTrue(!engine->Tick(10.0f).HasValue());
             ExpectTrue(!engine->RecreateGraphicsDevice().HasValue());
             ExpectEq(engine->CurrentFrame(), uint64_t {0});
@@ -181,7 +181,7 @@ struct FramePipelineSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto       engine   = std::move(*created);
-            auto       pipeline = engine.As<COM::IFramePipeline>();
+            auto       pipeline = engine.cast<COM::IFramePipeline>();
             auto&      entities = *engine->Entities();
             const auto body     = engine->Simulation()->CreateBoxBody({0.5f, 0.5f, 0.5f}, {.position = {0, 10, 0}});
             if (!ExpectTrue(body.HasValue()))
@@ -231,7 +231,7 @@ struct FramePipelineSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto       engine   = std::move(*created);
-            auto       pipeline = engine.As<COM::IFramePipeline>();
+            auto       pipeline = engine.cast<COM::IFramePipeline>();
             auto&      entities = *engine->Entities();
             const auto target   = entities.Spawn(Components::TransformComponent {.position = {4, 3, 2}}, Components::WorldTransformComponent {});
             const auto camera   = entities.Spawn(
@@ -259,7 +259,7 @@ struct FramePipelineSuite {
             if (!ExpectTrue(created.has_value()))
                 return {};
             auto       engine   = std::move(*created);
-            auto       pipeline = engine.As<COM::IFramePipeline>();
+            auto       pipeline = engine.cast<COM::IFramePipeline>();
             const auto entity   = engine->Entities()->Spawn(Components::TransformComponent {});
             ExpectTrue(pipeline->AdvanceFrame(0).HasValue());
             engine->ClearScene();
@@ -339,7 +339,7 @@ struct FramePipelineSuite {
                                      .Run();
             ExpectTrue(!result.has_value());
             if (!result)
-                ExpectTrue(result.error().Is(Test::StageFailure::Refused));
+                ExpectTrue(result.error() == Test::StageFailure::Refused);
             ExpectTrue(stopped);
             return {};
         }

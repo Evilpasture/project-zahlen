@@ -21,7 +21,7 @@ enum class DeviceFault : uint8_t {
 };
 
 [[nodiscard]] constexpr auto IsDeviceLost(ErrorCode code) noexcept -> bool {
-    return code.Is(DeviceFault::Lost);
+    return code == DeviceFault::Lost;
 }
 
 } // namespace ZHLN::Vk

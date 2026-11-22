@@ -712,7 +712,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
 
 One `Engine` implements all eight interfaces, so `engine->Graphics()` and
-`engine.As<IGraphicsDevice>()` reach the same subobject of one allocation. The
+`engine.cast<IGraphicsDevice>()` reach the same subobject of one allocation. The
 accessors are **borrows** and must not be released; `Query` / `As` take a
 reference the way COM expects.
 

@@ -82,7 +82,7 @@ struct alignas(64) BodyTable {
     }
 
     [[nodiscard]] auto ReserveSlot(SlotState pendingState, JPH::EMotionType motion, JPH::RVec3Arg spawnPos, JPH::QuatArg spawnRot) -> BodyID;
-    [[nodiscard]] auto TryMarkPendingDestroy(BodyID handle) noexcept -> bool;
+    [[nodiscard]] auto MarkPendingDestroy(BodyID handle) noexcept -> bool;
     [[nodiscard]] auto IsSlotActive(BodyID handle) const noexcept -> bool;
     void               RemoveDenseAndReleaseSlot(uint32_t slot, TransformFrame& backFrame) noexcept;
 };

@@ -252,7 +252,7 @@ struct ReflectLuaSuite {
         if (unknownRes) {
             return std::unexpected(LuaSuiteFail::ExpectedFailureDidNotHappen);
         }
-        if (!unknownRes.error().Is(ZHLN::LuaError::UnknownField) || !Near(live.post.exposure, 2.2f)) {
+        if (!(unknownRes.error() == ZHLN::LuaError::UnknownField)|| !Near(live.post.exposure, 2.2f)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
@@ -261,7 +261,7 @@ struct ReflectLuaSuite {
             live,
             "return { qualityPreset = 'SuperDuperUltra' }"
         );
-        if (enumRes || !enumRes.error().Is(ZHLN::LuaError::InvalidEnumString)) {
+        if (enumRes || !(enumRes.error() == ZHLN::LuaError::InvalidEnumString)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
@@ -311,15 +311,15 @@ struct ReflectLuaSuite {
         if (!shortSeq || !Near(color.x, 7.0f) || !Near(color.y, 8.0f) || !Near(color.z, 3.0f) || !Near(color.w, 4.0f))
             return std::unexpected(LuaSuiteFail::WrongValue);
         auto bad = ZHLN::ReflectLua::ApplyPatchString(color, "return { 5, 'bad' }");
-        if (bad || !bad.error().Is(ZHLN::LuaError::TypeMismatch) || !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
+        if (bad || !(bad.error() == ZHLN::LuaError::TypeMismatch)|| !Near(color.x, 7.0f) || !Near(color.y, 8.0f))
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         auto longSeq = ZHLN::ReflectLua::ApplyPatchString(color, "return { 1, 2, 3, 4, 5 }");
-        if (longSeq || !longSeq.error().Is(ZHLN::LuaError::OutOfRange) || !Near(color.x, 7.0f))
+        if (longSeq || !(longSeq.error() == ZHLN::LuaError::OutOfRange)|| !Near(color.x, 7.0f))
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
 
         // Constructing a new vector retains the full-sequence value contract.
         auto incomplete = ZHLN::ReflectLua::EvaluateString<ZHLN::FVec4>("return { 1, 2 }");
-        if (incomplete || !incomplete.error().Is(ZHLN::LuaError::OutOfRange))
+        if (incomplete || !(incomplete.error() == ZHLN::LuaError::OutOfRange))
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         return {};
     }
@@ -333,7 +333,7 @@ struct ReflectLuaSuite {
             "return function(m) return m end", "matrix_roundtrip", ZHLN::LuaBudget {}, *matrix);
         if (!roundTrip || roundTrip->elements != matrix->elements) return std::unexpected(LuaSuiteFail::WrongValue);
         auto bad = ZHLN::ReflectLua::ApplyPatchString(*matrix, "return { 1, 2 }");
-        if (bad || !bad.error().Is(ZHLN::LuaError::OutOfRange) || (*matrix)[0, 1] != 5.0f)
+        if (bad || !(bad.error() == ZHLN::LuaError::OutOfRange)|| (*matrix)[0, 1] != 5.0f)
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         return {};
     }
@@ -362,7 +362,7 @@ struct ReflectLuaSuite {
         // 2. Binary bytecode header ("\x1bLJ") must be rejected by text-only loader.
         const std::string fakeBytecode("\x1bLJ\x02\x00\x00", 6);
         auto              bcRes = ZHLN::ReflectLua::EvaluateString<SampleAggregate>(fakeBytecode, "bytecode");
-        if (bcRes || !bcRes.error().Is(ZHLN::LuaError::SyntaxError)) {
+        if (bcRes || !(bcRes.error() == ZHLN::LuaError::SyntaxError)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
@@ -371,7 +371,7 @@ struct ReflectLuaSuite {
         auto            loopRes = ZHLN::ReflectLua::EvaluateString<SampleAggregate>(
             "while true do end return {}", "inf_loop", tightCpu
         );
-        if (loopRes || !loopRes.error().Is(ZHLN::LuaError::InstructionBudgetExceeded)) {
+        if (loopRes || !(loopRes.error() == ZHLN::LuaError::InstructionBudgetExceeded)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 
@@ -382,7 +382,7 @@ struct ReflectLuaSuite {
             "oom_chunk",
             tightMem
         );
-        if (oomRes || !oomRes.error().Is(ZHLN::LuaError::MemoryBudgetExceeded)) {
+        if (oomRes || !(oomRes.error() == ZHLN::LuaError::MemoryBudgetExceeded)) {
             return std::unexpected(LuaSuiteFail::WrongErrorCode);
         }
 

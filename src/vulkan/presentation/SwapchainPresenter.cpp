@@ -144,7 +144,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     // 4. Acquire from swapchain abstraction — no raw Vulkan handles leaked
     auto acquired = swapchain.AcquireNext(sync.ImageAvailableSemaphore(slot));
     if (!acquired) {
-        if (acquired.error().Is(SwapchainAcquireError::OutOfDate)) {
+        if (acquired.error() == SwapchainAcquireError::OutOfDate) {
             if (desiredExtent.width != 0 && desiredExtent.height != 0) {
                 // Properly propagate rebuild failure instead of casting to (void)
                 if (auto rebuilt = Rebuild(desiredExtent.width, desiredExtent.height); !rebuilt) {
@@ -242,7 +242,7 @@ auto SwapchainPresenter::Present(
 
     // If the timing queue overflows, DO NOT re-submit the consumed present_sem!
     // Instead, drain past timings, increase queue size or fall back gracefully for future frames.
-    if (!presented && present_id != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {
+    if (!presented && present_id != nullptr && presented.error().get<VkResult>() == VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT) {
         if (_ctx != nullptr) {
             _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
         }

@@ -235,7 +235,7 @@ template <auto Fn>
             }
             return {false, 0U};
         }
-        [[nodiscard]] consteval auto TrySubstitute(Reflect::EntityToken token) -> bool {
+        [[nodiscard]] consteval auto Substitute(Reflect::EntityToken token) -> bool {
             const auto [found, idx] = FindSubstitution(token);
             if (found) {
                 AppendSubstitution(idx);
@@ -406,7 +406,7 @@ template <auto Fn>
             static_assert(kDesc.hasIdentifier, "ItaniumMangle: unnamed template-template arguments are not supported.");
             constexpr auto kPolicy = scanScopes.template operator()<TagWalk, T>(TagWalk {});
             assertScopes.template                        operator()<kPolicy>();
-            if (m.TrySubstitute(kDesc.id)) {
+            if (m.Substitute(kDesc.id)) {
                 return;
             }
             if constexpr (kDesc.isTopLevel) {
@@ -427,7 +427,7 @@ template <auto Fn>
             assertScopes.template                        operator()<kPolicy>();
             if constexpr (kDesc.isTopLevel) {
                 if constexpr (kDesc.isTemplateSpecialization) {
-                    if (!m.TrySubstitute(kDesc.templateId)) {
+                    if (!m.Substitute(kDesc.templateId)) {
                         m.AppendSourceName(kDesc.name);
                         m.AddSubstitution(kDesc.templateId);
                     }
@@ -438,7 +438,7 @@ template <auto Fn>
             } else {
                 m.out += 'N';
                 if constexpr (kDesc.isTemplateSpecialization) {
-                    if (!m.TrySubstitute(kDesc.templateId)) {
+                    if (!m.Substitute(kDesc.templateId)) {
                         emitPrefix.template operator()<ReflectWalk, T>(ReflectWalk {}, [&]<typename OwnerT>() consteval {
                             self.template operator()<DoTmplArgs, OwnerT>();
                         });
@@ -503,7 +503,7 @@ template <auto Fn>
                 m.out += "Dn";
             } else {
                 constexpr auto kToken = Reflect::EntityTokenOf<T>();
-                if (m.TrySubstitute(kToken)) {
+                if (m.Substitute(kToken)) {
                     return;
                 }
                 if constexpr (std::is_bounded_array_v<T>) {

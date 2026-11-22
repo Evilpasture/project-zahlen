@@ -71,9 +71,9 @@ enum class Error : uint8_t {
 } // namespace ScopedDomainB
 
 static_assert(ZHLN::ErrorCode(ScopedDomainA::Error::Failed) != ZHLN::ErrorCode(ScopedDomainB::Error::Failed));
-static_assert(ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is(ScopedDomainA::Error::Failed));
-static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is<ScopedDomainB::Error>());
-static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).Is(ScopedDomainB::Error::Failed));
+static_assert(ZHLN::ErrorCode(ScopedDomainA::Error::Failed) == ScopedDomainA::Error::Failed);
+static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).get<ScopedDomainB::Error>());
+static_assert(!(ZHLN::ErrorCode(ScopedDomainA::Error::Failed) == ScopedDomainB::Error::Failed));
 
 struct ErrorTestSuite {
     struct Tests {
@@ -97,13 +97,13 @@ struct ErrorTestSuite {
         std::expected<void, ZHLN::ErrorCode> type_and_value_matching() {
             ZHLN::Error err {CodecError::CorruptedStream};
 
-            if (!err.Is<CodecError>()) {
+            if (!err.get<CodecError>()) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
-            if (!err.Is(CodecError::CorruptedStream)) {
+            if (err.get<CodecError>() != CodecError::CorruptedStream) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
-            if (err.Is<NetworkError>()) {
+            if (err.get<NetworkError>()) {
                 return std::unexpected(NetworkError::ConnectionReset);
             }
             return {};
@@ -111,7 +111,7 @@ struct ErrorTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> value_extraction() {
             ZHLN::Error err {CodecError::UnsupportedVersion};
-            if (err.As<CodecError>() != CodecError::UnsupportedVersion) {
+            if (err.get<CodecError>() != CodecError::UnsupportedVersion) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             return {};
@@ -172,7 +172,7 @@ struct ErrorTestSuite {
             ZHLN::ErrorCode code {CodecError::CorruptedStream};
 
             ZHLN::Error promoted = code;
-            if (!promoted.Is<CodecError>() || !promoted.Is(CodecError::CorruptedStream)) {
+            if (promoted.get<CodecError>() != CodecError::CorruptedStream) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
 
@@ -185,7 +185,7 @@ struct ErrorTestSuite {
 
             // Demotion: back to the carrier without disturbing the words.
             ZHLN::ErrorCode back = promoted;
-            if (!(back == code) || !back.Is(CodecError::CorruptedStream)) {
+            if (!(back == code) || !(back == CodecError::CorruptedStream)) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             if (back.ToError().Message() != promoted.Message()) {
@@ -211,7 +211,7 @@ struct ErrorTestSuite {
             if (!err) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
-            if (err.Is<CodecError>()) {
+            if (err.get<CodecError>()) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             if (err.Category() != "None" || err.Message() != "None" || err.Name() != "None") {

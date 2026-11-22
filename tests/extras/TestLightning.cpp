@@ -116,8 +116,8 @@ struct LightningHostSuite {
             for (int i = 0; i < 30; ++i)
                 ExpectTrue(host.BeforeRender(*engine.Get(), .05f).has_value());
             ExpectEq(host.Size(), size_t(0));
-            ExpectTrue(engine.As<COM::IFramePipeline>()->AdvanceFrame(0).HasValue());
-            ExpectTrue(engine.As<COM::IFramePipeline>()->CancelFrame().HasValue());
+            ExpectTrue(engine.cast<COM::IFramePipeline>()->AdvanceFrame(0).HasValue());
+            ExpectTrue(engine.cast<COM::IFramePipeline>()->CancelFrame().HasValue());
             ExpectEq(engine->Entities()->EntitiesWith<Components::LightComponent>().size(), size_t(0));
             ExpectTrue(host.Spawn({0, 30, 0}, {}, {0, 10, 30}).has_value());
             engine->ClearScene();

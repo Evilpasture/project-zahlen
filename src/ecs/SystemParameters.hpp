@@ -305,11 +305,12 @@ class Query {
         return Query<Subset...>(*_registry);
     }
 
-    // Named equivalent of Select<...>. A target can only drop access or
-    // families: it cannot add a family or upgrade a read to a write.
+    // Projection to a narrower query type (Select<...> with a named target).
+    // A target can only drop access or families: it cannot add a family or
+    // upgrade a read to a write.
     template <typename TargetQuery>
         requires requires(const Query& source) { TemplatedDetail::QueryProjection<TargetQuery>::Project(source); }
-    [[nodiscard]] auto As() const noexcept -> TargetQuery {
+    [[nodiscard]] auto Project() const noexcept -> TargetQuery {
         return TemplatedDetail::QueryProjection<TargetQuery>::Project(*this);
     }
 

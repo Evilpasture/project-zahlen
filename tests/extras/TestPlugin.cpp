@@ -182,7 +182,7 @@ void test_plugin_screenshot_dynamic_load_and_error_propagation() {
                                     .Run();
     ExpectFalse(badRes.has_value());
     if (!badRes) {
-        ExpectTrue(badRes.error().Is(Screenshot::Error::WriteFailed));
+        ExpectTrue(badRes.error() == Screenshot::Error::WriteFailed);
         ExpectEq(badRes.error().ToError().Message(), std::string_view {"Failed to encode or write captured frame PNG"});
     }
 }
@@ -193,47 +193,47 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     const auto missing = BaseHeadlessApp("MissingPlugin").LoadPlugin("definitely_nonexistent_plugin_xyz").OnStart([&](COM::IEngine&) { started = true; }).Run();
     ExpectFalse(missing.has_value());
     if (!missing)
-        ExpectTrue(missing.error().Is(AppError::PluginNotFound));
+        ExpectTrue(missing.error() == AppError::PluginNotFound);
     ExpectFalse(started);
 
     // CLI --plugin validation: missing value and missing plugin both fail; --help skips plugin open.
     const auto missingVal = RunAppCli(BaseHeadlessApp("CliPluginNoVal"), {"--plugin"});
     ExpectFalse(missingVal.has_value());
     if (!missingVal)
-        ExpectTrue(missingVal.error().Is(CommandLineError::MissingValue));
+        ExpectTrue(missingVal.error() == CommandLineError::MissingValue);
 
     const auto helpSkip =
         RunAppCli(BaseHeadlessApp("CliPluginHelp").LoadPlugin("definitely_nonexistent_plugin_xyz"), {"--plugin", "also_missing_xyz", "--help"});
     ExpectTrue(helpSkip.has_value() && *helpSkip == AppExitReason::CliHelpRequested);
 
-    // Optional TryLoadPlugin silently skips a missing shared library and runs normally.
+    // Optional LoadPlugin (required = false) silently skips a missing shared library and runs normally.
     uint64_t   optionalFrames = 0;
     const auto optionalOk     = BaseHeadlessApp("OptionalMissingPlugin")
                                     .MaxFrames(1)
-                                    .TryLoadPlugin("definitely_nonexistent_plugin_xyz")
-                                    .TryLoadPlugin((std::filesystem::temp_directory_path() / "zhln_absent_plugin_xyz.so").string())
+                                    .LoadPlugin("definitely_nonexistent_plugin_xyz", nullptr, false)
+                                    .LoadPlugin((std::filesystem::temp_directory_path() / "zhln_absent_plugin_xyz.so").string(), nullptr, false)
                                     .AfterTick([&](COM::IEngine& e) { optionalFrames = e.CurrentFrame(); })
                                     .Run();
     ExpectTrue(optionalOk.has_value());
     ExpectEq(optionalFrames, uint64_t {1});
 
-    // Existing invalid file fails even under TryLoadPlugin (broken plugin is never silently ignored).
+    // Existing invalid file fails even when optional (broken plugin is never silently ignored).
     TempDir    tmp;
     const auto bogusSo = tmp.Path() / SharedLibrary::FormatFileNames("zahlen_plugin_bogus").front();
     {
         std::ofstream out(bogusSo, std::ios::binary);
         out << "not a valid shared library";
     }
-    const auto corruptRes = BaseHeadlessApp("CorruptPlugin").TryLoadPlugin(bogusSo.string()).Run();
+    const auto corruptRes = BaseHeadlessApp("CorruptPlugin").LoadPlugin(bogusSo.string(), nullptr, false).Run();
     ExpectFalse(corruptRes.has_value());
     if (!corruptRes)
-        ExpectTrue(corruptRes.error().Is(AppError::PluginLoadFailed));
+        ExpectTrue(corruptRes.error() == AppError::PluginLoadFailed);
 
     // Unrecognized InChain extension rejected cleanly by plugin factory.
     const auto unknownExt = BaseHeadlessApp("UnknownChain").LoadPlugin("freecam", COM::InChain(UnrecognizedPluginExtension {})).Run();
     ExpectFalse(unknownExt.has_value());
     if (!unknownExt)
-        ExpectTrue(unknownExt.error().Is(COM::Error::UnsupportedExtension));
+        ExpectTrue(unknownExt.error() == COM::Error::UnsupportedExtension);
 
     // Layout hash drift rejected cleanly across the .so boundary.
     FreeCam::Component     payload {};
@@ -248,7 +248,7 @@ void test_plugin_missing_optional_malformed_and_chain_rejection() {
     const auto driftedRes = BaseHeadlessApp("LayoutMismatch").LoadPlugin("freecam", &drifted).Run();
     ExpectFalse(driftedRes.has_value());
     if (!driftedRes)
-        ExpectTrue(driftedRes.error().Is(COM::Error::LayoutMismatch));
+        ExpectTrue(driftedRes.error() == COM::Error::LayoutMismatch);
 }
 
 void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
@@ -303,15 +303,15 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
         ExpectTrue(created.HasValue());
         if (created.HasValue() && ExpectTrue(created.value != nullptr)) {
             auto layer = COM::Ref<COM::IAppLayer>::Adopt(created.value);
-            ExpectTrue(layer.As<COM::IObject>().Get() != nullptr);
-            ExpectTrue(layer.As<COM::IAppLayer>().Get() != nullptr);
+            ExpectTrue(layer.cast<COM::IObject>().Get() != nullptr);
+            ExpectTrue(layer.cast<COM::IAppLayer>().Get() != nullptr);
         }
 
         // Direct by-value error return across the DSO boundary.
         const COM::Result<COM::IAppLayer*> rejected = factory(COM::InChain(UnrecognizedPluginExtension {}));
         ExpectFalse(rejected.HasValue());
         if (!rejected.HasValue()) {
-            ExpectTrue(rejected.error.Is(COM::Error::UnsupportedExtension));
+            ExpectTrue(rejected.error == COM::Error::UnsupportedExtension);
         }
     }
 
@@ -319,7 +319,7 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     const auto noSym = BaseHeadlessApp("NoCreateAppLayer").LoadPlugin(enginePath.string()).Run();
     ExpectFalse(noSym.has_value());
     if (!noSym) {
-        ExpectTrue(noSym.error().Is(AppError::PluginSymbolMissing));
+        ExpectTrue(noSym.error() == AppError::PluginSymbolMissing);
         ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"});
     }
 }
@@ -327,7 +327,7 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
 void test_plugin_manifest_parsing() {
     using ZHLN::Plugin::ParsePluginManifest;
 
-    const std::string valid = R"toml([plugin]
+    const std::string valid  = R"toml([plugin]
 name        = "animation"
 library     = "zahlen_plugin_animation"
 api         = 1
@@ -337,7 +337,7 @@ optional_requires = ["freecam"]
 auto_load   = false
 hot_reload  = true
 )toml";
-    auto parsed = ParsePluginManifest(valid);
+    auto              parsed = ParsePluginManifest(valid);
     ExpectTrue(parsed.has_value());
     if (!parsed)
         return;
@@ -416,9 +416,8 @@ void test_plugin_registry_orders_required_dependencies() {
     TempDir tmp;
 
     auto writePlugin = [&](std::string name, std::vector<std::string> deps = {}) {
-        const std::filesystem::path manifestPath =
-            tmp.Path() / ("zahlen_plugin_" + name + std::string(ZHLN::Plugin::kManifestSuffix));
-        std::ofstream out(manifestPath);
+        const std::filesystem::path manifestPath = tmp.Path() / ("zahlen_plugin_" + name + std::string(ZHLN::Plugin::kManifestSuffix));
+        std::ofstream               out(manifestPath);
         out << "[plugin]\n";
         out << "name = \"" << name << "\"\n";
         out << "library = \"zahlen_plugin_" << name << "\"\n";
@@ -434,9 +433,8 @@ void test_plugin_registry_orders_required_dependencies() {
         }
         out << "auto_load = false\n";
         out << "hot_reload = true\n";
-        const std::filesystem::path soPath =
-            tmp.Path() / ("libzahlen_plugin_" + name + std::string(".so"));
-        std::ofstream soOut(soPath, std::ios::binary);
+        const std::filesystem::path soPath = tmp.Path() / ("libzahlen_plugin_" + name + std::string(".so"));
+        std::ofstream               soOut(soPath, std::ios::binary);
         soOut << "dummy";
     };
 

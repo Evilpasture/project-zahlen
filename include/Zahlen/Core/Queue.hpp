@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <new>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <optional>
 #include <type_traits>
 
 namespace ZHLN {
@@ -128,16 +129,17 @@ class Queue {
         emplace(static_cast<T&&>(value));
     }
 
-    bool try_pop(T& outValue) noexcept {
+    // Fallibility is in the return type: disengaged when empty, never `Try`.
+    [[nodiscard]] auto Pop() noexcept -> std::optional<T> {
         MutexGuard guard(_mutex);
         if (_size == 0) {
-            return false;
+            return std::nullopt;
         }
-        outValue = static_cast<T&&>(_data[_head]);
+        std::optional<T> result(static_cast<T&&>(_data[_head]));
         _data[_head].~T();
         _head = (_head + 1) & (_capacity - 1);
         _size--;
-        return true;
+        return result;
     }
 
     [[nodiscard]] bool empty() const noexcept {

@@ -374,16 +374,16 @@ class SkipList {
 
     void ExitReader() const noexcept {
         if (_activeReaders.fetch_sub(1, std::memory_order::release) == 1) {
-            TryPurge();
+            Purge();
         }
     }
 
     void RetireNode(SkipNode* node) {
         ZHLN::Lock(_retireMutex, [&] { _retireQueue.push_back(node); });
-        TryPurge();
+        Purge();
     }
 
-    void TryPurge() const {
+    void Purge() const {
         if (_activeReaders.load(std::memory_order::acquire) == 0) {
             std::vector<SkipNode*> localQueue;
 

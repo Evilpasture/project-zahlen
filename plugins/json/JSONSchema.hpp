@@ -171,7 +171,7 @@ auto ParseObject(ValueReader reader, Options options) -> std::expected<T, ErrorC
 
         auto keyReader = reader.GetKey(fieldName);
         if (!keyReader) {
-            if (options.omitEmpty && keyReader.error().Is(JSONError::MissingField)) {
+            if (options.omitEmpty && keyReader.error() == JSONError::MissingField) {
                 return; // Optional-by-omission: absent key keeps the default.
             }
             err = keyReader.error();

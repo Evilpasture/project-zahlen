@@ -37,10 +37,10 @@ struct COMPhase2Suite {
             // a test failure, not a silently successful skipped assertion.
             if (!ExpectTrue(created.has_value())) return {};
             auto engine = std::move(*created);
-            auto debug = engine.As<IDebugDraw>();
-            auto graphics = engine.As<IGraphicsDevice>();
-            auto assets = engine.As<IAssetLibrary>();
-            auto actions = engine.As<IActionContext>();
+            auto debug = engine.cast<IDebugDraw>();
+            auto graphics = engine.cast<IGraphicsDevice>();
+            auto assets = engine.cast<IAssetLibrary>();
+            auto actions = engine.cast<IActionContext>();
             if (!ExpectTrue(bool(debug) && bool(graphics) && bool(assets) && bool(actions))) return {};
             ExpectTrue(debug.Get() == engine->Debug());
             engine->SetMaxFramesPerSecond(75);

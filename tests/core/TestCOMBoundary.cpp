@@ -563,7 +563,7 @@ struct COMBoundarySuite {
             const auto unknownRes =
                 ZHLN::COM::CreateEngine(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
             ZHLN::Test::ExpectTrue(!unknownRes.HasValue());
-            ZHLN::Test::ExpectTrue(unknownRes.error.Is(ZHLN::COM::Error::UnsupportedExtension));
+            ZHLN::Test::ExpectTrue(unknownRes.error == ZHLN::COM::Error::UnsupportedExtension);
 
             ZHLN::COM::WindowConfig winPayload {.headless = true};
             ZHLN::COM::ChainInNode        drifted {
@@ -576,7 +576,7 @@ struct COMBoundarySuite {
             };
             const auto driftRes = ZHLN::COM::CreateEngine(&drifted);
             ZHLN::Test::ExpectTrue(!driftRes.HasValue());
-            ZHLN::Test::ExpectTrue(driftRes.error.Is(ZHLN::COM::Error::LayoutMismatch));
+            ZHLN::Test::ExpectTrue(driftRes.error == ZHLN::COM::Error::LayoutMismatch);
             return {};
         }
 
@@ -603,12 +603,12 @@ struct COMBoundarySuite {
             ZHLN::COM::Ref<ZHLN::COM::IEngine> engine = std::move(*created);
             ZHLN::Test::ExpectTrue(static_cast<bool>(engine));
 
-            ZHLN::COM::Ref<ZHLN::COM::IGraphicsDevice> graphics   = engine.As<ZHLN::COM::IGraphicsDevice>();
-            ZHLN::COM::Ref<ZHLN::COM::IEntities>       entities   = engine.As<ZHLN::COM::IEntities>();
-            ZHLN::COM::Ref<ZHLN::COM::ISimulation>     simulation = engine.As<ZHLN::COM::ISimulation>();
-            ZHLN::COM::Ref<ZHLN::COM::IAudioDevice>    audio      = engine.As<ZHLN::COM::IAudioDevice>();
-            ZHLN::COM::Ref<ZHLN::COM::IAssetLibrary>   assets     = engine.As<ZHLN::COM::IAssetLibrary>();
-            ZHLN::COM::Ref<ZHLN::COM::IActionContext>  actions    = engine.As<ZHLN::COM::IActionContext>();
+            ZHLN::COM::Ref<ZHLN::COM::IGraphicsDevice> graphics   = engine.cast<ZHLN::COM::IGraphicsDevice>();
+            ZHLN::COM::Ref<ZHLN::COM::IEntities>       entities   = engine.cast<ZHLN::COM::IEntities>();
+            ZHLN::COM::Ref<ZHLN::COM::ISimulation>     simulation = engine.cast<ZHLN::COM::ISimulation>();
+            ZHLN::COM::Ref<ZHLN::COM::IAudioDevice>    audio      = engine.cast<ZHLN::COM::IAudioDevice>();
+            ZHLN::COM::Ref<ZHLN::COM::IAssetLibrary>   assets     = engine.cast<ZHLN::COM::IAssetLibrary>();
+            ZHLN::COM::Ref<ZHLN::COM::IActionContext>  actions    = engine.cast<ZHLN::COM::IActionContext>();
             if (!ZHLN::Test::ExpectTrue(static_cast<bool>(graphics)) || !ZHLN::Test::ExpectTrue(static_cast<bool>(entities)) ||
                 !ZHLN::Test::ExpectTrue(static_cast<bool>(simulation)) || !ZHLN::Test::ExpectTrue(static_cast<bool>(audio)) ||
                 !ZHLN::Test::ExpectTrue(static_cast<bool>(assets)) || !ZHLN::Test::ExpectTrue(static_cast<bool>(actions))) {
@@ -671,7 +671,7 @@ struct COMBoundarySuite {
             CheckAssets(*assets.Get(), *entities.Get());
             CheckActions(*actions.Get());
 
-            auto state = engine.As<ZHLN::COM::IState>();
+            auto state = engine.cast<ZHLN::COM::IState>();
             if (ZHLN::Test::ExpectTrue(static_cast<bool>(state) && state.Get() == engine->State())) {
                 ZHLN::Test::ExpectTrue(state->CullingStats().EnableCulling);
                 ZHLN::Test::ExpectFalse(state->CullingStats().FreezeFrustum);

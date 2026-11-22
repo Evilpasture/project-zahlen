@@ -293,7 +293,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     if (!mapped) {
         return;
     }
-    auto* gpu               = mapped->As<FrameUniforms>();
+    auto* gpu               = mapped->cast<FrameUniforms>();
     gpu->viewProj           = view.viewProjMatrix;
     gpu->unjitteredViewProj = unjittered;
     gpu->invViewProj        = Inverse(unjittered);
@@ -322,7 +322,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
         activeLineVertexCount = 0;
         if (auto mapped = frames.lineVbos[presenter.frameIndex].Map(allocator)) {
-            auto*    dst  = mapped->As<LineVertex>();
+            auto*    dst  = mapped->cast<LineVertex>();
             uint32_t vIdx = 0;
             for (const auto& line: pendingLines) {
                 if (vIdx + 2 > maxVertices) {
@@ -355,7 +355,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
             queues.CsgDraws().clear();
             return;
         }
-        auto* dst = mapped->As<InstanceData>();
+        auto* dst = mapped->cast<InstanceData>();
 
         for (size_t i = 0; i < drawCount; ++i) {
             dst[i] = queues.Draws()[i].instanceData;
@@ -566,7 +566,7 @@ namespace {
 // skipped, is a frame that went out; it reports Suboptimal only if some window
 // asked for its swapchain to be rebuilt, which is what EndFrame meant before.
 [[nodiscard]] auto SummarizePresentations(const PresentBatch& windows) noexcept -> FrameOutcome<PresentSuboptimal> {
-    const auto deviceLost = std::ranges::find_if(windows.errors, [](const PresentFailure& failure) { return failure.error.Is(FrameResult::DeviceLost); });
+    const auto deviceLost = std::ranges::find_if(windows.errors, [](const PresentFailure& failure) { return failure.error == FrameResult::DeviceLost; });
     if (deviceLost != windows.errors.end()) {
         return std::unexpected(deviceLost->error);
     }

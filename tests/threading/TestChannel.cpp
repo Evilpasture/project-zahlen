@@ -26,8 +26,8 @@ struct ChannelTestSuite {
     }
 
     struct Tests {
-        // --- 1. Basic Push, TryPop & Size ---
-        static std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
+        // --- 1. Basic Push, Poll & Size ---
+        static std::expected<void, ZHLN::ErrorCode> basic_push_poll() {
             ZHLN::Channel<int> chan;
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
@@ -38,26 +38,26 @@ struct ChannelTestSuite {
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(3));
 
-            auto val = chan.TryPop();
+            auto val = chan.Poll();
             ZHLN::Test::ExpectTrue(val.has_value());
             if (val) {
                 ZHLN::Test::ExpectEq(*val, 10);
             }
 
-            val = chan.TryPop();
+            val = chan.Poll();
             ZHLN::Test::ExpectTrue(val.has_value());
             if (val) {
                 ZHLN::Test::ExpectEq(*val, 20);
             }
 
-            val = chan.TryPop();
+            val = chan.Poll();
             ZHLN::Test::ExpectTrue(val.has_value());
             if (val) {
                 ZHLN::Test::ExpectEq(*val, 30);
             }
 
             // Pop on empty channel should safely fail without stalling
-            ZHLN::Test::ExpectFalse(chan.TryPop().has_value());
+            ZHLN::Test::ExpectFalse(chan.Poll().has_value());
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
 
             return {};
@@ -79,14 +79,14 @@ struct ChannelTestSuite {
 
             // Consume in parallel
             ZHLN::TaskSystem::ParallelFor(kTotalMessages, 64, [&](uint32_t, uint32_t, uint32_t) {
-                if (auto outVal = chan.TryPop()) {
+                if (auto outVal = chan.Poll()) {
                     receivedSum.fetch_add(*outVal, std::memory_order::relaxed);
                     receivedCount.fetch_add(1, std::memory_order::relaxed);
                 }
             });
 
             // Drain any remaining messages sequentially
-            while (auto outVal = chan.TryPop()) {
+            while (auto outVal = chan.Poll()) {
                 receivedSum.fetch_add(*outVal, std::memory_order::relaxed);
                 receivedCount.fetch_add(1, std::memory_order::relaxed);
             }

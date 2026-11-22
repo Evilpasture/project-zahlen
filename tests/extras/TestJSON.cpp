@@ -167,7 +167,7 @@ struct JSONTestSuite {
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
-                ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::InvalidJSON));
+                ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::InvalidJSON);
                 ZHLN::Println("    [Runtime Error Check] Caught InvalidJSON: {}", ZHLN::Error(parseResult.error()).Message());
             }
 
@@ -185,7 +185,7 @@ struct JSONTestSuite {
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
-                ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::MissingField));
+                ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::MissingField);
                 ZHLN::Println("    [Runtime Error Check] Caught MissingField: {}", ZHLN::Error(parseResult.error()).Message());
             }
 
@@ -208,7 +208,7 @@ struct JSONTestSuite {
             ZHLN::Test::ExpectFalse(parseResult.has_value());
 
             if (!parseResult) {
-                ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::TypeMismatch));
+                ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::TypeMismatch);
                 ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", ZHLN::Error(parseResult.error()).Message());
             }
 

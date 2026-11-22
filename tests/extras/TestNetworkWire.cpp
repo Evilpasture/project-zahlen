@@ -82,8 +82,8 @@ auto Span(std::initializer_list<uint8_t> list) -> std::span<const uint8_t> {
     return storage;
 }
 
-auto Is(const auto& result, Error expected) -> bool {
-    return !result.has_value() && result.error().code.Is(expected);
+auto FailsWith(const auto& result, Error expected) -> bool {
+    return !result.has_value() && result.error().code == expected;
 }
 
 template <typename T>
@@ -209,27 +209,27 @@ struct TestNetworkWireSuite {
                 ZHLN::Wire::Reader reader(Span({0x80, 0x00}));
                 uint64_t           decoded = 0;
                 auto               result  = reader.GetUVar(decoded);
-                ZHLN::Test::ExpectTrue(Is(result, Error::NonCanonicalVarint));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::NonCanonicalVarint));
                 ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "non-canonical"));
             }
             // {0xFF, 0x00}: 127 encoded in two bytes — non-canonical.
             {
                 ZHLN::Wire::Reader reader(Span({0xFF, 0x00}));
                 uint64_t           decoded = 0;
-                ZHLN::Test::ExpectTrue(Is(reader.GetUVar(decoded), Error::NonCanonicalVarint));
+                ZHLN::Test::ExpectTrue(FailsWith(reader.GetUVar(decoded), Error::NonCanonicalVarint));
             }
             // {0x80}: dangling continuation — truncated.
             {
                 ZHLN::Wire::Reader reader(Span({0x80}));
                 uint64_t           decoded = 0;
-                ZHLN::Test::ExpectTrue(Is(reader.GetUVar(decoded), Error::Truncated));
+                ZHLN::Test::ExpectTrue(FailsWith(reader.GetUVar(decoded), Error::Truncated));
             }
             // 11 continuation bytes — overflow.
             {
                 const std::vector<uint8_t> overflow(11, 0xFF);
                 ZHLN::Wire::Reader         reader(overflow);
                 uint64_t                   decoded = 0;
-                ZHLN::Test::ExpectTrue(Is(reader.GetUVar(decoded), Error::VarintOverflow));
+                ZHLN::Test::ExpectTrue(FailsWith(reader.GetUVar(decoded), Error::VarintOverflow));
             }
             // 128 needs two bytes and is canonical.
             {
@@ -248,7 +248,7 @@ struct TestNetworkWireSuite {
             int8_t             decoded = 0;
             ZHLN::Wire::Reader reader(writer.Bytes());
             auto               result = reader.Get(decoded);
-            ZHLN::Test::ExpectTrue(Is(result, Error::ValueOutOfRange));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::ValueOutOfRange));
             ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "outside the permitted range"));
             return {};
         }
@@ -257,7 +257,7 @@ struct TestNetworkWireSuite {
             ZHLN::Wire::Reader reader(Span({0x02}));
             bool               decoded = false;
             auto               result  = reader.Get(decoded);
-            ZHLN::Test::ExpectTrue(Is(result, Error::InvalidBoolean));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::InvalidBoolean));
             ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "neither 0 nor 1"));
             return {};
         }
@@ -281,12 +281,12 @@ struct TestNetworkWireSuite {
             std::string         decoded;
             ZHLN::Wire::Reader  reader(writer.Bytes(), limits);
             auto                result = reader.Get(decoded);
-            ZHLN::Test::ExpectTrue(Is(result, Error::StringTooLong));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::StringTooLong));
             ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "9 byte(s) exceeds the 8 byte limit"));
 
             // Trailing bytes are rejected.
             auto trailing = ZHLN::Wire::Decode<std::string>(Span({0x01, 'A', 0xFF}));
-            ZHLN::Test::ExpectTrue(Is(trailing, Error::TrailingBytes));
+            ZHLN::Test::ExpectTrue(FailsWith(trailing, Error::TrailingBytes));
             return {};
         }
 
@@ -303,7 +303,7 @@ struct TestNetworkWireSuite {
             ZHLN::FixedString<8> decoded;
             ZHLN::Wire::Reader   reader(writer.Bytes());
             auto                 result = reader.Get(decoded);
-            ZHLN::Test::ExpectTrue(Is(result, Error::FixedStringOverflow));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::FixedStringOverflow));
             ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "FixedString<8>"));
             return {};
         }
@@ -341,7 +341,7 @@ struct TestNetworkWireSuite {
             TestGear           decoded = TestGear::Neutral;
             ZHLN::Wire::Reader reader(writer.Bytes());
             auto               result = reader.Get(decoded);
-            ZHLN::Test::ExpectTrue(Is(result, Error::InvalidEnumValue));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::InvalidEnumValue));
             const auto text = result.error().Format();
             ZHLN::Test::ExpectTrue(Contains(text, "not a valid enumerator"));
             ZHLN::Test::ExpectTrue(Contains(text, "TestGear"));
@@ -417,12 +417,12 @@ struct TestNetworkWireSuite {
             std::vector<int32_t> decoded;
             auto                 result = reader.Get(decoded);
             ZHLN::Test::ExpectTrue(!result.has_value());
-            ZHLN::Test::ExpectTrue(Is(result, Error::ElementCountExceedsInput) || Is(result, Error::CollectionTooLarge));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::ElementCountExceedsInput) || FailsWith(result, Error::CollectionTooLarge));
 
             // A vector<uint8_t> claiming 100 bytes with 2 available.
             ZHLN::Wire::Reader blobReader(Span({100, 0x41, 0x42}));
             std::vector<uint8_t> blob;
-            ZHLN::Test::ExpectTrue(Is(blobReader.Get(blob), Error::ElementCountExceedsInput));
+            ZHLN::Test::ExpectTrue(FailsWith(blobReader.Get(blob), Error::ElementCountExceedsInput));
             return {};
         }
 
@@ -475,7 +475,7 @@ struct TestNetworkWireSuite {
             ZHLN::Test::ExpectTrue(encoded.has_value());
 
             auto decoded = ZHLN::Wire::Decode<TestPlayer>(*encoded);
-            ZHLN::Test::ExpectTrue(Is(decoded, Error::ValueOutOfRange));
+            ZHLN::Test::ExpectTrue(FailsWith(decoded, Error::ValueOutOfRange));
 
             const auto text = decoded.error().Format();
             ZHLN::Test::ExpectTrue(Contains(text, "150"));
@@ -491,7 +491,7 @@ struct TestNetworkWireSuite {
             ZHLN::Test::ExpectTrue(encoded.has_value());
 
             auto decoded = ZHLN::Wire::Decode<TestWorld>(*encoded);
-            ZHLN::Test::ExpectTrue(Is(decoded, Error::ValueOutOfRange));
+            ZHLN::Test::ExpectTrue(FailsWith(decoded, Error::ValueOutOfRange));
 
             const auto& failure = decoded.error();
             ZHLN::Test::ExpectTrue(Contains(failure.path, "players[2].hp"));
@@ -555,7 +555,7 @@ struct TestNetworkWireSuite {
         std::expected<void, ZHLN::ErrorCode> writer_limit_is_enforced() {
             ZHLN::Wire::Writer writer(4);
             auto               result = writer.PutBytes(Bytes({1, 2, 3, 4, 5, 6}));
-            ZHLN::Test::ExpectTrue(Is(result, Error::BufferOverflow));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::BufferOverflow));
             ZHLN::Test::ExpectEq(writer.Size(), size_t {0});
             return {};
         }
@@ -618,18 +618,18 @@ struct TestNetworkWireSuite {
             // Match offset 0 with nothing produced: invalid.
             {
                 auto result = ZHLN::Wire::Compression::Decompress(Span({0x00, 0x00, 0x00}), 64);
-                ZHLN::Test::ExpectTrue(Is(result, Error::DecompressionFailed));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::DecompressionFailed));
             }
             // Offset larger than the bytes produced so far.
             {
                 auto result = ZHLN::Wire::Compression::Decompress(Span({0x10, 'A', 0x05, 0x00}), 64);
-                ZHLN::Test::ExpectTrue(Is(result, Error::DecompressionFailed));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::DecompressionFailed));
                 ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "out of range"));
             }
             // Truncated length extension.
             {
                 auto result = ZHLN::Wire::Compression::Decompress(Span({0xF0, 0xFF}), 64);
-                ZHLN::Test::ExpectTrue(Is(result, Error::DecompressionFailed));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::DecompressionFailed));
             }
             // Output cap is enforced while expanding (zip-bomb guard).
             {
@@ -638,7 +638,7 @@ struct TestNetworkWireSuite {
                 ZHLN::Test::ExpectTrue(compressed.has_value());
                 if (compressed) {
                     auto result = ZHLN::Wire::Compression::Decompress(*compressed, 4096);
-                    ZHLN::Test::ExpectTrue(Is(result, Error::DecompressionFailed));
+                    ZHLN::Test::ExpectTrue(FailsWith(result, Error::DecompressionFailed));
                     ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "exceed the 4096 byte limit"));
                 }
             }
@@ -649,7 +649,7 @@ struct TestNetworkWireSuite {
                 ZHLN::Test::ExpectTrue(compressed.has_value());
                 if (compressed) {
                     auto result = ZHLN::Wire::Compression::Decompress(*compressed, 2047);
-                    ZHLN::Test::ExpectTrue(Is(result, Error::DecompressionFailed));
+                    ZHLN::Test::ExpectTrue(FailsWith(result, Error::DecompressionFailed));
                 }
             }
             return {};
@@ -731,7 +731,7 @@ struct TestNetworkWireSuite {
                 std::vector<uint8_t> corrupted = *frame;
                 corrupted[6]                   = corrupted[6] ^ 0xFF;
                 auto result = ZHLN::Net::DecodeFrame(corrupted);
-                ZHLN::Test::ExpectTrue(Is(result, Error::ChecksumMismatch));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::ChecksumMismatch));
                 ZHLN::Test::ExpectTrue(Contains(result.error().Format(), "CRC32 mismatch"));
             }
             // Truncated frame.
@@ -773,17 +773,17 @@ struct TestNetworkWireSuite {
             // Bad magic.
             {
                 auto result = ZHLN::Net::DecodeEnvelope(Span({'X', 'W', 2, 1}));
-                ZHLN::Test::ExpectTrue(Is(result, Error::InvalidFrame));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::InvalidFrame));
             }
             // Wrong version.
             {
                 auto result = ZHLN::Net::DecodeEnvelope(Span({'Z', 'W', 99, 1}));
-                ZHLN::Test::ExpectTrue(Is(result, Error::ProtocolVersionMismatch));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::ProtocolVersionMismatch));
             }
             // Unknown message type.
             {
                 auto result = ZHLN::Net::DecodeEnvelope(Span({'Z', 'W', 2, 99}));
-                ZHLN::Test::ExpectTrue(Is(result, Error::UnknownMessageType));
+                ZHLN::Test::ExpectTrue(FailsWith(result, Error::UnknownMessageType));
             }
             return {};
         }
@@ -824,7 +824,7 @@ struct TestNetworkWireSuite {
                 auto envelope = ZHLN::Net::EncodeEnvelope(ZHLN::Net::MessageType::ServerWelcome, writer.Bytes());
                 ZHLN::Test::ExpectTrue(envelope.has_value());
                 auto decoded = ZHLN::Net::DecodeServerWelcome(*envelope);
-                ZHLN::Test::ExpectTrue(Is(decoded, Error::ValueOutOfRange));
+                ZHLN::Test::ExpectTrue(FailsWith(decoded, Error::ValueOutOfRange));
                 ZHLN::Test::ExpectTrue(Contains(decoded.error().path, "tickRateHz"));
                 ZHLN::Test::ExpectTrue(Contains(decoded.error().Format(), "ServerWelcome.tickRateHz"));
             }
@@ -853,7 +853,7 @@ struct TestNetworkWireSuite {
                 auto bytes                       = ZHLN::Net::EncodeClientInput(bad);
                 ZHLN::Test::ExpectTrue(bytes.has_value());
                 auto decoded = ZHLN::Net::DecodeClientInput(*bytes);
-                ZHLN::Test::ExpectTrue(Is(decoded, Error::ValueOutOfRange));
+                ZHLN::Test::ExpectTrue(FailsWith(decoded, Error::ValueOutOfRange));
                 ZHLN::Test::ExpectTrue(Contains(decoded.error().Format(), "ClientInputMessage.moveFlags"));
                 ZHLN::Test::ExpectTrue(Contains(decoded.error().Format(), "Movement bitfield"));
             }
@@ -865,7 +865,7 @@ struct TestNetworkWireSuite {
                 auto bytes                       = ZHLN::Net::EncodeClientInput(bad);
                 ZHLN::Test::ExpectTrue(bytes.has_value());
                 auto decoded = ZHLN::Net::DecodeClientInput(*bytes);
-                ZHLN::Test::ExpectTrue(Is(decoded, Error::ValueOutOfRange));
+                ZHLN::Test::ExpectTrue(FailsWith(decoded, Error::ValueOutOfRange));
                 ZHLN::Test::ExpectTrue(Contains(decoded.error().path, "yaw"));
             }
             return {};
@@ -943,7 +943,7 @@ struct TestNetworkWireSuite {
             ZHLN::Net::InitialSnapshotMessage snapshot;
             snapshot.objects = {{1, FVec3{std::numeric_limits<float>::infinity(), 0.0f, 0.0f}, FVec3{1, 1, 1}}};
             auto result = ZHLN::Net::EncodeInitialSnapshot(snapshot);
-            ZHLN::Test::ExpectTrue(Is(result, Error::ValueOutOfRange));
+            ZHLN::Test::ExpectTrue(FailsWith(result, Error::ValueOutOfRange));
             ZHLN::Test::ExpectTrue(Contains(result.error().path, "position"));
             return {};
         }

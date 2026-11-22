@@ -10,6 +10,7 @@
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 
@@ -29,20 +30,11 @@ class Error {
 
     template <typename E>
         requires std::is_enum_v<E>
-    [[nodiscard]] constexpr auto Is() const noexcept -> bool {
-        return _category_hash == TemplatedDetail::HashTypeName(ZHLN::Reflect::TypeName<E>());
-    }
-
-    template <typename E>
-        requires std::is_enum_v<E>
-    [[nodiscard]] constexpr auto Is(E val) const noexcept -> bool {
-        return Is<E>() && _value == static_cast<uint32_t>(val);
-    }
-
-    template <typename E>
-        requires std::is_enum_v<E>
-    [[nodiscard]] constexpr auto As() const noexcept -> E {
-        return static_cast<E>(_value);
+    [[nodiscard]] constexpr auto get() const noexcept -> std::optional<E> {
+        if (_category_hash == TemplatedDetail::HashTypeName(ZHLN::Reflect::TypeName<E>())) {
+            return static_cast<E>(_value);
+        }
+        return std::nullopt;
     }
 
     [[nodiscard]] constexpr auto Category() const noexcept -> std::string_view {

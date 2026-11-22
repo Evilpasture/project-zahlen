@@ -465,7 +465,7 @@ auto PhysicsContext::CreateRigidBody(
         bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
-    if (world.TryEnterIdleJoltMutation()) {
+    if (world.EnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
         JPH::BodyCreationSettings   settings(
             shape, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), motion, static_cast<JPH::ObjectLayer>(layer)
@@ -985,7 +985,7 @@ void PhysicsContext::DestroyBodies(std::span<const Physics::BodyID> handles) {
     JPH::Array<Physics::Command> batch;
     batch.reserve(handles.size());
     for (const auto handle: handles) {
-        if (bt.TryMarkPendingDestroy(handle)) {
+        if (bt.MarkPendingDestroy(handle)) {
             Physics::Command cmd {};
             cmd.type           = Physics::CommandType::DestroyBody;
             cmd.payload.bodyID = handle;

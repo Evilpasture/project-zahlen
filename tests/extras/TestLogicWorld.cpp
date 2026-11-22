@@ -38,7 +38,7 @@ struct LogicWorldSuite {
             auto made = COM::CreateLogicWorldRef();
             if (!made)
                 return std::unexpected(made.error());
-            auto sim  = made->As<COM::ISimulation>();
+            auto sim  = made->cast<COM::ISimulation>();
             auto body = Body(*sim.Get());
             if (!ExpectTrue(body.HasValue()))
                 return {};

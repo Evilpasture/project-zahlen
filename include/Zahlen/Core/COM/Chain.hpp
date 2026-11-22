@@ -196,7 +196,7 @@ private:
 };
 
 template <typename Allowed, std::size_t Index, std::size_t Total, typename Visitor>
-constexpr auto TryMatchInNode(const ChainInNode& node, std::array<bool, Total>& seen, bool& matched,
+constexpr auto MatchInNode(const ChainInNode& node, std::array<bool, Total>& seen, bool& matched,
                                             Visitor& visitor) noexcept -> Result<void> {
     if (matched || node.sType != ChainTypeID<Allowed>()) {
         return {};
@@ -219,7 +219,7 @@ constexpr auto TryMatchInNode(const ChainInNode& node, std::array<bool, Total>& 
 }
 
 template <typename Allowed, std::size_t Index, std::size_t Total, typename Visitor>
-constexpr auto TryMatchOutNode(ChainOutNode& node, std::array<bool, Total>& seen, bool& matched,
+constexpr auto MatchOutNode(ChainOutNode& node, std::array<bool, Total>& seen, bool& matched,
                                              Visitor& visitor) noexcept -> Result<void> {
     if (matched || node.sType != ChainTypeID<Allowed>()) {
         return {};
@@ -246,7 +246,7 @@ constexpr auto DispatchInNodeImpl(const ChainInNode& node, std::array<bool, size
                                                 Visitor& visitor, std::index_sequence<Is...>) noexcept -> Result<void> {
     bool         matched = false;
     Result<void> outcome {};
-    ((matched ? void() : (outcome = TryMatchInNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
+    ((matched ? void() : (outcome = MatchInNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
     if (!matched) {
         return Error::UnsupportedExtension;
     }
@@ -258,7 +258,7 @@ constexpr auto DispatchOutNodeImpl(ChainOutNode& node, std::array<bool, sizeof..
                                                  Visitor& visitor, std::index_sequence<Is...>) noexcept -> Result<void> {
     bool         matched = false;
     Result<void> outcome {};
-    ((matched ? void() : (outcome = TryMatchOutNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
+    ((matched ? void() : (outcome = MatchOutNode<AllowedTs, Is, sizeof...(AllowedTs)>(node, seen, matched, visitor), void())), ...);
     if (!matched) {
         return Error::UnsupportedExtension;
     }

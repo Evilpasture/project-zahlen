@@ -41,7 +41,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     if (!mapped) {
         return;
     }
-    auto* indirectCmdsBase = mapped->As<VkDrawIndirectCommand>();
+    auto* indirectCmdsBase = mapped->cast<VkDrawIndirectCommand>();
 
     const auto placements = ctx.renderer.shadowAtlas.Placements();
 

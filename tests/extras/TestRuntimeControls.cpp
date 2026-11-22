@@ -160,7 +160,7 @@ struct RuntimeControlsSuite {
             if (!ExpectTrue(made.has_value()))
                 return {};
             auto engine   = std::move(*made);
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             if (!ExpectTrue(bool(pipeline)))
                 return {};
             auto document = ReadSkinnedFixture(engine->Assets());

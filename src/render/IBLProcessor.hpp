@@ -362,7 +362,7 @@ class IBLProcessor {
         std::memcpy(mapped->Data(), pixels, static_cast<size_t>(out.width) * out.height * sizeof(float) * 4u);
 
         if (out.cpuSourceMips) {
-            auto* mipPixels = mapped->As<float>();
+            auto* mipPixels = mapped->cast<float>();
             for (uint32_t mip = 1; mip < out.mipLevels; ++mip) {
                 DownsampleEquirect(
                     mipPixels + out.mipOffsets[mip - 1], mipPixels + out.mipOffsets[mip], std::max(1u, out.width >> (mip - 1)),
@@ -371,7 +371,7 @@ class IBLProcessor {
             }
         }
         if (useVisualSky) {
-            std::memcpy(mapped->As<float>() + out.visualOffset, src.visualRgba, static_cast<size_t>(out.width) * out.height * sizeof(float) * 4u);
+            std::memcpy(mapped->cast<float>() + out.visualOffset, src.visualRgba, static_cast<size_t>(out.width) * out.height * sizeof(float) * 4u);
         }
         return out;
     }

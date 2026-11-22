@@ -992,7 +992,7 @@ class Engine final:
 
             if (options.buildBLAS) {
                 auto blasRes = gfx.BuildMeshBLAS(createdMesh);
-                if (!blasRes && !blasRes.error().Is(RenderFeatureError::FeatureNotSupported)) {
+                if (!blasRes && !(blasRes.error() == RenderFeatureError::FeatureNotSupported)) {
                     gfx.DestroyMesh(createdMesh);
                     return blasRes.error();
                 }

@@ -400,7 +400,7 @@ void Engine::EvaluateInput(Engine& engine, float, FrameContext&) {
 
 void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
     auto renderRes = RenderSystem::Update(engine, engine.Registry(), engine._impl->sceneData, engine._impl->poseUploads, dt);
-    if (!renderRes && renderRes.error().Is(FrameResult::DeviceLost)) {
+    if (!renderRes && renderRes.error() == FrameResult::DeviceLost) {
         if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
             ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lostRes.error());
             ctx.error = lostRes.error();

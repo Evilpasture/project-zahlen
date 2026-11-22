@@ -155,7 +155,7 @@ struct TerrainHostSuite {
                 ExpectTrue(std::abs(hit.position.y - host.SampleHeightAt(0, 0)) < .1f);
             host.Remove(*tile);
             ExpectEq(host.Size(), size_t(0));
-            auto pipeline = engine.As<COM::IFramePipeline>();
+            auto pipeline = engine.cast<COM::IFramePipeline>();
             ExpectTrue(pipeline->AdvanceFrame(0).HasValue());
             ExpectTrue(pipeline->CancelFrame().HasValue());
             ExpectTrue(!engine->Simulation()->BodyPosition(body).HasValue());

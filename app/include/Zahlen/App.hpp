@@ -252,12 +252,10 @@ class ZHLN_STATIC_API App {
     // zahlen_plugin_<name>.dll). Node payload bytes in `config` are copied; any
     // non-owning pointers inside those payloads (e.g. COM::StringView) must
     // remain valid until Run/Main finishes loading plugins.
-    auto LoadPlugin(std::string_view spec, const COM::ChainInNode* config = nullptr) -> App&;
-
-    // Optional counterpart to LoadPlugin: silently skipped when no matching
-    // shared library file exists, while still failing if a present library is
-    // malformed or rejects its configuration.
-    auto TryLoadPlugin(std::string_view spec, const COM::ChainInNode* config = nullptr) -> App&;
+    // With `required = false`, a missing shared library is silently skipped,
+    // while a present-but-malformed library (or one rejecting its
+    // configuration) still fails Run().
+    auto LoadPlugin(std::string_view spec, const COM::ChainInNode* config = nullptr, bool required = true) -> App&;
 
     auto OnStart(std::function<void(COM::IEngine&)> start) -> App& {
         _start = std::move(start);
