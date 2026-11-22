@@ -189,15 +189,20 @@ RUN set -eu; \
       fi; \
     done
 
-# 3. Collect the runtime payload: the binaries, the cooked asset pak and, when
-#    configured, the gameplay script module. build/data/base.pak points into the
-#    shared cooked-asset cache, so dereference it for the runner image. A staged
-#    build/scripts tree may also be a symlink into the source tree; the script
-#    module is optional, so only copy that tree when the build produced it.
+# 3. Collect the runtime payload: the binaries and, when produced, the cooked
+#    asset pak and the gameplay script module. In-tree asset cooking is opt-in
+#    (ZHLN_COOK_IN_TREE_ASSETS, off by default): games cook their assets with
+#    the cooker toolchain package, so this build produces no base.pak unless a
+#    configure opted in. The runner mounts the pak only opportunistically and
+#    otherwise reads loose assets from ./resources, so copy it -- like the
+#    optional script module below -- only when the build produced it. A staged
+#    pak points into the shared cooked-asset cache, so dereference it.
 RUN mkdir -p /workspace/dist/data && \
     cp /workspace/build/bin/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
-    cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
+    if [ -f /workspace/build/data/base.pak ]; then \
+    cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak; \
+    fi && \
     if [ -d /workspace/build/scripts ]; then \
     cp -rL /workspace/build/scripts /workspace/dist/scripts; \
     fi
