@@ -320,7 +320,7 @@ struct RenderContext::Impl: Renderer {
 
     void NoteDeviceLost(std::string_view site) noexcept {
         if (!deviceLost.exchange(true, std::memory_order::relaxed)) {
-            ZHLN::LogError("[DeviceLost] Vulkan device lost ({})", site);
+            Log<LogTag::Error, LogTag::DeviceLost>("Vulkan device lost ({})", site);
         }
     }
 
@@ -354,7 +354,7 @@ struct RenderContext::Impl: Renderer {
                 if (Vk::IsDeviceLost(waited.error())) {
                     NoteDeviceLost("RenderContext::~Impl");
                 } else {
-                    ZHLN::LogError("[Render] device idle wait during teardown failed: {}", waited.error());
+                    Log<LogTag::Error>("device idle wait during teardown failed: {}", waited.error());
                 }
             }
         }

@@ -167,6 +167,17 @@ struct Response {
 // std::expected, which is plain data and moves across threads freely.
 [[nodiscard]] auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode>;
 
+// Rich fetch failure: the ErrorCode kind plus the transfer's own detail
+// (host, certificate, curl text). Plain data -- no logger needed here.
+struct FetchFailure {
+    ErrorCode   code;
+    std::string detail;
+};
+
+// Same transfer as Fetch, but a failure carries which host/field/cert
+// stopped it, for the caller to log.
+[[nodiscard]] auto FetchDetailed(const Request& request) noexcept -> std::expected<Response, FetchFailure>;
+
 // A GET with nothing else set.
 [[nodiscard]] auto Get(std::string_view url, uint32_t timeoutSeconds = 30) noexcept -> std::expected<Response, ErrorCode>;
 

@@ -5,6 +5,8 @@
 // --capture, and --plugin), process setup, plugin loading, frame pacing, and
 // teardown; optional fly-camera support loads dynamically when present.
 #include <Zahlen/App.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
@@ -18,6 +20,8 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <cmath>
 #include <cstdint>
+#include <print>
+
 
 namespace {
 
@@ -92,7 +96,7 @@ struct SandboxGame {
                 .range     = 18.0f,
             }
         );
-        ZHLN::Log("[Sandbox] F: launch a cube | R: reset view | Esc: quit. With freecam plugin: WASD fly, RMB look, Shift sprint.");
+        std::println(stderr, "[Sandbox] F: launch a cube | R: reset view | Esc: quit. With freecam plugin: WASD fly, RMB look, Shift sprint.");
     }
 
     void Tick(ZHLN::COM::IEngine& engine, float dt) {

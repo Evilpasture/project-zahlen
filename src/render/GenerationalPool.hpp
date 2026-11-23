@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <utility>
 
+
 namespace ZHLN {
 
 template <typename T, size_t MaxObjects, typename IDType = uint64_t>
@@ -36,11 +37,7 @@ class GenerationalPool {
     template <typename... Args>
     IDType Create(Args&&... args) {
         if (_freeIndices.empty()) [[unlikely]] {
-            ZHLN::LogError(
-                "GenerationalPool has exceeded its maximum capacity of {}! Returning "
-                "invalid handle.",
-                MaxObjects
-            );
+            Log<LogTag::Error, LogTag::Render>("GenerationalPool exhausted ({} live objects); Create returns a null handle.", MaxObjects);
             return static_cast<IDType>(0);
         }
         uint32_t index = _freeIndices.back();

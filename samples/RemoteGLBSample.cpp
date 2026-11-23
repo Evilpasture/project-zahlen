@@ -83,7 +83,10 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
+#include <print>
 #include <Animation/Context.hpp>
+#include <cstdio>
+#include <format>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <GitHub/GitHub.hpp>
@@ -123,6 +126,7 @@
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <glTF/GLTFAssets.hpp>
 #include <glTF/GLTFDocument.hpp>
 
@@ -144,6 +148,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
 
 namespace {
 
@@ -476,12 +481,12 @@ void ClearSubject(ZHLN::COM::IEngine& engine, Subject& subject) {
 auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
     auto doc = ZHLN::GLTF::Decode(bytes, virtualPath, {}, {}, engine.Assets());
     if (!doc) {
-        ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
+        ZHLN::Log(engine.Logger(), "'{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
     }
     auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
     if (!asset) {
-        ZHLN::Log("[RemoteGLB] '{}' failed to upload; the previous subject stays on screen.", virtualPath);
+        ZHLN::Log<ZHLN::LogTag::Error>("'{}' failed to upload; the previous subject stays on screen.", virtualPath);
         return false;
     }
     ClearSubject(engine, subject);
@@ -518,8 +523,8 @@ auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const
     subject.document  = std::move(*doc);
     subject.asset     = std::move(*asset);
     subject.loaded    = true;
-    ZHLN::Log(
-        "[RemoteGLB] Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
+    ZHLN::Log(engine.Logger(),
+        "Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
         virtualPath, subject.document->parts.size(), subject.document->nodes.size(), subject.triangles, subject.textures,
         subject.center.x, subject.center.y, subject.center.z, subject.radius, written
     );
@@ -996,10 +1001,8 @@ void SelectModel(SampleState& state, int index) {
     const GLBEntry& entry = state.displayEntries[static_cast<size_t>(index)];
     const auto      status = state.fetcher->Status(state.activeRequest);
     if ((entry.url == state.assetUrl) && (state.subject.loaded || (status == ZHLN::Remote::FetchStatus::Pending) || (status == ZHLN::Remote::FetchStatus::Succeeded))) {
-        ZHLN::Log("[RemoteGLB] '{}' is already on screen.", entry.label);
         return;
     }
-    ZHLN::Log("[RemoteGLB] Selecting '{}' ({}).", entry.label, entry.url);
     state.reported = false;
     state.fetchDetail.clear();
     state.assetUrl = entry.url;
@@ -1084,16 +1087,16 @@ void PollFetch(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.fetchDetail   = std::move(result->errorMessage);
 
     if (status == ZHLN::Remote::FetchStatus::Failed) {
-        ZHLN::Log("[RemoteGLB] Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
-        ZHLN::Log("[RemoteGLB] Check the URL and the network, then press R to try again.");
+        ZHLN::Log<ZHLN::LogTag::Error>("Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
+        ZHLN::Log(engine.Logger(), "Check the URL and the network, then press R to try again.");
         return;
     }
 
     if (!state.fetchDetail.empty()) {
-        ZHLN::Log("[RemoteGLB] {}", state.fetchDetail);
+        ZHLN::Log(engine.Logger(), "{}", state.fetchDetail);
     }
-    ZHLN::Log(
-        "[RemoteGLB] {} {} KiB in {:.2f}s: {}", state.lastFromCache ? "Cache hit," : "Downloaded", result->data.size() / 1024U, elapsed,
+    ZHLN::Log(engine.Logger(),
+        "{} {} KiB in {:.2f}s: {}", state.lastFromCache ? "Cache hit," : "Downloaded", result->data.size() / 1024U, elapsed,
         state.lastSource
     );
 
@@ -1120,7 +1123,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
 
     if (KeyPressed(state, *input, ZHLN::KeyCode::F) && state.subject.loaded) {
         FrameSubject(state.orbit, state.subject);
-        ZHLN::Log("[RemoteGLB] Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x,
+        ZHLN::Log(engine.Logger(), "Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x,
                   state.subject.center.y, state.subject.center.z);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::G) && state.studio.floor != ZHLN::Entity::Null()) {
@@ -1134,7 +1137,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
         { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; engine.Graphics()->ApplySettings(gfx); }
-        ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
+        ZHLN::Log(engine.Logger(), "Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
     // other half of the floor-shimmer A/B test. If the shimmer follows the
@@ -1145,7 +1148,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
         SetSubjectVisible(engine, state.subject, state.studio);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::R)) {
-        ZHLN::Log("[RemoteGLB] Re-downloading '{}', ignoring the cache.", state.assetUrl);
+        ZHLN::Log(engine.Logger(), "Re-downloading '{}', ignoring the cache.", state.assetUrl);
         state.reported = false;
         state.fetchDetail.clear();
         state.activeRequest = state.fetcher->Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, true);
@@ -1155,7 +1158,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     // it is one small request, and its result will be Ready or Failed either
     // way -- and the frame never starts a second crawl underneath one.
     if (KeyPressed(state, *input, ZHLN::KeyCode::C) && (state.catalog.phase.load(std::memory_order::acquire) != CatalogPhase::Loading)) {
-        ZHLN::Log("[RemoteGLB] Re-crawling the model list: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::Log(engine.Logger(), "Re-crawling the model list: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         state.catalogSeeded = false; // seed again once the new listing arrives
         StartCatalogCrawl(state.catalog, EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout));
     }
@@ -1211,7 +1214,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
         gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
-        ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution,
+        ZHLN::Log(engine.Logger(), "Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution,
                   gfx.post.giSamples, gfx.post.enableSSR, gfx.rayTracing.enableReflections, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
     }
 }
@@ -1310,14 +1313,13 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
+        std::println(stderr, "[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     // Crash diagnostics keep their state in a caller-owned struct; static storage
     // duration is required because its address is copied into the signal handler
@@ -1329,7 +1331,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Platform::Init();
     auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
+        std::println(stderr, "Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -1343,7 +1345,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
     if (auto fontID = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::Log<ZHLN::LogTag::Warning>("Font asset failed to load ({}), using embedded default.", fontID.error());
     } else {
         ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
@@ -1352,7 +1354,7 @@ auto main(int argc, char* argv[]) -> int {
     // An imported model holds GPU resources core cannot recreate, so the importer
     // subscribes its own device-lost rebuild. Once, next to the first import (see
     // GLTF::InstallDeviceLostHandler).
-    
+
     ZHLN::Animation::Context animCtx {};
 
     SampleState state;
@@ -1410,15 +1412,15 @@ auto main(int argc, char* argv[]) -> int {
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
     if (EnvironmentFlag("ZHLN_REMOTE_GLB_NO_CATALOG")) {
-        ZHLN::Log("[RemoteGLB] Catalog: disabled (ZHLN_REMOTE_GLB_NO_CATALOG=1)");
+        ZHLN::Log(engine->Logger(), "Catalog: disabled (ZHLN_REMOTE_GLB_NO_CATALOG=1)");
     } else {
-        ZHLN::Log("[RemoteGLB] Catalog: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::Log(engine->Logger(), "Catalog: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         StartCatalogCrawl(state.catalog, timeoutSeconds);
     }
 
     const ZHLN::Remote::ResolvedURL resolvedAsset = ZHLN::Remote::ResolveURL(state.assetUrl);
-    ZHLN::Log("[RemoteGLB] Asset: {}", state.assetUrl);
-    ZHLN::Log("[RemoteGLB] Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
+    ZHLN::Log(engine->Logger(), "Asset: {}", state.assetUrl);
+    ZHLN::Log(engine->Logger(), "Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
@@ -1461,12 +1463,12 @@ auto main(int argc, char* argv[]) -> int {
         }
         const auto result = engine->Tick(state.dt);
         if (!result.HasValue()) {
-            ZHLN::LogError("[RemoteGLB] frame failed: {}", ZHLN::Error(result.error).Message());
+            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
             break;
         }
 
         if (state.frameBudget != 0 && engine->CurrentFrame() >= state.frameBudget) {
-            ZHLN::Log("[RemoteGLB] Frame budget of {} reached; exiting.", state.frameBudget);
+            ZHLN::Log(engine->Logger(), "Frame budget of {} reached; exiting.", state.frameBudget);
             break;
         }
     }

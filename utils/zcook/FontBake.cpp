@@ -81,7 +81,7 @@ int CookFont(int argc, char** argv) {
         AssetCooking::FontBakeParams {.size = fontSize, .padding = padding, .firstCodepoint = first, .glyphCount = count, .atlasDim = atlasDim}
     );
     if (!cooked) {
-        std::println(stderr, "[zcook] ERROR: Font bake failed for '{}': {}", inPath, ZHLN::Error(cooked.error()).Message());
+        std::println(stderr, "[zcook] ERROR: Font bake failed for '{}': {}", inPath, cooked.error());
         return 1;
     }
 

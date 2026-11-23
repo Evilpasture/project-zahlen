@@ -4,6 +4,7 @@
 #include "MangleFixture.hpp"
 #include "TestsFramework.hpp"
 #include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Config.hpp>
@@ -12,6 +13,7 @@
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/COM/Types.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorDescribe.hpp>
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Profiler.hpp>
@@ -101,7 +103,7 @@ static_assert(
     Reflect::DescribeEntity<NeutralOuter<long>::Inner<char>>().templateId
 );
 static_assert(Reflect::DescribeEntity<std::string>().hasIdentifier);
-static_assert(Reflect::DescribeEntity<decltype(&EndLogCapture)>().kind == Reflect::EntityKind::Other);
+static_assert(Reflect::DescribeEntity<decltype(&COM::CreateLoggerRaw)>().kind == Reflect::EntityKind::Other);
 
 using InternalTraits = Reflect::FunctionTraits<&InternalStringFn>;
 static_assert(InternalTraits::name == "InternalStringFn");
@@ -112,10 +114,10 @@ static_assert(InternalTraits::parameterCount == 2);
 static_assert(std::is_same_v<InternalTraits::ReturnType, std::string>);
 static_assert(std::is_same_v<InternalTraits::ParameterTypes, std::tuple<int, const double&>>);
 
-using EndLogTraits = Reflect::FunctionTraits<&EndLogCapture>;
-static_assert(EndLogTraits::name == "EndLogCapture");
-static_assert(EndLogTraits::hasExternalLinkage);
-static_assert(!std::is_void_v<EndLogTraits::ReturnType>);
+using CreateLoggerTraits = Reflect::FunctionTraits<&COM::CreateLoggerRaw>;
+static_assert(CreateLoggerTraits::name == "CreateLoggerRaw");
+static_assert(CreateLoggerTraits::hasExternalLinkage);
+static_assert(!std::is_void_v<CreateLoggerTraits::ReturnType>);
 
 using CVarTraits = Reflect::FunctionTraits<&CVariadicDecl>;
 static_assert(CVarTraits::isCVariadic && CVarTraits::isNoexcept && CVarTraits::parameterCount == 1);
@@ -412,11 +414,18 @@ void test_mangle_matches_live_engine_dso_exports() {
     (void) ExpectExactEngineSymbol<static_cast<CreateEngineChainFn>(&COM::CreateEngineRaw)>(engineLib, enginePath);
     (void) ExpectExactEngineSymbol<&COM::CreateLogicWorldRaw>(engineLib, enginePath);
     const auto rgDump = ExpectExactEngineSymbol<&COM::RenderGraphDump>(engineLib, enginePath);
-    (void) ExpectExactEngineSymbol<&RegisterErrorCategory>(engineLib, enginePath);
-    const auto getLvl = ExpectExactEngineSymbol<&GetLogLevel>(engineLib, enginePath);
-    (void) ExpectExactEngineSymbol<&SetLogLevel>(engineLib, enginePath);
-    (void) ExpectExactEngineSymbol<&BeginLogCapture>(engineLib, enginePath);
-    (void) ExpectExactEngineSymbol<&CancelLogCapture>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&COM::CreateErrorRegistryRaw>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&COM::CreateLoggerRaw>(engineLib, enginePath);
+    // Layer 0 surface: the sink/level entry points every consumer DSO resolves
+    // to route its ambient lines. Only the ABI-clean signatures are asserted
+    // here -- DescribeStaticError / WriteAmbientLog / RegisterStaticErrorCategoryRaw
+    // carry std:: types by design, so ItaniumMangle refuses them; their export
+    // rules are pinned by cmake/zahlen_engine.map via check_engine_exports.
+    (void) ExpectExactEngineSymbol<static_cast<void (*)(ZHLN::LogSink) noexcept>(&ZHLN::SetLogSink)>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&ZHLN::GetLogSink>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&ZHLN::SetLogLevel>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&ZHLN::AmbientLogEnabled>(engineLib, enginePath);
+
     const auto pageSz = ExpectExactEngineSymbol<&GetPageSize>(engineLib, enginePath);
     (void) ExpectExactEngineSymbol<&AllocatePages>(engineLib, enginePath);
     (void) ExpectExactEngineSymbol<&ProtectPages>(engineLib, enginePath);
@@ -432,7 +441,6 @@ void test_mangle_matches_live_engine_dso_exports() {
     (void) ExpectExactEngineSymbol<&TaskSystem::Shutdown>(engineLib, enginePath);
 
     // Invoke safe side-effect-free getters and verify identical return values.
-    if (getLvl) ExpectTrue(getLvl() == GetLogLevel());
     if (pageSz) ExpectEq(pageSz(), GetPageSize());
     if (getPid) ExpectEq(getPid(), GetPID());
     if (workers) ExpectEq(workers(), TaskSystem::GetWorkerCount());

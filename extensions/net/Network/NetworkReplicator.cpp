@@ -8,6 +8,8 @@
 
 module;
 #include <Zahlen/COM/IEngine.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/HashMap.hpp>
@@ -23,6 +25,7 @@ module;
 #include <expected>
 #include <span>
 
+
 module ZHLN.Network;
 
 namespace ZHLN::Net {
@@ -31,7 +34,7 @@ auto ClientReplicator::ApplyInitialObjects(COM::IEntities& entities, std::span<c
     -> std::expected<void, ErrorCode> {
     auto message = DecodeInitialSnapshot(payload);
     if (!message) {
-        Log("Net: dropping initial snapshot — {}", message.error().Format());
+        Log<LogTag::Warning, LogTag::Network>("Initial snapshot decode failed: {}", message.error().Format());
         return std::unexpected(ErrorCode(Error::ReplicationFailed));
     }
 
@@ -55,7 +58,7 @@ auto ClientReplicator::ApplyPhysicsBatch(COM::IEntities& entities, std::span<con
     -> std::expected<void, ErrorCode> {
     auto message = DecodePhysicsBatch(payload);
     if (!message) {
-        Log("Net: dropping physics batch — {}", message.error().Format());
+        Log<LogTag::Warning, LogTag::Network>("Physics batch decode failed: {}", message.error().Format());
         return std::unexpected(ErrorCode(Error::ReplicationFailed));
     }
 

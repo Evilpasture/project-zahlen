@@ -5,6 +5,7 @@
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdarg>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 
@@ -28,22 +29,17 @@ auto JoltAssertBridge(const char* inExpression, const char* inMessage, const cha
     if (inExpression != nullptr && std::strcmp(inExpression, "inQuat.IsNormalized()") == 0) {
         static uint32_t warnCount = 0;
         if (warnCount++ < 5) {
-            ZHLN::Log(
-                "[Jolt Math Warning] Quaternion slightly out of normalization tolerance at "
-                "{}:{}. Bypassing safely.",
-                inFile, inLine
+            std::fprintf(
+                stderr, "[Jolt Math Warning] Quaternion slightly out of normalization tolerance at %s:%u. Bypassing safely.\n", inFile != nullptr ? inFile : "?",
+                inLine
             );
         }
         return false;
     }
 
-    ZHLN::Log(
-        "--- JOLT ASSERT FAILED ---\n"
-        "Expr: {}\n"
-        "Msg:  {}\n"
-        "File: {}:{}\n"
-        "--------------------------\n",
-        inExpression, ((inMessage != nullptr) ? inMessage : "None"), inFile, inLine
+    std::fprintf(
+        stderr, "--- JOLT ASSERT FAILED ---\nExpr: %s\nMsg:  %s\nFile: %s:%u\n--------------------------\n",
+        inExpression != nullptr ? inExpression : "?", inMessage != nullptr ? inMessage : "None", inFile != nullptr ? inFile : "?", inLine
     );
     return true;
 }

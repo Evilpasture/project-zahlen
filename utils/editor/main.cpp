@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Dedicated host-owned paused editor loop. No native Engine or registry bridge.
 #include "EditorSession.hpp"
+#include <cstdio>
+#include <format>
 #include <FallbackScene/FallbackScene.hpp>
 #include <SceneDocument.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
@@ -13,6 +15,8 @@
 #include <charconv>
 #include <cstdlib>
 #include <span>
+#include <print>
+
 namespace {
 auto Run(const ZHLN::EngineConfig& config, const std::filesystem::path& scenePath, uint32_t frames, bool rasterOnly) -> std::expected<void, ZHLN::ErrorCode> {
     using namespace ZHLN;
@@ -120,17 +124,17 @@ int main(int argc, char** argv) {
     };
     auto parsed = ParseEngineConfig(std::span(argv, size_t(argc)), config, flags);
     if (!parsed) {
-        LogError("[WorldEditor] command line: {}", parsed.error());
+        std::println(stderr, "[WorldEditor] command line: {}", parsed.error());
         return EXIT_FAILURE;
     }
     if (parsed->helpRequested || parsed->versionRequested || parsed->graphRequested)
         return EXIT_SUCCESS;
     if (config.headless && !frames) {
-        LogError("[WorldEditor] headless use requires bounded --frames");
+        std::println(stderr, "[WorldEditor] headless use requires bounded --frames");
         return EXIT_FAILURE;
     }
     auto result = Run(config, scenePath, frames, rasterOnly);
     if (!result)
-        LogError("[WorldEditor] failed: {}", result.error());
+        std::println(stderr, "[WorldEditor] failed: {}", result.error());
     return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }

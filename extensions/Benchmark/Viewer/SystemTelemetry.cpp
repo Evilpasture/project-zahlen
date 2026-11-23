@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Viewer/SystemTelemetry.hpp>
+#include <cstdio>
+#include <format>
 #include <Benchmark/Viewer/SystemProbe.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <cstdlib>
 #include <numeric>
 #include <utility>
+
 
 namespace ZHLN::Bench {
 
@@ -240,7 +243,6 @@ SystemTelemetry::SystemTelemetry(): _impl(std::make_unique<Impl>()) {
     _impl->enabled = !ProbeDisabledByEnvironment();
     if (!_impl->enabled) {
         _impl->snapshot.unavailableReason = "disabled by ZHLN_SYSTEM_TELEMETRY=0";
-        ZHLN::Log("[Bench] system telemetry: disabled by ZHLN_SYSTEM_TELEMETRY=0.");
     }
 }
 
@@ -270,7 +272,6 @@ void SystemTelemetry::Tick() {
             // should not have to guess at from an empty panel.
             const std::string_view reason = _impl->probe->Unavailable();
             _impl->snapshot.unavailableReason = reason.empty() ? "nothing to read on this platform" : std::string(reason);
-            ZHLN::Log("[Bench] system telemetry: {}.", _impl->snapshot.unavailableReason);
         }
     }
 

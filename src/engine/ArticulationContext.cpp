@@ -23,6 +23,9 @@
 #include <algorithm>
 #include <span>
 #include <string>
+#include <cstdio>
+#include <format>
+
 
 namespace ZHLN {
 
@@ -83,7 +86,6 @@ bool ArticulationContext::AttachRagdoll(
                         .isAddedToPhysics = false
                     }
     );
-    ZHLN::Log("[ArticulationContext] Skeletal ragdoll attached to entity {} ({} parts).", rootEntity.index, authoredParts.size());
     return true;
 }
 

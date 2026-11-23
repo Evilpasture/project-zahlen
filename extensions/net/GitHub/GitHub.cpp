@@ -85,10 +85,9 @@ inline constexpr std::string_view kUserAgent       = "project-zahlen";
     }
 
     const ZHLN::HTTP::Request request {.url = TreeURL(repo, branch), .headers = headers, .timeoutSeconds = timeoutSeconds};
-    auto wire = ZHLN::HTTP::Fetch(request);
+    auto wire = ZHLN::HTTP::FetchDetailed(request);
     if (!wire) {
-        const ZHLN::Error err = wire.error();
-        response.detail = std::format("no listing ({}: {})", err.Category(), err.Message());
+        response.detail = std::format("no listing ({}: {})", wire.error().code, wire.error().detail);
         return response;
     }
     if ((wire->statusCode < 200) || (wire->statusCode >= 300)) {

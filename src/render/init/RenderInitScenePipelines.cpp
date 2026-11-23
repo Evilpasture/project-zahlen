@@ -302,9 +302,9 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
             diagnostics.shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
-                    ZHLN::LogError("Failed to hot-reload CSG stencil pipelines: {}", res.error());
+                    Log<LogTag::Error>("Failed to hot-reload CSG stencil pipelines: {}", res.error());
                 } else {
-                    ZHLN::Log("[Shader Reload] CSG Stencil pipelines hot-reloaded successfully.");
+                    Log("CSG Stencil pipelines hot-reloaded successfully.");
                 }
             });
         });
@@ -323,7 +323,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
         return compute.hangGpu.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
-        ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());
+        Log<LogTag::Warning>("hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());
     }
     return {};
 }
@@ -559,9 +559,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 diagnostics.shaderReloads.Register("Skinning", {Shaders::Modules::SkinningCS::Path}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
-                        ZHLN::LogError("Failed to hot-reload Skinning pipeline: {}", res.error());
+                        Log<LogTag::Error>("Failed to hot-reload Skinning pipeline: {}", res.error());
                     } else {
-                        ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
+                        Log("Skinning pipeline hot-reloaded successfully.");
                     }
                 });
             }

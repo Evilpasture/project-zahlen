@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "BSPInteraction.hpp"
+#include <cstdio>
+#include <format>
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
@@ -17,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+
 
 namespace ZHLN::Interaction {
 
@@ -231,7 +234,6 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
 
     if (auto* door = entities.Get<DoorComponent>(entity)) {
         if ((door->flags & DoorFlags::Locked) != DoorFlags::None && input != "Unlock") {
-            Log("[Interaction] Door '{}' is locked", label);
             return;
         }
         if (input == "Open") {
@@ -263,7 +265,6 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
 
     if (auto* button = entities.Get<ButtonComponent>(entity)) {
         if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None && input != "Unlock") {
-            Log("[Interaction] Button '{}' is locked", label);
             return;
         }
         if (input == "Press" || input == "Use" || input == "Toggle") {
@@ -323,7 +324,6 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
 
     if (const auto* usable = entities.Get<UsableComponent>(entity)) {
         if (input == "Use" && usable->scriptHash != 0) {
-            Log("[Interaction] Entity '{}' dispatched script {:#X}", label, usable->scriptHash);
         }
     }
 }

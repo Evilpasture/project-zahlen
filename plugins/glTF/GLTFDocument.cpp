@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GLTFDocument.hpp"
+#include <cstdio>
+#include <format>
 #include "TangentGenerator.hpp"
 #include <Image/Image.hpp>
 #include <Zahlen/Log.hpp>
@@ -22,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+
 namespace ZHLN::GLTF {
 namespace {
 auto ReadSourceBytes(COM::IAssetLibrary* assets, std::string_view path) -> std::optional<std::vector<uint8_t>> {
@@ -61,9 +64,11 @@ struct NodeExtras {
 constexpr uint32_t kMaxMorphTargets = 4;
 
 // Advisory diagnostics only. In particular, extensionsRequired is a warning
-// here, not a reason to discard geometry that can still use the core fallback.
-void WarnImport(std::string_view path, std::string_view detail) {
-    LogWarning("[glTF] '{}' {}", path, detail);
+// here, not a reason to discard geometry that can still use the core
+// fallback. Warnings are collected into Document::warnings; reporting them
+// is the caller's job (it owns the logger).
+void WarnImport(std::vector<std::string>& warnings, std::string_view path, std::string_view detail) {
+    warnings.push_back(std::format("{}: {}", path, detail));
 }
 
 [[nodiscard]] auto FindExtensionCapability(std::string_view name) -> const Capability* {
@@ -84,30 +89,29 @@ void WarnImport(std::string_view path, std::string_view detail) {
     return false;
 }
 
-void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path) {
+void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path, std::vector<std::string>& warnings) {
     if (data.asset.version == nullptr || std::string_view(data.asset.version) != "2.0") {
-        WarnImport(
-            path, std::format("glTF version '{}' is not 2.0; continuing best effort.", data.asset.version != nullptr ? data.asset.version : "(missing)")
+        WarnImport(warnings, path, std::format("glTF version '{}' is not 2.0; continuing best effort.", data.asset.version != nullptr ? data.asset.version : "(missing)")
         );
     }
     if (data.asset.min_version != nullptr && std::string_view(data.asset.min_version) != "2.0") {
-        WarnImport(path, std::format("glTF minVersion '{}' differs from our supported 2.0; continuing best effort.", data.asset.min_version));
+        WarnImport(warnings, path, std::format("glTF minVersion '{}' differs from our supported 2.0; continuing best effort.", data.asset.min_version));
     }
 
-    auto report = [path](std::string_view name, bool required) {
+    auto report = [&warnings, path](std::string_view name, bool required) {
         const auto* capability = FindExtensionCapability(name);
         const char* status     = required ? "Required" : "Used";
         if (capability == nullptr) {
-            WarnImport(path, std::format("{} extension '{}' is unsupported; attempting the core/fallback data anyway.", status, name));
+            WarnImport(warnings, path, std::format("{} extension '{}' is unsupported; attempting the core/fallback data anyway.", status, name));
         } else if (capability->support == CapabilitySupport::Partial) {
-            WarnImport(path, std::format("{} extension '{}' is partially supported ({}); continuing best effort.", status, name, capability->limitation));
+            WarnImport(warnings, path, std::format("{} extension '{}' is partially supported ({}); continuing best effort.", status, name, capability->limitation));
         }
     };
 
     for (cgltf_size i = 0; i < data.extensions_required_count; ++i) {
         const std::string_view name = data.extensions_required[i];
         if (!DeclaresExtension(data.extensions_used, data.extensions_used_count, name)) {
-            WarnImport(path, std::format("Required extension '{}' is missing from extensionsUsed.", name));
+            WarnImport(warnings, path, std::format("Required extension '{}' is missing from extensionsUsed.", name));
         }
         report(name, true);
     }
@@ -123,15 +127,14 @@ void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path) {
     return cgltf_find_accessor(&prim, cgltf_attribute_type_position, 0) != nullptr;
 }
 
-void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
+void ValidateFeatureUsage(const cgltf_data& data, std::string_view path, std::vector<std::string>& warnings) {
     if (data.cameras_count != 0) {
-        WarnImport(path, "glTF cameras are not imported; using the scene's camera instead.");
+        WarnImport(warnings, path, "glTF cameras are not imported; using the scene's camera instead.");
     }
     for (cgltf_size m = 0; m < data.materials_count; ++m) {
         const auto& mat = data.materials[m];
         if (mat.has_pbr_specular_glossiness && !mat.has_pbr_metallic_roughness) {
-            WarnImport(
-                path, std::format(
+            WarnImport(warnings, path, std::format(
                           "Material '{}' has only KHR_materials_pbrSpecularGlossiness; no core PBR fallback, so it renders gray/default.",
                           mat.name != nullptr ? mat.name : "(unnamed)"
                       )
@@ -145,14 +148,13 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
             const auto& prim     = mesh.primitives[p];
             const auto  meshName = mesh.name != nullptr ? mesh.name : "(unnamed)";
             if (prim.type != cgltf_primitive_type_triangles) {
-                WarnImport(path, std::format("Mesh '{}' primitive {} is not TRIANGLES; drawing with triangle topology best effort.", meshName, p));
+                WarnImport(warnings, path, std::format("Mesh '{}' primitive {} is not TRIANGLES; drawing with triangle topology best effort.", meshName, p));
             }
             if (!HasPosition(prim)) {
-                WarnImport(path, std::format("Mesh '{}' primitive {} has no POSITION; skipping this primitive, but importing the rest.", meshName, p));
+                WarnImport(warnings, path, std::format("Mesh '{}' primitive {} has no POSITION; skipping this primitive, but importing the rest.", meshName, p));
             }
             if (prim.targets_count > kMaxMorphTargets) {
-                WarnImport(
-                    path, std::format(
+                WarnImport(warnings, path, std::format(
                               "Mesh '{}' primitive {} has {} morph targets; only the first {} POSITION deltas are used.", meshName, p, prim.targets_count,
                               kMaxMorphTargets
                           )
@@ -165,8 +167,7 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
                     ((attr.type == cgltf_attribute_type_color || attr.type == cgltf_attribute_type_joints || attr.type == cgltf_attribute_type_weights) &&
                      attr.index > 0);
                 if (ignored) {
-                    WarnImport(
-                        path, std::format("Mesh '{}' primitive {} ignores attribute '{}'.", meshName, p, attr.name != nullptr ? attr.name : "(unnamed)")
+                    WarnImport(warnings, path, std::format("Mesh '{}' primitive {} ignores attribute '{}'.", meshName, p, attr.name != nullptr ? attr.name : "(unnamed)")
                     );
                 }
             }
@@ -180,8 +181,7 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
                 }
             }
             if (ignoresMorphNormals || ignoresMorphTangents) {
-                WarnImport(
-                    path, std::format(
+                WarnImport(warnings, path, std::format(
                               "Mesh '{}' primitive {} ignores morph {} deltas; only POSITION is imported.", meshName, p,
                               ignoresMorphNormals && ignoresMorphTangents ? "NORMAL/TANGENT" :
                               ignoresMorphNormals                         ? "NORMAL" :
@@ -202,10 +202,10 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
         }
     }
     if (easedLinear) {
-        WarnImport(path, "LINEAR animation playback eases between keys rather than following glTF linear timing.");
+        WarnImport(warnings, path, "LINEAR animation playback eases between keys rather than following glTF linear timing.");
     }
     if (cubicSpline) {
-        WarnImport(path, "CUBICSPLINE tangent interpolation is unsupported; animation playback may be inaccurate.");
+        WarnImport(warnings, path, "CUBICSPLINE tangent interpolation is unsupported; animation playback may be inaccurate.");
     }
 }
 
@@ -623,10 +623,6 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         }
         if (job.transmissionFactor > 0.0f) {
             const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
-            ZHLN::Log(
-                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f}-{:.0f} nm, volume {:.3f} m, ior {:.2f}.", matName, job.transmissionFactor,
-                job.iridescenceFactor, job.filmThicknessMinNm, job.filmThicknessNm, job.volumeThicknessM, job.ior
-            );
         }
 
         job.emissiveFactor[0] = prim.material->emissive_factor[0];
@@ -1060,15 +1056,17 @@ auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::s
     if (cgltf_parse(&opts, bytes.data(), bytes.size(), &data) != cgltf_result_success)
         return std::unexpected(ImportError::ParseFailed);
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> guard(data, &cgltf_free);
-    ValidateDeclaredExtensions(*data, virtualPath);
+    std::vector<std::string> warnings;
+    ValidateDeclaredExtensions(*data, virtualPath, warnings);
     const std::string base(bytesPath);
     if (cgltf_load_buffers(&opts, data, base.empty() ? nullptr : base.c_str()) != cgltf_result_success)
         return std::unexpected(ImportError::BufferReadFailed);
     // Structural validation, not an unsupported-extension veto.
     if (cgltf_validate(data) != cgltf_result_success)
         return std::unexpected(ImportError::InvalidDocument);
-    ValidateFeatureUsage(*data, virtualPath);
+    ValidateFeatureUsage(*data, virtualPath, warnings);
     Document                                       document {.virtualPath = std::string(virtualPath), .options = options};
+    document.warnings = std::move(warnings);
     std::unordered_map<const cgltf_node*, int32_t> nodeMap;
     nodeMap.reserve(data->nodes_count);
     document.nodes.reserve(data->nodes_count);

@@ -4,6 +4,7 @@
 #include "vulkan/core/PhysicalDevice.hpp"
 #include "vulkan/core/Extensions.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -208,10 +209,6 @@ auto SelectPhysicalDevice(const VkInstance instance, const VkSurfaceKHR surface,
     }
 
     if (best_score >= 0 && best_device.has_value()) {
-        ZHLN::Log(
-            "[Vulkan] Selected physical device: {} ({})", best_device->properties.properties.deviceName,
-            DeviceTypeName(best_device->properties.properties.deviceType)
-        );
         return best_device;
     }
     return std::nullopt;

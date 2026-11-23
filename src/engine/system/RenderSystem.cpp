@@ -5,6 +5,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include "RenderSystem.hpp"
+#include "../EngineErrors.hpp"
 #include "../KernelSession.hpp"
 #include <engine/AssetManager.hpp>
 #include <render/SceneData.hpp>
@@ -48,11 +49,6 @@ namespace {
 
 
 
-enum class RenderSystemError : uint8_t {
-    NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
-    EnvironmentImageUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The scene's environment image was not supplied to the asset library"> {}),
-};
-
 namespace {
 
 [[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferID {
@@ -90,7 +86,7 @@ using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
     }
     const auto pixels = assets.FindEnvironmentImage(std::string_view(env->source));
     if (!pixels) {
-        Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
+        Log<LogTag::Warning>("No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
     }
     const std::span<const std::array<float, 3>> sh = pixels->sun
@@ -159,7 +155,7 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, SceneData& scene) {
 void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
     poseUploads.Drain([&](const PoseUpload& upload) {
         if (auto res = rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); !res) {
-            ZHLN::LogWarning("[RenderSystem] UpdateJointMatrices failed at offset {}: {}", upload.jointOffset, res.error());
+            Log<LogTag::Warning>("UpdateJointMatrices failed at offset {}: {}", upload.jointOffset, res.error());
         }
     });
 }

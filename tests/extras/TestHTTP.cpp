@@ -140,7 +140,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Get(server.Url("/ok"));
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] Get failed: {}", ZHLN::Error(response.error()).Message());
+                ZHLN::Println("    [HTTP] Get failed: {}", response.error());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -215,7 +215,7 @@ struct HTTPTestSuite {
             constexpr std::string_view payload  = R"({"a":1})";
             auto                       response = ZHLN::HTTP::Post(server.Url("/echo"), payload);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] Post failed: {}", ZHLN::Error(response.error()).Message());
+                ZHLN::Println("    [HTTP] Post failed: {}", response.error());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -249,7 +249,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Fetch(request);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] empty POST failed: {}", ZHLN::Error(response.error()).Message());
+                ZHLN::Println("    [HTTP] empty POST failed: {}", response.error());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -374,7 +374,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Get(server.Url("/redirect"));
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] redirect failed: {}", ZHLN::Error(response.error()).Message());
+                ZHLN::Println("    [HTTP] redirect failed: {}", response.error());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -463,7 +463,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Fetch(request);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] HEAD failed: {}", ZHLN::Error(response.error()).Message());
+                ZHLN::Println("    [HTTP] HEAD failed: {}", response.error());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 

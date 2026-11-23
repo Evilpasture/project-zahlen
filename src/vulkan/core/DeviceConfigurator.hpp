@@ -35,6 +35,7 @@ struct ConfiguredDevice {
 template <typename... Ts>
 class DeviceConfigurator {
   public:
+
     explicit DeviceConfigurator(VkPhysicalDevice physical) requires(sizeof...(Ts) == 0):
         _physical(physical), _extensions(ExtensionBuilder::ForDevice(physical)), _features(physical, std::tuple<>{}) {}
 

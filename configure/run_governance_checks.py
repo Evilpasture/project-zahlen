@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run all repository configure-time governance checks in parallel with stat-manifest caching.
 
-Invoked once by cmake/GovernanceChecks.cmake so configure does not pay 13
-sequential interpreter startups and 13 sequential tree walks on every reconfigure:
+Invoked once by cmake/GovernanceChecks.cmake so configure does not pay 14
+sequential interpreter startups and 14 sequential tree walks on every reconfigure:
   * On POSIX hosts (Linux/macOS), forks lightweight worker processes (avoiding
     11 extra Python startup/import cycles while bypassing the GIL across cores)
     and runs Perl's check_include_provenance.pl concurrently.
-  * On Windows (no fork), runs all 12 checks concurrently via subprocesses.
+  * On Windows (no fork), runs all 14 checks concurrently via subprocesses.
   * Fingerprints every governed source file, CMake file, checker script, and
     JSON allowlist by (relative path, mtime_ns, byte size).
   * Only a 100% clean pass writes the cache file; any violation fails
@@ -87,6 +87,7 @@ HISTORICAL_PYTHON_ORDER: tuple[str, ...] = (
     "check_capability_boundary.py",
     "check_image_boundary.py",
     "check_engine_exports.py",
+    "check_com_boundary.py",
 )
 # Longest-pole checks scheduled first to minimize parallel tail latency.
 SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
@@ -105,6 +106,7 @@ SCHEDULE_PYTHON_ORDER: tuple[str, ...] = (
     "check_capability_boundary.py",
     "check_image_boundary.py",
     "check_engine_exports.py",
+    "check_com_boundary.py",
 )
 PERL_CHECK = "check_include_provenance.pl"
 

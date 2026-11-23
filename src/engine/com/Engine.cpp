@@ -27,6 +27,8 @@
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -79,6 +81,10 @@
 #include <vector>
 
 namespace ZHLN::COM {
+
+static_assert(AuditInterfaceABI<ILogger>(), "ILogger violates the COM ABI rules.");
+static_assert(AuditInterfaceABI<ILoggerHub>(), "ILoggerHub violates the COM ABI rules.");
+static_assert(AuditInterfaceABI<IErrorRegistry>(), "IErrorRegistry violates the COM ABI rules.");
 
 static_assert(AuditInterfaceABI<IEngine>());
 static_assert(AuditInterfaceABI<IFramePipeline>());
@@ -271,7 +277,12 @@ class Engine final:
         IDebugDraw,
         IFramePipeline> {
   public:
-    explicit Engine(std::unique_ptr<ZHLN::Engine> engine) noexcept : m_engine(std::move(engine)) {}
+    // The logger and registry are COM objects the engine borrows as a plain
+    // LogSink; holding the Refs here (declared before m_engine, so they are
+    // destroyed after it) is what keeps the hub alive for the engine's whole
+    // life -- and what makes IEngine::Logger()/Errors() answerable.
+    Engine(std::unique_ptr<ZHLN::Engine> engine, Ref<ILogger> logger, Ref<IErrorRegistry> errors) noexcept
+        : m_logger(std::move(logger)), m_errors(std::move(errors)), m_engine(std::move(engine)) {}
 
     void TraceDiagnostics() const noexcept override;
 
@@ -318,6 +329,14 @@ class Engine final:
 
     void ClearScene() noexcept override {
         m_engine->ClearScene();
+    }
+
+    [[nodiscard]] ILogger* Logger() noexcept override {
+        return m_logger.Get();
+    }
+
+    [[nodiscard]] IErrorRegistry* Errors() noexcept override {
+        return m_errors.Get();
     }
 
     [[nodiscard]] IGraphicsDevice* Graphics() noexcept override {
@@ -2402,6 +2421,11 @@ private:
         uint64_t nextToken = 1;
     };
     uint64_t m_nextPrefabGPURevision = 1;
+    // Declared before m_engine: members are destroyed in reverse order, so the
+    // logger and registry outlive every teardown log line and error record the
+    // engine and its session produce.
+    Ref<ILogger>        m_logger;
+    Ref<IErrorRegistry> m_errors;
     std::unique_ptr<ZHLN::Engine> m_engine;
     std::shared_ptr<DeviceLostListeners> m_deviceLostListeners;
 };
@@ -2415,9 +2439,11 @@ void Engine::TraceDiagnostics() const noexcept {
 auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     EngineConfig config {};
     uint32_t     maxFramesPerSecond = 0;
+    LoggerConfig loggerNode {};
+    ErrorConfig  errorNode {};
 
     const Result<void> chainRes =
-        DispatchInChain<AppConfig, WindowConfig, RenderConfig, PhysicsConfig, DiagnosticsInfo>(
+        DispatchInChain<AppConfig, WindowConfig, RenderConfig, PhysicsConfig, DiagnosticsInfo, LoggerConfig, ErrorConfig>(
             configChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, DiagnosticsInfo>) {
                     if (!Valid(node.crashDumpPath)) return Error::NullArgument;
@@ -2440,19 +2466,46 @@ auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*
                     config.initialPipelineBinaryData = std::span<const uint8_t>(node.initialPipelineBinary);
                 } else if constexpr (std::is_same_v<NodeT, PhysicsConfig>) {
                     config.physics = node;
+                } else if constexpr (std::is_same_v<NodeT, LoggerConfig>) {
+                    loggerNode = node;
+                } else if constexpr (std::is_same_v<NodeT, ErrorConfig>) {
+                    errorNode = node;
                 }
                 return {};
             });
     if (!chainRes.HasValue()) return chainRes.error;
 
     config.fpsLimit = maxFramesPerSecond;
-    auto created = ZHLN::Engine::Create(config);
+
+    // The logger and registry exist before the engine so startup failures
+    // log into the caller's sink and the returned code can be Described by
+    // the caller's registry. Defaults are created here when the chain did
+    // not supply them; the logger's level honors AppConfig::logLevel.
+    ILogger*           logger = loggerNode.logger;
+    Ref<ILoggerHub>    ownedLogger;
+    Ref<IErrorRegistry> errors(errorNode.registry);
+    if (logger == nullptr) {
+        auto made = CreateLogger(InChain(LoggerConfig {.logger = nullptr, .level = config.logLevel}));
+        if (!made) return made.error();
+        ownedLogger = std::move(*made);
+        logger      = ownedLogger.Get();
+    }
+    if (errors.Get() == nullptr) {
+        auto made = CreateErrorRegistry();
+        if (!made) return made.error();
+        errors = std::move(*made);
+    }
+
+    // The engine is engine-first: it receives the host logger as a plain
+    // Layer-0 sink (gate + writer in one value) and never names ILogger. The
+    // Refs below keep the COM objects alive for the engine's whole life.
+    auto created = ZHLN::Engine::Create(config, logger->AsSink());
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
     (*created)->EmplaceService<EngineConfig>((*created)->Configuration());
 
-    auto* instance = new (std::nothrow) Engine(std::move(*created));
+    auto* instance = new (std::nothrow) Engine(std::move(*created), Ref<ILogger>(logger), std::move(errors));
     if (instance == nullptr) return ErrorCode(Error::AllocationFailed);
     return static_cast<IEngine*>(instance);
 }

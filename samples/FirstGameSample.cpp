@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/App.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -10,6 +12,8 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+
 
 struct Game {
     void Start(ZHLN::COM::IEngine& engine) {
@@ -47,7 +51,7 @@ struct Game {
                 .castsShadow = true});
         if (floor == ZHLN::Entity::Null() || box == ZHLN::Entity::Null() ||
             sun == ZHLN::Entity::Null()) {
-            ZHLN::LogError("Could not create the example scene");
+            ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "Could not create the example scene");
             engine.RequestClose();
         }
     }

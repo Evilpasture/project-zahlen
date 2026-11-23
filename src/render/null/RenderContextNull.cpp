@@ -147,7 +147,8 @@ auto RenderContext::GetPipelineBinaryData() const noexcept -> std::vector<uint8_
     return {};
 }
 
-auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept
+    -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl = std::make_unique<Impl>(target, cfg);
     return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
 }
@@ -569,7 +570,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 }
 
 void RenderContext::ProvokeDeviceLost() {
-    ZHLN::LogError("[DeviceLost] Simulated null-renderer device lost");
+    Log<LogTag::Error, LogTag::DeviceLost>("Simulated null-renderer device lost");
 }
 
 auto RenderContext::BakeProceduralTexture(

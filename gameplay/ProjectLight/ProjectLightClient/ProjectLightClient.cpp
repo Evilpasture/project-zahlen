@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <ProjectLightClient/LightProtocol.hpp>
+#include <cstdio>
+#include <format>
 
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
@@ -16,6 +18,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 
 #include <algorithm>
 #include <array>
@@ -33,6 +36,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
 
 namespace ZHLN::ProjectLight {
 namespace {
@@ -374,7 +378,7 @@ auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, s
     m_playerControllerStates.clear();
     m_sendAccumulator = 0.0f;
 
-    Log("[ProjectLight][net] opening TCP connection to {}:{} (authentication values are not logged).", config.host, config.port);
+    ZHLN::Log("opening TCP connection to {}:{} (authentication values are not logged).", config.host, config.port);
 
     auto addresses = Net::ResolveSocketEndpoints(
         config.host, config.port, Net::SocketAddressFamily::IPv4, Net::SocketType::Stream
@@ -402,7 +406,7 @@ auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, s
 
         auto noDelay = candidate->SetNoDelay(true);
         if (!noDelay) {
-            LogWarning("[ProjectLight][net] TCP_NODELAY could not be set (socket error {}).", noDelay.error().nativeCode);
+            ZHLN::Log<ZHLN::LogTag::Warning>("TCP_NODELAY could not be set (socket error {}).", noDelay.error().nativeCode);
         }
 
         tcp = std::move(*candidate);
@@ -448,14 +452,14 @@ auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, s
     m_localUdpPort = localEndpoint->port;
     m_connected = true;
 
-    Log("[ProjectLight][net] TCP transport connected to {}:{}; local UDP port {}.", config.host, config.port, m_localUdpPort);
+    ZHLN::Log("TCP transport connected to {}:{}; local UDP port {}.", config.host, config.port, m_localUdpPort);
     if (!SendTcpPacket(BuildConnectPacket(config, m_localUdpPort))) {
         CloseSockets();
         return std::unexpected("send connect packet failed");
     }
     FlushTcpTxBuffer();
     const size_t pendingBytes = m_tcpTxBuffer.size() - std::min(m_tcpTxOffset, m_tcpTxBuffer.size());
-    Log("[ProjectLight][net] connect request submitted (TCP bytes sent={}, pending={}); waiting for a server reply; TCP connect alone does not confirm protocol acceptance.",
+    ZHLN::Log("connect request submitted (TCP bytes sent={}, pending={}); waiting for a server reply; TCP connect alone does not confirm protocol acceptance.",
         m_tcpBytesSent, pendingBytes);
     return {};
 }
@@ -472,7 +476,7 @@ auto ClientSession::SendTcpPacket(const MsgPackValue& packet) -> bool {
     if (!m_connected || !m_tcpSocket.IsOpen()) return false;
     auto frame = EncodeStreamFrame(packet, false);
     if (!frame) {
-        Log("[ProjectLight] TCP packet encode failed: {}", frame.error());
+        ZHLN::Log<ZHLN::LogTag::Error>("TCP packet encode failed: {}", frame.error());
         return false;
     }
     if (m_tcpTxOffset == m_tcpTxBuffer.size()) {
@@ -491,7 +495,7 @@ void ClientSession::FlushTcpTxBuffer() noexcept {
         const auto   bytes = std::span<const uint8_t>(m_tcpTxBuffer.data() + m_tcpTxOffset, remaining);
         auto         result = m_tcpSocket.Send(bytes);
         if (!result) {
-            Log("[ProjectLight] TCP send failed (socket error {}); disconnecting.", result.error().nativeCode);
+            ZHLN::Log<ZHLN::LogTag::Error>("TCP send failed (socket error {}); disconnecting.", result.error().nativeCode);
             CloseSockets();
             return;
         }
@@ -499,7 +503,7 @@ void ClientSession::FlushTcpTxBuffer() noexcept {
             break;
         }
         if (result->state != Net::SocketIOState::Complete || result->bytes == 0) {
-            Log("[ProjectLight] TCP send made no progress; disconnecting.");
+            ZHLN::Log<ZHLN::LogTag::Error>("TCP send made no progress; disconnecting.");
             CloseSockets();
             return;
         }
@@ -520,7 +524,7 @@ auto ClientSession::SendRealtimePacket(const MsgPackValue& packet) -> bool {
 
     auto result = m_udpSocket.SendTo(std::span<const uint8_t>(packed), m_serverEndpoint);
     if (!result) {
-        Log("[ProjectLight] UDP send failed (socket error {}).", result.error().nativeCode);
+        ZHLN::Log<ZHLN::LogTag::Warning>("UDP send failed (socket error {}).", result.error().nativeCode);
         return false;
     }
     if (result->state == Net::SocketIOState::WouldBlock) {
@@ -941,7 +945,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
     if (!m_networkPollStarted) {
         m_networkPollStarted = true;
         m_lastNetworkStatusLog = now;
-        Log("[ProjectLight][net] frame poll is active; waiting for the first server reply.");
+        ZHLN::Log(engine.Logger(), "frame poll is active; waiting for the first server reply.");
     }
 
     FlushTcpTxBuffer();
@@ -959,7 +963,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
         }
         const std::string_view realtimeMode = !m_realtimeModeReceived ? "awaiting server mode"
                                                                        : (m_realtimeOverTcp ? "TCP" : "UDP");
-        Log("[ProjectLight][net] status: TCP transportConnected={} tx={}B rx={}B frames={} buffered={}B; UDP tx={}/{}B rx={}/{}B decodeErrors={}; mode={} snapshot={} objects={} parts={} lights={} boundEntities={} unrecognizedPackets={}",
+        ZHLN::Log(engine.Logger(), "status: TCP transportConnected={} tx={}B rx={}B frames={} buffered={}B; UDP tx={}/{}B rx={}/{}B decodeErrors={}; mode={} snapshot={} objects={} parts={} lights={} boundEntities={} unrecognizedPackets={}",
             m_connected, m_tcpBytesSent, m_tcpBytesReceived, m_tcpFramesReceived, m_tcpRxBuffer.size(), m_udpDatagramsSent,
             m_udpBytesSent, m_udpDatagramsReceived, m_udpBytesReceived, m_udpDecodeErrors, realtimeMode, m_snapshotComplete,
             m_objects.size(), partCount, lightCount, boundEntityCount, m_unrecognizedPackets);
@@ -971,7 +975,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
             const auto length = PeekStreamBodyLength(m_tcpRxBuffer);
             if (!length) break;
             if (*length == 0 || *length > MAX_STREAM_FRAME_BYTES) {
-                Log("[ProjectLight] invalid TCP frame length; disconnecting.");
+                ZHLN::Log<ZHLN::LogTag::Error>("invalid TCP frame length; disconnecting.");
                 CloseSockets();
                 return false;
             }
@@ -980,7 +984,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
             auto packet = DecodeStreamFrame(std::span<const uint8_t>(m_tcpRxBuffer.data(), frameSize));
             m_tcpRxBuffer.erase(m_tcpRxBuffer.begin(), m_tcpRxBuffer.begin() + static_cast<std::ptrdiff_t>(frameSize));
             if (!packet) {
-                Log("[ProjectLight] malformed TCP frame: {}; disconnecting.", packet.error());
+                ZHLN::Log<ZHLN::LogTag::Error>("malformed TCP frame: {}; disconnecting.", packet.error());
                 CloseSockets();
                 return false;
             }
@@ -989,12 +993,12 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
             if (!m_snapshotClassProbeLogged) {
                 if (const MsgPackValue* snapshot = packet->Find("initialObjectsSnapshot")) {
                     std::optional<uint16_t> inferredClassNameChannel;
-                    Log("[ProjectLight][net] raw initialObjectsSnapshot class probe: {}",
+                    ZHLN::Log(engine.Logger(), "raw initialObjectsSnapshot class probe: {}",
                         SnapshotClassProbe(*snapshot, &inferredClassNameChannel));
                     if (inferredClassNameChannel) {
                         m_remoteClassNameChannel = inferredClassNameChannel;
                         const auto compiledClassNameChannel = PropertyNameChannel("ClassName");
-                        Log("[ProjectLight][net] inferred remote ClassName channel {}; compiled property table expects {}.",
+                        ZHLN::Log(engine.Logger(), "inferred remote ClassName channel {}; compiled property table expects {}.",
                             *m_remoteClassNameChannel, compiledClassNameChannel.value_or(0u));
                         m_remotePropertyNameOverrides.fill(std::string_view {});
                         if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel
@@ -1002,14 +1006,14 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                             for (const auto& [channel, property]: kObservedRemotePropertyChannels) {
                                 m_remotePropertyNameOverrides[channel] = property;
                             }
-                            Log("[ProjectLight][net] audited remote property layout matched; mapped Position=5, Rotation=20, Size=21, Anchored=22, CanCollide=23, Color=24, Transparency=25, UserId=18, Character=19, NetworkOwner=32, Shape=33, RootPart=49, State=50, and light fields=56-64.");
+                            ZHLN::Log(engine.Logger(), "audited remote property layout matched; mapped Position=5, Rotation=20, Size=21, Anchored=22, CanCollide=23, Color=24, Transparency=25, UserId=18, Character=19, NetworkOwner=32, Shape=33, RootPart=49, State=50, and light fields=56-64.");
                         } else if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel) {
-                            LogWarning("[ProjectLight][net] no known numeric property layout matched this snapshot; only ClassName will use a remote override.");
+                            ZHLN::Log(engine.Logger(), "no known numeric property layout matched this snapshot; only ClassName will use a remote override.");
                         }
                     } else {
                         m_remoteClassNameChannel.reset();
                         m_remotePropertyNameOverrides.fill(std::string_view {});
-                        Log("[ProjectLight][net] no alternate ClassName channel inferred; using the compiled property table.");
+                        ZHLN::Log(engine.Logger(), "no alternate ClassName channel inferred; using the compiled property table.");
                     }
                     m_snapshotClassProbeLogged = true;
                 }
@@ -1022,10 +1026,10 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                 m_realtimeModeReceived = recognizedMode;
                 m_realtimeOverTcp = mode == "tcp";
                 if (recognizedMode) {
-                    Log("[ProjectLight][net] server selected {} for realtime traffic.", mode);
+                    ZHLN::Log(engine.Logger(), "server selected {} for realtime traffic.", mode);
                 } else {
                     ++m_unrecognizedPackets;
-                    LogWarning("[ProjectLight][net] server sent an unknown realtimeMode value '{}'.", mode);
+                    ZHLN::Log<ZHLN::LogTag::Warning>("server sent an unknown realtimeMode value '{}'.", mode);
                 }
             } else if (action == "snapshotEnd") {
                 const bool firstSnapshotEnd = !m_snapshotComplete;
@@ -1038,16 +1042,16 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                         if (IsPartClass(object.className)) ++partCount;
                         if (IsLightClass(object.className)) ++lightCount;
                     }
-                    Log("[ProjectLight][net] snapshotEnd received: {} replicated objects ({} parts/mesh parts, {} lights); sending snapshotReady.",
+                    ZHLN::Log(engine.Logger(), "snapshotEnd received: {} replicated objects ({} parts/mesh parts, {} lights); sending snapshotReady.",
                         m_objects.size(), partCount, lightCount);
                 }
                 if (SendTcpPacket(BuildSnapshotReadyPacket())) {
-                    if (firstSnapshotEnd) Log("[ProjectLight][net] snapshotReady sent/queued on TCP.");
+                    if (firstSnapshotEnd) ZHLN::Log(engine.Logger(), "snapshotReady sent/queued on TCP.");
                 } else {
-                    LogWarning("[ProjectLight][net] could not send snapshotReady.");
+                    ZHLN::Log<ZHLN::LogTag::Warning>("could not send snapshotReady.");
                 }
             } else if (action == "disconnect") {
-                Log("[ProjectLight] server requested disconnect.");
+                ZHLN::Log(engine.Logger(), "server requested disconnect.");
                 CloseSockets();
                 return false;
             } else {
@@ -1055,14 +1059,14 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                 if (!handled) {
                     ++m_unrecognizedPackets;
                     if (m_unrecognizedPackets <= 8u) {
-                        LogWarning("[ProjectLight][net] unhandled TCP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
+                        ZHLN::Log<ZHLN::LogTag::Warning>("unhandled TCP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
                                    action.empty() ? "<none>" : std::string(action), NetworkPacketSummary(*packet));
                     }
                 }
             }
 
             if (frameNumber <= 12u) {
-                Log("[ProjectLight][net] RX TCP frame #{} ({} bytes): action='{}', {}; replicatedObjects={}", frameNumber, frameSize,
+                ZHLN::Log(engine.Logger(), "RX TCP frame #{} ({} bytes): action='{}', {}; replicatedObjects={}", frameNumber, frameSize,
                     action.empty() ? "<none>" : std::string(action), NetworkPacketSummary(*packet), m_objects.size());
             }
             if (!m_connected) return false;
@@ -1074,14 +1078,14 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
         auto received = m_tcpSocket.Receive(std::span<uint8_t>(buffer));
         if (!received) {
             const int error = received.error().nativeCode;
-            if (!m_streamErrorLogged) Log("[ProjectLight] TCP receive failed (socket error {}).", error);
+            if (!m_streamErrorLogged) ZHLN::Log<ZHLN::LogTag::Error>("TCP receive failed (socket error {}).", error);
             m_streamErrorLogged = true;
             CloseSockets();
             return;
         }
         if (received->state == Net::SocketIOState::WouldBlock) break;
         if (received->state == Net::SocketIOState::PeerClosed) {
-            if (!m_streamErrorLogged) Log("[ProjectLight] server closed the TCP connection.");
+            if (!m_streamErrorLogged) ZHLN::Log(engine.Logger(), "server closed the TCP connection.");
             m_streamErrorLogged = true;
             CloseSockets();
             return;
@@ -1095,7 +1099,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
         );
         if (m_tcpRxBuffer.size() > MAX_STREAM_FRAME_BYTES + 4 + kReceiveChunkBytes || !drainFrames()) {
             if (m_connected) {
-                Log("[ProjectLight] incoming TCP frame buffer exceeds the configured limit; disconnecting.");
+                ZHLN::Log<ZHLN::LogTag::Error>("incoming TCP frame buffer exceeds the configured limit; disconnecting.");
                 CloseSockets();
             }
             return;
@@ -1108,7 +1112,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
         while (true) {
             auto received = m_udpSocket.ReceiveFrom(std::span<uint8_t>(datagram));
             if (!received) {
-                Log("[ProjectLight] UDP receive failed (socket error {}).", received.error().nativeCode);
+                ZHLN::Log<ZHLN::LogTag::Warning>("UDP receive failed (socket error {}).", received.error().nativeCode);
                 break;
             }
             if (received->io.state == Net::SocketIOState::WouldBlock) break;
@@ -1122,7 +1126,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
             if (!packet) {
                 ++m_udpDecodeErrors;
                 if (m_udpDecodeErrors <= 4u) {
-                    LogWarning("[ProjectLight][net] malformed UDP datagram #{} ({} bytes): {}", m_udpDatagramsReceived,
+                    ZHLN::Log<ZHLN::LogTag::Warning>("malformed UDP datagram #{} ({} bytes): {}", m_udpDatagramsReceived,
                                receivedBytes, packet.error());
                 }
                 continue;
@@ -1130,7 +1134,7 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
             if (!packet->IsMap()) {
                 ++m_udpDecodeErrors;
                 if (m_udpDecodeErrors <= 4u) {
-                    LogWarning("[ProjectLight][net] UDP datagram #{} decoded to a non-map MessagePack value.", m_udpDatagramsReceived);
+                    ZHLN::Log<ZHLN::LogTag::Warning>("UDP datagram #{} decoded to a non-map MessagePack value.", m_udpDatagramsReceived);
                 }
                 continue;
             }
@@ -1139,12 +1143,12 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                 ++m_unrecognizedPackets;
                 if (m_unrecognizedPackets <= 8u) {
                     const std::string_view action = GetFrameAction(*packet);
-                    LogWarning("[ProjectLight][net] unhandled UDP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
+                    ZHLN::Log<ZHLN::LogTag::Warning>("unhandled UDP packet #{}: action='{}', fields={}", m_unrecognizedPackets,
                                action.empty() ? "<none>" : std::string(action), NetworkPacketSummary(*packet));
                 }
             }
             if (m_udpDatagramsReceived <= 3u) {
-                Log("[ProjectLight][net] RX UDP datagram #{} ({} bytes): {}; replicatedObjects={}", m_udpDatagramsReceived,
+                ZHLN::Log(engine.Logger(), "RX UDP datagram #{} ({} bytes): {}; replicatedObjects={}", m_udpDatagramsReceived,
                     receivedBytes, NetworkPacketSummary(*packet), m_objects.size());
             }
         }

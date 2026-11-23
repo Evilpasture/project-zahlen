@@ -4,6 +4,7 @@
 #include "render/PresentationSurface.hpp"
 #include "render/RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <memory>
 #include <utility>
 
@@ -41,7 +42,7 @@ namespace {
 
     const Vk::SwapchainTarget& image = **acquired;
     if (dest.cachedGeneration != 0 && dest.cachedGeneration != image.generation) {
-        ZHLN::Log("[Render] Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
+        Log<LogTag::Debug>("Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
     }
     dest.cachedGeneration = image.generation;
 
@@ -173,7 +174,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
     }
     FrameDestinations::Window& dest = *found->entry;
     if (found->created) {
-        ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
+        Log("Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
 
     // Rebuild an auxiliary swapchain before the renderer allocates its matching

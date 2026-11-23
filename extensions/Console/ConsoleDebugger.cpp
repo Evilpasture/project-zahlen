@@ -22,6 +22,8 @@
 #endif
 
 #include "ConsoleDebugger.hpp"
+#include <cstdio>
+#include <format>
 #include "SymbolResolver.hpp"
 #include <Console/Console.hpp>
 #include <Scripting/ScriptBinder.hpp>
@@ -46,6 +48,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
 
 namespace ZHLN {
 

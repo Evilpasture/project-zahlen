@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The composition root owns every GUI frame and submission, not the plugin.
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
@@ -12,6 +14,8 @@
 #include <array>
 #include <charconv>
 #include <cstdlib>
+#include <print>
+
 namespace {
 auto Run(const ZHLN::EngineConfig& config, uint32_t frames) -> std::expected<void, ZHLN::ErrorCode> {
     using namespace ZHLN;
@@ -79,12 +83,12 @@ int main(int argc, char** argv) {
     if (parsed->helpRequested || parsed->versionRequested)
         return EXIT_SUCCESS;
     if (config.headless && !frames) {
-        LogError("--headless requires --frames");
+        std::println(stderr, "--headless requires --frames");
         return EXIT_FAILURE;
     }
     auto ran = Run(config, frames);
     if (!ran) {
-        LogError("Benchmark viewer failed: {}", ran.error());
+        std::println(stderr, "Benchmark viewer failed: {}", ran.error());
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

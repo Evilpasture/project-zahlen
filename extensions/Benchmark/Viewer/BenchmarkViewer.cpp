@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
+#include <cstdio>
+#include <format>
 #include <Widget/BarStrip.hpp>
 #include <Widget/HoverCard.hpp>
 #include <Widget/TextFit.hpp>
@@ -10,6 +12,7 @@
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -20,6 +23,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
 
 namespace ZHLN::Bench {
 
@@ -908,16 +912,15 @@ void Viewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_
 void Viewer::Impl::ToggleCapture() {
     if (telemetry.IsCapturing()) {
         telemetry.StopCapture();
-        ZHLN::Log("[Bench] frame telemetry capture stopped: {} frames -> {}", telemetry.CapturedFrames(), telemetry.CapturePath().string());
         return;
     }
 
     if (telemetry.StartCapture()) {
-        ZHLN::Log("[Bench] frame telemetry capture started: {}", telemetry.CapturePath().string());
         return;
     }
-
-    ZHLN::LogError("[Bench] frame telemetry capture could not open {}", telemetry.CapturePath().string());
+    // Capture could not be started (unwritable path): the viewer still runs,
+    // it just has no frame table to write.
+    ZHLN::Log<ZHLN::LogTag::Warning>("telemetry capture could not be started; running without it.");
 }
 
 void Viewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
@@ -1073,13 +1076,13 @@ void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
 
     m_impl->benchmark = std::make_unique<LogicBenchmark>();
     if (!m_impl->benchmark->Initialize(initialEntities)) {
-        ZHLN::LogError("[Bench] viewer: the benchmark world failed to initialize, so there is nothing to draw.");
+        ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "the benchmark world failed to initialize, so there is nothing to draw.");
         m_impl->benchmark.reset();
         return;
     }
 
     m_impl->frameClock.Reset();
-    ZHLN::Log("[Bench] viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
+    ZHLN::Log(engine.Logger(), "viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
 void Viewer::Tick(ZHLN::COM::IEngine& engine) {

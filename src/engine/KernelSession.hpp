@@ -14,6 +14,7 @@
 // wants windows asks Engine::AddWindow/Windows/AcquireTarget.
 
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
@@ -48,7 +49,12 @@ class EventBus;
 // objects, and the engine is what hands out the capabilities built on them.
 class KernelSession {
   public:
-    static auto Create(const EngineConfig& config) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode>;
+    // Installs `ambientSink` (see ZHLN::LogSink) for the session's lifetime
+    // and restores the previous one on destruction. A sink is a plain value:
+    // no ILogger, no COM, nothing to keep alive here.
+    static auto Create(const EngineConfig& config, ZHLN::LogSink ambientSink = {})
+        -> std::expected<std::unique_ptr<KernelSession>, ErrorCode>;
+
     ~KernelSession();
 
     KernelSession(const KernelSession&)                    = delete;
@@ -107,7 +113,7 @@ class KernelSession {
   private:
     KernelSession() = default;
 
-    auto InitInternal(const EngineConfig& config) -> std::expected<void, ErrorCode>;
+    auto InitInternal(const EngineConfig& config, ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode>;
 
     struct Impl;
     std::unique_ptr<Impl> _impl;

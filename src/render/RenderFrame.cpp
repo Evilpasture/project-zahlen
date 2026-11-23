@@ -308,7 +308,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
     const auto skinnedBlas = DispatchSkinningPasses(cmd);
     if (skinnedBlas.HasErrors() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
-        ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", *skinnedBlas.FirstError());
+        Log<LogTag::Warning>("PrepareSceneFrame: skinned BLAS rebuild failed: {}", *skinnedBlas.FirstError());
     }
 
     if (queues.Draws().size() > kGpuCullingMaxInstances) {
@@ -434,8 +434,8 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         // failed slot sinks the whole fork -- which is why the batch reports all
         // of them: one message per broken slot says whether the command pool ran
         // dry once or whether the fork is simply too wide for this frame.
-        recorded.ForEachError([](const Vk::RecordingFailure& failure) {
-            ZHLN::Log("[Render] Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
+        recorded.ForEachError([this](const Vk::RecordingFailure& failure) {
+            Log<LogTag::Warning>("Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
         });
         return;
     }
@@ -816,8 +816,8 @@ auto RenderContext::Impl::ProvokeDeviceLostInternal() const -> std::expected<voi
     }
 
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
-        ZHLN::Log(
-            "[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName
+        Log(
+            "Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName
         );
         return {};
     }

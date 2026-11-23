@@ -156,9 +156,6 @@ auto DeviceConfigurator<Ts...>::Build() && -> std::expected<ConfiguredDevice<Ts.
         return std::unexpected(extensions.error());
     }
     if (!_unsupported.empty()) {
-        for (VkStructureType type: _unsupported) {
-            ZHLN::Log("[Vulkan] Required device feature struct {} is not supported by the selected GPU", static_cast<uint32_t>(type));
-        }
         return std::unexpected(DeviceConfigurationError::MissingRequiredFeature);
     }
     if (_subgroupOps != 0) {

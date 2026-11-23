@@ -4,6 +4,9 @@
 #include "vulkan/Rendering.hpp"
 #include "vulkan/execution/CommandRecorder.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstdio>
+#include <format>
+
 
 namespace ZHLN::Vk {
 
@@ -20,7 +23,6 @@ auto CommandRecorder::Begin(
     };
     if (const VkResult res = vkBeginCommandBuffer(cmd, &info); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed begin failed ({}).", ToError(reset));
         }
         return std::unexpected(ToError(res));
     }
@@ -34,7 +36,6 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
     const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE);
     if (const VkResult res = vkEndCommandBuffer(cmd); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed end failed ({}).", ToError(reset));
         }
         return std::unexpected(ToError(res));
     }
@@ -44,7 +45,6 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
 void CommandRecorder::Abort() && noexcept {
     if (const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE); cmd != VK_NULL_HANDLE) {
         if (const VkResult res = vkResetCommandBuffer(cmd, 0); res != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", ToError(res));
         }
     }
 }

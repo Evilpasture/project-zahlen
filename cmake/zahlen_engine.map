@@ -29,6 +29,7 @@
     _ZN4ZHLN3COM15CreateEngineRaw[BE]*;                             /* @api ZHLN::COM::CreateEngineRaw */
     _ZN4ZHLN3COM15RenderGraphDump[BE]*;                             /* @api ZHLN::COM::RenderGraphDump */
     _ZN4ZHLN3COM19CreateLogicWorldRaw[BE]*;                         /* @api ZHLN::COM::CreateLogicWorldRaw */
+    _ZN4ZHLN3COM22CreateErrorRegistryRaw[BE]*;                      /* @api ZHLN::COM::CreateErrorRegistryRaw */
 
     /* === Tier 2: Core / Runtime ZHLN_API Surface === */
 
@@ -36,20 +37,19 @@
     _ZN4ZHLN16GetGitCommitHash[BE]*;                                /* @api ZHLN::GetGitCommitHash */
 
     /* include/Zahlen/Core/ErrorCode.hpp (process-wide dlclose-safe error registry) */
-    _ZN4ZHLN15TemplatedDetail20RegisterEnumCategory[BE]*;           /* @api ZHLN::TemplatedDetail::RegisterEnumCategory */
-    _ZN4ZHLN15TemplatedDetail18LookupErrorStrings[BE]*;             /* @api ZHLN::TemplatedDetail::LookupErrorStrings */
-    _ZN4ZHLN21RegisterErrorCategory[BE]*;                           /* @api ZHLN::RegisterErrorCategory */
+    _ZN4ZHLN15TemplatedDetail30RegisterStaticErrorCategoryRaw[BE]*;          /* @api ZHLN::TemplatedDetail::RegisterStaticErrorCategoryRaw */
+    _ZN4ZHLN19DescribeStaticError[BE]*;                             /* @api ZHLN::DescribeStaticError */
 
     /* include/Zahlen/Log.hpp */
-    _ZN4ZHLN11SetLogLevel[BE]*;                                     /* @api ZHLN::SetLogLevel */
-    _ZN4ZHLN11GetLogLevel[BE]*;                                     /* @api ZHLN::GetLogLevel */
-    _ZN4ZHLN14SetLogObserver[BE]*;                                  /* @api ZHLN::SetLogObserver */
-    _ZN4ZHLN14GetLogObserver[BE]*;                                  /* @api ZHLN::GetLogObserver */
-    _ZN4ZHLN15BeginLogCapture[BE]*;                                 /* @api ZHLN::BeginLogCapture */
-    _ZN4ZHLN13EndLogCapture[BE]*;                                   /* @api ZHLN::EndLogCapture */
-    _ZN4ZHLN16CancelLogCapture[BE]*;                                /* @api ZHLN::CancelLogCapture */
-    _ZN4ZHLN16InternalWriteLog[BE]*;                                /* @api ZHLN::InternalWriteLog */
     _ZN4ZHLN13InternalPanic[BE]*;                                   /* @api ZHLN::InternalPanic */
+    _ZN4ZHLN10SetLogSink[BE]*;                                    /* @api ZHLN::SetLogSink */
+    _ZN4ZHLN10GetLogSink[BE]*;                                    /* @api ZHLN::GetLogSink */
+    _ZN4ZHLN11SetLogLevel[BE]*;                                     /* @api ZHLN::SetLogLevel */
+    _ZN4ZHLN17AmbientLogEnabled[BE]*;                               /* @api ZHLN::AmbientLogEnabled */
+    _ZN4ZHLN15WriteAmbientLog[BE]*;                                 /* @api ZHLN::WriteAmbientLog */
+
+    /* include/Zahlen/COM/ILogger.hpp + IErrorRegistry.hpp */
+    _ZN4ZHLN3COM15CreateLoggerRaw[BE]*;                             /* @api ZHLN::COM::CreateLoggerRaw */
 
     /* include/Zahlen/Core/Diagnostics.hpp */
     _ZN4ZHLN11Diagnostics24InitializeSymbolResolver[BE]*;           /* @api ZHLN::Diagnostics::InitializeSymbolResolver */

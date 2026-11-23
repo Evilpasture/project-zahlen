@@ -49,6 +49,7 @@
 #include <utility>
 #include <vector>
 
+
 struct lua_State;
 
 namespace ZHLN {
@@ -114,6 +115,10 @@ class ZHLN_STATIC_API Vm {
     [[nodiscard]] auto ExecuteString(std::string_view code, std::string_view chunkName = "chunk") noexcept
         -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode>;
+    // Detail for the most recent failure (Lua error string, chunk name,
+    // budget hit); empty when the last call succeeded. The ErrorCode says
+    // what kind of failure; this says where and why.
+    [[nodiscard]] auto LastErrorDetail() const noexcept -> std::string_view;
 
     // Evaluates `code` and passes the top-of-stack Value to `consume` while the stack frame lives.
     [[nodiscard]] auto EvaluateTop(
@@ -289,14 +294,25 @@ namespace TemplatedDetail {
     }
 
     template <typename T>
-    auto PatchObject(T& target, Value table) -> std::expected<void, ErrorCode>;
+    auto PatchObject(T& target, Value table, std::string* detail = nullptr) -> std::expected<void, ErrorCode>;
 
     template <typename T>
-    auto PatchVector(T& target, Value table) -> std::expected<void, ErrorCode>;
+    auto PatchVector(T& target, Value table, std::string* detail = nullptr) -> std::expected<void, ErrorCode>;
 
+    // Reads `reader` into dst. On failure, when `detail` is non-null it
+    // receives what failed (field path composed by PatchObject, string
+    // lengths, enum tokens, array overflow) -- pure data, so this layer
+    // never needs a logger to explain itself.
     template <typename T>
-    auto ReadInto(T& dst, Value reader) -> std::expected<void, ErrorCode> {
+    auto ReadInto(T& dst, Value reader, std::string* detail = nullptr) -> std::expected<void, ErrorCode> {
         using Decayed = std::remove_cvref_t<T>;
+
+        const auto fail = [detail](ErrorCode code, std::string why) -> std::unexpected<ErrorCode> {
+            if (detail != nullptr && detail->empty()) {
+                *detail = std::move(why);
+            }
+            return std::unexpected(code);
+        };
 
         if constexpr (FixedCharArray<T>) {
             constexpr size_t kCap = std::extent_v<std::remove_reference_t<T>>;
@@ -306,8 +322,7 @@ namespace TemplatedDetail {
                 return std::unexpected(str.error());
             }
             if (str->size() >= kCap) {
-                ZHLN::Log("[Lua] string of length {} exceeds char[{}] at '{}'", str->size(), kCap, reader.Path());
-                return std::unexpected(LuaError::OutOfRange);
+                return fail(LuaError::OutOfRange, std::format("string of {} chars does not fit char[{}]", str->size(), kCap));
             }
             std::memcpy(dst, str->data(), str->size());
             dst[str->size()] = '\0';
@@ -322,16 +337,16 @@ namespace TemplatedDetail {
             using ElemT           = std::remove_extent_t<RawArr>;
             constexpr size_t kCap = std::extent_v<RawArr>;
             if (seqLen > kCap) {
-                ZHLN::Log("[Lua] array of {} elements exceeds array[{}] at '{}'", seqLen, kCap, reader.Path());
-                return std::unexpected(LuaError::OutOfRange);
+                return fail(LuaError::OutOfRange, std::format("sequence of {} elements exceeds capacity {}", seqLen, kCap));
             }
             for (size_t i = 0; i < seqLen; ++i) {
                 struct ElemCtx {
-                    ElemT* dstElem;
-                } ctx {&dst[i]};
+                    ElemT*       dstElem;
+                    std::string* detail;
+                } ctx {&dst[i], detail};
                 auto res = reader.WithElement(i, &ctx, [](const void* rawCtx, Value elem) -> std::expected<void, ErrorCode> {
                     const auto* c = static_cast<const ElemCtx*>(rawCtx);
-                    return ReadInto(*c->dstElem, elem);
+                    return ReadInto(*c->dstElem, elem, c->detail);
                 });
                 if (!res) {
                     return std::unexpected(res.error());
@@ -365,13 +380,7 @@ namespace TemplatedDetail {
                 return std::unexpected(parsed.error());
             }
             if (parsed->size() > Decayed::kMaxTextLength) {
-                ZHLN::Log(
-                    "[Lua] string of length {} exceeds FixedString<{}> capacity at '{}'",
-                    parsed->size(),
-                    Decayed::kMaxTextLength + 1,
-                    reader.Path()
-                );
-                return std::unexpected(LuaError::OutOfRange);
+                return fail(LuaError::OutOfRange, std::format("string of {} chars exceeds the {}-char limit", parsed->size(), Decayed::kMaxTextLength));
             }
             dst.assign(*parsed);
             return {};
@@ -382,8 +391,7 @@ namespace TemplatedDetail {
             }
             const auto parsed = ParseReflectedEnum<Decayed>(*raw);
             if (!parsed) {
-                ZHLN::Log("[Lua] '{}' is not a valid enumerator of {} at '{}'", *raw, ZHLN::Reflect::TypeName<Decayed>(), reader.Path());
-                return std::unexpected(LuaError::InvalidEnumString);
+                return fail(LuaError::InvalidEnumString, std::format("invalid enum token '{}'", *raw));
             }
             dst = *parsed;
             return {};
@@ -394,7 +402,7 @@ namespace TemplatedDetail {
                     return std::unexpected(raw.error());
                 }
                 if (*raw > static_cast<uint64_t>(std::numeric_limits<Decayed>::max())) {
-                    return std::unexpected(LuaError::OutOfRange);
+                    return fail(LuaError::OutOfRange, std::format("value {} exceeds the target integer range", *raw));
                 }
                 dst = static_cast<Decayed>(*raw);
                 return {};
@@ -426,7 +434,7 @@ namespace TemplatedDetail {
             if (dst.has_value()) {
                 inner = *dst;
             }
-            if (auto res = ReadInto(inner, reader); !res) {
+            if (auto res = ReadInto(inner, reader, detail); !res) {
                 return std::unexpected(res.error());
             }
             dst = std::move(inner);
@@ -446,11 +454,12 @@ namespace TemplatedDetail {
                 using MappedT = typename Decayed::mapped_type;
                 MappedT mapped {};
                 struct KeyCtx {
-                    MappedT* dstVal;
-                } ctx {&mapped};
+                    MappedT*     dstVal;
+                    std::string* detail;
+                } ctx {&mapped, detail};
                 auto found = reader.WithKey(key, &ctx, [](const void* rawCtx, Value child) -> std::expected<void, ErrorCode> {
                     const auto* c = static_cast<const KeyCtx*>(rawCtx);
-                    return ReadInto(*c->dstVal, child);
+                    return ReadInto(*c->dstVal, child, c->detail);
                 });
                 if (!found) {
                     return std::unexpected(found.error());
@@ -467,17 +476,17 @@ namespace TemplatedDetail {
             const size_t seqLen = *seqLenOpt;
             constexpr size_t kCap = std::tuple_size<Decayed>::value;
             if (seqLen > kCap) {
-                ZHLN::Log("[Lua] array of {} elements exceeds array[{}] at '{}'", seqLen, kCap, reader.Path());
-                return std::unexpected(LuaError::OutOfRange);
+                return fail(LuaError::OutOfRange, std::format("sequence of {} elements exceeds capacity {}", seqLen, kCap));
             }
             for (size_t i = 0; i < seqLen; ++i) {
                 using ElemT = typename Decayed::value_type;
                 struct ElemCtx {
-                    ElemT* dstElem;
-                } ctx {&dst[i]};
+                    ElemT*       dstElem;
+                    std::string* detail;
+                } ctx {&dst[i], detail};
                 auto res = reader.WithElement(i, &ctx, [](const void* rawCtx, Value elem) -> std::expected<void, ErrorCode> {
                     const auto* c = static_cast<const ElemCtx*>(rawCtx);
-                    return ReadInto(*c->dstElem, elem);
+                    return ReadInto(*c->dstElem, elem, c->detail);
                 });
                 if (!res) {
                     return std::unexpected(res.error());
@@ -498,11 +507,12 @@ namespace TemplatedDetail {
                 using ElemT = typename Decayed::value_type;
                 ElemT elemVal {};
                 struct ElemCtx {
-                    ElemT* dstElem;
-                } ctx {&elemVal};
+                    ElemT*       dstElem;
+                    std::string* detail;
+                } ctx {&elemVal, detail};
                 auto res = reader.WithElement(i, &ctx, [](const void* rawCtx, Value elem) -> std::expected<void, ErrorCode> {
                     const auto* c = static_cast<const ElemCtx*>(rawCtx);
-                    return ReadInto(*c->dstElem, elem);
+                    return ReadInto(*c->dstElem, elem, c->detail);
                 });
                 if (!res) {
                     return std::unexpected(res.error());
@@ -512,7 +522,7 @@ namespace TemplatedDetail {
             dst = std::move(container);
             return {};
         } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
-            return PatchObject(dst, reader);
+            return PatchObject(dst, reader, detail);
         } else {
             return std::unexpected(LuaError::TypeMismatch);
         }
@@ -522,18 +532,17 @@ namespace TemplatedDetail {
     // loses untouched coordinates during a patch. Patch vector fields against
     // their existing value and commit only after every supplied lane succeeds.
     template <typename T>
-    auto PatchVector(T& target, Value table) -> std::expected<void, ErrorCode> {
+    auto PatchVector(T& target, Value table, std::string* detail) -> std::expected<void, ErrorCode> {
         if (!table.IsTable()) return std::unexpected(LuaError::TypeMismatch);
 
         T staging = target;
         const auto seqLenOpt = table.SequenceLength();
             if (!seqLenOpt) {
-            if (auto res = PatchObject(staging, table); !res) return std::unexpected(res.error());
+            if (auto res = PatchObject(staging, table, detail); !res) return std::unexpected(res.error());
         } else {
             const size_t seqLen = *seqLenOpt;
             constexpr size_t kArity = ZHLN::Reflect::FieldCount<T>();
             if (seqLen > kArity) {
-                ZHLN::Log("[Lua] array of {} elements exceeds {}[{}] at '{}'", seqLen, ZHLN::Reflect::TypeName<T>(), kArity, table.Path());
                 return std::unexpected(LuaError::OutOfRange);
             }
             std::optional<ErrorCode> err;
@@ -556,16 +565,16 @@ namespace TemplatedDetail {
     }
 
     template <typename T>
-    auto PatchField(T& target, Value value) -> std::expected<void, ErrorCode> {
+    auto PatchField(T& target, Value value, std::string* detail = nullptr) -> std::expected<void, ErrorCode> {
         if constexpr (VectorLike<std::remove_cvref_t<T>>) {
-            return PatchVector(target, value);
+            return PatchVector(target, value, detail);
         } else {
-            return ReadInto(target, value);
+            return ReadInto(target, value, detail);
         }
     }
 
     template <typename T>
-    auto PatchObject(T& target, Value table) -> std::expected<void, ErrorCode> {
+    auto PatchObject(T& target, Value table, std::string* detail) -> std::expected<void, ErrorCode> {
         if (!table.IsTable()) {
             return std::unexpected(LuaError::NotATable);
         }
@@ -595,17 +604,21 @@ namespace TemplatedDetail {
             }
 
             using FieldRefT = decltype(fieldRef);
-            struct FieldCtx {
+            std::string fieldDetail;
+            struct FieldCtxEx {
                 std::remove_reference_t<FieldRefT>* ptr;
-            } ctx {&fieldRef};
-
-            auto res = table.WithKey(fieldName, &ctx, [](const void* rawCtx, Value child) -> std::expected<void, ErrorCode> {
-                const auto* c = static_cast<const FieldCtx*>(rawCtx);
-                return PatchField(*c->ptr, child);
+                std::string*                        detail;
+            } ctxEx {&fieldRef, &fieldDetail};
+            auto res = table.WithKey(fieldName, &ctxEx, [](const void* rawCtx, Value child) -> std::expected<void, ErrorCode> {
+                const auto* c = static_cast<const FieldCtxEx*>(rawCtx);
+                return PatchField(*c->ptr, child, c->detail);
             });
             if (!res) {
-                ZHLN::Log("[Lua] field '{}' of {} rejected value", fieldName, ZHLN::Reflect::TypeName<T>());
                 err = res.error();
+                if (detail != nullptr) {
+                    *detail = fieldDetail.empty() ? std::format("field '{}': {}", fieldName, res.error())
+                                                  : std::format("field '{}': {}", fieldName, fieldDetail);
+                }
             }
         });
 
@@ -615,8 +628,10 @@ namespace TemplatedDetail {
 
         for (size_t i = 0; i < keys->size(); ++i) {
             if (!consumed[i]) {
-                ZHLN::Log("[Lua] {} has no field named '{}' at '{}'", ZHLN::Reflect::TypeName<T>(), (*keys)[i], table.Path());
                 if (table.Budget().rejectUnknownFields) {
+                    if (detail != nullptr) {
+                        *detail = std::format("unknown field '{}'", (*keys)[i]);
+                    }
                     return std::unexpected(LuaError::UnknownField);
                 }
             }
@@ -696,7 +711,7 @@ namespace TemplatedDetail {
 // ----------------------------------------------------------------------------
 
 template <typename T>
-[[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", LuaBudget budget = {})
+[[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", LuaBudget budget = {}, std::string* outDetail = nullptr)
     -> std::expected<void, ErrorCode> {
     auto vm = Vm::Create(budget);
     if (!vm) {
@@ -704,28 +719,35 @@ template <typename T>
     }
 
     struct PatchCtx {
-        T* targetPtr;
-    } ctx {&target};
+        T*           targetPtr;
+        std::string* detail;
+    } ctx {&target, outDetail};
 
-    return vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
+    auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
         const auto* c = static_cast<const PatchCtx*>(rawCtx);
-        return TemplatedDetail::PatchField(*c->targetPtr, root);
+        return TemplatedDetail::PatchField(*c->targetPtr, root, c->detail);
     });
+    if (!res && outDetail != nullptr && outDetail->empty()) {
+        // Chunk-level failures (syntax/runtime/budget) are recorded by the
+        // Vm itself; surface them through the same detail channel.
+        *outDetail = std::string(vm->LastErrorDetail());
+    }
+    return res;
 }
 
 template <typename T>
-[[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {})
+[[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {}, std::string* outDetail = nullptr)
     -> std::expected<void, ErrorCode> {
     auto source = ReadFileText(path);
     if (!source) {
         return std::unexpected(source.error());
     }
     const std::string chunkName = "@" + path.generic_string();
-    return ApplyPatchString(target, *source, chunkName, budget);
+    return ApplyPatchString(target, *source, chunkName, budget, outDetail);
 }
 
 template <typename T>
-[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {})
+[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {}, std::string* outDetail = nullptr)
     -> std::expected<T, ErrorCode> {
     T out {};
     if constexpr (TemplatedDetail::VectorLike<std::remove_cvref_t<T>> && ValueTrait<std::remove_cvref_t<T>>::specialized) {
@@ -733,24 +755,32 @@ template <typename T>
         // unlike patching, it must not treat a short sequence as an update.
         auto vm = Vm::Create(budget);
         if (!vm) return std::unexpected(vm.error());
-        struct ValueCtx { T* target; } ctx {&out};
+        struct ValueCtx {
+            T*           target;
+            std::string* detail;
+        } ctx {&out, outDetail};
         auto res = vm->EvaluateTop(chunk, chunkName, &ctx, [](const void* rawCtx, Value root) -> std::expected<void, ErrorCode> {
             const auto* c = static_cast<const ValueCtx*>(rawCtx);
-            return TemplatedDetail::ReadInto(*c->target, root);
+            return TemplatedDetail::ReadInto(*c->target, root, c->detail);
         });
-        if (!res) return std::unexpected(res.error());
-    } else if (auto res = ApplyPatchString(out, chunk, chunkName, budget); !res) {
+        if (!res) {
+            if (outDetail != nullptr && outDetail->empty()) {
+                *outDetail = std::string(vm->LastErrorDetail());
+            }
+            return std::unexpected(res.error());
+        }
+    } else if (auto res = ApplyPatchString(out, chunk, chunkName, budget, outDetail); !res) {
         return std::unexpected(res.error());
     }
     return out;
 }
 
 template <typename T>
-[[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {}) -> std::expected<T, ErrorCode> {
+[[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {}, std::string* outDetail = nullptr) -> std::expected<T, ErrorCode> {
     auto source = ReadFileText(path);
     if (!source) return std::unexpected(source.error());
     const std::string chunkName = "@" + path.generic_string();
-    return EvaluateString<T>(*source, chunkName, budget);
+    return EvaluateString<T>(*source, chunkName, budget, outDetail);
 }
 
 // Evaluates a pure Lua function `return function(arg1, arg2, ...) -> table`

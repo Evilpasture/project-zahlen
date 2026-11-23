@@ -5,6 +5,7 @@
 #include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include "vulkan/core/Extensions.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -60,7 +61,7 @@ namespace {
         return std::unexpected(ContextError::InvalidInstance);
     }
     if (volkInitialize() != VK_SUCCESS) {
-        ZHLN::LogError("[Vulkan] No Vulkan loader is available; volkInitialize() failed while preparing a context.");
+        Log<LogTag::Error, LogTag::Vulkan>("No Vulkan loader is available; volkInitialize() failed while preparing a context.");
         return std::unexpected(ContextError::LoaderInitializationFailed);
     }
 
@@ -203,21 +204,19 @@ namespace {
     const bool descriptor_heap_enabled = vkCmdBindResourceHeapEXT != nullptr && vkCmdBindSamplerHeapEXT != nullptr && vkCmdPushDataEXT != nullptr &&
                                          vkWriteResourceDescriptorsEXT != nullptr && vkWriteSamplerDescriptorsEXT != nullptr;
     if (!descriptor_heap_enabled) {
-        ZHLN::LogWarning("[Vulkan] VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled.");
+        Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled.");
     }
-
     const MeshShaderLimits mesh_limits                 = QueryMeshShaderLimits(physical.handle);
     const bool             mesh_entry_points_available = vkCmdDrawMeshTasksEXT != nullptr && vkCmdDrawMeshTasksIndirectEXT != nullptr;
     const bool             mesh_shader_enabled         = meshShaderRequested && mesh_entry_points_available && MeshShaderLimitsSufficient(mesh_limits);
     if (meshShaderRequested && !mesh_shader_enabled) {
         if (!mesh_limits.supported) {
-            ZHLN::Log("[Vulkan] VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline.");
+            Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline.");
         } else if (!mesh_entry_points_available) {
-            ZHLN::LogWarning("[Vulkan] VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline.");
+            Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline.");
         } else {
-            ZHLN::Log(
-                "[Vulkan] Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using "
-                "vertex pipelines.",
+            Log<LogTag::Warning, LogTag::Vulkan>(
+                "Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using vertex pipelines.",
                 mesh_limits.maxMeshOutputVertices, mesh_limits.maxMeshOutputPrimitives, mesh_limits.maxTaskWorkGroupInvocations,
                 mesh_limits.maxMeshWorkGroupInvocations
             );
@@ -263,8 +262,8 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
 
     const bool debug_utils_enabled = _instance.DebugUtilsEnabled();
 
-    auto configured =
-        DeviceConfigurator<>(_physical.handle)
+    auto deviceConfigurator = DeviceConfigurator<>(_physical.handle);
+    auto configured = std::move(deviceConfigurator)
             .RequireExtension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
             .RequireExtension<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>(
                 VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME, [](auto& feature) { feature.dynamicRenderingUnusedAttachments = VK_TRUE; }
@@ -327,7 +326,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         }
         const std::string_view name(requested);
         if (!HasExtension(available_extensions, name)) {
-            ZHLN::LogWarning("[Vulkan] Skipping unsupported device extension: {}", name);
+            Log<LogTag::Warning, LogTag::Vulkan>("Skipping unsupported device extension: {}", name);
             continue;
         }
         if (!std::ranges::contains(enabled_extensions, name)) {

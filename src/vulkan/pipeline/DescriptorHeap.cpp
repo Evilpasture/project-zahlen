@@ -292,15 +292,6 @@ void DescriptorHeap::FreeStatic(uint32_t slot) noexcept {
 }
 
 void DescriptorHeap::BeginFrame(uint32_t frameIndex) noexcept {
-    if (_config.enableCapacityWarnings && _frameTransientCapacity > 0) {
-        const uint64_t threshold = std::min<uint64_t>(_config.warningThresholdPercent, 100ULL);
-        if (uint64_t {_frameTransientAllocated} * 100ULL > uint64_t {_frameTransientCapacity} * threshold) [[unlikely]] {
-            ZHLN::Log(
-                "[VK_EXT_descriptor_heap] frame transient partition {}% full ({} of {} slots); raise kFrameTransientResourceSlots.",
-                (uint64_t {_frameTransientAllocated} * 100ULL) / uint64_t {_frameTransientCapacity}, _frameTransientAllocated, _frameTransientCapacity
-            );
-        }
-    }
     _currentFrameSlot        = FrameSlot(frameIndex);
     _frameTransientAllocated = 0;
 }
@@ -403,17 +394,11 @@ auto DescriptorHeap::IsSlotWritable(uint32_t slot) const noexcept -> bool {
 
 auto DescriptorHeap::ValidateWriteSlot(uint32_t slot, uint32_t batchCount) const noexcept -> bool {
     if (slot >= _capacity) [[unlikely]] {
-        ZHLN::Log(
-            "[DescriptorHeap] {} heap write out of range: slot {} >= capacity {}. Dropping {} descriptor write(s).",
-            HeapTypeName(_type), slot, _capacity, batchCount
-        );
+        Log<LogTag::Warning, LogTag::Vulkan>("descriptor heap write out of range: slot {} >= capacity {}", slot, _capacity);
         return false;
     }
     if (!IsSlotWritable(slot)) [[unlikely]] {
-        ZHLN::Log(
-            "[DescriptorHeap] {} heap write targets unallocated or stale slot {}. Dropping {} descriptor write(s).",
-            HeapTypeName(_type), slot, batchCount
-        );
+        Log<LogTag::Warning, LogTag::Vulkan>("descriptor heap write targets unallocated or stale slot {}", slot);
         return false;
     }
     return true;

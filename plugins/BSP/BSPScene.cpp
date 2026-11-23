@@ -7,6 +7,8 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
+#include <cstdio>
+#include <format>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -20,6 +22,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include <Zahlen/COM/ILogger.hpp>
+
 
 namespace ZHLN::BSP {
 namespace {
@@ -785,7 +789,7 @@ auto DescribeScene(const Map& map, std::string_view virtualPath, const ImportOpt
         }
 
         if (casters > 0) {
-            Log(
+            ZHLN::Log(
                 "BSP Scene: {} -> {} of {} punctual light(s) cast into the shadow atlas ({} of {} faces)", virtualPath, casters, scene.lights.size(),
                 spentFaces, options.punctualShadowFaceBudget
             );
@@ -796,7 +800,7 @@ auto DescribeScene(const Map& map, std::string_view virtualPath, const ImportOpt
     // between "the map has no lights" and "the map's lights were suppressed
     // here".
     if (sceneLightSuppressed > 0) {
-        Log("BSP Scene: {} -> {} lights ({} entity lights suppressed: disabled spawnflag or zero colour/brightness)", virtualPath,
+        ZHLN::Log( "BSP Scene: {} -> {} lights ({} entity lights suppressed: disabled spawnflag or zero colour/brightness)", virtualPath,
             scene.lights.size(), sceneLightSuppressed);
     }
 

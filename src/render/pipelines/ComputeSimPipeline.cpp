@@ -104,7 +104,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         if (Vk::IsDeviceLost(submitted.error())) {
             impl.NoteDeviceLost("DispatchSimulations");
         } else {
-            ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());
+            Log<LogTag::Warning>("Compute submission failed ({}).", submitted.error());
         }
         return std::unexpected(AsFrameError(submitted.error()));
     }

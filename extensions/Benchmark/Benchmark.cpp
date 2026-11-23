@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Benchmark.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -11,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <utility>
+
 
 namespace ZHLN::Bench {
 
@@ -87,7 +90,6 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     auto chain = COM::InChain(config);
     auto world = COM::CreateLogicWorld(chain.Head());
     if (!world) {
-        ZHLN::LogError("[Bench] world creation failed; no benchmark is running: {}", world.error());
         return false;
     }
 
@@ -102,10 +104,6 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     SpawnWorkload(initialEntityCount);
 
     m_runStartSeconds = m_clock.WallTimeSinceStart();
-    ZHLN::Log(
-        "[Bench] initialized: {} entities, {} bodies live, {} body budget (maxBodies {}, {} body pairs, {} contact constraints)", m_metrics.entityCount,
-        m_liveBodies, m_bodyCeiling, config.maxBodies, config.maxBodyPairs, config.maxContactConstraints
-    );
     return true;
 }
 
@@ -140,10 +138,6 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         if (m_liveBodies >= m_bodyCeiling) {
             if (!m_ceilingReported) {
                 m_ceilingReported = true;
-                ZHLN::LogWarning(
-                    "[Bench] workload stopped at {} bodies: the physics config has no room for more. Raise PhysicsConfig::maxBodies (reserve {}).",
-                    m_liveBodies, kBodyReserve
-                );
             }
             break;
         }

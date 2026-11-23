@@ -82,7 +82,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped per-frame debug VBOs...");
+            Log<LogTag::Debug>("Pre-allocating persistently mapped per-frame debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
             for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                 auto gpu_buf_res =
@@ -315,7 +315,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
         return std::unexpected(ibl.error());
     }
     iblPayload = std::move(*ibl);
-    ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
+    Log<LogTag::Debug>("Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
     using namespace Resource;
     constexpr size_t kDdsHeaderBytes = 128;
@@ -460,7 +460,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 }
 
 auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode> {
-    ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
+    Log("Registering fallback system texture slots...");
 
     std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
     std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};

@@ -1,10 +1,12 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Log.hpp>
 #include "vulkan/core/Instance.hpp"
 #include "vulkan/core/Extensions.hpp"
 #include "vulkan/VkError.hpp"
-#include <Zahlen/Log.hpp>
+#include <Zahlen/Core/ErrorDescribe.hpp>
+#include <cstdio>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -121,22 +123,25 @@ auto VKAPI_CALL Instance::DebugCallback(
     const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     const VkDebugUtilsMessageTypeFlagsEXT        /*type*/,
     const VkDebugUtilsMessengerCallbackDataEXT*  callbackData,
-    void*                                        /*userData*/
+    void*                                        userData
 ) noexcept -> VkBool32 {
     const std::string_view message = callbackData != nullptr && callbackData->pMessage != nullptr ? std::string_view(callbackData->pMessage) :
                                                                                                     std::string_view("(no Vulkan diagnostic text)");
 
+    // pUserData is unused: the callback reads Core's ambient sink at call
+    // time, so it tracks whatever sink the engine installed most recently.
+    (void) userData;
     if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
-        ZHLN::LogError("[Vulkan] {}", message);
+        Log<LogTag::Error, LogTag::Vulkan>("{}", message);
         constexpr std::array<std::string_view, 4> k_gpu_bounds_markers = {"out of bounds", "Out of bounds", "OOB", "bounds check failed"};
         if (ContainsAny(message, k_gpu_bounds_markers)) {
-            ZHLN::LogError("[Vulkan] GPU-assisted validation detected an out-of-bounds shader access; aborting.");
+            Log<LogTag::Error, LogTag::Vulkan>("GPU-assisted validation detected an out-of-bounds shader access; aborting.");
             std::abort();
         }
     } else if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0) {
-        ZHLN::LogWarning("[Vulkan] {}", message);
+        Log<LogTag::Warning, LogTag::Vulkan>("{}", message);
     } else {
-        ZHLN::Log("[Vulkan] {}", message);
+        Log<LogTag::Vulkan>("{}", message);
     }
 
     return VK_FALSE;
@@ -148,6 +153,11 @@ auto Instance::Create(
     const std::span<const std::string_view> extensions,
     const ValidationMode                    validation
 ) noexcept -> std::expected<Instance, ErrorCode> {
+    // Anchor VkResult's reflection entries into the one shared error
+    // table up front, so Describe()/std::format can name Vulkan failures
+    // before the first Vulkan call ever fails (ToError also anchors on
+    // first use). Pure Core call -- no COM registry involved.
+    (void) ZHLN::RegisterStaticErrorCategory<VkResult>();
     GlobalVolkDispatchLease globalDispatchLease;
     if (!globalDispatchLease.Acquired()) {
         return std::unexpected(InstanceError::GlobalDispatchInUse);
@@ -164,10 +174,7 @@ auto Instance::Create(
     bool                       enable_validation  = validation != ValidationMode::Off;
     bool                       gpu_validation     = validation == ValidationMode::GPU;
     if (enable_validation && !HasLayer(available_layers, k_validation_layer)) {
-        ZHLN::LogWarning(
-            "[Vulkan] Validation layer {} is not available; continuing without validation. Install the Vulkan SDK or configure VK_LAYER_PATH to enable it.",
-            k_validation_layer
-        );
+        Log<LogTag::Warning, LogTag::Vulkan>("Validation layer {} is not available; continuing without validation.", k_validation_layer);
         enable_validation = false;
         gpu_validation    = false;
     }
@@ -176,7 +183,7 @@ auto Instance::Create(
     enabled_extension_names.reserve(extensions.size() + 3);
     const auto add_if_supported = [&](const std::string_view name, const std::string_view messagePrefix) {
         if (!HasExtension(available_extensions, name)) {
-            ZHLN::LogWarning("{}{}", messagePrefix, name);
+            Log<LogTag::Warning, LogTag::Vulkan>("{}{}", messagePrefix, name);
             return false;
         }
         if (!std::ranges::contains(enabled_extension_names, name)) {
@@ -265,7 +272,7 @@ auto Instance::Create(
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = &Instance::DebugCallback,
-        .pUserData       = nullptr,
+        .pUserData       = nullptr, // the callback reads the ambient sink at call time
     };
 
     const void* validation_chain = nullptr;
@@ -306,7 +313,7 @@ auto Instance::Create(
         const VkResult messenger_created                  = vkCreateDebugUtilsMessengerEXT(handle, &messenger_info, nullptr, &result._messenger);
         if (messenger_created != VK_SUCCESS) {
             result._messenger = VK_NULL_HANDLE;
-            ZHLN::LogWarning("[Vulkan] Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
+            Log<LogTag::Warning, LogTag::Vulkan>("Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
         }
     }
 

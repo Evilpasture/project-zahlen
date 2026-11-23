@@ -22,6 +22,9 @@
 #include <sys/sysmacros.h>
 #include <termios.h>
 #include <unistd.h>
+#include <cstdio>
+#include <format>
+
 #endif
 
 namespace ZHLN::TTYBackend {
@@ -103,7 +106,7 @@ template <typename Fn>
 [[nodiscard]] auto BindSymbol(const SharedLibrary& lib, const char* name, Fn& out) -> bool {
     out = lib.Symbol<Fn>(name);
     if (out == nullptr) {
-        ZHLN::Log("[TTY] Missing symbol '{}'", name);
+        ZHLN::Log<ZHLN::LogTag::Warning>("Missing symbol '{}'", name);
         return false;
     }
     return true;
@@ -119,7 +122,7 @@ template <typename Fn>
     static constexpr const char* const kEvdevNames[] = {"libevdev.so.2", "libevdev.so"};
 
     if (!g_seatLib.OpenAny(kSeatNames) || !g_evdevLib.OpenAny(kEvdevNames)) {
-        ZHLN::Log("[TTY] Failed to load libseat / libevdev at runtime.");
+        ZHLN::Log<ZHLN::LogTag::Error>("Failed to load libseat / libevdev at runtime.");
         g_seatLib.Close();
         g_evdevLib.Close();
         state = -1;
@@ -371,13 +374,13 @@ auto MapEvdevKey(uint16_t code) noexcept -> KeyCode {
 void handle_enable_seat(struct libseat* , void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = true;
-    ZHLN::Log("[TTY] libseat: Seat session enabled and active.");
+    ZHLN::Log("libseat: Seat session enabled and active.");
 }
 
 void handle_disable_seat(struct libseat* seat, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = false;
-    ZHLN::Log("[TTY] libseat: Seat session disabled (VT switched away).");
+    ZHLN::Log("libseat: Seat session disabled (VT switched away).");
     g_seat.disable_seat(seat);
 }
 
@@ -413,7 +416,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
             tcsetattr(state->tty_fd, TCSANOW, &t);
             ioctl(state->tty_fd, KDSETMODE, KD_GRAPHICS);
             ioctl(state->tty_fd, KDSKBMODE, K_MEDIUMRAW);
-            ZHLN::Log("[TTY] Virtual Console (VT) initialized.");
+            ZHLN::Log("Virtual Console (VT) initialized.");
         } else {
             close(state->tty_fd);
             state->tty_fd = -1;
@@ -423,14 +426,14 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     g_seat.set_log_level(kSeatLogInfo);
     state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
-        ZHLN::LogError("[TTY] Failed to initialize libseat session.");
+        ZHLN::Log<ZHLN::LogTag::Error>("Failed to initialize libseat session.");
         Shutdown(state);
         return nullptr;
     }
 
     while (!state->active) {
         if (g_seat.dispatch(state->seat, -1) == -1) {
-            ZHLN::LogError("[TTY] Error dispatching libseat during startup.");
+            ZHLN::Log<ZHLN::LogTag::Warning>("Error dispatching libseat during startup.");
             Shutdown(state);
             return nullptr;
         }
@@ -478,7 +481,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
                             ep_ev.data.ptr = dev;
                             epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ep_ev);
 
-                            ZHLN::Log("[TTY] libseat opened input device: {} (ID: {})", g_evdev.get_name(dev), device_id);
+                            ZHLN::Log("libseat opened input device: {} (ID: {})", g_evdev.get_name(dev), device_id);
                         } else {
                             g_evdev.free(dev);
                             g_seat.close_device(state->seat, device_id);
@@ -493,7 +496,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     if (state->taken_devices.empty()) {
-        ZHLN::LogError("[TTY] No input devices could be opened under this seat.");
+        ZHLN::Log<ZHLN::LogTag::Warning>("No input devices could be opened under this seat.");
         Shutdown(state);
         return nullptr;
     }
@@ -653,7 +656,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
                 }
 
                 if (state->ctrlDown && state->altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
-                    ZHLN::Log("[TTY] Emergency Escape Hatch triggered! Restoring terminal...");
+                    ZHLN::Log("Emergency Escape Hatch triggered! Restoring terminal...");
                     EmergencyRestore();
                     _exit(0);
                 }

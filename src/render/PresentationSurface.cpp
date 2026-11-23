@@ -6,6 +6,7 @@
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Log.hpp>
 
+
 namespace {
 
 struct Win32SurfaceCreateInfo {
@@ -47,13 +48,18 @@ template <typename CreateInfo>
     -> std::expected<ZHLN::Vk::Surface, ZHLN::ErrorCode> {
     const auto create = reinterpret_cast<CreateSurfaceFn<CreateInfo>>(vkGetInstanceProcAddr(instance, entryPoint));
     if (create == nullptr) {
-        ZHLN::Log("[PresentationSurface] {} is unavailable; {} was not enabled on the instance.", entryPoint, extension);
+        // The caller only sees the returned ordinal; which entry point was
+        // missing and which extension would provide it is information that
+        // exists nowhere else.
+        ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Vulkan>(
+            "{} is unavailable; {} was not enabled on the instance.", entryPoint, extension
+        );
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
     VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
     if (create(instance, &info, nullptr, &rawSurface) != VK_SUCCESS || rawSurface == VK_NULL_HANDLE) {
-        ZHLN::Log("[PresentationSurface] {} failed for this window.", entryPoint);
+        ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Vulkan>("{} failed for this window.", entryPoint);
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::WindowSurfaceCreationFailed);
     }
     return ZHLN::Vk::Surface(instance, rawSurface);

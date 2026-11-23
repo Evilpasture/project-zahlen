@@ -37,6 +37,7 @@ struct DevicePresentSupport {
 class Context {
   public:
     Context() noexcept = default;
+
     ~Context() noexcept;
 
     Context(const Context&)                    = delete;
@@ -161,6 +162,7 @@ class ContextBuilder {
         _instance = instance;
         return *this;
     }
+
     auto Instance(Vk::Instance&& instance) noexcept -> ContextBuilder& {
         _ownedInstance.emplace(std::move(instance));
         _instance = InstanceView(*_ownedInstance);

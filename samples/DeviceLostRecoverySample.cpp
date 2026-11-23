@@ -4,6 +4,9 @@
 // Exercises synchronous graphics device recreation and device-lost callback recovery over COM.
 
 #include <FreeCam/FreeCam.hpp>
+#include <print>
+#include <cstdio>
+#include <format>
 #include <Signal/CrashHandler.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IActionContext.hpp>
@@ -25,12 +28,14 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <span>
 #include <vector>
+
 
 namespace {
 
@@ -139,14 +144,13 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
+        std::println(stderr, "[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(engineConfig.logLevel);
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
@@ -154,7 +158,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
+        std::println(stderr, "Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -172,12 +176,12 @@ auto main(int argc, char* argv[]) -> int {
 
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
     const auto     info             = engine->Graphics()->Info();
-    ZHLN::Log(
-        "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {} triggers RecreateGraphicsDevice.",
+    ZHLN::Log(engine->Logger(),
+        "Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {} triggers RecreateGraphicsDevice.",
         ZHLN::GetPID(), engineConfig.headless ? "headless" : "windowed", std::string_view(info.gpuName), ZHLN::GetPID()
     );
     if (autoProvokeFrame != 0) {
-        ZHLN::Log("[DeviceLostRecoverySample] Will RecreateGraphicsDevice on frame {}.", autoProvokeFrame);
+        ZHLN::Log(engine->Logger(), "Will RecreateGraphicsDevice on frame {}.", autoProvokeFrame);
     }
 
     ZHLN::Clock clock({.maxDeltaTime = 0.05f});
@@ -198,9 +202,9 @@ auto main(int argc, char* argv[]) -> int {
         const bool signalNow = g_ProvokeRequested.exchange(false, std::memory_order::relaxed);
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->CurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
-            ZHLN::Log("[Sample] Recreating graphics device on frame {} (gen={}).", engine->CurrentFrame(), engine->DeviceGeneration());
+            ZHLN::Log(engine->Logger(), "Recreating graphics device on frame {} (gen={}).", engine->CurrentFrame(), engine->DeviceGeneration());
             if (auto lost = engine->RecreateGraphicsDevice(); !lost.HasValue()) {
-                ZHLN::LogError("[Sample] Recovery failed: {}", ZHLN::Error(lost.error).Message());
+                ZHLN::Log<ZHLN::LogTag::Error>("Recovery failed: {}", lost.error);
                 engine->RequestClose();
                 break;
             }
@@ -210,14 +214,14 @@ auto main(int argc, char* argv[]) -> int {
 
         if (ctx.rebuildDue) {
             ctx.rebuildDue = false;
-            ZHLN::Log("[Sample] Device-lost callback #{} (gen={}). Re-uploading arena.", ctx.recoveries, engine->DeviceGeneration());
+            ZHLN::Log(engine->Logger(), "Device-lost callback #{} (gen={}). Re-uploading arena.", ctx.recoveries, engine->DeviceGeneration());
             ctx.arena = BuildArena(*engine, ctx.arena);
         }
 
         ZHLN::FreeCam::Step(*engine, dt);
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::LogError("[DeviceLostRecovery] frame failed: {}", ZHLN::Error(result.error).Message());
+            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
             engine->RemoveDeviceLostCallback(callbackToken);
             return EXIT_FAILURE;
         }

@@ -190,8 +190,8 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
             impl.pipelines.pipelines
         );
 
-        built.ForEachError([](const VariantFailure& failure) {
-            ZHLN::LogWarning(
+        built.ForEachError([&ctx](const VariantFailure& failure) {
+            Log<LogTag::Warning>(
                 "UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
                 static_cast<uint32_t>(failure.format), failure.error
             );
@@ -221,7 +221,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         impl.vboAddresses[i] = ctx.ctx.BufferAddress(impl.vbos[i].Handle());
     }
     rollback.Dismiss();
-    ZHLN::Log("UIRenderer: {} format-matched pipelines + double-buffered VBOs ({} bytes).", pipelineCount, bufferSize);
+    Log("UIRenderer: {} format-matched pipelines + double-buffered VBOs ({} bytes).", pipelineCount, bufferSize);
     return {};
 }
 

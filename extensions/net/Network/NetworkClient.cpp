@@ -18,6 +18,8 @@
 module;
 
 #include <Socket/Socket.hpp>
+#include <cstdio>
+#include <format>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -34,6 +36,7 @@ module;
 #include <string>
 #include <utility>
 #include <vector>
+
 
 module ZHLN.Network;
 
@@ -258,7 +261,6 @@ struct Client::Impl {
             if (received.status == RecvStatus::Data) {
                 auto appended = tcpStream.Append({chunk, received.bytes});
                 if (!appended) {
-                    Log("Net: {} — closing stream", appended.error().Format());
                     CloseSockets();
                     return ErrorCode(Error::InvalidPayload);
                 }
@@ -282,7 +284,6 @@ struct Client::Impl {
         while (tcpStream.Size() >= 4) {
             auto length = PeekFrameLength(tcpStream.Data());
             if (!length) {
-                Log("Net: {} — closing stream", length.error().Format());
                 CloseSockets();
                 return ErrorCode(Error::InvalidPayload);
             }
@@ -292,7 +293,6 @@ struct Client::Impl {
             auto payload = DecodeFrame(tcpStream.Data().first(4 + static_cast<size_t>(*length)));
             tcpStream.Consume(4 + static_cast<size_t>(*length));
             if (!payload) {
-                Log("Net: {} — closing stream", payload.error().Format());
                 CloseSockets();
                 return ErrorCode(Error::InvalidPayload);
             }
@@ -376,7 +376,6 @@ auto Client::Connect(std::string_view host, uint16_t port, uint64_t userId, std:
         }
         auto noDelay = opened->SetNoDelay(true);
         if (!noDelay) {
-            Log("Net: TCP_NODELAY could not be set (socket error {})", noDelay.error().nativeCode);
         }
         tcp                         = std::move(*opened);
         _impl->serverAddress        = endpoint;
@@ -403,12 +402,10 @@ auto Client::Connect(std::string_view host, uint16_t port, uint64_t userId, std:
                 return std::unexpected(ErrorCode(Error::ConnectionFailed));
             }
         } else {
-            Log("Net: failed to frame ClientHello — {}", frame.error().Format());
             _impl->CloseSockets();
             return std::unexpected(ErrorCode(Error::HandshakeFailed));
         }
     } else {
-        Log("Net: failed to encode ClientHello — {}", encodedHello.error().Format());
         _impl->CloseSockets();
         return std::unexpected(ErrorCode(Error::HandshakeFailed));
     }
@@ -416,13 +413,11 @@ auto Client::Connect(std::string_view host, uint16_t port, uint64_t userId, std:
     Wire::Buffer handshakeStream {MAX_STREAM_FRAME_BYTES};
     auto         welcomeFrame = RecvExactFrame(_impl->tcpSocket, handshakeStream, HANDSHAKE_TIMEOUT_MS);
     if (!welcomeFrame) {
-        Log("Net: no ServerWelcome — {}", welcomeFrame.error().Format());
         _impl->CloseSockets();
         return std::unexpected(ErrorCode(Error::HandshakeTimeout));
     }
     auto welcome = DecodeServerWelcome(*welcomeFrame);
     if (!welcome) {
-        Log("Net: bad ServerWelcome — {}", welcome.error().Format());
         _impl->CloseSockets();
         return std::unexpected(ErrorCode(Error::HandshakeFailed));
     }
@@ -474,10 +469,8 @@ auto Client::PollEvents(COM::IEntities& entities) noexcept -> std::expected<void
     applied.ForEachError([](const MessageMiss& miss) {
         const char* carrier = miss.channel == Channel::Udp ? "datagram" : "stream frame";
         if (miss.type.has_value()) {
-            Log("Net: {} carrying {} was received but not applied — {}", carrier, *miss.type, miss.error);
             return;
         }
-        Log("Net: {} carrying an undecodable message was dropped — {}: {}", carrier, miss.error, miss.detail);
     });
 
     if (tcpFailure) {
@@ -527,22 +520,21 @@ void Client::SendInputs(bool forward, bool backward, bool left, bool right, bool
     };
     auto payload = EncodeClientInput(input);
     if (!payload) {
-        Log("Net: failed to encode input — {}", payload.error().Format());
+        Log<LogTag::Warning, LogTag::Network>("Client input encode failed: {}", payload.error().Format());
         return;
     }
     auto datagram = EncodeDatagram(*payload);
     if (!datagram) {
-        Log("Net: failed to frame input — {}", datagram.error().Format());
+        Log<LogTag::Warning, LogTag::Network>("Client input datagram encode failed: {}", datagram.error().Format());
         return;
     }
     if (datagram->size() > MAX_SAFE_UDP_PAYLOAD) {
-        Log("Net: input datagram of {} byte(s) exceeds the {} byte safe payload size", datagram->size(), MAX_SAFE_UDP_PAYLOAD);
+        Log<LogTag::Warning, LogTag::Network>("Client input datagram of {} bytes exceeds the {}-byte safe UDP payload; dropped.", datagram->size(), MAX_SAFE_UDP_PAYLOAD);
         return;
     }
 
     auto sent = _impl->udpSocket.Send(*datagram);
     if (!sent) {
-        Log("Net: input datagram send failed (socket error {})", sent.error().nativeCode);
     }
 }
 

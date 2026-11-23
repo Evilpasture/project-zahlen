@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "InteractionSystem.hpp"
+#include <cstdio>
+#include <format>
 #include "BSPInteraction.hpp"
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
@@ -22,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+
 
 namespace ZHLN::Interaction {
 namespace {
@@ -82,7 +85,6 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
         }
     }
     if (destEnt == Entity::Null()) {
-        Log("[Interaction] trigger_teleport target '{}' not found -- no info_teleport_destination with that name", destination);
         return;
     }
     const auto* destTrans = entities.Get<Components::TransformComponent>(destEnt);
@@ -108,7 +110,6 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
     }
 
     PostBeep(audio, 0.15f, 440.0f, 0.06f);
-    Log("[Interaction] Teleported player to '{}'", destination);
 }
 
 } // namespace
@@ -156,11 +157,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             trigger->flags |= TriggerFlags::PlayerInside;
 
             if (interactJustPressed) {
-                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}",
-                    DebugLabel(entities, triggerEnt), static_cast<uint32_t>(trigger->flags), std::string_view(trigger->target),
-                    (trigger->flags & TriggerFlags::TouchOpens) != TriggerFlags::None,
-                    (trigger->flags & TriggerFlags::UseOpens) != TriggerFlags::None,
-                    (trigger->flags & TriggerFlags::TriggerOnce) != TriggerFlags::None);
             }
 
             if (newlyEntered) {
@@ -208,10 +204,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                                 trigger->flags &= ~TriggerFlags::PlayerInside;
                                 processed = true;
 
-                                Log("Picked up item hash ID: {}", itemId);
                                 PostBeep(audio, 0.25f, 880.0f, 0.1f);
                             } else {
-                                Log("Inventory full!");
                                 PostBeep(audio, 0.25f, 220.0f, 0.15f);
                             }
                         }
@@ -221,7 +215,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                 if (!processed) {
                     if (const auto* usable = entities.Get<UsableComponent>(triggerEnt);
                         usable != nullptr && usable->scriptHash != 0) {
-                        Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
                         PostBeep(audio, 0.20f, 550.0f, 0.08f);
                     }
                 }
@@ -249,11 +242,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             }
             if (interactJustPressed && (door->flags & DoorFlags::UseOpens) != DoorFlags::None) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None) {
-                    Log("[Interaction] Door '{}' is locked: {}", std::string_view(door->targetname),
-                        std::string_view(door->message));
                     PostBeep(audio, 0.20f, 300.0f, 0.10f);
                     if (door->scriptHash != 0) {
-                        Log("[Interaction] Dispatching script hash for locked door: {:#X}", door->scriptHash);
                     }
                 } else {
                     const std::string_view action = ((door->flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
@@ -279,7 +269,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             }
             if (interactJustPressed && (button->flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None) {
-                    Log("[Interaction] Button '{}' is locked", std::string_view(button->targetname));
                     PostBeep(audio, 0.20f, 250.0f, 0.10f);
                 } else {
                     FireEntityInput(entities, buttonEnt, "Press", "", audio);

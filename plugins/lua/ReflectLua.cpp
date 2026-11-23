@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <lua/ReflectLua.hpp>
+#include <Zahlen/Log.hpp>
 
 #include <lua.hpp>
 #include <luajit.h>
@@ -9,8 +10,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <format>
 #include <fstream>
 #include <sstream>
+
 
 namespace ZHLN::ReflectLua {
 
@@ -53,7 +56,7 @@ namespace {
                 line.append(str, len);
             }
         }
-        ZHLN::Log("[Lua] {}", line);
+        Log<LogTag::Info, LogTag::Script>("{}", line);
         return 0;
     }
 
@@ -112,6 +115,7 @@ struct Vm::Impl {
     int64_t    remainingInstructions     = 0;
     bool       instructionBudgetExceeded = false;
     bool       memoryBudgetExceeded      = false;
+    std::string lastErrorDetail;
 
     static auto AllocWrapper(void* ud, void* ptr, size_t osize, size_t nsize) noexcept -> void* {
         auto* self = static_cast<Impl*>(ud);
@@ -190,11 +194,11 @@ struct Vm::Impl {
         }
         const char* msg = (lua_type(state, -1) == LUA_TSTRING) ? lua_tostring(state, -1) : "syntax error";
         if (rc == LUA_ERRMEM || memoryBudgetExceeded) {
-            ZHLN::Log("[Lua] memory budget exceeded while parsing '{}': {}", chunkName, msg);
+            lastErrorDetail = std::format("memory budget exceeded while parsing '{}': {}", chunkName, msg);
             lua_pop(state, 1);
             return std::unexpected(LuaError::MemoryBudgetExceeded);
         }
-        ZHLN::Log("[Lua] syntax error in '{}': {}", chunkName, msg);
+        lastErrorDetail = std::format("syntax error in '{}': {}", chunkName, msg);
         lua_pop(state, 1);
         return std::unexpected(LuaError::SyntaxError);
     }
@@ -210,16 +214,16 @@ struct Vm::Impl {
 
         const char* msg = (lua_type(state, -1) == LUA_TSTRING) ? lua_tostring(state, -1) : "runtime error";
         if (instructionBudgetExceeded) {
-            ZHLN::Log("[Lua] instruction budget ({}) exceeded in '{}'", budget.maxInstructions, chunkName);
+            lastErrorDetail = std::format("instruction budget exceeded in '{}': {}", chunkName, msg);
             lua_pop(state, 1);
             return std::unexpected(LuaError::InstructionBudgetExceeded);
         }
         if (rc == LUA_ERRMEM || memoryBudgetExceeded) {
-            ZHLN::Log("[Lua] memory budget ({} B) exceeded in '{}'", budget.maxMemoryBytes, chunkName);
+            lastErrorDetail = std::format("memory budget exceeded in '{}': {}", chunkName, msg);
             lua_pop(state, 1);
             return std::unexpected(LuaError::MemoryBudgetExceeded);
         }
-        ZHLN::Log("[Lua] runtime error in '{}': {}", chunkName, msg);
+        lastErrorDetail = std::format("runtime error in '{}': {}", chunkName, msg);
         lua_pop(state, 1);
         return std::unexpected(LuaError::RuntimeError);
     }
@@ -312,10 +316,17 @@ auto Vm::ExecuteString(std::string_view code, std::string_view chunkName) noexce
 auto Vm::ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode> {
     auto source = ReadFileText(path);
     if (!source) {
+        if (_impl != nullptr) {
+            _impl->lastErrorDetail = std::format("failed to open or read '{}'", path.generic_string());
+        }
         return std::unexpected(source.error());
     }
     const std::string chunkName = "@" + path.generic_string();
     return ExecuteString(*source, chunkName);
+}
+
+auto Vm::LastErrorDetail() const noexcept -> std::string_view {
+    return _impl != nullptr ? std::string_view(_impl->lastErrorDetail) : std::string_view {};
 }
 
 auto Vm::EvaluateTop(
@@ -657,13 +668,11 @@ void Builder::SetElementTop(size_t zeroBasedIndex) noexcept {
 auto ReadFileText(const std::filesystem::path& path) noexcept -> std::expected<std::string, ErrorCode> {
     std::ifstream in(path, std::ios::binary);
     if (!in.is_open()) {
-        ZHLN::Log("[Lua] failed to open '{}'", path.string());
         return std::unexpected(LuaError::FileReadFailed);
     }
     std::ostringstream buffer;
     buffer << in.rdbuf();
     if (in.bad()) {
-        ZHLN::Log("[Lua] failed while reading '{}'", path.string());
         return std::unexpected(LuaError::FileReadFailed);
     }
     return buffer.str();

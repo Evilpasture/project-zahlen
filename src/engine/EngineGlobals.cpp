@@ -57,7 +57,7 @@ void InitRenderDocAPI() {
     }
 #endif
     if (s_RDocAPI != nullptr) {
-        ZHLN::Log("[RenderDoc] In-App API successfully bound.");
+        Log("RenderDoc In-App API successfully bound.");
     }
 }
 
@@ -116,7 +116,7 @@ auto AcquireGlfw() -> bool {
 
 
     glfwSetErrorCallback([](int error, const char* description) -> void {
-        ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
+        Log<LogTag::Error>("GLFW error {}: {}", error, description ? description : "(null)");
     });
 
     if constexpr (isLinux) {
@@ -130,7 +130,7 @@ auto AcquireGlfw() -> bool {
         const char* desc = nullptr;
         const int   err  = glfwGetError(&desc);
         if (desc != nullptr) {
-            ZHLN::Log("[GLFW] glfwInit failed: ({}) {}", err, desc);
+            Log<LogTag::Error>("glfwInit failed: ({}) {}", err, desc);
         }
         return false;
     }

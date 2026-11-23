@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "EngineErrors.hpp"
+
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
 #include "tty/TTYBackend.hpp"
@@ -13,6 +15,7 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <render/Render.hpp>
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
@@ -112,30 +115,24 @@ void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::sp
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            ZHLN::Log("[KernelSession] Could not open '{}' for writing the pipeline binaries.", temp.string());
+            Log<LogTag::Warning>("Could not open '{}' for writing the pipeline binaries.", temp.string());
             return;
         }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
     std::filesystem::rename(temp, target, ec);
     if (ec) {
-        ZHLN::Log("[KernelSession] Renaming '{}' into place failed: {}", temp.string(), ec.message());
+        Log<LogTag::Warning>("Renaming '{}' into place failed: {}", temp.string(), ec.message());
         std::filesystem::remove(temp, ec);
         return;
     }
-    ZHLN::Log("[KernelSession] Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
+    Log("Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
 }
 
 } // namespace
 
-enum class KernelInitError : uint8_t {
-    WindowCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
-    TTYInitializationFailed    ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
-    RenderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
-    KernelAllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"Kernel instance allocation failed"> {}),
-};
-
 struct KernelSession::Impl {
+    ZHLN::LogSink        ambientSink {};
     std::unique_ptr<FS::FileSystemWatcher> fileSystemWatcher;
     std::unique_ptr<RenderContext>         renderContext;
     std::unique_ptr<AudioContext>          audioContext;
@@ -153,6 +150,7 @@ struct KernelSession::Impl {
     std::vector<WindowID>               windowIDs {WindowID::Primary};
 
     EngineConfig config;
+    ZHLN::LogSink previousSink {};
     // Own the bytes backing config.initialPipelineBinaryData across renderer
     // recreation. Only persist cache data loaded by the kernel itself.
     std::vector<uint8_t> pipelineBinaryData;
@@ -187,19 +185,33 @@ struct KernelSession::Impl {
     }
 };
 
-auto KernelSession::Create(const EngineConfig& config) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
+auto KernelSession::Create(const EngineConfig& config, const ZHLN::LogSink ambientSink)
+    -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
     auto instance = std::unique_ptr<KernelSession>(new (std::nothrow) KernelSession());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
     }
-    if (auto result = instance->InitInternal(config); !result) {
+    if (auto result = instance->InitInternal(config, ambientSink); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
+
+
+auto KernelSession::InitInternal(const EngineConfig& cfg, const ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
+    _impl->ambientSink       = ambientSink;
+    // Engine boundary: adapt the incoming logger into Core's ambient sink
+    // once, here. From this point every thread in the process -- including
+    // TaskSystem workers, which never pass through an install point --
+    // logs through the engine's hub instead of the stderr default. The
+    // previous Layer-0 sink is saved here and restored in ~KernelSession,
+    // before this session's hub can be released by its owner.
+    _impl->previousSink = ZHLN::GetLogSink();
+    if (ambientSink.write != nullptr) {
+        ZHLN::SetLogSink(ambientSink);
+    }
     _impl->config            = cfg;
     const auto inputReceiver = MakeInputReceiver(_impl->primaryInput);
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
@@ -223,7 +235,7 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
         if (!TTYBackend::IsSupported()) {
             return std::unexpected(KernelInitError::WindowCreationFailed);
         }
-        ZHLN::Log("[KernelSession] GLFW unavailable; falling back to a direct-to-display TTY session.");
+        Log("GLFW unavailable; falling back to a direct-to-display TTY session.");
         _impl->primaryHost = PlatformHost::CreateTTY(cfg.width, cfg.height, inputReceiver);
         if (!_impl->primaryHost.Valid()) {
             return std::unexpected(KernelInitError::TTYInitializationFailed);
@@ -238,6 +250,7 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
 
     InitRenderDocAPI();
 
+
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
@@ -246,27 +259,34 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
     _impl->primaryExtent = _impl->primaryHost.GetSize();
     _impl->BeginShaderObservation();
 
+    // AudioContext logs its device init through the ambient logger
+    // installed above -- no second, redundant scope needed.
     _impl->audioContext = std::make_unique<AudioContext>(AudioConfig {.headless = cfg.headless});
     _impl->assetManager = std::make_unique<AssetManager>();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);
 
     if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
         if (_impl->assetManager->MountPak(pak->string())) {
-            ZHLN::Log("Mounted asset pack: {}", pak->string());
+            Log("Mounted asset pack: {}", pak->string());
         } else {
-            ZHLN::LogWarning("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+            Log<LogTag::Warning>("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
         }
     } else {
-        ZHLN::LogWarning("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
+        Log<LogTag::Warning>("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};
 }
 
 KernelSession::~KernelSession() {
+    // Restore the Layer-0 sink that predates this session first: after
+    // this point the session's hub may be released by its owner, and no
+    // teardown line may be routed into it (or left pointing at it).
+    ZHLN::SetLogSink(_impl ? _impl->previousSink : ZHLN::LogSink {});
     if (_impl == nullptr) {
         return;
     }
+
 
     // Prefab buffers belong to the asset cache; it must release them while
     // the renderer that allocated them is still alive.

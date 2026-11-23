@@ -10,7 +10,9 @@
 # two steps away from the omission.
 
 set(RAW_ENGINE_SOURCES
-    Log.cpp
+    ErrorRegistry.cpp
+    Logger.cpp
+    diagnostics/Diagnostics.cpp
     diagnostics/StackTrace.cpp
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
@@ -22,6 +24,8 @@ set(RAW_ENGINE_SOURCES
     World.cpp
     system/CharacterMotorSystem.cpp
     com/Engine.cpp
+    com/ErrorRegistryAdapter.cpp
+    com/LoggerHub.cpp
     com/LogicWorld.cpp
     SystemWiring.cpp
     Hierarchy.cpp

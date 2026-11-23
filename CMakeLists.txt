@@ -893,6 +893,12 @@ endif()
 
 if(ZHLN_BUILD_TESTS)
     include(cmake/ZTest.cmake)
+# Without extras, plugins/ is never configured -- but the CPU test binary
+# cooks radiance assets, so configure the cooking library on its own
+# (AssetCooking's CMakeLists supports being configured from the root).
+if(NOT ZHLN_BUILD_EXTRAS AND ZHLN_BUILD_TESTS)
+    add_subdirectory(plugins/AssetCooking)
+endif()
     add_subdirectory(tests)
     zahlen_finalize_ztest_manifest()
 endif()

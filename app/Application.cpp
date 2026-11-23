@@ -15,6 +15,7 @@
 #include <Zahlen/HostRunner.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PluginManifestRegistry.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
 
 namespace ZHLN {
 
@@ -57,7 +59,7 @@ struct BuiltinHostOptions {
     return dirs;
 }
 
-[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary) -> std::expected<bool, ErrorCode> {
+[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary, COM::ILogger* logger) -> std::expected<bool, ErrorCode> {
     const char* const             rawEnv     = std::getenv("ZHLN_PLUGIN_PATH");
     const auto                    searchDirs = DefaultPluginSearchDirs();
     std::filesystem::path         resolvedPath;
@@ -73,11 +75,11 @@ struct BuiltinHostOptions {
         case SharedLibraryOpenStatus::Opened:
             return true;
         case SharedLibraryOpenStatus::LoadFailed:
-            LogError("[App] Failed to open plugin library '{}'.", resolvedPath.string());
+            Log<LogTag::Error>(logger, "Failed to open plugin library '{}'.", resolvedPath.string());
             return std::unexpected(AppError::PluginLoadFailed);
         case SharedLibraryOpenStatus::NotFound:
             if (required) {
-                LogError("[App] Required plugin '{}' not found.", spec);
+                Log<LogTag::Error>(logger, "Required plugin '{}' not found.", spec);
                 return std::unexpected(AppError::PluginNotFound);
             }
             return false;
@@ -219,7 +221,22 @@ auto App::RunConfigured(
     std::string_view             capturePath,
     std::span<const std::string> cliPlugins
 ) const -> AppRunResult {
-    SetLogLevel(config.logLevel);
+    // The run's logger: the consumer-injected hub (App::Logger) when set,
+    // otherwise a default hub created here and owned by this stack frame.
+    // Plugin libraries are opened before the engine exists, so their load
+    // failures already have somewhere to go; a second run in the same
+    // process creates a fresh hub honoring its own config.logLevel.
+    COM::Ref<COM::ILoggerHub> ownedLogger;
+    COM::ILogger*             runLog = _logger;
+    if (runLog == nullptr) {
+        if (auto made = COM::CreateLogger(COM::InChain(COM::LoggerConfig {.logger = nullptr, .level = config.logLevel}))) {
+            ownedLogger = std::move(*made);
+            runLog      = ownedLogger.Get();
+        }
+    }
+    // Leaf logging anywhere in this run resolves through the ambient
+    // sink: the engine installs its hub at creation; before that, lines
+    // go to the default (stderr) sink. No scoped install needed here.
     if (_prepare) {
         if (auto prepared = _prepare(); !prepared) {
             return std::unexpected(prepared.error());
@@ -248,7 +265,8 @@ auto App::RunConfigured(
         const auto    opened = OpenPluginLibrary(
             libraryStemOverride.empty() ? req.spec : libraryStemOverride,
             req.required,
-            library
+            library,
+            runLog
         );
         if (!opened) {
             return std::unexpected(opened.error());
@@ -259,10 +277,10 @@ auto App::RunConfigured(
         const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(library);
         if (factory == nullptr) {
             if (COM::ResolveSymbol<&COM::CreateAppLayerRaw>(library) != nullptr) {
-                LogError("[App] Plugin '{}' has a missing or incompatible factory ABI witness. Rebuild the plugin.", req.spec);
+                Log<LogTag::Error>(runLog, "Plugin '{}' has a missing or incompatible factory ABI witness. Rebuild the plugin.", req.spec);
                 return std::unexpected(AppError::PluginAbiMismatch);
             }
-            LogError("[App] Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerRawSymbol);
+            Log<LogTag::Error>(runLog, "Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerRawSymbol);
             return std::unexpected(AppError::PluginSymbolMissing);
         }
 
@@ -282,7 +300,7 @@ auto App::RunConfigured(
 
         auto created = COM::CreateAppLayer(factory, head);
         if (!created) {
-            LogError("[App] Plugin '{}' initialization failed: {}", req.spec, created.error());
+            Log<LogTag::Error>(runLog, "Plugin '{}' initialization failed: {}", req.spec, created.error());
             return std::unexpected(created.error());
         }
         pluginLibraries.push_back(std::move(library));
@@ -309,7 +327,7 @@ auto App::RunConfigured(
     PluginManifestRegistry registry;
     const auto             discovered = registry.Discover(DefaultPluginSearchDirs());
     if (!discovered) {
-        LogError("[App] Plugin discovery failed: {}", discovered.error().detail);
+        Log<LogTag::Error>(runLog, "Plugin discovery failed: {}", discovered.error().detail);
         return std::unexpected(AppError::PluginLoadFailed);
     }
     const std::vector<DiscoveredPlugin>& discoveredPlugins = *discovered;
@@ -374,7 +392,7 @@ auto App::RunConfigured(
     if (!registryNames.empty()) {
         auto resolved = registry.ResolveOrder(discoveredPlugins, std::move(registryNames));
         if (!resolved) {
-            LogError("[App] Plugin order resolution failed: {}", resolved.error().detail);
+            Log<LogTag::Error>(runLog, "Plugin order resolution failed: {}", resolved.error().detail);
             return std::unexpected(AppError::PluginLoadFailed);
         }
         loadOrder = *resolved;
@@ -521,11 +539,12 @@ auto App::RunConfigured(
                 .enableMeshShading     = config.enableMeshShading,
                 .initialPipelineBinary = config.initialPipelineBinaryData
             },
-            config.physics, COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
+            config.physics, COM::LoggerConfig {.logger = runLog, .level = config.logLevel},
+            COM::DiagnosticsInfo {.crashDumpPath = std::string_view(config.crashDumpPath)}
         )
     );
     if (!created) {
-        LogError("[App] engine creation failed: {}", created.error());
+        Log<LogTag::Error>(runLog, "engine creation failed: {}", created.error());
         layers.clear();
         closePluginLibraries();
         return std::unexpected(created.error());
@@ -591,32 +610,32 @@ auto App::RunConfigured(
             }
             slot = {}; // release the old plugin instance before dlclose
             lib.Close();
-            const auto reopened = OpenPluginLibrary(hr.libraryStem, true, lib);
+            const auto reopened = OpenPluginLibrary(hr.libraryStem, true, lib, runLog);
             if (!reopened || !*reopened) {
-                LogError("[App] Hot reload failed to reopen plugin '{}'.", hr.libraryStem);
+                Log<LogTag::Error>(runLog, "Hot reload failed to reopen plugin '{}'.", hr.libraryStem);
                 hr.lastWrite = mtime;
                 continue;
             }
             const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(lib);
             if (factory == nullptr) {
-                LogError("[App] Hot-reloaded plugin '{}' has an incompatible factory ABI.", hr.libraryStem);
+                Log<LogTag::Error>(runLog, "Hot-reloaded plugin '{}' has an incompatible factory ABI.", hr.libraryStem);
                 hr.lastWrite = mtime;
                 continue;
             }
             auto recreated = COM::CreateAppLayer(factory, nullptr);
             if (!recreated) {
-                LogError("[App] Hot-reloaded plugin '{}' failed to initialize: {}.", hr.libraryStem, recreated.error());
+                Log<LogTag::Error>(runLog, "Hot-reloaded plugin '{}' failed to initialize: {}.", hr.libraryStem, recreated.error());
                 hr.lastWrite = mtime;
                 continue;
             }
             slot = MakePluginSlot(std::move(*recreated));
             if (slot.start != nullptr) {
                 if (const auto started = slot.start(slot.state.get(), engineRef); !started) {
-                    LogError("[App] Hot-reloaded plugin '{}' failed to start: {}.", hr.libraryStem, started.error());
+                    Log<LogTag::Error>(runLog, "Hot-reloaded plugin '{}' failed to start: {}.", hr.libraryStem, started.error());
                 }
             }
             hr.lastWrite = mtime;
-            LogInfo("[App] Hot-reloaded plugin '{}'.", hr.libraryStem);
+            Log(runLog, "Hot-reloaded plugin '{}'.", hr.libraryStem);
         }
 
         if (maxFrames > 0 && engine->CurrentFrame() >= maxFrames) {
@@ -677,7 +696,7 @@ auto App::RunConfigured(
             break;
         }
         if (auto finished = pipeline->FinishFrame(); !finished.HasValue()) {
-            LogError("[App] engine frame failed: {}", finished.error);
+            Log<LogTag::Error>(runLog, "engine frame failed: {}", finished.error);
             frameError = finished.error;
             break;
         }
@@ -731,16 +750,16 @@ auto App::RunConfigured(
     }
     if (builtinCapture) {
         if (captureOutcome.Succeeded()) {
-            Log("[Capture] Wrote {}x{} PNG '{}' (mean luma {}).", captureOutcome.extent.width, captureOutcome.extent.height, capturePath,
+            Log(runLog, "Wrote {}x{} PNG '{}' (mean luma {}).", captureOutcome.extent.width, captureOutcome.extent.height, capturePath,
                 captureOutcome.metrics.meanLuma);
         } else if (captureOutcome.status == Screenshot::CaptureStatus::ReadFailed) {
-            LogError("[Capture] Failed to capture frame: {}", captureOutcome.error);
+            Log<LogTag::Error>(runLog, "Failed to capture frame: {}", captureOutcome.error);
             return std::unexpected(captureOutcome.error);
         } else if (captureOutcome.status == Screenshot::CaptureStatus::WriteFailed) {
-            LogError("[Capture] Failed to write PNG '{}'.", capturePath);
+            Log<LogTag::Error>(runLog, "Failed to write PNG '{}'.", capturePath);
             return std::unexpected(Screenshot::Error::WriteFailed);
         } else {
-            LogError("[Capture] Closed before target frame {}.", captureFrame);
+            Log<LogTag::Error>(runLog, "Closed before target frame {}.", captureFrame);
             return std::unexpected(Screenshot::Error::Incomplete);
         }
     }

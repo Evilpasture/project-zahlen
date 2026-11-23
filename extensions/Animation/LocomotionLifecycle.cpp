@@ -4,6 +4,8 @@
 module;
 
 #include <Animation/Components.hpp>
+#include <cstdio>
+#include <format>
 #include <Animation/PrefabRig.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
@@ -18,9 +20,11 @@ module;
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <algorithm>
 #include <cmath>
 #include <vector>
+
 
 module ZHLN.Locomotion;
 
@@ -83,7 +87,7 @@ auto SpawnCharacter(
     }
     const auto rigOpt = Animation::LoadPrefabRig(*assets, prefabHash);
     if (!rigOpt.has_value()) {
-        ZHLN::LogError("[Locomotion] Cannot spawn character: prefab '{}' is not cached.", modelVirtualPath);
+        ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "Cannot spawn character: prefab '{}' is not cached.", modelVirtualPath);
         return {};
     }
     const Animation::PrefabRig& prefab = *rigOpt;
@@ -108,7 +112,7 @@ auto SpawnCharacter(
     };
     const auto spawned = assets->Instantiate(prefabHash, spawnParams);
     if (spawned.empty() || spawned.front() == Entity::Null()) {
-        ZHLN::LogError("[Locomotion] Failed to spawn character entity for '{}'.", modelVirtualPath);
+        ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "Failed to spawn character entity for '{}'.", modelVirtualPath);
         return {};
     }
     const Entity entity = spawned.front();
@@ -157,7 +161,7 @@ auto SpawnCharacter(
     if (assets == nullptr) return {};
     const auto hashRes = assets->FindPrefab(COM::StringView {modelVirtualPath.data(), modelVirtualPath.size()});
     if (!hashRes.HasValue()) {
-        ZHLN::LogError("[Locomotion] Prefab '{}' is not cached (import it first).", modelVirtualPath);
+        ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "Prefab '{}' is not cached (import it first).", modelVirtualPath);
         return {};
     }
     return SpawnCharacter(engine, hashRes.value, modelVirtualPath, spawnFootPosition, initialYaw, setup);

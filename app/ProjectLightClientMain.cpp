@@ -107,9 +107,9 @@ int main(int argc, char* argv[]) {
                             .Run(std::span<char* const>(filteredArgPointers));
     if (!result) {
         if (result.error().get<ZHLN::CommandLineError>()) {
-            PrintConfigError(std::format("invalid command line ({}); use --help for engine options", result.error().ToError().Message()));
+            PrintConfigError(std::format("invalid command line ({}); use --help for engine options", result.error()));
         } else if (!result.error().get<ProjectLightStartupError>()) {
-            std::println(stderr, "Fatal project-light client error: {}", result.error().ToError().Message());
+            std::println(stderr, "Fatal project-light client error: {}", result.error());
         }
         return EXIT_FAILURE;
     }

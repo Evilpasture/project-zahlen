@@ -10,6 +10,9 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <cstdio>
+#include <format>
+
 
 namespace ZHLN::Vk {
 
@@ -58,7 +61,6 @@ void PipelineBinaryStore::Init(const VkDevice device, const bool enabled, const 
     VkPipelineBinaryKeyKHR global {};
     global.sType = VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR;
     if (vkGetPipelineKeyKHR(device, nullptr, &global) != VK_SUCCESS || global.keySize == 0 || global.keySize > VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR) {
-        ZHLN::Log("[PipelineBinary] vkGetPipelineKeyKHR failed; pipeline binaries disabled.");
         _enabled = false;
         return;
     }
@@ -76,7 +78,6 @@ void PipelineBinaryStore::Init(const VkDevice device, const bool enabled, const 
     const auto entryCount    = reader.U32();
     if (!magic || !version || *version != kFormatVersion || !entryCount || !globalKey || !std::ranges::equal(*magic, std::span<const uint8_t> {kMagic}) ||
         !std::ranges::equal(*globalKey, std::span<const uint8_t> {_globalKey})) {
-        ZHLN::Log("[PipelineBinary] Provided binary store was written by a different driver or GPU, or is corrupt; discarding.");
         return;
     }
 
@@ -98,12 +99,10 @@ void PipelineBinaryStore::Init(const VkDevice device, const bool enabled, const 
         entries.push_back(Entry {.key = {key->begin(), key->end()}, .data = {data->begin(), data->end()}});
     }
     if (entries.size() != *entryCount) {
-        ZHLN::Log("[PipelineBinary] Provided binary store is truncated; discarding.");
         return;
     }
 
     _entries = std::move(entries);
-    ZHLN::Log("[PipelineBinary] Reused {} pipeline binaries from provided data.", _entries.size());
 }
 
 auto PipelineBinaryStore::Find(const std::span<const uint8_t> key) const noexcept -> std::optional<std::vector<uint8_t>> {

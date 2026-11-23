@@ -209,7 +209,7 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             return std::unexpected(immediate.error());
         }
 
-        ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+        Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         return {};
     });
 }

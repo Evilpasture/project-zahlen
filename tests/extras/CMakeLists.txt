@@ -275,7 +275,9 @@ target_link_libraries(Extras_Serialization PRIVATE
     zahlen_serialization
     zahlen_lua
 )
-add_dependencies(Extras_Serialization zcook)
+if(TARGET zcook)
+    add_dependencies(Extras_Serialization zcook)
+endif()
 zahlen_register_extras_test(Extras_Serialization
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )

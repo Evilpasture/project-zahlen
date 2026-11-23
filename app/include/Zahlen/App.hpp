@@ -10,6 +10,7 @@
 // here; UI-using hosts compose extensions/UI explicitly.
 #include <Zahlen/AppOutcome.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -105,6 +106,11 @@ class ZHLN_STATIC_API App {
     }
     auto LogLevel(ZHLN::LogLevel level) noexcept -> App& {
         _config.logLevel = level;
+        return *this;
+    }
+
+    auto Logger(COM::ILogger* logger) noexcept -> App& {
+        _logger = logger;
         return *this;
     }
     auto CrashDumpPath(std::string_view path) -> App& {
@@ -435,6 +441,9 @@ class ZHLN_STATIC_API App {
     ) const -> AppRunResult;
     auto RunFromCLI(EngineConfig config, std::span<char* const> args, const Update& update) const -> AppRunResult;
 
+    // Borrowed; the caller owns the logger's lifetime. When unset,
+    // RunConfigured creates a default hub honoring EngineConfig::logLevel.
+    COM::ILogger*                                   _logger = nullptr;
     EngineConfig                                    _config;
     std::function<std::expected<void, ErrorCode>()> _prepare;
     std::function<void(COM::IEngine&)>              _start;

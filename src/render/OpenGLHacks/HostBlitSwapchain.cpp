@@ -4,6 +4,7 @@
 
 #if defined(__APPLE__)
 
+#include <Zahlen/Log.hpp>
 #include <GLFW/glfw3.h>
 #include <OpenGL/gl.h>
 #include "vulkan/Rendering.hpp"
@@ -39,8 +40,8 @@ struct State {
     bool ready = false;
 } g;
 
-void Log(const char* msg) {
-    std::fprintf(stderr, "Zahlen: [HostBlit] %s\n", msg);
+void HostBlitLog(const char* msg) {
+    ZHLN::Log("HostBlit: {}", msg);
 }
 
 bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
@@ -95,7 +96,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
         .pQueueFamilyIndices   = nullptr,
     };
     if (vkCreateBuffer(g.device, &bi, nullptr, &g.staging) != VK_SUCCESS) {
-        Log("vkCreateBuffer failed for the host staging buffer.");
+        HostBlitLog("vkCreateBuffer failed for the host staging buffer.");
         return false;
     }
 
@@ -103,7 +104,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     vkGetBufferMemoryRequirements(g.device, g.staging, &req);
     uint32_t typeIndex = 0;
     if (!FindHostMemoryType(req.memoryTypeBits, typeIndex)) {
-        Log("No HOST_VISIBLE|HOST_COHERENT memory type available.");
+        HostBlitLog("No HOST_VISIBLE|HOST_COHERENT memory type available.");
         vkDestroyBuffer(g.device, g.staging, nullptr);
         g.staging = VK_NULL_HANDLE;
         return false;
@@ -116,13 +117,13 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
         .memoryTypeIndex = typeIndex,
     };
     if (vkAllocateMemory(g.device, &ai, nullptr, &g.memory) != VK_SUCCESS) {
-        Log("vkAllocateMemory failed for the host staging buffer.");
+        HostBlitLog("vkAllocateMemory failed for the host staging buffer.");
         vkDestroyBuffer(g.device, g.staging, nullptr);
         g.staging = VK_NULL_HANDLE;
         return false;
     }
     if (vkBindBufferMemory(g.device, g.staging, g.memory, 0) != VK_SUCCESS || vkMapMemory(g.device, g.memory, 0, req.size, 0, &g.mapped) != VK_SUCCESS) {
-        Log("Could not bind/map the host staging buffer.");
+        HostBlitLog("Could not bind/map the host staging buffer.");
         DestroyStaging();
         return false;
     }
@@ -167,7 +168,7 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         g.glWindow = nullptr;
     }
     if (!glfwInit()) {
-        Log("glfwInit failed; cannot open a host presentation window.");
+        HostBlitLog("glfwInit failed; cannot open a host presentation window.");
         return nullptr;
     }
 
@@ -184,7 +185,7 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
     g.glWindow = glfwCreateWindow(fbW > 0 ? fbW : 1280, fbH > 0 ? fbH : 720, "Zahlen — Host Blit", nullptr, nullptr);
     if (g.glWindow == nullptr) {
-        Log("glfwCreateWindow (OpenGL 2.1) failed.");
+        HostBlitLog("glfwCreateWindow (OpenGL 2.1) failed.");
         return nullptr;
     }
     return g.glWindow;
@@ -241,7 +242,7 @@ void Shutdown() noexcept;
     if (g.ready)
         return true;
     if (gpu == VK_NULL_HANDLE || device == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        Log("Init needs a valid physical device, device and queue.");
+        HostBlitLog("Init needs a valid physical device, device and queue.");
         return false;
     }
     g.gpu         = gpu;
@@ -250,13 +251,12 @@ void Shutdown() noexcept;
     g.queueFamily = queueFamily;
 
     if (auto res = g.ring.Init(device, queueFamily); !res) {
-        const std::string_view why = ZHLN::Error(res.error()).Message();
-        std::fprintf(stderr, "Zahlen: [HostBlit] Command ring init failed: %.*s\n", static_cast<int>(why.size()), why.data());
+        ZHLN::Log<ZHLN::LogTag::Error>("HostBlit: Command ring init failed: {}", res.error());
         Shutdown();
         return false;
     }
     g.ready = true;
-    Log("Initialized (offscreen host presenter; no engine state touched).");
+    HostBlitLog("Initialized (offscreen host presenter; no engine state touched).");
     return true;
 }
 
@@ -285,7 +285,7 @@ void Shutdown() noexcept;
     if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
         return false;
     if (!ReadBackPixels(src.View().Mip(0), width, height, srcLayout)) {
-        Log("Readback copy failed; frame skipped.");
+        HostBlitLog("Readback copy failed; frame skipped.");
         return !glfwWindowShouldClose(target);
     }
 

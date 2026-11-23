@@ -12,6 +12,7 @@
 // is covered through RequestAsset/Poll as well as the blocking Fetch/Load API.
 
 #include "TestsFramework.hpp"
+#include <Zahlen/COM/IErrorRegistry.hpp>
 #include <CDN/CDN.hpp>
 #include <HTTP/HTTPServer.hpp>
 #include <RemoteAsset/DiskCache.hpp>
@@ -113,8 +114,14 @@ struct CDNTestSuite {
             ZHLN::Test::ExpectTrue(code == ZHLN::CDN::Error::NotFound);
             ZHLN::Test::ExpectFalse(code == ZHLN::CDN::Error::HTTPStatus);
 
-            // Message() is the annotated template, read back through reflection.
-            ZHLN::Test::ExpectEq(std::string(ZHLN::Error(code).Message()), std::string("the CDN has no asset at '{}' (HTTP 404)."));
+            // The annotated template is the message, read back through a registry.
+            auto registry = ZHLN::COM::CreateErrorRegistry();
+            ZHLN::Test::ExpectTrue(static_cast<bool>(registry));
+            (void) ZHLN::COM::RegisterEnum<ZHLN::CDN::Error>(**registry);
+            ZHLN::COM::ErrorDescription desc;
+            auto descPack = ZHLN::COM::OutChain(desc);
+            (void) registry.value()->Describe(code, descPack.Head());
+            ZHLN::Test::ExpectEq(std::string(std::string_view(desc.message)), std::string("the CDN has no asset at '{}' (HTTP 404)."));
 
             // FormatEnumMessage fills the template with the failure site's context, as Wire does.
             ZHLN::Test::ExpectEq(

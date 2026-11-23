@@ -198,7 +198,7 @@ auto PlatformHost::operator=(PlatformHost&& other) noexcept -> PlatformHost& {
 auto PlatformHost::CreateHeadless(uint32_t width, uint32_t height) -> PlatformHost {
     PlatformHost host;
     host._impl->backend = HeadlessBackend(width, height);
-    ZHLN::Log("[Host] Headless session: no window, no event queue, no window system.");
+    Log("Headless session: no window, no event queue, no window system.");
     return host;
 }
 
@@ -206,11 +206,11 @@ auto PlatformHost::CreateTTY(uint32_t width, uint32_t height, const WindowInputR
     PlatformHost host;
     host._impl->backend = TTYBackendState(width, height, receiver);
     if (!host.Valid()) {
-        ZHLN::Log("[Host] TTY session failed: the terminal could not be taken over.");
+        Log<LogTag::Warning>("TTY session failed: the terminal could not be taken over.");
         host._impl->backend = std::monostate {};
         return host;
     }
-    ZHLN::Log("[Host] TTY session: direct to display over KMS/DRM, libevdev for input, no GLFW.");
+    Log("TTY session: direct to display over KMS/DRM, libevdev for input, no GLFW.");
     return host;
 }
 
@@ -220,7 +220,7 @@ auto PlatformHost::CreateWindowed(const String32& title, uint32_t width, uint32_
 
     auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, WindowID::Primary);
     if (window->GetNativeHandle() == nullptr) {
-        ZHLN::Log("[Host] Windowed session failed: the OS window could not be created.");
+        Log<LogTag::Warning>("Windowed session failed: the OS window could not be created.");
         return host;
     }
     host._impl->backend = WindowedBackend(std::move(window));

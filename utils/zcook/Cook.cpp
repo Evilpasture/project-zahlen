@@ -105,7 +105,7 @@ int CookMesh(int argc, char** argv) {
         .primitives   = primitives,
     });
     if (!cooked) {
-        std::println(stderr, "[zcook] ERROR: Mesh cooking failed: {}", ZHLN::Error(cooked.error()).Message());
+        std::println(stderr, "[zcook] ERROR: Mesh cooking failed: {}", cooked.error());
         return 1;
     }
 
@@ -166,8 +166,8 @@ int CookTexture(int argc, char** argv) {
     if (isHdr) {
         const auto decoded = AssetCooking::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
         if (!decoded) {
-            const ZHLN::Error err = decoded.error();
-            std::println(stderr, "[zcook] ERROR: HDR decode failed: {} ({})", err.Message(), err.Name());
+            const ZHLN::ErrorCode err = decoded.error();
+            std::println(stderr, "[zcook] ERROR: HDR decode failed: {}", err);
             std::fclose(out);
             return 1;
         }

@@ -3,6 +3,7 @@
 
 #include "vulkan/presentation/Surface.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <algorithm>
 #include <optional>
 #include <span>
@@ -234,10 +235,6 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) 
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
 
-    ZHLN::Log(
-        "[Vulkan] Created TTY display surface {}x{} @ {:.2f} Hz (plane {}, stack {}).", image_extent.width, image_extent.height,
-        static_cast<double>(plan->mode.parameters.refreshRate) / 1000.0, plan->planeIndex, plan->stackIndex
-    );
 
     return DisplaySurface {
         .surface = Surface(instance, raw_surface),

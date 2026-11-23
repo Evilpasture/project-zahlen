@@ -1,4 +1,5 @@
 #include "ArticulationContext.hpp"
+#include "EngineErrors.hpp"
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -15,6 +16,7 @@
 #include "SystemWiring.hpp"
 #include <audio/Audio.hpp>
 #include <Zahlen/COM/FrameTypes.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/HashMap.hpp>
@@ -57,13 +59,15 @@
 
 namespace ZHLN {
 
-enum class EngineInitError : uint8_t {
-    EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
-};
-
 struct EngineImpl {
+    // The session owns World, the renderer and audio, and restores the
+    // Layer-0 sink this engine replaced when it is destroyed. The Logger it
+    // borrowed is the host's (or COM::Engine's) and is never held here: the
+    // engine only receives the plain LogSink above. Declaration order still
+    // matters -- kernel first, so everything it owns tears down before
+    // anything else in the engine does.
     std::unique_ptr<KernelSession> kernel;
-    std::unique_ptr<World>  world;
+    std::unique_ptr<World>         world;
 
     // Host-owned custom draw hooks, keyed by stable window identity.
     ZHLN::HashMap<WindowID, Engine::WindowDrawCallback> windowDrawCallbacks;
@@ -226,19 +230,20 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     return {};
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, ErrorCode> {
+auto Engine::Create(const EngineConfig& cfg, const ZHLN::LogSink ambientSink)
+    -> std::expected<std::unique_ptr<Engine>, ErrorCode> {
     auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
-    if (auto result = instance->InitInternal(cfg); !result) {
+    if (auto result = instance->InitInternal(cfg, ambientSink); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
+auto Engine::InitInternal(const EngineConfig& cfg, const ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
     _impl         = std::make_unique<EngineImpl>();
@@ -253,7 +258,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->world = std::move(world_res.value());
 
-    auto kernel_res = KernelSession::Create(cfg);
+    auto kernel_res = KernelSession::Create(cfg, ambientSink);
     if (!kernel_res) {
         return std::unexpected(kernel_res.error());
     }
@@ -402,7 +407,7 @@ void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
     auto renderRes = RenderSystem::Update(engine, engine.Registry(), engine._impl->sceneData, engine._impl->poseUploads, dt);
     if (!renderRes && renderRes.error() == FrameResult::DeviceLost) {
         if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
-            ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lostRes.error());
+            Log<LogTag::Error>("Fatal: GPU device recovery failed: {}", lostRes.error());
             ctx.error = lostRes.error();
             engine.Session().CloseWindow();
         }
@@ -778,7 +783,6 @@ auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
 
 auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
     Platform::Init();
-    SetLogLevel(config.logLevel);
     // Construct before the engine so its destructor (and any cleanup tasks)
     // finishes before the worker threads and fibers are retired.
     TaskSystem::Scope tasks;

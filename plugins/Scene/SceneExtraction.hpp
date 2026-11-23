@@ -12,6 +12,7 @@
 #include <Zahlen/Math/Vec4.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
+
 namespace ZHLN::Scene {
 namespace {
 
@@ -151,9 +152,6 @@ template <typename Reader>
     }
 
     if (unattributed > 0) {
-        ZHLN::Log(
-            "[Scene] extract: {} light {} left out -- not scene content (no SceneLightTagComponent)", unattributed, unattributed == 1 ? "entity" : "entities"
-        );
     }
     return lights;
 }

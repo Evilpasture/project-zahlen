@@ -111,7 +111,7 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
         return BufferID::Invalid;
     }
     if (particleStride == 0 || static_cast<size_t>(maxParticles) > std::numeric_limits<size_t>::max() / particleStride) {
-        ZHLN::LogWarning("[Render] Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
+        Log<LogTag::Warning, LogTag::Render>("Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
         return BufferID::Invalid;
     }
 
@@ -134,10 +134,10 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
     if (!created || *created == BufferID::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
-                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
+                Log<LogTag::Warning, LogTag::Render>("Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
             } else {
-                ZHLN::LogWarning(
-                    "[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
+                Log<LogTag::Warning, LogTag::Render>(
+                    "Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
                 );
             }
             storage->allocationWarningLogged = true;
@@ -362,7 +362,7 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
         }
 
         if (auto updated = UpdateBuffer(slotBuf, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
-            ZHLN::Log("Particle buffer update failed.");
+            Log<LogTag::Warning, LogTag::Render>("Particle buffer update failed.");
             continue;
         }
         _impl->queues.ParticleEmitters().push_back(
@@ -378,7 +378,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {
-            ZHLN::Log("GPU cache clear aborted due to reason: {}", res.error());
+            Log<LogTag::Warning, LogTag::Render>("GPU cache clear aborted due to reason: {}", res.error());
             return;
         }
     }
@@ -714,7 +714,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const size_t bytes = Resource::blue_noise_rgba.size();
     const auto   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes) / 4));
     if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
-        ZHLN::Log("[BlueNoise] Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
+        Log("Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
         return std::unexpected(ErrorCode {BlueNoiseError::UnexpectedLayout});
     }
 
@@ -768,7 +768,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     }
     blueNoiseTexIdx = *blueNoiseIdx;
 
-    ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
+    Log("Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
 
@@ -997,7 +997,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
         if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
-            ZHLN::LogWarning(
+            Log<LogTag::Warning, LogTag::Render>(
                 "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
             );
@@ -1010,7 +1010,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
     settings = incoming;
 
     if (settings.qualityPreset != previousTier) {
-        ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
+        Log("Graphics quality tier: {} -> {}", static_cast<int>(previousTier), static_cast<int>(settings.qualityPreset));
     }
 }
 
@@ -1119,12 +1119,12 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
     -> TextureID {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
+        Log<LogTag::Warning, LogTag::Render>("Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureID::Invalid;
     }
     const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
+        Log<LogTag::Warning, LogTag::Render>("Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureID::Invalid;
     }
     return *uploaded;
@@ -1315,7 +1315,7 @@ void RenderContext::ProvokeDeviceLost() {
         if (Vk::IsDeviceLost(provoked.error())) {
             _impl->deviceLost.store(true, std::memory_order::relaxed);
         }
-        ZHLN::Log("Failed to submit the device-loss dispatch.");
+        Log<LogTag::Error, LogTag::Render>("Failed to submit the device-loss dispatch.");
     }
 }
 

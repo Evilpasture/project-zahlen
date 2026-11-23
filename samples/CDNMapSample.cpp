@@ -4,6 +4,9 @@
 // Fetch one .glb through ZHLN::CDN::Manager, upload through GLTFAssets, fly with FreeCam.
 
 #include <Animation/Context.hpp>
+#include <print>
+#include <cstdio>
+#include <format>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <CDN/CDN.hpp>
@@ -31,6 +34,7 @@
 #include <Zahlen/Math/Transform.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <glTF/GLTFAssets.hpp>
 #include <glTF/GLTFDocument.hpp>
 
@@ -41,6 +45,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+
 
 namespace {
 
@@ -61,21 +66,20 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
+        std::println(stderr, "[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(engineConfig.logLevel);
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
     auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
+        std::println(stderr, "Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -90,26 +94,26 @@ auto main(int argc, char* argv[]) -> int {
     };
     auto cdn = ZHLN::CDN::Manager::Create(config);
     if (!cdn) {
-        ZHLN::LogError("[CDNMap] CDN::Manager::Create failed: {}", ZHLN::Error(cdn.error()).Message());
+        ZHLN::Log<ZHLN::LogTag::Error>("CDN::Manager::Create failed: {}", cdn.error());
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log("[CDNMap] Fetching {}/{}", kBaseURL, kAsset);
+    ZHLN::Log(engine->Logger(), "Fetching {}/{}", kBaseURL, kAsset);
     auto bytes = cdn->Load(kAsset, ZHLN::Remote::Validators::IsGLB);
     if (!bytes) {
-        ZHLN::LogError("[CDNMap] Load failed: {}", ZHLN::Error(bytes.error()).Message());
+        ZHLN::Log<ZHLN::LogTag::Error>("Load failed: {}", bytes.error());
         return EXIT_FAILURE;
     }
-    ZHLN::Log("[CDNMap] {} KiB", bytes->size() / 1024U);
+    ZHLN::Log(engine->Logger(), "{} KiB", bytes->size() / 1024U);
 
     auto doc = ZHLN::GLTF::Decode(std::span<const uint8_t>(*bytes), kAsset, {}, {}, engine->Assets());
     if (!doc) {
-        ZHLN::LogError("[CDNMap] glTF decode failed for '{}': {}", kAsset, ZHLN::Error(doc.error()).Message());
+        ZHLN::Log<ZHLN::LogTag::Error>("glTF decode failed for '{}': {}", kAsset, doc.error());
         return EXIT_FAILURE;
     }
     auto asset = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *doc);
     if (!asset) {
-        ZHLN::LogError("[CDNMap] glTF upload failed for '{}': {}", kAsset, ZHLN::Error(asset.error()).Message());
+        ZHLN::Log<ZHLN::LogTag::Error>("glTF upload failed for '{}': {}", kAsset, asset.error());
         return EXIT_FAILURE;
     }
 
@@ -126,7 +130,7 @@ auto main(int argc, char* argv[]) -> int {
     if (!doc->animations.empty() && !instances.empty()) {
         engine->Entities()->Attach(instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
     }
-    ZHLN::Log("[CDNMap] Spawned {} instance(s), {} part(s).", written, doc->parts.size());
+    ZHLN::Log(engine->Logger(), "Spawned {} instance(s), {} part(s).", written, doc->parts.size());
 
     FVec3 boundsMin {-1.0f, -1.0f, -1.0f};
     FVec3 boundsMax {1.0f, 1.0f, 1.0f};
@@ -135,7 +139,7 @@ auto main(int argc, char* argv[]) -> int {
     const float radius    = std::max((boundsMax - boundsMin).Length() * 0.5f, 1.0f);
     const float moveSpeed = std::clamp(radius * 0.35f, 8.0f, 400.0f);
     ZHLN::FreeCam::Attach(*engine->Entities(), moveSpeed);
-    ZHLN::Log("[CDNMap] Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
+    ZHLN::Log(engine->Logger(), "Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
 
     {
         auto& entities = *engine->Entities();
@@ -198,7 +202,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::LogError("[CDNMap] frame failed: {}", ZHLN::Error(result.error).Message());
+            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
             break;
         }
     }

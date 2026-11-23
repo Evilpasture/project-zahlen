@@ -5,6 +5,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Entity.hpp>
@@ -53,9 +54,12 @@ class EventBus;
 } // namespace ECS
 
 
+// COM::Engine is the host-facing adapter and the only caller of the private
+// frame-staging seam below. Declared, not included: no COM header (and so no
+// Chain.hpp/<meta>) reaches this file.
 namespace COM {
 class Engine;
-}
+} // namespace COM
 
 class ArticulationContext;
 class InputContext;
@@ -99,7 +103,13 @@ class Engine {
 
     auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
 
-    static auto Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, ErrorCode>;
+    // The ambient sink the engine installs while it is alive: normally
+    // logger->AsSink() from the host, empty when the caller only wants the
+    // stderr default. The engine names no COM type; whoever owns the logger
+    // keeps it alive, which is what makes the sink's gate and writer valid.
+    static auto Create(const EngineConfig& cfg, ZHLN::LogSink ambientSink = {})
+        -> std::expected<std::unique_ptr<Engine>, ErrorCode>;
+
 
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
@@ -321,7 +331,7 @@ class Engine {
     // scene is what used to accumulate duplicate steps.
     void EnsureFramePlan();
 
-    auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
+    auto InitInternal(const EngineConfig& cfg, ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode>;
 
     std::unique_ptr<EngineImpl> _impl;
 };

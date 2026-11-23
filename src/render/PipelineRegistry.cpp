@@ -25,7 +25,7 @@ void PipelineRegistry::RetireAll() noexcept {
 }
 
 void PipelineRegistry::LogMeshPipelineFallback(ErrorCode error) const noexcept {
-    ZHLN::Log("[PipelineRegistry] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", error);
+    Log<LogTag::Warning>("Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", error);
 }
 
 }

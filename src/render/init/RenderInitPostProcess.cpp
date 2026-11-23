@@ -158,7 +158,7 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
                 })
                 .transform([&](uint32_t searchIdx) -> void {
                     antiAliasing.smaaSearchTexIdx = searchIdx;
-                    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+                    Log<LogTag::Debug>("Area and search LUTs baked on GPU.");
                 });
         });
 }

@@ -168,7 +168,7 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::InvalidJSON);
-                ZHLN::Println("    [Runtime Error Check] Caught InvalidJSON: {}", ZHLN::Error(parseResult.error()).Message());
+                ZHLN::Println("    [Runtime Error Check] Caught InvalidJSON: {}", parseResult.error());
             }
 
             return {};
@@ -186,7 +186,7 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::MissingField);
-                ZHLN::Println("    [Runtime Error Check] Caught MissingField: {}", ZHLN::Error(parseResult.error()).Message());
+                ZHLN::Println("    [Runtime Error Check] Caught MissingField: {}", parseResult.error());
             }
 
             return {};
@@ -209,7 +209,7 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error() == ZHLN::JSONError::TypeMismatch);
-                ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", ZHLN::Error(parseResult.error()).Message());
+                ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", parseResult.error());
             }
 
             return {};

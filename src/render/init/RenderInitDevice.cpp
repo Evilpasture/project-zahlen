@@ -34,8 +34,8 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode validationMode) {
     constexpr VkSubgroupFeatureFlags kUsedSubgroupOps = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
 
-    return Vk::DeviceConfigurator<>(physical)
-        .OptionalPresentation(present)
+    auto configurator = Vk::DeviceConfigurator<>(physical);
+    return std::move(configurator).OptionalPresentation(present)
         .OptionalExtension("VK_KHR_portability_subset", isMac)
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
             f.multiview                          = VK_TRUE;
@@ -122,6 +122,7 @@ RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept:
 auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl               = std::make_unique<Impl>(target);
+
     impl->appName           = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
@@ -229,7 +230,7 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                 if (mode == PresentationMode::HostBlit) {
                     const bool ok = HostBlit::Init(impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphicsFamily);
                     if (!ok) {
-                        ZHLN::LogWarning("HostBlit presenter failed to initialize; continuing offscreen-only.");
+                        Log<LogTag::Warning>("HostBlit presenter failed to initialize; continuing offscreen-only.");
                         impl->presentationMode = PresentationMode::OffscreenOnly;
                     }
                 }
@@ -255,7 +256,7 @@ void RenderContext::Destroy() noexcept {
                 _impl->NoteDeviceLost("RenderContext::Destroy");
                 _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
             } else {
-                ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
+                Log<LogTag::Error>("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }
 
