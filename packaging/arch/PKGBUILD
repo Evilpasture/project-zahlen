@@ -2,7 +2,7 @@
 
 pkgname=zahlen-zpkg
 _commit=0009ddfeb1eabb99289423eb7e8552db21537708
-pkgver=0.4.0
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='Per-user package manager for Zahlen engine packages'
 arch=('x86_64' 'aarch64')
