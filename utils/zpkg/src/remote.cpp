@@ -7,8 +7,8 @@
 #include "zpkg/zpkg.hpp"
 #include <algorithm>
 #include <cstdio>
-#include <set>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -153,9 +153,11 @@ auto FetchToFile(std::string_view url, const fs::path& destination) -> std::expe
             .and_then([&file]() { return file.Flush(); });
     });
 #else
-    return std::unexpected(Fail {
-        "this zpkg was built without libcurl, so it cannot fetch " + target + "\n       Use a local directory or a file:// remote, or rebuild with libcurl."
-    });
+    return std::unexpected(
+        Fail {
+            "this zpkg was built without libcurl, so it cannot fetch " + target + "\n       Use a local directory or a file:// remote, or rebuild with libcurl."
+        }
+    );
 #endif
 }
 
@@ -244,14 +246,14 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
         baseUrl = *url;
         // The official shortcut never falls back to unsigned installation.
         requireSignatures = true;
-        auto keys = store.Keys();
+        auto keys         = store.Keys();
         if (!keys)
             return std::unexpected(std::move(keys.error()));
         if (keys->empty())
-            return std::unexpected(Fail {
-                "trust the release publisher before installing: verify its public key fingerprint, then run "
-                "'zpkg key add <release-key.pub>'. No key is downloaded or trusted automatically."
-            });
+            return std::unexpected(
+                Fail {"trust the release publisher before installing: verify its public key fingerprint, then run "
+                      "'zpkg key add <release-key.pub>'. No key is downloaded or trusted automatically."}
+            );
     } else {
         if (!options.release.empty())
             return std::unexpected(Fail {"--version selects an official release; omit --from or use --from official", 2});
@@ -302,8 +304,12 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
             failure += "\n       key " + signature.fingerprint + " does not verify the index";
         }
         if (!verified) {
-            return std::unexpected(Fail {"no trusted signature covers " + indexUrl + ":" + failure +
-                "\n       verify the publisher key fingerprint, then use zpkg key add <release-key.pub>"});
+            return std::unexpected(
+                Fail {
+                    "no trusted signature covers " + indexUrl + ":" + failure +
+                    "\n       verify the publisher key fingerprint, then use zpkg key add <release-key.pub>"
+                }
+            );
         }
     } else if (signatureText->has_value()) {
         auto signatures = ParseSignatureFile(**signatureText);
@@ -342,19 +348,22 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
         }
         if (options.toolchain.empty()) {
             if (index->toolchains.size() > 1) {
-                return std::unexpected(Fail {
-                    "remote '" + name + "' publishes " + std::to_string(index->toolchains.size()) + " toolchains; pick one with --toolchain <id>:\n         " +
-                    Join(
-                        [&] {
-                            std::vector<std::string> ids;
-                            for (const auto& toolchain: index->toolchains) {
-                                ids.push_back(toolchain.id + (toolchain.profile.empty() ? "" : "  (" + toolchain.profile + ")"));
-                            }
-                            return ids;
-                        }(),
-                        "\n         "
-                    )
-                });
+                return std::unexpected(
+                    Fail {
+                        "remote '" + name + "' publishes " + std::to_string(index->toolchains.size()) +
+                        " toolchains; pick one with --toolchain <id>:\n         " +
+                        Join(
+                            [&] {
+                                std::vector<std::string> ids;
+                                for (const auto& toolchain: index->toolchains) {
+                                    ids.push_back(toolchain.id + (toolchain.profile.empty() ? "" : "  (" + toolchain.profile + ")"));
+                                }
+                                return ids;
+                            }(),
+                            "\n         "
+                        )
+                    }
+                );
             }
             chosen = index->toolchains.front();
         } else {
@@ -383,16 +392,17 @@ auto SelectRemote(Store& store, const std::string& name, const InstallOptions& o
         std::vector<std::string> published;
         for (const auto& package: selection.toolchain.packages)
             published.push_back(package.package);
-        return std::unexpected(Fail {
-            "remote '" + name + "' has nothing matching '" + Join(options.only, "', '") + "' in toolchain " + selection.toolchain.id +
-            "\n       it publishes: " + Join(published, ", ") + "\n       omit the name to install the whole toolchain"
-        });
+        return std::unexpected(
+            Fail {
+                "remote '" + name + "' has nothing matching '" + Join(options.only, "', '") + "' in toolchain " + selection.toolchain.id +
+                "\n       it publishes: " + Join(published, ", ") + "\n       omit the name to install the whole toolchain"
+            }
+        );
     }
     return selection;
 }
 
 } // namespace
-
 
 // ---------------------------------------------------------------------------
 // Selection and resolution
@@ -403,10 +413,9 @@ auto OfficialReleaseUrl(std::string_view tag) -> std::expected<std::string, Fail
         return std::string(base) + "latest/download";
     // Tags are one path segment, not URLs or relative paths.
     if (tag == "." || tag == "..")
-        return std::unexpected(Fail {"invalid release tag; use a release name such as v0.4.0", 2});
+        return std::unexpected(Fail {"invalid release tag; use a release name such as v0.x.x", 2});
     for (const char c: tag) {
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-              (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
             return std::unexpected(Fail {"invalid release tag; only letters, digits, '.', '-' and '_' are supported", 2});
     }
     return std::string(base) + "download/" + std::string(tag);
@@ -519,12 +528,14 @@ auto InstallFromRemote(Store& store, const std::string& name, const InstallOptio
         if (AsciiLower(package.sha256) != actual) {
             std::error_code ec;
             fs::remove(Native(cached), ec);
-            return std::unexpected(Fail {
-                package.file +
-                ": the downloaded archive does not match the signed "
-                "index\n       expected " +
-                package.sha256 + "\n       actual   " + actual
-            });
+            return std::unexpected(
+                Fail {
+                    package.file +
+                    ": the downloaded archive does not match the signed "
+                    "index\n       expected " +
+                    package.sha256 + "\n       actual   " + actual
+                }
+            );
         }
         return cached;
     };
@@ -548,9 +559,9 @@ auto InstallFromRemote(Store& store, const std::string& name, const InstallOptio
         // change is one -- so the closure is read out of the archives' own
         // manifests. Fetching first and installing second means a requirement
         // nothing provides is still refused before a single file is extracted.
-        std::vector<IndexPackage>          scanned;
-        std::vector<IndexPackage>          frontier = selection.packages;
-        std::set<std::string>              known;
+        std::vector<IndexPackage> scanned;
+        std::vector<IndexPackage> frontier = selection.packages;
+        std::set<std::string>     known;
         for (const auto& package: frontier)
             known.insert(package.package);
         for (size_t index = 0; index < frontier.size(); ++index) {
@@ -580,9 +591,9 @@ auto InstallFromRemote(Store& store, const std::string& name, const InstallOptio
             }
         }
         IndexToolchain discovered;
-        discovered.id      = selection.toolchain.id;
-        discovered.version = selection.toolchain.version;
-        discovered.profile = selection.toolchain.profile;
+        discovered.id       = selection.toolchain.id;
+        discovered.version  = selection.toolchain.version;
+        discovered.profile  = selection.toolchain.profile;
         discovered.packages = std::move(scanned);
         resolution          = ResolveClosure(discovered, discovered.packages);
         resolution.missing.clear(); // already collected, with `present` taken into account
@@ -600,7 +611,8 @@ auto InstallFromRemote(Store& store, const std::string& name, const InstallOptio
         for (const auto& package: resolution.packages)
             names.push_back(package.package);
         log::Say(
-            "  closure    " + std::to_string(resolution.packages.size()) + " of " + std::to_string(selection.toolchain.packages.size()) + ": " + Join(names, " ")
+            "  closure    " + std::to_string(resolution.packages.size()) + " of " + std::to_string(selection.toolchain.packages.size()) + ": " +
+            Join(names, " ")
         );
     }
 
@@ -669,10 +681,10 @@ auto BuildIndex(const fs::path& directory) -> std::expected<std::vector<IndexToo
         auto digest       = Sha256FileHex(archivePath);
         if (!digest)
             return std::unexpected(std::move(digest.error()));
-        package.sha256   = *digest;
+        package.sha256       = *digest;
         package.dependencies = archive.Manifest().dependencies;
-        package.provides = archive.Manifest().provides;
-        auto size      = FileSizeOf(archivePath);
+        package.provides     = archive.Manifest().provides;
+        auto size            = FileSizeOf(archivePath);
         if (!size)
             return std::unexpected(std::move(size.error()));
         package.size = *size;

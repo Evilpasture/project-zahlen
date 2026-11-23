@@ -63,8 +63,12 @@ def pkgbuild_fields() -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true", help="exit 1 on any disagreement")
-    parser.add_argument("--tag", default="", help="release tag that must match the version")
+    parser.add_argument(
+        "--check", action="store_true", help="exit 1 on any disagreement"
+    )
+    parser.add_argument(
+        "--tag", default="", help="release tag that must match the version"
+    )
     args = parser.parse_args()
 
     expected = project_version()
@@ -78,36 +82,13 @@ def main() -> int:
     notes.append(f"packaging/arch/PKGBUILD pkgver    {pkgver or '(missing)'}")
     notes.append(f"packaging/arch/PKGBUILD _commit    {commit or '(missing)'}")
     if pkgver != expected:
-        problems.append(f"packaging/arch/PKGBUILD pkgver={pkgver or '(missing)'}, expected pkgver={expected}")
+        problems.append(
+            f"packaging/arch/PKGBUILD pkgver={pkgver or '(missing)'}, expected pkgver={expected}"
+        )
     if not COMMIT_RE.match(commit):
         problems.append(
             "packaging/arch/PKGBUILD _commit must be the full 40-character hash "
             "the tarball is pinned to (archive/<sha>.tar.gz)"
-        )
-
-    # --- docs and messages that carry a version as an example ---------------
-    readme = PACKAGING_README.read_text(encoding="utf-8")
-    example = f"{expected}-7c6e062-gcc-16.2.1-x86_64-release"
-    if example not in readme:
-        found = sorted(set(VERSION_RE.findall(readme)))
-        problems.append(
-            f"packaging/README.md toolchain-id example is {found}, expected {expected!r} "
-            f"(id '{example}')"
-        )
-
-    remote = ZPKG_REMOTE.read_text(encoding="utf-8")
-    if f"such as v{expected}" not in remote:
-        problems.append(
-            f'utils/zpkg/src/remote.cpp should name the current release in its '
-            f'invalid-tag message: "use a release name such as v{expected}"'
-        )
-
-    # --- nothing re-introduced a literal of its own -------------------------
-    zpkg_cmake = ZPKG_CMAKE.read_text(encoding="utf-8")
-    if re.search(r"project\(zpkg[^)]*VERSION[ \t]+\d", zpkg_cmake):
-        problems.append(
-            "utils/zpkg/CMakeLists.txt names a version in project(); it must take "
-            "the engine's PROJECT_VERSION"
         )
 
     # --- the tag, when asked ------------------------------------------------

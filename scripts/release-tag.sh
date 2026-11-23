@@ -2,13 +2,7 @@
 # Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# scripts/release-tag.sh -- the release tag, derived from PROJECT_VERSION.
-#
-# CMakeLists.txt is the only place the Zahlen version is written by hand. A
-# release tag is that version with a `v` in front, and nothing else: v0.4.0 is
-# engine 0.4.0, the toolchain id starts `0.4.0-`, `zpkg --version` says 0.4.0 and
-# the installed package configs claim 0.4.0. There is no separate tag thought to
-# be had by hand at publish time.
+# scripts/release-tag.sh
 #
 # Usage:
 #   scripts/release-tag.sh                # print v<PROJECT_VERSION>
@@ -39,15 +33,15 @@ fi
 version=$(printf '%s\n' "${project_line}" | sed -E 's/.*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 
 case "${1:-}" in
-    "")            printf 'v%s\n' "${version}" ;;
-    --print-version) printf '%s\n' "${version}" ;;
-    --git-describe)
-        # Not a source of truth; here so CI can report the disagreement when a
-        # push is tagged differently from the tree it points at.
-        git -C "${root}" describe --tags --abbrev=0 2>/dev/null || true
-        ;;
-    *)
-        echo "usage: $(basename "$0") [--print-version|--git-describe]" >&2
-        exit 2
-        ;;
+"") printf 'v%s\n' "${version}" ;;
+--print-version) printf '%s\n' "${version}" ;;
+--git-describe)
+    # Not a source of truth; here so CI can report the disagreement when a
+    # push is tagged differently from the tree it points at.
+    git -C "${root}" describe --tags --abbrev=0 2>/dev/null || true
+    ;;
+*)
+    echo "usage: $(basename "$0") [--print-version|--git-describe]" >&2
+    exit 2
+    ;;
 esac
