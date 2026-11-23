@@ -50,7 +50,7 @@ struct PerformanceTestSuite {
         }
 
         auto isolated_03_com_entities_and_physics_throughput() -> std::expected<void, ZHLN::ErrorCode> {
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef();
+            auto worldRes = ZHLN::COM::CreateLogicWorld();
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& world = **worldRes;
             auto& ents  = *world.Entities();

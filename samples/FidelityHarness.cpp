@@ -667,7 +667,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetLogObserver(&OnFidelityLog);
 
     ZHLN::Platform::Init();
-    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
+    auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;

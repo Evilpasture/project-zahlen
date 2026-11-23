@@ -48,7 +48,7 @@ struct BSPAssetsSuite {
             using namespace ZHLN;
             using Test::ExpectTrue;
             using Test::ExpectEq;
-            auto created = COM::CreateEngineRef(COM::InChain(
+            auto created = COM::CreateEngine(COM::InChain(
                 COM::AppConfig {.appName = String64("COM Studio files"), .logLevel = LogLevel::Quiet},
                 COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
                 COM::RenderConfig {.validationMode = ValidationMode::Off}));
@@ -102,7 +102,7 @@ struct BSPAssetsSuite {
             using namespace ZHLN;
             using Test::ExpectTrue;
             using Test::ExpectEq;
-            auto created = COM::CreateEngineRef(COM::InChain(
+            auto created = COM::CreateEngine(COM::InChain(
                 COM::AppConfig {.appName = String64("COM Source assets"), .logLevel = LogLevel::Quiet},
                 COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
                 COM::RenderConfig {.validationMode = ValidationMode::Off}));

@@ -187,8 +187,8 @@ FORBIDDEN_CANARY_SYMBOLS: tuple[str, ...] = (
 )
 
 REQUIRED_DSO_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("ZHLN::COM::CreateEngine", "_ZN4ZHLN3COM12CreateEngine"),
-    ("ZHLN::COM::CreateLogicWorld", "_ZN4ZHLN3COM16CreateLogicWorld"),
+    ("ZHLN::COM::CreateEngineRaw", "_ZN4ZHLN3COM15CreateEngineRaw"),
+    ("ZHLN::COM::CreateLogicWorldRaw", "_ZN4ZHLN3COM19CreateLogicWorldRaw"),
     ("ZHLN::COM::RenderGraphDump", "_ZN4ZHLN3COM15RenderGraphDump"),
     ("ZHLN::TemplatedDetail::RegisterEnumCategory", "_ZN4ZHLN15TemplatedDetail20RegisterEnumCategory"),
     ("ZHLN::TemplatedDetail::LookupErrorStrings", "_ZN4ZHLN15TemplatedDetail18LookupErrorStrings"),

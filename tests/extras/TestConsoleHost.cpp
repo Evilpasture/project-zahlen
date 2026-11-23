@@ -30,7 +30,7 @@ auto Logs(const GameConsole& console) {
 struct ConsoleHostSuite {
     struct Tests {
         std::expected<void, ErrorCode> real_scene_console_reads_edits_rejects_raw_native_escape_and_renders() {
-            auto made = COM::CreateEngineRef(
+            auto made = COM::CreateEngine(
                 COM::InChain(
                     COM::WindowConfig {.width = 640, .height = 360, .vsync = false, .headless = true},
                     COM::RenderConfig {.validationMode = ValidationMode::Off}

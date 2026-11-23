@@ -21,7 +21,7 @@ auto ExerciseGPURecovery(RecoveryExercise mode) -> std::expected<void, ZHLN::Err
     using namespace ZHLN;
     using Test::ExpectEq;
     using Test::ExpectTrue;
-    auto created = COM::CreateEngineRef(
+    auto created = COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = String64("COM glTF recovery"), .logLevel = LogLevel::Quiet},
             COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
@@ -246,7 +246,7 @@ struct GLTFAssetsSuite {
             if (!ExpectTrue(doc.has_value()))
                 return {};
             ExpectTrue(!doc->parts.empty() && !doc->skeletons.empty() && !doc->animations.empty());
-            auto created = COM::CreateEngineRef(
+            auto created = COM::CreateEngine(
                 COM::InChain(
                     COM::AppConfig {.appName = String64("COM glTF rig"), .logLevel = LogLevel::Quiet},
                     COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
@@ -272,7 +272,7 @@ struct GLTFAssetsSuite {
             using namespace ZHLN;
             using Test::ExpectEq;
             using Test::ExpectTrue;
-            auto created = COM::CreateEngineRef(
+            auto created = COM::CreateEngine(
                 COM::InChain(
                     COM::AppConfig {.appName = String64("COM glTF"), .logLevel = LogLevel::Quiet},
                     COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},

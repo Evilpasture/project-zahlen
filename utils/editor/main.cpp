@@ -17,7 +17,7 @@ namespace {
 auto Run(const ZHLN::EngineConfig& config, const std::filesystem::path& scenePath, uint32_t frames, bool rasterOnly) -> std::expected<void, ZHLN::ErrorCode> {
     using namespace ZHLN;
     ProcessScope process;
-    auto         created = COM::CreateEngineRef(
+    auto         created = COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
             COM::WindowConfig {

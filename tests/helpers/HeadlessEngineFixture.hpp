@@ -70,7 +70,7 @@ struct EngineOptions {
         .headless          = true,
         .enableMeshShading = opts.enableMeshShading,
     };
-    auto res = ZHLN::COM::CreateEngineRef(cfg);
+    auto res = ZHLN::COM::CreateEngine(cfg);
     return res ? std::move(*res) : ZHLN::COM::Ref<ZHLN::COM::IEngine>{};
 }
 

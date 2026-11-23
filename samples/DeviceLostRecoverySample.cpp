@@ -152,7 +152,7 @@ auto main(int argc, char* argv[]) -> int {
     InstallProvokeSignal();
     ZHLN::TaskSystem::Scope taskScope;
 
-    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
+    auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;

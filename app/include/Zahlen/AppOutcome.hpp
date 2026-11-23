@@ -27,7 +27,7 @@ enum class AppError : uint8_t {
     FrameTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine tick failed during frame execution"> {}),
     PluginNotFound ZHLN_ANNOTATION(ZHLN::Description<"Plugin shared library could not be found"> {}),
     PluginLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open plugin shared library"> {}),
-    PluginSymbolMissing ZHLN_ANNOTATION(ZHLN::Description<"Plugin shared library does not export ZHLN::COM::CreateAppLayer"> {}),
+    PluginSymbolMissing ZHLN_ANNOTATION(ZHLN::Description<"Plugin shared library does not export ZHLN::COM::CreateAppLayerRaw"> {}),
     PluginAbiMismatch ZHLN_ANNOTATION(ZHLN::Description<"Plugin factory ABI witness is missing or incompatible"> {}),
 };
 

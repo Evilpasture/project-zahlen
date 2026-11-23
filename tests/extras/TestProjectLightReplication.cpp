@@ -134,7 +134,7 @@ struct TestProjectLightReplicationSuite {
         // whole reason they exist: a system holding an entity can name the
         // instance without going through the client's mirror.
         std::expected<void, ZHLN::ErrorCode> instance_identity_round_trips_through_components() {
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef(); auto& registry = *(*worldRes)->Entities();
+            auto worldRes = ZHLN::COM::CreateLogicWorld(); auto& registry = *(*worldRes)->Entities();
             const Entity entity = registry.CreateEntity();
             registry.AttachMany(
                 entity,
@@ -163,7 +163,7 @@ struct TestProjectLightReplicationSuite {
             ZHLN::Test::ExpectEq(index.Count(), size_t {0});
             ZHLN::Test::ExpectEq(index.Find(kTorsoUid), Entity::Null());
 
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef(); auto& registry = *(*worldRes)->Entities();
+            auto worldRes = ZHLN::COM::CreateLogicWorld(); auto& registry = *(*worldRes)->Entities();
             const Entity torso = registry.CreateEntity();
             const Entity head  = registry.CreateEntity();
             index.Bind(kTorsoUid, torso);

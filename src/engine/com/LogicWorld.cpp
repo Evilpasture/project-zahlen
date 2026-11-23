@@ -505,7 +505,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
 IEntities* LogicWorld::Entities() noexcept {
     return this;
 }
-auto CreateLogicWorld(const ChainInNode* config) noexcept -> Result<ILogicWorld*> {
+auto CreateLogicWorldRaw(const ChainInNode* config) noexcept -> Result<ILogicWorld*> {
     PhysicsConfig physics {};
     auto          read = DispatchInChain<PhysicsConfig>(config, [&](const PhysicsConfig& c) -> Result<void> {
         physics = c;

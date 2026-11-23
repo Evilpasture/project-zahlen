@@ -15,7 +15,7 @@ using Test::ExpectEq;
 using Test::ExpectTrue;
 
 auto EditorEngine() {
-    return COM::CreateEngineRef(
+    return COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = String64("COM editor"), .logLevel = LogLevel::Quiet},
             COM::WindowConfig {.width = 800, .height = 480, .vsync = false, .headless = true},

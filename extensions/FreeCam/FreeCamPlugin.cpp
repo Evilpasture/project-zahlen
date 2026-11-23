@@ -72,7 +72,7 @@ class FreeCamPlugin final : public COM::Implements<FreeCamPlugin, COM::IAppLayer
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     FreeCam::Component knobs {};
     bool               hasKnobs = false;
     const auto         checked  = DispatchInChain<FreeCam::Component>(
@@ -93,4 +93,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

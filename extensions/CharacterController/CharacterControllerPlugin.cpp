@@ -3,7 +3,7 @@
 
 // Dynamically loadable COM::IAppLayer for the CharacterController extension.
 // Wraps ZHLN::Character::Layer so a host can step character movement through
-// the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).
+// the standard plugin ABI (CreateAppLayerRaw + the EntryPointWitness seal).
 //
 // Configuration arrives through a ChainInNode payload (PluginConfig); an
 // absent or empty chain means default configuration.
@@ -82,7 +82,7 @@ class CharacterControllerPlugin final
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     ZHLN::Character::PluginConfig parsed {};
     const auto                  checked = DispatchInChain<ZHLN::Character::PluginConfig>(
         config,
@@ -100,4 +100,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

@@ -8,11 +8,11 @@
 // Binary-stable application layer interface for dynamically loaded plugins and
 // reusable engine extensions (FreeCam, Screenshot, custom runtime tools).
 //
-// Each plugin shared library defines ZHLN::COM::CreateAppLayer(config)
+// Each plugin shared library defines ZHLN::COM::CreateAppLayerRaw(config)
 // returning Result<IAppLayer*> by value with a refcount of 1 on success (adopt
-// via Ref<IAppLayer>::Adopt or CreateAppLayerRef). Hosts resolve the entry
+// via Ref<IAppLayer>::Adopt or CreateAppLayer). Hosts resolve the entry
 // point dynamically using its consteval-mangled Itanium C++ ABI symbol
-// (kCreateAppLayerSymbol / COM::ResolveSymbol<&CreateAppLayer>(library)), while
+// (kCreateAppLayerRawSymbol / COM::ResolveSymbol<&CreateAppLayerRaw>(library)), while
 // the C++ declaration enforces signature agreement and COM ABI compliance at
 // compile time without extern "C" return-type workarounds. Plugin-specific
 // configuration arrives through the standard ChainInNode input chain validated
@@ -47,19 +47,19 @@ protected:
 // Exported by each plugin shared library (never by libzahlen_engine). ZHLN_EXPORT
 // gives plugin definitions default visibility / dllexport without generating a
 // dllimport reference in host translation units.
-[[nodiscard]] ZHLN_EXPORT Result<IAppLayer*> CreateAppLayer(const ChainInNode* config) noexcept;
+[[nodiscard]] ZHLN_EXPORT Result<IAppLayer*> CreateAppLayerRaw(const ChainInNode* config) noexcept;
 
 static_assert(AuditInterfaceABI<IAppLayer>(), "IAppLayer violates the COM ABI rules.");
-static_assert(AuditFunctionABI<&CreateAppLayer>(), "CreateAppLayer violates the COM ABI rules.");
+static_assert(AuditFunctionABI<&CreateAppLayerRaw>(), "CreateAppLayerRaw violates the COM ABI rules.");
 
-using CreateAppLayerFn = decltype(&CreateAppLayer);
+using CreateAppLayerRawFn = decltype(&CreateAppLayerRaw);
 
-// NUL-terminated Itanium C++ ABI symbol name computed from CreateAppLayer's
-// signature (`kCreateAppLayerSymbol.data()` is safe to pass directly to dlsym).
-inline constexpr std::string_view kCreateAppLayerSymbol = MangleFunction<&CreateAppLayer>();
+// NUL-terminated Itanium C++ ABI symbol name computed from CreateAppLayerRaw's
+// signature (`kCreateAppLayerRawSymbol.data()` is safe to pass directly to dlsym).
+inline constexpr std::string_view kCreateAppLayerRawSymbol = MangleFunction<&CreateAppLayerRaw>();
 
-[[nodiscard]] inline auto CreateAppLayerRef(
-    CreateAppLayerFn factory, const ChainInNode* config = nullptr
+[[nodiscard]] inline auto CreateAppLayer(
+    CreateAppLayerRawFn factory, const ChainInNode* config = nullptr
 ) noexcept -> std::expected<Ref<IAppLayer>, ErrorCode> {
     if (factory == nullptr) {
         return std::unexpected(Error::NullArgument);

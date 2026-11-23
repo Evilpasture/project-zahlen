@@ -18,11 +18,11 @@ auto Body(COM::ISimulation& sim, DVec3 position = {0, 8, 0}) {
 struct LogicWorldSuite {
     struct Tests {
         std::expected<void, ErrorCode> renderer_free_factory_validates_chain_and_configuration() {
-            auto invalid = COM::CreateLogicWorldRef(COM::InChain(PhysicsConfig {.maxBodies = 0}));
+            auto invalid = COM::CreateLogicWorld(COM::InChain(PhysicsConfig {.maxBodies = 0}));
             ExpectTrue(!invalid);
-            auto unsupported = COM::CreateLogicWorldRef(COM::InChain(COM::LogicWorldInfo {}));
+            auto unsupported = COM::CreateLogicWorld(COM::InChain(COM::LogicWorldInfo {}));
             ExpectTrue(!unsupported);
-            auto made = COM::CreateLogicWorldRef();
+            auto made = COM::CreateLogicWorld();
             if (!ExpectTrue(made.has_value()))
                 return {};
             COM::LogicWorldInfo info {};
@@ -35,7 +35,7 @@ struct LogicWorldSuite {
             return {};
         }
         std::expected<void, ErrorCode> retained_capability_owns_world_and_real_body_motion() {
-            auto made = COM::CreateLogicWorldRef();
+            auto made = COM::CreateLogicWorld();
             if (!made)
                 return std::unexpected(made.error());
             auto sim  = made->cast<COM::ISimulation>();
@@ -54,7 +54,7 @@ struct LogicWorldSuite {
             return {};
         }
         std::expected<void, ErrorCode> typed_physics_replacement_detach_and_deferred_despawn_release_bodies() {
-            auto made = COM::CreateLogicWorldRef();
+            auto made = COM::CreateLogicWorld();
             if (!made)
                 return std::unexpected(made.error());
             auto&      world    = *made->Get();
@@ -85,7 +85,7 @@ struct LogicWorldSuite {
             return {};
         }
         std::expected<void, ErrorCode> layout_rejection_and_dynamic_storage_do_not_expose_native_components() {
-            auto made = COM::CreateLogicWorldRef();
+            auto made = COM::CreateLogicWorld();
             if (!made)
                 return std::unexpected(made.error());
             auto*      e      = (*made)->Entities();

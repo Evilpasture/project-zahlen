@@ -1326,7 +1326,7 @@ auto main(int argc, char* argv[]) -> int {
 
     // 4. Initialize Engine
     ZHLN::Platform::Init();
-    auto engineRes = ZHLN::COM::CreateEngineRef(engineConfig);
+    auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
         ZHLN::LogError("[BSPSample] Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;

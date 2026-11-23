@@ -472,7 +472,7 @@ struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
             .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr,
         };
 
-        auto engineRes = ZHLN::COM::CreateEngineRef(cfg);
+        auto engineRes = ZHLN::COM::CreateEngine(cfg);
         if (!engineRes) {
             return {};
         }

@@ -70,7 +70,7 @@ auto FunctionPointers(
     int32_t (*throwingCb)(int32_t),
     int32_t (*noexceptCbB)(int32_t) noexcept,
     void (*voidNoexceptCb)() noexcept,
-    COM::CreateAppLayerFn
+    COM::CreateAppLayerRawFn
 ) noexcept -> int32_t {
     if (voidNoexceptCb) voidNoexceptCb();
     return (noexceptCbA ? noexceptCbA(10) : 0) +

@@ -169,7 +169,7 @@ struct BSPInteractionTestSuite {
     ZHLN::TaskSystem::Scope taskScope {1, 16};
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> typed_resolution_prefers_unique_brush_model() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
             const auto first = reg.Spawn(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
                 ZHLN::Components::SceneSourceComponent {.source = ZHLN::String256 {"maps/example.bsp#model_1"}});
             const auto second = reg.Spawn(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"shared"}},
@@ -236,7 +236,7 @@ struct BSPInteractionTestSuite {
                                 {"origin", "100 200 300"}, {"angles", "15 75 20"}};
             map.entities.push_back(destination);
 
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
             const ZHLN::BSP::ImportOptions options {};
             const auto decoded = ZHLN::BSP::DescribeInteractiveEntities(reg, map, options);
             ZHLN::Test::ExpectEq(decoded.size(), size_t {1});
@@ -266,7 +266,7 @@ struct BSPInteractionTestSuite {
             const auto map   = BuildSyntheticMap();
             const auto scene = ZHLN::BSP::DescribeScene(map, "maps/test.bsp");
 
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             ZHLN::Scene::Instance inst;
             for (const auto& sceneEnt: scene.entities) {
@@ -410,7 +410,7 @@ struct BSPInteractionTestSuite {
             // The gate sits well off the origin in this synthetic map.
             ZHLN::Test::ExpectGt((pivot - FVec3::Zero()).Length(), 1e-3f);
 
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             ZHLN::Scene::Instance inst;
             for (const auto& sceneEnt : scene.entities) {
@@ -470,7 +470,7 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> door_movement_system_state_machine() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             const auto doorEnt = reg.CreateEntity();
             reg.Attach(doorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("sliding_door")});
@@ -529,7 +529,7 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> rotating_door_slerp_movement() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             const auto rotDoorEnt = reg.CreateEntity();
             reg.Attach(rotDoorEnt, ZHLN::Components::NameComponent {.name = ZHLN::String64("rot_door")});
@@ -575,7 +575,7 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> source_entity_io_wiring() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             // 1. Door
             const auto doorEnt = reg.CreateEntity();
@@ -629,7 +629,7 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> proximity_trigger_volume_detection() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             // 1. Create player at (0, 0, 0)
             const auto playerEnt = reg.CreateEntity();
@@ -660,7 +660,7 @@ struct BSPInteractionTestSuite {
         std::expected<void, ZHLN::ErrorCode> pickups_accumulate_before_command_playback() {
             using namespace ZHLN;
             using namespace ZHLN::Interaction;
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
             const Entity player = reg.Spawn(Character::MovementComponent {}, Components::TransformComponent {});
             const Entity first = reg.Spawn(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
             const Entity second = reg.Spawn(Components::TransformComponent {}, TriggerComponent {}, PickupComponent {}, ItemBaseComponent {}, Components::MeshComponent {});
@@ -684,7 +684,7 @@ struct BSPInteractionTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> player_use_interaction_and_locking() {
-            auto _lw = ZHLN::COM::CreateLogicWorldRef(); auto& reg = *(*_lw)->Entities();
+            auto _lw = ZHLN::COM::CreateLogicWorld(); auto& reg = *(*_lw)->Entities();
 
             // Create player at (0, 0, 0)
             const auto playerEnt = reg.CreateEntity();

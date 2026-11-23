@@ -22,7 +22,7 @@ using ZHLN::DVec3;
 using ZHLN::FVec3;
 
 [[nodiscard]] auto MakePhysicsWorld() -> ZHLN::COM::Ref<ZHLN::COM::ILogicWorld> {
-    auto res = ZHLN::COM::CreateLogicWorldRef();
+    auto res = ZHLN::COM::CreateLogicWorld();
     ZHLN::Test::ExpectTrue(res.has_value());
     return std::move(*res);
 }

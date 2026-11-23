@@ -256,13 +256,13 @@ auto App::RunConfigured(
         if (!*opened) {
             return {};
         }
-        const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(library);
+        const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(library);
         if (factory == nullptr) {
-            if (COM::ResolveSymbol<&COM::CreateAppLayer>(library) != nullptr) {
+            if (COM::ResolveSymbol<&COM::CreateAppLayerRaw>(library) != nullptr) {
                 LogError("[App] Plugin '{}' has a missing or incompatible factory ABI witness. Rebuild the plugin.", req.spec);
                 return std::unexpected(AppError::PluginAbiMismatch);
             }
-            LogError("[App] Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerSymbol);
+            LogError("[App] Plugin '{}' does not export '{}'.", req.spec, COM::kCreateAppLayerRawSymbol);
             return std::unexpected(AppError::PluginSymbolMissing);
         }
 
@@ -280,7 +280,7 @@ auto App::RunConfigured(
         }
         const COM::ChainInNode* head = wireNodes.empty() ? nullptr : wireNodes.data();
 
-        auto created = COM::CreateAppLayerRef(factory, head);
+        auto created = COM::CreateAppLayer(factory, head);
         if (!created) {
             LogError("[App] Plugin '{}' initialization failed: {}", req.spec, created.error());
             return std::unexpected(created.error());
@@ -510,7 +510,7 @@ auto App::RunConfigured(
 
     // Non-plugin layers were already pushed above in `_entries` order.
 
-    auto created = COM::CreateEngineRef(
+    auto created = COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = config.appName, .logLevel = config.logLevel, .maxFramesPerSecond = config.fpsLimit},
             COM::WindowConfig {
@@ -597,13 +597,13 @@ auto App::RunConfigured(
                 hr.lastWrite = mtime;
                 continue;
             }
-            const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(lib);
+            const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(lib);
             if (factory == nullptr) {
                 LogError("[App] Hot-reloaded plugin '{}' has an incompatible factory ABI.", hr.libraryStem);
                 hr.lastWrite = mtime;
                 continue;
             }
-            auto recreated = COM::CreateAppLayerRef(factory, nullptr);
+            auto recreated = COM::CreateAppLayer(factory, nullptr);
             if (!recreated) {
                 LogError("[App] Hot-reloaded plugin '{}' failed to initialize: {}.", hr.libraryStem, recreated.error());
                 hr.lastWrite = mtime;

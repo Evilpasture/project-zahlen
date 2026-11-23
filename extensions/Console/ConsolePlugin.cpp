@@ -3,7 +3,7 @@
 
 // Dynamically loadable COM::IAppLayer for the Console extension. Wraps an
 // application-owned ZHLN::GameConsole so a host can expose an in-game console
-// through the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).
+// through the standard plugin ABI (CreateAppLayerRaw + the EntryPointWitness seal).
 //
 // The console itself is in-memory state: the host pumps input and renders
 // entries through the GameConsole API; the plugin layer owns the instance's
@@ -76,7 +76,7 @@ class ConsolePlugin final : public COM::Implements<ConsolePlugin, COM::IAppLayer
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     ZHLN::Console::PluginConfig parsed {};
     const auto                checked = DispatchInChain<ZHLN::Console::PluginConfig>(
         config, [&](const ZHLN::Console::PluginConfig& value) noexcept { parsed = value; });
@@ -93,4 +93,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

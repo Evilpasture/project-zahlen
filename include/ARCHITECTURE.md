@@ -709,7 +709,7 @@ it. `Core/COM/` is the mechanism; this is the surface built on it.
 | `IAssetLibrary.hpp` | `AssetHash`, prefab cache interrogation, chained `Instantiate` (`SpawnParams`), chained `SpawnPrimitive` (`SpawnBox`, `SpawnPlane`, `SpawnSphere`, `SpawnCylinder`, `SpawnCone`), and borrowed environment-image pixels |
 | `IActionContext.hpp` | raw device injection, chained action-map / action / binding / rebind / multi-seat routing configuration, default-binding snapshots/resets, virtual actions and physical state |
 | `IState.hpp` | engine-level `CullingStats` readback, reset, and `SetCullingEnabled` / `SetFreezeFrustum` toggles |
-| `EngineFactory.hpp` | `CreateEngine(const ChainInNode* configChain)` (`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngine()` / `CreateEngineRef()` wrappers |
+| `EngineFactory.hpp` | `CreateEngineRaw(const ChainInNode* configChain)` (`AppConfig`, `WindowConfig`, `RenderConfig`, `PhysicsConfig`), the single exported factory symbol, and inline `CreateEngineRaw()` / `CreateEngine()` wrappers |
 
 One `Engine` implements all eight interfaces, so `engine->Graphics()` and
 `engine.cast<IGraphicsDevice>()` reach the same subobject of one allocation. The
@@ -734,13 +734,13 @@ methods compiled in the consumer's own TU.
 There is no `extern "C"`, no IDL and no dispatch struct. GCC and Clang both
 implement the Itanium C++ ABI, so the mangled name, the vtable layout and the
 calling convention already agree:
-`CreateEngine(const ChainInNode*)` is defined in the shared
+`CreateEngineRaw(const ChainInNode*)` is defined in the shared
 library and undefined in every consumer. What the boundary refuses to carry is
 the *standard library*, not C++ itself.
 
-`CreateEngine` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
+`CreateEngineRaw` returns `Result<IEngine*>`, not `Result<Ref<IEngine>>`:
 `Result<T>` carries `T` by value and therefore requires a trivially copyable
-`T`, which a reference-counting handle is not. `CreateEngineRef` is inline, so
+`T`, which a reference-counting handle is not. `CreateEngine` is inline, so
 it runs in the consumer's translation unit and may use `std::expected<Ref<IEngine>,
 ErrorCode>` freely -- that type is built and consumed on one side and never
 crosses.

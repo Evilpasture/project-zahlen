@@ -14,7 +14,7 @@ using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
 auto LightningEngine() {
-    return COM::CreateEngineRef(
+    return COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = String64("COM lightning"), .logLevel = LogLevel::Quiet},
             COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},

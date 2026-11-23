@@ -173,7 +173,7 @@ struct TwoBoneIKTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> two_bone_ik_ecs_step_tracks_world_target_entity() {
             constexpr ZHLN::AssetID kAsset {303};
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef();
+            auto worldRes = ZHLN::COM::CreateLogicWorld();
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& entities = *(*worldRes)->Entities();
 

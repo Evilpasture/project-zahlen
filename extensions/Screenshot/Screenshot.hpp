@@ -44,7 +44,7 @@ enum class Error : uint8_t {
 };
 
 // ABI-stable configuration node passed via COM::InChain to the screenshot
-// shared-library plugin factory (COM::CreateAppLayer). The plugin copies path
+// shared-library plugin factory (COM::CreateAppLayerRaw). The plugin copies path
 // bytes during creation, so the caller's string need not outlive the call.
 struct PluginConfig {
     COM::StringView path {};

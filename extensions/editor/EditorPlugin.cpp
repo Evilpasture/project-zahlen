@@ -3,7 +3,7 @@
 
 // Dynamically loadable COM::IAppLayer for the Editor extension. Wraps an
 // application-owned ZHLN::Editor::State so a host can run the Hierarchy and
-// Inspector panels through the standard plugin ABI (CreateAppLayer + the
+// Inspector panels through the standard plugin ABI (CreateAppLayerRaw + the
 // EntryPointWitness seal).
 //
 // The editor is UI-dependent: its panels need a GUI::Frame that only the host
@@ -85,7 +85,7 @@ class EditorPlugin final : public COM::Implements<EditorPlugin, COM::IAppLayer> 
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     ZHLN::Editor::PluginConfig parsed {};
     const auto               checked = DispatchInChain<ZHLN::Editor::PluginConfig>(
         config, [&](const ZHLN::Editor::PluginConfig& value) noexcept { parsed = value; });
@@ -102,4 +102,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

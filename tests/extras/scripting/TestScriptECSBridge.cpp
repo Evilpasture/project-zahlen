@@ -46,7 +46,7 @@ struct ScriptECSBridgeTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> ecs_bridge_property_access_and_drilling() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                  world = std::move(*created);

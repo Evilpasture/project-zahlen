@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Declare a dynamically loadable COM::IAppLayer shared library linked against
-# libzahlen_engine, exporting CreateAppLayer and its ABI witness.
+# libzahlen_engine, exporting CreateAppLayerRaw and its ABI witness.
 function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
     add_library(${TARGET_NAME} SHARED ${ARGN})
     set_target_properties(${TARGET_NAME} PROPERTIES
@@ -37,7 +37,7 @@ function(zahlen_add_plugin TARGET_NAME PLUGIN_NAME)
         # Mach-O prepends an extra leading underscore to symbol table entries:
         # dlsym takes the Itanium name ("_Z..."), while ld64 -exported_symbol
         # takes the Mach-O symbol ("__Z...").
-        target_link_options(${TARGET_NAME} PRIVATE "LINKER:-exported_symbol,__ZN4ZHLN3COM14CreateAppLayer*"
+        target_link_options(${TARGET_NAME} PRIVATE "LINKER:-exported_symbol,__ZN4ZHLN3COM17CreateAppLayerRaw*"
             "LINKER:-exported_symbol,__ZN4ZHLN3COM8Contract*4SealEv")
     endif()
     if(COMMAND zahlen_enable_reflection)

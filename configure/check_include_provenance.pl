@@ -214,8 +214,8 @@ my %FIRST_PARTY = (
     # Qualified: tests/helpers/HeadlessEngineFixture.hpp has its own unrelated
     # ZHLN::Test::Headless::CreateEngine, and a bare key here would claim every
     # call to it -- including the unqualified ones a `using` makes possible.
+    'ZHLN::COM::CreateEngineRaw' => ['include/Zahlen/COM/EngineFactory.hpp'],
     'ZHLN::COM::CreateEngine'    => ['include/Zahlen/COM/EngineFactory.hpp'],
-    'ZHLN::COM::CreateEngineRef' => ['include/Zahlen/COM/EngineFactory.hpp'],
     # Qualified for the same reason: Simulation, Audio, Assets and Actions are
     # ordinary words elsewhere in this tree, and PrefabInfo is the kind of name
     # a tool or importer invents independently.

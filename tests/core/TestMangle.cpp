@@ -38,9 +38,9 @@ namespace {
 
 // Plugin entry point mangles to exact Itanium ABI symbol with trailing NUL.
 static_assert(
-    COM::kCreateAppLayerSymbol == "_ZN4ZHLN3COM14CreateAppLayerEPKNS0_11ChainInNodeE"
+    COM::kCreateAppLayerRawSymbol == "_ZN4ZHLN3COM17CreateAppLayerRawEPKNS0_11ChainInNodeE"
 );
-static_assert(COM::kCreateAppLayerSymbol.data()[COM::kCreateAppLayerSymbol.size()] == '\0');
+static_assert(COM::kCreateAppLayerRawSymbol.data()[COM::kCreateAppLayerRawSymbol.size()] == '\0');
 static_assert(
     COM::MangleFunction<&ZHLN_MangleGlobalEmpty>() == "_Z22ZHLN_MangleGlobalEmptyv"
 );
@@ -120,8 +120,8 @@ static_assert(!std::is_void_v<EndLogTraits::ReturnType>);
 using CVarTraits = Reflect::FunctionTraits<&CVariadicDecl>;
 static_assert(CVarTraits::isCVariadic && CVarTraits::isNoexcept && CVarTraits::parameterCount == 1);
 
-using CreateLayerTraits = Reflect::FunctionTraits<&COM::CreateAppLayer>;
-static_assert(CreateLayerTraits::name == "CreateAppLayer");
+using CreateLayerTraits = Reflect::FunctionTraits<&COM::CreateAppLayerRaw>;
+static_assert(CreateLayerTraits::name == "CreateAppLayerRaw");
 static_assert(CreateLayerTraits::hasExternalLinkage);
 static_assert(CreateLayerTraits::isNoexcept);
 static_assert(!CreateLayerTraits::isStaticMember);
@@ -130,15 +130,15 @@ static_assert(!CreateLayerTraits::isTemplateSpecialization);
 
 // Positive COM free-function ABI audit checks (including by-value Result<T>).
 using CreateEngineChainFn = COM::Result<COM::IEngine*> (*)(const COM::ChainInNode*) noexcept;
-static_assert(COM::EntryPointContract<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>() != 0);
+static_assert(COM::EntryPointContract<static_cast<CreateEngineChainFn>(&COM::CreateEngineRaw)>() != 0);
 
 static_assert(
-    COM::MangleFunction<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>() ==
-    "_ZN4ZHLN3COM12CreateEngineEPKNS0_11ChainInNodeE"
+    COM::MangleFunction<static_cast<CreateEngineChainFn>(&COM::CreateEngineRaw)>() ==
+    "_ZN4ZHLN3COM15CreateEngineRawEPKNS0_11ChainInNodeE"
 );
-static_assert(COM::AuditFunctionABI<&COM::CreateAppLayer>());
-static_assert(COM::AuditFunctionABI<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>());
-static_assert(COM::AuditFunctionABI<&COM::CreateLogicWorld>());
+static_assert(COM::AuditFunctionABI<&COM::CreateAppLayerRaw>());
+static_assert(COM::AuditFunctionABI<static_cast<CreateEngineChainFn>(&COM::CreateEngineRaw)>());
+static_assert(COM::AuditFunctionABI<&COM::CreateLogicWorldRaw>());
 static_assert(COM::AuditFunctionABI<&COM::RenderGraphDump>());
 static_assert(COM::AuditFunctionABI<&Mangle::CreateValue>());
 static_assert(COM::AuditFunctionABI<&Mangle::StaticHost::Entry>());
@@ -290,7 +290,7 @@ void test_mangle_dso_symbol_resolution_and_invocation() {
         ExpectEq(fn(&a4, &a4, &a4, &a34, nullptr, &n4, &g, p, &p), uint32_t {42u});
     }
 
-    // 7. Function pointer parameters (C++17 DoF...E vs throwing F...E + CreateAppLayerFn).
+    // 7. Function pointer parameters (C++17 DoF...E vs throwing F...E + CreateAppLayerRawFn).
     if (const auto fn = ResolveChecked<&Mangle::FunctionPointers>(lib, addrOf, 8u)) {
         g_voidCallbackHit = false;
         ExpectEq(fn(&AddOneNoexcept, &DoubleThrowing, &AddOneNoexcept, &MarkVoidNoexcept, nullptr), int32_t {57});
@@ -409,8 +409,8 @@ void test_mangle_matches_live_engine_dso_exports() {
     if (!ExpectTrue(engineLib.Open(enginePath, SharedLibraryBind::Local))) return;
 
     // Verify exact symbol name and in-DSO code address against libzahlen_engine.so.
-    (void) ExpectExactEngineSymbol<static_cast<CreateEngineChainFn>(&COM::CreateEngine)>(engineLib, enginePath);
-    (void) ExpectExactEngineSymbol<&COM::CreateLogicWorld>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<static_cast<CreateEngineChainFn>(&COM::CreateEngineRaw)>(engineLib, enginePath);
+    (void) ExpectExactEngineSymbol<&COM::CreateLogicWorldRaw>(engineLib, enginePath);
     const auto rgDump = ExpectExactEngineSymbol<&COM::RenderGraphDump>(engineLib, enginePath);
     (void) ExpectExactEngineSymbol<&RegisterErrorCategory>(engineLib, enginePath);
     const auto getLvl = ExpectExactEngineSymbol<&GetLogLevel>(engineLib, enginePath);

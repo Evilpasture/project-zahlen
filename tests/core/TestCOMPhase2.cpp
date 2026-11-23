@@ -29,7 +29,7 @@ struct COMPhase2Suite {
             using namespace ZHLN::COM;
             using Test::ExpectTrue;
             using Test::ExpectEq;
-            auto created = CreateEngineRef(InChain(
+            auto created = CreateEngine(InChain(
                 AppConfig {.appName = String64("Phase 2 boundary"), .logLevel = LogLevel::Quiet},
                 WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},
                 RenderConfig {.validationMode = ValidationMode::Off}));

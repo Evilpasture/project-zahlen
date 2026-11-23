@@ -168,7 +168,7 @@ ZHLN_EXPORT int32_t FunctionPointers(
     int32_t (*throwingCb)(int32_t),
     int32_t (*noexceptCbB)(int32_t) noexcept,
     void (*voidNoexceptCb)() noexcept,
-    COM::CreateAppLayerFn pluginFactory
+    COM::CreateAppLayerRawFn pluginFactory
 ) noexcept;
 
 ZHLN_EXPORT uint32_t TemplatesAndNttps(

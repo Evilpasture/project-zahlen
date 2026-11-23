@@ -16,7 +16,7 @@
 namespace {
 
 [[nodiscard]] auto MakeAudioTestEngine() -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
-    auto res = ZHLN::COM::CreateEngineRef(ZHLN::EngineConfig {
+    auto res = ZHLN::COM::CreateEngine(ZHLN::EngineConfig {
         .appName        = "TestsAudio",
         .width          = 64,
         .height         = 64,

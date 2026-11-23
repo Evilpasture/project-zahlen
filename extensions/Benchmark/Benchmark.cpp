@@ -85,7 +85,7 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     const PhysicsConfig config = RaisedFor(physCfg, initialEntityCount);
 
     auto chain = COM::InChain(config);
-    auto world = COM::CreateLogicWorldRef(chain.Head());
+    auto world = COM::CreateLogicWorld(chain.Head());
     if (!world) {
         ZHLN::LogError("[Bench] world creation failed; no benchmark is running: {}", world.error());
         return false;

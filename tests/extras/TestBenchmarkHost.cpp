@@ -13,7 +13,7 @@ using Test::ExpectTrue;
 struct BenchmarkHostSuite {
     struct Tests {
         std::expected<void, ErrorCode> real_host_composes_panels_submits_frames_and_rebinds() {
-            auto made = COM::CreateEngineRef(
+            auto made = COM::CreateEngine(
                 COM::InChain(
                     COM::WindowConfig {.width = 960, .height = 640, .vsync = false, .headless = true},
                     COM::RenderConfig {.validationMode = ValidationMode::Off}

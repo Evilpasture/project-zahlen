@@ -38,7 +38,7 @@ namespace {
 }
 
 [[nodiscard]] auto MakeHeadlessEngine() -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
-    auto res = ZHLN::COM::CreateEngineRef(ZHLN::EngineConfig {
+    auto res = ZHLN::COM::CreateEngine(ZHLN::EngineConfig {
         .appName        = "EnvironmentImageTest",
         .width          = 64,
         .height         = 64,

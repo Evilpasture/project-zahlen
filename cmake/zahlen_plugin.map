@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ELF symbol version script for dynamically loaded COM::IAppLayer plugins.
- * Only CreateAppLayer and its ABI witness are public.
+ * Only CreateAppLayerRaw and its ABI witness are public.
  */
 {
   global:
-    _ZN4ZHLN3COM14CreateAppLayer[BE]*;  /* @api ZHLN::COM::CreateAppLayer */
+    _ZN4ZHLN3COM17CreateAppLayerRaw[BE]*;  /* @api ZHLN::COM::CreateAppLayerRaw */
     _ZN4ZHLN3COM8Contract*4SealEv;
   local:
     *;

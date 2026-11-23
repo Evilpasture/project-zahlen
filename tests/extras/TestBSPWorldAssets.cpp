@@ -230,7 +230,7 @@ struct BSPWorldAssetsSuite {
             using namespace ZHLN;
             using Test::ExpectEq;
             using Test::ExpectTrue;
-            auto created = COM::CreateEngineRef(
+            auto created = COM::CreateEngine(
                 COM::InChain(
                     COM::AppConfig {.appName = String64("COM BSP world"), .logLevel = LogLevel::Quiet},
                     COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},

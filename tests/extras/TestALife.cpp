@@ -23,7 +23,7 @@ struct ALifeTestSuite {
         std::expected<void, ZHLN::ErrorCode> spatial_grid_inserts_moves_and_handles_generation_reuse() {
             using namespace ZHLN;
             using namespace ZHLN::ALife;
-            auto worldRes = COM::CreateLogicWorldRef();
+            auto worldRes = COM::CreateLogicWorld();
             Test::ExpectTrue(worldRes.has_value());
             auto& reg = *(*worldRes)->Entities();
 
@@ -75,7 +75,7 @@ struct ALifeTestSuite {
             using namespace ZHLN;
             using namespace ZHLN::ALife;
 
-            auto worldRes = COM::CreateLogicWorldRef();
+            auto worldRes = COM::CreateLogicWorld();
             Test::ExpectTrue(worldRes.has_value());
             auto& reg = *(*worldRes)->Entities();
 
@@ -97,7 +97,7 @@ struct ALifeTestSuite {
             const auto savePath = (tmp.Path() / "alife_state.bin").string();
             Test::ExpectTrue(sim.Save(reg, savePath.c_str()));
 
-            auto world2Res = COM::CreateLogicWorldRef();
+            auto world2Res = COM::CreateLogicWorld();
             auto& reg2 = *(*world2Res)->Entities();
             Simulator sim2 {};
             Test::ExpectTrue(sim2.Load(reg2, savePath.c_str()));

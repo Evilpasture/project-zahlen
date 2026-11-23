@@ -19,7 +19,7 @@ using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
 auto StagedEngine() {
-    return COM::CreateEngineRef(
+    return COM::CreateEngine(
         COM::InChain(
             COM::AppConfig {.appName = String64("Staged frames"), .logLevel = LogLevel::Quiet},
             COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},

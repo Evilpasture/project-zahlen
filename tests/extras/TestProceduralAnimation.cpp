@@ -111,7 +111,7 @@ struct ProceduralAnimationTestSuite {
             const auto bounds = ZHLN::Locomotion::MeasurePrefabBounds(rig);
             ZHLN::Test::ExpectTrue(bounds.valid && bounds.GetSize().y > 0.5f);
 
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef();
+            auto worldRes = ZHLN::COM::CreateLogicWorld();
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& entities = *(*worldRes)->Entities();
             constexpr ZHLN::AssetID kRigAsset {909};

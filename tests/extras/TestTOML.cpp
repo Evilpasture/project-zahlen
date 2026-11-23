@@ -587,7 +587,7 @@ onClickAction = "editor.save_scene"
          * rather than crashing or being invented.
          */
         std::expected<void, ZHLN::ErrorCode> extract_reads_a_world_back_into_a_description() {
-            auto worldRes = ZHLN::COM::CreateLogicWorldRef();
+            auto worldRes = ZHLN::COM::CreateLogicWorld();
             ZHLN::Test::ExpectTrue(worldRes.has_value());
             auto& registry = *(*worldRes)->Entities();
 

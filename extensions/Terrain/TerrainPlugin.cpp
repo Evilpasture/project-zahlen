@@ -3,7 +3,7 @@
 
 // Dynamically loadable COM::IAppLayer for the Terrain extension. Wraps
 // ZHLN::Terrain::System so a host can start, render and stop tile-based terrain
-// through the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).
+// through the standard plugin ABI (CreateAppLayerRaw + the EntryPointWitness seal).
 //
 // Configuration arrives through a ChainInNode payload (PluginConfig); an
 // absent or empty chain means default configuration. Terrain geometry itself is
@@ -84,7 +84,7 @@ class TerrainPlugin final : public COM::Implements<TerrainPlugin, COM::IAppLayer
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     ZHLN::Terrain::PluginConfig parsed {};
     const auto                checked = DispatchInChain<ZHLN::Terrain::PluginConfig>(
         config, [&](const ZHLN::Terrain::PluginConfig& value) noexcept { parsed = value; });
@@ -101,4 +101,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

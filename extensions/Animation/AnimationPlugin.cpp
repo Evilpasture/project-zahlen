@@ -3,7 +3,7 @@
 
 // Dynamically loadable COM::IAppLayer for the Animation extension. Wraps
 // ZHLN::Animation::Layer so a host can start, tick and stop animation through
-// the standard plugin ABI (CreateAppLayer + the EntryPointWitness seal).
+// the standard plugin ABI (CreateAppLayerRaw + the EntryPointWitness seal).
 //
 // Configuration arrives through a ChainInNode payload (PluginConfig); an
 // absent or empty chain means default configuration. The layer ticks the
@@ -82,7 +82,7 @@ class AnimationPlugin final : public COM::Implements<AnimationPlugin, COM::IAppL
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     Animation::PluginConfig parsed {};
     const auto              checked = DispatchInChain<Animation::PluginConfig>(
         config, [&](const Animation::PluginConfig& value) noexcept { parsed = value; });
@@ -99,4 +99,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

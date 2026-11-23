@@ -61,8 +61,8 @@ struct UnrecognizedPluginExtension {
 
 void test_plugin_freecam_dynamic_load_config_and_detach() {
     static_assert(COM::AuditInterfaceABI<COM::IAppLayer>());
-    static_assert(COM::AuditFunctionABI<&COM::CreateAppLayer>());
-    static_assert(COM::kCreateAppLayerSymbol == "_ZN4ZHLN3COM14CreateAppLayerEPKNS0_11ChainInNodeE");
+    static_assert(COM::AuditFunctionABI<&COM::CreateAppLayerRaw>());
+    static_assert(COM::kCreateAppLayerRawSymbol == "_ZN4ZHLN3COM17CreateAppLayerRawEPKNS0_11ChainInNodeE");
 
     // Load libzahlen_plugin_freecam by bare name with custom InChain config,
     // verify it attaches custom FreeCam::Component across the .so boundary in
@@ -277,24 +277,24 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
             continue;
 
         // Old extern "C" entry point is absent; consteval-mangled C++ symbol resolves cleanly.
-        ExpectTrue(lib.GetSymbol("ZHLN_CreateAppLayer") == nullptr);
-        constexpr auto mangled = COM::MangleFunction<&COM::CreateAppLayer>();
+        ExpectTrue(lib.GetSymbol("ZHLN_CreateAppLayerRaw") == nullptr);
+        constexpr auto mangled = COM::MangleFunction<&COM::CreateAppLayerRaw>();
         void* const    raw     = lib.GetSymbol(mangled.data());
-        const auto     factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(lib);
+        const auto     factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(lib);
         ExpectTrue(raw != nullptr);
         ExpectTrue(factory != nullptr);
         ExpectTrue(raw == reinterpret_cast<void*>(factory));
-        using Witness = COM::EntryPointWitness<&COM::CreateAppLayer>;
-        using Stale   = COM::Contract<COM::CreateAppLayerFn, COM::EntryPointContract<&COM::CreateAppLayer>() ^ uint64_t { 1 }>;
+        using Witness = COM::EntryPointWitness<&COM::CreateAppLayerRaw>;
+        using Stale   = COM::Contract<COM::CreateAppLayerRawFn, COM::EntryPointContract<&COM::CreateAppLayerRaw>() ^ uint64_t { 1 }>;
         ExpectTrue(COM::ResolveSymbol<&Witness::Seal>(lib) != nullptr);
         ExpectTrue(COM::ResolveSymbol<&Stale::Seal>(lib) == nullptr);
         struct MissingWitness {
             const SharedLibrary& library;
             auto                 GetSymbol(const char* name) const noexcept -> void* {
-                return std::string_view(name) == COM::kCreateAppLayerSymbol ? library.GetSymbol(name) : nullptr;
+                return std::string_view(name) == COM::kCreateAppLayerRawSymbol ? library.GetSymbol(name) : nullptr;
             }
         };
-        ExpectTrue(COM::ResolveVerifiedSymbol<&COM::CreateAppLayer>(MissingWitness {lib}) == nullptr);
+        ExpectTrue(COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(MissingWitness {lib}) == nullptr);
         if (!factory)
             continue;
 
@@ -315,12 +315,12 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
         }
     }
 
-    // A valid shared library without ZHLN::COM::CreateAppLayer fails with PluginSymbolMissing.
+    // A valid shared library without ZHLN::COM::CreateAppLayerRaw fails with PluginSymbolMissing.
     const auto noSym = BaseHeadlessApp("NoCreateAppLayer").LoadPlugin(enginePath.string()).Run();
     ExpectFalse(noSym.has_value());
     if (!noSym) {
         ExpectTrue(noSym.error() == AppError::PluginSymbolMissing);
-        ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayer"});
+        ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayerRaw"});
     }
 }
 

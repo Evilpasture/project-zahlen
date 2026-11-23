@@ -2412,7 +2412,7 @@ void Engine::TraceDiagnostics() const noexcept {
 
 // --- Factory ----------------------------------------------------------------
 
-auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
+auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     EngineConfig config {};
     uint32_t     maxFramesPerSecond = 0;
 

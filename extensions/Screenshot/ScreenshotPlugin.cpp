@@ -64,7 +64,7 @@ class ScreenshotPlugin final : public COM::Implements<ScreenshotPlugin, COM::IAp
 
 namespace ZHLN::COM {
 
-ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
+ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     Screenshot::PluginConfig parsed {};
     const auto               checked = DispatchInChain<Screenshot::PluginConfig>(
         config, [&](const Screenshot::PluginConfig& value) noexcept {
@@ -90,4 +90,4 @@ ZHLN_EXPORT auto CreateAppLayer(const ChainInNode* config) noexcept -> Result<IA
 } // namespace ZHLN::COM
 
 template <>
-ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayer>::Seal() noexcept {}
+ZHLN_EXPORT void ZHLN::COM::EntryPointWitness<&ZHLN::COM::CreateAppLayerRaw>::Seal() noexcept {}

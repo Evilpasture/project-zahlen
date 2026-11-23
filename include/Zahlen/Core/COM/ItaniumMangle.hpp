@@ -52,7 +52,7 @@ static_assert(false, "ItaniumMangle targets the Itanium C++ ABI");
 namespace ZHLN::COM {
 
 // Computes the NUL-terminated Itanium C++ ABI symbol name of free or static
-// member function `Fn` (e.g. `COM::MangleFunction<&COM::CreateAppLayer>()`).
+// member function `Fn` (e.g. `COM::MangleFunction<&COM::CreateAppLayerRaw>()`).
 // The entire mangler lives in this function body: templates and partial
 // specializations cannot be declared at block scope, so type decomposition
 // reuses Reflect::FunctionTypeTraits (Callable.hpp), and scope/template-

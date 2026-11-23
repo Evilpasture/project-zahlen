@@ -38,7 +38,7 @@ auto FirstTimedTrack(const GLTF::Document& doc) -> int32_t {
 }
 auto RuntimeEngine(bool animated = true) {
     (void)animated;
-    return COM::CreateEngineRef(COM::InChain(
+    return COM::CreateEngine(COM::InChain(
         COM::AppConfig {.appName = String64("Engine runtime controls"), .logLevel = LogLevel::Quiet},
         COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true}, COM::RenderConfig {.validationMode = ValidationMode::Off}
     ));

@@ -97,7 +97,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> help_lists_commands() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -117,7 +117,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> empty_line_is_a_no_op() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -129,7 +129,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> unknown_command_reports_help_hint() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -141,7 +141,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> types_lists_registered_components() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -156,7 +156,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> type_dumps_fields_or_reports_missing() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -179,7 +179,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> find_entity_and_inspect() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto               world = std::move(*created);
@@ -217,7 +217,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> get_and_set_component_fields() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto  world = std::move(*created);
@@ -252,7 +252,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> sym_rejects_bad_addresses() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto                 world = std::move(*created);
@@ -268,7 +268,7 @@ struct ConsoleDebuggerTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> patch_applies_lua_table_and_rolls_back_on_error() {
-            auto created = ZHLN::COM::CreateLogicWorldRef();
+            auto created = ZHLN::COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto  world = std::move(*created);

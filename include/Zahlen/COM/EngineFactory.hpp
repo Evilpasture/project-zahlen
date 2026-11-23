@@ -66,24 +66,24 @@ static_assert(std::is_standard_layout_v<PhysicsConfig> && std::is_trivially_copy
 // the boundary by value and so requires a trivially copyable T, which a
 // reference-counting handle is not. The reference is already taken -- adopt
 // it, do not AddRef it. Pass nullptr (or COM::InChain()) for defaults.
-ZHLN_API auto CreateEngine(const ChainInNode* configChain) noexcept -> Result<IEngine*>;
+ZHLN_API auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*>;
 
-inline auto CreateEngine() noexcept -> Result<IEngine*> {
-    return CreateEngine(nullptr);
+inline auto CreateEngineRaw() noexcept -> Result<IEngine*> {
+    return CreateEngineRaw(nullptr);
 }
 
 // Inline, so std::expected is built and consumed in the consumer's own
 // translation unit and never travels across the boundary.
-[[nodiscard]] inline auto CreateEngineRef(const ChainInNode* configChain = nullptr) noexcept
+[[nodiscard]] inline auto CreateEngine(const ChainInNode* configChain = nullptr) noexcept
     -> std::expected<Ref<IEngine>, ErrorCode> {
-    const Result<IEngine*> created = CreateEngine(configChain);
+    const Result<IEngine*> created = CreateEngineRaw(configChain);
     if (!created.HasValue()) return std::unexpected(created.error);
     return Ref<IEngine>::Adopt(created.value);
 }
 
-[[nodiscard]] inline auto CreateEngineRef(const EngineConfig& cfg) noexcept
+[[nodiscard]] inline auto CreateEngine(const EngineConfig& cfg) noexcept
     -> std::expected<Ref<IEngine>, ErrorCode> {
-    const Result<IEngine*> created = CreateEngine(InChain(
+    const Result<IEngine*> created = CreateEngineRaw(InChain(
         AppConfig {
             .appName            = cfg.appName,
             .logLevel           = cfg.logLevel,

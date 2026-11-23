@@ -138,7 +138,7 @@ struct RenderPipelinesTestSuite {
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
-            auto engineRes = ZHLN::COM::CreateEngineRef(cfg);
+            auto engineRes = ZHLN::COM::CreateEngine(cfg);
             if (!engineRes) {
                 return std::unexpected(engineRes.error());
             }
@@ -443,20 +443,20 @@ struct RenderPipelinesTestSuite {
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
 
-            auto firstRes = ZHLN::COM::CreateEngineRef(smallCfg("LocalGPUSerialA"));
+            auto firstRes = ZHLN::COM::CreateEngine(smallCfg("LocalGPUSerialA"));
             if (!firstRes) {
                 return std::unexpected(firstRes.error());
             }
             auto first = std::move(firstRes.value());
 
             {
-                auto secondRes = ZHLN::COM::CreateEngineRef(smallCfg("LocalGPUSerialB"));
+                auto secondRes = ZHLN::COM::CreateEngine(smallCfg("LocalGPUSerialB"));
                 if (secondRes.has_value()) {
                     ZHLN::Println("    [INFO] a second engine was created; the single-instance claim is gone. Revisit this test.");
                     return {};
                 }
                 ZHLN::Println(
-                    "    [INFO] second CreateEngineRef refused: {}: {}", ZHLN::Error(secondRes.error()).Category(), ZHLN::Error(secondRes.error()).Message()
+                    "    [INFO] second CreateEngine refused: {}: {}", ZHLN::Error(secondRes.error()).Category(), ZHLN::Error(secondRes.error()).Message()
                 );
             }
 
@@ -478,7 +478,7 @@ struct RenderPipelinesTestSuite {
 
             first = {};
 
-            auto secondRes = ZHLN::COM::CreateEngineRef(smallCfg("LocalGPUSerialB"));
+            auto secondRes = ZHLN::COM::CreateEngine(smallCfg("LocalGPUSerialB"));
             if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
                 return {};
             }

@@ -30,7 +30,7 @@ using Test::ExpectTrue;
 struct COMScriptLifetimeSuite {
     struct Tests {
         std::expected<void, ErrorCode> nested_and_indexed_boxes_re_resolve_after_storage_moves_and_removal() {
-            auto created = COM::CreateLogicWorldRef();
+            auto created = COM::CreateLogicWorld();
             if (!created)
                 return std::unexpected(created.error());
             auto            world    = std::move(*created);
@@ -83,8 +83,8 @@ struct COMScriptLifetimeSuite {
             return {};
         }
         std::expected<void, ErrorCode> array_box_assignment_resolves_rhs_and_rejects_cross_world_identity() {
-            auto a = COM::CreateLogicWorldRef();
-            auto b = COM::CreateLogicWorldRef();
+            auto a = COM::CreateLogicWorld();
+            auto b = COM::CreateLogicWorld();
             if (!a)
                 return std::unexpected(a.error());
             if (!b)
@@ -116,7 +116,7 @@ struct COMScriptLifetimeSuite {
             std::optional<ScriptVal> held;
             COM::IEntities*          borrowed = nullptr;
             {
-                auto world = COM::CreateLogicWorldRef();
+                auto world = COM::CreateLogicWorld();
                 if (!world)
                     return std::unexpected(world.error());
                 borrowed = (*world)->Entities();
@@ -140,7 +140,7 @@ struct COMScriptLifetimeSuite {
             return {};
         }
         std::expected<void, ErrorCode> fixed_strings_and_resource_owners_have_explicit_mutation_rules() {
-            auto made = COM::CreateLogicWorldRef();
+            auto made = COM::CreateLogicWorld();
             if (!made)
                 return std::unexpected(made.error());
             auto&           entities = *(*made)->Entities();

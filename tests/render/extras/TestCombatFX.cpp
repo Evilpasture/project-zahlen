@@ -34,7 +34,7 @@ struct CombatFXTestSuite {
     }
 
     static auto CreateTestEngine() -> ZHLN::COM::Ref<ZHLN::COM::IEngine> {
-        auto created = ZHLN::COM::CreateEngineRef(
+        auto created = ZHLN::COM::CreateEngine(
             ZHLN::COM::InChain(
                 ZHLN::COM::AppConfig {.appName = ZHLN::String64("Combat host"), .logLevel = ZHLN::LogLevel::Quiet},
                 ZHLN::COM::WindowConfig {.width = 160, .height = 120, .vsync = false, .headless = true},

@@ -26,9 +26,9 @@
 {
   global:
     /* === Tier 1: COM Factory Surface === */
-    _ZN4ZHLN3COM12CreateEngine[BE]*;                                /* @api ZHLN::COM::CreateEngine */
+    _ZN4ZHLN3COM15CreateEngineRaw[BE]*;                             /* @api ZHLN::COM::CreateEngineRaw */
     _ZN4ZHLN3COM15RenderGraphDump[BE]*;                             /* @api ZHLN::COM::RenderGraphDump */
-    _ZN4ZHLN3COM16CreateLogicWorld[BE]*;                            /* @api ZHLN::COM::CreateLogicWorld */
+    _ZN4ZHLN3COM19CreateLogicWorldRaw[BE]*;                         /* @api ZHLN::COM::CreateLogicWorldRaw */
 
     /* === Tier 2: Core / Runtime ZHLN_API Surface === */
 

@@ -125,7 +125,7 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
         .headless       = true,
     };
 
-    auto engineRes = ZHLN::COM::CreateEngineRef(cfg);
+    auto engineRes = ZHLN::COM::CreateEngine(cfg);
     if (!engineRes) {
         return {};
     }

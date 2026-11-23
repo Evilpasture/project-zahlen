@@ -561,7 +561,7 @@ struct COMBoundarySuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> create_engine_validates_config_chains_before_device_init() {
             const auto unknownRes =
-                ZHLN::COM::CreateEngine(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
+                ZHLN::COM::CreateEngineRaw(ZHLN::COM::InChain(COMIdentityTest::UnknownEngineSlice {}));
             ZHLN::Test::ExpectTrue(!unknownRes.HasValue());
             ZHLN::Test::ExpectTrue(unknownRes.error == ZHLN::COM::Error::UnsupportedExtension);
 
@@ -574,14 +574,14 @@ struct COMBoundarySuite {
                 .data       = &winPayload,
                 .pNext      = nullptr,
             };
-            const auto driftRes = ZHLN::COM::CreateEngine(&drifted);
+            const auto driftRes = ZHLN::COM::CreateEngineRaw(&drifted);
             ZHLN::Test::ExpectTrue(!driftRes.HasValue());
             ZHLN::Test::ExpectTrue(driftRes.error == ZHLN::COM::Error::LayoutMismatch);
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> the_com_boundary_works_end_to_end() {
-            auto created = ZHLN::COM::CreateEngineRef(ZHLN::COM::InChain(
+            auto created = ZHLN::COM::CreateEngine(ZHLN::COM::InChain(
                 ZHLN::COM::AppConfig {
                     .appName  = ZHLN::String64("COM boundary test"),
                     .logLevel = ZHLN::LogLevel::Quiet,
