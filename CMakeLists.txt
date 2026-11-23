@@ -41,7 +41,7 @@ endif()
 # configured from it, cmake/Toolchains.cmake uses it for the toolchain id and the
 # exported package version, .github/workflows/release.yml takes the release tag
 # from it, and tests/version_test.py fails the build when a copy disagrees.
-project(zahlen VERSION 0.4.0 LANGUAGES C CXX ASM)
+project(zahlen VERSION 0.5.0 LANGUAGES C CXX ASM)
 
 option(ZHLN_INSTALL_TOOLCHAIN_PACKAGES "Install independently consumable toolchain packages" OFF)
 
