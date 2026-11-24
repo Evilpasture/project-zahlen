@@ -158,10 +158,14 @@ auto DeviceConfigurator<Ts...>::Build() && -> std::expected<ConfiguredDevice<Ts.
     if (!_unsupported.empty()) {
         return std::unexpected(DeviceConfigurationError::MissingRequiredFeature);
     }
-    if (_subgroupOps != 0) {
-        ReportSubgroupSupport(_physical, _subgroupOps);
+    DiagnosticLedger diagnostics;
+    for (const std::string_view skipped: _extensions.SkippedOptional()) {
+        diagnostics.Add(DiagnosticSeverity::Info, "Extensions", "Skipped unsupported optional extension '{}'.", skipped);
     }
-    return ConfiguredDevice<Ts...> {std::move(*extensions), std::move(_features)};
+    if (_subgroupOps != 0) {
+        ReportSubgroupSupport(_physical, _subgroupOps, diagnostics);
+    }
+    return ConfiguredDevice<Ts...> {std::move(*extensions), std::move(_features), std::move(diagnostics)};
 }
 
 }

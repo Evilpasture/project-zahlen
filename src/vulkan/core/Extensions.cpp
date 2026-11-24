@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vulkan/core/Extensions.hpp"
-#include <Zahlen/Log.hpp>
 #include <expected>
-#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -133,7 +131,14 @@ auto ExtensionBuilder::Require(const std::string_view name) noexcept -> Extensio
 }
 
 auto ExtensionBuilder::Optional(const std::string_view name) noexcept -> ExtensionBuilder& {
-    if (const auto* matched = FindAvailable(name); matched != nullptr && !std::ranges::contains(_active, *matched)) {
+    const auto* matched = FindAvailable(name);
+    if (matched == nullptr) {
+        if (!std::ranges::contains(_skipped, name)) {
+            _skipped.emplace_back(name);
+        }
+        return *this;
+    }
+    if (!std::ranges::contains(_active, *matched)) {
         _active.push_back(*matched);
     }
     return *this;
@@ -149,10 +154,11 @@ auto ExtensionBuilder::OptionalGroup(const std::initializer_list<std::string_vie
 }
 
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ErrorCode> {
+    // A required extension that is not there is a hard failure, not a line: the
+    // error code is the answer and the names stay on the builder
+    // (MissingRequired()) for a caller that wants to say which. Nothing here
+    // touches a sink -- that decision belongs to whoever built the device.
     if (!_missingRequired.empty()) {
-        for (const auto& name: _missingRequired) {
-            kVkLog.Error("Required extension is not supported: {}", name);
-        }
         return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }
     return ExtensionResult(std::move(_active));

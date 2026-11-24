@@ -5,6 +5,7 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
+#include "vulkan/DeviceDiagnostics.hpp"
 #include "vulkan/core/Extensions.hpp"
 #include "vulkan/core/Features.hpp"
 #include <Zahlen/Core/Description.hpp>
@@ -22,14 +23,22 @@ enum class DeviceConfigurationError : uint8_t {
     MissingRequiredFeature ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan device feature is not supported">{}) = 1,
 };
 
+// Cold-path verdicts. The two predicates answer a question and nothing else --
+// they are called inside the accept-predicates of OptionalMeshShaders and
+// OptionalRayTracing, where a captureless lambda cannot reach a ledger, and the
+// answer they give is the same one DeviceConfigurator::Build() reports. The
+// reporting helper next to them records into the ledger the caller gets back.
 [[nodiscard]] bool MeshShaderLimitsSufficient(VkPhysicalDevice physical) noexcept;
 [[nodiscard]] bool RayTracingDriverUsable(VkPhysicalDevice physical) noexcept;
-void ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags requiredOps) noexcept;
+void            ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags requiredOps, DiagnosticLedger& diagnostics) noexcept;
 
 template <typename... Ts>
 struct ConfiguredDevice {
     ExtensionResult    extensions;
     FeatureChain<Ts...> features;
+    // Everything the negotiation decided, in order. The caller logs it or
+    // asserts on it; nothing here has touched a sink.
+    DiagnosticLedger diagnostics;
 };
 
 template <typename... Ts>

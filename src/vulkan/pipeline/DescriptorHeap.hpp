@@ -396,7 +396,11 @@ class DescriptorHeap {
     void               LeaveImmediate(uint64_t scopeId) noexcept;
     void               WriteResources(std::span<const ResourceWriteEntry> entries) noexcept;
     void               WriteSamplers(std::span<const SamplerWriteEntry> entries) noexcept;
-    [[nodiscard]] auto ValidateWriteSlot(uint32_t slot, uint32_t batchCount) const noexcept -> bool;
+    // A stale, unallocated or out-of-range slot is memory corruption, not a
+    // diagnostic, so this fails fast and returns nothing. The batch count the old
+    // signature took measured the size of a *batch* of arbitrary slots, never the
+    // descriptor count at `slot`, so it validated nothing and was ignored.
+    void AssertSlotWritable(uint32_t slot) const noexcept;
     [[nodiscard]] auto IsSlotWritable(uint32_t slot) const noexcept -> bool;
     void               MarkStaticLive(uint32_t slot) noexcept;
     void               ClearStaticLive(uint32_t slot) noexcept;

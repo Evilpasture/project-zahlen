@@ -10,7 +10,6 @@
 #include <array>
 #include <cstddef>
 #include <utility>
-#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -393,16 +392,18 @@ auto DescriptorHeap::IsSlotWritable(uint32_t slot) const noexcept -> bool {
     return (slot - immediateBase) < _immediateTransientAllocated;
 }
 
-auto DescriptorHeap::ValidateWriteSlot(uint32_t slot, uint32_t batchCount) const noexcept -> bool {
+void DescriptorHeap::AssertSlotWritable(uint32_t slot) const noexcept {
+    // A write to an out-of-range, unallocated or stale slot is not a diagnostic:
+    // it corrupts the heap and the GPU reads whatever the descriptor happened to
+    // point at. Warning-and-returning-false let command recording continue
+    // through a corrupt state, which is precisely the failure mode the memory
+    // safety rules forbid elsewhere (LinearArena, SparseSet). Fail fast instead.
     if (slot >= _capacity) [[unlikely]] {
-        kVkLog.Warn("descriptor heap write out of range: slot {} >= capacity {}", slot, _capacity);
-        return false;
+        ZHLN::Panic("DescriptorHeap: write out of range: slot {} >= capacity {}", slot, _capacity);
     }
     if (!IsSlotWritable(slot)) [[unlikely]] {
-        kVkLog.Warn("descriptor heap write targets unallocated or stale slot {}", slot);
-        return false;
+        ZHLN::Panic("DescriptorHeap: write targets unallocated or stale slot {} (capacity {})", slot, _capacity);
     }
-    return true;
 }
 
 void DescriptorHeap::FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept {
@@ -440,9 +441,7 @@ void DescriptorHeap::WriteResources(std::span<const ResourceWriteEntry> entries)
     uint32_t   minSlot    = entries.front().slot;
     uint32_t   maxSlot    = minSlot;
     for (const auto& entry: entries) {
-        if (!ValidateWriteSlot(entry.slot, totalCount)) [[unlikely]] {
-            return;
-        }
+        AssertSlotWritable(entry.slot);
         minSlot = std::min(minSlot, entry.slot);
         maxSlot = std::max(maxSlot, entry.slot);
     }
@@ -503,9 +502,7 @@ void DescriptorHeap::WriteSamplers(std::span<const SamplerWriteEntry> entries) n
     uint32_t   minSlot    = entries.front().slot;
     uint32_t   maxSlot    = minSlot;
     for (const auto& entry: entries) {
-        if (!ValidateWriteSlot(entry.slot, totalCount)) [[unlikely]] {
-            return;
-        }
+        AssertSlotWritable(entry.slot);
         minSlot = std::min(minSlot, entry.slot);
         maxSlot = std::max(maxSlot, entry.slot);
     }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "vulkan/DeviceDiagnostics.hpp"
 #include "vulkan/VulkanHeader.hpp"
 #include "vulkan/core/Device.hpp"
 #include "vulkan/core/Features.hpp"
@@ -75,6 +76,20 @@ class Context {
         return _physical;
     }
 
+    // What device negotiation decided, in order, as a borrowed view. The cold
+    // path collected it and logged nothing; whoever built this context decides
+    // what to say, and a test reads it directly instead of installing a sink.
+    [[nodiscard]] auto Diagnostics() const noexcept -> std::span<const DeviceDiagnostic> {
+        return _diagnostics.Entries();
+    }
+
+    // One-shot extraction for a composition root that is done with the context's
+    // copy: the ledger and its strings move out, and the context stops paying for
+    // them for the rest of the run. Diagnostics() is empty afterwards.
+    [[nodiscard]] auto TakeDiagnostics() noexcept -> DiagnosticLedger {
+        return std::move(_diagnostics);
+    }
+
     [[nodiscard]] auto BufferAddress(const VkBuffer buffer) const noexcept -> VkDeviceAddress {
         const VkBufferDeviceAddressInfo info {
             .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
@@ -145,6 +160,7 @@ class Context {
     LogicalDevice               _device;
     DevicePresentSupport        _present {};
     EnabledFeatureSet           _enabledFeatures;
+    DiagnosticLedger            _diagnostics {};
     GPUAddressTracker*          _addressTracker              = nullptr;
     bool                        _addressBindingReportEnabled = false;
 };

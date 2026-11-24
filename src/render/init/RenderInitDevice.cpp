@@ -4,6 +4,8 @@
 #include "render/OpenGLHacks/HostBlit.hpp"
 #include "render/PresentationSurface.hpp"
 #include "render/RenderInternal.hpp"
+#include "vulkan/DeviceDiagnostics.hpp"
+#include "vulkan/VulkanLog.hpp"
 #include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Error.hpp>
@@ -221,6 +223,27 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                         .Build()
                         .transform([&](auto&& context) -> auto {
                             impl->ctx = std::forward<decltype(context)>(context);
+                            // The composition root for device negotiation: the
+                            // builders only collected facts, and this is the one
+                            // place that decides an operator hears them. A test
+                            // that wants them reads ctx.Diagnostics() and never
+                            // installs a sink.
+                            // Consumed by value: the context gives its copy up and
+                            // stops holding the strings for the rest of the run.
+                            const Vk::DiagnosticLedger ledger = impl->ctx.TakeDiagnostics();
+                            for (const Vk::DeviceDiagnostic& diagnostic: ledger.Entries()) {
+                                switch (diagnostic.severity) {
+                                    case Vk::DiagnosticSeverity::Error:
+                                        ZHLN::kVkLog.Error("[{}] {}", diagnostic.component, diagnostic.message);
+                                        break;
+                                    case Vk::DiagnosticSeverity::Warning:
+                                        ZHLN::kVkLog.Warn("[{}] {}", diagnostic.component, diagnostic.message);
+                                        break;
+                                    case Vk::DiagnosticSeverity::Info:
+                                        ZHLN::kVkLog.Info("[{}] {}", diagnostic.component, diagnostic.message);
+                                        break;
+                                }
+                            }
                             impl->diagnostics.gpuDiagnostics.Create(impl->ctx, {.crashDumpPath = cfg.crashDumpPath});
                         });
                 });

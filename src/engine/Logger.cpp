@@ -29,9 +29,15 @@ namespace {
 using ZHLN::LogSeverity;
 using ZHLN::LogSource;
 
-// Defined below, beside the sink that uses it; declared here because the console
-// sink's Write() reaches it before that point in the file.
-auto ShouldColorize(FILE* stream) noexcept -> bool;
+// Colour only a terminal: a redirected stream keeps the plain format, so logs
+// piped into a file or a test harness carry no escape sequences.
+auto ShouldColorize(FILE* stream) noexcept -> bool {
+    if (stream == nullptr) {
+        return false;
+    }
+    const int fd = ::fileno(stream);
+    return fd >= 0 && ::isatty(fd) != 0;
+}
 
 
 

@@ -4,7 +4,6 @@
 #include "vulkan/core/Context.hpp"
 #include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include "vulkan/core/Extensions.hpp"
-#include <Zahlen/Log.hpp>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -12,7 +11,6 @@
 #include <utility>
 #include <vector>
 #include "vulkan/core/DeviceConfigurator.hpp"
-#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -28,7 +26,7 @@ Context::Context(Context&& other) noexcept:
     _ownedInstance(std::move(other._ownedInstance)), _instance(std::exchange(other._instance, InstanceView {})),
     _surface(std::exchange(other._surface, VK_NULL_HANDLE)), _physical(std::exchange(other._physical, PhysicalDeviceInfo {})),
     _device(std::move(other._device)), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)),
-    _addressTracker(std::exchange(other._addressTracker, nullptr)),
+    _diagnostics(std::move(other._diagnostics)), _addressTracker(std::exchange(other._addressTracker, nullptr)),
     _addressBindingReportEnabled(std::exchange(other._addressBindingReportEnabled, false)) {
 }
 
@@ -49,6 +47,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         _enabledFeatures             = std::move(other._enabledFeatures);
         _addressTracker              = std::exchange(other._addressTracker, nullptr);
         _addressBindingReportEnabled = std::exchange(other._addressBindingReportEnabled, false);
+        _diagnostics                 = std::move(other._diagnostics);
     }
     return *this;
 }
@@ -59,8 +58,10 @@ namespace {
     if (!instance.Valid()) {
         return std::unexpected(ContextError::InvalidInstance);
     }
+    // A hard failure: the error code is the answer. Nothing below this line has
+    // a logger to talk to, and log-and-continue through a dead loader is exactly
+    // what this pass removed.
     if (volkInitialize() != VK_SUCCESS) {
-        kVkLog.Error("No Vulkan loader is available; volkInitialize() failed while preparing a context.");
         return std::unexpected(ContextError::LoaderInitializationFailed);
     }
 
@@ -129,8 +130,8 @@ namespace {
     const std::span<const std::string> extensionNames,
     const VkPhysicalDeviceFeatures2*   features,
     const bool                         meshShaderRequested,
-    const bool                         rayTracingRequested
-) noexcept -> std::expected<LogicalDevice, ErrorCode> {
+    const bool                         rayTracingRequested,
+    DiagnosticLedger&                  diagnostics) noexcept -> std::expected<LogicalDevice, ErrorCode> {
     if (physical.handle == VK_NULL_HANDLE || !physical.hasGraphics || physical.graphicsFamily == UINT32_MAX || physical.presentFamily == UINT32_MAX ||
         physical.transferFamily == UINT32_MAX || physical.computeFamily == UINT32_MAX) {
         return std::unexpected(ContextError::NoSuitableDeviceFound);
@@ -203,18 +204,30 @@ namespace {
     const bool descriptor_heap_enabled = vkCmdBindResourceHeapEXT != nullptr && vkCmdBindSamplerHeapEXT != nullptr && vkCmdPushDataEXT != nullptr &&
                                          vkWriteResourceDescriptorsEXT != nullptr && vkWriteSamplerDescriptorsEXT != nullptr;
     if (!descriptor_heap_enabled) {
-        kVkLog.Warn("VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled.");
+        diagnostics.Add(
+            DiagnosticSeverity::Warning, "DescriptorHeap",
+            "VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled."
+        );
     }
     const MeshShaderLimits mesh_limits                 = QueryMeshShaderLimits(physical.handle);
     const bool             mesh_entry_points_available = vkCmdDrawMeshTasksEXT != nullptr && vkCmdDrawMeshTasksIndirectEXT != nullptr;
     const bool             mesh_shader_enabled         = meshShaderRequested && mesh_entry_points_available && MeshShaderLimitsSufficient(mesh_limits);
     if (meshShaderRequested && !mesh_shader_enabled) {
+        // Three different facts, three ledger entries: "the device cannot" and
+        // "the loader will not" are not the same answer, and a test that expects
+        // the vertex pipeline needs to know which one it got.
         if (!mesh_limits.supported) {
-            kVkLog.Warn("VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline.");
+            diagnostics.Add(
+                DiagnosticSeverity::Warning, "MeshShader", "VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline."
+            );
         } else if (!mesh_entry_points_available) {
-            kVkLog.Warn("VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline.");
+            diagnostics.Add(
+                DiagnosticSeverity::Warning, "MeshShader", "VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline."
+            );
         } else {
-            kVkLog.Warn("Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using vertex pipelines.",
+            diagnostics.Add(
+                DiagnosticSeverity::Warning, "MeshShader",
+                "Limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using vertex pipelines.",
                 mesh_limits.maxMeshOutputVertices, mesh_limits.maxMeshOutputPrimitives, mesh_limits.maxTaskWorkGroupInvocations,
                 mesh_limits.maxMeshWorkGroupInvocations
             );
@@ -229,6 +242,12 @@ namespace {
                         }
     );
     const bool ray_tracing_enabled = rayTracingRequested && ray_tracing_extensions;
+    if (rayTracingRequested && !ray_tracing_enabled) {
+        diagnostics.Add(
+            DiagnosticSeverity::Info, "RayTracing",
+            "Acceleration-structure extensions were not enabled for this device; ray tracing paths are disabled."
+        );
+    }
 
     return LogicalDevice {handle,        graphics_queue,          present_queue,       transfer_queue,
                           compute_queue, descriptor_heap_enabled, mesh_shader_enabled, ray_tracing_enabled};
@@ -259,6 +278,11 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     context._physical = _physical;
 
     const bool debug_utils_enabled = _instance.DebugUtilsEnabled();
+
+    // Cold-path negotiation is value-driven from here down: everything below
+    // records into this ledger instead of writing to a sink, and the context
+    // carries the result to whoever built it.
+    DiagnosticLedger diagnostics;
 
     auto deviceConfigurator = DeviceConfigurator<>(_physical.handle);
     auto configured = std::move(deviceConfigurator)
@@ -307,6 +331,24 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     if (!configured) {
         return std::unexpected(configured.error());
     }
+    diagnostics.Append(std::move(configured->diagnostics));
+
+    // The caller's own list goes through the same builder every other ask goes
+    // through, so ExtensionBuilder stays the single authority on what survived
+    // negotiation. Handling it here by hand is how the same skipped extension
+    // ended up recorded twice: once by the builder, once by this loop.
+    ExtensionBuilder callerExtensions = ExtensionBuilder::ForDevice(_physical.handle);
+    for (const char* requested: _deviceExtensions) {
+        if (requested != nullptr) {
+            callerExtensions.Optional(requested);
+        }
+    }
+    for (const std::string_view skipped: callerExtensions.SkippedOptional()) {
+        diagnostics.Add(DiagnosticSeverity::Info, "Extensions", "Skipping unsupported device extension '{}'.", skipped);
+    }
+    if (const auto callerList = callerExtensions.Build(); !callerList) {
+        return std::unexpected(callerList.error());
+    }
 
     std::vector<const char*>           requested_extensions  = _deviceExtensions;
     const std::span<const char* const> configured_extensions = configured->extensions;
@@ -323,8 +365,11 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
             continue;
         }
         const std::string_view name(requested);
+        // Every name reaching here already passed a builder, so this is a
+        // consistency check between what was negotiated and what this driver
+        // reports, not a negotiation step -- and it records nothing, because the
+        // builder already decided and reported.
         if (!HasExtension(available_extensions, name)) {
-            kVkLog.Warn("Skipping unsupported device extension: {}", name);
             continue;
         }
         if (!std::ranges::contains(enabled_extensions, name)) {
@@ -349,7 +394,8 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
             feature_root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
             offsetof(VkPhysicalDeviceAccelerationStructureFeaturesKHR, accelerationStructure)
         ) && FeatureBitEnabled(feature_root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, offsetof(VkPhysicalDeviceRayQueryFeaturesKHR, rayQuery))
-    );
+    ,
+        diagnostics);
     if (!logical_device) {
         return std::unexpected(logical_device.error());
     }
@@ -364,6 +410,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     }
 
     context._ownedInstance = std::move(_ownedInstance);
+    context._diagnostics  = std::move(diagnostics);
     return context;
 }
 
