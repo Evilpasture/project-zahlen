@@ -60,35 +60,39 @@ struct BuiltinHostOptions {
     return dirs;
 }
 
-[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, SharedLibrary& outLibrary, COM::ILogger* logger) -> std::expected<bool, ErrorCode> {
+// The host's view of a plugin load: an open library, nothing at all, or a
+// failure. `std::expected<bool, ErrorCode>` could not say which of "loaded" and
+// "not found but optional" was which without a comment.
+[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, COM::ILogger* logger)
+    -> std::expected<std::optional<SharedLibrary>, ErrorCode> {
     // One view for the whole function: the null check, the channel and the
     // severity all live in the wrapper instead of in every call.
-    const COM::LoggerView         log {logger};
-    const char* const             rawEnv     = std::getenv("ZHLN_PLUGIN_PATH");
-    const auto                    searchDirs = DefaultPluginSearchDirs();
-    std::filesystem::path         resolvedPath;
-    const SharedLibraryOpenStatus status = outLibrary.OpenPlugin(
+    const COM::LoggerView log {logger};
+
+    // std::getenv returns null when the variable is unset and a string_view must
+    // never be built from null, so the pointer is narrowed exactly once, here.
+    const char* const rawEnv     = std::getenv("ZHLN_PLUGIN_PATH");
+    const auto        searchDirs = DefaultPluginSearchDirs();
+
+    auto opened = SharedLibrary::OpenPlugin(
         spec,
         PluginSearchOptions {
             .envPath    = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {},
             .searchDirs = searchDirs,
-        },
-        &resolvedPath
+        }
     );
-    switch (status) {
-        case SharedLibraryOpenStatus::Opened:
-            return true;
-        case SharedLibraryOpenStatus::LoadFailed:
-            log.Error("Failed to open plugin library '{}'.", resolvedPath.string());
-            return std::unexpected(AppError::PluginLoadFailed);
-        case SharedLibraryOpenStatus::NotFound:
-            if (required) {
-                log.Error("Required plugin '{}' not found.", spec);
-                return std::unexpected(AppError::PluginNotFound);
-            }
-            return false;
+    if (!opened) {
+        log.Error("Failed to open plugin library '{}': {}", spec, opened.error());
+        return std::unexpected(AppError::PluginLoadFailed);
     }
-    return std::unexpected(AppError::PluginNotFound);
+    if (!opened->has_value()) {
+        if (required) {
+            log.Error("Required plugin '{}' not found.", spec);
+            return std::unexpected(AppError::PluginNotFound);
+        }
+        return std::nullopt;
+    }
+    return std::optional<SharedLibrary> {std::move((*opened)->library)};
 }
 } // namespace
 
@@ -266,19 +270,15 @@ auto App::RunConfigured(
         if (req.invalidChain) {
             return std::unexpected(COM::Error::DuplicateExtension);
         }
-        SharedLibrary library;
-        const auto    opened = OpenPluginLibrary(
-            libraryStemOverride.empty() ? req.spec : libraryStemOverride,
-            req.required,
-            library,
-            runLog
-        );
+        auto opened = OpenPluginLibrary(libraryStemOverride.empty() ? req.spec : libraryStemOverride, req.required, runLog);
         if (!opened) {
             return std::unexpected(opened.error());
         }
-        if (!*opened) {
+        if (!opened->has_value()) {
             return {};
         }
+        // The library arrives open, already having said where it came from.
+        SharedLibrary library = std::move(**opened);
         const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(library);
         if (factory == nullptr) {
             if (COM::ResolveSymbol<&COM::CreateAppLayerRaw>(library) != nullptr) {
@@ -615,12 +615,13 @@ auto App::RunConfigured(
             }
             slot = {}; // release the old plugin instance before dlclose
             lib.Close();
-            const auto reopened = OpenPluginLibrary(hr.libraryStem, true, lib, runLog);
-            if (!reopened || !*reopened) {
+            auto reopened = OpenPluginLibrary(hr.libraryStem, true, runLog);
+            if (!reopened || !reopened->has_value()) {
                 log.Error("Hot reload failed to reopen plugin '{}'.", hr.libraryStem);
                 hr.lastWrite = mtime;
                 continue;
             }
+            lib = std::move(**reopened);
             const auto factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(lib);
             if (factory == nullptr) {
                 log.Error("Hot-reloaded plugin '{}' has an incompatible factory ABI.", hr.libraryStem);

@@ -177,13 +177,19 @@ static_assert(!COM::FunctionTypeCompliant<void*>());
             dirs.push_back(parent);
         }
     }
-    return out.OpenPlugin(
-               "ztest_mangle_fixture",
-               PluginSearchOptions {
-                   .stemPrefix = "",
-                   .searchDirs = dirs,
-               }
-           ) == SharedLibraryOpenStatus::Opened;
+    auto opened = SharedLibrary::OpenPlugin(
+        "ztest_mangle_fixture",
+        PluginSearchOptions {
+            .stemPrefix = "",
+            .searchDirs = dirs,
+        }
+    );
+    if (!opened.has_value() || !opened->has_value()) {
+        return false;
+    }
+    // The fixture must stay open in `out` for the symbol lookups below.
+    out = std::move((*opened)->library);
+    return true;
 }
 
 using FixtureAddrFn = decltype(&Mangle::FixtureSymbolAddress);

@@ -104,38 +104,52 @@ auto SharedLibrary::SplitSearchPath(std::string_view envValue) -> std::vector<st
     return dirs;
 }
 
-auto SharedLibrary::OpenPlugin(
-    std::string_view           spec,
-    const PluginSearchOptions& options,
-    std::filesystem::path*     outResolvedPath
-) -> SharedLibraryOpenStatus {
-    Close();
-    if (outResolvedPath != nullptr) {
-        outResolvedPath->clear();
-    }
+namespace {
+// Internal probe result. "Missing" keeps the search going; "Rejected" stops it,
+// because a file that exists and will not load is an answer, not a miss.
+enum class Probe : uint8_t { Missing, Loaded, Rejected };
+} // namespace
+
+auto SharedLibrary::OpenPlugin(const std::string_view spec, const PluginSearchOptions& options)
+    -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
     if (spec.empty()) {
-        return SharedLibraryOpenStatus::NotFound;
+        return std::optional<LoadedPlugin> {};
     }
 
-    auto tryCandidate = [&](const std::filesystem::path& candidate) -> SharedLibraryOpenStatus {
+    SharedLibrary         opened;
+    std::filesystem::path resolved;
+
+    const auto tryCandidate = [&](const std::filesystem::path& candidate) -> Probe {
         std::error_code ec;
         if (!std::filesystem::exists(candidate, ec) || ec) {
-            return SharedLibraryOpenStatus::NotFound;
+            return Probe::Missing;
         }
         if (std::filesystem::is_directory(candidate, ec) || ec) {
-            return SharedLibraryOpenStatus::NotFound;
+            return Probe::Missing;
         }
-        if (outResolvedPath != nullptr) {
-            *outResolvedPath = candidate;
-        }
-        if (!Open(candidate, options.bind)) {
-            return SharedLibraryOpenStatus::LoadFailed;
-        }
-        return SharedLibraryOpenStatus::Opened;
+        resolved = candidate;
+        return opened.Open(candidate, options.bind) ? Probe::Loaded : Probe::Rejected;
+    };
+
+    const auto finish = [&]() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+        return std::optional<LoadedPlugin> {LoadedPlugin {std::move(opened), std::move(resolved)}};
+    };
+    const auto rejected = []() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+        return std::unexpected(SharedLibraryError::LoadFailed);
+    };
+    const auto nothing = []() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+        return std::optional<LoadedPlugin> {};
     };
 
     if (IsExplicitPath(spec)) {
-        return tryCandidate(std::filesystem::path(spec));
+        switch (tryCandidate(std::filesystem::path(spec))) {
+            case Probe::Loaded:
+                return finish();
+            case Probe::Rejected:
+                return rejected();
+            case Probe::Missing:
+                return nothing();
+        }
     }
 
     std::string stem;
@@ -144,44 +158,55 @@ auto SharedLibrary::OpenPlugin(
     stem.append(spec);
     const auto names = FormatFileNames(stem);
 
-    auto probeDirectories = [&](std::span<const std::filesystem::path> directories) -> SharedLibraryOpenStatus {
+    const auto probeDirectories = [&](const std::span<const std::filesystem::path> directories) -> Probe {
         for (const auto& dir: directories) {
             if (dir.empty()) {
                 continue;
             }
             for (const auto& filename: names) {
-                const auto status = tryCandidate(dir / filename);
-                if (status != SharedLibraryOpenStatus::NotFound) {
-                    return status;
+                const Probe probe = tryCandidate(dir / filename);
+                if (probe != Probe::Missing) {
+                    return probe;
                 }
             }
         }
-        return SharedLibraryOpenStatus::NotFound;
+        return Probe::Missing;
     };
 
     if (!options.envPath.empty()) {
         const auto envDirs = SplitSearchPath(options.envPath);
-        if (const auto status = probeDirectories(envDirs); status != SharedLibraryOpenStatus::NotFound) {
-            return status;
+        switch (probeDirectories(envDirs)) {
+            case Probe::Loaded:
+                return finish();
+            case Probe::Rejected:
+                return rejected();
+            case Probe::Missing:
+                break;
         }
     }
 
-    if (const auto status = probeDirectories(options.searchDirs); status != SharedLibraryOpenStatus::NotFound) {
-        return status;
+    switch (probeDirectories(options.searchDirs)) {
+        case Probe::Loaded:
+            return finish();
+        case Probe::Rejected:
+            return rejected();
+        case Probe::Missing:
+            break;
     }
 
     if (options.allowSystemSearch) {
+        // The OS loader's own search path: there is no path to stat, so the load
+        // attempt *is* the probe, and a bare name that will not load is still a
+        // rejection rather than a miss.
         for (const auto& filename: names) {
-            if (Open(filename.c_str(), options.bind)) {
-                if (outResolvedPath != nullptr) {
-                    *outResolvedPath = filename;
-                }
-                return SharedLibraryOpenStatus::Opened;
+            if (opened.Open(filename.c_str(), options.bind)) {
+                resolved = filename;
+                return finish();
             }
         }
     }
 
-    return SharedLibraryOpenStatus::NotFound;
+    return nothing();
 }
 
 } // namespace ZHLN

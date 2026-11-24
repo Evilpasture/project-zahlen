@@ -272,8 +272,10 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     };
 
     for (const std::string_view name: {"freecam", "screenshot"}) {
-        SharedLibrary lib;
-        ExpectTrue(lib.OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs}) == SharedLibraryOpenStatus::Opened);
+        auto opened = SharedLibrary::OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs});
+        if (!ExpectTrue(opened.has_value() && opened->has_value()))
+            continue;
+        SharedLibrary lib = std::move((*opened)->library);
         if (!ExpectTrue(lib.IsOpen()))
             continue;
 
