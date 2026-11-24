@@ -5,6 +5,7 @@
 #if defined(__APPLE__)
 
 #include <Zahlen/Log.hpp>
+#include "render/OpenGLHacks/HostBlitLog.hpp"
 #include <GLFW/glfw3.h>
 #include <OpenGL/gl.h>
 #include "vulkan/Rendering.hpp"
@@ -39,10 +40,6 @@ struct State {
 
     bool ready = false;
 } g;
-
-void HostBlitLog(const char* msg) {
-    ZHLN::Log("HostBlit: {}", msg);
-}
 
 bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
     VkPhysicalDeviceMemoryProperties props {};
@@ -96,7 +93,6 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
         .pQueueFamilyIndices   = nullptr,
     };
     if (vkCreateBuffer(g.device, &bi, nullptr, &g.staging) != VK_SUCCESS) {
-        HostBlitLog("vkCreateBuffer failed for the host staging buffer.");
         return false;
     }
 
@@ -104,7 +100,6 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     vkGetBufferMemoryRequirements(g.device, g.staging, &req);
     uint32_t typeIndex = 0;
     if (!FindHostMemoryType(req.memoryTypeBits, typeIndex)) {
-        HostBlitLog("No HOST_VISIBLE|HOST_COHERENT memory type available.");
         vkDestroyBuffer(g.device, g.staging, nullptr);
         g.staging = VK_NULL_HANDLE;
         return false;
@@ -117,13 +112,11 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
         .memoryTypeIndex = typeIndex,
     };
     if (vkAllocateMemory(g.device, &ai, nullptr, &g.memory) != VK_SUCCESS) {
-        HostBlitLog("vkAllocateMemory failed for the host staging buffer.");
         vkDestroyBuffer(g.device, g.staging, nullptr);
         g.staging = VK_NULL_HANDLE;
         return false;
     }
     if (vkBindBufferMemory(g.device, g.staging, g.memory, 0) != VK_SUCCESS || vkMapMemory(g.device, g.memory, 0, req.size, 0, &g.mapped) != VK_SUCCESS) {
-        HostBlitLog("Could not bind/map the host staging buffer.");
         DestroyStaging();
         return false;
     }
@@ -168,7 +161,6 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         g.glWindow = nullptr;
     }
     if (!glfwInit()) {
-        HostBlitLog("glfwInit failed; cannot open a host presentation window.");
         return nullptr;
     }
 
@@ -185,7 +177,6 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
     g.glWindow = glfwCreateWindow(fbW > 0 ? fbW : 1280, fbH > 0 ? fbH : 720, "Zahlen — Host Blit", nullptr, nullptr);
     if (g.glWindow == nullptr) {
-        HostBlitLog("glfwCreateWindow (OpenGL 2.1) failed.");
         return nullptr;
     }
     return g.glWindow;
@@ -242,7 +233,6 @@ void Shutdown() noexcept;
     if (g.ready)
         return true;
     if (gpu == VK_NULL_HANDLE || device == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
-        HostBlitLog("Init needs a valid physical device, device and queue.");
         return false;
     }
     g.gpu         = gpu;
@@ -256,7 +246,6 @@ void Shutdown() noexcept;
         return false;
     }
     g.ready = true;
-    HostBlitLog("Initialized (offscreen host presenter; no engine state touched).");
     return true;
 }
 
@@ -285,7 +274,6 @@ void Shutdown() noexcept;
     if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
         return false;
     if (!ReadBackPixels(src.View().Mip(0), width, height, srcLayout)) {
-        HostBlitLog("Readback copy failed; frame skipped.");
         return !glfwWindowShouldClose(target);
     }
 

@@ -368,6 +368,15 @@ without touching Core, and a sink matches on the channel name structurally
 capture ring and a harness counter all render a line identically without
 agreeing on a `std::string` across a DSO.
 
+Message style follows from the same idea. A line reads `<subject> <action>
+(<key>=<value> ...)` -- `MeshShader fallback (vertices=32, budget=64)`,
+`Windowed session failed (stage=os-window-create)`, `Global texture slots
+exhausted (slots=4096, upload=refused)`. Lowercase after the subject, no trailing
+full stop, and no `[Vulkan]`-style tag pasted into the text: the channel already
+prefixes the rendered line, so a tag in the message would print twice. A leaf
+that returns an error does not also log it; the boundary that turns the code into
+a frame result is where it gets said.
+
 `include/Zahlen/COM/` declares its own wire copies (`COM::LogSeverity`,
 `COM::LogSource`, `COM::LogContext`) and includes no Layer-0 header at all, so a
 strict COM consumer logs through `COM::Log(logger, "...", args...)` without

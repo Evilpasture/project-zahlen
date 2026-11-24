@@ -129,8 +129,10 @@ auto AcquireGlfw() -> bool {
     if (!glfwInit()) {
         const char* desc = nullptr;
         const int   err  = glfwGetError(&desc);
+        // Logged here, not returned-only: GLFW's own description is the part that
+        // says *why*, and the boolean this function returns cannot carry it.
         if (desc != nullptr) {
-            kLog.Error("glfwInit failed: ({}) {}", err, desc);
+            kLog.Error("GLFW init failed (code={}, reason={})", err, desc);
         }
         return false;
     }

@@ -167,16 +167,19 @@ auto Instance::Create(
     bool                       enable_validation  = validation != ValidationMode::Off;
     bool                       gpu_validation     = validation == ValidationMode::GPU;
     if (enable_validation && !HasLayer(available_layers, k_validation_layer)) {
-        kVkLog.Warn("Validation layer {} is not available; continuing without validation.", k_validation_layer);
+        kVkLog.Warn("Validation layer unavailable (name={}, validation=off)", k_validation_layer);
         enable_validation = false;
         gpu_validation    = false;
     }
 
     std::vector<std::string> enabled_extension_names;
     enabled_extension_names.reserve(extensions.size() + 3);
-    const auto add_if_supported = [&](const std::string_view name, const std::string_view messagePrefix) {
+    // `stage` is a key, not a sentence: the channel already says Vulkan, so the
+    // line reads "Instance extension unavailable (name=..., stage=...)" with no
+    // "[Vulkan]" pasted into the message.
+    const auto add_if_supported = [&](const std::string_view name, const std::string_view stage) {
         if (!HasExtension(available_extensions, name)) {
-            kVkLog.Warn("{}{}", messagePrefix, name);
+            kVkLog.Warn("Instance extension unavailable (name={}, stage={})", name, stage);
             return false;
         }
         if (!std::ranges::contains(enabled_extension_names, name)) {
@@ -186,18 +189,18 @@ auto Instance::Create(
     };
 
     for (const std::string_view extension: extensions) {
-        add_if_supported(extension, "[Vulkan] Skipping unsupported instance extension: ");
+        add_if_supported(extension, "requested");
     }
 
     const bool debug_utils_enabled = validation != ValidationMode::Off &&
-                                     add_if_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "[Vulkan] Debug utils is unavailable: ");
+                                     add_if_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "debug-utils");
     const bool validation_features_enabled = enable_validation && gpu_validation &&
-                                             add_if_supported(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, "[Vulkan] GPU-assisted validation is unavailable: ");
+                                             add_if_supported(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, "gpu-validation");
     if (gpu_validation && !validation_features_enabled) {
         gpu_validation = false;
     }
     const bool layer_settings_enabled = enable_validation && gpu_validation &&
-                                        add_if_supported(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME, "[Vulkan] Layer settings extension is unavailable: ");
+                                        add_if_supported(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME, "layer-settings");
 
     std::vector<const char*> enabled_extensions;
     enabled_extensions.reserve(enabled_extension_names.size());
@@ -306,7 +309,7 @@ auto Instance::Create(
         const VkResult messenger_created                  = vkCreateDebugUtilsMessengerEXT(handle, &messenger_info, nullptr, &result._messenger);
         if (messenger_created != VK_SUCCESS) {
             result._messenger = VK_NULL_HANDLE;
-            kVkLog.Warn("Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
+            kVkLog.Warn("Validation debug messenger creation failed (result={})", static_cast<int32_t>(messenger_created));
         }
     }
 

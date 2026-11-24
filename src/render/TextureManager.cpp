@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "render/RenderLog.hpp"
 #include "render/TextureManager.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Hash.hpp>
@@ -283,7 +284,10 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
         _freeSlots.pop_back();
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
-            kLog.Error("globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            // Kept, unlike the other log-and-return sites: nothing between here
+            // and the frame boundary reports this code, so dropping the line would
+            // leave a refused upload with no trace at all.
+            kRenderLog.Error("Global texture slots exhausted (slots={}, upload=refused)", kGlobalTextureSlots);
 
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);

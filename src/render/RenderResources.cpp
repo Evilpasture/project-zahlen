@@ -1315,12 +1315,9 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
 auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
     auto provoked = _impl->ProvokeDeviceLostInternal();
     if (!provoked) [[unlikely]] {
-        // The expected failure is the loss itself, which the recovery path reports
-        // once it acts on it. Only a submission that failed for some other reason
-        // needs a line of its own here.
-        if (!IsDeviceLost(provoked.error())) {
-            kRenderLog.Error("Failed to submit the device-loss dispatch ({}).", provoked.error());
-        }
+        // Returned, not narrated: the recovery path reports the loss once it acts
+        // on it, and a caller that fails here propagates the same code up to the
+        // frame boundary, which is where it gets said.
         return std::unexpected(AsFrameError(provoked.error()));
     }
     return {};
