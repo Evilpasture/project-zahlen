@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Zahlen/App.hpp>
-#include <cstdio>
-#include <format>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IEntities.hpp>
@@ -51,7 +49,7 @@ struct Game {
                 .castsShadow = true});
         if (floor == ZHLN::Entity::Null() || box == ZHLN::Entity::Null() ||
             sun == ZHLN::Entity::Null()) {
-            ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "Could not create the example scene");
+            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "Could not create the example scene");
             engine.RequestClose();
         }
     }

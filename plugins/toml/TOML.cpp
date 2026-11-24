@@ -14,8 +14,6 @@
 // The tree is a deque of nodes so that node addresses stay stable while the
 // document is still being built (Value holds raw pointers into it).
 
-#include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <format>
 #include <charconv>
 #include <cstdlib>
@@ -28,7 +26,6 @@
 #include <toml/TOML.hpp>
 #include <utility>
 #include <vector>
-
 
 namespace ZHLN::ReflectTOML {
 
@@ -126,7 +123,6 @@ class Parser {
         _failure = ParseFailure {.code = error, .line = static_cast<uint32_t>(Line()), .detail = std::string(reason)};
         return std::unexpected(error);
     }
-
 
     // Spaces, tabs, comments and -- when `newlines` -- line breaks.
     void SkipInsignificant(bool newlines) noexcept {

@@ -21,7 +21,6 @@
 #include <BSP/BSPVradLightmap.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Log.hpp>
 #include <array>
 #include <cmath>
 #include <string>

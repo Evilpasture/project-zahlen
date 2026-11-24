@@ -3,7 +3,6 @@
 
 #include "DecalSystem.hpp"
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <render/Render.hpp>
 #include <ecs/ECS.hpp>

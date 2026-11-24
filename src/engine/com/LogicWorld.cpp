@@ -4,6 +4,7 @@
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include "LogBridge.hpp"
 #include <ecs/ECS.hpp>
 #include <engine/World.hpp>
 #include <physics/Physics.hpp>
@@ -133,7 +134,7 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         // for as long as this world lives, so leave it alone.
         if (ZHLN::GetLogSink().write == nullptr) {
             m_previousSink  = ZHLN::GetLogSink();
-            ZHLN::SetLogSink(m_logger->AsSink());
+            ZHLN::SetLogSink(ZHLN::LogBridge::ToSink(m_logger.Get()));
             m_installedSink = true;
         }
         Reflect::ForEachNestedType<Components>([&]<class T>() {
@@ -536,24 +537,24 @@ auto CreateLogicWorldRaw(const ChainInNode* config) noexcept -> Result<ILogicWor
     PhysicsConfig physics {};
     LoggerConfig  loggerNode {};
     ErrorConfig   errorNode {};
-    if (const auto readSvc = DispatchInChain<LoggerConfig, ErrorConfig>(
-            config,
-            [&]<typename Node>(const Node& node) -> Result<void> {
-                if constexpr (std::is_same_v<Node, LoggerConfig>) {
-                    loggerNode = node;
-                } else {
-                    errorNode = node;
-                }
-                return {};
+    // One dispatch over every node this factory accepts. Two sequential
+    // DispatchInChain calls could never both succeed: each rejects any node in
+    // the chain that is not in its own AllowedTs list, so a chain carrying
+    // PhysicsConfig failed the LoggerConfig/ErrorConfig pass and a chain
+    // carrying either of those failed the PhysicsConfig pass. Only a null chain
+    // got through.
+    const auto read = DispatchInChain<PhysicsConfig, LoggerConfig, ErrorConfig>(
+        config, [&]<typename Node>(const Node& node) -> Result<void> {
+            if constexpr (std::is_same_v<Node, PhysicsConfig>) {
+                physics = node;
+            } else if constexpr (std::is_same_v<Node, LoggerConfig>) {
+                loggerNode = node;
+            } else {
+                errorNode = node;
             }
-        );
-        !readSvc.HasValue()) {
-        return readSvc.error;
-    }
-    auto          read = DispatchInChain<PhysicsConfig>(config, [&](const PhysicsConfig& c) -> Result<void> {
-        physics = c;
-        return {};
-    });
+            return {};
+        }
+    );
     if (!read.HasValue())
         return read.error;
     if (!physics.maxBodies || !physics.maxBodyPairs || !physics.maxContactConstraints || !physics.tempAllocatorSize)
@@ -563,11 +564,16 @@ auto CreateLogicWorldRaw(const ChainInNode* config) noexcept -> Result<ILogicWor
     if (loggerNode.logger != nullptr) {
         logger = Ref<ILogger>(loggerNode.logger);
     } else {
-        auto made = CreateLogger();
+        // Honor the level the caller asked for: a world created without a
+        // LoggerConfig node still gets the console default, but one that named
+        // a level gets that level instead of the factory's Info.
+        auto made = CreateLogger(InChain(LoggerConfig {.logger = nullptr, .level = loggerNode.level}));
         if (!made) return made.error();
         logger = Ref<ILogger>(made->Get());
     }
     if (errors.Get() == nullptr) {
+        // A caller-supplied registry (above) already carries whatever detail it
+        // recorded; this branch only runs when there is nothing to seed from.
         auto made = CreateErrorRegistry();
         if (!made) return made.error();
         errors = std::move(*made);

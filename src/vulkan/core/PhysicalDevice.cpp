@@ -3,8 +3,6 @@
 
 #include "vulkan/core/PhysicalDevice.hpp"
 #include "vulkan/core/Extensions.hpp"
-#include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <cstddef>
 #include <optional>
 #include <utility>

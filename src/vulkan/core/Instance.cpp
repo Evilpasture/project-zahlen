@@ -4,7 +4,6 @@
 #include <Zahlen/Log.hpp>
 #include "vulkan/core/Instance.hpp"
 #include "vulkan/core/Extensions.hpp"
-#include <cstdio>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -12,6 +11,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -130,16 +130,16 @@ auto VKAPI_CALL Instance::DebugCallback(
     // time, so it tracks whatever sink the engine installed most recently.
     (void) userData;
     if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
-        Log<LogTag::Error, LogTag::Vulkan>("{}", message);
+        kVkLog.Error("{}", message);
         constexpr std::array<std::string_view, 4> k_gpu_bounds_markers = {"out of bounds", "Out of bounds", "OOB", "bounds check failed"};
         if (ContainsAny(message, k_gpu_bounds_markers)) {
-            Log<LogTag::Error, LogTag::Vulkan>("GPU-assisted validation detected an out-of-bounds shader access; aborting.");
+            kVkLog.Error("GPU-assisted validation detected an out-of-bounds shader access; aborting.");
             std::abort();
         }
     } else if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0) {
-        Log<LogTag::Warning, LogTag::Vulkan>("{}", message);
+        kVkLog.Warn("{}", message);
     } else {
-        Log<LogTag::Vulkan>("{}", message);
+        kVkLog.Info("{}", message);
     }
 
     return VK_FALSE;
@@ -167,7 +167,7 @@ auto Instance::Create(
     bool                       enable_validation  = validation != ValidationMode::Off;
     bool                       gpu_validation     = validation == ValidationMode::GPU;
     if (enable_validation && !HasLayer(available_layers, k_validation_layer)) {
-        Log<LogTag::Warning, LogTag::Vulkan>("Validation layer {} is not available; continuing without validation.", k_validation_layer);
+        kVkLog.Warn("Validation layer {} is not available; continuing without validation.", k_validation_layer);
         enable_validation = false;
         gpu_validation    = false;
     }
@@ -176,7 +176,7 @@ auto Instance::Create(
     enabled_extension_names.reserve(extensions.size() + 3);
     const auto add_if_supported = [&](const std::string_view name, const std::string_view messagePrefix) {
         if (!HasExtension(available_extensions, name)) {
-            Log<LogTag::Warning, LogTag::Vulkan>("{}{}", messagePrefix, name);
+            kVkLog.Warn("{}{}", messagePrefix, name);
             return false;
         }
         if (!std::ranges::contains(enabled_extension_names, name)) {
@@ -306,7 +306,7 @@ auto Instance::Create(
         const VkResult messenger_created                  = vkCreateDebugUtilsMessengerEXT(handle, &messenger_info, nullptr, &result._messenger);
         if (messenger_created != VK_SUCCESS) {
             result._messenger = VK_NULL_HANDLE;
-            Log<LogTag::Warning, LogTag::Vulkan>("Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
+            kVkLog.Warn("Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
         }
     }
 

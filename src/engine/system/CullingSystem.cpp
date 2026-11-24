@@ -14,8 +14,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <ecs/ECS.hpp>
-#include <cstdio>
-#include <format>
 
 
 namespace ZHLN::Tests { namespace {
@@ -50,17 +48,17 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Ent
     }
 
     if (visible.size() > entities.size()) {
-        Log<LogTag::Error>("Culling verification: visible count {} exceeds total entity count {}", visible.size(), entities.size());
+        kLog.Error("Culling verification: visible count {} exceeds total entity count {}", visible.size(), entities.size());
     }
 
     for (Entity e: visible) {
         if (!query.IsAlive(e)) {
-            Log<LogTag::Error>("Culling verification: visible list contains dead entity {}", e.index);
+            kLog.Error("Culling verification: visible list contains dead entity {}", e.index);
         }
     }
 
     if (stats.EnableCulling && visible.size() != expectedVisible) {
-        Log<LogTag::Warning>("Culling verification: visible count {} does not match expected {}", visible.size(), expectedVisible);
+        kLog.Warn("Culling verification: visible count {} does not match expected {}", visible.size(), expectedVisible);
     }
 }
 }}

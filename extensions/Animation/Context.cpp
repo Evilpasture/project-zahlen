@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Animation/Context.hpp>
-#include <cstdio>
-#include <format>
 #include <Animation/IK.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -939,7 +937,7 @@ void Context::Step(
                     // The palette upload is best-effort per frame, but a
                     // failure is not nothing: the skinning of this instance
                     // stays at whatever the GPU held last.
-                    ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Render>("Joint palette upload failed for offset {}: {}", slice.jointOffset, res.error);
+                    ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Render"}, "Joint palette upload failed for offset {}: {}", slice.jointOffset, res.error);
                 }
             }
             if (sink.uploadPalette != nullptr) {

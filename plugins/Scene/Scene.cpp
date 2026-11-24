@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Scene.hpp"
-#include <cstdio>
-#include <format>
 #include "SceneExtraction.hpp"
 #include "SceneFields.hpp"
 #include <Zahlen/Core/Defer.hpp>

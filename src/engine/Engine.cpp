@@ -56,6 +56,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "engine/EngineLog.hpp"
 
 namespace ZHLN {
 
@@ -188,7 +189,7 @@ void Engine::TraceDiagnostics() const noexcept {
 Engine::Engine(): _impl(nullptr) {
 }
 
-auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+auto Engine::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<void, ErrorCode> {
     // Dropping the old RenderContext retires emitter buffers in Destroy(); the
     // replacement renderer is created after that. Component authoring data survives.
     auto& reg = _impl->world->GetRegistry();
@@ -200,7 +201,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         owned.mesh = {}; // the old context will reclaim its pool; never destroy these on the new device
     }
 
-    if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
+    if (auto rebuilt = _impl->kernel->HandleDeviceLost(drainDevice); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
     ++_impl->deviceGeneration;
@@ -410,14 +411,14 @@ void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
         // loss is *observed*. Recovery is also reachable deliberately
         // (IEngine::RecreateGraphicsDevice on a healthy device), and a reset is not
         // a loss, so it must not look like one.
-        Log<LogTag::Error, LogTag::DeviceLost>("device lost; recreating the renderer");
+        kDeviceLostLog.Error("device lost; recreating the renderer");
         // The fault report is evidence of *this* loss and it dies with the device, so
         // it is taken here, in the observer, like the count. Recovery stays pure, and
         // a deliberate reset can no longer reach it: on a healthy device the dump
         // would report "0 fault reports" to stderr.
         engine.Render().DumpDeviceFaultReport();
         if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
-            Log<LogTag::Error>("Fatal: GPU device recovery failed: {}", lostRes.error());
+            kLog.Error("Fatal: GPU device recovery failed: {}", lostRes.error());
             ctx.error = lostRes.error();
             engine.Session().CloseWindow();
         }
@@ -714,7 +715,7 @@ auto Engine::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
     if (!provoked && provoked.error() == FrameResult::DeviceLost) {
         // Same path a captured frame takes, so DeviceLostCount moves for the
         // reason production would, not because a test-only branch logged.
-        Log<LogTag::Error, LogTag::DeviceLost>("device lost; recreating the renderer");
+        kDeviceLostLog.Error("device lost; recreating the renderer");
         Render().DumpDeviceFaultReport();
         return HandleDeviceLost();
     }

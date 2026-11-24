@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Benchmark.hpp>
-#include <cstdio>
-#include <format>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -136,9 +134,10 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
     size_t spawned = 0;
     for (; spawned < count; ++spawned) {
         if (m_liveBodies >= m_bodyCeiling) {
-            if (!m_ceilingReported) {
-                m_ceilingReported = true;
-            }
+            // The workload stops at the configured ceiling. (The one-time line
+            // that told the operator to raise PhysicsConfig::maxBodies is gone
+            // with the rest of the benchmark's ambient logging; the ceiling
+            // itself is what the numbers are measured against.)
             break;
         }
 

@@ -5,6 +5,7 @@
 #include "presentation/PresentationTarget.hpp"
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Log.hpp>
+#include "vulkan/VulkanLog.hpp"
 
 
 namespace {
@@ -51,15 +52,14 @@ template <typename CreateInfo>
         // The caller only sees the returned ordinal; which entry point was
         // missing and which extension would provide it is information that
         // exists nowhere else.
-        ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Vulkan>(
-            "{} is unavailable; {} was not enabled on the instance.", entryPoint, extension
+        ZHLN::kVkLog.Warn("{} is unavailable; {} was not enabled on the instance.", entryPoint, extension
         );
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::WindowSurfaceUnsupported);
     }
 
     VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
     if (create(instance, &info, nullptr, &rawSurface) != VK_SUCCESS || rawSurface == VK_NULL_HANDLE) {
-        ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Vulkan>("{} failed for this window.", entryPoint);
+        ZHLN::kVkLog.Warn("{} failed for this window.", entryPoint);
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::WindowSurfaceCreationFailed);
     }
     return ZHLN::Vk::Surface(instance, rawSurface);

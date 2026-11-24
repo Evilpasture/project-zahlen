@@ -38,11 +38,9 @@
 // and a reason, which is what the panel draws.
 
 #include "SystemProbe.hpp"
-#include <cstdio>
 #include <format>
 #include <Zahlen/Core/SharedLibrary.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -58,7 +56,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
 
 namespace ZHLN::Bench::Platform {
 
@@ -598,8 +595,6 @@ auto NvmlProbe::Init(std::string_view gpuNameHint) -> std::expected<void, ErrorC
 
     _device = chosen->first;
     _name   = std::move(chosen->second);
-    if (!gpuNameHint.empty() && !_name.empty() && _name != gpuNameHint) {
-    }
     return {};
 }
 
@@ -663,9 +658,6 @@ class LinuxProbe final: public SystemProbe {
         InitGpu(gpuNameHint);
 
         _backend = BackendLabel(_cores > 0 ? "procfs" : "", GpuSourceLabel());
-
-        if (const std::string_view name = GpuName(); !name.empty()) {
-        }
     }
 
     [[nodiscard]] auto Sample() noexcept -> std::optional<ProbeSample> override {

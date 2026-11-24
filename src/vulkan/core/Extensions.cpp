@@ -3,8 +3,8 @@
 
 #include "vulkan/core/Extensions.hpp"
 #include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <expected>
+#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -151,7 +151,7 @@ auto ExtensionBuilder::OptionalGroup(const std::initializer_list<std::string_vie
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ErrorCode> {
     if (!_missingRequired.empty()) {
         for (const auto& name: _missingRequired) {
-            Log<LogTag::Error, LogTag::Vulkan>("Required extension is not supported: {}", name);
+            kVkLog.Error("Required extension is not supported: {}", name);
         }
         return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }

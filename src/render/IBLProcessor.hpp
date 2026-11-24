@@ -23,7 +23,6 @@
 #include <numbers>
 #include <span>
 #include <utility>
-#include <cstdio>
 #include <format>
 
 

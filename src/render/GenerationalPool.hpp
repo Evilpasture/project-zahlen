@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <utility>
+#include "render/RenderLog.hpp"
 
 
 namespace ZHLN {
@@ -37,7 +38,7 @@ class GenerationalPool {
     template <typename... Args>
     IDType Create(Args&&... args) {
         if (_freeIndices.empty()) [[unlikely]] {
-            Log<LogTag::Error, LogTag::Render>("GenerationalPool exhausted ({} live objects); Create returns a null handle.", MaxObjects);
+            kRenderLog.Error("GenerationalPool exhausted ({} live objects); Create returns a null handle.", MaxObjects);
             return static_cast<IDType>(0);
         }
         uint32_t index = _freeIndices.back();

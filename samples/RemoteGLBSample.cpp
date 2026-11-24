@@ -481,12 +481,12 @@ void ClearSubject(ZHLN::COM::IEngine& engine, Subject& subject) {
 auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
     auto doc = ZHLN::GLTF::Decode(bytes, virtualPath, {}, {}, engine.Assets());
     if (!doc) {
-        ZHLN::Log(engine.Logger(), "'{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
+        ZHLN::COM::Log(engine.Logger(), "'{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
     }
     auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
     if (!asset) {
-        ZHLN::Log<ZHLN::LogTag::Error>("'{}' failed to upload; the previous subject stays on screen.", virtualPath);
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "'{}' failed to upload; the previous subject stays on screen.", virtualPath);
         return false;
     }
     ClearSubject(engine, subject);
@@ -523,11 +523,8 @@ auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const
     subject.document  = std::move(*doc);
     subject.asset     = std::move(*asset);
     subject.loaded    = true;
-    ZHLN::Log(engine.Logger(),
-        "Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
-        virtualPath, subject.document->parts.size(), subject.document->nodes.size(), subject.triangles, subject.textures,
-        subject.center.x, subject.center.y, subject.center.z, subject.radius, written
-    );
+    ZHLN::COM::Log(engine.Logger(), "Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).", virtualPath, subject.document->parts.size(), subject.document->nodes.size(), subject.triangles, subject.textures,
+        subject.center.x, subject.center.y, subject.center.z, subject.radius, written);
     return true;
 }
 
@@ -1087,18 +1084,16 @@ void PollFetch(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.fetchDetail   = std::move(result->errorMessage);
 
     if (status == ZHLN::Remote::FetchStatus::Failed) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
-        ZHLN::Log(engine.Logger(), "Check the URL and the network, then press R to try again.");
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
+        ZHLN::COM::Log(engine.Logger(), "Check the URL and the network, then press R to try again.");
         return;
     }
 
     if (!state.fetchDetail.empty()) {
-        ZHLN::Log(engine.Logger(), "{}", state.fetchDetail);
+        ZHLN::COM::Log(engine.Logger(), "{}", state.fetchDetail);
     }
-    ZHLN::Log(engine.Logger(),
-        "{} {} KiB in {:.2f}s: {}", state.lastFromCache ? "Cache hit," : "Downloaded", result->data.size() / 1024U, elapsed,
-        state.lastSource
-    );
+    ZHLN::COM::Log(engine.Logger(), "{} {} KiB in {:.2f}s: {}", state.lastFromCache ? "Cache hit," : "Downloaded", result->data.size() / 1024U, elapsed,
+        state.lastSource);
 
     // The cache file's name is the model's identity in the prefab cache, so a
     // second run and a device-lost rebuild import the same name and hit it.
@@ -1123,8 +1118,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
 
     if (KeyPressed(state, *input, ZHLN::KeyCode::F) && state.subject.loaded) {
         FrameSubject(state.orbit, state.subject);
-        ZHLN::Log(engine.Logger(), "Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x,
-                  state.subject.center.y, state.subject.center.z);
+        ZHLN::COM::Log(engine.Logger(), "Re-framed: {:.3f} m from ({:.2f}, {:.2f}, {:.2f}).", state.orbit.distance, state.subject.center.x, state.subject.center.y, state.subject.center.z);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::G) && state.studio.floor != ZHLN::Entity::Null()) {
         state.studio.floorOn = !state.studio.floorOn;
@@ -1137,7 +1131,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
         state.studio.ssrOn = !state.studio.ssrOn;
         { ZHLN::GraphicsSettings gfx = engine.Graphics()->Settings(); gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0; engine.Graphics()->ApplySettings(gfx); }
-        ZHLN::Log(engine.Logger(), "Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
+        ZHLN::COM::Log(engine.Logger(), "Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
     }
     // H — hide the subject itself, shadow casters and reflections with it: the
     // other half of the floor-shimmer A/B test. If the shimmer follows the
@@ -1148,7 +1142,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
         SetSubjectVisible(engine, state.subject, state.studio);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::R)) {
-        ZHLN::Log(engine.Logger(), "Re-downloading '{}', ignoring the cache.", state.assetUrl);
+        ZHLN::COM::Log(engine.Logger(), "Re-downloading '{}', ignoring the cache.", state.assetUrl);
         state.reported = false;
         state.fetchDetail.clear();
         state.activeRequest = state.fetcher->Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, true);
@@ -1158,7 +1152,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
     // it is one small request, and its result will be Ready or Failed either
     // way -- and the frame never starts a second crawl underneath one.
     if (KeyPressed(state, *input, ZHLN::KeyCode::C) && (state.catalog.phase.load(std::memory_order::acquire) != CatalogPhase::Loading)) {
-        ZHLN::Log(engine.Logger(), "Re-crawling the model list: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::COM::Log(engine.Logger(), "Re-crawling the model list: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         state.catalogSeeded = false; // seed again once the new listing arrives
         StartCatalogCrawl(state.catalog, EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout));
     }
@@ -1214,8 +1208,7 @@ void HandleInput(ZHLN::COM::IEngine& engine, SampleState& state) {
         gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
-        ZHLN::Log(engine.Logger(), "Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution,
-                  gfx.post.giSamples, gfx.post.enableSSR, gfx.rayTracing.enableReflections, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
+        ZHLN::COM::Log(engine.Logger(), "Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, AA {}, denoise {}).", QualityName(ZHLN::DetectPreset(gfx)), gfx.shadows.resolution, gfx.post.giSamples, gfx.post.enableSSR, gfx.rayTracing.enableReflections, AAName(gfx.antiAliasing.mode), gfx.rayTracing.denoiserPasses);
     }
 }
 
@@ -1345,7 +1338,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
     if (auto fontID = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine->Logger(), "Font asset failed to load ({}), using embedded default.", fontID.error());
     } else {
         ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
@@ -1370,14 +1363,9 @@ auto main(int argc, char* argv[]) -> int {
     // off or fails).
     state.displayEntries = {MakeSyntheticEntry(state.assetUrl)};
 
-    // The turntable owns the camera, so core's WASD free-cam has to come off the
-    // camera entity or the two write the same transform every frame.
-    {
-        const auto cameraOpt = engine->Entities()->SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
-        const ZHLN::Entity camera = cameraOpt.HasValue() ? cameraOpt.value : ZHLN::Entity{};
-        if (camera != ZHLN::Entity::Null()) {
-        }
-    }
+    // The turntable owns the camera. The freecam layer is loaded by name and this
+    // sample never loads it, so nothing else writes the camera's transform; the
+    // empty `if` that used to sit here detached a layer that was never attached.
 
     // A new VkDevice leaves every primitive this sample built behind with the old
     // one. The model rebuilds itself through the importer's subscription; the
@@ -1412,15 +1400,15 @@ auto main(int argc, char* argv[]) -> int {
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
     if (EnvironmentFlag("ZHLN_REMOTE_GLB_NO_CATALOG")) {
-        ZHLN::Log(engine->Logger(), "Catalog: disabled (ZHLN_REMOTE_GLB_NO_CATALOG=1)");
+        ZHLN::COM::Log(engine->Logger(), "Catalog: disabled (ZHLN_REMOTE_GLB_NO_CATALOG=1)");
     } else {
-        ZHLN::Log(engine->Logger(), "Catalog: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::COM::Log(engine->Logger(), "Catalog: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         StartCatalogCrawl(state.catalog, timeoutSeconds);
     }
 
     const ZHLN::Remote::ResolvedURL resolvedAsset = ZHLN::Remote::ResolveURL(state.assetUrl);
-    ZHLN::Log(engine->Logger(), "Asset: {}", state.assetUrl);
-    ZHLN::Log(engine->Logger(), "Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
+    ZHLN::COM::Log(engine->Logger(), "Asset: {}", state.assetUrl);
+    ZHLN::COM::Log(engine->Logger(), "Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
     state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
     state.fetchStartedAt = clock.WallTimeSinceStart();
 
@@ -1463,12 +1451,12 @@ auto main(int argc, char* argv[]) -> int {
         }
         const auto result = engine->Tick(state.dt);
         if (!result.HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
+            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine->Logger(), "frame failed: {}", result.error);
             break;
         }
 
         if (state.frameBudget != 0 && engine->CurrentFrame() >= state.frameBudget) {
-            ZHLN::Log(engine->Logger(), "Frame budget of {} reached; exiting.", state.frameBudget);
+            ZHLN::COM::Log(engine->Logger(), "Frame budget of {} reached; exiting.", state.frameBudget);
             break;
         }
     }

@@ -10,7 +10,6 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/COM/IEngine.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>

@@ -4,7 +4,6 @@
 #include "render/PresentationSurface.hpp"
 #include "render/RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <memory>
 #include <utility>
 
@@ -42,7 +41,7 @@ namespace {
 
     const Vk::SwapchainTarget& image = **acquired;
     if (dest.cachedGeneration != 0 && dest.cachedGeneration != image.generation) {
-        Log<LogTag::Debug>("Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
+        kLog.Debug("Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
     }
     dest.cachedGeneration = image.generation;
 
@@ -290,9 +289,11 @@ auto RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     // No idle wait of its own: the only caller is RenderContext::ReleaseDevice(),
-    // and the two paths that reach it differ exactly here -- Destroy() has just
-    // drained the device, while recovery does not drain at all, because the device it
-    // is releasing is already gone.
+    // and the paths that reach it differ exactly here -- Destroy() has just
+    // drained the device (which is also how a deliberate reset through
+    // IEngine::RecreateGraphicsDevice drains a *healthy* device before its
+    // destinations go away), while recovery does not drain at all, because the
+    // device it is releasing is already gone.
     destinations.AbortRecordings();
     for (auto& destination: destinations.Windows()) {
         if (!destination.IsPrimary()) {

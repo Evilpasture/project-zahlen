@@ -673,7 +673,7 @@ auto InstantiatePrefabInternal(
 }
 
 void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& reg) {
-    Log<LogTag::Warning>("Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
+    kLog.Warn("Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     gfx.ClearGPUCaches();
 

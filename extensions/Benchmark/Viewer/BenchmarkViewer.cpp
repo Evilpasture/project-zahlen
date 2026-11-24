@@ -920,7 +920,7 @@ void Viewer::Impl::ToggleCapture() {
     }
     // Capture could not be started (unwritable path): the viewer still runs,
     // it just has no frame table to write.
-    ZHLN::Log<ZHLN::LogTag::Warning>("telemetry capture could not be started; running without it.");
+    ZHLN::Log<ZHLN::LogSeverity::Warning>("telemetry capture could not be started; running without it.");
 }
 
 void Viewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine) {
@@ -1076,13 +1076,13 @@ void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
 
     m_impl->benchmark = std::make_unique<LogicBenchmark>();
     if (!m_impl->benchmark->Initialize(initialEntities)) {
-        ZHLN::Log<ZHLN::LogTag::Error>(engine.Logger(), "the benchmark world failed to initialize, so there is nothing to draw.");
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "the benchmark world failed to initialize, so there is nothing to draw.");
         m_impl->benchmark.reset();
         return;
     }
 
     m_impl->frameClock.Reset();
-    ZHLN::Log(engine.Logger(), "viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
+    ZHLN::COM::Log(engine.Logger(), "viewer attached to the engine: {} entities, panel {}.", initialEntities, m_impl->visible ? "shown" : "hidden");
 }
 
 void Viewer::Tick(ZHLN::COM::IEngine& engine) {

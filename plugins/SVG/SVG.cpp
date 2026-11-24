@@ -8,8 +8,6 @@
 
 #include <SVG/SVG.hpp>
 #include <cstdio>
-#include <format>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -25,7 +23,6 @@
 #else
 #include <resvg.h>
 #endif
-
 
 // The API this file is written against -- resvg_render taking a transform plus
 // an explicit pixel size, resvg_size/resvg_rect with float members, the option

@@ -3,14 +3,12 @@
 // The composition root owns every GUI frame and submission, not the plugin.
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <cstdio>
-#include <format>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/HostRunner.hpp>
 #include <UI/HostUI.hpp>
-#include <Zahlen/Log.hpp>
 #include <array>
 #include <charconv>
 #include <cstdlib>

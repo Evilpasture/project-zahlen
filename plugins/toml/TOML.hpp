@@ -351,22 +351,24 @@ auto GetValue(Value reader, ParseFailure* failure = nullptr) -> std::expected<Fi
     }
 }
 
-// Fills a reflected struct from a table. Absent keys keep their default;
-// keys the struct does not declare are logged and skipped.
+// Fills a reflected struct from a table. Absent keys keep their default; keys
+// the struct does not declare are skipped -- a document may carry fields a
+// given reader does not know (an older binary against a newer file), and this
+// parser has no warning channel to report them through: ParseWithDiagnostics
+// reports failures, and tolerating a surplus key is not one.
 template <typename T>
 auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorCode> {
     if (!reader.IsValid()) {
         return std::unexpected(TOMLError::MissingField);
     }
 
-    auto documentKeys = reader.GetTableKeys();
-    if (!documentKeys) {
+    // Proves the reader is a table before anything is read out of it.
+    if (const auto documentKeys = reader.GetTableKeys(); !documentKeys) {
         return std::unexpected(documentKeys.error());
     }
 
-    T                    obj {};
+    T                       obj {};
     std::optional<ErrorCode> err;
-    std::vector<bool>    consumed(documentKeys->size(), false);
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> void {
         if (err) {
@@ -374,12 +376,6 @@ auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorC
         }
 
         using FieldType = std::decay_t<decltype(fieldVal)>;
-
-        for (size_t i = 0; i < documentKeys->size(); ++i) {
-            if ((*documentKeys)[i] == fieldName) {
-                consumed[i] = true;
-            }
-        }
 
         auto keyReader = reader.GetKey(fieldName);
         if (!keyReader) {
@@ -408,11 +404,6 @@ auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorC
 
     if (err) {
         return std::unexpected(*err);
-    }
-
-    for (size_t i = 0; i < documentKeys->size(); ++i) {
-        if (!consumed[i]) {
-        }
     }
 
     return obj;

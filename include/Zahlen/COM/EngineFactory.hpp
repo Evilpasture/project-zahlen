@@ -11,15 +11,23 @@
 // an extern "C" shim or a hand-written dispatch struct.
 //
 // Creation options cross as a non-intrusive reflected ChainInNode list
-// (COM::InChain(...)) over granular config slices (AppConfig,
-// WindowConfig, RenderConfig, PhysicsConfig). An older consumer
-// passes only the slices it knows; new slices are added as separate structs
-// without shifting a vtable or reading past a caller-allocated struct, and
-// accidental layout edits to a shipped slice fail cleanly with
-// Error::LayoutMismatch.
+// (COM::InChain(...)) over granular config slices (AppConfig, WindowConfig,
+// RenderConfig, PhysicsConfig, DiagnosticsInfo, LoggerConfig, ErrorConfig). An
+// older consumer passes only the slices it knows; new slices are added as
+// separate structs without shifting a vtable or reading past a
+// caller-allocated struct, and accidental layout edits to a shipped slice fail
+// cleanly with Error::LayoutMismatch.
+//
+// Every slice above is declared by a header this one includes, so a consumer
+// that can spell the InChain(...) call can also see the struct it is passing:
+// LoggerConfig and ErrorConfig are named here often enough that requiring a
+// second include for them only produced "incomplete type" errors at the call
+// site.
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/LoggerTypes.hpp>
+#include <Zahlen/COM/ErrorTypes.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>

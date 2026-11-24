@@ -10,7 +10,6 @@
 // boundary in chain nodes and interface calls.
 
 #include <Zahlen/Core/COM/Types.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <cstdint>
@@ -28,9 +27,30 @@ struct ErrorEnumEntry {
     StringView message {};
 };
 
-// LogSource lives in Core (Zahlen/Log.hpp); this alias keeps the COM
-// spelling working for ABI-facing declarations.
-using LogSource = ZHLN::LogSource;
+// ---- Wire logging primitives ----------------------------------------------
+// Declared here, in COM, and NOT aliased from Zahlen/Log.hpp: the COM surface
+// must stay includable, auditable and versionable on its own, and a COM
+// consumer must not acquire Layer 0 (source_location, std::format, the ambient
+// sink) by including a logger header. Values match ZHLN::LogSeverity and
+// ZHLN::LogSource one for one; src/engine/com/LoggerHub.cpp asserts that.
+enum class LogSeverity : uint8_t { Debug, Info, Warning, Error, Off };
+
+struct LogSource {
+    StringView file {};
+    StringView function {};
+    //: Open channel name ("Vulkan", "DeviceLost", "MyPlugin"). Empty when the
+    //: call site named none. A *view*: it points into the recording code's
+    //: storage, so anything that outlives that code copies it (see ErrorRecord).
+    StringView channel {};
+    uint32_t   line = 0;
+};
+
+static_assert(std::is_standard_layout_v<LogSource> && std::is_trivially_copyable_v<LogSource>);
+
+// COM::LogContext lives in LoggerTypes.hpp alongside COM::LogSeverity.
+// Zahlen/COM/LoggerTypes.hpp, beside COM::LogSeverity: the two travel together
+// through ILogger::Write, and neither of them is an alias of a Layer-0 type.
+// This header no longer includes Zahlen/Log.hpp at all.
 
 // Filled by IErrorRegistry::Describe through an out-chain. Strings longer
 // than the fixed capacity are truncated, never allocated.
@@ -40,13 +60,25 @@ struct ErrorDescription {
     String256 message {};
 };
 
-// The most recent RecordDetail call on a registry: the code plus the
-// human context ("part 3: activeMorphCount=6 > 4") a returning function
-// attached to it.
+// The most recent RecordDetail call on a registry: the code plus the human
+// context ("part 3: activeMorphCount=6 > 4") a returning function attached to
+// it, and where it was recorded.
+//
+// Every string here is a fixed-capacity member owned by the payload, not a view
+// into the recording DSO. That is the whole point of the type: the reason a
+// plugin calls RecordDetail before it fails is that its code is about to be
+// unloaded, so a payload that borrowed its .rodata would dangle precisely when
+// the record is read. Paths longer than the capacity are truncated, like every
+// other wire string (see ErrorDescription); nothing is allocated.
 struct ErrorRecord {
-    ErrorCode  code {};
-    String256  detail {};
-    LogSource  source {};
+    ErrorCode code {};
+    String256 detail {};
+    String64  file {};
+    String128 function {};
+    uint32_t  line   = 0;
+    //: Owned copy of LogSource::channel -- see the note above: a plugin's
+    //: channel literal must not outlive the plugin.
+    String32  channel {};
 };
 
 // Chain node carrying a caller-owned registry into CreateEngineRaw /

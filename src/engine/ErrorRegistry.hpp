@@ -7,6 +7,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -42,22 +43,30 @@ class ErrorRegistry {
     // True when the category (and the anchoring enum entry) is known.
     auto Describe(ErrorCode code, std::string& outCategory, std::string& outName, std::string& outMessage) const noexcept -> bool;
 
+    // Copies every string it keeps, including the source's file and function:
+    // the caller is usually a plugin that records a detail precisely because it
+    // is about to be unloaded, and a stored std::string_view into that plugin's
+    // .rodata would dangle the moment it went away.
     void RecordDetail(ErrorCode code, LogSource source, std::string_view detail) noexcept;
 
     struct Detail {
         ErrorCode   code {};
-        LogSource   source {};
+        std::string file {};
+        std::string function {};
+        uint32_t    line   = 0;
+        String32    channel {};
         std::string detail {};
     };
 
-    // nullptr until something recorded a detail. The pointer stays valid until
-    // the next RecordDetail on this registry.
-    [[nodiscard]] auto LastDetail() const noexcept -> const Detail*;
+    // A copy: nullopt until something recorded a detail. Returning a pointer to
+    // the slot instead would hand callers a reference that the next
+    // RecordDetail -- on any thread -- replaces underneath them.
+    [[nodiscard]] auto LastDetail() const noexcept -> std::optional<Detail>;
 
   private:
-    mutable Mutex _mutex;
-    Detail        _last {};
-    bool          _hasLast = false;
+    mutable Mutex        _mutex;
+    Detail               _last {};
+    bool                 _hasLast = false;
 };
 
 } // namespace ZHLN

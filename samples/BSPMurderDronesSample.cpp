@@ -4,7 +4,6 @@
 #include <Animation/Context.hpp>
 #include <print>
 #include <cstdio>
-#include <format>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -78,7 +77,6 @@ import ZHLN.ProceduralAnimation;
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -821,32 +819,18 @@ auto AttachCharacterRig(
     firstPerson.hideHead       = true;
     firstPerson.hideHair       = true;
 
-    ZHLN::Log(engine.Logger(),
-        "Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
-        animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
-    );
-    ZHLN::Log(engine.Logger(),
-        "Procedural layers: gait={}, gravity bounce={}, leg IK={}, acceleration tilt={}, upper body={}, secondary motion={}.",
-        animationConfig.enableGait, animationConfig.enableGravityBounce, animationConfig.enableLegIK, animationConfig.enableAccelerationTilt,
-        animationConfig.enableUpperBody, animationConfig.enableSecondaryMotion
-    );
-    ZHLN::Log(engine.Logger(),
-        "Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.",
-        animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection,
-        animationConfig.pelvisDropWeight
-    );
-    ZHLN::Log(engine.Logger(),
-        "IK limits: extension={}, body tilt={} deg, ankle sideways={} deg, ankle forward={} deg.", animationConfig.maxLegExtension,
-        animationConfig.maxIKBodyTiltDegrees, animationConfig.maxAnkleSidewaysDegrees, animationConfig.maxAnkleForwardDegrees
-    );
+    ZHLN::COM::Log(engine.Logger(), "Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper", animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension);
+    ZHLN::COM::Log(engine.Logger(), "Procedural layers: gait={}, gravity bounce={}, leg IK={}, acceleration tilt={}, upper body={}, secondary motion={}.", animationConfig.enableGait, animationConfig.enableGravityBounce, animationConfig.enableLegIK, animationConfig.enableAccelerationTilt, animationConfig.enableUpperBody, animationConfig.enableSecondaryMotion);
+    ZHLN::COM::Log(engine.Logger(), "Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.", animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection, animationConfig.pelvisDropWeight);
+    ZHLN::COM::Log(engine.Logger(), "IK limits: extension={}, body tilt={} deg, ankle sideways={} deg, ankle forward={} deg.", animationConfig.maxLegExtension, animationConfig.maxIKBodyTiltDegrees, animationConfig.maxAnkleSidewaysDegrees, animationConfig.maxAnkleForwardDegrees);
     if (animationConfig.authoredPoseOnly) {
-        ZHLN::Log(engine.Logger(), "Authored-pose-only isolation enabled; all procedural layers are bypassed.");
+        ZHLN::COM::Log(engine.Logger(), "Authored-pose-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {
-        ZHLN::Log(engine.Logger(), "Leg IK disabled; gait/keyframe layers remain active.");
+        ZHLN::COM::Log(engine.Logger(), "Leg IK disabled; gait/keyframe layers remain active.");
     }
 
     if (prefab) {
-        ZHLN::Log(engine.Logger(), "GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
+        ZHLN::COM::Log(engine.Logger(), "GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
         int32_t idleTrack = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "idle") : -1;
         if (idleTrack < 0 && !prefab->animations.empty()) {
@@ -856,10 +840,10 @@ auto AttachCharacterRig(
         const int32_t runTrack  = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "run") : -1;
         if (idleTrack >= 0) {
             const auto& clip = prefab->animations[static_cast<size_t>(idleTrack)];
-            ZHLN::Log(engine.Logger(), "Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
-            ZHLN::Log(engine.Logger(), "Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
+            ZHLN::COM::Log(engine.Logger(), "Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
+            ZHLN::COM::Log(engine.Logger(), "Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
-            ZHLN::Log<ZHLN::LogTag::Warning>(engine.Logger(), "'{}' contains no authored animation track; bind pose will be shown.", glbPath);
+            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "'{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
@@ -909,7 +893,7 @@ auto AttachCharacterRig(
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(firstPerson)
         );
     } else {
-        ZHLN::Log<ZHLN::LogTag::Warning>(engine.Logger(), "'{}' not found; falling back to the in-memory procedural rig.", glbPath);
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "'{}' not found; falling back to the in-memory procedural rig.", glbPath);
 
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
@@ -1023,10 +1007,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
     }
 
     g_view.firstPerson = firstPerson;
-    ZHLN::Log(engine.Logger(),
-        "Character view: {}.",
-        firstPerson ? "FIRST PERSON / FREE LOOK, HEAD HIDDEN" : "THIRD PERSON / PROCEDURAL ORBIT (hold RMB to orbit, T returns to the eye)"
-    );
+    ZHLN::COM::Log(engine.Logger(), "Character view: {}.", firstPerson ? "FIRST PERSON / FREE LOOK, HEAD HIDDEN" : "THIRD PERSON / PROCEDURAL ORBIT (hold RMB to orbit, T returns to the eye)");
 }
 
 /** Adopts whatever is currently driving the camera as the sample's own look. */
@@ -1447,7 +1428,7 @@ auto main(int argc, char* argv[]) -> int {
         auto d = ZHLN::GLTF::Read(candidate, {}, engine->Assets());
         if (d) {
             for (const auto& warning : d->warnings)
-                ZHLN::Log<ZHLN::LogTag::Warning>("glTF: {}", warning);
+                ZHLN::Log<ZHLN::LogSeverity::Warning>("glTF: {}", warning);
         }
         if (!d) return false;
         auto u = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *d);
@@ -1476,7 +1457,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto bodyRes = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = spawnCenter.Cast<double>(), .maxSlopeRadians = (std::numbers::pi_v<float> / 180.0f) * 50.0f}, playerHull));
         if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("Failed to create the player CharacterVirtual body.");
+            ZHLN::Log<ZHLN::LogSeverity::Error>("Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
         const ZHLN::Physics::BodyID playerBody = bodyRes.value;
@@ -1506,10 +1487,9 @@ auto main(int argc, char* argv[]) -> int {
         AttachCharacterRig(*engine, g_player, rigPath, rigDoc, rigInfo, rigAsset.hash, g_view, characterHeight);
         ApplyProceduralView(*engine, g_view.firstPerson);
 
-        ZHLN::Log(engine->Logger(),
+        ZHLN::COM::Log(engine->Logger(),
             "Spawned procedural character ({}) at ({:.2f}, {:.2f}, {:.2f})",
-            hasPlayerStart ? "info_player_start" : "fallback view position", spawnCenter.x, spawnCenter.y, spawnCenter.z
-        );
+            hasPlayerStart ? "info_player_start" : "fallback view position", spawnCenter.x, spawnCenter.y, spawnCenter.z);
     }
 
     // 9. Lighting & Post-Processing Setup
@@ -1595,13 +1575,12 @@ auto main(int argc, char* argv[]) -> int {
             const bool pickKeyDown = input.KeyDown(ZHLN::KeyCode::F, ZHLN::kPrimarySeat);
             if (pickKeyDown && !pickKeyWasDown) {
                 if (g_pick.hasHit) {
-                    ZHLN::Log(engine->Logger(),
+                    ZHLN::COM::Log(engine->Logger(),
                         "CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal ({:.2f}, {:.2f}, {:.2f})  body {}",
                         g_pick.label, g_pick.distance, g_pick.position.x, g_pick.position.y, g_pick.position.z,
-                        g_pick.normal.x, g_pick.normal.y, g_pick.normal.z, g_pick.bodyIndex
-                    );
+                        g_pick.normal.x, g_pick.normal.y, g_pick.normal.z, g_pick.bodyIndex);
                 } else {
-                    ZHLN::Log(engine->Logger(), "CROSSHAIR no hit within {:.1f} m.", kPickDistance);
+                    ZHLN::COM::Log(engine->Logger(), "CROSSHAIR no hit within {:.1f} m.", kPickDistance);
                 }
             }
             pickKeyWasDown = pickKeyDown;
@@ -1642,7 +1621,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (auto tick = engine->Tick(dt); !tick.HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", tick.error);
+            ZHLN::Log<ZHLN::LogSeverity::Error>("frame failed: {}", tick.error);
             break;
         }
         UpdatePlayerRigAmbientCube(*engine);
@@ -1657,6 +1636,6 @@ auto main(int argc, char* argv[]) -> int {
     for (ZHLN::TextureID tex : ownedTextures) {
         if (tex != ZHLN::TextureID::Invalid) engine->Graphics()->UnloadTexture(tex);
     }
-    ZHLN::Log(engine->Logger(), "Exiting cleanly.");
+    ZHLN::COM::Log(engine->Logger(), "Exiting cleanly.");
     return EXIT_SUCCESS;
 }

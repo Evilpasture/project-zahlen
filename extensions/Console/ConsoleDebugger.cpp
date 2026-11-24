@@ -22,7 +22,6 @@
 #endif
 
 #include "ConsoleDebugger.hpp"
-#include <cstdio>
 #include <format>
 #include "SymbolResolver.hpp"
 #include <Console/Console.hpp>

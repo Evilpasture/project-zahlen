@@ -68,11 +68,13 @@ class RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
-    // False once Destroy() has taken the implementation: the renderer is gone, and
-    // every other method here has a live renderer as its precondition. This is
-    // derived state, not a kept flag -- it is only what the moved-from _impl says.
+    // False once the renderer has been released (Destroy(), ReleaseDevice()): the
+    // renderer is gone, and every other method here has a live renderer as its
+    // precondition. Both backends answer the same way -- the Vulkan one by having
+    // moved its implementation out, the null one by having cleared its state in
+    // place -- so a host that keys its teardown off this reads one contract.
     [[nodiscard]] explicit operator bool() const noexcept {
-        return _impl != nullptr;
+        return _impl != nullptr && !_released;
     }
 
     // Explicit teardown: drains the device and dumps a pending fault report, then
@@ -307,6 +309,11 @@ class RenderContext {
     void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
 
     std::unique_ptr<Impl> _impl;
+    // Set by whichever backend's ReleaseDevice() ran. The null backend keeps its
+    // (now empty) implementation alive -- it has no device to tear down and a
+    // host polling a torn-down headless context must not dereference nullptr --
+    // so "released" cannot be read off _impl alone.
+    bool _released = false;
 };
 
 class PipelineStatsCapture {

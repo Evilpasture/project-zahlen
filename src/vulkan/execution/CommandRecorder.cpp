@@ -3,9 +3,6 @@
 
 #include "vulkan/Rendering.hpp"
 #include "vulkan/execution/CommandRecorder.hpp"
-#include <Zahlen/Log.hpp>
-#include <cstdio>
-#include <format>
 
 
 namespace ZHLN::Vk {
@@ -22,8 +19,10 @@ auto CommandRecorder::Begin(
         .pInheritanceInfo = inheritance,
     };
     if (const VkResult res = vkBeginCommandBuffer(cmd, &info); res != VK_SUCCESS) {
-        if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-        }
+        // Hand the buffer back in a reusable state. The reset's own result is
+        // not actionable: a device loss or a buffer still pending shows up in
+        // the error this function is already returning.
+        (void) vkResetCommandBuffer(cmd, 0);
         if (res == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(CommandRecordingError::DeviceLost);
         }
@@ -38,8 +37,7 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
     }
     const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE);
     if (const VkResult res = vkEndCommandBuffer(cmd); res != VK_SUCCESS) {
-        if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-        }
+        (void) vkResetCommandBuffer(cmd, 0); // reusable again; see Begin()
         if (res == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(CommandRecordingError::DeviceLost);
         }
@@ -49,9 +47,11 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
 }
 
 void CommandRecorder::Abort() && noexcept {
+    // Aborting is best-effort by contract: the buffer goes back to the pool in
+    // whatever state the reset leaves it, and the caller has already abandoned
+    // the recording.
     if (const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE); cmd != VK_NULL_HANDLE) {
-        if (const VkResult res = vkResetCommandBuffer(cmd, 0); res != VK_SUCCESS) {
-        }
+        (void) vkResetCommandBuffer(cmd, 0);
     }
 }
 

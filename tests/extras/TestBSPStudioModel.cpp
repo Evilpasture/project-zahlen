@@ -6,7 +6,6 @@
 #include <BSP/StudioModelTypes.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include "helpers/StudioFixture.hpp"
 #include <cmath>

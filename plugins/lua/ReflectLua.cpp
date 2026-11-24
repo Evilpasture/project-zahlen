@@ -56,7 +56,7 @@ namespace {
                 line.append(str, len);
             }
         }
-        Log<LogTag::Info, LogTag::Script>("{}", line);
+        ZHLN::Log<ZHLN::LogSeverity::Info>(ZHLN::LogChannel{"Script"}, "{}", line);
         return 0;
     }
 

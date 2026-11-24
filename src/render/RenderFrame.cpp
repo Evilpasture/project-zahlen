@@ -308,7 +308,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
     const auto skinnedBlas = DispatchSkinningPasses(cmd);
     if (skinnedBlas.HasErrors() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
-        Log<LogTag::Warning>("PrepareSceneFrame: skinned BLAS rebuild failed: {}", *skinnedBlas.FirstError());
+        kLog.Warn("PrepareSceneFrame: skinned BLAS rebuild failed: {}", *skinnedBlas.FirstError());
     }
 
     if (queues.Draws().size() > kGpuCullingMaxInstances) {
@@ -435,7 +435,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         // of them: one message per broken slot says whether the command pool ran
         // dry once or whether the fork is simply too wide for this frame.
         recorded.ForEachError([this](const Vk::RecordingFailure& failure) {
-            Log<LogTag::Warning>("Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
+            kLog.Warn("Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
         });
         return;
     }

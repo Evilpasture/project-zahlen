@@ -18,7 +18,6 @@
 module;
 
 #include <Socket/Socket.hpp>
-#include <cstdio>
 #include <format>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/COM/IEngine.hpp>
@@ -374,8 +373,8 @@ auto Client::Connect(std::string_view host, uint16_t port, uint64_t userId, std:
         if (!connection) {
             continue;
         }
-        auto noDelay = opened->SetNoDelay(true);
-        if (!noDelay) {
+        if (const auto noDelay = opened->SetNoDelay(true); !noDelay) {
+            ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "TCP_NODELAY could not be set (socket error {}).", noDelay.error().nativeCode);
         }
         tcp                         = std::move(*opened);
         _impl->serverAddress        = endpoint;
@@ -466,11 +465,17 @@ auto Client::PollEvents(COM::IEntities& entities) noexcept -> std::expected<void
     const ErrorCode tcpFailure = _impl->PumpTcp(entities, applied);
     const ErrorCode udpFailure = _impl->PumpUdp(entities, applied);
 
+    // A message that arrived whole and was still not applied is a real event,
+    // and the batch is the only place it is recorded: dropping it here again --
+    // with an empty lambda -- made the richer return type pointless.
     applied.ForEachError([](const MessageMiss& miss) {
         const char* carrier = miss.channel == Channel::Udp ? "datagram" : "stream frame";
         if (miss.type.has_value()) {
+            ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "{} carrying {} was received but not applied ({}).", carrier, *miss.type, miss.error);
             return;
         }
+        ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "{} carrying an undecodable message was dropped ({}{}{}).", carrier, miss.error,
+            miss.detail.empty() ? std::string_view {} : std::string_view {" — "}, miss.detail);
     });
 
     if (tcpFailure) {
@@ -520,21 +525,21 @@ void Client::SendInputs(bool forward, bool backward, bool left, bool right, bool
     };
     auto payload = EncodeClientInput(input);
     if (!payload) {
-        Log<LogTag::Warning, LogTag::Network>("Client input encode failed: {}", payload.error().Format());
+        ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "Client input encode failed: {}", payload.error().Format());
         return;
     }
     auto datagram = EncodeDatagram(*payload);
     if (!datagram) {
-        Log<LogTag::Warning, LogTag::Network>("Client input datagram encode failed: {}", datagram.error().Format());
+        ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "Client input datagram encode failed: {}", datagram.error().Format());
         return;
     }
     if (datagram->size() > MAX_SAFE_UDP_PAYLOAD) {
-        Log<LogTag::Warning, LogTag::Network>("Client input datagram of {} bytes exceeds the {}-byte safe UDP payload; dropped.", datagram->size(), MAX_SAFE_UDP_PAYLOAD);
+        ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "Client input datagram of {} bytes exceeds the {}-byte safe UDP payload; dropped.", datagram->size(), MAX_SAFE_UDP_PAYLOAD);
         return;
     }
 
-    auto sent = _impl->udpSocket.Send(*datagram);
-    if (!sent) {
+    if (const auto sent = _impl->udpSocket.Send(*datagram); !sent) {
+        ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Network"}, "input datagram send failed (socket error {}).", sent.error().nativeCode);
     }
 }
 

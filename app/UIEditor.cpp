@@ -613,14 +613,14 @@ void UpdateEditor(ZHLN::COM::IEngine& engine, Session& session, float dt) {
     }
     session.events.Drain<GUI::UiActionEvent>([&engine](const GUI::UiActionEvent& event) {
         if (event.id == "editor.save_scene") {
-            ZHLN::Log(engine.Logger(), "editor.save_scene");
+            ZHLN::COM::Log(engine.Logger(), "editor.save_scene");
         }
     });
 }
 
 void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
     if (PreviewIsRunning(engine, session)) {
-        ZHLN::Log(engine.Logger(), "Preview window already open");
+        ZHLN::COM::Log(engine.Logger(), "Preview window already open");
         return;
     }
     StopPreview(engine, session);
@@ -633,25 +633,25 @@ void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
     // what kind of content it accepts.
     const auto previewWindow = engine.AddWindow(ZHLN::COM::WindowCreateInfo {.title = "UI Preview", .width = 800, .height = 600});
     if (!previewWindow.HasValue()) {
-        ZHLN::Log<ZHLN::LogTag::Warning>(engine.Logger(), "Preview AddWindow failed");
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Preview AddWindow failed");
         return;
     }
     session.previewID = previewWindow.value;
 
-    ZHLN::Log(engine.Logger(), "Preview window open");
+    ZHLN::COM::Log(engine.Logger(), "Preview window open");
 }
 
 void SaveTree(const GUI::UINode& tree, std::string_view path) {
     const std::string text = ZHLN::ReflectTOML::Serialize(tree);
     std::ofstream     out {std::string {path}, std::ios::binary | std::ios::trunc};
     if (!out) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("could not open '{}' for writing", path);
+        ZHLN::Log<ZHLN::LogSeverity::Warning>("could not open '{}' for writing", path);
         return;
     }
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     out.close();
     if (out.fail()) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("writing '{}' failed", path);
+        ZHLN::Log<ZHLN::LogSeverity::Warning>("writing '{}' failed", path);
         return;
     }
     ZHLN::Log("wrote '{}'", path);
@@ -660,18 +660,18 @@ void SaveTree(const GUI::UINode& tree, std::string_view path) {
 void LoadTree(Session& session, std::string_view path) {
     std::ifstream in {std::string {path}, std::ios::binary};
     if (!in) {
-        ZHLN::Log<ZHLN::LogTag::Error>( "'{}' is not readable", path);
+        ZHLN::Log<ZHLN::LogSeverity::Error>( "'{}' is not readable", path);
         return;
     }
     const std::string text {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
     auto              parsed = ZHLN::ReflectTOML::Parse<GUI::UINode>(text);
     if (!parsed) {
-        ZHLN::Log<ZHLN::LogTag::Error>( "'{}' did not parse as a UINode", path);
+        ZHLN::Log<ZHLN::LogSeverity::Error>( "'{}' did not parse as a UINode", path);
         return;
     }
     session.tree       = std::move(*parsed);
     session.selectedId = RootPath(session.tree);
-    ZHLN::Log<ZHLN::LogTag::Error>( "loaded '{}'", path);
+    ZHLN::Log("loaded '{}'", path);
 }
 
 // Builds this window's UI and publishes it. The render step draws whatever is
@@ -836,7 +836,7 @@ auto main(int argc, char* argv[]) -> int {
             if (baked) {
                 ui->SetBakedFont(std::move(*baked));
             } else {
-                ZHLN::Log<ZHLN::LogTag::Warning>(engine.Logger(), "Font load failed ({}); using embedded default.", baked.error());
+                ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Font load failed ({}); using embedded default.", baked.error());
             }
         }
         auto Tick(ZHLN::COM::IEngine& engine, float dt) -> std::expected<void, ZHLN::ErrorCode> {

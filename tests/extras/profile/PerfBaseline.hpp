@@ -34,7 +34,6 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <chrono>

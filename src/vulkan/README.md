@@ -38,10 +38,10 @@ Volk's dispatch tables are process-global in this build. The supported Engine pa
 
 ### Diagnostics Ownership (Vk::GPUDiagnostics)
 
-`Vk::Instance` owns only its `VkInstance` handle and optional validation messenger, forwarding validation diagnostics directly to `ZHLN::Log<ZHLN::LogTag::Error, ZHLN::LogTag::Vulkan>` / `ZHLN::Log<ZHLN::LogTag::Warning, ZHLN::LogTag::Vulkan>` with zero heap-allocated callback state or test-sink plumbing.
+`Vk::Instance` owns only its `VkInstance` handle and optional validation messenger, forwarding validation diagnostics directly to `ZHLN::Log<ZHLN::LogSeverity::Error>(kVkLog, ...)` / `ZHLN::Log<ZHLN::LogSeverity::Warning>(kVkLog, ...)` with zero heap-allocated callback state or test-sink plumbing. `kVkLog` is `inline constexpr ZHLN::LogChannel {"Vulkan"}` declared in `src/vulkan/`: the channel is a name the subsystem owns, not an enum value Core has to know.
 
 * `Vk::GPUDiagnostics` owns `GPUAddressTracker` directly in-place and manages the `VK_EXT_device_address_binding_report` messenger for the logical device's lifetime, detaching before device/instance teardown.
-* Sinks (such as automated tests or fidelity harnesses) intercept `ZHLN::Log<LogTag::Error, LogTag::Vulkan>` lines via `ZHLN::SetLogSink()`, and match them on `LogSource::domain == LogDomain::Vulkan` rather than plumbing test counters through `EngineConfig`, `RenderContext`, or `Vk::Instance`.
+* Sinks (such as automated tests or fidelity harnesses) intercept those lines via `ZHLN::SetLogSink()`, and match them on `LogSource::channel == "Vulkan"` (with `severity == Error` for validation failures) rather than plumbing test counters through `EngineConfig`, `RenderContext`, or `Vk::Instance`.
 
 ### One dispatch table per image
 

@@ -12,7 +12,10 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <mutex>
 #include <Zahlen/FileSystem/Paths.hpp>
+#include "LogBridge.hpp"
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
 #include <new>
 #include <string>
 #include <string_view>
@@ -22,6 +25,16 @@
 namespace ZHLN::COM {
 
 namespace {
+
+// A wire StringView is valid when it is empty or points at storage; building a
+// std::string_view from {nullptr, n} is undefined.
+[[nodiscard]] bool Valid(const StringView value) noexcept {
+    return value.size == 0 || value.data != nullptr;
+}
+
+[[nodiscard]] auto Text(const StringView value) noexcept -> std::string_view {
+    return value.size != 0 ? std::string_view(value.data, value.size) : std::string_view {};
+}
 
 auto SeverityForLevel(const LogLevel level) noexcept -> LogSeverity {
     switch (level) {
@@ -46,11 +59,27 @@ class LoggerHub final: public Implements<LoggerHub, ILoggerHub> {
     }
 
     [[nodiscard]] bool IsEnabled(const LogSeverity severity) const noexcept override {
-        return _logger->IsEnabled(severity);
+        return _logger->IsEnabled(static_cast<ZHLN::LogSeverity>(severity));
     }
 
     void Write(const LogSeverity severity, const LogSource source, const StringView message) const noexcept override {
-        _logger->Write(severity, source, std::string_view(message));
+        // An empty channel means untagged and is legal; a non-empty one is a
+        // wire string like any other and must be well-formed before it is read.
+        if (!Valid(source.file) || !Valid(source.function) || !Valid(message) ||
+            (source.channel.size != 0 && !Valid(source.channel))) {
+            return;
+        }
+        // Wire -> native, once, at the only point that knows both shapes.
+        _logger->Write(
+            static_cast<ZHLN::LogSeverity>(severity),
+            ZHLN::LogSource {
+                .file     = Text(source.file),
+                .function = Text(source.function),
+                .channel  = Text(source.channel),
+                .line     = source.line,
+            },
+            Text(message)
+        );
     }
 
     void Flush() const noexcept override {
@@ -58,14 +87,14 @@ class LoggerHub final: public Implements<LoggerHub, ILoggerHub> {
     }
 
     void SetMinSeverity(const LogSeverity minSeverity) noexcept override {
-        _logger->SetMinimumSeverity(minSeverity);
+        _logger->SetMinimumSeverity(static_cast<ZHLN::LogSeverity>(minSeverity));
     }
 
     auto AddSink(ILogger* sink) noexcept -> Result<uint64_t> override {
         if (sink == nullptr) {
             return Error::NullArgument;
         }
-        const uint64_t token = _logger->AddExternalSink(sink->AsSink());
+        const uint64_t token = _logger->AddExternalSink(ZHLN::LogBridge::ToSink(sink));
         // The registered LogSink's userData points at this ILogger, so the hub
         // holds a strong reference of its own: a caller that drops (or never
         // keeps) its Ref cannot leave a dangling sink behind. Released by
@@ -79,12 +108,6 @@ class LoggerHub final: public Implements<LoggerHub, ILoggerHub> {
         (void) _logger->RemoveExternalSink(token);
         const std::scoped_lock lock(_sinkMutex);
         std::erase_if(_held, [&](const auto& entry) { return entry.first == token; });
-    }
-
-    // A COM logger is still a Layer-0 sink: the engine below COM (and any
-    // host that only wants the lines) installs this value.
-    [[nodiscard]] auto AsSink() const noexcept -> ZHLN::LogSink {
-        return _logger->AsLogSink();
     }
 
   private:
@@ -119,9 +142,22 @@ auto CreateLoggerRaw(const ChainInNode* config) noexcept -> Result<ILoggerHub*> 
                 } else {
                     // FileSinkConfig: default location is the cache dir, never
                     // the process CWD; an unusable path just yields no sink.
+                    if (!Valid(node.path)) {
+                        return Error::NullArgument;
+                    }
                     const std::string path = node.path.size != 0
                                                  ? std::string(std::string_view(node.path))
                                                  : (FS::Paths::CacheDir() / "zahlen_runtime.log").string();
+                    // The default lives under CacheDir(), which on a first run
+                    // does not exist yet -- creating only the file would fail
+                    // with ENOENT and silently drop the one sink a host can
+                    // configure by name.
+                    if (const std::filesystem::path parent = std::filesystem::path(path).parent_path(); !parent.empty()) {
+                        std::error_code ec;
+                        std::filesystem::create_directories(parent, ec);
+                        // A directory that cannot be created just yields no
+                        // sink below, as does an unopenable file.
+                    }
                     if (FILE* file = std::fopen(path.c_str(), node.append ? "a" : "w"); file != nullptr) {
                         hub->Engine().AddFileSink(file, false);
                         sawSink = true;

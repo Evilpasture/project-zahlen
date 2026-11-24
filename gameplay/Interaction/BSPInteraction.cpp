@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "BSPInteraction.hpp"
-#include <cstdio>
-#include <format>
 #include <BSP/BSPInteraction.hpp>
 #include <Zahlen/Audio/AudioValues.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
@@ -12,14 +10,12 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cmath>
 #include <string>
-
 
 namespace ZHLN::Interaction {
 
@@ -322,10 +318,8 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
         }
     }
 
-    if (const auto* usable = entities.Get<UsableComponent>(entity)) {
-        if (input == "Use" && usable->scriptHash != 0) {
-        }
-    }
+    // UsableComponent::scriptHash used to be reported from here; the entity
+    // carries it and the script layer dispatches it, this function does not.
 }
 
 void FireEntityInput(COM::IEntities& entities, std::string_view targetname, std::string_view input,

@@ -246,7 +246,7 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
             material.value.metallicFactor  = object.metallic;
             params.materialOverride        = material.value;
         } else {
-            ZHLN::Log<ZHLN::LogTag::Warning>("Could not create material for '{}': {}", object.name, material.error);
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("Could not create material for '{}': {}", object.name, material.error);
         }
 
         const FVec3 halfExtents = FVec3::Splat(0.5f);
@@ -586,8 +586,7 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
                 if (entities.IsAlive(bound)) ++liveEntityCount;
             }
         }
-        ZHLN::Log(engine.Logger(), "initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}",
-            state.objects.size(), partCount, lightCount, boundEntityCount, liveEntityCount, state.workspaceUid, state.localPlayerUid, state.localRootPartUid);
+        ZHLN::COM::Log(engine.Logger(), "initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}", state.objects.size(), partCount, lightCount, boundEntityCount, liveEntityCount, state.workspaceUid, state.localPlayerUid, state.localRootPartUid);
         std::unordered_map<std::string, size_t> classCounts;
         for (const auto& [uid, object]: state.objects) {
             (void)uid;
@@ -602,11 +601,11 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
             if (!classSummary.empty()) classSummary += ", ";
             classSummary += std::format("{}={}", distribution[i].first, distribution[i].second);
         }
-        ZHLN::Log(engine.Logger(), "parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
         if (partCount == 0 && lightCount == 0) {
-            ZHLN::Log(engine.Logger(), "snapshot completed but contains no renderable Part/MeshPart or light objects.");
+            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "snapshot completed but contains no renderable Part/MeshPart or light objects.");
         } else if (liveEntityCount == 0) {
-            ZHLN::Log(engine.Logger(), "replicated renderables exist, but no live ECS render entities were created.");
+            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "replicated renderables exist, but no live ECS render entities were created.");
         }
         state.summaryLogged = true;
     }
@@ -675,7 +674,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     const auto charRes        = sim.CreateCharacter(COM::InChain(charDesc));
     state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::BodyID::Null();
     if (state.localControllerBody == Physics::BodyID::Null()) {
-        ZHLN::Log<ZHLN::LogTag::Warning>(engine.Logger(), "Could not create the local player CharacterVirtual body.");
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Could not create the local player CharacterVirtual body.");
         return;
     }
 

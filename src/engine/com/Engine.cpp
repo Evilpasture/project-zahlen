@@ -59,6 +59,9 @@
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
+#include "LogBridge.hpp"
+#include "RawSinkLogger.hpp"
+#include "engine/EngineLog.hpp"
 #include <render/RenderContext.hpp>
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
@@ -81,6 +84,7 @@
 #include <vector>
 
 namespace ZHLN::COM {
+
 
 static_assert(AuditInterfaceABI<ILogger>(), "ILogger violates the COM ABI rules.");
 static_assert(AuditInterfaceABI<ILoggerHub>(), "ILoggerHub violates the COM ABI rules.");
@@ -376,7 +380,10 @@ class Engine final:
     Result<void> RecreateGraphicsDevice() noexcept override {
         if (m_engine->FramePending())
             return FramePipelineError::FrameInProgress;
-        const auto result = m_engine->HandleDeviceLost();
+        // A deliberate reset runs on a device that still works: drain it before
+        // the renderer is torn down, or the teardown frees resources the GPU is
+        // still executing against. Recovery paths pass false instead.
+        const auto result = m_engine->HandleDeviceLost(/*drainDevice=*/true);
         if (!result) return result.error();
         return {};
     }
@@ -2481,11 +2488,32 @@ auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*
     // log into the caller's sink and the returned code can be Described by
     // the caller's registry. Defaults are created here when the chain did
     // not supply them; the logger's level honors AppConfig::logLevel.
-    ILogger*           logger = loggerNode.logger;
-    Ref<ILoggerHub>    ownedLogger;
+    ILogger*            logger = loggerNode.logger;
+    Ref<ILoggerHub>     ownedLogger;
+    Ref<ILogger>        chainedHost;
     Ref<IErrorRegistry> errors(errorNode.registry);
     if (logger == nullptr) {
-        auto made = CreateLogger(InChain(LoggerConfig {.logger = nullptr, .level = config.logLevel}));
+        // A sink published before this factory ran is a *host* sink: a test
+        // framework's capture ring, a harness counter, an app's own writer. It
+        // must keep seeing every line -- DeviceLostCount and friends read from
+        // it -- but the minted hub must not join it with a console sink behind
+        // the host's back: that second stderr sink answers to config.logLevel,
+        // not to `ztest -q`'s SetLogLevel(Off), so quiet test runs grew a
+        // duplicate copy of every engine line on stderr.
+        //
+        // So the host sink is chained in the hub's *configuration*
+        // (LoggerConfig::logger counts as a sink, so CreateLoggerRaw adds no
+        // console sink) instead of being added afterwards on top of one.
+        ILogger* inChain = nullptr;
+        if (const ZHLN::LogSink previous = ZHLN::GetLogSink(); previous.write != nullptr) {
+            // A host sink is a Layer-0 value, not a COM object, so it enters the
+            // hub through the adapter every other external observer uses.
+            auto* adapter = new (std::nothrow) RawSinkLogger(previous);
+            if (adapter == nullptr) return ErrorCode(Error::AllocationFailed);
+            chainedHost = Ref<ILogger>::Adopt(adapter);
+            inChain     = adapter; // CreateLoggerRaw takes its own reference
+        }
+        auto made = CreateLogger(InChain(LoggerConfig {.logger = inChain, .level = config.logLevel}));
         if (!made) return made.error();
         ownedLogger = std::move(*made);
         logger      = ownedLogger.Get();
@@ -2497,18 +2525,15 @@ auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*
     }
 
     // The engine is engine-first: it receives the host logger as a plain
-    // Layer-0 sink (gate + writer in one value) and never names ILogger. The Refs
-    // below keep the COM objects alive for the engine's whole life. Hand the engine a
-    // sink to install as the process ambient sink only when the caller supplied that
-    // logger: a hub minted just above is this factory's console default, and
-    // installing it would discard the sink the host already registered -- in a test,
-    // the framework's capture sink, which is where DeviceLostCount and
-    // ValidationErrorCount read from, so those counters would be structurally zero and
-    // every engine line would print instead of being captured. The trade is that the
-    // level gate the minted hub would have applied now comes from whatever the host
-    // installed (or the global SetLogLevel); a host that wants both passes a
-    // LoggerConfig in-chain.
-    const ZHLN::LogSink ambientSink = ownedLogger.Get() != nullptr ? ZHLN::LogSink {} : logger->AsSink();
+    // Layer-0 sink (gate + writer in one value) and never names ILogger. The
+    // Refs above keep the COM objects alive for the engine's whole life.
+    //
+    // That sink becomes the process ambient sink in BOTH cases, so every ambient
+    // ZHLN::Log inside Vulkan, Render, Audio and the frame loop lands in the same
+    // pipeline as the engine's explicit lines: one format, one level. A minted
+    // hub already chained whatever the host had installed (above), so nothing is
+    // added behind a caller's back.
+    const ZHLN::LogSink ambientSink = ZHLN::LogBridge::ToSink(logger);
     auto created = ZHLN::Engine::Create(config, ambientSink);
     if (!created) return created.error();
 

@@ -15,8 +15,6 @@
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Zahlen/Render/Vertex.hpp>
 #include <vector>
-#include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 

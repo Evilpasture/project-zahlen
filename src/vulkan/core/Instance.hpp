@@ -13,9 +13,6 @@
 #include <string_view>
 #include <type_traits>
 
-namespace ZHLN::COM {
-}
-
 namespace ZHLN::Vk {
 
 enum class ValidationMode : uint8_t {

@@ -27,7 +27,6 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -48,7 +47,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
 
 struct lua_State;
 

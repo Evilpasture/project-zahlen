@@ -6,7 +6,6 @@
 #include <Animation/Context.hpp>
 #include <print>
 #include <cstdio>
-#include <format>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <CDN/CDN.hpp>
@@ -94,26 +93,26 @@ auto main(int argc, char* argv[]) -> int {
     };
     auto cdn = ZHLN::CDN::Manager::Create(config);
     if (!cdn) {
-        ZHLN::Log<ZHLN::LogTag::Error>("CDN::Manager::Create failed: {}", cdn.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("CDN::Manager::Create failed: {}", cdn.error());
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log(engine->Logger(), "Fetching {}/{}", kBaseURL, kAsset);
+    ZHLN::COM::Log(engine->Logger(), "Fetching {}/{}", kBaseURL, kAsset);
     auto bytes = cdn->Load(kAsset, ZHLN::Remote::Validators::IsGLB);
     if (!bytes) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Load failed: {}", bytes.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("Load failed: {}", bytes.error());
         return EXIT_FAILURE;
     }
-    ZHLN::Log(engine->Logger(), "{} KiB", bytes->size() / 1024U);
+    ZHLN::COM::Log(engine->Logger(), "{} KiB", bytes->size() / 1024U);
 
     auto doc = ZHLN::GLTF::Decode(std::span<const uint8_t>(*bytes), kAsset, {}, {}, engine->Assets());
     if (!doc) {
-        ZHLN::Log<ZHLN::LogTag::Error>("glTF decode failed for '{}': {}", kAsset, doc.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("glTF decode failed for '{}': {}", kAsset, doc.error());
         return EXIT_FAILURE;
     }
     auto asset = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *doc);
     if (!asset) {
-        ZHLN::Log<ZHLN::LogTag::Error>("glTF upload failed for '{}': {}", kAsset, asset.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("glTF upload failed for '{}': {}", kAsset, asset.error());
         return EXIT_FAILURE;
     }
 
@@ -130,7 +129,7 @@ auto main(int argc, char* argv[]) -> int {
     if (!doc->animations.empty() && !instances.empty()) {
         engine->Entities()->Attach(instances.front(), ZHLN::Animation::AnimatorComponent {.prefabAsset = asset->hash, .currentTrackIdx = 0, .currentLoop = true});
     }
-    ZHLN::Log(engine->Logger(), "Spawned {} instance(s), {} part(s).", written, doc->parts.size());
+    ZHLN::COM::Log(engine->Logger(), "Spawned {} instance(s), {} part(s).", written, doc->parts.size());
 
     FVec3 boundsMin {-1.0f, -1.0f, -1.0f};
     FVec3 boundsMax {1.0f, 1.0f, 1.0f};
@@ -139,7 +138,7 @@ auto main(int argc, char* argv[]) -> int {
     const float radius    = std::max((boundsMax - boundsMin).Length() * 0.5f, 1.0f);
     const float moveSpeed = std::clamp(radius * 0.35f, 8.0f, 400.0f);
     ZHLN::FreeCam::Attach(*engine->Entities(), moveSpeed);
-    ZHLN::Log(engine->Logger(), "Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
+    ZHLN::COM::Log(engine->Logger(), "Bounds centre ({:.1f}, {:.1f}, {:.1f}), radius {:.1f} m.", center.x, center.y, center.z, radius);
 
     {
         auto& entities = *engine->Entities();
@@ -202,7 +201,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
+            ZHLN::Log<ZHLN::LogSeverity::Error>("frame failed: {}", result.error);
             break;
         }
     }

@@ -92,7 +92,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
 
     ZHLN::Assert(pixels != nullptr && texelBytes != 0u && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
     if (pixels == nullptr || pixelBytes == 0) {
-        Log<LogTag::Warning>("Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
+        kLog.Warn("Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
         return std::unexpected(TextureUploadError::NoPixelData);
     }
     if (id <= static_cast<uint64_t>(SystemTextures::FlatNormal)) {
@@ -283,7 +283,7 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
         _freeSlots.pop_back();
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
-            Log<LogTag::Error>("globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            kLog.Error("globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
 
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);

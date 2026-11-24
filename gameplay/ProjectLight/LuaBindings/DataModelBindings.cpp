@@ -10,8 +10,6 @@
 // (`configure/check_layer_dag.py`) never points upward.
 
 #include <LuaBindings/DataModelBindings.hpp>
-#include <cstdio>
-#include <format>
 #include <Zahlen/Math/Vec3.hpp>
 
 #include <DataModel/DataModel.hpp>
@@ -1322,7 +1320,7 @@ void InvokeLuaConnection(const std::weak_ptr<LuaConnectionRecord>& weakConnectio
         const char* error = lua_tostring(state, -1);
         if (LuaBindingContext* context = GetBindingContext(state); context != nullptr) {
             context->lastCallbackError = error != nullptr ? error : "unknown Lua callback error";
-            Log<LogTag::Error, LogTag::Script>("Lua callback failed: {}", context->lastCallbackError);
+            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel{"Script"}, "Lua callback failed: {}", context->lastCallbackError);
         }
     }
     lua_settop(state, originalTop);

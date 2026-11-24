@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <utility>
+#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -394,11 +395,11 @@ auto DescriptorHeap::IsSlotWritable(uint32_t slot) const noexcept -> bool {
 
 auto DescriptorHeap::ValidateWriteSlot(uint32_t slot, uint32_t batchCount) const noexcept -> bool {
     if (slot >= _capacity) [[unlikely]] {
-        Log<LogTag::Warning, LogTag::Vulkan>("descriptor heap write out of range: slot {} >= capacity {}", slot, _capacity);
+        kVkLog.Warn("descriptor heap write out of range: slot {} >= capacity {}", slot, _capacity);
         return false;
     }
     if (!IsSlotWritable(slot)) [[unlikely]] {
-        Log<LogTag::Warning, LogTag::Vulkan>("descriptor heap write targets unallocated or stale slot {}", slot);
+        kVkLog.Warn("descriptor heap write targets unallocated or stale slot {}", slot);
         return false;
     }
     return true;

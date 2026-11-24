@@ -27,9 +27,8 @@ class ValidationCountingSink final: public COM::Implements<ValidationCountingSin
     [[nodiscard]] auto IsEnabled(COM::LogSeverity) const noexcept -> bool override {
         return true;
     }
-    void Write(COM::LogSeverity severity, COM::LogSource source, COM::StringView message) const noexcept override {
-        const std::string_view messageText(message);
-        if (severity == COM::LogSeverity::Error && source.domain == ZHLN::LogDomain::Vulkan)
+    void Write(COM::LogSeverity severity, COM::LogSource source, COM::StringView /*message*/) const noexcept override {
+        if (severity == COM::LogSeverity::Error && source.channel == std::string_view {"Vulkan"})
             validationErrors.fetch_add(1, std::memory_order_relaxed);
     }
     void Flush() const noexcept override {}
@@ -100,7 +99,7 @@ bool RunInstalledCubeSmoke(void (*createScene)(COM::IEngine&), const char* ppmPa
         if (!copied.HasValue() || copied.value > pixels.size()) {
             // ErrorCode's public formatter includes category and reason. A Tick
             // counter is not proof that a drawable GPU frame was completed.
-            ZHLN::Log<ZHLN::LogTag::Error, ZHLN::LogTag::Render>(
+            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel{"Render"}, 
                 "CaptureFrame failed after {} engine tick(s): {}", tickCount, copied.error
             );
         } else {

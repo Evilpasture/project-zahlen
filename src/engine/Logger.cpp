@@ -26,130 +26,14 @@
 
 namespace {
 
-using ZHLN::LogDomain;
 using ZHLN::LogSeverity;
 using ZHLN::LogSource;
 
-constexpr auto SeverityTag(const LogSeverity severity) noexcept -> std::string_view {
-    switch (severity) {
-        case LogSeverity::Debug:
-            return "DEBUG";
-        case LogSeverity::Info:
-            return "INFO";
-        case LogSeverity::Warning:
-            return "WARN";
-        case LogSeverity::Error:
-            return "ERROR";
-        case LogSeverity::Off:
-            return "OFF";
-    }
-    return "INFO";
-}
+// Defined below, beside the sink that uses it; declared here because the console
+// sink's Write() reaches it before that point in the file.
+auto ShouldColorize(FILE* stream) noexcept -> bool;
 
-constexpr auto SeverityColor(const LogSeverity severity) noexcept -> std::string_view {
-    switch (severity) {
-        case LogSeverity::Debug:
-            return "\x1b[90m";
-        case LogSeverity::Info:
-            return {};
-        case LogSeverity::Warning:
-            return "\x1b[33m";
-        case LogSeverity::Error:
-            return "\x1b[31m";
-        case LogSeverity::Off:
-            return {};
-    }
-    return {};
-}
 
-constexpr std::string_view kColorReset = "\x1b[0m";
-
-auto ShouldColorize(FILE* stream) noexcept -> bool {
-    // NO_COLOR (https://no-color.org/): present and non-empty disables color.
-    // Cached once per stream: isatty does not change its answer.
-    static const bool stderrColor = [] {
-        if (const char* noColor = std::getenv("NO_COLOR"); (noColor != nullptr) && (noColor[0] != '\0')) {
-            return false;
-        }
-#if defined(_WIN32)
-        return _isatty(_fileno(stderr)) != 0;
-#else
-        return ::isatty(::fileno(stderr)) != 0;
-#endif
-    }();
-    static const bool stdoutColor = [] {
-        if (const char* noColor = std::getenv("NO_COLOR"); (noColor != nullptr) && (noColor[0] != '\0')) {
-            return false;
-        }
-#if defined(_WIN32)
-        return _isatty(_fileno(stdout)) != 0;
-#else
-        return ::isatty(::fileno(stdout)) != 0;
-#endif
-    }();
-    return (stream == stdout) ? stdoutColor : stderrColor;
-}
-
-auto BaseName(const std::string_view path) noexcept -> std::string_view {
-    if (const auto pos = path.find_last_of("/\\"); pos != std::string_view::npos) {
-        return path.substr(pos + 1);
-    }
-    return path;
-}
-
-auto DomainTag(const LogDomain domain) noexcept -> std::string_view {
-    switch (domain) {
-        case LogDomain::General: return {};
-        case LogDomain::Vulkan: return "Vulkan";
-        case LogDomain::DeviceLost: return "DeviceLost";
-        case LogDomain::Render: return "Render";
-        case LogDomain::Audio: return "Audio";
-        case LogDomain::Network: return "Network";
-        case LogDomain::Physics: return "Physics";
-        case LogDomain::Script: return "Script";
-    }
-    return {};
-}
-
-// One formatting pass shared by every sink:
-// [file:line] [Fiber:tag] [Domain] [SEV] message
-auto FormatLine(const LogSeverity severity, const LogSource source, const std::string_view message, const bool colorize)
-    -> std::string {
-    const uint64_t fiberId = ZHLN::GetCurrentFiberID();
-    char           fiberTag[24];
-    if (fiberId == 0) {
-        std::snprintf(fiberTag, sizeof(fiberTag), "Thread");
-    } else if (fiberId == 1) {
-        std::snprintf(fiberTag, sizeof(fiberTag), "Main");
-    } else {
-        std::snprintf(fiberTag, sizeof(fiberTag), "%#llx", static_cast<unsigned long long>(fiberId));
-    }
-    const std::string_view file = BaseName(source.file);
-    // The domain tag Log<LogTag::Vulkan>/<DeviceLost>/<Script>... selects is
-    // rendered here, in the one place that formats a line, so call sites no
-    // longer hand-prefix message strings with "[Tag] ".
-    std::string domainPrefix;
-    if (const std::string_view domainTag = DomainTag(source.domain); !domainTag.empty()) {
-        domainPrefix = std::format("[{}] ", domainTag);
-    }
-    if (severity == LogSeverity::Info && !colorize) {
-        return std::format("[{}:{}] [Fiber:{}] {}{}", file, source.line, fiberTag, domainPrefix, message);
-    }
-    if (colorize) {
-        return std::format(
-            "[{}:{}] [Fiber:{}] {}[{}{}{}] {}",
-            file,
-            source.line,
-            fiberTag,
-            domainPrefix,
-            SeverityColor(severity),
-            SeverityTag(severity),
-            kColorReset,
-            message
-        );
-    }
-    return std::format("[{}:{}] [Fiber:{}] {}[{}] {}", file, source.line, fiberTag, domainPrefix, SeverityTag(severity), message);
-}
 
 struct ConsoleSink {
     bool colorize  = true;
@@ -157,7 +41,7 @@ struct ConsoleSink {
 
     void Write(const LogSeverity severity, const LogSource source, const std::string_view message) const noexcept {
         FILE*                  stream = useStdErr ? stderr : stdout;
-        const std::string      line   = FormatLine(severity, source, message, colorize && ShouldColorize(stream));
+        const std::string      line   = ZHLN::FormatLogLine(severity, source, message, colorize && ShouldColorize(stream));
         std::fwrite(line.data(), 1, line.size(), stream);
         std::fputc('\n', stream);
     }
@@ -186,7 +70,7 @@ struct FileSink {
         if (file == nullptr) {
             return;
         }
-        const std::string line = FormatLine(severity, source, message, false);
+        const std::string line = ZHLN::FormatLogLine(severity, source, message, false);
         std::fwrite(line.data(), 1, line.size(), file);
         std::fputc('\n', file);
     }
@@ -253,7 +137,44 @@ void LoggerFlushThunk(void* userData) noexcept {
 
 } // namespace
 
+
 namespace ZHLN {
+
+namespace {
+
+// Process-wide fallbacks, both of them only consulted when nothing better is
+// installed:
+//   g_minSeverity -- the minimum severity a freshly minted Logger starts at,
+//                    and the gate the stderr fallback uses. SetLogLevel writes
+//                    it; a logger given an explicit level (LoggerConfig) is not
+//                    affected.
+//   g_sink        -- the ambient sink (Zahlen/Log.hpp).
+std::atomic<LogSeverity> g_minSeverity {LogSeverity::Info};
+
+// Installed once per engine/session at most, read on every log call.
+//
+// Guarded by a mutex rather than published as a std::atomic<LogSink>: a sink is
+// four pointers (32 bytes), which is wider than any lock-free CAS a target
+// offers (16 bytes on x86-64/ARM64). GCC and Clang lower such an atomic to
+// libatomic's __atomic_load/__atomic_store, which route through a hidden lock
+// table -- a lock, at that point, that is both slower than this mutex and a link
+// dependency (-latomic) that MinGW and some Linux toolchains do not add for you.
+// A one-byte atomic (g_minSeverity) is genuinely lock-free everywhere and stays
+// an atomic.
+//
+// The per-line cost is ONE acquisition, not three: the caller takes a single
+// snapshot through GetLogSink(), gates on that snapshot's filter and writes
+// through the same snapshot's writer. No lock is held while a sink runs, so a
+// sink may log from inside its Write.
+std::mutex g_sinkMutex;
+LogSink    g_sink {};
+
+} // namespace
+
+using LogDetail::BaseName;
+using LogDetail::kColorReset;
+using LogDetail::SeverityColor;
+using LogDetail::SeverityTag;
 
 struct Logger::Impl {
     mutable Mutex                           mutex;
@@ -265,13 +186,27 @@ struct Logger::Impl {
 };
 
 Logger::Logger(): _impl(std::make_unique<Impl>()) {
+    // A logger nobody gave an explicit level starts at the process default
+    // (SetLogLevel). That is what makes a host's -q/-v useful for engines that
+    // the factory mints for itself: the flag sets the default, and every logger
+    // created afterwards inherits it instead of hard-coding Info.
+    _impl->minimum = g_minSeverity.load(std::memory_order::acquire);
 }
 
 Logger::~Logger() = default;
 
 auto Logger::IsEnabled(const LogSeverity severity) const noexcept -> bool {
+    // One acquisition, and no foreign call under it: the answer is "would any
+    // sink see this line?". The display sinks (console, file) honor the
+    // logger's own minimum severity; an attached external sink is an observer
+    // owned by the host -- a capture ring, a telemetry counter -- and is
+    // delivered every line regardless of what the display is set to, so its
+    // presence alone makes the line enabled. `Off` still means silence.
+    if (severity == LogSeverity::Off) {
+        return false;
+    }
     const std::scoped_lock lock(_impl->mutex);
-    return severity != LogSeverity::Off && severity >= _impl->minimum;
+    return severity >= _impl->minimum || !_impl->external.empty();
 }
 
 void Logger::Write(const LogSeverity severity, const LogSource source, const std::string_view message) const noexcept {
@@ -279,17 +214,22 @@ void Logger::Write(const LogSeverity severity, const LogSource source, const std
     // under the lock; external sinks are arbitrary consumer code (they may
     // add/remove sinks or flush), so they are snapshotted and invoked after
     // the lock is released.
+    if (severity == LogSeverity::Off) {
+        return;
+    }
     SinkSnapshot external;
     {
         const std::scoped_lock lock(_impl->mutex);
-        if (severity < _impl->minimum) {
-            return;
-        }
-        for (const auto& sink: _impl->consoles) {
-            sink.Write(severity, source, message);
-        }
-        for (const auto& sink: _impl->files) {
-            sink.Write(severity, source, message);
+        // Display sinks are gated by the logger's minimum severity; external
+        // observers are not (see IsEnabled): silencing the console must not
+        // blind a test's capture ring or a harness's validation counter.
+        if (severity >= _impl->minimum) {
+            for (const auto& sink: _impl->consoles) {
+                sink.Write(severity, source, message);
+            }
+            for (const auto& sink: _impl->files) {
+                sink.Write(severity, source, message);
+            }
         }
         if (_impl->external.empty()) {
             return; // nothing forwards: no snapshot, no allocation
@@ -376,37 +316,13 @@ auto Logger::AsLogSink() const noexcept -> LogSink {
 
 namespace ZHLN {
 
-namespace {
-// Default minimum severity for the no-sink path (stderr). The engine-sink
-// path defers to the sink's own filter instead.
-std::atomic<LogSeverity> g_minSeverity {LogSeverity::Info};
-
-// Installed once per engine/session at most, read on every log call. The
-// mutex (rather than separate atomics per field) keeps filter/write/flush/
-// userData a consistent set without allocating; the lock is never held
-// across the sink call itself, so a sink may log from inside its own Write.
-std::mutex g_sinkMutex;
-LogSink    g_sink;
-
-auto SeverityName(const LogSeverity severity) noexcept -> const char* {
-    switch (severity) {
-        case LogSeverity::Debug: return "DBG";
-        case LogSeverity::Info: return "INF";
-        case LogSeverity::Warning: return "WRN";
-        case LogSeverity::Error: return "ERR";
-        case LogSeverity::Off: return "OFF";
-    }
-    return "???";
-}
-} // namespace
-
 void SetLogSink(const LogSink sink) noexcept {
-    const std::lock_guard lock(g_sinkMutex);
+    const std::scoped_lock lock(g_sinkMutex);
     g_sink = sink;
 }
 
 auto GetLogSink() noexcept -> LogSink {
-    const std::lock_guard lock(g_sinkMutex);
+    const std::scoped_lock lock(g_sinkMutex);
     return g_sink;
 }
 
@@ -426,12 +342,18 @@ auto AmbientLogEnabled(const LogSeverity severity) noexcept -> bool {
 void WriteAmbientLog(const LogSeverity severity, const LogSource source, const std::string_view message) noexcept {
     const LogSink sink = GetLogSink();
     if (sink.write != nullptr) {
+        // The gate the caller consulted (AmbientLogEnabled) was read from the
+        // same published value; a filter that changed its mind concurrently is
+        // that sink's business, not a reason to drop the line here.
         sink.write(severity, source, message, sink.userData);
         return;
     }
-    // Default sink: stderr, one line, severity-tagged -- logging must never
-    // be silently dropped just because no host installed anything.
-    std::fprintf(stderr, "[%s] %.*s\n", SeverityName(severity), static_cast<int>(message.size()), message.data());
+    // Default sink: stderr, rendered by the one formatting pass, exactly like
+    // any installed console sink -- logging must never be silently dropped just
+    // because no host installed anything, and a line that survives must not
+    // lose its file, fiber or severity on the way out.
+    const std::string line = FormatLogLine(severity, source, message, false);
+    std::fprintf(stderr, "%s\n", line.c_str());
 }
 
 } // namespace ZHLN

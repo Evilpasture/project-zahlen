@@ -12,8 +12,6 @@
 #include <ecs/ECS.hpp>
 #include <physics/Physics.hpp>
 #include <vector>
-#include <cstdio>
-#include <format>
 
 
 namespace ZHLN::Tests {
@@ -68,8 +66,7 @@ static void VerifyRealVisualInterpolation(
         const auto expected = Lerp(snapshots[j].previousPosition, snapshots[j].currentPosition, clampedAlpha);
         const auto actual = trans->position;
         if ((actual - expected).LengthSquared() > 1e-3f) {
-            Log<LogTag::Warning>(
-                "Visual interpolation drift on entity {}: expected ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
+            kLog.Warn("Visual interpolation drift on entity {}: expected ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
                 e.index, expected.x, expected.y, expected.z, actual.x, actual.y, actual.z, clampedAlpha
             );
         }

@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vulkan/presentation/Surface.hpp"
-#include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <algorithm>
 #include <optional>
 #include <span>
@@ -233,7 +231,6 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) 
     if (vkCreateDisplayPlaneSurfaceKHR(instance, &create_info, nullptr, &raw_surface) != VK_SUCCESS) {
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
-
 
     return DisplaySurface {
         .surface = Surface(instance, raw_surface),

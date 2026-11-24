@@ -82,7 +82,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            Log<LogTag::Debug>("Pre-allocating persistently mapped per-frame debug VBOs...");
+            kLog.Debug("Pre-allocating persistently mapped per-frame debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
             for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                 auto gpu_buf_res =
@@ -315,7 +315,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
         return std::unexpected(ibl.error());
     }
     iblPayload = std::move(*ibl);
-    Log<LogTag::Debug>("Uploading Linearly Transformed Cosines (LTC) LUTs...");
+    kLog.Debug("Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
     using namespace Resource;
     constexpr size_t kDdsHeaderBytes = 128;

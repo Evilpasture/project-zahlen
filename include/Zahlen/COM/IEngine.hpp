@@ -20,6 +20,11 @@
 
 namespace ZHLN::COM {
 
+// Forward declarations, not includes: IEngine is included by nearly every
+// consumer and the two logging interfaces bring in the error/format surface
+// with them. A caller that *uses* the returned object -- rather than handing
+// the pointer straight back to the engine -- includes <Zahlen/COM/ILogger.hpp>
+// or <Zahlen/COM/IErrorRegistry.hpp> itself.
 struct ILogger;
 struct ILoggerHub;
 struct IErrorRegistry;

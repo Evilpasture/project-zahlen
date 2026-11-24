@@ -95,28 +95,45 @@ auto ErrorRegistry::Describe(ErrorCode code, std::string& outCategory, std::stri
     if (it == categories.end()) {
         return false;
     }
-    outCategory = it->second.name;
-    outName     = "Unknown";
-    outMessage  = "Unknown";
     for (const auto& entry: it->second.entries) {
         if (entry.value == code.Value()) {
-            outName    = entry.name;
-            outMessage = entry.message;
+            outCategory = it->second.name;
+            outName     = entry.name;
+            outMessage  = entry.message;
             return true;
         }
     }
+    // A known category with an unknown enumerator is still a miss: the outputs
+    // are left untouched so a caller that ignores the result cannot mistake a
+    // stale description for a real one.
     return false;
 }
 
 void ErrorRegistry::RecordDetail(const ErrorCode code, const LogSource source, const std::string_view detail) noexcept {
+    // Everything is copied here, while the recording DSO is still mapped: the
+    // source views point into its .rodata and the detail into its stack.
+    Detail recorded {
+        .code     = code,
+        // Base name, not the full path: ErrorRecord::file is a String64 and an
+        // absolute build path is longer than that, so truncating it cut the
+        // filename off the end -- the one part a reader needs.
+        .file     = std::string(LogDetail::BaseName(source.file)),
+        .function = std::string(source.function),
+        .line     = source.line,
+        .channel  = String32 {source.channel},
+        .detail   = std::string(detail),
+    };
     const std::scoped_lock lock(_mutex);
-    _last    = Detail {.code = code, .source = source, .detail = std::string(detail)};
+    _last    = std::move(recorded);
     _hasLast = true;
 }
 
-auto ErrorRegistry::LastDetail() const noexcept -> const Detail* {
+auto ErrorRegistry::LastDetail() const noexcept -> std::optional<Detail> {
     const std::scoped_lock lock(_mutex);
-    return _hasLast ? &_last : nullptr;
+    if (!_hasLast) {
+        return std::nullopt;
+    }
+    return _last;
 }
 
 } // namespace ZHLN

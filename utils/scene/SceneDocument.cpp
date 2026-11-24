@@ -55,18 +55,18 @@ auto ReadSceneDocument(const std::filesystem::path& path) -> std::expected<Scene
 auto LoadSceneDocument(COM::IEngine& engine, const std::filesystem::path& path, Scene::InstantiateOptions options) -> bool {
     const auto parsed = ReadSceneDocument(path);
     if (!parsed) {
-        ZHLN::Log<ZHLN::LogTag::Error>("document '{}': {}", path.string(), parsed.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("document '{}': {}", path.string(), parsed.error());
         return false;
     }
     if (const auto valid = Scene::Validate(*engine.Assets(), *parsed); !valid) {
-        ZHLN::Log<ZHLN::LogTag::Error>("document dependencies '{}': {}", path.string(), valid.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("document dependencies '{}': {}", path.string(), valid.error());
         return false;
     }
     engine.ClearScene();
     const auto instance = Scene::Instantiate(engine, *parsed, options);
     if (!instance) {
         engine.ClearScene();
-        ZHLN::Log<ZHLN::LogTag::Error>("instantiate '{}': {}", path.string(), instance.error());
+        ZHLN::Log<ZHLN::LogSeverity::Error>("instantiate '{}': {}", path.string(), instance.error());
         return false;
     }
     return true;

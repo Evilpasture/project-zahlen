@@ -202,8 +202,6 @@ struct alignas(64) RigBoneMap {
     uint32_t jointCount                   = 0;
     int32_t  skeletonIndex                = -1;
     uint64_t poseVersion                  = 0;
-    size_t   synchronizedAttachmentCount  = 0;
-    size_t   synchronizedSkinPaletteCount = 0;
     bool     initialized                  = false;
     bool     poseValid                    = false;
     // Baked control rigs animate CTR/FK/IK/MCH/ORG and DEF nodes together.

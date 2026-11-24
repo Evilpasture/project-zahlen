@@ -10,9 +10,6 @@
 
 struct lua_State;
 
-namespace ZHLN::COM {
-}
-
 namespace ZHLN::ProjectLight {
 
 class DataModel;

@@ -81,7 +81,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                 Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS
             >();
             if (!shaders) {
-                Log<LogTag::Warning>("Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
+                kLog.Warn("Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
                 return {};
             }
 
@@ -97,7 +97,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                                 .Binaries(&impl.pipelineBinaries)
                                 .Build(device);
             if (!pipeline) {
-                Log<LogTag::Warning>("Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
+                kLog.Warn("Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
                 return {};
             }
             _cascadeMeshPipeline = std::move(*pipeline);

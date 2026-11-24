@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "InteractionSystem.hpp"
-#include <cstdio>
-#include <format>
 #include "BSPInteraction.hpp"
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
@@ -17,14 +15,12 @@
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <cmath>
 #include <string>
-
 
 namespace ZHLN::Interaction {
 namespace {
@@ -38,19 +34,6 @@ void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float dur
             .duration = duration,
         });
     }
-}
-
-[[nodiscard]] auto DebugLabel(const COM::IEntities& entities, Entity e) -> std::string {
-    if (const auto* meta = entities.Get<BSPEntityMetadataComponent>(e)) {
-        if (!meta->className.empty()) {
-            return std::string(meta->className.c_str()) +
-                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
-        }
-    }
-    if (const auto* name = entities.Get<Components::NameComponent>(e); name != nullptr && !name->name.empty()) {
-        return std::string(name->name.c_str());
-    }
-    return "entity#" + std::to_string(e.index);
 }
 
 [[nodiscard]] auto FindPlayerEntity(const COM::IEntities& entities) noexcept -> Entity {
@@ -156,9 +139,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             const bool newlyEntered = ((trigger->flags & TriggerFlags::PlayerInside) == TriggerFlags::None);
             trigger->flags |= TriggerFlags::PlayerInside;
 
-            if (interactJustPressed) {
-            }
-
             if (newlyEntered) {
                 const String64     target          = trigger->target;
                 const TriggerFlags savedFlags      = trigger->flags;
@@ -243,8 +223,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             if (interactJustPressed && (door->flags & DoorFlags::UseOpens) != DoorFlags::None) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None) {
                     PostBeep(audio, 0.20f, 300.0f, 0.10f);
-                    if (door->scriptHash != 0) {
-                    }
                 } else {
                     const std::string_view action = ((door->flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
                     FireEntityInput(entities, doorEnt, action, "", audio);

@@ -98,9 +98,8 @@ class FidelityLogSink final: public ZHLN::COM::Implements<FidelityLogSink, ZHLN:
     [[nodiscard]] auto IsEnabled(ZHLN::COM::LogSeverity) const noexcept -> bool override {
         return true;
     }
-    void Write(ZHLN::COM::LogSeverity severity, ZHLN::COM::LogSource source, ZHLN::COM::StringView message) const noexcept override {
-        const std::string_view messageText(message);
-        if (severity == ZHLN::COM::LogSeverity::Error && source.domain == ZHLN::LogDomain::Vulkan) {
+    void Write(ZHLN::COM::LogSeverity severity, ZHLN::COM::LogSource source, ZHLN::COM::StringView /*message*/) const noexcept override {
+        if (severity == ZHLN::COM::LogSeverity::Error && source.channel == std::string_view {"Vulkan"}) {
             g_validationErrors.fetch_add(1, std::memory_order::relaxed);
         }
     }
@@ -274,12 +273,12 @@ uint32_t ImportModel(ZHLN::COM::IEngine& engine, std::span<const uint8_t> bytes,
         engine.Assets()
     );
     if (!doc) {
-        ZHLN::Log(engine.Logger(), "'{}' is not a glTF this importer can read.", virtualPath);
+        ZHLN::COM::Log(engine.Logger(), "'{}' is not a glTF this importer can read.", virtualPath);
         return 0;
     }
     auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
     if (!asset) {
-        ZHLN::Log<ZHLN::LogTag::Error>("'{}' failed to upload.", virtualPath);
+        ZHLN::Log<ZHLN::LogSeverity::Error>("'{}' failed to upload.", virtualPath);
         return 0;
     }
     if (asset->ownsResources) {
@@ -436,7 +435,7 @@ void StripSceneLights(ZHLN::COM::IEngine& engine) {
     }
     if (!lights.empty() || !suns.empty()) {
         (void)0;
-        ZHLN::Log(engine.Logger(), "Removed {} light(s) and {} sun tag(s). The panorama is the only light.", lights.size(), suns.size());
+        ZHLN::COM::Log(engine.Logger(), "Removed {} light(s) and {} sun tag(s). The panorama is the only light.", lights.size(), suns.size());
     }
 }
 
@@ -487,7 +486,7 @@ enum class DiagnosticCapture {
         }
         auto material = renderer.FindMaterial(mesh->materialAsset);
         if (!material) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("Diagnostic cannot find a material for an imported mesh.");
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("Diagnostic cannot find a material for an imported mesh.");
             return false;
         }
 
@@ -508,7 +507,7 @@ enum class DiagnosticCapture {
                 // forward pass, at unchanged full coverage. Textured or
                 // alpha-covered glass needs a separate shader mask.
                 if (material->alphaMode != 0 || material->albedoMap != ZHLN::TextureID::Invalid) {
-                    ZHLN::Log(engine.Logger(), "Transmission coverage requires untextured OPAQUE glass; this material is unsupported.");
+                    ZHLN::COM::Log(engine.Logger(), "Transmission coverage requires untextured OPAQUE glass; this material is unsupported.");
                     return false;
                 }
                 material->unlit           = true;
@@ -540,10 +539,10 @@ enum class DiagnosticCapture {
 
     if (transmitting == 0 || (mode == DiagnosticCapture::DielectricSpecular && opaque == 0) ||
         (mode == DiagnosticCapture::TransmissionWithoutIridescence && iridescent == 0)) {
-        ZHLN::Log(engine.Logger(), "Diagnostic has no applicable transmitting/opaque/iridescent mesh; refusing an unchanged capture.");
+        ZHLN::COM::Log(engine.Logger(), "Diagnostic has no applicable transmitting/opaque/iridescent mesh; refusing an unchanged capture.");
         return false;
     }
-    ZHLN::Log(engine.Logger(), "Diagnostic: {} transmitting, {} black-albedo opaque, {} iridescent mesh(es).", transmitting, opaque, iridescent);
+    ZHLN::COM::Log(engine.Logger(), "Diagnostic: {} transmitting, {} black-albedo opaque, {} iridescent mesh(es).", transmitting, opaque, iridescent);
     return true;
 }
 
@@ -676,7 +675,11 @@ auto main(int argc, char* argv[]) -> int {
     const FidelityScenario scenario = *parsed;
 
     auto fidelitySink = ZHLN::COM::Ref<FidelityLogSink>::Adopt(new (std::nothrow) FidelityLogSink());
-    auto fidelityHub  = ZHLN::COM::CreateLogger();
+    // The hub carries the run's level, so --quiet/--verbose reach it, and the
+    // engine receives the same hub below: one pipeline, one level, one format.
+    auto fidelityHub = ZHLN::COM::CreateLogger(
+        ZHLN::COM::InChain(ZHLN::COM::LoggerConfig {.logger = nullptr, .level = engineConfig.logLevel})
+    );
     if (fidelityHub) (void) (*fidelityHub)->AddSink(fidelitySink.Get());
 
     ZHLN::Platform::Init();
@@ -699,6 +702,10 @@ auto main(int argc, char* argv[]) -> int {
             .initialPipelineBinary = engineConfig.initialPipelineBinaryData,
         },
         engineConfig.physics,
+        // Crash dumps were silently dropped when this chain was expanded by
+        // hand: the path the harness resolved (or defaulted) has to travel with
+        // the rest of the config or a fault report has nowhere to go.
+        ZHLN::COM::DiagnosticsInfo {.crashDumpPath = std::string_view(engineConfig.crashDumpPath)},
         ZHLN::COM::LoggerConfig {.logger = fidelityHub ? fidelityHub->Get() : nullptr, .level = engineConfig.logLevel}
     ));
     if (!engineRes) {
@@ -713,33 +720,30 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::Animation::Context animCtx {};
 
-    ZHLN::Log(engine->Logger(),
+    ZHLN::COM::Log(engine->Logger(),
         "'{}': model='{}', lighting='{}', {}x{}, orbit(theta={:.1f}, phi={:.1f}, radius={:.3f}), fov={:.1f}.",
         scenario.name.empty() ? std::string_view {"(untitled)"} : std::string_view {scenario.name}, scenario.model, scenario.lighting,
         scenario.dimensions.width, scenario.dimensions.height, scenario.orbit.theta, scenario.orbit.phi, scenario.orbit.radius,
-        scenario.verticalFov
-    );
+        scenario.verticalFov);
     if (!scenario.lighting.empty()) {
-        ZHLN::Log(engine->Logger(), "Radiance '{}' (skybox {}).", scenario.lighting, scenario.renderSkybox);
+        ZHLN::COM::Log(engine->Logger(), "Radiance '{}' (skybox {}).", scenario.lighting, scenario.renderSkybox);
     }
 
-    // The harness owns the camera, so core's WASD free-cam must come off the
-    // camera entity or the two write the same transform every frame.
-    {
-        const ZHLN::Entity camera = engine->Entities()->SingletonEntity<ZHLN::Components::MainCameraTagComponent>().ValueOr(ZHLN::Entity::Null());
-        if (camera != ZHLN::Entity::Null()) {
-        }
-        // Before the import, so a light the default scene attached cannot
-        // light the first frames. The import is stripped again below.
-        StripSceneLights(*engine);
-    }
+    // The harness owns the camera. Nothing else drives it: the freecam layer is
+    // loaded by name and this sample never loads it, so there is no second
+    // writer on the camera's transform to detach. (The empty `if` that used to
+    // sit here was left over from when the harness attached one and detached it.)
+    //
+    // Before the import, so a light the default scene attached cannot light the
+    // first frames. The import is stripped again below.
+    StripSceneLights(*engine);
 
     // Conformance settings and the authored camera, before the import: the
     // backdrop and the grade are already right while the model uploads. The
     // ambient scale defaults to 1:1; --no-aa is only for unfiltered A/B captures.
     const ZHLN::GraphicsSettings settings = MakeConformanceSettings(config.ambientScale, config.noAA);
     ApplyGraphicsSettings(*engine, settings);
-    ZHLN::Log(engine->Logger(), "Antialiasing: {}.", config.noAA ? "none (--no-aa)" : "SMAA (spatial)");
+    ZHLN::COM::Log(engine->Logger(), "Antialiasing: {}.", config.noAA ? "none (--no-aa)" : "SMAA (spatial)");
 
     // The environment is an ECS key, not a renderer-side file load. Decode
     // the scenario's raw HDR/JPEG (or cooked ZRD1/ZRD2) through the optional
@@ -748,13 +752,13 @@ auto main(int argc, char* argv[]) -> int {
     // image. Preflight here: Engine::Tick does not surface all render errors.
     if (!scenario.lighting.empty()) {
         if (scenario.lighting.size() > ZHLN::String256::kMaxTextLength) {
-            ZHLN::Log(engine->Logger(), "Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
+            ZHLN::COM::Log(engine->Logger(), "Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
         auto& assets = *engine->Assets();
         auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets, scenario.lighting);
         if (!decoded) {
-            ZHLN::Log<ZHLN::LogTag::Error>("Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
+            ZHLN::Log<ZHLN::LogSeverity::Error>("Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
             return EXIT_FAILURE;
         }
         const ZHLN::COM::EnvironmentImageCacheInfo cacheInfo {
@@ -766,7 +770,7 @@ auto main(int argc, char* argv[]) -> int {
             .contentHash  = decoded->contentHash,
         };
         if (!assets.CacheEnvironmentImage(ZHLN::COM::InChain(cacheInfo)).HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
+            ZHLN::Log<ZHLN::LogSeverity::Error>("Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
             return EXIT_FAILURE;
         }
         // The environment map is scene content and carries itself: RenderSystem
@@ -785,11 +789,11 @@ auto main(int argc, char* argv[]) -> int {
                       std::isfinite(camera.yaw.value) && std::isfinite(camera.pitch.value);
     });
     if (!hasCamera) {
-        ZHLN::Log<ZHLN::LogTag::Warning>(engine->Logger(), "No main camera entity for '{}'; refusing an empty capture.", scenario.name);
+        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine->Logger(), "No main camera entity for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
     if (!cameraValid) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Invalid camera for '{}'; refusing an empty capture.", scenario.name);
+        ZHLN::Log<ZHLN::LogSeverity::Error>("Invalid camera for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
 
@@ -803,12 +807,12 @@ auto main(int argc, char* argv[]) -> int {
     // The model bytes arrive from disk (runner-driven) rather than a fetch.
     const auto modelBytes = ReadFileBytes(scenario.model);
     if (!modelBytes) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Model load failed; nothing to render.");
+        ZHLN::Log<ZHLN::LogSeverity::Error>("Model load failed; nothing to render.");
         return EXIT_FAILURE;
     }
     std::vector<ZHLN::TextureID> ownedTextures;
     if (ImportModel(*engine, *modelBytes, scenario.model, ownedTextures) == 0) {
-        ZHLN::Log(engine->Logger(), "Model import produced no geometry; nothing to render.");
+        ZHLN::COM::Log(engine->Logger(), "Model import produced no geometry; nothing to render.");
         return EXIT_FAILURE;
     }
     // Defensively remove any scene lights: neither the model nor the default
@@ -835,16 +839,16 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Animation::Step(*engine, animCtx, dt);
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("Render tick failed: {}; refusing an incomplete capture.", result.error);
+            ZHLN::Log<ZHLN::LogSeverity::Error>("Render tick failed: {}; refusing an incomplete capture.", result.error);
             return EXIT_FAILURE;
         }
     }
     if (!engine->IsRunning()) {
-        ZHLN::Log(engine->Logger(), "Render host stopped before capture.");
+        ZHLN::COM::Log(engine->Logger(), "Render host stopped before capture.");
         return EXIT_FAILURE;
     }
     if (const uint32_t errors = g_validationErrors.load(std::memory_order::relaxed); errors != 0) {
-        ZHLN::Log<ZHLN::LogTag::Error>("{} Vulkan validation errors; refusing to publish an invalid capture.", errors);
+        ZHLN::Log<ZHLN::LogSeverity::Error>("{} Vulkan validation errors; refusing to publish an invalid capture.", errors);
         return EXIT_FAILURE;
     }
 
@@ -855,7 +859,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Screenshot::CaptureBuffer captureBuffer;
     const auto captureRes = captureBuffer.Read(*engine->Graphics(), captureExtent);
     if (!captureRes || *captureRes == nullptr) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Capture failed.");
+        ZHLN::Log<ZHLN::LogSeverity::Error>("Capture failed.");
         return EXIT_FAILURE;
     }
     const ZHLN::CapturedFrame* capture = *captureRes;
@@ -866,13 +870,13 @@ auto main(int argc, char* argv[]) -> int {
     const bool                 outputKeepsAlpha = std::string_view(config.outputPath).ends_with(".pam");
     const std::vector<uint8_t> encoded          = ZHLN::Netpbm::EncodePPM(*capture, outputKeepsAlpha);
     if (encoded.empty()) {
-        ZHLN::Log(engine->Logger(), "Capture produced no encodable pixels.");
+        ZHLN::COM::Log(engine->Logger(), "Capture produced no encodable pixels.");
         return EXIT_FAILURE;
     }
     if (!WriteBytes(config.outputPath, encoded)) {
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log(engine->Logger(), "Wrote {} ({}x{}, {} bytes).", config.outputPath, capture->extent.width, capture->extent.height, encoded.size());
+    ZHLN::COM::Log(engine->Logger(), "Wrote {} ({}x{}, {} bytes).", config.outputPath, capture->extent.width, capture->extent.height, encoded.size());
     return EXIT_SUCCESS;
 }

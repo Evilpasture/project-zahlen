@@ -4,7 +4,6 @@
 module;
 
 #include <Animation/Components.hpp>
-#include <cstdio>
 #include <format>
 
 // clang-format off
@@ -29,7 +28,6 @@ module;
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <algorithm>
@@ -44,7 +42,6 @@ module;
 #include <span>
 #include <string_view>
 #include <utility>
-
 
 module ZHLN.ProceduralAnimation;
 
@@ -1384,8 +1381,6 @@ bool BuildBoneMap(const Animation::PrefabRig& prefab, const Skeleton& skeleton, 
     outMap.sourcePrefabAsset     = vPath.empty() ? InvalidAssetID : HashAssetPath(vPath);
     outMap.nodeCount             = std::min(prefab.nodes.size(), kMaxRigNodes);
     outMap.jointCount            = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
-    if (prefab.nodes.size() > kMaxRigNodes) {
-    }
 
     for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         const int32_t importedParent     = prefab.nodes[node].parentIndex;
@@ -1893,84 +1888,15 @@ void ProceduralAnimation::Evaluate(
         SkinBinding                 skin   = FindSkinBinding(entities, entity, prefab);
 
         if ((!boneMap->initialized || boneMap->sourcePrefabAsset != prefabAsset) && prefab != nullptr && skin.skeleton != nullptr) {
-            const bool complete        = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
+            // The rig-coverage accounting that used to follow this call fed a
+            // per-rig diagnostic line; it is gone, and so is the accounting.
+            BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->sourcePrefabAsset = prefabAsset;
             boneMap->jointOffset       = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex     = skin.skeletalMesh->skeletonIndex;
             if (hair) {
                 hair->bindPoseInitialized = false;
                 hair->initialized         = false;
-            }
-
-            size_t mappedCoreBones = 0;
-            for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                mappedCoreBones += IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount) ? 1u : 0u;
-            }
-            size_t mappedHairBones   = 0;
-            size_t mappedHairStrands = 0;
-            for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
-                bool strandMapped = false;
-                for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                    const size_t semantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand + link;
-                    if (IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
-                        ++mappedHairBones;
-                        strandMapped = true;
-                    }
-                }
-                mappedHairStrands += strandMapped ? 1u : 0u;
-            }
-            if (boneMap->preserveAuthoredHierarchy) {
-            }
-            if (boneMap->childOfConstraintCount > 0) {
-                size_t kneeJoints      = 0;
-                size_t footAttachments = 0;
-                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
-                    kneeJoints += boneMap->childOfConstraints[index].kind == RigChildOfKind::Knee ? 1u : 0u;
-                    footAttachments += boneMap->childOfConstraints[index].kind == RigChildOfKind::FootAttachment ? 1u : 0u;
-                }
-                const RigNodeIndex footL = boneMap->nodeIndices[BoneSlot(CharacterBone::FootL)];
-                const RigNodeIndex footR = boneMap->nodeIndices[BoneSlot(CharacterBone::FootR)];
-                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
-                    const RigChildOfConstraint& constraint = boneMap->childOfConstraints[index];
-                    if (constraint.kind != RigChildOfKind::FootAttachment || !IsValidRigNode(constraint.child, prefab->nodes.size())) {
-                        continue;
-                    }
-                    const std::string_view parentLabel = constraint.parent == footL ? "FootL" : (constraint.parent == footR ? "FootR" : "Foot");
-                }
-            }
-            if (boneMap->fingerJointConstraintCount > 0) {
-                size_t repairedFingerRelations = 0;
-                for (size_t index = 0; index < boneMap->fingerJointConstraintCount; ++index) {
-                    repairedFingerRelations += boneMap->fingerJointConstraints[index].repairRelation ? 1u : 0u;
-                }
-            }
-            if (animator && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
-                const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
-                size_t               usableTransformChannels = 0;
-                for (const AnimationChannel& channel: clip.channels) {
-                    usableTransformChannels += channel.path != AnimationPathType::Weights && channel.targetNodeIndex >= 0 &&
-                                                       channel.targetNodeIndex < static_cast<int32_t>(boneMap->nodeCount) ?
-                                                   1u :
-                                                   0u;
-                }
-                if (usableTransformChannels == 0) {
-                }
-            } else {
-            }
-            if (!complete) {
-                for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                    if (!IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
-                    }
-                }
-                for (size_t strand = 0; strand < boneMap->sourceHairStrandCount; ++strand) {
-                    const size_t rootSemantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
-                    bool         strandMapped = false;
-                    for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                        strandMapped = strandMapped || IsValidRigNode(boneMap->nodeIndices[rootSemantic + link], boneMap->nodeCount);
-                    }
-                    if (!strandMapped) {
-                    }
-                }
             }
         }
         if (!boneMap->initialized || boneMap->nodeCount == 0) {
@@ -2425,10 +2351,12 @@ void ProceduralAnimation::Evaluate(
             }
             const std::span<const Mat4x4> paletteSpan {palette.data(), paletteCount};
             if (graphics != nullptr) {
-                if (const auto res =
-                        graphics->UpdateJointMatrices(skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
-                    !res.HasValue()) {
-                }
+                // The upload is the point; a resource that has already been
+                // released rejects it and there is nothing this loop could do
+                // about that, so the result is not branched on.
+                (void) graphics->UpdateJointMatrices(
+                    skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()}
+                );
             }
             if (sink.uploadPalette != nullptr) {
                 sink.uploadPalette(sink.user, skeletalMesh->jointOffset, paletteSpan);
@@ -2481,19 +2409,11 @@ void ProceduralAnimation::Evaluate(
         // change detection and the loop tail. Destructs on the closing brace.
         ZHLN::ScopedTimer tailTimer("PA Stage: Entity tail");
 
-        const size_t previousPaletteCount     = boneMap->synchronizedSkinPaletteCount;
-        boneMap->synchronizedSkinPaletteCount = uploadedPaletteCount;
-        if (boneMap->poseVersion == 1 || previousPaletteCount != uploadedPaletteCount) {
-        }
-
         // Non-skinned child entities are attachments, not palette consumers.
         // Publish their evaluated node TRS before core TransformSystem runs.
-        const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Attachments");
-            boneMap->synchronizedAttachmentCount = Animation::SyncNonSkinnedAttachments(entities, entity, *boneMap);
-        }
-        if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
+            (void) Animation::SyncNonSkinnedAttachments(entities, entity, *boneMap);
         }
     }
 }

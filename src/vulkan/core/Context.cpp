@@ -5,7 +5,6 @@
 #include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include "vulkan/core/Extensions.hpp"
 #include <Zahlen/Log.hpp>
-#include <cstdio>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -13,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "vulkan/core/DeviceConfigurator.hpp"
+#include "vulkan/VulkanLog.hpp"
 
 namespace ZHLN::Vk {
 
@@ -60,7 +60,7 @@ namespace {
         return std::unexpected(ContextError::InvalidInstance);
     }
     if (volkInitialize() != VK_SUCCESS) {
-        Log<LogTag::Error, LogTag::Vulkan>("No Vulkan loader is available; volkInitialize() failed while preparing a context.");
+        kVkLog.Error("No Vulkan loader is available; volkInitialize() failed while preparing a context.");
         return std::unexpected(ContextError::LoaderInitializationFailed);
     }
 
@@ -203,19 +203,18 @@ namespace {
     const bool descriptor_heap_enabled = vkCmdBindResourceHeapEXT != nullptr && vkCmdBindSamplerHeapEXT != nullptr && vkCmdPushDataEXT != nullptr &&
                                          vkWriteResourceDescriptorsEXT != nullptr && vkWriteSamplerDescriptorsEXT != nullptr;
     if (!descriptor_heap_enabled) {
-        Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled.");
+        kVkLog.Warn("VK_EXT_descriptor_heap entry points are unavailable; descriptor-heap paths are disabled.");
     }
     const MeshShaderLimits mesh_limits                 = QueryMeshShaderLimits(physical.handle);
     const bool             mesh_entry_points_available = vkCmdDrawMeshTasksEXT != nullptr && vkCmdDrawMeshTasksIndirectEXT != nullptr;
     const bool             mesh_shader_enabled         = meshShaderRequested && mesh_entry_points_available && MeshShaderLimitsSufficient(mesh_limits);
     if (meshShaderRequested && !mesh_shader_enabled) {
         if (!mesh_limits.supported) {
-            Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline.");
+            kVkLog.Warn("VK_EXT_mesh_shader is not supported by the physical device; using the vertex pipeline.");
         } else if (!mesh_entry_points_available) {
-            Log<LogTag::Warning, LogTag::Vulkan>("VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline.");
+            kVkLog.Warn("VK_EXT_mesh_shader entry points are unavailable; using the vertex pipeline.");
         } else {
-            Log<LogTag::Warning, LogTag::Vulkan>(
-                "Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using vertex pipelines.",
+            kVkLog.Warn("Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using vertex pipelines.",
                 mesh_limits.maxMeshOutputVertices, mesh_limits.maxMeshOutputPrimitives, mesh_limits.maxTaskWorkGroupInvocations,
                 mesh_limits.maxMeshWorkGroupInvocations
             );
@@ -325,7 +324,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         }
         const std::string_view name(requested);
         if (!HasExtension(available_extensions, name)) {
-            Log<LogTag::Warning, LogTag::Vulkan>("Skipping unsupported device extension: {}", name);
+            kVkLog.Warn("Skipping unsupported device extension: {}", name);
             continue;
         }
         if (!std::ranges::contains(enabled_extensions, name)) {

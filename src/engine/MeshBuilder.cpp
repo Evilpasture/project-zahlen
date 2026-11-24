@@ -72,7 +72,7 @@ auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh {
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
@@ -116,7 +116,7 @@ auto BuildPlaneMesh(RenderContext& gfx, float extent, ZHLN::FVec4 color, bool bu
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreatePlaneMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreatePlaneMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
@@ -213,7 +213,7 @@ auto BuildBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreateBoxMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreateBoxMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
@@ -281,7 +281,7 @@ auto BuildSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color, bool b
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreateSphereMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreateSphereMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
@@ -357,7 +357,7 @@ auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVe
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreateCylinderMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreateCylinderMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;
@@ -428,7 +428,7 @@ auto BuildConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 c
     auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
     if (!res) [[unlikely]] {
         if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("CreateConeMesh: Failed to build mesh BLAS: {}", res.error());
+            kLog.Warn("CreateConeMesh: Failed to build mesh BLAS: {}", res.error());
         }
     }
     return finalMesh;

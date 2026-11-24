@@ -22,8 +22,6 @@
 #include <sys/sysmacros.h>
 #include <termios.h>
 #include <unistd.h>
-#include <cstdio>
-#include <format>
 
 #endif
 
@@ -106,7 +104,7 @@ template <typename Fn>
 [[nodiscard]] auto BindSymbol(const SharedLibrary& lib, const char* name, Fn& out) -> bool {
     out = lib.Symbol<Fn>(name);
     if (out == nullptr) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("Missing symbol '{}'", name);
+        kLog.Warn("Missing symbol '{}'", name);
         return false;
     }
     return true;
@@ -122,7 +120,7 @@ template <typename Fn>
     static constexpr const char* const kEvdevNames[] = {"libevdev.so.2", "libevdev.so"};
 
     if (!g_seatLib.OpenAny(kSeatNames) || !g_evdevLib.OpenAny(kEvdevNames)) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Failed to load libseat / libevdev at runtime.");
+        kLog.Error("Failed to load libseat / libevdev at runtime.");
         g_seatLib.Close();
         g_evdevLib.Close();
         state = -1;
@@ -426,14 +424,14 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     g_seat.set_log_level(kSeatLogInfo);
     state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
-        ZHLN::Log<ZHLN::LogTag::Error>("Failed to initialize libseat session.");
+        kLog.Error("Failed to initialize libseat session.");
         Shutdown(state);
         return nullptr;
     }
 
     while (!state->active) {
         if (g_seat.dispatch(state->seat, -1) == -1) {
-            ZHLN::Log<ZHLN::LogTag::Warning>("Error dispatching libseat during startup.");
+            kLog.Warn("Error dispatching libseat during startup.");
             Shutdown(state);
             return nullptr;
         }
@@ -496,7 +494,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     if (state->taken_devices.empty()) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("No input devices could be opened under this seat.");
+        kLog.Warn("No input devices could be opened under this seat.");
         Shutdown(state);
         return nullptr;
     }
@@ -639,6 +637,8 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
 
             if (rc == kEvdevReadStatusSync) {
                 while (g_evdev.next_event(dev, kEvdevReadSync, &ev) == kEvdevReadStatusSync) {
+                    // Drain the sync backlog so the next read reports real device
+                    // state instead of replaying it; nothing to forward downstream.
                 }
                 break;
             }

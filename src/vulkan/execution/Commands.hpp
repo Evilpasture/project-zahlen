@@ -5,7 +5,6 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include <Zahlen/Log.hpp>
 #include "vulkan/execution/CommandPool.hpp"
 #include "vulkan/execution/CommandRecorder.hpp"
 #include "vulkan/execution/GpuPayload.hpp"

@@ -101,10 +101,16 @@ class Engine {
     Engine();
     ~Engine();
 
-    auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
+    // `drainDevice` says whether the device is still alive when this runs. A
+    // loss-recovery call passes false: the device is already gone, so asking it
+    // to go idle would only wait on a dead queue. A deliberate reset
+    // (IEngine::RecreateGraphicsDevice) passes true and gets a real WaitIdle
+    // first -- otherwise it destroys swapchains, semaphores, pools and buffers
+    // that the GPU is still executing against.
+    auto HandleDeviceLost(bool drainDevice = false) noexcept -> std::expected<void, ErrorCode>;
 
     // The ambient sink the engine installs while it is alive: normally
-    // logger->AsSink() from the host, empty when the caller only wants the
+    // ZHLN::ToSink(logger) from the host, empty when the caller only wants the
     // stderr default. The engine names no COM type; whoever owns the logger
     // keeps it alive, which is what makes the sink's gate and writer valid.
     static auto Create(const EngineConfig& cfg, ZHLN::LogSink ambientSink = {})

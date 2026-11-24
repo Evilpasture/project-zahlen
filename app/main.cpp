@@ -6,7 +6,6 @@
 // teardown; optional fly-camera support loads dynamically when present.
 #include <Zahlen/App.hpp>
 #include <cstdio>
-#include <format>
 #include <Zahlen/COM/IActionContext.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IAudioDevice.hpp>
@@ -14,14 +13,12 @@
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <cmath>
 #include <cstdint>
 #include <print>
-
 
 namespace {
 

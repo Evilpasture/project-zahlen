@@ -4,8 +4,6 @@
 // Standalone, windowless logic benchmark. Neither the renderer nor App's game
 // loop is started here; metrics are comparable on a headless build machine.
 #include <Benchmark/Benchmark.hpp>
-#include <cstdio>
-#include <format>
 #include <CommandLine/CommandLine.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>

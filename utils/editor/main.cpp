@@ -3,14 +3,12 @@
 // Dedicated host-owned paused editor loop. No native Engine or registry bridge.
 #include "EditorSession.hpp"
 #include <cstdio>
-#include <format>
 #include <FallbackScene/FallbackScene.hpp>
 #include <SceneDocument.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/ConfigCli.hpp>
 #include <Zahlen/HostRunner.hpp>
-#include <Zahlen/Log.hpp>
 #include <array>
 #include <charconv>
 #include <cstdlib>

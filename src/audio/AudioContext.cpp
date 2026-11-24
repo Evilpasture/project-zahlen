@@ -31,6 +31,7 @@
 #include <windows.h>
 #endif
 #include <miniaudio.h>
+#include "audio/AudioLog.hpp"
 
 namespace ZHLN {
 
@@ -1374,7 +1375,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
         result = ma_engine_init(&engineCfg, &_impl->engine);
         if (result == MA_SUCCESS) {
             _impl->headless = true;
-            Log<LogTag::Warning, LogTag::Audio>("No playback device available; running AudioContext in headless mixer mode.");
+            kAudioLog.Warn("No playback device available; running AudioContext in headless mixer mode.");
         }
     } else {
         _impl->headless = cfg.headless;
@@ -1382,7 +1383,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
 
     if (result != MA_SUCCESS) {
         _impl->UninitHeadlessResourceManager();
-        Log<LogTag::Error, LogTag::Audio>("Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
+        kAudioLog.Error("Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
         return;
     }
 
@@ -1399,7 +1400,7 @@ AudioContext::AudioContext(const AudioConfig& cfg) : _impl(std::make_unique<Impl
 
     const bool reverbOk = busesOk && _impl->InitReverbNode();
     if (!busesOk || !reverbOk) {
-        Log<LogTag::Error, LogTag::Audio>("Failed to initialize core mixer bus hierarchy or reverb DSP node.");
+        kAudioLog.Error("Failed to initialize core mixer bus hierarchy or reverb DSP node.");
         if (_impl->reverbNode.nodeInit) {
             ma_node_uninit(&_impl->reverbNode.base, nullptr);
             _impl->reverbNode.nodeInit = false;

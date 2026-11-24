@@ -60,20 +60,20 @@ void WriteFd2(const std::string_view msg) noexcept {
 
 namespace ZHLN::Diagnostics {
 
-void WriteToChannel(const LogChannel channel, const std::string_view msg) noexcept {
+void WriteToChannel(const LogTarget channel, const std::string_view msg) noexcept {
     switch (channel) {
-        case LogChannel::StdOut:
+        case LogTarget::StdOut:
 #if defined(_WIN32)
             ::_write(1, msg.data(), static_cast<unsigned int>(msg.size()));
 #else
             ::write(1, msg.data(), msg.size());
 #endif
             return;
-        case LogChannel::File:
+        case LogTarget::File:
             // No ambient log file exists anymore; file output belongs to a
             // FileSink on a logger hub. Diagnostics fall back to fd 2.
             break;
-        case LogChannel::StdErr:
+        case LogTarget::StdErr:
             break;
     }
     WriteFd2(msg);

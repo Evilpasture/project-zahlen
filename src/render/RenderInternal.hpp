@@ -319,7 +319,7 @@ struct RenderContext::Impl: Renderer {
     RenderDiagnostics diagnostics;
     // No loss state lives here. Whether the device is gone is carried by the code a
     // call returns -- IsDeviceLost (render/DeviceLoss.hpp) is the predicate, and it
-    // remembers nothing -- while the one LogDomain::DeviceLost line per loss is
+    // remembers nothing -- while the one channel "DeviceLost" line per loss is
     // emitted by whoever observes the loss (Engine::Present or
     // Engine::ProvokeDeviceLost), never by recovery, which is also reached by a
     // deliberate reset.

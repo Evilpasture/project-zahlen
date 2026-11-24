@@ -6,7 +6,6 @@
 #include "SceneFields.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -117,11 +116,12 @@ template <typename Reader>
 template <typename Reader>
 [[nodiscard]] auto ExtractLights(const Reader& registry) -> std::vector<Light> {
     std::vector<Light> lights;
-    size_t                  unattributed = 0;
 
     for (const ZHLN::Entity entity: registry.template EntitiesWith<Components::LightComponent>()) {
+        // A light nobody attributed to the scene (or one already being torn
+        // down) is not part of the snapshot. This used to count them for a log
+        // line; the count had no other reader.
         if (!registry.template Get<Components::SceneLightTagComponent>(entity) || registry.template Get<Components::PendingDestroy>(entity)) {
-            ++unattributed;
             continue;
         }
         const auto& light = *registry.template Get<Components::LightComponent>(entity);
@@ -151,8 +151,6 @@ template <typename Reader>
         );
     }
 
-    if (unattributed > 0) {
-    }
     return lights;
 }
 

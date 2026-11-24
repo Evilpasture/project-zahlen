@@ -64,7 +64,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         geometry.RecordPendingUpdates(recording->recorder.Handle());
         const auto reconciled = ReconcileDestination(dest, recording->recorder);
         if (!reconciled) {
-            Log<LogTag::Error>("Window target cannot be presented: {}.", reconciled.error());
+            kLog.Error("Window target cannot be presented: {}.", reconciled.error());
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotReconcilable});
@@ -117,7 +117,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         );
         if (!result) {
             const bool lost = IsDeviceLost(result.error());
-            Log<LogTag::Error>("Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
+            kLog.Error("Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(result.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
@@ -149,7 +149,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             const Extent2D size = dest.target != nullptr ? dest.target->GetFramebufferExtent() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
-                    Log<LogTag::Warning>("Window rebuild after present failed; retrying next frame.");
+                    kLog.Warn("Window rebuild after present failed; retrying next frame.");
                 }
             }
 

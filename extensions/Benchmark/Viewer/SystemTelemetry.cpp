@@ -2,15 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Viewer/SystemTelemetry.hpp>
-#include <cstdio>
-#include <format>
 #include <Benchmark/Viewer/SystemProbe.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <cstdlib>
 #include <numeric>
 #include <utility>
-
 
 namespace ZHLN::Bench {
 

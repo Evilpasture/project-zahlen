@@ -8,7 +8,6 @@
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <engine/EngineServices.hpp>
-#include <Zahlen/Log.hpp>
 #include <engine/World.hpp>
 #include <engine/VisibilityState.hpp>
 #include <ecs/ECS.hpp>
@@ -21,7 +20,6 @@
 #include <vector>
 
 namespace ZHLN {
-
 
 struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;

@@ -9,7 +9,6 @@
 #include <BSP/VTFDecoder.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <cmath>

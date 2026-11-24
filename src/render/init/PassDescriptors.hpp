@@ -73,12 +73,11 @@ template <typename PassT>
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
-                Log<LogTag::Error>("Failed to hot-reload pipeline '{}': {}", name, reload.error());
+                kLog.Error("Failed to hot-reload pipeline '{}': {}", name, reload.error());
             } else {
                 Log("Pipeline '{}' hot-reloaded successfully.", name);
             }
-        }
-    );
+        });
     return {};
 }
 
@@ -94,7 +93,7 @@ template <typename BuildFn>
         self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn, self]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
-                Log<LogTag::Error>("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
+                kLog.Error("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
             } else {
                 Log("Pipeline '{}' hot-reloaded successfully.", name);
             }

@@ -26,6 +26,7 @@
 #include <fstream>
 #include <new>
 #include <vector>
+#include "render/RenderLog.hpp"
 
 namespace ZHLN {
 
@@ -115,14 +116,14 @@ void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::sp
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            Log<LogTag::Warning>("Could not open '{}' for writing the pipeline binaries.", temp.string());
+            kLog.Warn("Could not open '{}' for writing the pipeline binaries.", temp.string());
             return;
         }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
     std::filesystem::rename(temp, target, ec);
     if (ec) {
-        Log<LogTag::Warning>("Renaming '{}' into place failed: {}", temp.string(), ec.message());
+        kLog.Warn("Renaming '{}' into place failed: {}", temp.string(), ec.message());
         std::filesystem::remove(temp, ec);
         return;
     }
@@ -269,10 +270,10 @@ auto KernelSession::InitInternal(const EngineConfig& cfg, const ZHLN::LogSink am
         if (_impl->assetManager->MountPak(pak->string())) {
             Log("Mounted asset pack: {}", pak->string());
         } else {
-            Log<LogTag::Warning>("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+            kLog.Warn("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
         }
     } else {
-        Log<LogTag::Warning>("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
+        kLog.Warn("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};
@@ -376,9 +377,9 @@ void KernelSession::RemoveWindow(WindowID id) {
         // only channel it has.
         if (const auto released = _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window)); !released) {
             if (released.error() == FrameResult::DeviceLost) {
-                Log<LogTag::Error>("GPU device lost while releasing a removed window's target ({}).", released.error());
+                kLog.Error("GPU device lost while releasing a removed window's target ({}).", released.error());
             } else {
-                Log<LogTag::Warning, LogTag::Render>("Failed to release a removed window's target ({}).", released.error());
+                kRenderLog.Warn("Failed to release a removed window's target ({}).", released.error());
             }
         }
     }
@@ -511,7 +512,7 @@ auto KernelSession::GetConfig() const noexcept -> const EngineConfig& {
     return _impl->config;
 }
 
-auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+auto KernelSession::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<void, ErrorCode> {
     if (!_impl->renderContext || !*_impl->renderContext) {
         // Recovery can be entered with nothing to recover -- no renderer at all, or
         // one whose Destroy() has already taken the implementation: say so instead
@@ -528,11 +529,20 @@ auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode
     // the tiny allocator state across RenderContext recreation here, in the
     // owner of RenderContext lifetime, instead of putting it back in World.
     auto jointAllocator = _impl->renderContext->ExtractJointAllocator();
-    // The loss is why we are here: no drain (it would only ask a dead device to go
-    // idle again) and no loss line, because the observer that saw the loss wrote it
-    // -- and took the fault report. The reset below then frees just the shell: the
-    // destructor's Destroy() finds !_impl and does nothing.
-    _impl->renderContext->ReleaseDevice();
+    // Nothing is logged here either way: the observer that saw the loss wrote the
+    // line -- and took the fault report. What differs is the drain. A recovery is
+    // running *because* the device is gone, so it releases without a WaitIdle; a
+    // caller resetting a healthy device (IEngine::RecreateGraphicsDevice) has GPU
+    // work in flight and must drain before the swapchain, semaphores, command
+    // pools and buffers it is about to destroy stop being referenced by pending
+    // submissions. Destroy() is that path: WaitIdle, dump a fault report if the
+    // drain itself finds a loss, then release. Either way the context is released
+    // exactly once, and the destructor's Destroy() finds !_impl and does nothing.
+    if (drainDevice) {
+        _impl->renderContext->Destroy();
+    } else {
+        _impl->renderContext->ReleaseDevice();
+    }
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);

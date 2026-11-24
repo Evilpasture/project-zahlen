@@ -230,7 +230,7 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                 if (mode == PresentationMode::HostBlit) {
                     const bool ok = HostBlit::Init(impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphicsFamily);
                     if (!ok) {
-                        Log<LogTag::Warning>("HostBlit presenter failed to initialize; continuing offscreen-only.");
+                        kLog.Warn("HostBlit presenter failed to initialize; continuing offscreen-only.");
                         impl->presentationMode = PresentationMode::OffscreenOnly;
                     }
                 }
@@ -251,7 +251,8 @@ void RenderContext::ReleaseDevice() noexcept {
     // and the destructor's Destroy() after it, return above -- and it gives the
     // teardown a defined owner, so `impl` dies at the closing brace of this function
     // and ~Impl runs here, in order, instead of when the host's unique_ptr unwinds.
-    auto impl = std::move(_impl);
+    _released = true;
+    auto impl  = std::move(_impl);
 
     if (impl->ctx.Device() != VK_NULL_HANDLE) {
         impl->DestroyDestinations();
@@ -283,10 +284,10 @@ void RenderContext::Destroy() noexcept {
                 // reported as the teardown fact it is and deliberately not counted:
                 // the count means "a loss happened and the runtime recovered from
                 // it", and this is where one is found, not where one is handled.
-                Log<LogTag::Error>("GPU device lost while destroying the renderer ({})", idle.error());
+                kLog.Error("GPU device lost while destroying the renderer ({})", idle.error());
                 DumpDeviceFaultReport();
             } else {
-                Log<LogTag::Error>("Failed to wait for idle while destroying destinations ({})", idle.error());
+                kLog.Error("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }
     }

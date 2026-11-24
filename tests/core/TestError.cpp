@@ -77,8 +77,11 @@ static_assert(!ZHLN::ErrorCode(ScopedDomainA::Error::Failed).get<ScopedDomainB::
 static_assert(!(ZHLN::ErrorCode(ScopedDomainA::Error::Failed) == ScopedDomainB::Error::Failed));
 
 // A registry with the test-local categories registered, as a caller would
-// build before CreateEngine. Constructing an ErrorCode registers nothing by
-// itself anymore -- registration is explicit, against an instance.
+// build before CreateEngine. Registration against an instance is explicit; what
+// ErrorCode(E) does on its own is anchor E in the engine-owned *static* describe
+// table (ErrorCode.hpp -> TemplatedDetail::AnchorEnumCategory), which is why
+// std::format("{}", code) works with no registry in hand. The two tables are the
+// same process-wide store -- see src/engine/ErrorRegistry.cpp.
 auto MakeTestRegistry() -> ZHLN::COM::Ref<ZHLN::COM::IErrorRegistry> {
     auto registry = ZHLN::COM::CreateErrorRegistry();
     if (!registry) {
@@ -222,7 +225,11 @@ struct ErrorTestSuite {
         }
 
         // --- 7. Unknown Categories Degrade to "Unknown" ---
-        std::expected<void, ZHLN::ErrorCode> unknown_category_resolves_to_unknown() {
+        // --- 7. An Unregistered Code Is a Miss, Not "Unknown" ---
+        // Describe used to report success and fill every field with "Unknown",
+        // which made the raw-code fallback in COM::DescribeError unreachable and
+        // let a caller print a description that described nothing.
+        std::expected<void, ZHLN::ErrorCode> unknown_category_is_reported_as_a_miss() {
             auto registry = MakeTestRegistry();
             if (!registry) {
                 return std::unexpected(CodecError::CorruptedStream);
@@ -234,9 +241,119 @@ struct ErrorTestSuite {
             if (foreign.get<CodecError>()) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
-            const auto desc = Describe(*registry, foreign);
-            if (std::string_view(desc.category) != "Unknown" || std::string_view(desc.message) != "Unknown" ||
-                std::string_view(desc.name) != "Unknown") {
+            ZHLN::COM::ErrorDescription desc;
+            auto                           pack = ZHLN::COM::OutChain(desc);
+            const auto                     described = registry->Describe(foreign, pack.Head());
+            if (described.HasValue()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (described.error != ZHLN::ErrorCode(ZHLN::COM::Error::NotRegistered)) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // Nothing was written into the payload, so an ignored result cannot
+            // masquerade as a description.
+            if (!std::string_view(desc.category).empty() || !std::string_view(desc.name).empty()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // ... and the one-shot rendering falls back to the raw words.
+            const auto text = ZHLN::COM::DescribeError(*registry, foreign);
+            if (text != std::format("error {:#010x}:{}", foreign.CategoryHash(), foreign.Value())) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 7b. A Recorded Detail Is Copied Out of the Recorder ---
+        // RecordDetail exists for the plugin that is about to be unloaded: the
+        // detail, the file and the function all point into that plugin's memory
+        // when the call returns, so the registry has to own what it keeps.
+        std::expected<void, ZHLN::ErrorCode> recorded_detail_outlives_its_source_buffers() {
+            auto registry = MakeTestRegistry();
+            if (!registry) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // LastError before anything was recorded is a miss, not an empty record.
+            ZHLN::COM::ErrorRecord empty {};
+            auto                    emptyPack = ZHLN::COM::OutChain(empty);
+            if (registry->LastError(emptyPack.Head()).HasValue()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+
+            std::string file     = "plugin/Transient.cpp";
+            std::string function = "Transient::Evaluate()";
+            std::string channel  = "Script";
+            std::string detail   = "part 3: activeMorphCount=6 > 4";
+            ZHLN::COM::LogSource source;
+            source.file     = ZHLN::COM::StringView(file);
+            source.function = ZHLN::COM::StringView(function);
+            source.channel  = ZHLN::COM::StringView(channel);
+            source.line     = 42;
+            registry->RecordDetail(ZHLN::ErrorCode(CodecError::CorruptedStream), source, ZHLN::COM::StringView(detail));
+
+            // Simulate dlclose: every buffer the call borrowed is gone (and, for
+            // good measure, overwritten with something else).
+            file.assign(file.size(), 'X');
+            function.assign(function.size(), 'Y');
+            channel.assign(channel.size(), 'W');
+            detail.assign(detail.size(), 'Z');
+            file.clear();
+            function.clear();
+            channel.clear();
+            detail.clear();
+
+            ZHLN::COM::ErrorRecord record {};
+            auto                    pack = ZHLN::COM::OutChain(record);
+            const auto              read = registry->LastError(pack.Head());
+            if (!read.HasValue()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (record.code != ZHLN::ErrorCode(CodecError::CorruptedStream)) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (std::string_view(record.detail) != "part 3: activeMorphCount=6 > 4") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // The record stores the base name: String64 cannot hold an absolute
+            // build path, and truncating one cut the filename off the end.
+            if (std::string_view(record.file) != "Transient.cpp" || std::string_view(record.function) != "Transient::Evaluate()") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // The channel is the fourth thing the record owns: it was a view into
+            // a plugin's .rodata, and that plugin has been unloaded above.
+            if (record.line != 42u || std::string_view(record.channel) != "Script") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 7c. A New Registry Can Be Seeded From The Caller's ---
+        std::expected<void, ZHLN::ErrorCode> create_error_registry_seeds_from_the_caller() {
+            auto first = MakeTestRegistry();
+            if (!first) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            ZHLN::COM::LogSource source;
+            source.file = ZHLN::COM::StringView("boot/Startup.cpp");
+            first->RecordDetail(ZHLN::ErrorCode(NetworkError::HostUnreachable), source, ZHLN::COM::StringView("connect timed out"));
+
+            // ErrorConfig names the registry to seed from; the engine factory
+            // passes exactly this when a caller rebuilds after a failure.
+            auto seeded = ZHLN::COM::CreateErrorRegistry(ZHLN::COM::InChain(
+                ZHLN::COM::ErrorConfig {.registry = first.Get()}
+            ));
+            if (!seeded) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            ZHLN::COM::ErrorRecord record {};
+            auto                    pack = ZHLN::COM::OutChain(record);
+            if (!(*seeded)->LastError(pack.Head()).HasValue()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (record.code != ZHLN::ErrorCode(NetworkError::HostUnreachable) || std::string_view(record.detail) != "connect timed out") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            // The seeded registry is a fresh object, not the one that was passed in.
+            if ((*seeded).Get() == first.Get()) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             return {};
@@ -273,8 +390,14 @@ struct ErrorTestSuite {
             if (!registry->UnregisterCategory(hash)) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
-            const auto afterUnregister = Describe(*registry, ZHLN::ErrorCode {hash, 3u});
-            if (std::string_view(afterUnregister.category) != "Unknown") {
+            // After UnregisterCategory the code is a miss again: the payload is
+            // left untouched rather than stamped "Unknown".
+            ZHLN::COM::ErrorDescription afterUnregister;
+            auto                        afterPack = ZHLN::COM::OutChain(afterUnregister);
+            if (registry->Describe(ZHLN::ErrorCode {hash, 3u}, afterPack.Head()).HasValue()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (!std::string_view(afterUnregister.category).empty()) {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             return {};

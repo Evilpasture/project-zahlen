@@ -11,7 +11,6 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/ECS/Components.hpp>
 #include <engine/SceneResources.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <engine/ModelPrefab.hpp>
 #include <render/Render.hpp>

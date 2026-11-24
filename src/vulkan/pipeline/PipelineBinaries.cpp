@@ -5,14 +5,11 @@
 #include "vulkan/Rendering.hpp"
 // clang-format on
 #include "vulkan/pipeline/PipelineBinaries.hpp"
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
-#include <cstdio>
 #include <format>
-
 
 namespace ZHLN::Vk {
 

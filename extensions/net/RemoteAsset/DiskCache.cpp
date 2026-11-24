@@ -9,7 +9,6 @@
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -27,7 +26,6 @@
 #include <string>
 #include <thread>
 #include <utility>
-
 
 namespace ZHLN::Remote {
 

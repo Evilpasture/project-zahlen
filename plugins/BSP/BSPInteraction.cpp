@@ -10,7 +10,6 @@
 #include <Zahlen/Math/Vec3.hpp>
 
 #include "BSPScene.hpp" // ConvertDirection / ConvertPosition / EngineEulerAnglesFromSourceAngles
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <charconv>
 #include <cmath>

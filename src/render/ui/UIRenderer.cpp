@@ -191,8 +191,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         );
 
         built.ForEachError([&ctx](const VariantFailure& failure) {
-            Log<LogTag::Warning>(
-                "UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
+            kLog.Warn("UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
                 static_cast<uint32_t>(failure.format), failure.error
             );
         });

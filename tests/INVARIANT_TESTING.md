@@ -109,7 +109,7 @@ noise-relative are untouched.
 
 ## 3b. Where `DeviceLostCount()` comes from
 
-`DeviceLostCount()` counts `LogDomain::DeviceLost` lines. Exactly one line
+`DeviceLostCount()` counts lines whose channel is `"DeviceLost"`. Exactly one line
 produces them: the loss branch of `Engine::Present`, and the same line in
 `Engine::ProvokeDeviceLost` -- i.e. where a loss is *observed*. Nothing else logs
 one and nothing counts one, so the count means "a loss happened and the runtime
@@ -119,13 +119,18 @@ That distinction is load-bearing. `IEngine::RecreateGraphicsDevice` enters the s
 recovery path deliberately, on a healthy device; it is not a loss, it does not count
 as one, and it does not dump a fault report. A loss seen only during teardown --
 `RenderContext::Destroy`, or a window being removed -- is logged as a general
-`LogTag::Error` fact and not counted, because it has no recovery to attach to.
+error-severity fact on no channel at all, and not counted, because it has no recovery
+to attach to.
 
-For the count to move at all, the ambient sink has to be the capture sink.
-`COM::CreateEngineRaw` installs the `ILogger` hub only when the chain supplied one;
-a hub it mints itself is a console default, and installing that would discard the
-sink the host registered. Tests inherit the framework's `CaptureHub()` observer this
-way, which is what makes the counters live.
+For the count to move at all, ambient `ZHLN::Log` lines have to reach the capture
+sink. `COM::CreateEngineRaw` installs the logger it is going to use as the process
+ambient sink in both cases -- one the chain supplied, or the console default it
+mints -- so ambient lines share the engine's format and level. A minted hub must not
+swallow what the host already installed, though: whatever sink was installed before
+creation (in a test, `CaptureHub()`'s observer) is chained into the minted hub as an
+external sink, which is what makes the counters live. Tests get that chain without
+asking for it; a host that installed its own sink before creating an engine keeps
+receiving lines after it.
 
 What is *not* exercised in-tree: `Engine::ProvokeDeviceLost`, the C++ entry point
 that provokes a real loss rather than a deliberate reset. The test surface is COM,

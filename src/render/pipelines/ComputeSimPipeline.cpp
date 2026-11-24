@@ -106,7 +106,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         // everything else -- including its own name and code, which is what the
         // blanket loss line cannot carry.
         if (!IsDeviceLost(submitted.error())) {
-            Log<LogTag::Warning>("Compute submission failed ({}).", submitted.error());
+            kLog.Warn("Compute submission failed ({}).", submitted.error());
         }
         return std::unexpected(AsFrameError(submitted.error()));
     }

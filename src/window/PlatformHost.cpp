@@ -206,7 +206,7 @@ auto PlatformHost::CreateTTY(uint32_t width, uint32_t height, const WindowInputR
     PlatformHost host;
     host._impl->backend = TTYBackendState(width, height, receiver);
     if (!host.Valid()) {
-        Log<LogTag::Warning>("TTY session failed: the terminal could not be taken over.");
+        kLog.Warn("TTY session failed: the terminal could not be taken over.");
         host._impl->backend = std::monostate {};
         return host;
     }
@@ -220,7 +220,7 @@ auto PlatformHost::CreateWindowed(const String32& title, uint32_t width, uint32_
 
     auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, WindowID::Primary);
     if (window->GetNativeHandle() == nullptr) {
-        Log<LogTag::Warning>("Windowed session failed: the OS window could not be created.");
+        kLog.Warn("Windowed session failed: the OS window could not be created.");
         return host;
     }
     host._impl->backend = WindowedBackend(std::move(window));

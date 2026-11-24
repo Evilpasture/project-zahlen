@@ -7,7 +7,6 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
@@ -130,10 +129,25 @@ RenderContext::~RenderContext() {
 }
 
 void RenderContext::ReleaseDevice() noexcept {
-    // Ownership is the flag: reset() releases the implementation once, and a repeat
-    // call -- which the destructor always issues -- finds nothing left to release.
-    // The containers need no clearing first; their destructors are about to run.
-    _impl.reset();
+    // There is no device to release, and the state this backend owns is a handful of
+    // containers plus a target reference -- so releasing it means emptying it in
+    // place, not handing the implementation back. Dropping the implementation here
+    // (as the Vulkan backend does) would turn every method a host is allowed to
+    // poll after teardown -- GetFramebufferSize, GetSettings, EndFrame, the buffer
+    // and texture handles -- into a null dereference, for no resources saved.
+    // _released is the state; operator bool() reports it.
+    if (_impl == nullptr || _released) {
+        return;
+    }
+    _released = true;
+    _impl->gpuMeshes.clear();
+    _impl->gpuMaterials.clear();
+    _impl->namedTextures.clear();
+    _impl->liveTextures.clear();
+    _impl->liveBuffers.clear();
+    _impl->acquiredTargets.clear();
+    _impl->_freeMorphDeltaRanges.clear();
+    _impl->frameOpen = false;
 }
 
 void RenderContext::Destroy() noexcept {

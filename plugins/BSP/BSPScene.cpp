@@ -7,8 +7,6 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
-#include <cstdio>
-#include <format>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
@@ -22,7 +20,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
-#include <Zahlen/COM/ILogger.hpp>
 
 
 namespace ZHLN::BSP {

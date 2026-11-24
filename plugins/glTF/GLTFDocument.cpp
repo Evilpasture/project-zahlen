@@ -1,11 +1,9 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GLTFDocument.hpp"
-#include <cstdio>
 #include <format>
 #include "TangentGenerator.hpp"
 #include <Image/Image.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -621,10 +619,6 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
                 job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
             }
         }
-        if (job.transmissionFactor > 0.0f) {
-            const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
-        }
-
         job.emissiveFactor[0] = prim.material->emissive_factor[0];
         job.emissiveFactor[1] = prim.material->emissive_factor[1];
         job.emissiveFactor[2] = prim.material->emissive_factor[2];

@@ -7,7 +7,6 @@
 #include <Animation/Context.hpp>
 #include <print>
 #include <cstdio>
-#include <format>
 #include <Animation/AnimationSystem.hpp>
 #include <Animation/Animator.hpp>
 #include <Camera/TargetCamera.hpp>
@@ -83,15 +82,15 @@ struct InspectorState {
         auto doc = ZHLN::GLTF::Read(path, {}, engine->Assets());
         if (!doc) {
             status = "Failed to decode: " + std::string(path);
-            ZHLN::Log<ZHLN::LogTag::Error>("{}: {}", status, doc.error());
+            ZHLN::Log<ZHLN::LogSeverity::Error>("{}: {}", status, doc.error());
             return;
         }
         for (const auto& warning : doc->warnings)
-            ZHLN::Log<ZHLN::LogTag::Warning>("glTF: {}", warning);
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("glTF: {}", warning);
         auto uploaded = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *doc);
         if (!uploaded) {
             status = "Failed to upload: " + std::string(path);
-            ZHLN::Log<ZHLN::LogTag::Error>("{}: {}", status, uploaded.error());
+            ZHLN::Log<ZHLN::LogSeverity::Error>("{}: {}", status, uploaded.error());
             return;
         }
         ClearModel();
@@ -135,7 +134,7 @@ struct InspectorState {
         asset          = std::move(*uploaded);
         lastGeneration = engine->DeviceGeneration();
         status         = std::string(path);
-        ZHLN::Log(engine->Logger(), "Loaded '{}' ({} entity/ies).", path, spawned.size());
+        ZHLN::COM::Log(engine->Logger(), "Loaded '{}' ({} entity/ies).", path, spawned.size());
     }
 };
 
@@ -195,7 +194,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::HostUI hostUI(*engine);
 #if defined(ZHLN_HAS_FONTS)
     if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
-        ZHLN::Log<ZHLN::LogTag::Warning>("Font asset failed to load ({}), using embedded default.", fontAsset.error());
+        ZHLN::Log<ZHLN::LogSeverity::Warning>("Font asset failed to load ({}), using embedded default.", fontAsset.error());
     } else {
         hostUI.SetBakedFont(std::move(*fontAsset));
     }
@@ -257,7 +256,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::Log<ZHLN::LogTag::Error>("frame failed: {}", result.error);
+            ZHLN::Log<ZHLN::LogSeverity::Error>("frame failed: {}", result.error);
             state.ClearModel();
             return EXIT_FAILURE;
         }

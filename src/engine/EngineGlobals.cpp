@@ -116,7 +116,7 @@ auto AcquireGlfw() -> bool {
 
 
     glfwSetErrorCallback([](int error, const char* description) -> void {
-        Log<LogTag::Error>("GLFW error {}: {}", error, description ? description : "(null)");
+        kLog.Error("GLFW error {}: {}", error, description ? description : "(null)");
     });
 
     if constexpr (isLinux) {
@@ -130,7 +130,7 @@ auto AcquireGlfw() -> bool {
         const char* desc = nullptr;
         const int   err  = glfwGetError(&desc);
         if (desc != nullptr) {
-            Log<LogTag::Error>("glfwInit failed: ({}) {}", err, desc);
+            kLog.Error("glfwInit failed: ({}) {}", err, desc);
         }
         return false;
     }

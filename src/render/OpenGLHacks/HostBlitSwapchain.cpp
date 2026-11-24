@@ -251,7 +251,7 @@ void Shutdown() noexcept;
     g.queueFamily = queueFamily;
 
     if (auto res = g.ring.Init(device, queueFamily); !res) {
-        ZHLN::Log<ZHLN::LogTag::Error>("HostBlit: Command ring init failed: {}", res.error());
+        kLog.Error("HostBlit: Command ring init failed: {}", res.error());
         Shutdown();
         return false;
     }

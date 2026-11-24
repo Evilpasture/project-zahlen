@@ -21,14 +21,23 @@ namespace ZHLN::COM {
 
 struct ILogger;
 
-// LogSeverity and LogContext live in Core (Zahlen/Log.hpp) as
-// ZHLN::LogSeverity / ZHLN::LogContext; these aliases keep the COM
-// spelling working for existing declarations.
-using LogSeverity = ZHLN::LogSeverity;
-using LogContext  = ZHLN::LogContext;
 
-// Chain node carrying a caller-owned logger into CreateEngineRaw /
-// CreateLogicWorldRaw / CreateAppLayerRaw. Null means "create a default hub".
+// A format string plus where it was written, captured at the call site. The
+// COM twin of ZHLN::LogContext, declared here rather than aliased so a COM
+// consumer never includes Zahlen/Log.hpp to log one line.
+struct LogContext {
+    std::string_view     fmt {};
+    std::source_location loc {};
+
+    template <typename T>
+        requires std::is_convertible_v<const T&, std::string_view>
+    consteval LogContext(const T& s, std::source_location l = std::source_location::current()): fmt(s), loc(l) {
+    }
+
+    constexpr LogContext(std::string_view s, std::source_location l = std::source_location::current()): fmt(s), loc(l) {
+    }
+};
+
 struct LoggerConfig {
     ILogger* logger = nullptr;
     LogLevel level  = LogLevel::Moderate;

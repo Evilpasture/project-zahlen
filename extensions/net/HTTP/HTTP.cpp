@@ -8,8 +8,6 @@
 
 #include <HTTP/HTTP.hpp>
 #include <cstdio>
-#include <format>
-#include <Zahlen/Log.hpp>
 #include <array>
 #include <curl/curl.h>
 #include <optional>
@@ -17,7 +15,6 @@
 #include <string>
 #include <utility>
 #include <Zahlen/Core/Reflection/EnumFormat.hpp>
-
 
 // What this file is written against: the option names it sets (all of them
 // decades old except the two _STR protocol options, which are guarded on their

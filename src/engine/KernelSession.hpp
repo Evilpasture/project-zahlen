@@ -107,7 +107,10 @@ class KernelSession {
 
     [[nodiscard]] auto GetConfig() const noexcept -> const EngineConfig&;
 
-    auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
+    // See Engine::HandleDeviceLost: `drainDevice` distinguishes a dead device
+    // (recovery: nothing to wait for) from a healthy one being reset (drain
+    // first, then tear down).
+    auto HandleDeviceLost(bool drainDevice = false) noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto ProvokeDeviceLost() -> std::expected<void, ErrorCode>;
 
   private:

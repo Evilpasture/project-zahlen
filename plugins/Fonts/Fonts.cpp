@@ -16,7 +16,6 @@
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <cmath>
 #include <expected>

@@ -353,6 +353,29 @@ hosting (`Engine.hpp`, `Kernel.hpp`), frame orchestration (`FramePlan.hpp`,
 subsystems (`EngineServices.hpp`, `PoseUploads.hpp`, `SystemContext.hpp`,
 `GameModule.hpp`, `AssetManager.hpp`, `World.hpp`).
 
+### Logging: two tiers, one seam
+
+Layer 0 (`include/Zahlen/Log.hpp`) knows no subsystem: a severity, a source
+(file, function, line and an optional open *channel* name), a sink value, and
+`Panic`/`Assert`. There is no enum of components in it. A subsystem names
+itself where it lives -- `inline constexpr ZHLN::LogChannel kVkLog {"Vulkan"};`
+in `src/vulkan/` -- and a call site reads `kVkLog.Warn(...)` or
+`ZHLN::Log<LogSeverity::Warning>(kVkLog, ...)`. A new plugin adds a channel
+without touching Core, and a sink matches on the channel name structurally
+(`source.channel == "DeviceLost"`) instead of parsing message text.
+
+`FormatLogLine` is header-inline and ABI-free: the console, a file sink, a test
+capture ring and a harness counter all render a line identically without
+agreeing on a `std::string` across a DSO.
+
+`include/Zahlen/COM/` declares its own wire copies (`COM::LogSeverity`,
+`COM::LogSource`, `COM::LogContext`) and includes no Layer-0 header at all, so a
+strict COM consumer logs through `COM::Log(logger, "...", args...)` without
+acquiring `source_location` plumbing or the ambient sink. The two worlds meet in
+exactly one place, `src/engine/com/`: `LogBridge.hpp` publishes a COM logger as a
+Layer-0 `LogSink`, `RawSinkLogger.hpp` does the reverse for a host sink chained
+into a minted hub, and `configure/check_com_boundary.py` keeps it that way.
+
 Only pervasive definitions stay at the root of `include/Zahlen/`: `Common.h`
 (the `ZHLN_API` ABI macros), `Config.hpp`, `Error.hpp`, `Log.hpp`, and
 `Format.hpp` (whose formatter specializations span Entity, Jolt, and the

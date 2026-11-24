@@ -4,7 +4,6 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include "Simulator.hpp"
 #include "ALifeComponents.hpp"
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/COM/IEntities.hpp>

@@ -86,7 +86,7 @@ using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
     }
     const auto pixels = assets.FindEnvironmentImage(std::string_view(env->source));
     if (!pixels) {
-        Log<LogTag::Warning>("No prepared environment pixels registered for '{}'", std::string_view(env->source));
+        kLog.Warn("No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
     }
     const std::span<const std::array<float, 3>> sh = pixels->sun
@@ -155,7 +155,7 @@ void SubmitParticleEmitters(ParticleSubmitQuery query, SceneData& scene) {
 void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
     poseUploads.Drain([&](const PoseUpload& upload) {
         if (auto res = rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); !res) {
-            Log<LogTag::Warning>("UpdateJointMatrices failed at offset {}: {}", upload.jointOffset, res.error());
+            kLog.Warn("UpdateJointMatrices failed at offset {}: {}", upload.jointOffset, res.error());
         }
     });
 }

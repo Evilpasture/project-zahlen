@@ -34,6 +34,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include "render/RenderLog.hpp"
 
 namespace ZHLN {
 
@@ -111,7 +112,7 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
         return BufferID::Invalid;
     }
     if (particleStride == 0 || static_cast<size_t>(maxParticles) > std::numeric_limits<size_t>::max() / particleStride) {
-        Log<LogTag::Warning, LogTag::Render>("Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
+        kRenderLog.Warn("Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
         return BufferID::Invalid;
     }
 
@@ -134,10 +135,9 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
     if (!created || *created == BufferID::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
-                Log<LogTag::Warning, LogTag::Render>("Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
+                kRenderLog.Warn("Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
             } else {
-                Log<LogTag::Warning, LogTag::Render>(
-                    "Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
+                kRenderLog.Warn("Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
                 );
             }
             storage->allocationWarningLogged = true;
@@ -362,7 +362,7 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
         }
 
         if (auto updated = UpdateBuffer(slotBuf, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
-            Log<LogTag::Warning, LogTag::Render>("Particle buffer update failed.");
+            kRenderLog.Warn("Particle buffer update failed.");
             continue;
         }
         _impl->queues.ParticleEmitters().push_back(
@@ -378,7 +378,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {
-            Log<LogTag::Warning, LogTag::Render>("GPU cache clear aborted due to reason: {}", res.error());
+            kRenderLog.Warn("GPU cache clear aborted due to reason: {}", res.error());
             return;
         }
     }
@@ -1000,10 +1000,9 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
             // A dead device is not a rejected setting: keeping the old resolution and
             // blaming the value would tell the caller the opposite of what happened.
             // Not counted either -- recovery reports the loss.
-            Log<LogTag::Error, LogTag::Render>("GPU device lost while resizing shadow targets to {}x{}.", incoming.shadows.resolution, incoming.shadows.resolution);
+            kRenderLog.Error("GPU device lost while resizing shadow targets to {}x{}.", incoming.shadows.resolution, incoming.shadows.resolution);
         } else {
-            Log<LogTag::Warning, LogTag::Render>(
-                "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
+            kRenderLog.Warn("failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
             );
             incoming.shadows.resolution = settings.shadows.resolution;
@@ -1124,12 +1123,12 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
     -> TextureID {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
-        Log<LogTag::Warning, LogTag::Render>("Procedural texture '{}' has an invalid extent or texel count.", name);
+        kRenderLog.Warn("Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureID::Invalid;
     }
     const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
-        Log<LogTag::Warning, LogTag::Render>("Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
+        kRenderLog.Warn("Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureID::Invalid;
     }
     return *uploaded;
@@ -1196,7 +1195,7 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             // What belongs here is the failure that is *not* a loss, with this
             // site's name and its own code.
             if (!IsDeviceLost(immediate.error())) {
-                Log<LogTag::Warning, LogTag::Render>("CaptureFrame: scene color transition failed ({}).", immediate.error());
+                kRenderLog.Warn("CaptureFrame: scene color transition failed ({}).", immediate.error());
             }
             return std::unexpected(AsFrameError(immediate.error()));
         }
@@ -1256,7 +1255,7 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
         );
         !immediate) [[unlikely]] {
         if (!IsDeviceLost(immediate.error())) {
-            Log<LogTag::Warning, LogTag::Render>("CaptureFrame: HDR scene color copy failed ({}).", immediate.error());
+            kRenderLog.Warn("CaptureFrame: HDR scene color copy failed ({}).", immediate.error());
         }
         return std::unexpected(AsFrameError(immediate.error()));
     }
@@ -1325,7 +1324,7 @@ auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
         // once it acts on it. Only a submission that failed for some other reason
         // needs a line of its own here.
         if (!IsDeviceLost(provoked.error())) {
-            Log<LogTag::Error, LogTag::Render>("Failed to submit the device-loss dispatch ({}).", provoked.error());
+            kRenderLog.Error("Failed to submit the device-loss dispatch ({}).", provoked.error());
         }
         return std::unexpected(AsFrameError(provoked.error()));
     }
