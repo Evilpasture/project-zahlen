@@ -243,32 +243,56 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
         });
 }
 
+void RenderContext::ReleaseDevice() noexcept {
+    if (!_impl) {
+        return;
+    }
+    // Take ownership before touching anything. The move is the flag: a second call,
+    // and the destructor's Destroy() after it, return above -- and it gives the
+    // teardown a defined owner, so `impl` dies at the closing brace of this function
+    // and ~Impl runs here, in order, instead of when the host's unique_ptr unwinds.
+    auto impl = std::move(_impl);
+
+    if (impl->ctx.Device() != VK_NULL_HANDLE) {
+        impl->DestroyDestinations();
+        if constexpr (isMac) {
+            if (impl->presentationMode == PresentationMode::HostBlit) {
+                HostBlit::Shutdown();
+            }
+        }
+    }
+} // ~Impl here: staging, caches, deletion queue, gpuDiagnostics.Shutdown()
+
+void RenderContext::DumpDeviceFaultReport() noexcept {
+    if (_impl) {
+        _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+    }
+}
+
 void RenderContext::Destroy() noexcept {
     if (!_impl) {
         return;
     }
-
-    if (_impl->ctx.Device() != nullptr) {
-        if (_impl->deviceLost.load(std::memory_order::relaxed)) {
-            _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
-        } else if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
-            if (Vk::IsDeviceLost(idle.error())) {
-                _impl->NoteDeviceLost("RenderContext::Destroy");
-                _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+    if (_impl->ctx.Device() != VK_NULL_HANDLE) {
+        // Fault reports only exist until gpuDiagnostics.Shutdown(), which
+        // ReleaseDevice() performs through ~Impl, so a loss observed here has to be
+        // dumped here. One WaitIdle, one OnDeviceLost.
+        if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+            if (IsDeviceLost(idle.error())) {
+                // A loss found only here has no recovery to piggyback on, so it is
+                // reported as the teardown fact it is and deliberately not counted:
+                // the count means "a loss happened and the runtime recovered from
+                // it", and this is where one is found, not where one is handled.
+                Log<LogTag::Error>("GPU device lost while destroying the renderer ({})", idle.error());
+                DumpDeviceFaultReport();
             } else {
                 Log<LogTag::Error>("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }
-
-        _impl->DestroyDestinations();
-        if constexpr (isMac) {
-            if (_impl->presentationMode == PresentationMode::HostBlit) {
-                HostBlit::Shutdown();
-            }
-        }
-        _impl->diagnostics.gpuDiagnostics.Shutdown();
-        _impl->submittedStaging.reset();
     }
+    // The release is the same operation recovery uses; the difference is only that
+    // this path did not already know the device was gone.
+    ReleaseDevice();
 }
 
 std::vector<uint8_t> RenderContext::GetPipelineBinaryData() const noexcept {

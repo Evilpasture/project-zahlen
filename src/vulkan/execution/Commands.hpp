@@ -5,7 +5,6 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include "vulkan/VkError.hpp"
 #include <Zahlen/Log.hpp>
 #include "vulkan/execution/CommandPool.hpp"
 #include "vulkan/execution/CommandRecorder.hpp"
@@ -74,10 +73,6 @@ using DrawIndirectCountState        = IndirectCountDrawState<VkDrawIndirectComma
 using DrawIndexedIndirectCountState = IndirectCountDrawState<VkDrawIndexedIndirectCommand>;
 using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndirectCommandEXT>;
 
-enum class CommandRingError : uint8_t {
-    TimelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Timeline semaphore creation failed for a command ring"> {}) = 1,
-};
-
 template <QueueType QType, size_t Capacity = 8>
 class CommandRing {
   public:
@@ -109,7 +104,7 @@ class CommandRing {
         _device       = device;
         auto timeline = Semaphore::CreateTimeline(device);
         if (!timeline) [[unlikely]] {
-            return std::unexpected(CommandRingError::TimelineCreationFailed);
+            return std::unexpected(timeline.error());
         }
         _timeline = std::move(*timeline);
         for (size_t i = 0; i < Capacity; ++i) {
@@ -145,7 +140,10 @@ class CommandRing {
             // submitted command buffers may still be executing is invalid.
             // The owner can now propagate device loss instead of silently
             // tearing down live Vulkan objects.
-            return std::unexpected(ToError(waited));
+            if (waited == VK_ERROR_DEVICE_LOST) {
+                return std::unexpected(CommandRingError::DeviceLost);
+            }
+            return std::unexpected(CommandRingError::WaitFailed);
         }
 
         for (size_t i = 0; i < Capacity; ++i) {
@@ -172,7 +170,10 @@ class CommandRing {
     [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
         const uint32_t i = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
         if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS) {
-            return std::unexpected(ToError(r));
+            if (r == VK_ERROR_DEVICE_LOST) {
+                return std::unexpected(CommandRingError::DeviceLost);
+            }
+            return std::unexpected(CommandRingError::WaitFailed);
         }
         if (auto reset = _pools[i].Reset(); !reset) [[unlikely]] {
             return std::unexpected(reset.error());
@@ -247,8 +248,9 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
 
     if (const VkResult waited = ring.WaitValue(*submitted); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(CommandRingError::DeviceLost);
         }
-        return std::unexpected(ToError(waited));
+        return std::unexpected(CommandRingError::WaitFailed);
     }
 
     return {};
@@ -288,8 +290,9 @@ template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename R
     };
     if (const VkResult waited = vkWaitSemaphores(ctx.Device(), &waitInfo, UINT64_MAX); waited != VK_SUCCESS) [[unlikely]] {
         if (waited == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(CommandRingError::DeviceLost);
         }
-        return std::unexpected(ToError(waited));
+        return std::unexpected(CommandRingError::WaitFailed);
     }
 
     return {};

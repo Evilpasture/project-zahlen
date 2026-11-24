@@ -108,7 +108,7 @@ class KernelSession {
     [[nodiscard]] auto GetConfig() const noexcept -> const EngineConfig&;
 
     auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
-    void ProvokeDeviceLost();
+    [[nodiscard]] auto ProvokeDeviceLost() -> std::expected<void, ErrorCode>;
 
   private:
     KernelSession() = default;

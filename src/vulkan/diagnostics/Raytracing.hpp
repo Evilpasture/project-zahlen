@@ -5,13 +5,18 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include "vulkan/VkError.hpp"
 #include "vulkan/memory/GeometryView.hpp"
 #include <cstdint>
 #include "vulkan/core/Handles.hpp"
 #include "vulkan/memory/BufferSlice.hpp"
 
 namespace ZHLN::Vk {
+
+// Creating an acceleration structure is this domain's one fallible call,
+// and it happens at setup: nobody asks whether the device was lost.
+enum class RaytracingError : uint8_t {
+    AccelerationStructureCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Acceleration structure creation failed"> {}) = 1,
+};
 
 enum class AccelerationStructureType : uint8_t {
     TopLevel,

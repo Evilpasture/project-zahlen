@@ -4,8 +4,6 @@
 #include <Zahlen/Log.hpp>
 #include "vulkan/core/Instance.hpp"
 #include "vulkan/core/Extensions.hpp"
-#include "vulkan/VkError.hpp"
-#include <Zahlen/Core/ErrorDescribe.hpp>
 #include <cstdio>
 #include <algorithm>
 #include <array>
@@ -153,18 +151,13 @@ auto Instance::Create(
     const std::span<const std::string_view> extensions,
     const ValidationMode                    validation
 ) noexcept -> std::expected<Instance, ErrorCode> {
-    // Anchor VkResult's reflection entries into the one shared error
-    // table up front, so Describe()/std::format can name Vulkan failures
-    // before the first Vulkan call ever fails (ToError also anchors on
-    // first use). Pure Core call -- no COM registry involved.
-    (void) ZHLN::RegisterStaticErrorCategory<VkResult>();
     GlobalVolkDispatchLease globalDispatchLease;
     if (!globalDispatchLease.Acquired()) {
         return std::unexpected(InstanceError::GlobalDispatchInUse);
     }
 
     if (auto res = volkInitialize(); res != VK_SUCCESS) {
-        return std::unexpected(ToError(res));
+        return std::unexpected(InstanceError::CreationFailed);
     }
 
     const std::vector<VkExtensionProperties> available_extensions = EnumerateInstanceExtensions();
@@ -298,7 +291,7 @@ auto Instance::Create(
 
     VkInstance handle = VK_NULL_HANDLE;
     if (const auto res = vkCreateInstance(&create_info, nullptr, &handle); res != VK_SUCCESS) {
-        return std::unexpected(ToError(res));
+        return std::unexpected(InstanceError::CreationFailed);
     }
 
     volkLoadInstance(handle);

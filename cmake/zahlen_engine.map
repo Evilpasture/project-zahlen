@@ -95,6 +95,10 @@
     /* include/Zahlen/Threading/{Mutex,SharedMutex,ConditionalVariable,Thread,TaskSystem}.hpp */
     _ZN4ZHLN5Mutex8LockSlow[BE]*;                                   /* @api ZHLN::Mutex::LockSlow */
     _ZN4ZHLN5Mutex10UnlockSlow[BE]*;                                /* @api ZHLN::Mutex::UnlockSlow */
+    _ZN4ZHLN5Mutex12CheckPreLock[BE]*;                              /* @api ZHLN::Mutex::CheckPreLock */
+    _ZN4ZHLN5Mutex8PostLock[BE]*;                                   /* @api ZHLN::Mutex::PostLock */
+    _ZN4ZHLN5Mutex9PreUnlock[BE]*;                                  /* @api ZHLN::Mutex::PreUnlock */
+    _ZN4ZHLN5Mutex10ClearOwner[BE]*;                                /* @api ZHLN::Mutex::ClearOwner */
     _ZN4ZHLN11SharedMutex8LockSlow[BE]*;                            /* @api ZHLN::SharedMutex::LockSlow */
     _ZN4ZHLN11SharedMutex10UnlockSlow[BE]*;                         /* @api ZHLN::SharedMutex::UnlockSlow */
     _ZN4ZHLN11SharedMutex14LockSharedSlow[BE]*;                     /* @api ZHLN::SharedMutex::LockSharedSlow */
@@ -113,6 +117,7 @@
     _ZN4ZHLN10TaskSystem8Dispatch[BE]*;                             /* @api ZHLN::TaskSystem::Dispatch */
     _ZN4ZHLN10TaskSystem18DispatchBackground[BE]*;                  /* @api ZHLN::TaskSystem::DispatchBackground */
     _ZN4ZHLN10TaskSystem4Wait[BE]*;                                 /* @api ZHLN::TaskSystem::Wait */
+    _ZN4ZHLN10TaskSystem6WakeUp[BE]*;                                /* @api ZHLN::TaskSystem::WakeUp */
 
     /* include/Zahlen/FileSystem/FileWatcher.hpp */
     _ZN4ZHLN2FS17FileSystemWatcherC[12]Ev;                          /* @api ZHLN::FS::FileSystemWatcher::FileSystemWatcher */

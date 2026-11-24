@@ -107,15 +107,48 @@ global gain drifts. The previously failing modes (sample AO at `-0.06`,
 both GTAOs at `+0.05`) pass on structure; the checks that already were
 noise-relative are untouched.
 
+## 3b. Where `DeviceLostCount()` comes from
+
+`DeviceLostCount()` counts `LogDomain::DeviceLost` lines. Exactly one line
+produces them: the loss branch of `Engine::Present`, and the same line in
+`Engine::ProvokeDeviceLost` -- i.e. where a loss is *observed*. Nothing else logs
+one and nothing counts one, so the count means "a loss happened and the runtime
+recovered from it", not "recovery ran".
+
+That distinction is load-bearing. `IEngine::RecreateGraphicsDevice` enters the same
+recovery path deliberately, on a healthy device; it is not a loss, it does not count
+as one, and it does not dump a fault report. A loss seen only during teardown --
+`RenderContext::Destroy`, or a window being removed -- is logged as a general
+`LogTag::Error` fact and not counted, because it has no recovery to attach to.
+
+For the count to move at all, the ambient sink has to be the capture sink.
+`COM::CreateEngineRaw` installs the `ILogger` hub only when the chain supplied one;
+a hub it mints itself is a console default, and installing that would discard the
+sink the host registered. Tests inherit the framework's `CaptureHub()` observer this
+way, which is what makes the counters live.
+
+What is *not* exercised in-tree: `Engine::ProvokeDeviceLost`, the C++ entry point
+that provokes a real loss rather than a deliberate reset. The test surface is COM,
+which exposes only `RecreateGraphicsDevice`, so the hook has no caller today.
+Recovery is therefore reasoned about rather than proven from the suites -- and a
+test that only ticks `IEngine` sees the count move only if a loss actually happens.
+
+On timing: a loss produced by a *frame* (`DispatchSimulations`, a pool reset, a
+present, a destination acquire) is counted inside `Tick`, when `Engine::Present`
+sees `FrameResult::DeviceLost`, not at the moment the Vulkan call failed. A test
+that calls `RenderContext` directly gets the returned `FrameResult::DeviceLost` but
+will not see the count move, because recovery never ran.
+
 ## 4. Quiet logs
 
 The runner now captures engine logs per test instead of streaming them:
 
-- Every test runs at `Verbose` with output suppressed into a bounded buffer
-  (`ZHLN::BeginLogCapture`, `src/engine/Log.cpp`). A passing test prints
-  only its `[ RUN ]`/`[ PASS ]` lines; a failing test prints its usual
-  failure details plus the captured engine log (head 15 + tail 50 lines,
-  omission counted).
+- Every test runs with the framework's capture sink registered as the ambient
+  `LogSink` (`Test::CaptureHub()`, `tests/TestsFramework.hpp`), so engine lines
+  land in a bounded per-test buffer instead of the terminal. A passing test prints
+  only its `[ RUN ]`/`[ PASS ]` lines; a failing test prints its usual failure
+  details plus the captured engine log (head 15 + tail 50 lines, omission counted).
+  That same buffer is what `DeviceLostCount()` and `ValidationErrorCount()` read.
 - `ZHLN_TEST_LOG=verbose` disables the capture and streams engine logs,
   for debugging.
 - Panics bypass suppression, so a fatal always prints.

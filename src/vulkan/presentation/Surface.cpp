@@ -9,7 +9,6 @@
 #include <span>
 #include <utility>
 #include <vector>
-#include "vulkan/VkError.hpp"
 
 namespace ZHLN::Vk {
 
@@ -208,7 +207,7 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) 
 
     VkDisplayPlaneCapabilitiesKHR capabilities {};
     if (const auto res = vkGetDisplayPlaneCapabilitiesKHR(physicalDevice, plan->mode.displayMode, plan->planeIndex, &capabilities); res != VK_SUCCESS) {
-        return std::unexpected(ToError(res));
+        return std::unexpected(SurfaceCreationError::DisplayCapabilitiesQueryFailed);
     }
 
     VkExtent2D image_extent = plan->mode.parameters.visibleRegion;

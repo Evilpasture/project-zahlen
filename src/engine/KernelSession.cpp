@@ -368,7 +368,20 @@ void KernelSession::RemoveWindow(WindowID id) {
     if (id == WindowID::Primary) return;
     auto* window = WindowFor(id);
     if (window == nullptr) return;
-    if (_impl->renderContext) _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window));
+    if (_impl->renderContext && *_impl->renderContext) {
+        // A removed window has no frame to fail and no recovery to attach to, so a
+        // failed release is reported here as the teardown fact it is -- the same
+        // treatment RenderContext::Destroy() gives one -- and deliberately not
+        // counted, because nothing recovered from it. API is void, so this is the
+        // only channel it has.
+        if (const auto released = _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window)); !released) {
+            if (released.error() == FrameResult::DeviceLost) {
+                Log<LogTag::Error>("GPU device lost while releasing a removed window's target ({}).", released.error());
+            } else {
+                Log<LogTag::Warning, LogTag::Render>("Failed to release a removed window's target ({}).", released.error());
+            }
+        }
+    }
     // Save identity before destroying the window; never read through a freed reference.
     std::erase_if(_impl->secondaryWindows, [window](const auto& owned) { return owned.get() == window; });
     _impl->secondaryInputs.erase(id);
@@ -499,12 +512,27 @@ auto KernelSession::GetConfig() const noexcept -> const EngineConfig& {
 }
 
 auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+    if (!_impl->renderContext || !*_impl->renderContext) {
+        // Recovery can be entered with nothing to recover -- no renderer at all, or
+        // one whose Destroy() has already taken the implementation: say so instead
+        // of dereferencing either.
+        return std::unexpected(RenderSystemError::RenderContextUnavailable);
+    }
+    // Pure recovery: nothing is logged or counted here. This is also the path a
+    // deliberate reset takes (IEngine::RecreateGraphicsDevice), and a reset is not a
+    // loss. The loss line is emitted where a loss is observed -- Engine::Present and
+    // Engine::ProvokeDeviceLost.
     _impl->assetManager->InvalidateGPUMeshes();
     _impl->StopShaderObservation();
     // jointOffset must survive device loss (IAssetLibrary contract): move
     // the tiny allocator state across RenderContext recreation here, in the
     // owner of RenderContext lifetime, instead of putting it back in World.
     auto jointAllocator = _impl->renderContext->ExtractJointAllocator();
+    // The loss is why we are here: no drain (it would only ask a dead device to go
+    // idle again) and no loss line, because the observer that saw the loss wrote it
+    // -- and took the fault report. The reset below then frees just the shell: the
+    // destructor's Destroy() finds !_impl and does nothing.
+    _impl->renderContext->ReleaseDevice();
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
@@ -518,8 +546,11 @@ auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode
     return {};
 }
 
-void KernelSession::ProvokeDeviceLost() {
-    _impl->renderContext->ProvokeDeviceLost();
+auto KernelSession::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    if (!_impl->renderContext || !*_impl->renderContext) {
+        return std::unexpected(RenderSystemError::RenderContextUnavailable);
+    }
+    return _impl->renderContext->ProvokeDeviceLost();
 }
 
 } // namespace ZHLN

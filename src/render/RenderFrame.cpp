@@ -502,16 +502,10 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
 
     _impl->diagnostics.gpuProfiler.Reset(frame_index);
     if (auto reset = _impl->computePools[frame_index].Reset(); !reset) [[unlikely]] {
-        if (Vk::IsDeviceLost(reset.error())) {
-            _impl->NoteDeviceLost("BeginFrame::computePool");
-        }
         _impl->frameOpen = false;
         return std::unexpected(AsFrameError(reset.error()));
     }
     if (auto reset = _impl->parallelRecorders[frame_index].Reset(); !reset) [[unlikely]] {
-        if (Vk::IsDeviceLost(reset.error())) {
-            _impl->NoteDeviceLost("BeginFrame::parallelRecorders");
-        }
         _impl->frameOpen = false;
         return std::unexpected(AsFrameError(reset.error()));
     }
@@ -519,9 +513,6 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     for (auto& worker: _impl->workerCmds) {
         worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);
         if (auto reset = worker.pools[frame_index].Reset(); !reset) [[unlikely]] {
-            if (Vk::IsDeviceLost(reset.error())) {
-                _impl->NoteDeviceLost("BeginFrame::workerPool");
-            }
             _impl->frameOpen = false;
             return std::unexpected(AsFrameError(reset.error()));
         }
@@ -634,8 +625,8 @@ auto RenderContext::GetAcquiredTarget(const PresentationTarget& target) noexcept
     return _impl->TargetAttachment(target);
 }
 
-void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
-    _impl->ReleaseTarget(target);
+auto RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept -> std::expected<void, ErrorCode> {
+    return _impl->ReleaseTarget(target);
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureID, ErrorCode> {

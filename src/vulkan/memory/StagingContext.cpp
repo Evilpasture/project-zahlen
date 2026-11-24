@@ -181,7 +181,7 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
 
     auto timeline = Semaphore::CreateTimeline(_ctx->Device());
     if (!timeline) [[unlikely]] {
-        return std::unexpected(VulkanCallError::VulkanCallFailed);
+        return std::unexpected(timeline.error());
     }
     const auto signal = SemaphoreSubmit::Timeline(*timeline, 1, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
     if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, std::span<const SemaphoreSubmit> {&signal, 1}); !result) {

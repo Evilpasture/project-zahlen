@@ -158,60 +158,65 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
 auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected<void, ErrorCode> {
     auto* device = _ctx.Device();
 
-    return Vk::WaitIdle(device).transform_error(
-                                   [](auto) -> ErrorCode { return ShadowResolutionError::RecreationFailed; }
-    ).and_then([&]() -> std::expected<void, ErrorCode> {
-        const VkExtent2D ext = {.width = resolution, .height = resolution};
+    // The idle wait used to be funnelled through transform_error(), which turned
+    // every failure -- device loss included -- into RecreationFailed. The caller
+    // could then not tell "the GPU is gone" from "this resolution was rejected",
+    // and treated a dead device as a bad setting. The code now survives intact:
+    // WaitIdle already reports VulkanCallError::DeviceLost when that is the cause.
+    if (auto idle = Vk::WaitIdle(device); !idle) {
+        return std::unexpected(idle.error());
+    }
 
-        auto sm_res = Vk::RenderTarget<Res_ShadowMap>::Create(
-            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
-        );
-        if (!sm_res) {
-            return std::unexpected(sm_res.error());
-        }
-        auto smp_res = Vk::RenderTarget<Res_ShadowMap>::Create(
-            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
-        );
-        if (!smp_res) {
-            sm_res->Destroy(_allocator);
-            return std::unexpected(smp_res.error());
-        }
+    const VkExtent2D ext = {.width = resolution, .height = resolution};
 
-        _shadowCascadeViews.clear();
-        _shadowCascadeViewsPrev.clear();
-        _graph.shadowMap.Destroy(_allocator);
-        _shadowMapPrev.Destroy(_allocator);
-        _graph.shadowMap = std::move(*sm_res);
-        _shadowMapPrev   = std::move(*smp_res);
+    auto sm_res = Vk::RenderTarget<Res_ShadowMap>::Create(
+        _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+    );
+    if (!sm_res) {
+        return std::unexpected(sm_res.error());
+    }
+    auto smp_res = Vk::RenderTarget<Res_ShadowMap>::Create(
+        _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+    );
+    if (!smp_res) {
+        sm_res->Destroy(_allocator);
+        return std::unexpected(smp_res.error());
+    }
 
-        if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
-            return std::unexpected(r.error());
-        } else {
-            _shadowCascadeViews = std::move(*r);
-        }
-        if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
-            return std::unexpected(r.error());
-        } else {
-            _shadowCascadeViewsPrev = std::move(*r);
-        }
+    _shadowCascadeViews.clear();
+    _shadowCascadeViewsPrev.clear();
+    _graph.shadowMap.Destroy(_allocator);
+    _shadowMapPrev.Destroy(_allocator);
+    _graph.shadowMap = std::move(*sm_res);
+    _shadowMapPrev   = std::move(*smp_res);
 
-        if (auto immediate = Vk::ExecuteImmediate(
-                _ctx, _ring,
-                [&](VkCommandBuffer cmd) -> void {
-                    const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View()};
-                    for (const auto& view: shadows) {
-                        view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
-                        view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
-                    }
+    if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
+        return std::unexpected(r.error());
+    } else {
+        _shadowCascadeViews = std::move(*r);
+    }
+    if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
+        return std::unexpected(r.error());
+    } else {
+        _shadowCascadeViewsPrev = std::move(*r);
+    }
+
+    if (auto immediate = Vk::ExecuteImmediate(
+            _ctx, _ring,
+            [&](VkCommandBuffer cmd) -> void {
+                const std::array shadows = {_graph.shadowMap.View(), _shadowMapPrev.View()};
+                for (const auto& view: shadows) {
+                    view.DiscardTo<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd);
+                    view.Transition<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd);
                 }
-            );
-            !immediate) [[unlikely]] {
-            return std::unexpected(immediate.error());
-        }
+            }
+        );
+        !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
 
-        Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
-        return {};
-    });
+    Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
+    return {};
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {

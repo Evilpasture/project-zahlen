@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 #include "vulkan/core/DeviceConfigurator.hpp"
-#include "vulkan/VkError.hpp"
 
 namespace ZHLN::Vk {
 
@@ -134,7 +133,7 @@ namespace {
 ) noexcept -> std::expected<LogicalDevice, ErrorCode> {
     if (physical.handle == VK_NULL_HANDLE || !physical.hasGraphics || physical.graphicsFamily == UINT32_MAX || physical.presentFamily == UINT32_MAX ||
         physical.transferFamily == UINT32_MAX || physical.computeFamily == UINT32_MAX) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        return std::unexpected(ContextError::NoSuitableDeviceFound);
     }
 
     const std::array<uint32_t, 4>           candidates {physical.graphicsFamily, physical.presentFamily, physical.transferFamily, physical.computeFamily};
@@ -187,7 +186,7 @@ namespace {
     VkDevice       handle  = VK_NULL_HANDLE;
     const VkResult created = vkCreateDevice(physical.handle, &create_info, nullptr, &handle);
     if (created != VK_SUCCESS) {
-        return std::unexpected(ToError(created));
+        return std::unexpected(ContextError::DeviceCreationFailed);
     }
 
     volkLoadDevice(handle);

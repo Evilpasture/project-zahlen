@@ -18,7 +18,8 @@ enum class SurfaceCreationError : uint8_t {
     IncompatibleDisplay         ZHLN_ANNOTATION(ZHLN::Description<"Could not find compatible display plane"> {}),
     TTYSurfaceCreationFailed    ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed"> {}),
     NoDisplayFound              ZHLN_ANNOTATION(ZHLN::Description<"No display found for surface"> {}),
-    IncompatibleModes           ZHLN_ANNOTATION(ZHLN::Description<"No compatible display modes found"> {})
+    IncompatibleModes           ZHLN_ANNOTATION(ZHLN::Description<"No compatible display modes found"> {}),
+    DisplayCapabilitiesQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"Querying display plane capabilities failed"> {}),
 };
 
 class Surface {

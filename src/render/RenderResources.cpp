@@ -994,8 +994,13 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
-        if (targets.ResizeShadows(incoming.shadows.resolution)) {
+        if (auto resized = targets.ResizeShadows(incoming.shadows.resolution); resized) {
             settings.shadows.resolution = incoming.shadows.resolution;
+        } else if (IsDeviceLost(resized.error())) {
+            // A dead device is not a rejected setting: keeping the old resolution and
+            // blaming the value would tell the caller the opposite of what happened.
+            // Not counted either -- recovery reports the loss.
+            Log<LogTag::Error, LogTag::Render>("GPU device lost while resizing shadow targets to {}x{}.", incoming.shadows.resolution, incoming.shadows.resolution);
         } else {
             Log<LogTag::Warning, LogTag::Render>(
                 "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
@@ -1187,10 +1192,13 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
                 }
             );
             !immediate) [[unlikely]] {
-            if (Vk::IsDeviceLost(immediate.error())) {
-                impl->deviceLost.store(true, std::memory_order::relaxed);
+            // A loss is not this site's line to write: recovery reports it once.
+            // What belongs here is the failure that is *not* a loss, with this
+            // site's name and its own code.
+            if (!IsDeviceLost(immediate.error())) {
+                Log<LogTag::Warning, LogTag::Render>("CaptureFrame: scene color transition failed ({}).", immediate.error());
             }
-            return std::unexpected(immediate.error());
+            return std::unexpected(AsFrameError(immediate.error()));
         }
 
         auto mapped = stagingBuffer.Map(impl->allocator);
@@ -1247,10 +1255,10 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             }
         );
         !immediate) [[unlikely]] {
-        if (Vk::IsDeviceLost(immediate.error())) {
-            impl->deviceLost.store(true, std::memory_order::relaxed);
+        if (!IsDeviceLost(immediate.error())) {
+            Log<LogTag::Warning, LogTag::Render>("CaptureFrame: HDR scene color copy failed ({}).", immediate.error());
         }
-        return std::unexpected(immediate.error());
+        return std::unexpected(AsFrameError(immediate.error()));
     }
 
     auto mapped = stagingBuffer.Map(impl->allocator);
@@ -1310,13 +1318,18 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
     return result;
 }
 
-void RenderContext::ProvokeDeviceLost() {
-    if (auto provoked = _impl->ProvokeDeviceLostInternal(); !provoked) [[unlikely]] {
-        if (Vk::IsDeviceLost(provoked.error())) {
-            _impl->deviceLost.store(true, std::memory_order::relaxed);
+auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    auto provoked = _impl->ProvokeDeviceLostInternal();
+    if (!provoked) [[unlikely]] {
+        // The expected failure is the loss itself, which the recovery path reports
+        // once it acts on it. Only a submission that failed for some other reason
+        // needs a line of its own here.
+        if (!IsDeviceLost(provoked.error())) {
+            Log<LogTag::Error, LogTag::Render>("Failed to submit the device-loss dispatch ({}).", provoked.error());
         }
-        Log<LogTag::Error, LogTag::Render>("Failed to submit the device-loss dispatch.");
+        return std::unexpected(AsFrameError(provoked.error()));
     }
+    return {};
 }
 
 } // namespace ZHLN

@@ -32,6 +32,9 @@ enum class WorldInitError : uint8_t {
 enum class RenderSystemError : uint8_t {
     NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
     EnvironmentImageUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The scene's environment image was not supplied to the asset library"> {}),
+    // Appended, not inserted: RenderSystemError is registered (ErrorRegistryAdapter),
+    // so an existing member's ordinal is part of what the table publishes.
+    RenderContextUnavailable ZHLN_ANNOTATION(ZHLN::Description<"No render context is available: it was never created or has already been torn down"> {}),
 };
 
 } // namespace ZHLN

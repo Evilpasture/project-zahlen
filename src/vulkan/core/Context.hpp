@@ -22,6 +22,7 @@ enum class ContextError : uint8_t {
     InvalidInstance            ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
     LoaderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan loader initialization failed"> {}),
     NoSuitableDeviceFound      ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
+    DeviceCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Logical device creation failed"> {}),
 };
 
 class GPUAddressTracker;

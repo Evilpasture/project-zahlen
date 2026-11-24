@@ -126,10 +126,14 @@ class Mutex {
     [[gnu::cold, gnu::noinline]] ZHLN_API void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] ZHLN_API void UnlockSlow() noexcept;
 
-    void CheckPreLock() noexcept;
-    void PostLock() noexcept;
-    void PreUnlock() noexcept;
-    void ClearOwner() noexcept;
+    // Same argument as LockSlow/UnlockSlow: the inline fast paths call these
+    // when isDebug, and that code is instantiated in every consumer DSO. The
+    // release build never references them (isDebug is false), which is exactly
+    // why hiding them went unnoticed until someone built -O0/Debug.
+    ZHLN_API void CheckPreLock() noexcept;
+    ZHLN_API void PostLock() noexcept;
+    ZHLN_API void PreUnlock() noexcept;
+    ZHLN_API void ClearOwner() noexcept;
 };
 
 static_assert(isDebug || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");

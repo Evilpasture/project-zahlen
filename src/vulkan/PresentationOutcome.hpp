@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
@@ -16,12 +15,11 @@ using PresentationOutcome = std::expected<std::optional<T>, ErrorCode>;
 
 struct PresentSuboptimal {};
 
-enum class DeviceFault : uint8_t {
-    Lost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)"> {}) = 1,
-};
-
-[[nodiscard]] constexpr auto IsDeviceLost(ErrorCode code) noexcept -> bool {
-    return code == DeviceFault::Lost;
-}
+// There is no shared "device lost" code here on purpose. Device loss is a
+// property of the six domains that can report it, each spelling the member
+// itself (VulkanCallError, CommandPoolError, CommandRecordingError,
+// CommandRingError, SwapchainError, PresentationError). Aggregating them into
+// one question is the render layer's job: see IsDeviceLost in
+// src/render/DeviceLoss.hpp.
 
 } // namespace ZHLN::Vk

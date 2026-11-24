@@ -24,7 +24,10 @@ auto CommandRecorder::Begin(
     if (const VkResult res = vkBeginCommandBuffer(cmd, &info); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
         }
-        return std::unexpected(ToError(res));
+        if (res == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(CommandRecordingError::DeviceLost);
+        }
+        return std::unexpected(CommandRecordingError::BeginFailed);
     }
     return CommandRecorder {cmd};
 }
@@ -37,7 +40,10 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
     if (const VkResult res = vkEndCommandBuffer(cmd); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
         }
-        return std::unexpected(ToError(res));
+        if (res == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(CommandRecordingError::DeviceLost);
+        }
+        return std::unexpected(CommandRecordingError::EndFailed);
     }
     return ExecutableCommands {cmd};
 }

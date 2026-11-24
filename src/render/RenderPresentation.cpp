@@ -100,10 +100,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
-            const bool lost = Vk::IsDeviceLost(executable.error());
-            if (lost) {
-                NoteDeviceLost("PresentUsedWindows::End");
-            }
+            const bool lost = IsDeviceLost(executable.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(executable.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
@@ -119,10 +116,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}
         );
         if (!result) {
-            const bool lost = Vk::IsDeviceLost(result.error());
-            if (lost) {
-                NoteDeviceLost("PresentUsedWindows::Present");
-            }
+            const bool lost = IsDeviceLost(result.error());
             Log<LogTag::Error>("Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(result.error())});
             dest.acquired.reset();

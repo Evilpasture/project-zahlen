@@ -2497,9 +2497,19 @@ auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*
     }
 
     // The engine is engine-first: it receives the host logger as a plain
-    // Layer-0 sink (gate + writer in one value) and never names ILogger. The
-    // Refs below keep the COM objects alive for the engine's whole life.
-    auto created = ZHLN::Engine::Create(config, logger->AsSink());
+    // Layer-0 sink (gate + writer in one value) and never names ILogger. The Refs
+    // below keep the COM objects alive for the engine's whole life. Hand the engine a
+    // sink to install as the process ambient sink only when the caller supplied that
+    // logger: a hub minted just above is this factory's console default, and
+    // installing it would discard the sink the host already registered -- in a test,
+    // the framework's capture sink, which is where DeviceLostCount and
+    // ValidationErrorCount read from, so those counters would be structurally zero and
+    // every engine line would print instead of being captured. The trade is that the
+    // level gate the minted hub would have applied now comes from whatever the host
+    // installed (or the global SetLogLevel); a host that wants both passes a
+    // LoggerConfig in-chain.
+    const ZHLN::LogSink ambientSink = ownedLogger.Get() != nullptr ? ZHLN::LogSink {} : logger->AsSink();
+    auto created = ZHLN::Engine::Create(config, ambientSink);
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);

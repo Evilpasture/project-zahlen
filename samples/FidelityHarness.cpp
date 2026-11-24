@@ -680,7 +680,27 @@ auto main(int argc, char* argv[]) -> int {
     if (fidelityHub) (void) (*fidelityHub)->AddSink(fidelitySink.Get());
 
     ZHLN::Platform::Init();
-    auto engineRes = ZHLN::COM::CreateEngine(engineConfig, fidelityHub ? fidelityHub->Get() : nullptr, nullptr);
+    // The hub travels in-chain (LoggerConfig), not as a factory argument: the
+    // engine receives it as a plain LogSink and names no COM logger type.
+    auto engineRes = ZHLN::COM::CreateEngine(ZHLN::COM::InChain(
+        ZHLN::COM::AppConfig {
+            .appName = engineConfig.appName, .logLevel = engineConfig.logLevel, .maxFramesPerSecond = engineConfig.fpsLimit
+        },
+        ZHLN::COM::WindowConfig {
+            .width      = engineConfig.width,
+            .height     = engineConfig.height,
+            .fullscreen = engineConfig.fullscreen,
+            .vsync      = engineConfig.vsync,
+            .headless   = engineConfig.headless,
+        },
+        ZHLN::COM::RenderConfig {
+            .validationMode        = engineConfig.validationMode,
+            .enableMeshShading     = engineConfig.enableMeshShading,
+            .initialPipelineBinary = engineConfig.initialPipelineBinaryData,
+        },
+        engineConfig.physics,
+        ZHLN::COM::LoggerConfig {.logger = fidelityHub ? fidelityHub->Get() : nullptr, .level = engineConfig.logLevel}
+    ));
     if (!engineRes) {
         std::println(stderr, "Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;

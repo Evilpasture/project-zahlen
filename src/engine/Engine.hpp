@@ -274,7 +274,7 @@ class Engine {
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
     [[nodiscard]] auto DeviceGeneration() const noexcept -> uint64_t;
 
-    void ProvokeDeviceLost();
+    [[nodiscard]] auto ProvokeDeviceLost() -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto Tick(float dt) -> std::expected<void, ErrorCode>;
 

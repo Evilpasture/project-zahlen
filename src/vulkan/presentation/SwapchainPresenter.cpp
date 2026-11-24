@@ -229,7 +229,13 @@ auto SwapchainPresenter::Present(
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
             return PresentSuboptimal {};
         }
-        return std::unexpected(ToError(result));
+        if (result == VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT) {
+            return std::unexpected(PresentationError::PresentTimingQueueFull);
+        }
+        if (result == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(PresentationError::DeviceLost);
+        }
+        return std::unexpected(PresentationError::PresentFailed);
     };
     auto presented = present_frame(present_id);
 
@@ -242,7 +248,7 @@ auto SwapchainPresenter::Present(
 
     // If the timing queue overflows, DO NOT re-submit the consumed present_sem!
     // Instead, drain past timings, increase queue size or fall back gracefully for future frames.
-    if (!presented && present_id != nullptr && presented.error().get<VkResult>() == VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT) {
+    if (!presented && present_id != nullptr && presented.error() == PresentationError::PresentTimingQueueFull) {
         if (_ctx != nullptr) {
             _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
         }

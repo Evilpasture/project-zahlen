@@ -86,7 +86,6 @@ struct RenderContext::Impl {
     ZHLN::Mutex                               _morphDeltaMutex;
     std::vector<std::pair<uint32_t, uint32_t>> _freeMorphDeltaRanges;
     bool                                      frameOpen       = false;
-    bool                                      destroyed       = false;
     std::unordered_set<uint64_t>              liveBuffers;
     std::unordered_set<uint64_t>              liveTextures {1, 2, 3};
     std::unordered_map<std::string, uint64_t> namedTextures;
@@ -130,17 +129,20 @@ RenderContext::~RenderContext() {
     Destroy();
 }
 
+void RenderContext::ReleaseDevice() noexcept {
+    // Ownership is the flag: reset() releases the implementation once, and a repeat
+    // call -- which the destructor always issues -- finds nothing left to release.
+    // The containers need no clearing first; their destructors are about to run.
+    _impl.reset();
+}
+
 void RenderContext::Destroy() noexcept {
-    if (!_impl || _impl->destroyed) {
-        return;
-    }
-    _impl->destroyed = true;
-    _impl->acquiredTargets.clear();
-    _impl->gpuMeshes.clear();
-    _impl->gpuMaterials.clear();
-    _impl->namedTextures.clear();
-    _impl->liveTextures.clear();
-    _impl->liveBuffers.clear();
+    // No device to drain and no fault report to dump: the release is the whole job.
+    ReleaseDevice();
+}
+
+void RenderContext::DumpDeviceFaultReport() noexcept {
+    // The null renderer has no device, so there is never a fault report to write.
 }
 
 auto RenderContext::GetPipelineBinaryData() const noexcept -> std::vector<uint8_t> {
@@ -168,11 +170,11 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
 }
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
-    // No GPU ring to fence: retiring ranges are reusable immediately.
-    for (uint32_t slot = 0; slot < 3; ++slot) _impl->jointAllocator.ClearRetiringForSlot(slot, 3, [](uint32_t, uint32_t) noexcept {});
-    if (_impl->destroyed) {
+    if (!_impl) {
         return std::optional<FrameScope> {};
     }
+    // No GPU ring to fence: retiring ranges are reusable immediately.
+    for (uint32_t slot = 0; slot < 3; ++slot) _impl->jointAllocator.ClearRetiringForSlot(slot, 3, [](uint32_t, uint32_t) noexcept {});
     const auto fbSize = GetFramebufferSize();
     if (!fbSize.has_value() || fbSize->width == 0 || fbSize->height == 0) {
         return std::optional<FrameScope> {};
@@ -409,7 +411,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {
-    if (_impl->destroyed || target.WasClosed()) {
+    if (!_impl || target.WasClosed()) {
         return std::optional<FrameTarget> {};
     }
     const Extent2D ext = target.GetFramebufferExtent();
@@ -433,8 +435,12 @@ auto RenderContext::GetAcquiredTarget(const PresentationTarget& target) noexcept
     return std::nullopt;
 }
 
-void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
+auto RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept -> std::expected<void, ErrorCode> {
+    if (!_impl) {
+        return {};
+    }
     _impl->acquiredTargets.erase(reinterpret_cast<uintptr_t>(&target));
+    return {};
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool /*hdr*/) -> std::expected<TextureID, ErrorCode> {
@@ -569,8 +575,11 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
     return {};
 }
 
-void RenderContext::ProvokeDeviceLost() {
-    Log<LogTag::Error, LogTag::DeviceLost>("Simulated null-renderer device lost");
+auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    // The null renderer has no device to lose, so it does not log: it hands back
+    // the code the real renderer would produce, and the engine's recovery path
+    // reports it exactly as it would in production.
+    return std::unexpected(FrameResult::DeviceLost);
 }
 
 auto RenderContext::BakeProceduralTexture(

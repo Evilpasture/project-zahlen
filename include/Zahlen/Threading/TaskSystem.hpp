@@ -77,7 +77,9 @@ ZHLN_API void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 
 ZHLN_API void Wait(Counter* counter);
 
-void WakeUp(ZHLN::Fiber* fiber);
+// Called from Channel<T>'s inline wake-up path, which instantiates in the
+// consumer's TU; exported for the same reason as the Mutex fast-path hooks.
+ZHLN_API void WakeUp(ZHLN::Fiber* fiber);
 
 // Invoke callables in parallel and join all fibers before returning. The
 // callables (including temporary arguments) remain alive for the whole call,

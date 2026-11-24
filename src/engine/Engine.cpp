@@ -406,6 +406,16 @@ void Engine::EvaluateInput(Engine& engine, float, FrameContext&) {
 void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
     auto renderRes = RenderSystem::Update(engine, engine.Registry(), engine._impl->sceneData, engine._impl->poseUploads, dt);
     if (!renderRes && renderRes.error() == FrameResult::DeviceLost) {
+        // One line and one DeviceLostCount increment per loss, emitted where the
+        // loss is *observed*. Recovery is also reachable deliberately
+        // (IEngine::RecreateGraphicsDevice on a healthy device), and a reset is not
+        // a loss, so it must not look like one.
+        Log<LogTag::Error, LogTag::DeviceLost>("device lost; recreating the renderer");
+        // The fault report is evidence of *this* loss and it dies with the device, so
+        // it is taken here, in the observer, like the count. Recovery stays pure, and
+        // a deliberate reset can no longer reach it: on a healthy device the dump
+        // would report "0 fault reports" to stderr.
+        engine.Render().DumpDeviceFaultReport();
         if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
             Log<LogTag::Error>("Fatal: GPU device recovery failed: {}", lostRes.error());
             ctx.error = lostRes.error();
@@ -696,8 +706,19 @@ void Engine::AddTeardownHook(TeardownHook hook) {
     }
 }
 
-void Engine::ProvokeDeviceLost() {
-    _impl->kernel->ProvokeDeviceLost();
+// The test hook. Recovery only runs when the provoked submission *reports* the
+// loss: a dispatch that is accepted while the device dies asynchronously returns
+// success here, and the loss surfaces on a later frame like any other.
+auto Engine::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    auto provoked = _impl->kernel->ProvokeDeviceLost();
+    if (!provoked && provoked.error() == FrameResult::DeviceLost) {
+        // Same path a captured frame takes, so DeviceLostCount moves for the
+        // reason production would, not because a test-only branch logged.
+        Log<LogTag::Error, LogTag::DeviceLost>("device lost; recreating the renderer");
+        Render().DumpDeviceFaultReport();
+        return HandleDeviceLost();
+    }
+    return provoked;
 }
 
 namespace {
