@@ -38,6 +38,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace ZHLN::ProjectLight {
@@ -601,11 +602,11 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
             if (!classSummary.empty()) classSummary += ", ";
             classSummary += std::format("{}={}", distribution[i].first, distribution[i].second);
         }
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
         if (partCount == 0 && lightCount == 0) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "snapshot completed but contains no renderable Part/MeshPart or light objects.");
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("snapshot completed but contains no renderable Part/MeshPart or light objects.");
         } else if (liveEntityCount == 0) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "replicated renderables exist, but no live ECS render entities were created.");
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("replicated renderables exist, but no live ECS render entities were created.");
         }
         state.summaryLogged = true;
     }
@@ -674,7 +675,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     const auto charRes        = sim.CreateCharacter(COM::InChain(charDesc));
     state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::BodyID::Null();
     if (state.localControllerBody == Physics::BodyID::Null()) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Could not create the local player CharacterVirtual body.");
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("Could not create the local player CharacterVirtual body.");
         return;
     }
 

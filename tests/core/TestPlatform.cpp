@@ -262,7 +262,9 @@ struct PlatformTestSuite {
             );
             ZHLN::Test::ExpectFalse(rejected.has_value());
             if (!rejected.has_value()) {
-                ZHLN::Test::ExpectTrue(rejected.error() == ZHLN::SharedLibraryError::LoadFailed);
+                ZHLN::Test::ExpectTrue(rejected.error().code == ZHLN::SharedLibraryError::LoadFailed);
+                // The path the loader rejected, not just the fact that it did.
+                ZHLN::Test::ExpectEq(rejected.error().attemptedPath.string(), badFile.string());
             }
             return {};
         }

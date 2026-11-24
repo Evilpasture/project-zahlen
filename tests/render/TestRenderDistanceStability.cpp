@@ -442,7 +442,12 @@ template <typename SceneFn>
 // last avoids rebuilding the pool for any suite after it.
 namespace {
 
-struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) DistanceStabilitySuite {
+// AllowDeviceLostMark: this suite retries a real device loss up to
+// kMaxDeviceLostRecoveries times and erases the dead context's failures, so a
+// recovered loss is the case working, not the case failing. Without the mark the
+// runner appends its device-lost verdict *after* the case returns and marks a
+// correct recovery FAILED.
+struct ZHLN_ANNOTATION(ZHLN::Test::Priority<100> {}) ZHLN_ANNOTATION(ZHLN::Test::AllowDeviceLostMark {}) DistanceStabilitySuite {
     DistanceStabilitySuite() {
         ZHLN::Test::Headless::BeginSession();
     }

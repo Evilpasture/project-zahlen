@@ -83,6 +83,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -789,7 +790,7 @@ auto main(int argc, char* argv[]) -> int {
                       std::isfinite(camera.yaw.value) && std::isfinite(camera.pitch.value);
     });
     if (!hasCamera) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine->Logger(), "No main camera entity for '{}'; refusing an empty capture.", scenario.name);
+        ZHLN::COM::LoggerView{engine->Logger()}.Warn("No main camera entity for '{}'; refusing an empty capture.", scenario.name);
         return EXIT_FAILURE;
     }
     if (!cameraValid) {

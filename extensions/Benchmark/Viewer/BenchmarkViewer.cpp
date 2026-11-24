@@ -23,6 +23,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace ZHLN::Bench {
@@ -1076,7 +1077,7 @@ void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
 
     m_impl->benchmark = std::make_unique<LogicBenchmark>();
     if (!m_impl->benchmark->Initialize(initialEntities)) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "the benchmark world failed to initialize, so there is nothing to draw.");
+        ZHLN::COM::LoggerView{engine.Logger()}.Error("the benchmark world failed to initialize, so there is nothing to draw.");
         m_impl->benchmark.reset();
         return;
     }

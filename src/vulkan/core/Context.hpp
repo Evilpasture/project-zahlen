@@ -78,16 +78,12 @@ class Context {
 
     // What device negotiation decided, in order, as a borrowed view. The cold
     // path collected it and logged nothing; whoever built this context decides
-    // what to say, and a test reads it directly instead of installing a sink.
+    // what to say, and a test reads the same entries directly instead of
+    // installing a sink. The ledger stays owned by the context for its whole
+    // life -- a few short strings -- so reading it never depends on whether the
+    // composition root has already drained it.
     [[nodiscard]] auto Diagnostics() const noexcept -> std::span<const DeviceDiagnostic> {
         return _diagnostics.Entries();
-    }
-
-    // One-shot extraction for a composition root that is done with the context's
-    // copy: the ledger and its strings move out, and the context stops paying for
-    // them for the rest of the run. Diagnostics() is empty afterwards.
-    [[nodiscard]] auto TakeDiagnostics() noexcept -> DiagnosticLedger {
-        return std::move(_diagnostics);
     }
 
     [[nodiscard]] auto BufferAddress(const VkBuffer buffer) const noexcept -> VkDeviceAddress {

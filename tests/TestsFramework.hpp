@@ -507,10 +507,11 @@ inline std::atomic<uint32_t> g_deviceLost {0};
 // COM sink on the framework's own logger hub, and that hub is the ambient sink
 // for the whole run (see CaptureHub()). Every line therefore takes one path --
 // ambient or explicit, engine or leaf library -- and this sink is what counts
-// the validation/device-lost telemetry and buffers the per-test log.
+// the validation/device-lost telemetry and buffers the per-test log, capped at
+// kMaxCapturedLines.
 // Lines are stored and echoed through ZHLN::FormatLogLine, the same rendering
 // the console sink uses, so a failing test's dump keeps the [file:line], fiber,
-// domain and severity instead of a bare message. Verbose runs echo live;
+// channel and severity instead of a bare message. Verbose runs echo live;
 // otherwise the buffer is only printed when a case fails.
 inline std::atomic<bool> g_captureEchoToStderr {false};
 
@@ -532,8 +533,8 @@ class CaptureLogger final: public COM::Implements<CaptureLogger, COM::ILogger> {
     }
 
     void Write(COM::LogSeverity severity, COM::LogSource source, COM::StringView message) const noexcept override {
-        // Validation/device-lost lines carry structured domains from the
-        // open channel names -- no substring-matching on messages or source paths.
+        // Validation and device-lost lines are told apart by their open channel
+        // names -- no substring-matching on messages or source paths.
         // Device-lost lines count as device-lost only: recovery tests
         // assert ValidationErrorCount() == 0 across a simulated loss.
         if (source.channel == std::string_view {"DeviceLost"}) {
@@ -554,6 +555,13 @@ class CaptureLogger final: public COM::Implements<CaptureLogger, COM::ILogger> {
         }
         std::scoped_lock lock(_mutex);
         if (_capturing) {
+            // Bounded, as the base logging layer's ring was: a Verbose
+            // multi-hundred-frame test must not grow this without limit. When it
+            // fills, the oldest quarter goes, so the tail -- where a failure
+            // usually is -- is what survives.
+            if (_captured.size() >= kMaxCapturedLines) {
+                _captured.erase(_captured.begin(), _captured.begin() + static_cast<std::ptrdiff_t>(kMaxCapturedLines / 4));
+            }
             _captured.push_back(line);
         }
     }
@@ -573,6 +581,7 @@ class CaptureLogger final: public COM::Implements<CaptureLogger, COM::ILogger> {
     }
 
   private:
+    static constexpr size_t  kMaxCapturedLines = 512;
     mutable ZHLN::Mutex      _mutex;
     mutable bool             _capturing = false;
     mutable std::vector<std::string> _captured;
@@ -2014,11 +2023,12 @@ inline auto ParseRunnerOptions(int argc, char** argv) -> RunnerOptions {
             .description = "Silence engine console logs during worker execution",
             .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
                 // Quiet means "nothing on the console", not "capture less":
-                // the hub has no console sink, and an attached external sink is
-                // an observer the level does not gate, so the per-case capture
-                // buffer and the telemetry counters keep everything -- including
-                // Debug lines -- while the process default silences the console
-                // sinks of any logger minted for an engine mid-run.
+                // CaptureHub() has no console sink at all, and an engine that
+                // mints a hub chains this capture sink in through LoggerConfig,
+                // so the minted hub adds no console sink either. The per-case
+                // buffer and the telemetry counters keep everything, including
+                // Debug lines, while the process default silences anything that
+                // still owns a console sink.
                 ZHLN::SetLogLevel(ZHLN::LogSeverity::Off);
                 if (auto* hub = CaptureHub()) hub->SetMinSeverity(COM::LogSeverity::Off);
                 return {};

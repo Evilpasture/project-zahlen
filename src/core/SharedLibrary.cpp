@@ -111,7 +111,7 @@ enum class Probe : uint8_t { Missing, Loaded, Rejected };
 } // namespace
 
 auto SharedLibrary::OpenPlugin(const std::string_view spec, const PluginSearchOptions& options)
-    -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+    -> std::expected<std::optional<LoadedPlugin>, LoadFailure> {
     if (spec.empty()) {
         return std::optional<LoadedPlugin> {};
     }
@@ -131,13 +131,15 @@ auto SharedLibrary::OpenPlugin(const std::string_view spec, const PluginSearchOp
         return opened.Open(candidate, options.bind) ? Probe::Loaded : Probe::Rejected;
     };
 
-    const auto finish = [&]() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+    const auto finish = [&]() -> std::expected<std::optional<LoadedPlugin>, LoadFailure> {
         return std::optional<LoadedPlugin> {LoadedPlugin {std::move(opened), std::move(resolved)}};
     };
-    const auto rejected = []() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
-        return std::unexpected(SharedLibraryError::LoadFailed);
+    // The candidate that exists is the candidate that failed, and its path is
+    // the one thing a caller needs to act on the failure.
+    const auto rejected = [&]() -> std::expected<std::optional<LoadedPlugin>, LoadFailure> {
+        return std::unexpected(LoadFailure {.code = SharedLibraryError::LoadFailed, .attemptedPath = std::move(resolved)});
     };
-    const auto nothing = []() -> std::expected<std::optional<LoadedPlugin>, ErrorCode> {
+    const auto nothing = []() -> std::expected<std::optional<LoadedPlugin>, LoadFailure> {
         return std::optional<LoadedPlugin> {};
     };
 

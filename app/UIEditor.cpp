@@ -51,6 +51,7 @@
 #include <string_view>
 #include <vector>
 #include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -633,7 +634,7 @@ void OpenPreview(ZHLN::COM::IEngine& engine, Session& session) {
     // what kind of content it accepts.
     const auto previewWindow = engine.AddWindow(ZHLN::COM::WindowCreateInfo {.title = "UI Preview", .width = 800, .height = 600});
     if (!previewWindow.HasValue()) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Preview AddWindow failed");
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("Preview AddWindow failed");
         return;
     }
     session.previewID = previewWindow.value;
@@ -836,7 +837,7 @@ auto main(int argc, char* argv[]) -> int {
             if (baked) {
                 ui->SetBakedFont(std::move(*baked));
             } else {
-                ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "Font load failed ({}); using embedded default.", baked.error());
+                ZHLN::COM::LoggerView{engine.Logger()}.Warn("Font load failed ({}); using embedded default.", baked.error());
             }
         }
         auto Tick(ZHLN::COM::IEngine& engine, float dt) -> std::expected<void, ZHLN::ErrorCode> {

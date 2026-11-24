@@ -82,7 +82,9 @@ struct BuiltinHostOptions {
         }
     );
     if (!opened) {
-        log.Error("Failed to open plugin library '{}': {}", spec, opened.error());
+        // The loader's rejection names the file it choked on, which is the whole
+        // reason the factory hands back a LoadFailure instead of a bare code.
+        log.Error("Failed to open plugin library '{}': the OS loader rejected '{}'.", spec, opened.error().attemptedPath.string());
         return std::unexpected(AppError::PluginLoadFailed);
     }
     if (!opened->has_value()) {
@@ -92,6 +94,9 @@ struct BuiltinHostOptions {
         }
         return std::nullopt;
     }
+    // Debug, not Info: the resolved path is what a human needs when a plugin
+    // turns out to be the wrong build, and nothing needs it otherwise.
+    log.Debug("Loaded plugin library '{}' from '{}'.", spec, (*opened)->path.string());
     return std::optional<SharedLibrary> {std::move((*opened)->library)};
 }
 } // namespace

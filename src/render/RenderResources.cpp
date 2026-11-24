@@ -400,11 +400,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->deletionQueue.Drain();
 }
 
-void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (auto* const cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
-        _impl->diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
-    }
-}
 
 PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
     if (!_impl->diagnostics.gpuProfiler.PipelineStatsAvailable()) {

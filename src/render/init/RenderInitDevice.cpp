@@ -225,17 +225,12 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                             impl->ctx = std::forward<decltype(context)>(context);
                             // The composition root for device negotiation: the
                             // builders only collected facts, and this is the one
-                            // place that decides an operator hears them. A test
-                            // that wants them reads ctx.Diagnostics() and never
-                            // installs a sink.
-                            // Consumed by value: the context gives its copy up and
-                            // stops holding the strings for the rest of the run.
-                            const Vk::DiagnosticLedger ledger = impl->ctx.TakeDiagnostics();
-                            for (const Vk::DeviceDiagnostic& diagnostic: ledger.Entries()) {
+                            // place that decides an operator hears them. The
+                            // ledger stays in the context, so a test reads the
+                            // same entries through ctx.Diagnostics() instead of
+                            // installing a sink.
+                            for (const Vk::DeviceDiagnostic& diagnostic: impl->ctx.Diagnostics()) {
                                 switch (diagnostic.severity) {
-                                    case Vk::DiagnosticSeverity::Error:
-                                        ZHLN::kVkLog.Error("[{}] {}", diagnostic.component, diagnostic.message);
-                                        break;
                                     case Vk::DiagnosticSeverity::Warning:
                                         ZHLN::kVkLog.Warn("[{}] {}", diagnostic.component, diagnostic.message);
                                         break;

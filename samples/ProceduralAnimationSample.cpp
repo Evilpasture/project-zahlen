@@ -60,6 +60,7 @@ using ZHLN::Quat;
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -583,7 +584,7 @@ auto AttachCharacterRig(
             ZHLN::COM::Log(engine.Logger(), "Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
             ZHLN::COM::Log(engine.Logger(), "Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "'{}' contains no authored animation track; bind pose will be shown.", glbPath);
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("'{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
@@ -627,7 +628,7 @@ auto AttachCharacterRig(
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, ZHLN::FirstPersonVisibilityComponent {}, std::move(itemHandling)
         );
     } else {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "'{}' not found; falling back to the in-memory procedural rig.", glbPath);
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("'{}' not found; falling back to the in-memory procedural rig.", glbPath);
 
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
@@ -836,7 +837,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine->Logger(), "frame failed: {}", result.error);
+            ZHLN::COM::LoggerView{engine->Logger()}.Error("frame failed: {}", result.error);
             break;
         }
     }

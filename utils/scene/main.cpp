@@ -36,6 +36,7 @@
 #include <string_view>
 #include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -167,7 +168,7 @@ struct DiagnosticHost {
                     ApplyGraphicsProfileFromLua(engine, path);
             });
             if (!watch)
-                ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "could not watch '{}'.", path.string());
+                ZHLN::COM::LoggerView{engine.Logger()}.Warn("could not watch '{}'.", path.string());
         }
 #endif
         return {};

@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace ZHLN::ProjectLight {
@@ -993,21 +994,21 @@ void ClientSession::PollNetwork(COM::IEngine& engine) {
                     if (inferredClassNameChannel) {
                         m_remoteClassNameChannel = inferredClassNameChannel;
                         const auto compiledClassNameChannel = PropertyNameChannel("ClassName");
-                        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "inferred remote ClassName channel {}; compiled property table expects {}.", *m_remoteClassNameChannel, compiledClassNameChannel.value_or(0u));
+                        ZHLN::COM::LoggerView{engine.Logger()}.Warn("inferred remote ClassName channel {}; compiled property table expects {}.", *m_remoteClassNameChannel, compiledClassNameChannel.value_or(0u));
                         m_remotePropertyNameOverrides.fill(std::string_view {});
                         if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel
                             && MatchesObservedRemotePropertySchema(*snapshot, *m_remoteClassNameChannel)) {
                             for (const auto& [channel, property]: kObservedRemotePropertyChannels) {
                                 m_remotePropertyNameOverrides[channel] = property;
                             }
-                            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "audited remote property layout matched; mapped Position=5, Rotation=20, Size=21, Anchored=22, CanCollide=23, Color=24, Transparency=25, UserId=18, Character=19, NetworkOwner=32, Shape=33, RootPart=49, State=50, and light fields=56-64.");
+                            ZHLN::COM::LoggerView{engine.Logger()}.Warn("audited remote property layout matched; mapped Position=5, Rotation=20, Size=21, Anchored=22, CanCollide=23, Color=24, Transparency=25, UserId=18, Character=19, NetworkOwner=32, Shape=33, RootPart=49, State=50, and light fields=56-64.");
                         } else if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel) {
-                            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "no known numeric property layout matched this snapshot; only ClassName will use a remote override.");
+                            ZHLN::COM::LoggerView{engine.Logger()}.Warn("no known numeric property layout matched this snapshot; only ClassName will use a remote override.");
                         }
                     } else {
                         m_remoteClassNameChannel.reset();
                         m_remotePropertyNameOverrides.fill(std::string_view {});
-                        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine.Logger(), "no alternate ClassName channel inferred; using the compiled property table.");
+                        ZHLN::COM::LoggerView{engine.Logger()}.Warn("no alternate ClassName channel inferred; using the compiled property table.");
                     }
                     m_snapshotClassProbeLogged = true;
                 }

@@ -258,7 +258,6 @@ class RenderContext {
     // allocation; out-of-range or zero counts are ignored.
     void FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept;
 
-    void WriteCheckpoint(std::string_view name) noexcept;
 
     [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
 

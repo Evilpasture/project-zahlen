@@ -570,8 +570,6 @@ void RenderContext::FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept {
     _impl->_freeMorphDeltaRanges = std::move(coalesced);
 }
 
-void RenderContext::WriteCheckpoint(std::string_view /*name*/) noexcept {
-}
 
 auto RenderContext::CapturePipelineStats() noexcept -> PipelineStatsCapture {
     return PipelineStatsCapture {_impl.get()};

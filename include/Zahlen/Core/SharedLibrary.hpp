@@ -30,6 +30,14 @@ enum class SharedLibraryError : uint8_t {
     LoadFailed ZHLN_ANNOTATION(ZHLN::Description<"A candidate library file exists but the OS loader rejected it"> {}) = 1,
 };
 
+// A failed load, with the file the loader choked on. The path is known the
+// moment the candidate exists, so throwing it away here is what made a caller
+// unable to say which library was broken.
+struct LoadFailure {
+    SharedLibraryError    code = SharedLibraryError::LoadFailed;
+    std::filesystem::path attemptedPath {};
+};
+
 struct PluginSearchOptions {
     std::string_view                       stemPrefix        = "zahlen_plugin_";
     std::string_view                       envPath           = {};
@@ -96,14 +104,15 @@ class SharedLibrary {
     //
     // Three outcomes, as three value states rather than a status byte plus an
     // out-parameter:
-    //   unexpected(SharedLibraryError::LoadFailed)  a candidate exists and the OS
-    //                                              loader rejected it -- hard
+    //   unexpected(LoadFailure)                     a candidate exists and the OS
+    //                                              loader rejected it -- hard, and
+    //                                              it names the file it tried
     //   std::nullopt                                nothing matched anywhere it
     //                                              was allowed to look -- benign
     //   LoadedPlugin                                open, plus where it came from
     [[nodiscard]] ZHLN_API static auto OpenPlugin(
         std::string_view spec, const PluginSearchOptions& options = {}
-    ) -> std::expected<std::optional<LoadedPlugin>, ErrorCode>;
+    ) -> std::expected<std::optional<LoadedPlugin>, LoadFailure>;
 
     [[nodiscard]] auto OpenAny(std::span<const char* const> candidates, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         for (const char* path: candidates) {

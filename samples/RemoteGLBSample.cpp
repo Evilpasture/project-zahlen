@@ -148,6 +148,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -486,7 +487,7 @@ auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const
     }
     auto asset = ZHLN::GLTF::Upload(*engine.Assets(), *engine.Graphics(), *doc);
     if (!asset) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "'{}' failed to upload; the previous subject stays on screen.", virtualPath);
+        ZHLN::COM::LoggerView{engine.Logger()}.Error("'{}' failed to upload; the previous subject stays on screen.", virtualPath);
         return false;
     }
     ClearSubject(engine, subject);
@@ -1084,7 +1085,7 @@ void PollFetch(ZHLN::COM::IEngine& engine, SampleState& state) {
     state.fetchDetail   = std::move(result->errorMessage);
 
     if (status == ZHLN::Remote::FetchStatus::Failed) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
+        ZHLN::COM::LoggerView{engine.Logger()}.Error("Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
         ZHLN::COM::Log(engine.Logger(), "Check the URL and the network, then press R to try again.");
         return;
     }
@@ -1338,7 +1339,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
     if (auto fontID = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::COM::Log<ZHLN::COM::LogSeverity::Warning>(engine->Logger(), "Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::COM::LoggerView{engine->Logger()}.Warn("Font asset failed to load ({}), using embedded default.", fontID.error());
     } else {
         ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
     }
@@ -1451,7 +1452,7 @@ auto main(int argc, char* argv[]) -> int {
         }
         const auto result = engine->Tick(state.dt);
         if (!result.HasValue()) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine->Logger(), "frame failed: {}", result.error);
+            ZHLN::COM::LoggerView{engine->Logger()}.Error("frame failed: {}", result.error);
             break;
         }
 

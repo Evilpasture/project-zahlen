@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <span>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 namespace {
@@ -202,7 +203,7 @@ auto main(int argc, char* argv[]) -> int {
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
             ZHLN::COM::Log(engine->Logger(), "Recreating graphics device on frame {} (gen={}).", engine->CurrentFrame(), engine->DeviceGeneration());
             if (auto lost = engine->RecreateGraphicsDevice(); !lost.HasValue()) {
-                ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine->Logger(), "Recovery failed: {}", lost.error);
+                ZHLN::COM::LoggerView{engine->Logger()}.Error("Recovery failed: {}", lost.error);
                 engine->RequestClose();
                 break;
             }
@@ -219,7 +220,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::FreeCam::Step(*engine, dt);
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine->Logger(), "frame failed: {}", result.error);
+            ZHLN::COM::LoggerView{engine->Logger()}.Error("frame failed: {}", result.error);
             engine->RemoveDeviceLostCallback(callbackToken);
             return EXIT_FAILURE;
         }

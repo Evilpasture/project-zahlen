@@ -127,8 +127,9 @@ sink. `COM::CreateEngineRaw` installs the logger it is going to use as the proce
 ambient sink in both cases -- one the chain supplied, or the console default it
 mints -- so ambient lines share the engine's format and level. A minted hub must not
 swallow what the host already installed, though: whatever sink was installed before
-creation (in a test, `CaptureHub()`'s observer) is chained into the minted hub as an
-external sink, which is what makes the counters live. Tests get that chain without
+creation (in a test, the sink `CaptureHub()` publishes) is chained into the minted hub
+through its `LoggerConfig`, which is what makes the counters live -- and what keeps the
+minted hub from adding a console sink of its own. Tests get that chain without
 asking for it; a host that installed its own sink before creating an engine keeps
 receiving lines after it.
 
@@ -150,10 +151,18 @@ The runner now captures engine logs per test instead of streaming them:
 
 - Every test runs with the framework's capture sink registered as the ambient
   `LogSink` (`Test::CaptureHub()`, `tests/TestsFramework.hpp`), so engine lines
-  land in a bounded per-test buffer instead of the terminal. A passing test prints
+  land in a per-test buffer instead of the terminal. The buffer is bounded at
+  `kMaxCapturedLines` (512); when it fills, the oldest quarter is dropped, so the tail
+  -- where a failure usually is -- is what survives a Verbose frame loop. A passing test prints
   only its `[ RUN ]`/`[ PASS ]` lines; a failing test prints its usual failure
   details plus the captured engine log (head 15 + tail 50 lines, omission counted).
   That same buffer is what `DeviceLostCount()` and `ValidationErrorCount()` read.
+- `-q/--quiet` sets the process level to `Off` and the capture hub's minimum
+  severity to `Off`. Silence comes from there being no console sink in the default
+  hub at all -- not from the process default gating anything -- so an engine that
+  mints a hub still takes its level from `AppConfig::logLevel`; that hub has no
+  console sink precisely because the capture sink is chained in through its
+  `LoggerConfig`.
 - `ZHLN_TEST_LOG=verbose` disables the capture and streams engine logs,
   for debugging.
 - Panics bypass suppression, so a fatal always prints.

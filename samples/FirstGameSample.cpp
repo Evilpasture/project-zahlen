@@ -11,6 +11,7 @@
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
 
 
 struct Game {
@@ -49,7 +50,7 @@ struct Game {
                 .castsShadow = true});
         if (floor == ZHLN::Entity::Null() || box == ZHLN::Entity::Null() ||
             sun == ZHLN::Entity::Null()) {
-            ZHLN::COM::Log<ZHLN::COM::LogSeverity::Error>(engine.Logger(), "Could not create the example scene");
+            ZHLN::COM::LoggerView{engine.Logger()}.Error("Could not create the example scene");
             engine.RequestClose();
         }
     }

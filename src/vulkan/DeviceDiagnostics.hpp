@@ -29,10 +29,13 @@
 
 namespace ZHLN::Vk {
 
+// Two severities, because two is what the cold path can produce: a negotiation
+// either fell back the way it is supposed to (Info) or lost something the engine
+// wanted (Warning). A hard failure is returned as an error code, never recorded
+// here, so an `Error` member would have been a case nothing could reach.
 enum class DiagnosticSeverity : uint8_t {
     Info    = 0, // a normal fallback: the device is not what it could be, and that is fine
     Warning = 1, // a capability the engine wanted is unavailable; a documented path replaces it
-    Error   = 2, // recorded against a failure that is being returned
 };
 
 // One negotiation fact. `component` names the part of setup that decided it
