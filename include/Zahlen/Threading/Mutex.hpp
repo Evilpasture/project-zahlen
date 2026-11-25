@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Atomic.hpp>
+#include <atomic>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
@@ -18,8 +18,8 @@ extern void YieldFiber() noexcept;
 namespace detail {
 
 struct MutexOwner {
-    alignas(16) ZHLN::Atomic<bool>      hasOwner;
-    alignas(16) ZHLN::Atomic<uintptr_t> owner;
+    alignas(16) std::atomic<bool>      hasOwner {false};
+    alignas(16) std::atomic<uintptr_t> owner {0};
 
     [[nodiscard]] auto IsOwned() const noexcept -> bool {
         return hasOwner.load(std::memory_order::acquire);
@@ -61,6 +61,9 @@ class Mutex {
   public:
     constexpr Mutex() noexcept = default;
     ~Mutex()                   = default;
+
+    Mutex(const Mutex&)                    = delete;
+    auto operator=(const Mutex&) -> Mutex& = delete;
 
     [[gnu::flatten, gnu::hot, gnu::always_inline]]
     void lock() noexcept {
@@ -116,9 +119,9 @@ class Mutex {
 
     using Owner = std::conditional_t<isDebug, detail::MutexOwner, detail::NoMutexOwner>;
 
-    ZHLN::Atomic<uint8_t> _bits;
+    std::atomic<uint8_t> _bits {UNLOCKED};
 
-    [[no_unique_address]] Owner _owner;
+    [[no_unique_address]] Owner _owner {};
 
     // Reached from the inline Lock()/Unlock() fast paths, so these cannot be
     // hidden: every consumer's own objects call them. Exported for that reason
@@ -139,8 +142,9 @@ class Mutex {
 static_assert(isDebug || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
 static_assert(
-    isDebug || (std::is_trivially_default_constructible_v<Mutex> && std::is_standard_layout_v<Mutex> && std::is_trivially_copyable_v<Mutex>),
-    "Mutex must remain a trivial C-compatible byte in Release mode!"
+    isDebug || (std::is_nothrow_default_constructible_v<Mutex> && std::is_trivially_destructible_v<Mutex> &&
+                std::is_standard_layout_v<Mutex>),
+    "Mutex must remain a 1-byte standard-layout lock initialized to UNLOCKED in Release mode!"
 );
 
 struct MutexGuard {

@@ -21,10 +21,6 @@ namespace {
 // only inside this fixed stack window during vkWrite*DescriptorsEXT.
 inline constexpr uint32_t kDescriptorWriteChunk = 16;
 
-[[nodiscard]] constexpr auto HeapTypeName(DescriptorHeapType type) noexcept -> const char* {
-    return type == DescriptorHeapType::Samplers ? "Sampler" : "Resource";
-}
-
 } // namespace
 
 DescriptorHeap::~DescriptorHeap() noexcept {

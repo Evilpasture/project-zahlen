@@ -24,6 +24,7 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <UI/GUI.hpp>
 #include <UI/HostUI.hpp>
 #include <Zahlen/Log.hpp>
@@ -41,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -58,6 +60,7 @@ struct InspectorState {
     std::vector<ZHLN::Entity>     spawned;
     ZHLN::Entity                  orbitPivot = ZHLN::Entity::Null();
     std::string                   pendingDrop;
+    std::string                   mountedHostDir;
     std::string                   status = "Drop a .glb / .gltf file onto the window";
     uint64_t                      lastGeneration = 0;
 
@@ -79,7 +82,27 @@ struct InspectorState {
 
     void LoadPath(std::string_view path) {
         if (engine == nullptr) return;
-        auto doc = ZHLN::GLTF::Read(path, {}, engine->Assets());
+        auto&       assets      = *engine->Assets();
+        std::string virtualPath = std::string(path);
+        if (!assets.VirtualFileExists(std::string_view(virtualPath))) {
+            std::filesystem::path hostPath(path);
+            if (!std::filesystem::exists(hostPath)) {
+                if (const auto found = ZHLN::FS::Paths::FindDataFile("resources/assets/" + std::string(path))) {
+                    hostPath = *found;
+                }
+            }
+            if (std::filesystem::exists(hostPath)) {
+                if (!mountedHostDir.empty()) {
+                    (void)assets.UnmountDirectory(std::string_view(mountedHostDir));
+                    mountedHostDir.clear();
+                }
+                const std::filesystem::path dir = hostPath.has_parent_path() ? hostPath.parent_path() : std::filesystem::current_path();
+                mountedHostDir                  = dir.string();
+                (void)assets.MountDirectory(std::string_view(mountedHostDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "inspector"});
+                virtualPath = "inspector/" + hostPath.filename().string();
+            }
+        }
+        auto doc = ZHLN::GLTF::Read(assets, virtualPath);
         if (!doc) {
             status = "Failed to decode: " + std::string(path);
             ZHLN::Log<ZHLN::LogSeverity::Error>("{}: {}", status, doc.error());
@@ -193,7 +216,13 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::HostUI hostUI(*engine);
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
+    if (!engine->Assets()->VirtualFileExists(ZHLN::Fonts::kVendoredFontVirtualPath)) {
+        if (const auto found = ZHLN::FS::Paths::FindDataFile(ZHLN::Fonts::kVendoredFontDataRelPath)) {
+            const std::string fontsDir = found->parent_path().parent_path().string();
+            (void)engine->Assets()->MountDirectory(std::string_view(fontsDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "fonts"});
+        }
+    }
+    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(*engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
         ZHLN::Log<ZHLN::LogSeverity::Warning>("Font asset failed to load ({}), using embedded default.", fontAsset.error());
     } else {
         hostUI.SetBakedFont(std::move(*fontAsset));

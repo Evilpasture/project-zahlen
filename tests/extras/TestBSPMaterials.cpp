@@ -9,6 +9,7 @@
 #include <BSP/VTFDecoder.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Render/Vertex.hpp>
 #include <cmath>
@@ -121,8 +122,9 @@ struct BSPMaterialsTestSuite {
                 std::ofstream f(tempRoot / "materials" / "concrete" / "wall.png");
                 f << "PNG_DUMMY_DATA";
             }
-            ZHLN::BSP::SourceVFS vfs;
-            vfs.AddSearchPath(tempRoot.string());
+            ZHLN::FS::VirtualFileSystem coreVfs;
+            (void)coreVfs.MountDirectory(tempRoot.string(), ZHLN::FS::MountOptions {.caseInsensitive = true});
+            ZHLN::BSP::SourceVFS vfs(coreVfs);
 
             // 1. Verify path normalization
             ZHLN::Test::ExpectEq(ZHLN::BSP::SourceVFS::NormalizePath("Materials\\Brick//BrickWall003d.vmt"), "materials/brick/brickwall003d.vmt");
@@ -489,8 +491,9 @@ struct BSPMaterialsTestSuite {
                 f.write(reinterpret_cast<const char*>(vtf.data()), vtf.size());
             }
 
-            ZHLN::BSP::SourceVFS vfs;
-            vfs.AddSearchPath(tempRoot.string());
+            ZHLN::FS::VirtualFileSystem coreVfs;
+            (void)coreVfs.MountDirectory(tempRoot.string(), ZHLN::FS::MountOptions {.caseInsensitive = true});
+            ZHLN::BSP::SourceVFS vfs(coreVfs);
 
             // 1. Resolve material
             const auto vmtPath = vfs.ResolveMaterial("custom/wall");
@@ -617,8 +620,9 @@ struct BSPMaterialsTestSuite {
                 f.write(reinterpret_cast<const char*>(vtf.data()), static_cast<std::streamsize>(vtf.size()));
             }
 
-            ZHLN::BSP::SourceVFS vfs;
-            vfs.AddSearchPath(tempRoot.string());
+            ZHLN::FS::VirtualFileSystem coreVfs;
+            (void)coreVfs.MountDirectory(tempRoot.string(), ZHLN::FS::MountOptions {.caseInsensitive = true});
+            ZHLN::BSP::SourceVFS vfs(coreVfs);
 
             struct Parsed {
                 bool                   ok = false;

@@ -176,6 +176,30 @@ if [ -n "$(unresolved_libraries "$cooker")" ]; then
 fi
 printf 'PASS: installed cooker resolves from the store (%s)\n' "$cooker"
 
+# Installed COM runtime plugin (.so + .manifest.toml) verification: Screenshot
+# was requested in --only, so both its plugin library and manifest must be
+# present under lib*/zahlen/plugins/ and resolve libzahlen_engine.so via
+# $ORIGIN/../..; excluded components' plugins must remain absent.
+screenshot_plugin_matches=("$prefix"/lib*/zahlen/plugins/libzahlen_plugin_screenshot.so)
+if [ "${#screenshot_plugin_matches[@]}" -ne 1 ] || [ ! -f "${screenshot_plugin_matches[0]}" ]; then
+    echo "FAIL: expected installed libzahlen_plugin_screenshot.so under ${prefix}/lib*/zahlen/plugins" >&2
+    exit 1
+fi
+plugin_dir=$(dirname "${screenshot_plugin_matches[0]}")
+test -f "${plugin_dir}/zahlen_plugin_screenshot.manifest.toml"
+for excluded_plugin in freecam character_controller animation terrain vfx gltf; do
+    if [ -e "${plugin_dir}/libzahlen_plugin_${excluded_plugin}.so" ] || [ -e "${plugin_dir}/zahlen_plugin_${excluded_plugin}.manifest.toml" ]; then
+        echo "FAIL: excluded runtime plugin '${excluded_plugin}' was installed despite --only" >&2
+        exit 1
+    fi
+done
+if [ -n "$(unresolved_libraries "${screenshot_plugin_matches[0]}")" ]; then
+    echo 'FAIL: installed libzahlen_plugin_screenshot.so cannot resolve libzahlen_engine.so' >&2
+    ldd "${screenshot_plugin_matches[0]}" >&2
+    exit 1
+fi
+printf 'PASS: installed COM plugin and manifest resolve from the store (%s)\n' "${screenshot_plugin_matches[0]}"
+
 # The store is relocatable: `active` is a relative link and the rpaths zpkg
 # leaves in installed binaries are $ORIGIN-relative, so moving the whole
 # directory must break neither. zpkg's default root still names the old path,
@@ -209,6 +233,12 @@ test -x "$moved_cooker"
 if [ -n "$(unresolved_libraries "$moved_cooker")" ]; then
     echo 'FAIL: the cooker broke when the store moved; its rpath is absolute' >&2
     ldd "$moved_cooker" >&2
+    exit 1
+fi
+moved_plugin_matches=("$moved_prefix"/lib*/zahlen/plugins/libzahlen_plugin_screenshot.so)
+if [ "${#moved_plugin_matches[@]}" -ne 1 ] || [ -n "$(unresolved_libraries "${moved_plugin_matches[0]}")" ]; then
+    echo 'FAIL: installed COM plugin broke when the store moved; its rpath is absolute' >&2
+    ldd "${moved_plugin_matches[0]}" >&2
     exit 1
 fi
 # Nothing zpkg wrote may record where the store used to be: a store that leaked an

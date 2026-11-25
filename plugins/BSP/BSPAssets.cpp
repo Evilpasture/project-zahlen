@@ -11,7 +11,6 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <filesystem>
 #include <optional>
 #include <unordered_map>
 
@@ -53,14 +52,8 @@ auto PrepareAssets(const Map& map, SourceVFS source, std::string_view virtualPat
     -> std::expected<PreparedAssets, ErrorCode> {
     if (!ValidAssetPath(virtualPath) || !std::isfinite(options.unitScale) || options.unitScale <= 0)
         return std::unexpected(COM::Error::InvalidArgument);
-    if (!options.assetRoot.empty())
-        source.AddSearchPath(options.assetRoot);
-    const std::filesystem::path path(virtualPath);
-    if (path.has_parent_path()) {
-        source.AddSearchPath(path.parent_path().string());
-        if (path.parent_path().has_parent_path())
-            source.AddSearchPath(path.parent_path().parent_path().string());
-    }
+    if (!options.virtualPrefix.empty())
+        source.SetVirtualPrefix(options.virtualPrefix);
     const auto moving         = CollectInteractiveSubmodels(map, options);
     auto       worldOptions   = options;
     worldOptions.gatherLights = false; // BSP scene owns the authored entity lights.
@@ -125,8 +118,8 @@ auto DecodeAssets(std::span<const std::byte> bytes, SourceVFS source, std::strin
 auto ReadAssets(SourceVFS source, std::string_view virtualPath, const ImportOptions& options) -> std::expected<PreparedAssets, ErrorCode> {
     if (!ValidAssetPath(virtualPath))
         return std::unexpected(COM::Error::InvalidArgument);
-    if (!options.assetRoot.empty())
-        source.AddSearchPath(options.assetRoot);
+    if (!options.virtualPrefix.empty())
+        source.SetVirtualPrefix(options.virtualPrefix);
     const auto bytes = source.ReadFile(virtualPath);
     if (!bytes)
         return std::unexpected(Error::ShortRead);

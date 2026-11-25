@@ -28,6 +28,7 @@
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
@@ -54,6 +55,7 @@ using ZHLN::Quat;
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -685,7 +687,22 @@ auto main(int argc, char* argv[]) -> int {
     std::optional<ZHLN::GLTF::Document>       prefabDoc;
     ZHLN::GLTF::Asset                         prefabAsset {};
     std::optional<ZHLN::Animation::PrefabRig> rigInfo;
-    if (auto decoded = ZHLN::GLTF::Read(rigPath, {}, engine->Assets())) {
+    auto&                                     assets         = *engine->Assets();
+    std::string                               rigVirtualPath = std::string(rigPath);
+    if (!assets.VirtualFileExists(std::string_view(rigVirtualPath))) {
+        std::filesystem::path hostPath(rigPath);
+        if (!std::filesystem::exists(hostPath)) {
+            if (const auto found = ZHLN::FS::Paths::FindDataFile("resources/assets/" + std::string(rigPath))) {
+                hostPath = *found;
+            }
+        }
+        if (std::filesystem::exists(hostPath)) {
+            const std::string dir = (hostPath.has_parent_path() ? hostPath.parent_path() : std::filesystem::current_path()).string();
+            (void)assets.MountDirectory(std::string_view(dir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "rig"});
+            rigVirtualPath = "rig/" + hostPath.filename().string();
+        }
+    }
+    if (auto decoded = ZHLN::GLTF::Read(assets, rigVirtualPath)) {
         for (const auto& warning : decoded->warnings)
             ZHLN::Log<ZHLN::LogSeverity::Warning>("glTF: {}", warning);
         if (auto uploaded = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *decoded)) {

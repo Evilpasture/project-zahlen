@@ -7,7 +7,6 @@
 #include <expected>
 #include <memory>
 namespace ZHLN::Lightning {
-enum class Phase : uint8_t { SteppedLeader, ReturnStroke, Dissipating };
 // POD diagnostics; no owning GPU handles or registry access.
 struct BoltState {
     Phase    phase     = Phase::SteppedLeader;

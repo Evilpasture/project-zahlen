@@ -5,8 +5,10 @@
 #include <Animation/Components.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -237,12 +239,18 @@ struct GLTFAssetsSuite {
         std::expected<void, ZHLN::ErrorCode> imports_real_rig_and_its_animation_through_capabilities() {
             using namespace ZHLN;
             using Test::ExpectTrue;
-            // Source fixtures must not depend on the worker's current directory.
-            const auto path       = std::filesystem::path(ZHLN_TEST_SOURCE_DIR) / "resources/assets/ProceduralAnimationBaseRig.glb";
-            const auto sourcePath = path.string();
-            auto       doc        = GLTF::Read(std::string_view(sourcePath));
+            // Source fixtures must not depend on the worker's current directory,
+            // and GLTF::Read reads strictly from a mounted VFS (never raw OS paths).
+            const auto assetsDir = std::filesystem::path(ZHLN_TEST_SOURCE_DIR) / "resources/assets";
+            const auto path      = assetsDir / "ProceduralAnimationBaseRig.glb";
+            FS::VirtualFileSystem vfs;
+            if (!ExpectTrue(vfs.MountDirectory(assetsDir.string()).has_value()))
+                return {};
+            // Negative check: raw OS path must be rejected even though the file exists on disk.
+            ExpectTrue(!GLTF::Read(vfs, path.string()).has_value());
+            auto doc = GLTF::Read(vfs, "ProceduralAnimationBaseRig.glb");
             if (!doc)
-                Println("    glTF rig fixture failed: '{}' (exists={}, error={})", sourcePath, std::filesystem::exists(path), doc.error());
+                Println("    glTF rig fixture failed: '{}' (exists={}, error={})", path.string(), std::filesystem::exists(path), doc.error());
             if (!ExpectTrue(doc.has_value()))
                 return {};
             ExpectTrue(!doc->parts.empty() && !doc->skeletons.empty() && !doc->animations.empty());
@@ -323,11 +331,13 @@ struct GLTFAssetsSuite {
                 f.write(reinterpret_cast<const char*>(Test::GLTFPNG.data()), Test::GLTFPNG.size());
             }
             ExpectTrue(assets.MountDirectory(std::string_view(root.string())).HasValue());
-            auto split = GLTF::Read("models/model.gltf", {}, &assets);
+            auto split = GLTF::Read(assets, "models/model.gltf");
             if (ExpectTrue(split.has_value())) {
                 ExpectEq(split->primitives.size(), doc->primitives.size());
                 ExpectEq(split->textures[0].rgba.size(), size_t(4));
             }
+            // Unmounted raw OS path must not bypass the VFS boundary.
+            ExpectTrue(!GLTF::Read(assets, (root / "models/model.gltf").string()).has_value());
             ExpectTrue(assets.UnmountDirectory(std::string_view(root.string())).HasValue());
             std::filesystem::remove_all(root);
             auto conflict                        = *doc;

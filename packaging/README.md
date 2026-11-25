@@ -47,19 +47,21 @@ sanitized builds.
 | CommandLine | CommandLine | system C++ runtime |
 | Image | Image | system C++ runtime |
 | Signal | Signal | Engine |
-| Screenshot | Screenshot + `libzahlen_plugin_screenshot.so` | Engine, Image |
+| Screenshot | Screenshot + `libzahlen_plugin_screenshot.so` + manifest | Engine, Image |
 | HostRunner | HostRunner | Engine, CommandLine, Signal |
 | Application | Application | Engine, CommandLine, HostRunner, Screenshot |
 | UI | UI (`GUI::Context`, `HostUI`, embedded default font) | Engine |
 | UISchema | UISchema | Engine, UI |
 | Serialization | Serialization | Engine, UISchema, system simdjson |
-| GLTF | GLTF | Engine, Serialization |
+| GLTF | GLTF + `libzahlen_plugin_gltf.so` + manifest | Engine, Serialization, Image |
 | Netpbm | Netpbm (header-only) | Engine |
-| FreeCam | FreeCam + `libzahlen_plugin_freecam.so` | Engine |
-| Camera | Camera | Engine, FreeCam |
-| CharacterController | CharacterController | Engine, FreeCam |
-| SkeletalAnimation | SkeletalAnimation | Engine |
-| Animation | Animation | Engine, SkeletalAnimation, CharacterController, Camera, FreeCam |
+| Terrain | Terrain + `libzahlen_plugin_terrain.so` + manifest | Engine |
+| VFX | VFX + `libzahlen_plugin_vfx.so` + manifest | Engine |
+| FreeCam | FreeCam + `libzahlen_plugin_freecam.so` + manifest | Engine |
+| Camera | Camera | Engine |
+| CharacterController | CharacterController + `libzahlen_plugin_character_controller.so` + manifest | Engine |
+| AnimationControls | AnimationControls | Engine |
+| Animation | Animation + `libzahlen_plugin_animation.so` + manifest | Engine, AnimationControls, CharacterController, Camera, FreeCam |
 | Cooker | zcook (installed as `bin/zcook`) | Engine |
 
 All targets use the `Zahlen::` namespace. The `Requires` column is what the

@@ -247,8 +247,8 @@ struct BSPWorldAssetsSuite {
             std::filesystem::create_directories(root / "materials/source");
             std::ofstream(root / "materials/source/lit.vmt") << "LightmappedGeneric {}";
             std::ofstream(root / "materials/source/glass.vmt") << "VertexLitGeneric {\"$translucent\" \"1\"}";
-            BSP::SourceVFS source;
-            source.AddSearchPath(root.string());
+            ExpectTrue(assets.MountDirectory(std::string_view(root.string()), COM::MountDirectoryOptions {.caseInsensitive = true}).HasValue());
+            BSP::SourceVFS source(assets);
             BSP::AssetDocument document {.virtualPath = "world/test"};
             auto                  sky       = WorldPart(-10, "source/lit");
             sky.skyboxLayer                 = true;
@@ -315,6 +315,7 @@ struct BSPWorldAssetsSuite {
             assets.ClearCache();
             for (const auto texture: imported->textures)
                 engine->Graphics()->UnloadTexture(texture);
+            ExpectTrue(assets.UnmountDirectory(std::string_view(root.string())).HasValue());
             std::filesystem::remove_all(root);
             return {};
         }

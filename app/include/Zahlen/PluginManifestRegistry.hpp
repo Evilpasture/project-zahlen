@@ -60,9 +60,10 @@ struct DiscoveredPlugin {
 
 // One ordered load step the host should perform.
 struct LoadEntry {
-    std::string  name;      // plugin name
-    std::string  libraryStem; // stem passed to SharedLibrary::OpenPlugin
-    bool         hotReload; // whether the host may reload this in a live process
+    std::string              name;        // plugin name
+    std::string              libraryStem; // stem passed to SharedLibrary::OpenPlugin
+    bool                     hotReload = false; // whether the host may reload this in a live process
+    std::vector<std::string> before    = {};    // prerequisites (required + selected optional) that must load first
 };
 
 // Why discovery or ordering could not produce a load list.

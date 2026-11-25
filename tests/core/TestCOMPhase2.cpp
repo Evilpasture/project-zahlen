@@ -119,23 +119,40 @@ struct COMPhase2Suite {
             const auto mountPath = temp.string();
             ExpectTrue(assets->MountDirectory({mountPath.data(), mountPath.size()}).HasValue());
             ExpectTrue(assets->VirtualFileExists("phase2-probe.bin"));
-            const auto fileSize = assets->ReadVirtualFile("phase2-probe.bin", {});
+            const auto fileSize = assets->VirtualFileSize("phase2-probe.bin");
             ExpectTrue(fileSize.HasValue() && fileSize.value == 5);
-            uint8_t untouched = 91;
-            const auto shortRead = assets->ReadVirtualFile("phase2-probe.bin", {&untouched, 1});
-            ExpectTrue(shortRead.HasValue() && shortRead.value == 5 && untouched == 91);
-            std::array<uint8_t, 5> fileBytes {};
-            ExpectTrue(assets->ReadVirtualFile("phase2-probe.bin", fileBytes).HasValue());
-            ExpectTrue(fileBytes[0] == 'A' && fileBytes[4] == 'E');
-            const auto emptySize = assets->ReadVirtualFile("phase2-empty.bin", {});
+            const auto opened = assets->OpenVirtualFile("phase2-probe.bin");
+            ExpectTrue(opened.has_value() && (*opened)->Text() == "ABCDE");
+            std::string visitedText;
+            ExpectTrue(assets->WithVirtualBytes("phase2-probe.bin", [&](std::span<const std::byte> bytes) noexcept {
+                visitedText.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            }).HasValue());
+            ExpectEq(visitedText, std::string("ABCDE"));
+            const auto fileBytes = assets->ReadVirtualBytes("phase2-probe.bin");
+            ExpectTrue(fileBytes.has_value() && fileBytes->size() == 5 &&
+                       fileBytes->front() == std::byte {'A'} && fileBytes->back() == std::byte {'E'});
+            const auto emptySize = assets->VirtualFileSize("phase2-empty.bin");
             ExpectTrue(emptySize.HasValue() && emptySize.value == 0);
+            const auto emptyBytes = assets->ReadVirtualBytes("phase2-empty.bin");
+            ExpectTrue(emptyBytes.has_value() && emptyBytes->empty());
             ExpectTrue(assets->UnmountDirectory({mountPath.data(), mountPath.size()}).HasValue());
             ExpectTrue(!assets->VirtualFileExists("phase2-probe.bin"));
+
+            // Prefixed & case-insensitive mount through COM::MountDirectoryOptions.
+            ExpectTrue(assets->MountDirectory(
+                {mountPath.data(), mountPath.size()},
+                MountDirectoryOptions {.virtualPrefix = "Phase2", .caseInsensitive = true}
+            ).HasValue());
+            ExpectTrue(assets->VirtualFileExists("phase2/PHASE2-PROBE.BIN"));
+            const auto prefixedText = assets->ReadVirtualText("phase2/PHASE2-PROBE.BIN");
+            ExpectTrue(prefixedText.has_value() && *prefixedText == "ABCDE");
+            ExpectTrue(assets->UnmountDirectory({mountPath.data(), mountPath.size()}).HasValue());
 
             ExpectTrue(!assets->MountDirectory({nullptr, 1}).HasValue());
             ExpectTrue(!assets->MountPak({}).HasValue());
             ExpectTrue(!assets->VirtualFileExists("__phase2_missing_file__"));
-            ExpectTrue(!assets->ReadVirtualFile("__phase2_missing_file__", {}).HasValue());
+            ExpectTrue(!assets->VirtualFileSize("__phase2_missing_file__").HasValue());
+            ExpectTrue(!assets->OpenVirtualFile("__phase2_missing_file__").has_value());
             const std::array<FVec3, 3> vertices {{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}};
             const std::array<uint32_t, 3> indices {0, 1, 2};
             const auto collisionID = static_cast<CollisionAssetID>(0xabcdef0123456ULL);

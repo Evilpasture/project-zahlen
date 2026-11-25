@@ -4,10 +4,10 @@
 #pragma once
 
 #include <RemoteAsset/DiskCache.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Error.hpp>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -39,9 +39,9 @@ struct FetchPayload {
 };
 
 struct FetchJob {
-    ZHLN::Atomic<uint32_t> refCount {0};
-    ZHLN::Atomic<bool>     cancelSignal {false};
-    ZHLN::Atomic<bool>     isDone {false};
+    std::atomic<uint32_t> refCount {0};
+    std::atomic<bool>     cancelSignal {false};
+    std::atomic<bool>     isDone {false};
 
     AsyncAssetFetcher*       fetcher = nullptr;
     std::string              canonicalKey;

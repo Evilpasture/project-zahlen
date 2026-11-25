@@ -181,18 +181,38 @@ zahlen_add_extras_group(Extras_Application
     TestScreenshot.cpp
     TestPlugin.cpp
 )
-# Deliberately does NOT link zahlen_ui, zahlen_freecam, or either plugin .so:
-# TestPlugin loads libzahlen_plugin_freecam and libzahlen_plugin_screenshot
-# dynamically through ZHLN::App::LoadPlugin / --plugin at runtime.
+# Deliberately does NOT link zahlen_ui, zahlen_freecam, zahlen_animation,
+# zahlen_character_controller, zahlen_terrain, zahlen_vfx, zahlen_gltf_assets,
+# zahlen_bsp_assets, zahlen_svg, zahlen_http, zahlen_discord_rpc,
+# zahlen_interaction, or any plugin .so: TestPlugin loads every plugin .so
+# dynamically at runtime through PluginManifestRegistry / SharedLibrary / App.
 target_link_libraries(Extras_Application PRIVATE zahlen_application zahlen_screenshot zahlen_image)
 set_property(TARGET Extras_Application APPEND PROPERTY BUILD_RPATH "${CMAKE_BINARY_DIR}/lib")
-if(TARGET zahlen_plugin_freecam)
-    add_dependencies(Extras_Application zahlen_plugin_freecam)
+foreach(_zhln_app_plugin IN ITEMS
+    zahlen_plugin_freecam
+    zahlen_plugin_screenshot
+    zahlen_plugin_character_controller
+    zahlen_plugin_animation
+    zahlen_plugin_terrain
+    zahlen_plugin_vfx
+    zahlen_plugin_gltf
+    zahlen_plugin_bsp
+    zahlen_plugin_discord_rpc
+    zahlen_plugin_interaction
+    zahlen_plugin_svg
+    zahlen_plugin_http)
+    if(TARGET ${_zhln_app_plugin})
+        add_dependencies(Extras_Application ${_zhln_app_plugin})
+    endif()
+endforeach()
+unset(_zhln_app_plugin)
+if(TARGET zahlen_plugin_svg)
+    target_compile_definitions(Extras_Application PRIVATE ZHLN_HAS_SVG_PLUGIN=1)
 endif()
-if(TARGET zahlen_plugin_screenshot)
-    add_dependencies(Extras_Application zahlen_plugin_screenshot)
+if(TARGET zahlen_plugin_http)
+    target_compile_definitions(Extras_Application PRIVATE ZHLN_HAS_HTTP_PLUGIN=1)
 endif()
-zahlen_register_extras_test(Extras_Application TIMEOUT 180)
+zahlen_register_extras_test(Extras_Application POOL gpu TIMEOUT 180 LABELS "GPU;Extras;COM")
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
 zahlen_add_extras_build_alias(Extras_Application TestPlugin)
 

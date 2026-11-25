@@ -118,6 +118,8 @@ struct BSPAssetsSuite {
             // No disk search path is installed: these paths resolve through
             // IAssetLibrary, including material includes and texture bytes.
             ExpectTrue(vfs.Exists("MATERIALS\\STUDIO\\RED.VMT"));
+            // Raw OS host path must never bypass the VFS boundary.
+            ExpectTrue(!vfs.Exists((directory.path / "materials/studio/red.vmt").string()));
             const auto bytes = vfs.ReadFile("materials/studio/red.png");
             ExpectTrue(bytes.has_value() && !bytes->empty());
             const auto empty = vfs.ReadFile("empty.bin");

@@ -482,15 +482,13 @@ void UpdateRemoteCharacterParts(COM::IEngine& engine, SceneMirrorState& state, f
     if (assets == nullptr) {
         return {};
     }
-    const auto sizeRes = assets->ReadVirtualFile(COM::StringView(path), {});
-    if (!sizeRes.HasValue() || sizeRes.value == 0) {
+    auto opened = assets->OpenVirtualFile(COM::StringView(path));
+    if (!opened) {
         return {};
     }
-    std::vector<uint8_t> bytes(static_cast<size_t>(sizeRes.value));
-    if (assets->ReadVirtualFile(COM::StringView(path), COM::Span<uint8_t>(bytes.data(), bytes.size())).HasValue()) {
-        return bytes;
-    }
-    return {};
+    const auto bytes = (*opened)->Bytes();
+    const auto* raw  = reinterpret_cast<const uint8_t*>(bytes.data);
+    return std::vector<uint8_t>(raw, raw + bytes.size);
 }
 
 void UpdateSoundVoices(COM::IEngine& engine, SceneMirrorState& state) {

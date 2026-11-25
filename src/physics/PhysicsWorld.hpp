@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AtomicBuffer.hpp"
 #include "BodyTable.hpp"
 #include "CommandMailbox.hpp"
 #include "TransformBuffer.hpp"
@@ -16,10 +17,10 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Constraints/Constraint.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
-#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <atomic>
+#include <physics/Physics.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -80,8 +81,8 @@ struct PhysicsWorld {
     uint32_t                        maxJoltBodies = 0;
     double                          time          = 0.0;
 
-    alignas(64) ZHLN::Atomic<bool>     isStepping {false};
-    ZHLN::Atomic<uint32_t>             stepGate {0};
+    alignas(64) std::atomic<bool>      isStepping {false};
+    std::atomic<uint32_t>              stepGate {0};
 
     static constexpr uint32_t kStepGateSteppingBit = 0x80000000u;
 
@@ -116,7 +117,7 @@ struct PhysicsWorld {
     CommandMailbox  mailbox {};
 
     alignas(64) JPH::Array<ContactEvent> contactBuffer;
-    ZHLN::Atomic<size_t>                 contactCount {0};
+    std::atomic<size_t>                  contactCount {0};
     size_t                               contactCapacity = 0;
 
     alignas(64) mutable ZHLN::Mutex materialMutex {};
@@ -124,9 +125,9 @@ struct PhysicsWorld {
     size_t                          materialCount    = 0;
     size_t                          materialCapacity = 0;
 
-    alignas(64) mutable ZHLN::Mutex    constraintMutex {};
-    JPH::Array<JPH::Constraint*>       constraints;
-    JPH::Array<ZHLN::Atomic<uint32_t>> constraintGenerations;
+    alignas(64) mutable ZHLN::Mutex constraintMutex {};
+    JPH::Array<JPH::Constraint*>    constraints;
+    AtomicBuffer<uint32_t>          constraintGenerations;
     JPH::Array<SlotState>              constraintStates;
     JPH::Array<uint32_t>               freeConstraintSlots;
     size_t                             constraintCapacity  = 0;

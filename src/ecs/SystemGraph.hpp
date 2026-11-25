@@ -5,7 +5,6 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Arena.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/Reflection/Services.hpp>
 #include <Zahlen/Core/SoA.hpp>

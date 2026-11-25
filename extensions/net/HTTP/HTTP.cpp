@@ -7,14 +7,15 @@
 // libcurl is upgraded.
 
 #include <HTTP/HTTP.hpp>
-#include <cstdio>
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <array>
+#include <atomic>
+#include <cstdio>
 #include <curl/curl.h>
 #include <optional>
 #include <span>
 #include <string>
 #include <utility>
-#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 
 // What this file is written against: the option names it sets (all of them
 // decades old except the two _STR protocol options, which are guarded on their
@@ -111,11 +112,11 @@ struct NativeRequest {
     std::span<const uint8_t> body;
     uint32_t                 timeoutSeconds  = 0;
     bool                     followRedirects = true;
-    const ZHLN::Atomic<bool>* cancelSignal    = nullptr;
+    const std::atomic<bool>* cancelSignal    = nullptr;
 };
 
 int CurlProgressCallback(void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept {
-    const auto* cancelSignal = static_cast<const ZHLN::Atomic<bool>*>(clientp);
+    const auto* cancelSignal = static_cast<const std::atomic<bool>*>(clientp);
     if (cancelSignal != nullptr && cancelSignal->load(std::memory_order::relaxed)) {
         return 1;
     }
@@ -455,7 +456,7 @@ auto Perform(const NativeRequest& request, NativeResponse& response) noexcept ->
     if (request.cancelSignal != nullptr) {
         apply(curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L));
         apply(curl_easy_setopt(easy, CURLOPT_XFERINFOFUNCTION, &CurlProgressCallback));
-        apply(curl_easy_setopt(easy, CURLOPT_XFERINFODATA, const_cast<ZHLN::Atomic<bool>*>(request.cancelSignal)));
+        apply(curl_easy_setopt(easy, CURLOPT_XFERINFODATA, const_cast<std::atomic<bool>*>(request.cancelSignal)));
     }
 
     if (setup != CURLE_OK) {

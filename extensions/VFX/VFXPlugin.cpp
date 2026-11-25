@@ -1,16 +1,16 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Dynamically loadable COM::IAppLayer for the VFX extension. Wraps the
-// Explosion and Lightning systems so a host can start, render and stop combat
-// FX through the standard plugin ABI (CreateAppLayerRaw + the EntryPointWitness
-// seal). Both systems are started and stopped together; a future plugin can
-// split them if independent lifetimes are needed.
+// Dynamically loadable COM::IAppLayer + VFX::IVfxLayer plugin. Wraps the
+// Explosion and Lightning systems so a host can start, spawn, render, and stop
+// combat FX across the standard plugin ABI (CreateAppLayerRaw +
+// EntryPointWitness::Seal) without linking the static zahlen_vfx library.
 //
-// Configuration arrives through a ChainInNode payload (PluginConfig); an
+// Configuration arrives through a ChainInNode payload (VFX::PluginConfig); an
 // absent or empty chain means default configuration.
 
 #include <VFX/Explosion.hpp>
+#include <VFX/IVfxLayer.hpp>
 #include <VFX/Lightning.hpp>
 
 #include <Zahlen/COM/IEngine.hpp>
@@ -20,23 +20,15 @@
 #include <Zahlen/Core/COM/Contract.hpp>
 #include <new>
 
-namespace ZHLN::VFX {
-
-// Plugin-boundary configuration for the VFX layer. Kept out of the public
-// extension headers so the extensions know nothing about the COM plugin ABI.
-struct PluginConfig {
-    bool enabled = true; // when false, OnBeforeRender is a no-op
-};
-
-} // namespace ZHLN::VFX
-
 namespace {
 
 using namespace ZHLN;
 
-class VFXPlugin final : public COM::Implements<VFXPlugin, COM::IAppLayer> {
+class VFXPlugin final : public COM::Implements<VFXPlugin, COM::IAppLayer, VFX::IVfxLayer> {
   public:
-    explicit VFXPlugin(VFX::PluginConfig config) noexcept : _config(std::move(config)) {}
+    explicit VFXPlugin(VFX::PluginConfig config) noexcept : _config(config) {}
+
+    // --- COM::IAppLayer ------------------------------------------------------
 
     auto OnStart(COM::IEngine* engine) noexcept -> COM::Result<void> override {
         if (engine == nullptr) {
@@ -81,6 +73,57 @@ class VFXPlugin final : public COM::Implements<VFXPlugin, COM::IAppLayer> {
         _lightning.Stop(*engine);
     }
 
+    // --- VFX::IVfxLayer ------------------------------------------------------
+
+    auto SpawnExplosion(const Explosion::SpawnInfo& info) noexcept -> COM::Result<Entity> override {
+        const auto spawned = _explosion.Spawn(info);
+        if (!spawned) {
+            return spawned.error();
+        }
+        return *spawned;
+    }
+
+    void RemoveExplosion(Entity entity) noexcept override {
+        _explosion.Remove(entity);
+    }
+
+    void ClearExplosions() noexcept override {
+        _explosion.Clear();
+    }
+
+    auto ExplosionCount() const noexcept -> uint64_t override {
+        return static_cast<uint64_t>(_explosion.Size());
+    }
+
+    auto CraterCount() const noexcept -> uint64_t override {
+        return static_cast<uint64_t>(_explosion.CraterCount());
+    }
+
+    auto SpawnLightning(
+        FVec3                        cloud,
+        FVec3                        ground,
+        FVec3                        camera,
+        const Lightning::ConfigInfo& config
+    ) noexcept -> COM::Result<Entity> override {
+        const auto spawned = _lightning.Spawn(cloud, ground, camera, config);
+        if (!spawned) {
+            return spawned.error();
+        }
+        return *spawned;
+    }
+
+    void RemoveLightning(Entity entity) noexcept override {
+        _lightning.Remove(entity);
+    }
+
+    void ClearLightning() noexcept override {
+        _lightning.Clear();
+    }
+
+    auto LightningCount() const noexcept -> uint64_t override {
+        return static_cast<uint64_t>(_lightning.Size());
+    }
+
   private:
     Explosion::System _explosion {};
     Lightning::System _lightning {};
@@ -93,7 +136,7 @@ namespace ZHLN::COM {
 
 ZHLN_EXPORT auto CreateAppLayerRaw(const ChainInNode* config) noexcept -> Result<IAppLayer*> {
     ZHLN::VFX::PluginConfig parsed {};
-    const auto            checked = DispatchInChain<ZHLN::VFX::PluginConfig>(
+    const auto              checked = DispatchInChain<ZHLN::VFX::PluginConfig>(
         config, [&](const ZHLN::VFX::PluginConfig& value) noexcept { parsed = value; });
     if (!checked.HasValue()) {
         return checked.error;

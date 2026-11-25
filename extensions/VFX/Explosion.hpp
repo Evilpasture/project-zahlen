@@ -1,18 +1,13 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include "VFXTypes.hpp"
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <expected>
 #include <memory>
 namespace ZHLN::Explosion {
-enum class Kind : uint8_t { StandardFireball, ArtilleryMortar };
-struct SpawnInfo {
-    FVec3 origin {};
-    float scale = 1;
-    Kind  kind  = Kind::ArtilleryMortar;
-};
 struct EmitterState {
     float    age           = 0;
     uint32_t fireParticles = 0, smokeParticles = 0, shockwaves = 0;

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PresenceTypes.hpp"
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -47,23 +48,6 @@ struct RichPresence {
     std::optional<int64_t>      startTimestamp;
     std::optional<std::string>  largeImage;
     std::optional<std::string>  largeText;
-};
-
-enum class PresenceState : uint8_t {
-    Stopped,
-    Connecting,
-    Disconnected,
-    Connected,
-    Stopping,
-    RpcRejected // Discord replied with an RPC ERROR, including an authorization rejection.
-};
-
-enum class PresenceError : uint8_t {
-    InvalidApplicationId = 1,
-    AlreadyStarted,
-    NotStarted,
-    TaskSystemUnavailable,
-    TaskCapacityExhausted
 };
 
 [[nodiscard]] auto ValidateApplicationId(std::string_view applicationId) noexcept -> std::expected<void, PresenceError>;

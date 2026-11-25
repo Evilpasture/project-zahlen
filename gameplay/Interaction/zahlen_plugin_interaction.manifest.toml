@@ -1,0 +1,11 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[plugin]
+name              = "interaction"
+library           = "zahlen_plugin_interaction"
+api               = 1
+description       = "Trigger volume, pickup, container, and usable gameplay host layer"
+optional_requires = ["character_controller"]
+auto_load         = false
+hot_reload        = true

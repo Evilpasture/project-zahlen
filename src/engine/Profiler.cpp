@@ -1,15 +1,16 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Profiler.hpp>
+#include <Zahlen/Core/SkipList.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <string_view>
-#include <type_traits>
 
 namespace ZHLN {
 
@@ -17,10 +18,10 @@ namespace {
 
 template <size_t N = 100>
 struct ProfileDataInternal {
-    std::array<ZHLN::Atomic<float>, N> history;
-    ZHLN::Atomic<size_t>               writeIndex;
-    ZHLN::Atomic<float>                latestValue;
-    ZHLN::Atomic<float>                rollingAverageMS;
+    std::array<std::atomic<float>, N> history {};
+    std::atomic<size_t>               writeIndex {0};
+    std::atomic<float>                latestValue {0.0f};
+    std::atomic<float>                rollingAverageMS {0.0f};
 
     void Push(float value) noexcept {
         size_t idx = writeIndex.fetch_add(1, std::memory_order::relaxed) % N;
@@ -33,21 +34,23 @@ struct ProfileDataInternal {
     }
 };
 
-static_assert(
-    std::is_trivially_copyable_v<ProfileDataInternal<100>> && std::is_trivially_default_constructible_v<ProfileDataInternal<100>>,
-    "ProfileDataInternal must remain a POD for SkipList compatibility"
-);
-
-SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
+SkipList<std::string, std::shared_ptr<ProfileDataInternal<100>>, std::less<>> s_Metrics;
+ZHLN::Mutex                                                                   s_MetricsInsertMutex {};
 
 }
 
 void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
     std::string key(name);
-    const auto  push = [&](ProfileDataInternal<100>& data) { data.Push(timeMS); };
-    if (!s_Metrics.With(key, push)) [[unlikely]] {
-        s_Metrics.Insert(key, ProfileDataInternal<100> {});
-        s_Metrics.With(key, push);
+    const auto  push = [&](const std::shared_ptr<ProfileDataInternal<100>>& data) { data->Push(timeMS); };
+    if (s_Metrics.With(key, push)) [[likely]] {
+        return;
+    }
+
+    ZHLN::MutexGuard lock(s_MetricsInsertMutex);
+    if (!s_Metrics.With(key, push)) {
+        auto created = std::make_shared<ProfileDataInternal<100>>();
+        created->Push(timeMS);
+        s_Metrics.Insert(key, std::move(created));
     }
 }
 
@@ -56,22 +59,22 @@ void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexce
         return;
     }
 
-    s_Metrics.Iterate([&](const auto& name, const ProfileDataInternal<100>& data) {
-        float cpuTime    = data.latestValue.load(std::memory_order::relaxed);
-        float rollingAvg = data.rollingAverageMS.load(std::memory_order::relaxed);
+    s_Metrics.Iterate([&](const auto& name, const std::shared_ptr<ProfileDataInternal<100>>& data) {
+        float cpuTime    = data->latestValue.load(std::memory_order::relaxed);
+        float rollingAvg = data->rollingAverageMS.load(std::memory_order::relaxed);
 
-        size_t count = data.writeIndex.load(std::memory_order::relaxed);
+        size_t count = data->writeIndex.load(std::memory_order::relaxed);
         size_t limit = std::min(count, size_t(100));
 
         std::array<float, 100> flatHistory {};
         if (count < 100) {
             for (size_t j = 0; j < count; ++j) {
-                flatHistory[j] = data.history[j].load(std::memory_order::relaxed);
+                flatHistory[j] = data->history[j].load(std::memory_order::relaxed);
             }
         } else {
             size_t startIdx = count % 100;
             for (size_t j = 0; j < 100; ++j) {
-                flatHistory[j] = data.history[(startIdx + j) % 100].load(std::memory_order::relaxed);
+                flatHistory[j] = data->history[(startIdx + j) % 100].load(std::memory_order::relaxed);
             }
         }
 

@@ -1,0 +1,10 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[plugin]
+name        = "discord_rpc"
+library     = "zahlen_plugin_discord_rpc"
+api         = 1
+description = "Discord Rich Presence IPC capability plugin (Discord::IPresenceClient)"
+auto_load   = false
+hot_reload  = false

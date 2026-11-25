@@ -342,6 +342,23 @@ function(zhln_toolchain_source_package name)
         REQUIRES ${_requires} PROVIDES ${_provides})
 endfunction()
 
+# Install a dynamically loaded COM runtime plugin (.so/.dylib/.dll) and its
+# companion .manifest.toml into the relocatable plugin directory. The plugin
+# resolves libzahlen_engine.so via INSTALL_RPATH "$ORIGIN/../.." without
+# requiring LD_LIBRARY_PATH, and is never exported as a link-time CMake target.
+function(zhln_toolchain_install_plugin target component manifest_relpath)
+    if(TARGET ${target})
+        set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
+        install(TARGETS ${target}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ${component}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ${component})
+        if(EXISTS "${PROJECT_SOURCE_DIR}/${manifest_relpath}")
+            install(FILES "${PROJECT_SOURCE_DIR}/${manifest_relpath}"
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ${component})
+        endif()
+    endif()
+endfunction()
+
 # --- 1. Core shared-library package: libzahlen_engine.so ONLY ---------------
 set_target_properties(zahlen_engine PROPERTIES EXPORT_NAME Engine)
 if(USE_SANITIZERS)
@@ -399,12 +416,8 @@ zhln_toolchain_source_package(Screenshot
     SOURCES extensions/Screenshot/Screenshot.cpp
     PUBLIC_LINKS Zahlen::Engine
     PRIVATE_LINKS Zahlen::Image)
-if(TARGET zahlen_plugin_screenshot)
-    set_target_properties(zahlen_plugin_screenshot PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
-    install(TARGETS zahlen_plugin_screenshot
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenScreenshot
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenScreenshot)
-endif()
+zhln_toolchain_install_plugin(zahlen_plugin_screenshot ZahlenScreenshot
+    extensions/Screenshot/zahlen_plugin_screenshot.manifest.toml)
 
 zhln_toolchain_source_package(HostRunner
     CHECK_TARGET zahlen_host_runner
@@ -490,6 +503,8 @@ zhln_toolchain_source_package(GLTF
     VENDORED_HEADERS extern/cgltf/cgltf.h
     PUBLIC_LINKS Zahlen::Engine
     PRIVATE_LINKS Zahlen::Serialization Zahlen::Image)
+zhln_toolchain_install_plugin(zahlen_plugin_gltf ZahlenGLTF
+    plugins/glTF/zahlen_plugin_gltf.manifest.toml)
 
 zhln_toolchain_source_package(Fonts
     CHECK_TARGET zahlen_fonts
@@ -581,9 +596,13 @@ zhln_toolchain_source_package(Terrain
     HEADER_FILES extensions/Terrain/Terrain.hpp
                  extensions/Terrain/TerrainGeometry.hpp
                  extensions/Terrain/TerrainComponents.hpp
+                 extensions/Terrain/TerrainTypes.hpp
+                 extensions/Terrain/ITerrainLayer.hpp
     HEADER_DEST Terrain
     SOURCES extensions/Terrain/TerrainGeometry.cpp extensions/Terrain/Terrain.cpp
     PUBLIC_LINKS Zahlen::Engine)
+zhln_toolchain_install_plugin(zahlen_plugin_terrain ZahlenTerrain
+    extensions/Terrain/zahlen_plugin_terrain.manifest.toml)
 
 zhln_toolchain_source_package(VFX
     CHECK_TARGET zahlen_vfx
@@ -593,12 +612,16 @@ zhln_toolchain_source_package(VFX
                  extensions/VFX/LightningGeometry.hpp
                  extensions/VFX/Explosion.hpp
                  extensions/VFX/ExplosionPolicy.hpp
+                 extensions/VFX/VFXTypes.hpp
+                 extensions/VFX/IVfxLayer.hpp
     HEADER_DEST VFX
     SOURCES extensions/VFX/CombatFXLifecycle.cpp
             extensions/VFX/LightningGeometry.cpp
             extensions/VFX/Lightning.cpp
             extensions/VFX/Explosion.cpp
     PUBLIC_LINKS Zahlen::Engine)
+zhln_toolchain_install_plugin(zahlen_plugin_vfx ZahlenVFX
+    extensions/VFX/zahlen_plugin_vfx.manifest.toml)
 
 zhln_toolchain_source_package(FreeCam
     CHECK_TARGET zahlen_freecam
@@ -606,12 +629,8 @@ zhln_toolchain_source_package(FreeCam
     HEADER_DIRS extensions/FreeCam
     SOURCES extensions/FreeCam/FreeCam.cpp
     PUBLIC_LINKS Zahlen::Engine)
-if(TARGET zahlen_plugin_freecam)
-    set_target_properties(zahlen_plugin_freecam PROPERTIES INSTALL_RPATH "$ORIGIN/../..")
-    install(TARGETS zahlen_plugin_freecam
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/zahlen/plugins COMPONENT ZahlenFreeCam
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/plugins COMPONENT ZahlenFreeCam)
-endif()
+zhln_toolchain_install_plugin(zahlen_plugin_freecam ZahlenFreeCam
+    extensions/FreeCam/zahlen_plugin_freecam.manifest.toml)
 
 zhln_toolchain_source_package(Camera
     CHECK_TARGET zahlen_camera
@@ -626,6 +645,8 @@ zhln_toolchain_source_package(CharacterController
     HEADER_DIRS extensions/CharacterController
     SOURCES extensions/CharacterController/CharacterController.cpp
     PUBLIC_LINKS Zahlen::Engine)
+zhln_toolchain_install_plugin(zahlen_plugin_character_controller ZahlenCharacterController
+    extensions/CharacterController/zahlen_plugin_character_controller.manifest.toml)
 
 zhln_toolchain_source_package(AnimationControls
     CHECK_TARGET zahlen_animation_controls
@@ -660,6 +681,8 @@ zhln_toolchain_source_package(Animation
                  Zahlen::CharacterController
                  Zahlen::Camera
                  Zahlen::FreeCam)
+zhln_toolchain_install_plugin(zahlen_plugin_animation ZahlenAnimation
+    extensions/Animation/zahlen_plugin_animation.manifest.toml)
 
 zhln_toolchain_source_package(AssetCooking
     CHECK_TARGET zahlen_asset_cooking

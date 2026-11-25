@@ -444,8 +444,8 @@ class HeapManager {
     HeapManager(const HeapManager&)                    = delete;
     auto operator=(const HeapManager&) -> HeapManager& = delete;
 
-    HeapManager(HeapManager&&) noexcept                    = default;
-    auto operator=(HeapManager&&) noexcept -> HeapManager& = default;
+    HeapManager(HeapManager&&)                    = delete;
+    auto operator=(HeapManager&&) -> HeapManager& = delete;
 
     [[nodiscard]] auto Init(
         const Context& ctx,

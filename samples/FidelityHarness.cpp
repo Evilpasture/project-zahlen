@@ -267,12 +267,24 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
 // or zero when the parse or the spawn produced nothing. The prefab is cached by
 // `virtualPath` (the resolved model path, unique per asset in the suite), so
 // repeated imports of the same asset and options reuse the same entry.
-uint32_t ImportModel(ZHLN::COM::IEngine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath, std::vector<ZHLN::TextureID>& ownedTextures) {
+uint32_t ImportModel(ZHLN::COM::IEngine& engine, std::span<const uint8_t> bytes, std::string_view modelPath, std::vector<ZHLN::TextureID>& ownedTextures) {
+    auto&                       assets = *engine.Assets();
+    const std::filesystem::path fsPath(modelPath);
+    std::string                 virtualPath = std::string(modelPath);
+    std::string                 mountedDir;
+    if (!assets.VirtualFileExists(std::string_view(virtualPath)) && fsPath.has_filename()) {
+        mountedDir = (fsPath.has_parent_path() ? fsPath.parent_path() : std::filesystem::current_path()).string();
+        (void)assets.MountDirectory(std::string_view(mountedDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "fidelity"});
+        virtualPath = "fidelity/" + fsPath.filename().string();
+    }
     auto doc = ZHLN::GLTF::Decode(
-        bytes, virtualPath, virtualPath,
+        bytes, virtualPath,
         ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048},
-        engine.Assets()
+        &assets
     );
+    if (!mountedDir.empty()) {
+        (void)assets.UnmountDirectory(std::string_view(mountedDir));
+    }
     if (!doc) {
         ZHLN::COM::Log(engine.Logger(), "'{}' is not a glTF this importer can read.", virtualPath);
         return 0;
@@ -757,7 +769,25 @@ auto main(int argc, char* argv[]) -> int {
             return EXIT_FAILURE;
         }
         auto& assets = *engine->Assets();
-        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets, scenario.lighting);
+        auto decoded = [&]() -> std::expected<ZHLN::EnvironmentImage, ZHLN::ErrorCode> {
+            if (assets.VirtualFileExists(std::string_view(scenario.lighting))) {
+                return ZHLN::AssetCooking::ReadEnvironmentImage(assets, scenario.lighting);
+            }
+            std::ifstream in(std::filesystem::path(scenario.lighting), std::ios::binary | std::ios::ate);
+            if (!in) {
+                return std::unexpected(ZHLN::AssetCooking::RadianceAssetError::NotFound);
+            }
+            const auto end = in.tellg();
+            if (end <= 0) {
+                return std::unexpected(ZHLN::AssetCooking::RadianceAssetError::Truncated);
+            }
+            in.seekg(0);
+            std::vector<std::byte> bytes(static_cast<size_t>(end));
+            if (!in.read(reinterpret_cast<char*>(bytes.data()), end)) {
+                return std::unexpected(ZHLN::AssetCooking::RadianceAssetError::Truncated);
+            }
+            return ZHLN::AssetCooking::DecodeRadiance(bytes);
+        }();
         if (!decoded) {
             ZHLN::Log<ZHLN::LogSeverity::Error>("Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
             return EXIT_FAILURE;

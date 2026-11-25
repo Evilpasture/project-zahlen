@@ -3,17 +3,16 @@
 
 #pragma once
 
-#include "Atomic.hpp"
-#include <concepts>
-#include <optional>
-#include <type_traits>
-#include <utility>
-#include "Platform.hpp"
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <concepts>
 #include <cstdint>
 #include <new>
+#include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -25,7 +24,7 @@ class SkipList {
     static constexpr uint32_t MAX_LEVEL = 32;
 
     struct Spinlock {
-        ZHLN::Atomic<bool> locked;
+        std::atomic<bool> locked {false};
 
         void lock() noexcept {
             bool expected = false;
@@ -40,19 +39,19 @@ class SkipList {
         }
     };
 
-    struct SkipNode {
-        Key                key;
-        Value              value;
-        uint32_t           height;
-        ZHLN::Atomic<bool> deleted;
-        Spinlock           lock;
+    struct alignas(alignof(std::atomic<void*>)) SkipNode {
+        Key               key;
+        Value             value;
+        uint32_t          height;
+        std::atomic<bool> deleted {false};
+        Spinlock          lock {};
 
-        [[nodiscard]] ZHLN::Atomic<SkipNode*>* GetForward() noexcept {
-            return reinterpret_cast<ZHLN::Atomic<SkipNode*>*>(this + 1);
+        [[nodiscard]] std::atomic<SkipNode*>* GetForward() noexcept {
+            return reinterpret_cast<std::atomic<SkipNode*>*>(this + 1);
         }
 
-        [[nodiscard]] const ZHLN::Atomic<SkipNode*>* GetForward() const noexcept {
-            return reinterpret_cast<const ZHLN::Atomic<SkipNode*>*>(this + 1);
+        [[nodiscard]] const std::atomic<SkipNode*>* GetForward() const noexcept {
+            return reinterpret_cast<const std::atomic<SkipNode*>*>(this + 1);
         }
     };
 
@@ -351,8 +350,8 @@ class SkipList {
         const uint32_t  lvl  = _level.load(std::memory_order::acquire);
 
         for (int i = static_cast<int>(lvl) - 1; i >= 0; --i) {
-            const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
-            SkipNode*                      next    = forward[i].load(std::memory_order::acquire);
+            const std::atomic<SkipNode*>* forward = curr->GetForward();
+            SkipNode*                     next    = forward[i].load(std::memory_order::acquire);
             while (next && _compare(next->key, key)) {
                 curr = next;
                 next = curr->GetForward()[i].load(std::memory_order::acquire);
@@ -400,17 +399,13 @@ class SkipList {
     }
 
     static SkipNode* CreateNode(const Key& key, const Value& value, uint32_t height) {
-        size_t size = sizeof(SkipNode) + height * sizeof(ZHLN::Atomic<SkipNode*>);
+        size_t size = sizeof(SkipNode) + height * sizeof(std::atomic<SkipNode*>);
         void*  mem  = ::operator new(size, std::align_val_t {alignof(SkipNode)});
-        auto*  node = ::new (mem) SkipNode {.key = key, .value = value, .height = height, .deleted = {}, .lock = {}};
-
-        node->deleted.store(false, std::memory_order::relaxed);
-        node->lock.locked.store(false, std::memory_order::relaxed);
+        auto*  node = ::new (mem) SkipNode {.key = key, .value = value, .height = height};
 
         auto* forward = node->GetForward();
         for (uint32_t i = 0; i < height; ++i) {
-            ::new (&forward[i]) ZHLN::Atomic<SkipNode*>();
-            forward[i].store(nullptr, std::memory_order::relaxed);
+            ::new (&forward[i]) std::atomic<SkipNode*>(nullptr);
         }
         return node;
     }
@@ -438,13 +433,13 @@ class SkipList {
         return height;
     }
 
-    SkipNode*              _head = nullptr;
-    Compare                _compare;
-    ZHLN::Atomic<uint32_t> _level {1};
-    ZHLN::Atomic<size_t>   _size {0};
+    SkipNode*             _head = nullptr;
+    Compare               _compare;
+    std::atomic<uint32_t> _level {1};
+    std::atomic<size_t>   _size {0};
 
     // Const lookups participate in reader tracking and may reclaim retired nodes.
-    mutable ZHLN::Atomic<uint32_t> _activeReaders {0};
+    mutable std::atomic<uint32_t>  _activeReaders {0};
     mutable ZHLN::Mutex            _retireMutex {};
     mutable std::vector<SkipNode*> _retireQueue;
 };

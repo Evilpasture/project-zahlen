@@ -14,6 +14,7 @@
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
+#include <atomic>
 #include <memory>
 
 namespace ZHLN::Physics {
@@ -50,10 +51,10 @@ struct WorldDataCreateInfo {
 };
 
 struct MappingDataCreateInfo {
-    const void* ZHLN_RESTRICT* const ZHLN_RESTRICT    body_ptrs;
-    const ZHLN::Atomic<uint32_t>* const ZHLN_RESTRICT generations;
-    const size_t                                      slot_capacity;
-    const uint32_t* const ZHLN_RESTRICT               slot_to_dense;
+    const void* ZHLN_RESTRICT* const ZHLN_RESTRICT   body_ptrs;
+    const std::atomic<uint32_t>* const ZHLN_RESTRICT generations;
+    const size_t                                     slot_capacity;
+    const uint32_t* const ZHLN_RESTRICT              slot_to_dense;
 };
 // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 

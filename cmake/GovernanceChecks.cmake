@@ -23,6 +23,7 @@
 #   - check_capability_boundary.py (optional layers consume capabilities, not the engine's internal services)
 #   - check_image_boundary.py      (private image codec containment; Core stays codec-free)
 #   - check_engine_exports.py      (hidden visibility, --exclude-libs, ZHLN_API <-> version-script parity, DSO nm audit)
+#   - check_plugin_fs_boundary.py  (plugins/ reads strictly via VFS or byte spans; no direct OS filesystem I/O)
 #
 # configure/run_governance_checks.py runs all checks concurrently across CPU
 # cores and caches passing tree fingerprints in ${CMAKE_BINARY_DIR}/.zhln_governance_cache.json

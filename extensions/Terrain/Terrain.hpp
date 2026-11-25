@@ -7,13 +7,6 @@
 #include <expected>
 #include <memory>
 namespace ZHLN::Terrain {
-struct CreateInfo {
-    FVec3 position {};
-    float roughness     = 0.85f;
-    float metallic      = 0.05f;
-    bool  createPhysics = true;
-    bool  buildBLAS     = true;
-};
 // Host-owned configuration, not a handle into the native global slot table.
 struct TileComponent {
     float roughness = 0.85f;

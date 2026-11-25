@@ -22,6 +22,7 @@
 #include <Zahlen/Render/Info.hpp>
 #if defined(ZHLN_SCENE_HOST_HAS_LUA)
 #include <lua/ReflectLua.hpp>
+#include <lua/ReflectLuaFile.hpp>
 #endif
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
 #include <Discord/RichPresence.hpp>

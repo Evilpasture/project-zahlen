@@ -12,6 +12,7 @@
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -98,12 +99,16 @@ struct ProceduralAnimationTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> base_rig_glb_decodes_maps_and_evaluates_via_com() {
-            const std::filesystem::path glbPath =
-                std::filesystem::path(ZHLN_TEST_SOURCE_DIR) / "resources/assets/ProceduralAnimationBaseRig.glb";
+            const std::filesystem::path assetsDir = std::filesystem::path(ZHLN_TEST_SOURCE_DIR) / "resources/assets";
+            const std::filesystem::path glbPath   = assetsDir / "ProceduralAnimationBaseRig.glb";
             if (!std::filesystem::exists(glbPath)) {
                 return {};
             }
-            const auto doc = ZHLN::GLTF::Read(glbPath.string());
+            ZHLN::FS::VirtualFileSystem vfs;
+            if (!vfs.MountDirectory(assetsDir.string())) {
+                return {};
+            }
+            const auto doc = ZHLN::GLTF::Read(vfs, "ProceduralAnimationBaseRig.glb");
             ZHLN::Test::ExpectTrue(doc.has_value());
             if (!doc) return {};
             const auto rig = RigFromDocument(*doc);

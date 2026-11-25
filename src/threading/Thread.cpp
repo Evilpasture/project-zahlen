@@ -128,10 +128,21 @@ auto Fiber::Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fibe
     return fiber;
 }
 
-void Fiber::Resume(Fiber* target) noexcept {
+auto Fiber::Resume(Fiber* target) noexcept -> bool {
     while (target->isRunning.exchange(true, std::memory_order::acq_rel)) {
         CPURelax();
     }
+
+    // Exclusive ownership of `target` starts here. Clearing `queued` AFTER
+    // acquiring `isRunning` (rather than when popping the ready queue) closes
+    // two races:
+    //   1. An outgoing runner cannot observe `queued == false` and return this
+    //      fiber to freeQueue while we are blocked on `isRunning` about to run it.
+    //   2. Any concurrent WakeUp pairs with this seq_cst store via Dekker
+    //      ordering: either it saw `queued == true` (meaning its wake state was
+    //      already published before we enter `target`) or it sees `false` and
+    //      pushes a fresh ready entry.
+    target->queued.store(false, std::memory_order::seq_cst);
 
     Fiber* self    = t_currentFiber;
     target->caller = self;
@@ -141,7 +152,15 @@ void Fiber::Resume(Fiber* target) noexcept {
 
     ZHLN_Switch(&self->stackPointer, target->stackPointer);
 
+    // Decide whether the fiber is idle and safe to recycle BEFORE releasing
+    // `isRunning`: any worker that already popped a late wake for `target` is
+    // blocked on `isRunning` above and has not cleared `queued` yet.
+    const bool shouldRecycle =
+        target->taskDone.exchange(false, std::memory_order::acquire) &&
+        !target->queued.load(std::memory_order::acquire);
+
     target->isRunning.store(false, std::memory_order::release);
+    return shouldRecycle;
 }
 
 void Fiber::Yield() noexcept {

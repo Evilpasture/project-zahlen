@@ -35,7 +35,7 @@ struct alignas(128) Fiber {
 
     static auto GetCurrent() noexcept -> Fiber*;
     static void Yield() noexcept;
-    static void Resume(Fiber* target) noexcept;
+    [[nodiscard]] static auto Resume(Fiber* target) noexcept -> bool;
 
     static auto Create(size_t stackSize, FiberFunc func, void* arg) noexcept -> Fiber*;
     static void Destroy(Fiber* fiber) noexcept;

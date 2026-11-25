@@ -5,14 +5,17 @@
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/SharedMutex.hpp>
+#include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp> // Required for InitMainThread
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <latch>
 #include <memory>
+#include <new>
 #include <thread>
 
 // ============================================================================
@@ -45,20 +48,49 @@ struct SyncPrimTestSuite {
     struct Tests {
         // 1. Basic Mutex Locking/Unlocking Properties
         std::expected<void, ZHLN::ErrorCode> mutex_basic_lock_unlock() {
-            // Construction must initialize the lock byte even on dirty stack
-            // storage. The old trivial default constructor left this byte
-            // indeterminate and caused permanent "locked" states on macOS.
-            alignas(ZHLN::Mutex) std::array<std::byte, sizeof(ZHLN::Mutex)> dirtyStorage;
-            dirtyStorage.fill(std::byte {0xff});
-            auto*      initialized = std::construct_at(reinterpret_cast<ZHLN::Mutex*>(dirtyStorage.data()));
-            const bool dirtyTry    = initialized->try_lock();
-            ZHLN::Test::ExpectTrue(dirtyTry);
-            if (dirtyTry) {
-                initialized->unlock();
-            }
-            std::destroy_at(initialized);
+            // Default-initialization (not just value-initialization via
+            // std::construct_at) must initialize the lock byte even on dirty
+            // heap/stack storage. Testing 0x01 and 0x41 specifically covers
+            // bit patterns where LOCKED (0x01) is set and POISONED (0x04) is
+            // clear, which previously caused permanent deadlocks in Release.
+            struct MemberHolder {
+                uint32_t                  tag;
+                ZHLN::Mutex               mutex;
+                ZHLN::ConditionalVariable cv;
+                ZHLN::BufferSync          sync;
+                explicit MemberHolder(uint32_t t) noexcept: tag(t) {}
+            };
 
-            ZHLN::Mutex mutex {};
+            for (const uint8_t pattern: {uint8_t {0x01}, uint8_t {0x41}, uint8_t {0xff}}) {
+                alignas(ZHLN::Mutex) std::array<std::byte, sizeof(ZHLN::Mutex)> dirtyStorage;
+                dirtyStorage.fill(std::byte {pattern});
+                auto*      initialized = ::new (dirtyStorage.data()) ZHLN::Mutex;
+                const bool dirtyTry    = initialized->try_lock();
+                ZHLN::Test::ExpectTrue(dirtyTry);
+                if (dirtyTry) {
+                    initialized->unlock();
+                }
+                std::destroy_at(initialized);
+
+                alignas(MemberHolder) std::array<std::byte, sizeof(MemberHolder)> dirtyHolder;
+                dirtyHolder.fill(std::byte {pattern});
+                auto*      holder    = ::new (dirtyHolder.data()) MemberHolder(7u);
+                const bool holderTry = holder->mutex.try_lock();
+                ZHLN::Test::ExpectTrue(holderTry);
+                if (holderTry) {
+                    holder->mutex.unlock();
+                }
+                const bool syncTry = holder->sync.shadowLock.try_lock();
+                ZHLN::Test::ExpectTrue(syncTry);
+                if (syncTry) {
+                    holder->sync.shadowLock.unlock();
+                }
+                ZHLN::Test::ExpectEq(holder->sync.viewExportCount.load(std::memory_order::relaxed), 0);
+                holder->cv.NotifyOne();
+                std::destroy_at(holder);
+            }
+
+            ZHLN::Mutex mutex;
 
             // Sequential lock/unlock
             mutex.lock();
@@ -327,6 +359,87 @@ struct SyncPrimTestSuite {
             if (violated.load(std::memory_order::relaxed) || !ZHLN::Test::ExpectEq(sharedValue, 256u)) {
                 return std::unexpected(SyncPrimError::ConcurrencyFailure);
             }
+            return {};
+        }
+
+        // 6. Fiber + OS Mutex Churn & ConditionalVariable NotifyOne Wakeup Stress
+        std::expected<void, ZHLN::ErrorCode> fiber_mutex_churn_and_condvar_wakeup_stress() {
+            // Exercises fiber recycling concurrently with OS-thread mutex unlocks
+            // waking fibers across the two-phase WaitState / Fiber::Resume protocol.
+            for (int round = 0; round < 32; ++round) {
+                ZHLN::Mutex           mutex;
+                std::atomic<uint32_t> completed {0};
+                std::atomic<bool>     stopHammer {false};
+
+                std::thread osHammer([&] {
+                    while (!stopHammer.load(std::memory_order::relaxed)) {
+                        ZHLN::MutexGuard guard(mutex);
+                        for (int spin = 0; spin < 16; ++spin) {
+                            ZHLN::CPURelax();
+                        }
+                    }
+                });
+
+                constexpr uint32_t kTasks = 96;
+                ZHLN::TaskSystem::ParallelFor(kTasks, 1, [&](uint32_t start, uint32_t end, uint32_t) {
+                    for (uint32_t i = start; i < end; ++i) {
+                        ZHLN::MutexGuard guard(mutex);
+                        for (int spin = 0; spin < 12; ++spin) {
+                            ZHLN::CPURelax();
+                        }
+                        completed.fetch_add(1, std::memory_order::relaxed);
+                    }
+                });
+
+                stopHammer.store(true, std::memory_order::relaxed);
+                osHammer.join();
+
+                if (!ZHLN::Test::ExpectEq(completed.load(std::memory_order::relaxed), kTasks)) {
+                    return std::unexpected(SyncPrimError::ConcurrencyFailure);
+                }
+            }
+
+            // Exercises concurrent ConditionalVariable::Wait + NotifyOne without
+            // losing a wake when _bits transitions while new waiters enqueue.
+            for (int round = 0; round < 64; ++round) {
+                ZHLN::Mutex               mutex;
+                ZHLN::ConditionalVariable cv;
+                int                       available = 0;
+                std::atomic<int>          consumed {0};
+                constexpr int             kConsumers = 4;
+                constexpr int             kPerThread = 12;
+
+                std::array<std::thread, kConsumers> consumers;
+                for (auto& th: consumers) {
+                    th = std::thread([&] {
+                        for (int i = 0; i < kPerThread; ++i) {
+                            ZHLN::MutexGuard guard(mutex);
+                            while (available == 0) {
+                                cv.Wait(mutex);
+                            }
+                            --available;
+                            consumed.fetch_add(1, std::memory_order::relaxed);
+                        }
+                    });
+                }
+
+                for (int i = 0; i < kConsumers * kPerThread; ++i) {
+                    {
+                        ZHLN::MutexGuard guard(mutex);
+                        ++available;
+                    }
+                    cv.NotifyOne();
+                }
+
+                for (auto& th: consumers) {
+                    th.join();
+                }
+
+                if (!ZHLN::Test::ExpectEq(consumed.load(std::memory_order::relaxed), kConsumers * kPerThread)) {
+                    return std::unexpected(SyncPrimError::SignalingFailure);
+                }
+            }
+
             return {};
         }
     };

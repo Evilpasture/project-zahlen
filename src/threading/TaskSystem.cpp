@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <atomic>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -91,21 +91,25 @@ class BoundedFiberQueue {
         if (!_cells) {
             return true;
         }
-        const size_t pos = _dequeuePos.load(std::memory_order::relaxed);
-        const size_t seq = _cells[pos & _mask].sequence.load(std::memory_order::acquire);
-        return static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1) < 0;
+        const size_t deq = _dequeuePos.load(std::memory_order::acquire);
+        const size_t enq = _enqueuePos.load(std::memory_order::acquire);
+        if (enq != deq) {
+            return false;
+        }
+        const size_t seq = _cells[deq & _mask].sequence.load(std::memory_order::acquire);
+        return static_cast<intptr_t>(seq) - static_cast<intptr_t>(deq + 1) < 0;
     }
 
   private:
     struct Cell {
-        ZHLN::Atomic<size_t> sequence {0};
-        Fiber*               fiber = nullptr;
+        std::atomic<size_t> sequence {0};
+        Fiber*              fiber = nullptr;
     };
 
-    std::unique_ptr<Cell[]>          _cells;
-    size_t                           _mask = 0;
-    alignas(64) ZHLN::Atomic<size_t> _enqueuePos {0};
-    alignas(64) ZHLN::Atomic<size_t> _dequeuePos {0};
+    std::unique_ptr<Cell[]>         _cells;
+    size_t                          _mask = 0;
+    alignas(64) std::atomic<size_t> _enqueuePos {0};
+    alignas(64) std::atomic<size_t> _dequeuePos {0};
 };
 
 struct alignas(128) WorkerSlot {
@@ -127,12 +131,12 @@ std::vector<std::thread>      s_threads;
 
 // Lifecycle transitions (including worker joins) are serialized. WorkerMain's
 // hot queue loop is lock-free and only enters s_sleepMutex when parking.
-std::mutex                            s_lifecycleMutex;
-bool                                  s_running = false;
-alignas(64) ZHLN::Atomic<uint32_t>    s_workerCount {0};
-alignas(64) ZHLN::Atomic<uint32_t>    s_parkedWorkers {0};
-alignas(64) ZHLN::Atomic<bool>        s_stopRequested {false};
-alignas(64) ZHLN::Atomic<uint32_t>    s_dispatchCursor {0};
+std::mutex                          s_lifecycleMutex;
+bool                                s_running = false;
+alignas(64) std::atomic<uint32_t>   s_workerCount {0};
+alignas(64) std::atomic<uint32_t>   s_parkedWorkers {0};
+alignas(64) std::atomic<bool>       s_stopRequested {false};
+alignas(64) std::atomic<uint32_t>   s_dispatchCursor {0};
 std::mutex                            s_sleepMutex;
 std::condition_variable               s_sleepCv;
 
@@ -159,7 +163,9 @@ enum class EnqueueResult : uint8_t {
 // already finished the task it was woken for -- running the previous caller's
 // closure, and decrementing the previous caller's Counter, after both are gone.
 [[nodiscard]] auto EnqueueFiber(BoundedFiberQueue& queue, Fiber* fiber) noexcept -> EnqueueResult {
-    const bool wasEmpty = !fiber->queued.exchange(true, std::memory_order::acq_rel);
+    // seq_cst pairs with Fiber::Resume's `queued.store(false, seq_cst)` and
+    // waiter wake-state transitions so a wake can never be dropped.
+    const bool wasEmpty = !fiber->queued.exchange(true, std::memory_order::seq_cst);
     if (!wasEmpty) {
         return EnqueueResult::AlreadyQueued;
     }
@@ -172,11 +178,10 @@ enum class EnqueueResult : uint8_t {
 }
 
 [[nodiscard]] auto DequeueFiber(BoundedFiberQueue& queue) noexcept -> Fiber* {
-    Fiber* fiber = queue.Pop();
-    if (fiber != nullptr) {
-        fiber->queued.store(false, std::memory_order::release);
-    }
-    return fiber;
+    // Keep `fiber->queued` set until Fiber::Resume acquires `fiber->isRunning`:
+    // clearing it here would let an outgoing runner observe `queued == false`
+    // and recycle the fiber into freeQueue while this worker is about to run it.
+    return queue.Pop();
 }
 
 [[nodiscard]] auto PopOrStealReady(uint32_t preferredSlot, uint32_t totalWorkers) noexcept -> Fiber* {
@@ -250,17 +255,15 @@ enum class EnqueueResult : uint8_t {
     return nullptr;
 }
 
-void RecycleFiber(Fiber* fiber, uint32_t preferredSlot, uint32_t totalWorkers) noexcept {
-    if (fiber == nullptr || !fiber->taskDone.exchange(false, std::memory_order::acquire)) {
+void RunFiber(Fiber* fiber, uint32_t preferredSlot, uint32_t totalWorkers) noexcept {
+    if (fiber == nullptr) {
         return;
     }
-    // Only an idle fiber goes back in the pool. A fiber that still owns a ready
-    // entry comes back here through that entry instead; pooling it twice would
-    // let two dispatches fill the same fiber, dropping the first task.
-    if (fiber->queued.load(std::memory_order::acquire)) {
-        return;
-    }
-    if (totalWorkers > 0 && s_workerSlots) {
+    // Only an idle fiber goes back in the pool. Fiber::Resume checks taskDone
+    // and queued while still holding isRunning, so a fiber that still owns a
+    // ready entry (or a dequeued resume waiting on isRunning) comes back here
+    // through that entry instead of being pooled twice.
+    if (Fiber::Resume(fiber) && totalWorkers > 0 && s_workerSlots) {
         s_workerSlots[ClampSlot(preferredSlot, totalWorkers)].freeQueue.Push(fiber);
     }
 }
@@ -319,8 +322,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
 
     for (;;) {
         if (Fiber* fiber = PopOrStealWorkerReady(index, totalWorkers)) {
-            Fiber::Resume(fiber);
-            RecycleFiber(fiber, index, totalWorkers);
+            RunFiber(fiber, index, totalWorkers);
             continue;
         }
 
@@ -336,8 +338,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
             }
         }
         if (spunFiber != nullptr) {
-            Fiber::Resume(spunFiber);
-            RecycleFiber(spunFiber, index, totalWorkers);
+            RunFiber(spunFiber, index, totalWorkers);
             continue;
         }
 
@@ -345,8 +346,7 @@ void WorkerMain(uint32_t index, uint32_t totalWorkers) {
 
         if (Fiber* lateFiber = PopOrStealWorkerReady(index, totalWorkers)) {
             s_parkedWorkers.fetch_sub(1, std::memory_order::relaxed);
-            Fiber::Resume(lateFiber);
-            RecycleFiber(lateFiber, index, totalWorkers);
+            RunFiber(lateFiber, index, totalWorkers);
             continue;
         }
 
@@ -546,8 +546,7 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
                 pushedCount = 0;
             }
             if (Fiber* ready = PopOrStealReady(localSlot, totalWorkers)) {
-                Fiber::Resume(ready);
-                RecycleFiber(ready, localSlot, totalWorkers);
+                RunFiber(ready, localSlot, totalWorkers);
                 fiber = AllocateFiber(localSlot, totalWorkers);
             }
         }
@@ -616,8 +615,7 @@ void Wait(Counter* counter) {
 
         if (isMain) {
             if (Fiber* fiber = PopOrStealReady(localSlot, totalWorkers)) {
-                Fiber::Resume(fiber);
-                RecycleFiber(fiber, localSlot, totalWorkers);
+                RunFiber(fiber, localSlot, totalWorkers);
                 spinCount = 0;
             } else {
                 if (spinCount < 100) {

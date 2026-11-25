@@ -10,6 +10,7 @@
 #include <Scene/Scene.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <cmath>
 #include <cstring>
@@ -428,8 +429,9 @@ struct BSPStaticPropsTestSuite {
                 mdlFile.write("IDST", 4);
             }
 
-            ZHLN::BSP::SourceVFS vfs;
-            vfs.AddSearchPath(tempRoot.string());
+            ZHLN::FS::VirtualFileSystem coreVfs;
+            (void)coreVfs.MountDirectory(tempRoot.string(), ZHLN::FS::MountOptions {.caseInsensitive = true});
+            ZHLN::BSP::SourceVFS vfs(coreVfs);
 
             // 1. Resolve with full path
             const auto res1 = vfs.ResolveModel("models/props_c17/furniturechair001a.mdl");

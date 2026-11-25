@@ -27,6 +27,7 @@
 #include <expected>
 #include <filesystem>
 #include <lua/ReflectLua.hpp>
+#include <lua/ReflectLuaFile.hpp>
 #include <lua/SceneLua.hpp>
 #include <optional>
 #include <string>

@@ -95,7 +95,7 @@ struct RenderAnimatedMeshTestSuite {
             );
 
             // 3. Instantiate Prefab Directly From Embedded In-Memory Byte Stream
-            auto decodedUzi = ZHLN::GLTF::Decode(kUziGlbData, "Uzi.glb", {}, {}, engine->Assets());
+            auto decodedUzi = ZHLN::GLTF::Decode(kUziGlbData, "Uzi.glb", {}, engine->Assets());
             if (!decodedUzi) return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);
             auto uploadedUzi = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *decodedUzi);
             if (!uploadedUzi) return std::unexpected(AnimatedMeshTestError::PrefabLoadFailed);

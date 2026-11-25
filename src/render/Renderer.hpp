@@ -23,12 +23,13 @@
 #include "vulkan/Rendering.hpp"
 #include "vulkan/core/FrameStorage.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <deque>
 #include <optional>
 
 namespace ZHLN {
@@ -58,7 +59,7 @@ struct IBLPayload {
 
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, Vk::kFramesInFlight> pools;
-    std::array<ZHLN::Atomic<uint32_t>, Vk::kFramesInFlight>                   cmdCount {};
+    std::array<std::atomic<uint32_t>, Vk::kFramesInFlight>                    cmdCount {};
 };
 
 struct Renderer {
@@ -128,8 +129,8 @@ struct Renderer {
 
     uint32_t activeLineVertexCount = 0;
 
-    static constexpr size_t       kParallelRecordingSlots = 2;
-    ZHLN::Array<WorkerCmdContext> workerCmds;
+    static constexpr size_t      kParallelRecordingSlots = 2;
+    std::deque<WorkerCmdContext> workerCmds;
 
     ZHLN::Array<Light> mappedLights;
 

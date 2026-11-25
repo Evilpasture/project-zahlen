@@ -156,32 +156,37 @@ void test_vfs_directory_mount_overlay_async_and_traversal_rejection(
 
     FS::VirtualFileSystem vfs;
     Expect(!vfs.MountDirectory(""));
+    Expect(vfs.MountDirectory("").error()) == ErrorCode(FS::VFSError::InvalidPath);
     Expect(!vfs.MountDirectory((tmp.Path() / "does_not_exist").string()));
     Expect(!vfs.MountDirectory(pakPath.string())); // regular file, not a directory
+    Expect(!vfs.MountDirectory(dirA.string(), FS::MountOptions {.virtualPrefix = "../escape"}));
 
-    Expect(vfs.MountPak(pakPath.string()));
+    Expect(vfs.MountPak(pakPath.string()).has_value());
     Expect(vfs.Exists("configs/settings.cfg"));
 
     // Mount dirA, then dirB: reverse mount order means dirB > dirA > pak.
-    Expect(vfs.MountDirectory(dirA.string()));
-    Expect(vfs.MountDirectory(dirB.string()));
+    Expect(vfs.MountDirectory(dirA.string()).has_value());
+    Expect(vfs.MountDirectory(dirB.string()).has_value());
     Expect(vfs.MountedDirectoryCount()) == 2u;
 
     {
-        FS::LoadRequest req {.assetID = FS::HashPath("configs/settings.cfg")};
-        Expect(vfs.LoadSync(req));
-        Expect(!req.isZeroCopy);
-        Expect(std::string_view(static_cast<const char*>(req.outData), req.outSize)) == "from_dir_b_override";
-        FS::VirtualFileSystem::FreeMemory(req);
+        auto loaded = vfs.LoadSync(FS::HashPath("configs/settings.cfg"));
+        Expect(loaded.has_value());
+        Expect(!loaded->IsZeroCopy());
+        Expect(loaded->Text()) == "from_dir_b_override";
     }
 
     // Unmount dirB -> falls back to dirA; unmount dirA -> falls back to pak!
-    Expect(vfs.UnmountDirectory(dirB.string()));
+    Expect(vfs.UnmountDirectory(dirB.string()).has_value());
     Expect(vfs.MountedDirectoryCount()) == 1u;
     {
-        std::array<char, 64> buf {};
-        const size_t         n = vfs.ReadFile("configs/settings.cfg", buf.data(), buf.size());
-        Expect(std::string_view(buf.data(), n)) == "from_dir_a";
+        auto text = vfs.ReadText("configs/settings.cfg");
+        Expect(text.has_value());
+        Expect(*text) == "from_dir_a";
+
+        auto sz = vfs.FileSize("configs/settings.cfg");
+        Expect(sz.has_value());
+        Expect(*sz) == std::string_view("from_dir_a").size();
     }
 
     // Dynamic file written into dirA AFTER MountDirectory() is discovered by Hash64 LoadSync & LoadAsync!
@@ -191,38 +196,54 @@ void test_vfs_directory_mount_overlay_async_and_traversal_rejection(
     }
     Expect(vfs.Exists(FS::HashPath("configs/late_spawned.txt")));
 
-    std::array<FS::LoadRequest, 2> asyncReqs {
-        FS::LoadRequest {.assetID = FS::HashPath("only_a.txt")},
-        FS::LoadRequest {.assetID = FS::HashPath("configs/late_spawned.txt")},
+    std::array<FS::AsyncLoad, 2> asyncReqs {
+        FS::AsyncLoad {.assetID = FS::HashPath("only_a.txt")},
+        FS::AsyncLoad {.assetID = FS::HashPath("configs/late_spawned.txt")},
     };
     TaskSystem::Counter counter {0};
-    vfs.LoadAsync(RestrictSpan<FS::LoadRequest>(asyncReqs.data(), asyncReqs.size()), &counter);
+    vfs.LoadAsync(RestrictSpan<FS::AsyncLoad>(asyncReqs.data(), asyncReqs.size()), &counter);
     TaskSystem::Wait(&counter);
 
-    Expect(asyncReqs[0].success);
-    Expect(asyncReqs[1].success);
-    Expect(std::string_view(static_cast<const char*>(asyncReqs[0].outData), asyncReqs[0].outSize)) == "exclusive_a";
-    Expect(std::string_view(static_cast<const char*>(asyncReqs[1].outData), asyncReqs[1].outSize)) == "created_after_mount";
-    FS::VirtualFileSystem::FreeMemory(asyncReqs[0]);
-    FS::VirtualFileSystem::FreeMemory(asyncReqs[1]);
+    Expect(asyncReqs[0].result.has_value());
+    Expect(asyncReqs[1].result.has_value());
+    Expect(asyncReqs[0].result->Text()) == "exclusive_a";
+    Expect(asyncReqs[1].result->Text()) == "created_after_mount";
 
     // Path traversal & absolute path attempts must be rejected unconditionally.
-    std::array<char, 64> leakBuf {};
     Expect(!vfs.Exists("../secret.txt"));
     Expect(!vfs.Exists("configs/../../secret.txt"));
     Expect(!vfs.Exists("/etc/passwd"));
-    Expect(vfs.ReadFile("../secret.txt", leakBuf.data(), leakBuf.size())) == 0u;
-    Expect(vfs.ReadFile("configs/../../secret.txt", nullptr, 0)) == 0u;
+    Expect(vfs.Open("../secret.txt").error()) == ErrorCode(FS::VFSError::InvalidPath);
+    Expect(vfs.FileSize("configs/../../secret.txt").error()) == ErrorCode(FS::VFSError::InvalidPath);
 
-    // Unmounting dirA restores the underlying `.pak` entry.
-    Expect(vfs.UnmountDirectory(dirA.string()));
+    // Virtual prefix + case-insensitive mount options (e.g. Source engine assets on POSIX).
+    {
+        const auto mixedDir = tmp.Path() / "mixed_mod";
+        std::filesystem::create_directories(mixedDir / "Materials" / "Brick", ec);
+        {
+            std::ofstream f(mixedDir / "Materials" / "Brick" / "Wall.VMT", std::ios::binary);
+            f << "LightmappedGeneric";
+        }
+        Expect(vfs.MountDirectory(
+            mixedDir.string(),
+            FS::MountOptions {.virtualPrefix = "csgo", .caseInsensitive = true}
+        ).has_value());
+        Expect(vfs.Exists("csgo/materials/brick/wall.vmt"));
+        Expect(!vfs.Exists("materials/brick/wall.vmt"));
+        auto text = vfs.ReadText("CSGO/materials/brick/wall.vmt");
+        Expect(text.has_value());
+        Expect(*text) == "LightmappedGeneric";
+        Expect(vfs.UnmountDirectory(mixedDir.string()).has_value());
+    }
+
+    // Unmounting dirA restores the underlying `.pak` entry with zero-copy pinning.
+    Expect(vfs.UnmountDirectory(dirA.string()).has_value());
     Expect(vfs.MountedDirectoryCount()) == 0u;
     {
-        FS::LoadRequest req {.assetID = FS::HashPath("configs/settings.cfg")};
-        Expect(vfs.LoadSync(req));
-        Expect(req.isZeroCopy);
-        Expect(std::string_view(static_cast<const char*>(req.outData), req.outSize)) == "from_pak_base";
-        FS::VirtualFileSystem::FreeMemory(req);
+        auto loaded = vfs.LoadSync(FS::HashPath("configs/settings.cfg"));
+        Expect(loaded.has_value());
+        Expect(loaded->IsZeroCopy());
+        Expect(loaded->Text()) == "from_pak_base";
     }
 }
 

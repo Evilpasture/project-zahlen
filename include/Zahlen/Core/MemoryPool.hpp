@@ -3,10 +3,11 @@
 
 #pragma once
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <bit>
 #include <new>
 #include <utility>
 
@@ -21,7 +22,7 @@ class ObjectPool {
 
   public:
     struct Spinlock {
-        ZHLN::Atomic<bool> locked {false};
+        std::atomic<bool> locked {false};
 
         void lock() noexcept {
             bool expected = false;

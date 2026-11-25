@@ -35,7 +35,6 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
-#include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -112,7 +111,6 @@ class ZHLN_STATIC_API Vm {
     // subject to this VM's instruction and memory budgets.
     [[nodiscard]] auto ExecuteString(std::string_view code, std::string_view chunkName = "chunk") noexcept
         -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode>;
     // Detail for the most recent failure (Lua error string, chunk name,
     // budget hit); empty when the last call succeeded. The ErrorCode says
     // what kind of failure; this says where and why.
@@ -220,9 +218,6 @@ class ZHLN_STATIC_API Builder {
   private:
     lua_State* _state = nullptr;
 };
-
-[[nodiscard]] ZHLN_STATIC_API auto ReadFileText(const std::filesystem::path& path) noexcept
-    -> std::expected<std::string, ErrorCode>;
 
 namespace TemplatedDetail {
 
@@ -734,17 +729,6 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {}, std::string* outDetail = nullptr)
-    -> std::expected<void, ErrorCode> {
-    auto source = ReadFileText(path);
-    if (!source) {
-        return std::unexpected(source.error());
-    }
-    const std::string chunkName = "@" + path.generic_string();
-    return ApplyPatchString(target, *source, chunkName, budget, outDetail);
-}
-
-template <typename T>
 [[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {}, std::string* outDetail = nullptr)
     -> std::expected<T, ErrorCode> {
     T out {};
@@ -771,14 +755,6 @@ template <typename T>
         return std::unexpected(res.error());
     }
     return out;
-}
-
-template <typename T>
-[[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {}, std::string* outDetail = nullptr) -> std::expected<T, ErrorCode> {
-    auto source = ReadFileText(path);
-    if (!source) return std::unexpected(source.error());
-    const std::string chunkName = "@" + path.generic_string();
-    return EvaluateString<T>(*source, chunkName, budget, outDetail);
 }
 
 // Evaluates a pure Lua function `return function(arg1, arg2, ...) -> table`
@@ -832,17 +808,6 @@ template <typename OutT, typename... InArgs>
         return std::unexpected(res.error());
     }
     return out;
-}
-
-template <typename OutT, typename... InArgs>
-[[nodiscard]] auto EvaluateCallFile(const std::filesystem::path& path, LuaBudget budget, const InArgs&... inputs)
-    -> std::expected<OutT, ErrorCode> {
-    auto source = ReadFileText(path);
-    if (!source) {
-        return std::unexpected(source.error());
-    }
-    const std::string chunkName = "@" + path.generic_string();
-    return EvaluateCallString<OutT>(*source, chunkName, budget, inputs...);
 }
 
 } // namespace ReflectLua

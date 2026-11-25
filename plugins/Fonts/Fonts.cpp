@@ -15,110 +15,62 @@
 #include <Image/Image.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
-#include <Zahlen/FileSystem/Paths.hpp>
 #include <algorithm>
 #include <cmath>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <json/JSON.hpp>
 #include <limits>
 #include <memory>
 #include <string>
 
-namespace fs = std::filesystem;
-
 namespace ZHLN::Fonts {
 
 namespace {
 
-// --- Byte sources: mounted paks first, then unpacked files -------------------
-
-auto ReadUnpacked(std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    std::ifstream file(fs::path(path), std::ios::binary | std::ios::ate);
-    if (!file) {
-        return std::nullopt;
-    }
-    const std::streamsize size = file.tellg();
-    if (size <= 0) {
-        return std::nullopt;
-    }
-    std::vector<uint8_t> out(static_cast<size_t>(size));
-    file.seekg(0, std::ios::beg);
-    if (!file.read(reinterpret_cast<char*>(out.data()), size)) {
-        return std::nullopt;
-    }
-    return out;
-}
-
 auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string {
-    const size_t slash = base.find_last_of('/');
-    std::string joined = (slash == std::string_view::npos) ? std::string() : std::string(base.substr(0, slash + 1));
+    const size_t slash  = base.find_last_of('/');
+    std::string  joined = (slash == std::string_view::npos) ? std::string() : std::string(base.substr(0, slash + 1));
     joined += name;
     return joined;
 }
 
-// --- Resolution -------------------------------------------------------------
+// --- Resolution (strictly VFS via COM::IAssetLibrary) -----------------------
 
-struct LoaderInstance {
-    COM::IAssetLibrary* library = nullptr;
-    BakedFontSource             source;
-};
-
-auto ReadBytes(const LoaderInstance& self, std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    // Mounted paks first, then an unpacked file: the capability answers the
-    // virtual path space, which is the whole of what this loader needs.
-    if (self.library) {
-        const auto size = self.library->ReadVirtualFile(path, {});
-        if (size.HasValue() && size.value && size.value <= std::vector<uint8_t>().max_size()) {
-            std::vector<uint8_t> bytes(static_cast<size_t>(size.value));
-            const auto copy = self.library->ReadVirtualFile(path, bytes);
-            if (copy.HasValue() && copy.value == bytes.size()) return bytes;
-        }
-    }
-    return self.source.allowUnpackedFallback ? ReadUnpacked(path) : std::nullopt;
-}
-
-auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    const auto fntBytes = ReadBytes(self, self.source.fntPath);
-    if (!fntBytes) {
+auto LoadFontBMPairFromVfs(const COM::IAssetLibrary& assets, const BakedFontSource& source) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
+    const auto fntFile = assets.OpenVirtualFile(COM::StringView(source.fntPath));
+    if (!fntFile) {
         return std::unexpected(BMError::MissingMetrics);
     }
 
-    const std::string_view text(reinterpret_cast<const char*>(fntBytes->data()), fntBytes->size());
-    auto descExp = ParseBMDescriptor(text);
+    auto descExp = ParseBMDescriptor((*fntFile)->Text());
     if (!descExp.has_value()) {
         return std::unexpected(descExp.error());
     }
 
-    const std::string pagePath = JoinVirtualDir(self.source.fntPath, descExp->pageFile);
-    const auto        pngBytes = ReadBytes(self, pagePath);
-    if (!pngBytes || pngBytes->size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    const std::string pagePath = JoinVirtualDir(source.fntPath, descExp->pageFile);
+    const auto        pngFile  = assets.OpenVirtualFile(COM::StringView(pagePath));
+    if (!pngFile) {
+        return std::unexpected(BMError::BadPage);
+    }
+    const auto pngRaw = (*pngFile)->Bytes();
+    if (pngRaw.size == 0 || pngRaw.size > static_cast<size_t>(std::numeric_limits<int>::max())) {
         return std::unexpected(BMError::BadPage);
     }
 
-    const auto image = Image::DecodeRGBA8(*pngBytes);
-    if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight)
+    const auto image = Image::DecodeRGBA8({reinterpret_cast<const uint8_t*>(pngRaw.data), pngRaw.size});
+    if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight) {
         return std::unexpected(BMError::BadPage);
-    auto bakedExp = AssembleBakedFont(*descExp, image->pixels);
-
-    if (!bakedExp.has_value()) {
-        return std::unexpected(bakedExp.error());
     }
-
-    return std::move(*bakedExp);
+    return AssembleBakedFont(*descExp, image->pixels);
 }
 
-auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    const auto zfontBytes = ReadBytes(self, self.source.zfontPath);
-    if (!zfontBytes) {
+auto LoadCookedFontFromVfs(const COM::IAssetLibrary& assets, const BakedFontSource& source) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
+    const auto zfontFile = assets.OpenVirtualFile(COM::StringView(source.zfontPath));
+    if (!zfontFile) {
         return std::unexpected(BMError::MissingMetrics);
     }
-    auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes->data()), zfontBytes->size()));
-    if (!bakedExp.has_value()) {
-        return std::unexpected(bakedExp.error());
-    }
-    return std::move(*bakedExp);
+    const auto raw = (*zfontFile)->Bytes();
+    return GUI::DecodeCookedFont(std::span<const std::byte>(raw.data, raw.size));
 }
 
 } // anonymous namespace
@@ -262,38 +214,36 @@ auto AssembleBakedFont(const BMDescriptor& desc, std::span<const uint8_t> rgba8)
 }
 
 auto VendoredDefaultFontSource() -> BakedFontSource {
-    // The vendored font is a loose file in the checkout, not a pak entry, so it
-    // is located through the engine's data-file search rather than the virtual
-    // path space: the resolved path is then read by ReadUnpacked (the pak probe
-    // simply misses for it, which is the same code path a fontbm pair off disk
-    // always took). One directory above the descriptor sits its page PNG, which
-    // LoadFontBMPair joins onto this path -- so both halves resolve together.
-    if (const auto found = FS::Paths::FindDataFile(kVendoredFontFntPath)) {
-        BakedFontSource source;
-        source.fntPath = found->string();
-        // The pak's fonts/default.zfont is zcook's Font8x8 placeholder, so
-        // without this the container answers first and the vendored font never
-        // gets a look in.
-        source.preferFontbmPair = true;
-        return source;
-    }
-    // Not a checkout that carries it: leave the stock virtual paths alone so the
-    // pak's cooked font (or nothing) resolves exactly as it did before.
-    return {};
+    BakedFontSource source;
+    source.fntPath          = std::string(kVendoredFontVirtualPath);
+    source.preferFontbmPair = true;
+    return source;
 }
 
-auto LoadBakedFont(COM::IAssetLibrary* assets, const BakedFontSource& source) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    LoaderInstance self;
-    self.library = assets;
-    self.source = source;
-    if (source.preferFontbmPair) {
-        auto pair = LoadFontBMPair(self);
-        if (pair) return pair;
-        return LoadCookedFont(self);
+auto DecodeFontBMPair(std::string_view fntJson, std::span<const uint8_t> pagePng) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
+    auto descExp = ParseBMDescriptor(fntJson);
+    if (!descExp.has_value()) {
+        return std::unexpected(descExp.error());
     }
-    auto cooked = LoadCookedFont(self);
+    if (pagePng.empty() || pagePng.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return std::unexpected(BMError::BadPage);
+    }
+    const auto image = Image::DecodeRGBA8(pagePng);
+    if (!image || image->width != descExp->atlasWidth || image->height != descExp->atlasHeight) {
+        return std::unexpected(BMError::BadPage);
+    }
+    return AssembleBakedFont(*descExp, image->pixels);
+}
+
+auto LoadBakedFont(const COM::IAssetLibrary& assets, const BakedFontSource& source) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
+    if (source.preferFontbmPair) {
+        auto pair = LoadFontBMPairFromVfs(assets, source);
+        if (pair) return pair;
+        return LoadCookedFontFromVfs(assets, source);
+    }
+    auto cooked = LoadCookedFontFromVfs(assets, source);
     if (cooked) return cooked;
-    return LoadFontBMPair(self);
+    return LoadFontBMPairFromVfs(assets, source);
 }
 
 auto UploadFontAtlas(COM::IGraphicsDevice& graphics, const GUI::BakedFontAsset& asset) -> std::expected<FontAtlas, ErrorCode> {

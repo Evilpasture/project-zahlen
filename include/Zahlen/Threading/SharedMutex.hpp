@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Atomic.hpp>
+#include <atomic>
 #include <cstdint>
 #include <type_traits>
 #include <utility>
@@ -81,7 +81,7 @@ class SharedMutex {
     static constexpr uint32_t READER_SHIFT   = 4u;
     static constexpr uint32_t READER_UNIT    = 1u << READER_SHIFT;
 
-    ZHLN::Atomic<uint32_t> _state {0};
+    std::atomic<uint32_t> _state {0};
 
     // Reached from the inline fast paths, so every consumer's objects call
     // them and the definitions have to be exported.
