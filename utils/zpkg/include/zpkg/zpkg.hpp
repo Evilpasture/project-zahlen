@@ -31,10 +31,10 @@ namespace fs = std::filesystem;
 inline constexpr int              PackageFormat = 1;
 inline constexpr int              IndexFormat   = 2;
 
-// The Zahlen version this zpkg ships with, defined by utils/zpkg/CMakeLists.txt
-// from the engine's PROJECT_VERSION. Never a literal: zpkg is part of a release,
-// so `zpkg --version` has to agree with the release tag and with what
-// `zpkg info` prints for the toolchain it installed.
+// zpkg's own CalVer, defined by utils/zpkg/CMakeLists.txt from
+// utils/zpkg/VERSION. It is deliberately NOT the engine version: `zpkg --version`
+// answers "which package manager is this", while `zpkg info` and `zpkg list`
+// answer "which engine toolchain is installed".
 #ifndef ZPKG_TOOL_VERSION
 #error "ZPKG_TOOL_VERSION is set by utils/zpkg/CMakeLists.txt; do not compile zpkg by hand"
 #endif

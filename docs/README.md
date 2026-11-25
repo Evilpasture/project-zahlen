@@ -10,6 +10,7 @@ release's assets together.
 |---|---|
 | Build and runtime requirements | [Requirements](REQUIREMENTS.md) |
 | Game developer: install, link, run | [Consuming Zahlen](CONSUMING.md) |
+| Game developer: upgrade an installed toolchain | [Upgrading](UPGRADING.md) |
 | Game developer: create a scene and add gameplay | [First game](FIRST_GAME.md) |
 | Engine contributor: source builds, containers | [Engine development](DEVELOPMENT.md) |
 | Package maintainer: exports, manifests, ABI | [Packaging](../packaging/README.md) |

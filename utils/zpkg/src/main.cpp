@@ -25,6 +25,7 @@ void Usage() {
 Packages
   install <path|dir>...        Install archives from a directory or file
   install <remote>[:<name>]    Install a toolchain, or one package, from a remote
+  sync [options]               Install the active package set from a newer release
   verify <path|dir|remote>     Check archives without installing anything
   list [--files] [--json]      Installed toolchains, active one marked
   info <toolchain-id>          Compiler, profile, ABI, packages, requirements
@@ -48,6 +49,9 @@ Publishing and trust
 Install options
   --only <a,b,...>        Only these packages or components
   --toolchain <id>        Which toolchain to take from a remote
+  --version <tag>         Official release tag (install, sync); default: latest
+  --activate              (sync) make the installed toolchain active afterwards
+  --dry-run               (sync) print the package set, download nothing
   --require-checksums     Fail unless SHA256SUMS covers every archive
   -s, --require-signatures
                           Fail unless a trusted key signs the checksums
@@ -283,6 +287,91 @@ auto CommandInstall(Store& store, const Args& args) -> std::expected<void, Fail>
             return std::unexpected(std::move(prefix.error()));
         log::Say("Build your game with:");
         log::Say("  cmake -S . -B build -DCMAKE_PREFIX_PATH=\"" + ToUtf8(*prefix) + "\"");
+    }
+    return {};
+}
+
+// Releases are immutable toolchains, so there is no "update in place". The
+// upgrade verb installs exactly the packages the active toolchain currently has
+// (plus their dependency closure) from a newer release, into the new toolchain
+// id, then optionally repoints ACTIVE. Everything else -- signed index, hash
+// checks, closure resolution, archive validation -- is the ordinary install
+// path; only the component list comes from the store instead of argv.
+auto CommandSync(Store& store, const Args& args) -> std::expected<void, Fail> {
+    if (!args.positional.empty())
+        return std::unexpected(Fail {"sync takes no positional arguments; use --version, --from, --activate or --dry-run", UsageError});
+
+    const std::string remote = args.Value("from", "official");
+    const std::string tag    = args.Value("version");
+    if (remote != "official" && !tag.empty())
+        return std::unexpected(Fail {"--version selects an official release; omit --from when pinning a tag", UsageError});
+
+    auto active = store.Active();
+    if (!active)
+        return std::unexpected(std::move(active.error()));
+    if (!active->has_value())
+        return std::unexpected(Fail {"nothing is active; run 'zpkg install' first", 1});
+
+    auto packages = store.Packages(**active);
+    if (!packages)
+        return std::unexpected(std::move(packages.error()));
+    if (packages->empty())
+        return std::unexpected(Fail {"active toolchain '" + **active + "' has no packages to sync", 1});
+
+    InstallOptions options;
+    for (const auto& package: *packages)
+        options.only.push_back(package.info.package);
+    options.requireChecksums  = true;
+    options.requireSignatures = true;
+    options.force             = args.Has("force");
+    options.release           = remote == "official" ? tag : std::string {};
+
+    const std::string target = remote == "official"
+        ? "official " + (tag.empty() ? std::string("latest") : tag)
+        : remote;
+    log::Say("sync " + std::to_string(options.only.size()) + " packages from " + target +
+             " (active: " + **active + ")");
+    if (args.Has("dry-run")) {
+        for (const auto& name: options.only)
+            log::Say("  would install " + name);
+        log::Say("dry run: nothing downloaded or installed");
+        return {};
+    }
+
+    auto report = InstallFromRemote(store, remote, options);
+    if (!report)
+        return std::unexpected(std::move(report.error()));
+    auto finished = store.Finish(std::move(*report), options.ignoreMissing);
+    if (!finished)
+        return std::unexpected(std::move(finished.error()));
+    const std::string installed = finished->toolchain;
+    if (installed.empty())
+        return {};
+
+    // An upgrade that reports two different prefixes is worse than no hint:
+    // the installed one is what the packages contain, the active one is what
+    // CMake will pick up next. Say which is which.
+    auto prefix = store.Prefix(installed);
+    if (!prefix)
+        return std::unexpected(std::move(prefix.error()));
+
+    if (installed == **active) {
+        log::Say("already on " + installed + "; nothing to activate");
+        return {};
+    }
+    if (args.Has("activate")) {
+        auto switched = store.SetActive(installed);
+        if (!switched)
+            return std::unexpected(std::move(switched.error()));
+        log::Warn("switching changes future builds only: already-linked binaries keep the "
+                  "toolchain they were built against");
+        log::Say("active toolchain: " + installed);
+        log::Say("prefix: " + ToUtf8(*prefix));
+        log::Say("Build your game with:");
+        log::Say("  cmake -S . -B build -DCMAKE_PREFIX_PATH=\"" + ToUtf8(*prefix) + "\"");
+    } else {
+        log::Say("installed " + installed + "; activate it with 'zpkg use " + installed + "'");
+        log::Say("prefix (when active): " + ToUtf8(*prefix));
     }
     return {};
 }
@@ -617,7 +706,7 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
         Usage();
         return {};
     }
-    const std::set<std::string> commands = {"install", "verify", "list", "info", "use", "prefix", "env", "which", "remove", "shims", "index", "key", "remote"};
+    const std::set<std::string> commands = {"install", "sync", "verify", "list", "info", "use", "prefix", "env", "which", "remove", "shims", "index", "key", "remote"};
     if (commands.count(command) == 0)
         return std::unexpected(Fail {"unknown command '" + command + "'; use 'zpkg help'", UsageError});
     std::set<std::string> valued;
@@ -629,6 +718,10 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
     if (command == "install") {
         valued.insert({"from", "version"});
         flags.insert({"force", "ignore-missing"});
+    }
+    if (command == "sync") {
+        valued.insert({"from", "version"});
+        flags.insert({"activate", "dry-run", "force"});
     }
     if (command == "list") flags.insert({"files", "json"});
     if (command == "remove") { valued.insert("package"); flags.insert("force"); }
@@ -658,7 +751,7 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
 
     // Mutating commands take the store lock; read-only ones do not, so `zpkg
     // list` still answers while an install is running.
-    const bool mutating = command == "install" || command == "remove" || command == "use" || command == "key" || command == "remote" || command == "shims";
+    const bool mutating = command == "install" || command == "sync" || command == "remove" || command == "use" || command == "key" || command == "remote" || command == "shims";
     std::optional<StoreLock> lock;
     if (mutating) {
         auto acquired = StoreLock::Acquire(env.root);
@@ -669,6 +762,8 @@ auto Run(int argc, char** argv) -> std::expected<void, Fail> {
 
     if (command == "install")
         return CommandInstall(store, args);
+    if (command == "sync")
+        return CommandSync(store, args);
     if (command == "verify")
         return CommandVerify(store, args);
     if (command == "list")

@@ -34,6 +34,7 @@ with tempfile.TemporaryDirectory(prefix="zpkg-cli-") as tmp:
     assert "--only <a,b,...>" in usage and "--from" not in usage
     run("instal", code=2, contains="unknown command")
     for args in [("install", "--require-signaturs"),
+                 ("sync", "--bogus"),
                  ("install", "--require-signatures=no"),
                  ("list", "--from", "local"),
                  ("install", "--from"),
@@ -49,6 +50,11 @@ with tempfile.TemporaryDirectory(prefix="zpkg-cli-") as tmp:
     run("install", "application", "--version", "../bad", code=2, contains="invalid release tag")
     run("install", "application", "--from", "local", "--version", "v1", code=2)
     run("install", "./missing.tar.gz", code=1)
+    # sync is a store command: no active toolchain is a clear refusal, and
+    # --version only makes sense for the built-in official source.
+    run("sync", "--dry-run", code=1, contains="nothing is active")
+    run("sync", "--dry-run", "--from", "local", "--version", "v1", code=2,
+        contains="omit --from")
 
     published = root / "published"
     published.mkdir()
@@ -94,6 +100,11 @@ with tempfile.TemporaryDirectory(prefix="zpkg-cli-") as tmp:
         run("install", "application", "--from", "local", code=1, contains="no trusted signature")
         run("key", "add", key)
         run("install", "application", "--from=local", contains="Build your game with:")
+        # sync derives its package set from the store, never from argv; the dry
+        # run must never reach the remote.
+        dry = run("sync", "--dry-run", "--from", "local")
+        assert "would install zahlen-engine" in dry, dry
+        assert "dry run:" in dry, dry
         manifests = root / "store/store" / toolchain / "usr/share/zahlen/manifests"
         assert sorted(p.name for p in manifests.iterdir()) == ["zahlen-application.json", "zahlen-engine.json"]
         prefix = run("prefix").strip()

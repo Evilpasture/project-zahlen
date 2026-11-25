@@ -3,19 +3,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Fail when a version number is written in two places.
 
-`PROJECT_VERSION` in the top-level CMakeLists.txt is the only hand-written
-version in the tree. Everything else reads it:
+`PROJECT_VERSION` in the top-level CMakeLists.txt is the engine's semver and
+the source of the release tag. zpkg has its OWN CalVer in utils/zpkg/VERSION;
+they are different numbers on purpose, because a manager release is not an
+engine release. This check enforces all of the following at configure time:
 
-  * include/Zahlen/Version.hpp   generated from it by configure_file()
-  * utils/zpkg                   reads the project() line, so zpkg reports it
-  * .github/workflows/release.yml takes the release tag from it
-                                 (scripts/release-tag.sh)
-
-Three numbers are still literals, because a packager or a publisher reads them
-without running CMake: packaging/arch/PKGBUILD's pkgver (which its _commit must
-carry as the full hash), the example toolchain id in packaging/README.md, and
-zpkg's invalid-tag error message. Those are checked here, so a bump that forgets
-one fails at configure time instead of publishing two versions of one release.
+  * the engine release tag matches PROJECT_VERSION (when --tag is given)
+  * utils/zpkg/VERSION is well-formed CalVer YYYY.MM.DD
+  * PKGBUILD pkgver equals that CalVer
+  * PKGBUILD _commit is a full 40-character hash
+  * utils/zpkg/CMakeLists.txt still reads VERSION, not the engine project() line
 
 Usage:
     tests/version_test.py                 # report and check
@@ -37,8 +34,9 @@ PKGBUILD = ROOT / "packaging" / "arch" / "PKGBUILD"
 PACKAGING_README = ROOT / "packaging" / "README.md"
 ZPKG_REMOTE = ROOT / "utils" / "zpkg" / "src" / "remote.cpp"
 ZPKG_CMAKE = ROOT / "utils" / "zpkg" / "CMakeLists.txt"
+ZPKG_VERSION_FILE = ROOT / "utils" / "zpkg" / "VERSION"
 
-VERSION_RE = re.compile(r"\b\d+\.\d+\.\d+\b")
+CALVER_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -81,9 +79,28 @@ def main() -> int:
     commit = fields.get("_commit", "")
     notes.append(f"packaging/arch/PKGBUILD pkgver    {pkgver or '(missing)'}")
     notes.append(f"packaging/arch/PKGBUILD _commit    {commit or '(missing)'}")
-    if pkgver != expected:
+    # --- zpkg CalVer --------------------------------------------------------
+    calver = ZPKG_VERSION_FILE.read_text(encoding="utf-8").strip()
+    notes.append(f"utils/zpkg/VERSION (CalVer)        {calver}")
+    if not CALVER_RE.match(calver):
         problems.append(
-            f"packaging/arch/PKGBUILD pkgver={pkgver or '(missing)'}, expected pkgver={expected}"
+            f"utils/zpkg/VERSION is {calver!r}, expected CalVer YYYY.MM.DD "
+            "(run scripts/bump-zpkg-calver.sh)"
+        )
+    if pkgver != calver:
+        problems.append(
+            f"packaging/arch/PKGBUILD pkgver={pkgver or '(missing)'}, "
+            f"expected zpkg CalVer {calver} (run scripts/bump-zpkg-calver.sh)"
+        )
+    if pkgver == expected:
+        problems.append(
+            "PKGBUILD pkgver still tracks the engine semver; zpkg must use its "
+            "own CalVer from utils/zpkg/VERSION"
+        )
+    if "ZPKG_VERSION_FILE" not in ZPKG_CMAKE.read_text(encoding="utf-8"):
+        problems.append(
+            "utils/zpkg/CMakeLists.txt no longer reads utils/zpkg/VERSION; "
+            "zpkg would silently fall back to the engine version"
         )
     if not COMMIT_RE.match(commit):
         problems.append(

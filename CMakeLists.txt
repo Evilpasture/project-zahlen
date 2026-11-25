@@ -221,10 +221,9 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/Zahlen/Version.hpp.in"
     "${ZHLN_GENERATED_INCLUDE_DIR}/Zahlen/Version.hpp" @ONLY)
 include_directories(BEFORE SYSTEM "${ZHLN_GENERATED_INCLUDE_DIR}")
 
-# PROJECT_VERSION is the only hand-written version number; the copies other tools
-# need (zpkg's ToolVersion, the PKGBUILD, packaging/README.md) are checked here
-# rather than trusted. The check is cheap and errors at configure time, which is
-# the last moment before a wrong number ends up inside a published package.
+# PROJECT_VERSION is the engine's only hand-written version number. zpkg has its
+# own CalVer in utils/zpkg/VERSION, mirrored into the PKGBUILD; the check below
+# refuses a release whose engine tag, zpkg CalVer and PKGBUILD have drifted apart.
 if(ZHLN_HAS_PYTHON)
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/version_test.py" --check

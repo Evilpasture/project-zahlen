@@ -218,14 +218,14 @@ jobs:
 
       # No sudo, no root, no LD_LIBRARY_PATH: the script re-executes itself as an
       # unprivileged user and installs the packages with zpkg into ~/.local.
-      - name: Install engine packages with zpkg and render app/cube.cpp
+      - name: Install engine packages with zpkg and link a consumer
         run: |
           mkdir -p toolchain-output
           docker run --rm --entrypoint bash \
             -v "$PWD/toolchain-output:/pkg-output" \
             "${{ steps.image.outputs.ref }}" scripts/test-toolchain-install.sh
 
-      - name: Upload toolchain packages and rendered frame
+      - name: Upload toolchain packages and install smoke logs
         if: always()
         uses: actions/upload-artifact@v4
         with:

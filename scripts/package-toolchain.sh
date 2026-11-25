@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Package a built Release tree into zpkg-installable artifacts, plus the small
-# extras a release needs (the manager binary, the consumer example, the release
+# extras a release needs (the manager binary, debug symbols, the pinned release
 # key). This is the publishing half of scripts/test-toolchain-install.sh: that
-# script packages and then *installs and runs* the result as an unprivileged
+# script packages and then *installs and links* the result as an unprivileged
 # user, which is a test; this one only produces the release, and is what the
 # release workflow publishes.
 #
@@ -17,16 +17,18 @@
 #                    toolchain.json  <- this directory is what `zpkg install`
 #                    is pointed at, and it must contain nothing but packages:
 #                    zpkg's indexer claims every zahlen-*.tar.gz it sees.
-#   <out>/tools/     zpkg binary, cube-consumer-<id>.tar.gz, SHA256SUMS.tools.
-#                    The consumer bundle is deliberately NOT named zahlen-*, so
-#                    a user who flattens the release into one directory can
-#                    still run `zpkg install .` without the bundle being parsed
-#                    as a package.
+#   <out>/tools/     zpkg binary, debug symbols, KEY-FINGERPRINT.txt,
+#                    SHA256SUMS.tools. No consumer example ships with a release:
+#                    an example that CI untars and builds is a fixture with a
+#                    version-dependent filename, not an example for humans.
 #
-# Signing key: set ZHLN_RELEASE_KEY_PEM to a base64-encoded PKCS#8 ed25519
-# private key (GitHub secret) to sign with the project key. Without it an
-# ephemeral key is generated so forks can still produce a consistent release;
-# the fingerprint is printed either way, and users who care pin it.
+# Signing key: ZHLN_RELEASE_KEY_PEM is REQUIRED and holds the base64-encoded
+# PKCS#8 ed25519 project key (GitHub secret). A missing secret is an error, not
+# a reason to generate a throwaway key: that silently rotated the publisher on
+# every release and forced every user to re-add a key. The public half is pinned
+# at packaging/keys/zahlen-release.pub and checked here before anything is
+# signed. ZHLN_RELEASE_KEY_PEM_PREVIOUS optionally dual-signs a rotation.
+# ZHLN_ALLOW_EPHEMERAL_KEY=1 is the explicit escape hatch for forks and tests.
 #
 # No output is discarded here. The CI log is the only place a failure explains
 # itself, and nobody reads it until the run is already red -- by which point a
@@ -139,18 +141,29 @@ rm -rf "${debugstage}"
 
 # ---------------------------------------------------------------------------
 # Release key. zpkg's signature files are "<fingerprint> <base64 signature>",
-# and the fingerprint is the first 32 hex characters of SHA-256 over the raw
-# 32-byte public key, so it can be produced here without a store or a zpkg run.
+# ONE LINE PER SIGNER, and the fingerprint is the first 32 hex characters of
+# SHA-256 over the raw 32-byte public key. Trust is anchored at the checked-in
+# packaging/keys/zahlen-release.pub, so signing with anything else is a bug.
 # ---------------------------------------------------------------------------
 keyfile=$(mktemp)
-trap 'rm -f "${keyfile}"' EXIT
+prevfile=$(mktemp)
+trap 'rm -f "${keyfile}" "${prevfile}" "${tools}/release-key.raw"' EXIT
+
+ephemeral=0
 if [ -n "${ZHLN_RELEASE_KEY_PEM:-}" ]; then
     printf '%s' "${ZHLN_RELEASE_KEY_PEM}" | base64 -d >"${keyfile}"
     printf 'signing with the project key from ZHLN_RELEASE_KEY_PEM\n'
-else
+elif [ "${ZHLN_ALLOW_EPHEMERAL_KEY:-0}" = 1 ]; then
+    ephemeral=1
     openssl genpkey -algorithm ed25519 -out "${keyfile}"
-    printf 'warning: no ZHLN_RELEASE_KEY_PEM; signing with a throwaway key.\n' >&2
+    printf 'warning: ZHLN_ALLOW_EPHEMERAL_KEY=1; signing with a throwaway key.\n' >&2
     printf '         Users of this release must re-add the published key.\n' >&2
+else
+    echo "error: ZHLN_RELEASE_KEY_PEM is not set." >&2
+    echo "       Refusing to sign a release with a throwaway key: it rotates the" >&2
+    echo "       publisher and forces every user to re-add a key. See" >&2
+    echo "       packaging/keys/README.md (forks: ZHLN_ALLOW_EPHEMERAL_KEY=1)." >&2
+    exit 1
 fi
 
 pubfile="${pkgs}/zahlen-release-key.pub"
@@ -162,14 +175,51 @@ rm -f "${tools}/release-key.raw"
 printf '%s\n' "${fingerprint}" >"${tools}/KEY-FINGERPRINT.txt"
 printf 'release key fingerprint: %s\n' "${fingerprint}"
 
+pinned="${root}/packaging/keys/zahlen-release.pub"
+pinned_fp="${root}/packaging/keys/FINGERPRINT"
+if [ "${ephemeral}" -eq 0 ]; then
+    if [ ! -f "${pinned}" ] || [ ! -f "${pinned_fp}" ]; then
+        echo "error: packaging/keys/zahlen-release.pub / FINGERPRINT are missing." >&2
+        echo "       Run scripts/bootstrap-release-key.sh once." >&2
+        exit 1
+    fi
+    if [ "$(tr -d '[:space:]' <"${pinned}")" != "$(tr -d '[:space:]' <"${pubfile}")" ]; then
+        echo "error: ZHLN_RELEASE_KEY_PEM does not match ${pinned}." >&2
+        echo "       Either the secret was rotated silently or the pinned key is stale." >&2
+        exit 1
+    fi
+    if [ "$(tr -d '[:space:]' <"${pinned_fp}")" != "${fingerprint}" ]; then
+        echo "error: ${pinned_fp} says $(tr -d '[:space:]' <"${pinned_fp}"), key says ${fingerprint}." >&2
+        exit 1
+    fi
+    printf 'pinned key matches: %s (%s)\n' "${fingerprint}" "${pinned}"
+fi
+
+# One line per signer. A deliberate rotation publishes BOTH signatures for one
+# release, so stores holding either key still verify it. zpkg accepts a
+# signature from any trusted key and never downloads a key by itself.
+signers=("${keyfile}:${fingerprint}")
+if [ -n "${ZHLN_RELEASE_KEY_PEM_PREVIOUS:-}" ]; then
+    printf '%s' "${ZHLN_RELEASE_KEY_PEM_PREVIOUS}" | base64 -d >"${prevfile}"
+    previous_fp=$(openssl pkey -in "${prevfile}" -pubout -outform DER | tail -c 32 | sha256sum | cut -c1-32)
+    signers+=("${prevfile}:${previous_fp}")
+    printf 'dual-signing with the previous key: %s\n' "${previous_fp}"
+fi
+
 sign_file() {
-    openssl pkeyutl -sign -inkey "${keyfile}" -rawin -in "$1" -out "$1.sig"
-    {
-        printf '%s ' "${fingerprint}"
-        base64 -w0 "$1.sig"
-        printf '\n'
-    } >"$1.ed25519"
-    rm -f "$1.sig"
+    : >"$1.ed25519"
+    local spec key fp
+    for spec in "${signers[@]}"; do
+        key=${spec%%:*}
+        fp=${spec##*:}
+        openssl pkeyutl -sign -inkey "${key}" -rawin -in "$1" -out "$1.sig"
+        {
+            printf '%s ' "${fp}"
+            base64 -w0 "$1.sig"
+            printf '\n'
+        } >>"$1.ed25519"
+        rm -f "$1.sig"
+    done
 }
 
 sign_file "${pkgs}/SHA256SUMS"
@@ -181,20 +231,23 @@ sign_file "${pkgs}/index.json"
 cp "${metadata}" "${pkgs}/toolchain.json"
 
 # ---------------------------------------------------------------------------
-# Extras: the manager itself and the consumer project the release is tested
-# with, so a user does not need this checkout to use the toolchain.
+# Extras: the manager binary and optional debug symbols. No example consumer
+# project is published: it was a machine-read fixture whose filename carried
+# the toolchain id, so a renamed or stale example could break a release job.
+# The consumer smoke test is generated by the jobs that need it.
 # ---------------------------------------------------------------------------
 [ -x "${zpkg_bin}" ] || {
     echo "error: ${zpkg_bin} is missing; build utils/zpkg first (or set ZPKG_BIN)" >&2
     exit 1
 }
 install -m755 "${zpkg_bin}" "${tools}/zpkg-linux-x86_64"
-tar -C tests/installed -czf "${tools}/cube-consumer-${id}.tar.gz" .
-# Named differently from the packages' SHA256SUMS on purpose: a release is a
-# flat directory once downloaded, and two files with that name would collide.
-(cd "${tools}" && sha256sum zpkg-linux-x86_64 "cube-consumer-${id}.tar.gz" $( [ -f "${symbols}" ] && basename "${symbols}" ) >SHA256SUMS.tools)
+tools_files=(zpkg-linux-x86_64)
+if [ -f "${symbols}" ]; then
+    tools_files+=("$(basename "${symbols}")")
+fi
+(cd "${tools}" && sha256sum "${tools_files[@]}" >SHA256SUMS.tools)
 
 printf '\nrelease contents:\n'
 (cd "${out}" && find . -maxdepth 2 -type f -printf '  %-46p %10s bytes\n' | sort)
-printf '\ninstall with:\n  zpkg key add %s/zahlen-release-key.pub\n  zpkg install %s --require-checksums --require-signatures\n' \
-    "${pkgs}" "${pkgs}"
+printf '\ninstall with:\n  zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"\n  zpkg install %s --require-checksums --require-signatures\n' \
+    "${pkgs}"

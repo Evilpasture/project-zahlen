@@ -61,7 +61,7 @@ Goal: Collapse the triple API (`Engine.hpp` + `Capabilities/` + `Native*` + `COM
 - [x] Strip `ZahlenEngine` install to `libzahlen_engine.so` + stripped `include/` only (no `Jolt` target or `Jolt/` headers, no private headers)
 - [x] Convert optional COM extensions to source/header-only packages compiled by consumer toolchain over `Zahlen::Engine` (stop installing prebuilt static `.a` archives)
 - [x] Remove `${CMAKE_CXX_COMPILER_VERSION}` and `${ZHLN_GIT_HASH}` (and Jolt/GLIBCXX date locks where applicable) from `ZHLN_TOOLCHAIN_ABI` / `PackageConfig.cmake.in`, preserving glibc floor + runtime `ChainInNode` `LayoutHash` validation
-- [x] Update packaging scripts (`scripts/package-toolchain.sh`, `scripts/test-toolchain-install.sh`) and `tests/installed/` consumer smoke test; verify install + consumer build
+- [x] Update packaging scripts (`scripts/package-toolchain.sh`, `scripts/test-toolchain-install.sh`) and the (since removed) `tests/installed/` consumer smoke test; verify install + consumer build
 
 ## Phase 6: Re-enable Tests & Samples (`-DZHLN_BUILD_TESTS=ON -DZHLN_BUILD_SAMPLES=ON`)
 - [x] Delete obsolete tests covering removed `Capabilities/`, `Native*`, `Engine.hpp`, or `GameModule` plumbing
@@ -73,7 +73,7 @@ Goal: Collapse the triple API (`Engine.hpp` + `Capabilities/` + `Native*` + `COM
 
 ## Completion & Verification Summary
 - **Single-`.so` boundary**: `libzahlen_engine.so` is the sole shipped shared library (161 `ZHLN::` public symbols + intentional `mimalloc` allocator overrides; zero `JPH::`, Vulkan/volk/VMA, Clay, miniaudio, meshoptimizer, SPIRV-Reflect, cgltf, or stb symbol/header leaks; zero `libJolt*` artifacts; Jolt sealed as hidden PIC static archive).
-- **Toolchain packaging**: 30 relocatable CMake packages (`ZahlenEngine` shared library, `ZahlenCooker` binary, and 28 source/header packages under `share/zahlen/src/<pkg>`, zero `.a` archives). Verified with `-DZHLN_DEV_MODE=OFF -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON`, `zpkg` selective `--only` install + checksum verification + prefix/store relocation, `tests/installed/` consumer + `zcook` pack mount + headless Vulkan frame capture, and full out-of-tree compilation & execution of all 29 CMake library packages (including C++26 modules) in both `Release` and `Debug` (`-O0 -g`) against the single Release `libzahlen_engine.so`.
+- **Toolchain packaging**: 30 relocatable CMake packages (`ZahlenEngine` shared library, `ZahlenCooker` binary, and 28 source/header packages under `share/zahlen/src/<pkg>`, zero `.a` archives). Verified with `-DZHLN_DEV_MODE=OFF -DZHLN_INSTALL_TOOLCHAIN_PACKAGES=ON`, `zpkg` selective `--only` install + checksum verification + prefix/store relocation, the (since removed) `tests/installed/` consumer smoke, and full out-of-tree compilation & execution of all 29 CMake library packages (including C++26 modules) in both `Release` and `Debug` (`-O0 -g`) against the single Release `libzahlen_engine.so`.
 - **Governance**: `ZHLN_GOVERNANCE_CACHE=0 python3 configure/run_governance_checks.py` — 15/15 checks passed (0 violations).
 - **Test suites (Release, Fedora 44 aarch64, Mesa lavapipe `LP_NATIVE_VECTOR_WIDTH=256`)**:
   - `tests/TestImage`: PASSED (0 failed)

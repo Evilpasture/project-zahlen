@@ -732,7 +732,10 @@ auto Store::Finish(InstallReport report, bool ignoreMissing) -> std::expected<In
     } else {
         log::Say("active toolchain: " + **active + " (unchanged; 'zpkg use <id>' to switch)");
     }
-    auto prefix = Prefix();
+    // On an upgrade the active toolchain is deliberately left alone, so the
+    // active prefix and the prefix of the packages just installed differ.
+    // Print the installed one: that is the path the report is about.
+    auto prefix = Prefix(report.toolchain);
     if (!prefix)
         return std::unexpected(std::move(prefix.error()));
     log::Say("prefix: " + ToUtf8(*prefix));

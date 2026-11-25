@@ -330,8 +330,8 @@ esac
 
 # The PR c++/125280 check below is a *build-host* question -- "can this
 # compiler compile JoltPhysics" -- and most installs of this compiler never
-# build the engine: release consumers and the release workflow's render job
-# install it for its runtime and to compile a consumer app, neither of which
+# build the engine: release consumers and the release workflow's consume job
+# install it for its runtime and to compile a link smoke test, neither of which
 # touches Jolt, and both call this script from a scripts-only checkout where
 # cmake/probes/ does not even exist. So the check is opt-in
 # (ZHLN_GCC_VERIFY_JOLT=1, which scripts/ci-ubuntu-2204-env.sh --build sets):

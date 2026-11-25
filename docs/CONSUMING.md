@@ -30,17 +30,23 @@ if you choose that path.
 
 ## 2. Install the engine
 
-Download `zahlen-release-key.pub` from your release and verify its fingerprint
-through a trusted channel. Trust the publisher once, then install:
+The project key is long-lived and pinned in this repository at
+[`packaging/keys/zahlen-release.pub`](../packaging/keys/zahlen-release.pub)
+(Arch users: `/usr/share/zahlen/zahlen-release-key.pub`). Verify its fingerprint
+out of band, then trust it **once**:
 
 ```sh
-zpkg key add zahlen-release-key.pub --name "zahlen release"
+zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
 zpkg install
 ```
 
 `install` selects Application and its dependencies from the latest official
 GitHub release. It downloads packages and requires a trusted signature and
-matching archive hashes. A changed signing key requires explicit trust setup.
+matching archive hashes. The key is committed to git history, so it is not
+self-authenticating: do not trust a `zahlen-release-key.pub` that came only from
+the release page it signs. Deliberate rotations are dual-signed, so an existing
+store keeps working; an unannounced rotation is a refusal, not an instruction to
+add another key. See [Upgrading](UPGRADING.md) for the version lifecycle.
 
 To select components or pin a release:
 
@@ -50,9 +56,12 @@ zpkg install application --version <release-tag>
 ```
 
 The first installed toolchain becomes active. Later installs preserve the active
-toolchain; use `zpkg use <id>` to switch. Repeated installs keep packages already
-present. `zpkg list` shows installed toolchains and `zpkg prefix` prints the active
-prefix. For reproducible builds, use `zpkg prefix <id>`.
+toolchain; `zpkg sync --activate` installs the same package set from a newer
+release and switches it, or `zpkg use <id>` switches explicitly. Repeated installs
+keep packages already present. `zpkg list` shows installed toolchains and
+`zpkg prefix` prints the active prefix. For reproducible builds, use
+`zpkg prefix <id>`. `zpkg --version` is the manager's CalVer, **not** the engine
+version; `zpkg list` / `zpkg info` show the installed toolchain.
 
 For offline archives and custom remotes, see the
 [zpkg reference](../utils/zpkg/README.md#commands).

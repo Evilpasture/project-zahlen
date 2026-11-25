@@ -11,32 +11,34 @@ name: Release (Ubuntu 22.04 baseline)
 # then installed, compiled against and run by a machine that has nothing but a
 # normal dev environment and the release itself.
 #
-# Three jobs, deliberately different in kind:
+# Four jobs, deliberately different in kind:
+#   version    resolve the engine tag from CMakeLists.txt and zpkg's CalVer from
+#              the release date. Two version schemes, two sources of truth.
 #   toolchain  build *inside* Ubuntu 22.04 (docker/release-jammy/Containerfile: apt
 #              packages, and GCC 16 from the Ubuntu toolchain PPA since the tree
-#              needs -freflection), package, sign, publish to a GitHub Release.
-#              Nothing is cross-compiled: the compiler, binutils, wayland-scanner
-#              and the libraries are the distro's own, so the artifact's glibc
-#              floor is the floor of the machine that built it -- and it is the
-#              same compiler package a jammy user installs.
+#              needs -freflection), package, sign with the PINNED project key,
+#              check the artifacts against each other, and publish. A missing
+#              key or a stale CalVer/fingerprint stops the release here.
 #              This job runs no test suite: the full ztest gate for the commit
-#              is ci.yml's "Test (release)" (unsanitised, current lavapipe),
-#              and what the shipped bytes do at run time is consume/render
-#              below. A suite run on jammy could only fail at Vulkan device
-#              creation -- its Mesa 23.x is below the engine's driver floor --
-#              while still costing the compile of every test target.
+#              is ci.yml's "Test (release)" (unsanitised, current lavapipe).
+#              A suite run on jammy could only fail at Vulkan device creation --
+#              its Mesa 23.x is below the engine's driver floor -- while still
+#              costing the compile of every test target.
 #   consume    NO container, NO checkout of build outputs: a fresh jammy runner
-#              downloads that release, installs it with zpkg as an unprivileged
-#              user, builds a consumer app against it and checks the glibc floor
-#              of what got installed. If this job passes, the release installs,
-#              links and loads on jammy -- which is the claim the release makes.
-#   render     the frame itself, on a runner whose *driver* meets the engine's
-#              floor. jammy cannot be that runner: its Mesa is 23.x and lavapipe
-#              only grew VK_EXT_descriptor_heap in Mesa 26.2, which no PPA
-#              publishes for jammy. So this job runs on noble, installs the same
-#              published release, and runs the cube binary the jammy job built.
-#              The release under test does not change; only the machine with the
-#              Vulkan driver does.
+#              downloads that release, trusts the pinned key, installs it with
+#              zpkg as an unprivileged user, generates a link smoke test and
+#              checks the glibc floor. It then installs the PREVIOUS release
+#              into a second store and runs `zpkg sync` to this one: an upgrade
+#              must never require another `key add`.
+#   staleness  re-download the published assets AND the release body and check
+#              that they still agree with the pinned key, the notes, the CalVer
+#              and each other. A re-upload can replace every asset while the
+#              body keeps advertising the old fingerprint; this is the guard.
+#
+# No rendered frame or consumer example is published: an "example" that a job
+# has to untar and compile is a fixture with a version-dependent filename, not
+# documentation. Device-level rendering is exercised by ci.yml on a current
+# lavapipe; the release lane claims only "installs, links and loads on jammy".
 
 on:
   push:
@@ -90,6 +92,7 @@ jobs:
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      calver: ${{ steps.version.outputs.calver }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -106,9 +109,11 @@ jobs:
             version=$(scripts/release-tag.sh --print-version)
             tag=$(scripts/release-tag.sh)
           fi
+          calver=$(date -u +%Y.%m.%d)
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "release ${tag} (engine version ${version})" >> "$GITHUB_STEP_SUMMARY"
+          echo "calver=${calver}" >> "$GITHUB_OUTPUT"
+          echo "release ${tag} (engine ${version}, zpkg CalVer ${calver})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: A tag push must agree with the tree
         if: github.event_name == 'push'
@@ -121,9 +126,8 @@ jobs:
             echo "       Bump CMakeLists.txt, or delete the tag and re-create it from that commit." >&2
             exit 1
           fi
-          # The other copies of the number: the PKGBUILD's pkgver, the toolchain
-          # id in packaging/README.md, zpkg's example tag. A release built from a
-          # tree where those disagree would publish two versions of one release.
+          # Engine semver copies are checked here; zpkg's separate CalVer is
+          # checked against the release date in the toolchain job below.
           python3 tests/version_test.py --check --tag "${RESOLVED_TAG}"
 
   toolchain:
@@ -138,6 +142,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false
+
+      # zpkg is CalVer. A stale utils/zpkg/VERSION must stop the release before
+      # a binary with yesterday's date is published.
+      - name: zpkg CalVer must be the release date
+        env:
+          CALVER: ${{ needs.version.outputs.calver }}
+        run: scripts/bump-zpkg-calver.sh --check --date "${CALVER}"
+
+      - name: Release key must be configured
+        env:
+          HAS_KEY: ${{ secrets.ZHLN_RELEASE_KEY_PEM != '' }}
+        run: |
+          if [ "${HAS_KEY}" != true ]; then
+            echo "error: ZHLN_RELEASE_KEY_PEM secret is missing." >&2
+            echo "       Run scripts/bootstrap-release-key.sh and set the secret;" >&2
+            echo "       package-toolchain.sh refuses to invent a throwaway key." >&2
+            exit 1
+          fi
 
       # The compiler cache is what makes an iteration cheap: the build directory is
       # thrown away every run, so without it every translation unit -- including all
@@ -240,6 +262,8 @@ jobs:
             -e CCACHE_DIR=/ccache \
             -e ZHLN_GLIBC_BASELINE="${GLIBC_BASELINE}" \
             -e ZHLN_SLANG_VERSION="${{ steps.slang.outputs.version }}" \
+            -e ZHLN_RELEASE_KEY_PEM="${{ secrets.ZHLN_RELEASE_KEY_PEM }}" \
+            -e ZHLN_RELEASE_KEY_PEM_PREVIOUS="${{ secrets.ZHLN_RELEASE_KEY_PEM_PREVIOUS }}" \
             zahlen-release-builder:jammy bash scripts/build-release-toolchain.sh /dist
 
       # A second look from the host, on the packaged archives rather than a build
@@ -257,7 +281,7 @@ jobs:
             echo "Toolchain \`${id}\`, ${compiler} ${compiler_version}."
             echo
             echo "* glibc baseline: **${GLIBC_BASELINE}**, enforced by \`scripts/check-glibc-floor.sh\`"
-            echo "* release key fingerprint: \`${fingerprint}\`"
+            echo "* release key fingerprint: \`${fingerprint}\` (pinned in \`packaging/keys/zahlen-release.pub\`)"
             backends=$(cat dist/window-backends.txt || echo 'wayland=ON x11=OFF')
             echo "* window backends: ${backends} (GLFW is vendored and static; Wayland is the primary backend)"
             echo "* built natively on Ubuntu 22.04 (no sysroot, no cross-compilation)"
@@ -266,44 +290,45 @@ jobs:
             echo
             echo '## Install'
             echo
+            echo 'The project key is pinned in this repository. Trust it once:'
+            echo
             echo '```sh'
-            echo 'zpkg key add zahlen-release-key.pub --name "zahlen release"'
+            echo 'zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"'
             echo 'zpkg install . --require-checksums --require-signatures'
             echo '```'
             echo
-            echo '## Build against it'
+            echo '## Upgrade'
             echo
             echo '```sh'
-            echo 'tar -xzf cube-consumer-*.tar.gz -C consumer'
-            echo 'cmake -S consumer -B consumer-build -G Ninja \'
-            echo '  -DCMAKE_BUILD_TYPE=Release \'
-            echo "  -DCMAKE_CXX_COMPILER=g++-${GCC_BIN_SUFFIX} \\"
-            echo '  -DCMAKE_PREFIX_PATH="$(zpkg prefix)"'
-            echo 'cmake --build consumer-build'
+            echo 'zpkg sync --activate'
             echo '```'
             echo
-            echo 'The release was built with a released GCC 16, not the trunk'
-            echo 'snapshot Ubuntu 22.04 offers. Get it with the script in this repository,'
-            echo 'which downloads it, checks the version and compiles a probe with it:'
+            echo 'Requirements, the game build and the full upgrade flow are in'
+            echo "[Consuming Zahlen](https://github.com/Evilpasture/project-zahlen/blob/${RELEASE_TAG}/docs/CONSUMING.md)"
+            echo 'and [Upgrading](https://github.com/Evilpasture/project-zahlen/blob/${RELEASE_TAG}/docs/UPGRADING.md)'
+            echo 'at this tag. No example project or rendered frame ships with the release:'
+            echo 'an example that a job has to parse is a fixture, and fixtures belong to CI.'
             echo
-            echo '```sh'
-            echo 'sudo scripts/install-gcc-prebuilt.sh 16.2.0 /opt/gcc16'
-            echo 'export PATH=/opt/gcc16/bin:$PATH'
-            echo '```'
-            echo
-            echo 'Or `sudo scripts/ci-ubuntu-2204-env.sh --consumer`, which does that and'
-            echo 'installs the runtime libraries as well.'
-            echo
-            echo 'That is not only for building against the toolchain: the engine and the'
-            echo 'tools were compiled by that GCC, so they need its runtime at run time --'
-            echo '`GLIBCXX_3.4.36` and `GCC_13.0.0`, where 22.04 ships 3.4.30. The script'
-            echo 'installs that runtime and registers it with `ldconfig`, which is also why'
-            echo 'it has to run as root. Nothing else is implied -- the release'
-            echo 'carries its own GLFW (static, inside `libzahlen_engine`), so no'
-            echo '`libglfw3` is required, and the GLIBC_2.35 floor is checked before'
+            echo 'The engine and tools were compiled by a released GCC 16, so they need its'
+            echo 'runtime at run time -- `GLIBCXX_3.4.36` and `GCC_13.0.0`, where 22.04 ships'
+            echo '3.4.30. Nothing else is implied -- the release carries its own GLFW (static,'
+            echo 'inside `libzahlen_engine`), so no `libglfw3` is required, and the GLIBC_2.35'
+            echo 'floor is checked before'
             echo 'anything is published.'
           } > dist/release-notes.md
           cat dist/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Catch the exact class of bug that produced five releases with a
+      # fingerprint in the notes that did not match the published key.
+      - name: Reject stale release assets and notes before publishing
+        env:
+          CALVER: ${{ needs.version.outputs.calver }}
+        run: |
+          scripts/check-release-consistency.sh \
+            --assets dist/packages --tools dist/tools \
+            --notes dist/release-notes.md \
+            --versions --date "${CALVER}" \
+            --zpkg dist/tools/zpkg-linux-x86_64
 
       - name: Publish the release
         env:
@@ -323,10 +348,9 @@ jobs:
             #
             # A release has to carry one generation, so drop every asset this
             # build is not about to re-upload: what stays is exactly `dist/`.
-            # That includes the rendered frame an earlier run attached -- the
-            # consumer job re-attaches it with `--clobber` when it renders, so
-            # the frame is missing only while a run is in flight or when the
-            # consumer half is failing, which is information rather than damage.
+            # No other job uploads assets to a release any more: the old render
+            # job attached a frame afterwards, which let the body and the assets
+            # describe two different generations. A release is exactly dist/.
             keep=$(cd dist && printf '%s\n' packages/* tools/* | sed 's|.*/||')
             gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' |
               while IFS= read -r asset; do
@@ -438,7 +462,10 @@ jobs:
           # The manager binary ships separately from the packages, so it has its
           # own sums file (the packages' SHA256SUMS is zpkg's own contract).
           ( cd dist && sha256sum -c SHA256SUMS.tools )
-          zpkg key add dist/zahlen-release-key.pub --name "zahlen release"
+          # Trust the key pinned in git history, NOT the one from this release
+          # page. If the two differ, the install below refuses: that is the
+          # whole point of an out-of-band trust anchor.
+          zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
           zpkg key list
           # No ZHLN_ROOT: the default per-user store is what a developer gets.
           zpkg install dist --require-checksums --require-signatures
@@ -446,11 +473,26 @@ jobs:
           zpkg prefix | tee "${RUNNER_TEMP}/prefix.txt"
           zpkg which zcook | tee "${RUNNER_TEMP}/zcook.txt"
 
-      - name: Build the consumer app against the installed toolchain
+      # A generated smoke fixture, not an example: nothing shipped in the
+      # release is untarred here and no checked-in sample is compiled by CI.
+      - name: Build a link smoke test against the installed toolchain
         run: |
           prefix=$(cat "${RUNNER_TEMP}/prefix.txt")
           mkdir -p consumer
-          tar -xzf "dist/cube-consumer-${{ steps.tc.outputs.id }}.tar.gz" -C consumer
+          cat >consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.28)
+          project(ZahlenConsumerSmoke LANGUAGES CXX)
+          find_package(ZahlenApplication CONFIG REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE Zahlen::Application)
+          EOF
+          cat >consumer/main.cpp <<'EOF'
+          #include <Zahlen/App.hpp>
+
+          int main(int argc, char* argv[]) {
+              return ZHLN::App().Main(argc, argv);
+          }
+          EOF
           cmake -S consumer -B consumer-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="gcc-${{ steps.tc.outputs.gcc }}" \
@@ -464,190 +506,86 @@ jobs:
             grep -Fn "${GITHUB_WORKSPACE}/src" consumer-build/build.ninja >&2
             exit 1
           fi
+          # The installed packages must be self-contained. No rendered frame:
+          # jammy's lavapipe is below the engine's Vulkan floor, and a device
+          # check belongs to ci.yml's "Test (release)" job.
+          env -u LD_LIBRARY_PATH ldd consumer-build/consumer | tee consumer-ldd.txt
+          ! grep -q 'not found' consumer-ldd.txt
+          # --help is handled before host/device creation, so this exercises
+          # the CLI and the loader without needing a Vulkan driver.
+          env -u LD_LIBRARY_PATH consumer-build/consumer --help >consumer-help.txt 2>&1
+          test -s consumer-help.txt
 
-      # Rendering deliberately does not happen here. This job's lavapipe is
-      # jammy's Mesa 23.x, which does not expose VK_EXT_descriptor_heap or
-      # VK_KHR_maintenance5 -- the engine requires both (RenderInitDevice.cpp),
-      # so device creation cannot succeed on this runner no matter how the
-      # release was built. The `render` job runs the same binary on a driver
-      # above that floor. Handing it over keeps the two claims apart: this job
-      # proves the release *installs and links on jammy*, that one proves it
-      # *runs*.
-      - name: Hand the built consumer to the render job
-        uses: actions/upload-artifact@v4
-        with:
-          name: zahlen-consumer-cube
-          path: consumer-build/cube
-          if-no-files-found: error
-          retention-days: 7
-
-      # Same guard as the build side, but on what actually got installed into
       # the user's store -- the artifact the user runs, not the build tree.
       - name: Check the installed packages against the baseline
         run: scripts/check-glibc-floor.sh "${GLIBC_BASELINE}" "$(cat "${RUNNER_TEMP}/prefix.txt")"
 
-  render:
-    name: Render the frame (driver above the engine's floor)
-    needs: [version, consume]
-    # noble, because it is the only LTS with a Mesa new enough to run this
-    # engine on a CPU: lavapipe implements VK_EXT_descriptor_heap first in Mesa
-    # 26.2, and kisak-mesa publishes 26.2.x for noble but not for jammy. The
-    # artifact under test is unchanged -- the release built on jammy, installed
-    # by the same zpkg, running the binary the consume job compiled.
-    runs-on: ubuntu-24.04
+      # The upgrade path was invisible to CI: every consume run started from an
+      # empty store and added the just-downloaded key. This one starts from the
+      # PREVIOUS release's store and must not need another `key add` for the
+      # new release. A silently rotated (throwaway) key fails right here.
+      - name: Upgrade from the previous release without re-adding a key
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export PATH="${HOME}/.local/bin:${PATH}"
+          previous=$(gh release list --limit 2 --exclude-drafts --exclude-prereleases \
+            --json tagName --jq '.[1].tagName')
+          test -n "${previous}"
+          echo "previous release: ${previous}"
+          mkdir -p prev-dist
+          gh release download "${previous}" -D prev-dist
+
+          # A separate store: an existing 0.5.x user, not the fresh install above.
+          export ZHLN_ROOT="${RUNNER_TEMP}/upgrade-store"
+          mkdir -p "${ZHLN_ROOT}"
+          zpkg key add prev-dist/zahlen-release-key.pub --name "previous release"
+          zpkg install prev-dist --require-checksums --require-signatures
+          zpkg list
+
+          # The one-time trust step for the long-lived project key. After this,
+          # no `key add` may appear: sync must install the new release as-is.
+          zpkg key add packaging/keys/zahlen-release.pub --name "zahlen release"
+          zpkg sync --version "${RELEASE_TAG}" --activate
+          zpkg list
+          expected=$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' dist/toolchain.json)
+          test "$(zpkg list | awk '/\*/ {print $2}')" = "${expected}"
+
+  staleness:
+    name: Verify the published release is not stale
+    needs: [version, toolchain, consume]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
-    timeout-minutes: 30
+      CALVER: ${{ needs.version.outputs.calver }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      # Everything the release runs is looked up through the dynamic loader, so
-      # this job provisions the machine the way the documented consumer does:
-      # `ci-ubuntu-2204-env.sh --consumer` runs this very script. It installs the
-      # pinned GCC 16 and registers its libstdc++ with ldconfig.
-      - name: Checkout repository (for the toolchain runtime installer)
+      - name: Checkout repository (checks, keys and CalVer only)
         uses: actions/checkout@v4
         with:
           submodules: false
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            packaging
+            utils/zpkg
 
-      - name: Install the compiler runtime the release was built against
-        run: |
-          # The release asks the loader for GLIBCXX_3.4.36 and GCC_13.0.0:
-          # jammy ships 3.4.30, noble 3.4.33, and no distro has 3.4.36. Without
-          # this the cube dies in the loader before main() --
-          #   version `GLIBCXX_3.4.36' not found (required by .../libzahlen_engine.so)
-          # -- which no amount of Vulkan driver can fix.
-          sudo scripts/install-gcc-prebuilt.sh 16.2.0 /opt/gcc16
-
-      - name: Install a Vulkan driver the engine can use
-        run: |
-          # Do the update explicitly below so it can use the same retry policy as
-          # package installation. The Launchpad content CDN has intermittently
-          # returned HTTP 503 for .deb downloads even when its package index was
-          # available; one transient response should not require a manual rerun.
-          sudo add-apt-repository --yes --no-update ppa:kisak/kisak-mesa
-
-          apt_retry() {
-            local attempt=1 max_attempts=4 delay=15
-            while true; do
-              if sudo apt-get -o Acquire::Retries=3 "$@"; then
-                return 0
-              fi
-              if [ "${attempt}" -ge "${max_attempts}" ]; then
-                echo "error: apt-get $* failed after ${max_attempts} attempts" >&2
-                return 1
-              fi
-              echo "apt-get $* failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s" >&2
-              sleep "${delay}"
-              attempt=$((attempt + 1))
-              delay=$((delay * 2))
-            done
-          }
-
-          # Translations are not used in CI and the PPA's Translation index was
-          # also returning 503s. Skipping it removes that unnecessary request.
-          apt_retry -o Acquire::Languages=none update -qq
-
-          # The driver, plus the runtime libraries `ci-ubuntu-2204-env.sh
-          # --consumer` installs on jammy, in noble's spelling (`libcurl4t64`):
-          # the engine's shared objects dlopen/link these before Vulkan is even
-          # reached, and this job runs the jammy-built cube on a machine that was
-          # never provisioned for it.
-          apt_retry install -y --no-install-recommends \
-            mesa-vulkan-drivers libvulkan1 vulkan-tools netpbm \
-            libzstd1 libatomic1 libcurl4t64 \
-            libwayland-client0 libwayland-cursor0 libwayland-egl1 \
-            libxkbcommon0 libdecor-0-0 \
-            zstd unzip
-          apt-cache policy mesa-vulkan-drivers | sed -n '1,4p' | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-
-      # Say exactly what is missing rather than letting the cube fail at device
-      # creation with one line per extension.
-      - name: Check the driver against the extensions the engine requires
-        run: |
-          vulkaninfo > "${RUNNER_TEMP}/vulkaninfo.txt" 2>/dev/null || true
-          missing=
-          for ext in VK_EXT_descriptor_heap VK_KHR_maintenance5 VK_EXT_extended_dynamic_state3; do
-            grep -q -- "${ext}" "${RUNNER_TEMP}/vulkaninfo.txt" || missing="${missing} ${ext}"
-          done
-          if [ -n "${missing}" ]; then
-            echo "error: the installed driver does not expose:${missing}" >&2
-            echo "       this job needs Mesa 26.2 or newer (or NVIDIA 610+); the" >&2
-            echo "       engine requires these extensions at device creation." >&2
-            exit 1
-          fi
-          grep -E 'deviceName|driverInfo|apiVersion' "${RUNNER_TEMP}/vulkaninfo.txt" | head -3 \
-            | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
-
-      # No checkout in this job, so `gh` has no git remote to infer the
-      # repository from and fails with "failed to run git: fatal: not a git
-      # repository" before it ever reaches the network. GH_REPO says which
-      # repository directly, which is also why this job needs no source tree.
+      # Re-download what a user actually gets. The pre-publish check sees the
+      # build directory; this one sees GitHub's assets and the release BODY,
+      # which can survive a re-upload with a different key.
       - name: Download the published release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p dist
           gh release download "${RELEASE_TAG}" -D dist
-          ls -la dist | head
+          gh release view "${RELEASE_TAG}" --json body --jq .body > dist/published-notes.md
+          gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' > dist/asset-names.txt
+          chmod +x dist/zpkg-linux-x86_64
 
-      - name: Install it unprivileged
+      - name: Everything published must agree with everything pinned
         run: |
-          mkdir -p "${HOME}/.local/bin"
-          install -m755 dist/zpkg-linux-x86_64 "${HOME}/.local/bin/zpkg"
-          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
-          export PATH="${HOME}/.local/bin:${PATH}"
-          ( cd dist && sha256sum -c SHA256SUMS.tools )
-          zpkg key add dist/zahlen-release-key.pub --name "zahlen release"
-          zpkg install dist --require-checksums --require-signatures
-
-      - name: Take the consumer the jammy job built
-        uses: actions/download-artifact@v4
-        with:
-          name: zahlen-consumer-cube
-          path: consumer-build
-
-      # The consumer writes a non-constant PPM or the step fails, so "it ran"
-      # cannot be a blank frame.
-      - name: Render a cube
-        run: |
-          mkdir -p out
-          # Artifacts do not carry file modes (upload-artifact: "all files will
-          # have 644"), so the binary the jammy job compiled arrives without its
-          # executable bit. Put it back; nothing else about the file changed.
-          chmod +x consumer-build/cube
-          # Without this, a cube that never ran only shows up as the `grep`
-          # below failing, which reports "the rendered frame was blank" -- the
-          # wrong diagnosis, as this very failure showed.
-          set -o pipefail
-          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
-          export VK_ICD_FILENAMES="${VK_DRIVER_FILES}"
-          echo "ICD: ${VK_DRIVER_FILES}"
-          ./consumer-build/cube out/cube.ppm 2>&1 | tee out/render.log
-          # Lowercase: the cube prints this with std::println("... nonconstant={}",
-          # bool), and std::format spells booleans true/false. The former
-          # `nonconstant=True` here could never match, so a perfectly good frame
-          # was reported as blank.
-          grep -q 'nonconstant=true' out/render.log || {
-            echo 'FAIL: the rendered frame was blank' >&2
-            grep -F 'nonconstant=' out/render.log >&2 || true
-            exit 1
-          }
-          pnmtopng out/cube.ppm >"out/zahlen-cube-${RELEASE_TAG}.png"
-          file "out/zahlen-cube-${RELEASE_TAG}.png"
-
-      - name: Upload the frame and logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zahlen-release-render
-          path: out/
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Attach the rendered frame to the release
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release upload "${RELEASE_TAG}" "out/zahlen-cube-${RELEASE_TAG}.png" --clobber
+          scripts/check-release-consistency.sh \
+            --assets dist --tools dist \
+            --notes dist/published-notes.md \
+            --asset-list dist/asset-names.txt \
+            --versions --date "${CALVER}" \
+            --zpkg dist/zpkg-linux-x86_64

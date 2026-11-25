@@ -4,10 +4,24 @@ zpkg installs engine packages into a per-user store and selects the active
 toolchain. For game setup, see the [consumer guide](../../docs/CONSUMING.md).
 For command syntax, see [Commands](#commands).
 
+## Version and trust
+
+`zpkg --version` is the manager's own **CalVer** (`YYYY.MM.DD`, from
+`utils/zpkg/VERSION`); it is not the engine version. The installed engine
+toolchain is shown by `zpkg list` / `zpkg info`. A PKGBUILD bump updates the
+manager only.
+
+The project signing key is long-lived, committed at
+[`packaging/keys/zahlen-release.pub`](../../packaging/keys/zahlen-release.pub)
+and installed by the Arch package to `/usr/share/zahlen/zahlen-release-key.pub`.
+Trust it once with `zpkg key add`; verify its fingerprint out of band. A release
+signed by any other key is a refusal, not an instruction to add another key.
+See [Upgrading](../../docs/UPGRADING.md).
+
 ## Install a release
 
-After trusting the release publisher key, run `zpkg install` to get Application
-and its dependencies. Component names can be shortened:
+After trusting the publisher key, run `zpkg install` to get Application and its
+dependencies. Component names can be shortened:
 
 ```sh
 zpkg install application
@@ -132,6 +146,7 @@ Store behavior:
 | Command | Effect |
 |---|---|
 | `install [component ...] [--version <tag>] [--from <remote>]` | signed component install (default: Application from the latest official release) |
+| `sync [--version <tag>] [--from <remote>] [--activate] [--dry-run]` | install the active toolchain's package set from a newer release, optionally activate it |
 | `install <path\|dir>...` | verify, extract into `store/<id>/`, record the package |
 | `install <remote>` | install that remote's whole toolchain |
 | `install <remote>:<name>` | install that package and everything it requires |
@@ -150,6 +165,14 @@ Store behavior:
 
 Install options: `--from <remote>`, `--version <tag>`, `--only a,b`, `--toolchain <id>`, `--require-checksums`,
 `-s/--require-signatures`, `--ignore-missing`, `--force`, `--quiet`.
+Sync options: `--from`, `--version`, `--activate`, `--dry-run`, `--force`, `--quiet`.
+
+`sync` never updates a toolchain in place. It reads the package names recorded
+in the active toolchain, resolves their closure against the target release's
+signed `index.json`, and installs into that release's own immutable toolchain
+directory. Without `--activate` it leaves `ACTIVE` alone and prints the
+`zpkg use <id>` command; with `--activate` it switches and warns that binaries
+already linked keep the toolchain they were built against.
 
 ## What a name selects
 
@@ -189,7 +212,12 @@ download of everything that is not in the closure.
 The signature covers the exact bytes of the file named before the extension. A
 key is trusted per store with `zpkg key add <key.pub> --name <who>`, so the same
 signature is accepted on a machine where the publisher is trusted and refused
-everywhere else. zpkg never signs; a release job does:
+everywhere else. Multiple lines are allowed: `zpkg` accepts a signature from any
+trusted key, which is how a deliberate key rotation publishes one dual-signed
+release instead of forcing every user to re-add a key. The project key is pinned
+at [`packaging/keys/`](../../packaging/keys/README.md); a release signed by an
+unknown key is a refusal, not an instruction to trust it. zpkg never signs; a
+release job does:
 
 ```sh
 openssl genpkey -algorithm ed25519 -out release-key.pem

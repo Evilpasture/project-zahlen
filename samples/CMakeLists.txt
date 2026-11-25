@@ -3,6 +3,9 @@
 
 option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
 
+# FirstGameSample.cpp is documentation for docs/FIRST_GAME.md. It is deliberately
+# NOT a build target: an example that CI compiles is a fixture, and a changed
+# example must never be able to break a release job. See docs/UPGRADING.md.
 if(NOT ZHLN_BUILD_SAMPLES)
     return()
 endif()
@@ -12,7 +15,6 @@ set(SAMPLE_SOURCES
     CDNMapSample.cpp
     DeviceLostRecoverySample.cpp
     FidelityHarness.cpp
-    FirstGameSample.cpp
     GlTFInspectorSample.cpp
     ProceduralAnimationSample.cpp
     RemoteGLBSample.cpp

@@ -1,8 +1,11 @@
 # Maintainer: Evilpasture <housemaster@evilpasture.org>
 
 pkgname=zahlen-zpkg
-_commit=0009ddfeb1eabb99289423eb7e8552db21537708
-pkgver=0.6.0
+_commit=61456affc498adbb58eb52ba4f1328121741890a
+# zpkg CalVer, mirrored from utils/zpkg/VERSION by scripts/bump-zpkg-calver.sh.
+# After merging a change to utils/zpkg/, update _commit to that commit and run
+# updpkgsums: the pinned tarball must contain the VERSION and keys/ files below.
+pkgver=2026.11.25
 pkgrel=1
 pkgdesc='Per-user package manager for Zahlen engine packages'
 arch=('x86_64' 'aarch64')
@@ -32,6 +35,11 @@ check() {
 
 package() {
     install -Dm755 build/zpkg "${pkgdir}/usr/bin/zpkg"
+    # Out-of-band trust anchor: the key lives in git history, not only inside
+    # the release it signs. `zpkg key add /usr/share/zahlen/zahlen-release-key.pub`
+    # is a one-time step for Arch users.
+    install -Dm644 "project-zahlen-${_commit}/packaging/keys/zahlen-release.pub" \
+        "${pkgdir}/usr/share/zahlen/zahlen-release-key.pub"
     install -Dm644 "project-zahlen-${_commit}/LICENSE.md" \
         "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.md"
 }

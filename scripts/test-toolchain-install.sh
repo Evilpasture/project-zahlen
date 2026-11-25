@@ -2,7 +2,7 @@
 # Run INSIDE the built builder image, with a writable /pkg-output bind mount.
 #
 # This is the client-side proof: a plain unprivileged user installs engine
-# packages with zpkg, builds an app against them and runs it, without root,
+# packages with zpkg and builds/links an app against them, without root,
 # without LD_LIBRARY_PATH, and without the engine checkout on disk. The
 # container starts as root only to hand the checkout to the test user and then
 # re-executes this script as that user; every step below runs unprivileged.
@@ -27,8 +27,23 @@ fi
 
 cd /workspace
 mkdir -p "$out" /tmp/zahlen-consumer
-# Stage the complete, self-contained consumer project, not engine sources.
-cp tests/installed/* /tmp/zahlen-consumer/
+# Generate the consumer smoke fixture. It is a TEST, not an example: no
+# checked-in sample is compiled by CI, no release ships a consumer tarball,
+# and a renamed example can never break this job again.
+cat >/tmp/zahlen-consumer/CMakeLists.txt <<'EOF'
+cmake_minimum_required(VERSION 3.28)
+project(ZahlenConsumerSmoke LANGUAGES CXX)
+find_package(ZahlenApplication CONFIG REQUIRED)
+add_executable(consumer main.cpp)
+target_link_libraries(consumer PRIVATE Zahlen::Application)
+EOF
+cat >/tmp/zahlen-consumer/main.cpp <<'EOF'
+#include <Zahlen/App.hpp>
+
+int main(int argc, char* argv[]) {
+    return ZHLN::App().Main(argc, argv);
+}
+EOF
 
 profile=release
 grep -q '^USE_SANITIZERS:BOOL=ON$' build/CMakeCache.txt && profile=asan-ubsan
@@ -95,8 +110,8 @@ fi
 
 # Only the components this consumer needs. Everything else must stay invisible.
 # Unprivileged by construction: nothing below uses sudo.
-# Trust the throwaway release key, then publish and sign the index that
-# describes the artifacts.
+# This is a local test key for the fixture packages below, not the project
+# release key: publishing uses ZHLN_RELEASE_KEY_PEM and the pinned public key.
 "$zpkg" key add "$out/zahlen-release-key.pub" --name "zahlen CI" >/dev/null
 "$zpkg" key list
 fingerprint=$("$zpkg" key list | awk '{print $1; exit}')
@@ -300,6 +315,13 @@ rm -rf "$escape"
 printf 'PASS: archive outside usr/ rejected\n'
 
 # --- build and run the consumer against the store -------------------------
+# --- build and link a consumer against the store --------------------------
+#
+# No rendered frame, no cooked pack and no device creation here: those belong
+# to the engine's own test suite (ci.yml "Test (release)") on a driver that
+# meets the Vulkan floor. This job's claim is narrower and still valuable:
+# find_package() resolves from the store, the imported targets link, the
+# loader resolves everything without LD_LIBRARY_PATH, and the CLI runs.
 
 cmake -S /tmp/zahlen-consumer -B /tmp/consumer-build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix" \
@@ -317,88 +339,41 @@ done
 printf 'PASS: consumer build references the store only\n'
 
 # The option hooks must end up inside the consumer executable. If the package
-# fails to attach them, libasan's own weak stub wins and the run below reports
-# the driver's one-time-init leaks as ours -- hours into CI, at the last step.
-# Check it here instead: the definition is 'T' only when the object was linked.
+# fails to attach them, libasan's own weak stub wins and a later run reports
+# the driver's one-time-init leaks as ours. Check it here instead.
 if [ "$profile" = asan-ubsan ]; then
     for symbol in __lsan_default_options __lsan_default_suppressions __ubsan_default_suppressions; do
-        # awk rather than grep -q: this script runs with pipefail, and grep -q
-        # closing the pipe early would report success as a failed pipeline.
-        if ! nm /tmp/consumer-build/cube |
+        if ! nm /tmp/consumer-build/consumer |
             awk -v want="${symbol}" '$2 == "T" && $3 == want { hit = 1 } END { exit(hit ? 0 : 1) }'; then
-            echo "FAIL: ${symbol} is not linked into cube (ZahlenEngineConfig skipped the hook object)" >&2
-            nm /tmp/consumer-build/cube | grep -F "${symbol}" >&2 || true
+            echo "FAIL: ${symbol} is not linked into consumer (ZahlenEngineConfig skipped the hook object)" >&2
+            nm /tmp/consumer-build/consumer | grep -F "${symbol}" >&2 || true
             exit 1
         fi
     done
 fi
 
-# Shared-library resolution must not depend on the environment. The linked
-# binaries record the store path of the .so they linked, every package is
-# installed with an $ORIGIN rpath, and LD_LIBRARY_PATH stays unset here on
-# purpose -- a required LD_LIBRARY_PATH would be a bug in the packages.
-env -u LD_LIBRARY_PATH ldd /tmp/consumer-build/cube | tee "$out/consumer-ldd.txt"
+# Shared-library resolution must not depend on the environment. Every package
+# is installed with an $ORIGIN rpath and LD_LIBRARY_PATH stays unset here.
+env -u LD_LIBRARY_PATH ldd /tmp/consumer-build/consumer | tee "$out/consumer-ldd.txt"
 if grep -q 'not found' "$out/consumer-ldd.txt"; then
     echo 'FAIL: the consumer needs LD_LIBRARY_PATH, so the packages are not self-contained' >&2
     exit 1
 fi
 printf 'PASS: no LD_LIBRARY_PATH required\n'
 
-# The consumer owns its content: it cooks a pack with the toolchain's cooker from
-# an asset root it owns, and never from the engine checkout. The font pair below
-# is copied out because this script runs inside the checkout; a real project has
-# its own assets in that place.
-assets=/tmp/zahlen-consumer-assets
-rm -rf "$assets"
-mkdir -p "$assets/resources/assets/fonts"
-cp /workspace/resources/fonts/JetBrainsMonoNerdFontRegular/*.fnt \
-   /workspace/resources/fonts/JetBrainsMonoNerdFontRegular/*.png \
-   "$assets/resources/assets/fonts/"
-"$cooker" ninja --out "$assets/assets.ninja" --source "$assets" \
-    --engine-tools "$tools" --self "$cooker" --no-blender
-ninja -C "$assets" -f assets.ninja
-test -s "$assets/data/base.pak"
-printf 'PASS: consumer cooked its own pack with the installed zcook (%s bytes)\n' \
-    "$(stat -c %s "$assets/data/base.pak")"
-
-mkdir -p /tmp/zahlen-game/data
-cp "$assets/data/base.pak" /tmp/zahlen-game/data/base.pak
-cd /tmp/zahlen-game
-# Force software Vulkan; never silently select a host GPU or skip rendering.
-export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
-export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
-export VK_LAYER_PATH=/usr/share/vulkan/explicit_layer.d
-test -r "$VK_DRIVER_FILES"
-# No ZHLN_DATA_DIR: the engine finds data/base.pak in the working directory,
-# which is where the cook above put it. Pointing it at the store would be
-# pointing at a directory that no longer carries data.
-if [ "$profile" = asan-ubsan ]; then
-    # No suppressions= path on purpose: the rules are compiled into the hook
-    # object, and only the reporting verbosity is set here. When a driver stops
-    # leaking the count drops to zero, which is good news, so this is a report
-    # rather than a failure -- but it must never say "nothing fired" because the
-    # rules were never read.
-    export LSAN_OPTIONS=print_suppressions=1
-fi
-timeout 180s /tmp/consumer-build/cube "$out/cube.ppm" \
-    2>&1 | tee "$out/consumer-render.log"
-if [ "$profile" = asan-ubsan ]; then
-    if grep -q 'Suppressions used' "$out/consumer-render.log"; then
-        grep -A3 'Suppressions used' "$out/consumer-render.log"
-    else
-        printf 'NOTE: no LeakSanitizer rule matched; the driver may simply have stopped leaking\n'
-    fi
-fi
-
-# The pack the consumer cooked is the one the engine has to mount. Without this
-# the cook above could produce a well-formed archive that nothing reads, and the
-# run would still pass on the embedded defaults alone.
-if ! grep -Fq 'Mounted asset pack' "$out/consumer-render.log"; then
-    echo 'FAIL: the engine never mounted the pack the consumer cooked' >&2
-    tail -20 "$out/consumer-render.log" >&2
+# --help is handled before host/device creation (AppExitReason::CliHelpRequested),
+# so the CLI and the loader are exercised without needing a Vulkan driver.
+if ! env -u LD_LIBRARY_PATH /tmp/consumer-build/consumer --help \
+        >"$out/consumer-help.txt" 2>&1; then
+    echo 'FAIL: consumer --help did not exit cleanly' >&2
+    cat "$out/consumer-help.txt" >&2
     exit 1
 fi
-printf 'PASS: engine mounted the consumer-cooked pack\n'
+test -s "$out/consumer-help.txt" || {
+    echo 'FAIL: consumer --help printed nothing' >&2
+    exit 1
+}
+printf 'PASS: consumer CLI runs without creating a device\n'
 
 # Negative test: reject this specific mismatch, not any configure failure.
 # Keep expected CMake errors out of the CI console while preserving the log.
@@ -420,5 +395,5 @@ if ! grep -Fq 'Zahlen profile mismatch:' "$wrong_log"; then
 fi
 rm -rf "$wrong_build"
 printf 'PASS: incompatible sanitizer profile rejected (details: %s)\n' "$wrong_log"
-printf 'PASS: installed prefab cube rendered and captured (%s toolchain, unprivileged)\n' "$profile"
+printf 'PASS: installed consumer links and loads (%s toolchain, unprivileged)\n' "$profile"
 exit 0

@@ -447,13 +447,13 @@ cmake -B "${build}" -S . -G Ninja \
 #       VK_EXT_extended_dynamic_state3, so a suite run here could only fail
 #       every engine-creating case at device creation -- and compiling the
 #       test targets to learn that again costs most of this lane's build.
-#       What the release bytes themselves do on a capable driver is the
-#       release workflow's render job, on the installed packages.
+#       A link-and-loader smoke test (not a rendered frame) is
+#       release.yml's consume job; a GPU/driver check belongs to ci.yml.
 #   ZHLN_BUILD_SAMPLES=OFF    same reasoning: the samples are development
 #       executables with no install rules and no packaged component comes
-#       from samples/ (the consumer the release ships is the tests/installed
-#       cube source, packaged by scripts/package-toolchain.sh). Building
-#       them here only costs engine-linked compiles nobody publishes.
+#       from samples/. No consumer project ships with a release at all;
+#       release.yml generates its own link smoke test. Building samples
+#       here only costs engine-linked compiles nobody publishes.
 #   ZHLN_BUILD_SVG=OFF        resvg is not packaged for jammy and building it needs
 #       cargo; without this the configure drops the plugin with a warning on every
 #       run. It is not one of the 30 released components.
@@ -529,8 +529,10 @@ ctest --test-dir "${build}-zpkg" --output-on-failure
 #     commit on a current lavapipe, where device creation can succeed;
 #   * the release workflow's consume job installs these packages unprivileged
 #     and links a consumer against them on bare jammy;
-#   * its render job runs the shipped bytes on Ubuntu 24.04 / Mesa 26.2 and
-#     requires a non-blank frame.
+#   * the release workflow's consume job generates a link smoke test and
+#     runs the CLI with --help (no device creation on jammy);
+#   * ci.yml's "Test (release)" covers device-level rendering on a current
+#     lavapipe, where the engine's required extensions exist.
 # Running the suite on this host instead used to fail every engine-creating
 # case at device creation (jammy's Mesa 23.x has none of the required
 # extensions), after paying the full compile of every test target -- and the
