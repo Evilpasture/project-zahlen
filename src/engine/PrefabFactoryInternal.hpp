@@ -12,6 +12,7 @@
 #include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string_view>
 
 namespace ZHLN {
@@ -25,22 +26,27 @@ namespace ECS {
 class Registry;
 }
 namespace PrefabFactory {
-auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh;
-auto BuildBoxMesh(RenderContext& gfx, FVec3 halfExtents, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildPlaneMesh(RenderContext& gfx, float extent, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildSphereMesh(RenderContext& gfx, float radius, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
-auto BuildConeMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> Mesh;
 
-auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity;
+// Procedural mesh builders. A caller that passes buildBLAS is asking for a
+// ray-traceable mesh, so a BLAS failure they can act on fails the call and the
+// buffers are released; a device that cannot build one at all still gets its
+// mesh. Nothing here logs: a mesh is data, and the caller owns the decision.
+[[nodiscard]] auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
+[[nodiscard]] auto BuildBoxMesh(RenderContext& gfx, FVec3 halfExtents, FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
+[[nodiscard]] auto BuildPlaneMesh(RenderContext& gfx, float extent, FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
+[[nodiscard]] auto BuildSphereMesh(RenderContext& gfx, float radius, FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
+[[nodiscard]] auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
+[[nodiscard]] auto BuildConeMesh(RenderContext& gfx, float radius, float height, FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode>;
 
-auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity;
+auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
 
-auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity;
+auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
 
-auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity;
+auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
 
-auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity;
+auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
+
+auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode>;
 
 // Engine's device-recovery barrier and internal spawners.
 void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& registry);
@@ -51,7 +57,7 @@ auto CreateBoxInternal(
     ZHLN::FVec3                     halfExtents,
     const SpawnParams&              params,
     bool                            buildBLAS = true
-) -> Entity;
+) -> std::expected<Entity, ErrorCode>;
 auto CreateSphereInternal(
     RenderContext&                  gfx,
     ECS::Registry&                  reg,
@@ -59,7 +65,7 @@ auto CreateSphereInternal(
     float                           radius,
     const SpawnParams&              params,
     bool                            buildBLAS = true
-) -> Entity;
+) -> std::expected<Entity, ErrorCode>;
 auto CreateCylinderInternal(
     RenderContext&                  gfx,
     ECS::Registry&                  reg,
@@ -68,7 +74,7 @@ auto CreateCylinderInternal(
     float                           height,
     const SpawnParams&              params,
     bool                            buildBLAS = true
-) -> Entity;
+) -> std::expected<Entity, ErrorCode>;
 auto CreateConeInternal(
     RenderContext&                  gfx,
     ECS::Registry&                  reg,
@@ -77,7 +83,7 @@ auto CreateConeInternal(
     float                           height,
     const SpawnParams&              params,
     bool                            buildBLAS = true
-) -> Entity;
+) -> std::expected<Entity, ErrorCode>;
 auto CreatePlaneInternal(
     RenderContext&                  gfx,
     ECS::Registry&                  reg,
@@ -86,7 +92,7 @@ auto CreatePlaneInternal(
     ZHLN::FVec4                     color,
     const SpawnParams&              params,
     bool                            buildBLAS = true
-) -> Entity;
+) -> std::expected<Entity, ErrorCode>;
 auto InstantiatePrefabInternal(
     RenderContext&       gfx,
     ECS::Registry&       reg,

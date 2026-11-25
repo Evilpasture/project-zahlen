@@ -389,7 +389,4 @@ void AssertNoAliasing(const A& src, const B& dst, LogContext ctx, const Args&...
     }
 }
 
-auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
-auto JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) noexcept -> bool;
-
 } // namespace ZHLN

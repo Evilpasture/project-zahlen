@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "EngineGlobals.hpp"
+#include "diagnostics/SanitizerBridges.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>

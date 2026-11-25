@@ -1024,17 +1024,41 @@ class Engine final:
                 }
             }
         } else if (boxDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (planeDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildPlaneMesh(gfx, planeDesc->extent, planeDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildPlaneMesh(gfx, planeDesc->extent, planeDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (sphereDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildSphereMesh(gfx, sphereDesc->radius, sphereDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildSphereMesh(gfx, sphereDesc->radius, sphereDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (cylinderDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height, cylinderDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height, cylinderDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (coneDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (tetraDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildTetrahedronMesh(gfx, options.buildBLAS);
+            auto built = PrefabFactory::BuildTetrahedronMesh(gfx, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         }
 
         return DispatchOutChain<ZHLN::Mesh>(outMeshChain, [&](ZHLN::Mesh& outMesh) -> Result<void> {
@@ -1749,26 +1773,36 @@ class Engine final:
                     resolved.materialOverride.baseColorFactor = boxDesc->color;
                 }
             }
-            return PrefabFactory::CreateBoxConfigured(*m_engine, boxDesc->halfExtents, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateBoxConfigured(*m_engine, boxDesc->halfExtents, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (planeDesc.has_value()) {
             const FVec4 planeColor = planeDesc->color.w >= 0.0F ? planeDesc->color : FVec4 {0.6F, 0.6F, 0.6F, 1.0F};
-            return PrefabFactory::CreatePlaneConfigured(*m_engine, planeDesc->extent, planeColor, params, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreatePlaneConfigured(*m_engine, planeDesc->extent, planeColor, params, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (sphereDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (sphereDesc->color.w >= 0.0F) resolved.color = sphereDesc->color;
-            return PrefabFactory::CreateSphereConfigured(*m_engine, sphereDesc->radius, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateSphereConfigured(*m_engine, sphereDesc->radius, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (cylinderDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (cylinderDesc->color.w >= 0.0F) resolved.color = cylinderDesc->color;
-            return PrefabFactory::CreateCylinderConfigured(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateCylinderConfigured(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (coneDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (coneDesc->color.w >= 0.0F) resolved.color = coneDesc->color;
-            return PrefabFactory::CreateConeConfigured(*m_engine, coneDesc->radius, coneDesc->height, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateConeConfigured(*m_engine, coneDesc->radius, coneDesc->height, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         return Error::InvalidArgument;
     }

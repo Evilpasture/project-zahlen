@@ -10,6 +10,7 @@
 #include <engine/ModelPrefab.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Error.hpp>
+#include <expected>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <physics/Physics.hpp>
@@ -25,22 +26,16 @@ class ArticulationContext;
 
 namespace ZHLN::PrefabFactory {
 
-// Standalone builders return caller-owned buffers: use DestroyMesh after their
-// last draw. Entity spawners below attach scene-owned cleanup instead.
-auto CreateTetrahedronMesh(RenderContext& gfx) -> Mesh;
-auto CreatePlaneMesh(RenderContext& gfx, float extent = 10.0f, ZHLN::FVec4 color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
-auto CreateBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+// Entity spawners attach scene-owned cleanup; a mesh built through the COM
+// device is yours to DestroyMesh after its last draw.
 
-auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params = {}) -> std::expected<Entity, ErrorCode>;
 
-auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::FVec4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
+auto CreatePlane(Engine& engine, float extent = 10.0f, ZHLN::FVec4 color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> std::expected<Entity, ErrorCode>;
 
-auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;
-auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
-auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> std::expected<Entity, ErrorCode>;
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> std::expected<Entity, ErrorCode>;
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> std::expected<Entity, ErrorCode>;
 
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 

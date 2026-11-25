@@ -426,34 +426,34 @@ void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 namespace PrefabFactory {
-auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params);
 }
-auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params);
 }
-auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
-auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
-auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
+auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params);
 }
-auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params, buildBLAS);
 }
-auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params, buildBLAS);
 }
-auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params, buildBLAS);
 }
-auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
-auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {

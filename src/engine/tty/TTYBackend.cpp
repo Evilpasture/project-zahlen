@@ -5,7 +5,11 @@
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <window/Window.hpp>
+#include <window/WindowLog.hpp>
 #include <algorithm>
+#include <cstdint>
+#include <expected>
+#include <string_view>
 
 #ifdef __linux__
 #include <Zahlen/Core/SharedLibrary.hpp>
@@ -103,56 +107,62 @@ SeatApi       g_seat;
 template <typename Fn>
 [[nodiscard]] auto BindSymbol(const SharedLibrary& lib, const char* name, Fn& out) -> bool {
     out = lib.Symbol<Fn>(name);
-    if (out == nullptr) {
-        kLog.Warn("Missing symbol '{}'", name);
-        return false;
-    }
-    return true;
+    return out != nullptr;
 }
 
-[[nodiscard]] auto LoadSeatAndEvdev() -> bool {
-    static int state = 0;
-    if (state != 0) {
-        return state == 1;
-    }
+// Binds every entry point the backend needs and returns the first one that did
+// not resolve, or nullptr when the bundle is complete. One missing symbol makes
+// the backend unusable, so the rest of the list is not worth carrying.
+[[nodiscard]] auto BindSeatAndEvdev() -> const char* {
+    const char* missing = nullptr;
+    const auto  bind    = [&missing](const SharedLibrary& lib, const char* name, auto& out) {
+        if (missing == nullptr && !BindSymbol(lib, name, out)) {
+            missing = name;
+        }
+    };
 
+    bind(g_seatLib, "libseat_set_log_level", g_seat.set_log_level);
+    bind(g_seatLib, "libseat_open_seat", g_seat.open_seat);
+    bind(g_seatLib, "libseat_disable_seat", g_seat.disable_seat);
+    bind(g_seatLib, "libseat_close_seat", g_seat.close_seat);
+    bind(g_seatLib, "libseat_get_fd", g_seat.get_fd);
+    bind(g_seatLib, "libseat_dispatch", g_seat.dispatch);
+    bind(g_seatLib, "libseat_open_device", g_seat.open_device);
+    bind(g_seatLib, "libseat_close_device", g_seat.close_device);
+    bind(g_evdevLib, "libevdev_new_from_fd", g_evdev.new_from_fd);
+    bind(g_evdevLib, "libevdev_free", g_evdev.free);
+    bind(g_evdevLib, "libevdev_has_event_type", g_evdev.has_event_type);
+    bind(g_evdevLib, "libevdev_grab", g_evdev.grab);
+    bind(g_evdevLib, "libevdev_get_name", g_evdev.get_name);
+    bind(g_evdevLib, "libevdev_next_event", g_evdev.next_event);
+
+    return missing;
+}
+
+// Loads both libraries and binds them. The handles are their own state, so a
+// second call is a no-op that reports the same answer: no latch, nothing to go
+// stale, and a window backend that probes support twice pays two syscalls.
+[[nodiscard]] auto LoadSeatAndEvdev() -> std::expected<void, std::string_view> {
     static constexpr const char* const kSeatNames[]  = {"libseat.so.1", "libseat.so"};
     static constexpr const char* const kEvdevNames[] = {"libevdev.so.2", "libevdev.so"};
 
-    if (!g_seatLib.OpenAny(kSeatNames) || !g_evdevLib.OpenAny(kEvdevNames)) {
-        kLog.Error("Failed to load libseat / libevdev at runtime.");
+    if (!g_seatLib.IsOpen() && !g_seatLib.OpenAny(kSeatNames)) {
+        return std::unexpected(std::string_view {"libseat"});
+    }
+    if (!g_evdevLib.IsOpen() && !g_evdevLib.OpenAny(kEvdevNames)) {
         g_seatLib.Close();
-        g_evdevLib.Close();
-        state = -1;
-        return false;
+        return std::unexpected(std::string_view {"libevdev"});
     }
 
-    bool ok = true;
-    ok = BindSymbol(g_seatLib, "libseat_set_log_level", g_seat.set_log_level) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_open_seat", g_seat.open_seat) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_disable_seat", g_seat.disable_seat) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_close_seat", g_seat.close_seat) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_get_fd", g_seat.get_fd) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_dispatch", g_seat.dispatch) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_open_device", g_seat.open_device) && ok;
-    ok = BindSymbol(g_seatLib, "libseat_close_device", g_seat.close_device) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_new_from_fd", g_evdev.new_from_fd) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_free", g_evdev.free) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_has_event_type", g_evdev.has_event_type) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_grab", g_evdev.grab) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_get_name", g_evdev.get_name) && ok;
-    ok = BindSymbol(g_evdevLib, "libevdev_next_event", g_evdev.next_event) && ok;
-
-    if (!ok) {
+    if (const char* missing = BindSeatAndEvdev(); missing != nullptr) {
         g_seatLib.Close();
         g_evdevLib.Close();
         g_seat  = {};
         g_evdev = {};
-        state   = -1;
-        return false;
+        return std::unexpected(std::string_view {missing});
     }
-    state = 1;
-    return true;
+
+    return {};
 }
 
 [[maybe_unused]] consteval auto KeyCodeToEvdev(KeyCode key) noexcept -> uint16_t {
@@ -372,13 +382,13 @@ auto MapEvdevKey(uint16_t code) noexcept -> KeyCode {
 void handle_enable_seat(struct libseat* , void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = true;
-    ZHLN::Log("libseat: Seat session enabled and active.");
+    kWindowLog.Info("Seat session enabled (stage=libseat-enable-seat)");
 }
 
 void handle_disable_seat(struct libseat* seat, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = false;
-    ZHLN::Log("libseat: Seat session disabled (VT switched away).");
+    kWindowLog.Warn("Seat session disabled (stage=libseat-disable-seat, reason=vt-switch)");
     g_seat.disable_seat(seat);
 }
 
@@ -389,11 +399,13 @@ struct libseat_seat_listener seat_listener = {
 }
 
 auto IsSupported() -> bool {
-    return access("/dev/tty", R_OK | W_OK) == 0 && LoadSeatAndEvdev();
+    // A capability probe answers yes or no; it does not narrate.
+    return access("/dev/tty", R_OK | W_OK) == 0 && LoadSeatAndEvdev().has_value();
 }
 
 auto Init(uint32_t width, uint32_t height) -> void* {
-    if (!LoadSeatAndEvdev()) {
+    if (const auto loaded = LoadSeatAndEvdev(); !loaded) {
+        kWindowLog.Error("Seat backend unavailable (missing={})", loaded.error());
         return nullptr;
     }
     auto* state   = new TTYState();
@@ -414,7 +426,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
             tcsetattr(state->tty_fd, TCSANOW, &t);
             ioctl(state->tty_fd, KDSETMODE, KD_GRAPHICS);
             ioctl(state->tty_fd, KDSKBMODE, K_MEDIUMRAW);
-            ZHLN::Log("Virtual Console (VT) initialized.");
+            kWindowLog.Info("Virtual console initialized (mode=graphics)");
         } else {
             close(state->tty_fd);
             state->tty_fd = -1;
@@ -424,14 +436,14 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     g_seat.set_log_level(kSeatLogInfo);
     state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
-        kLog.Error("Failed to initialize libseat session.");
+        kWindowLog.Error("Seat session open failed (stage=libseat-open-seat)");
         Shutdown(state);
         return nullptr;
     }
 
     while (!state->active) {
         if (g_seat.dispatch(state->seat, -1) == -1) {
-            kLog.Warn("Error dispatching libseat during startup.");
+            kWindowLog.Warn("Seat dispatch failed (stage=startup)");
             Shutdown(state);
             return nullptr;
         }
@@ -479,7 +491,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
                             ep_ev.data.ptr = dev;
                             epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ep_ev);
 
-                            ZHLN::Log("libseat opened input device: {} (ID: {})", g_evdev.get_name(dev), device_id);
+                            kWindowLog.Info("Input device opened (name={}, id={})", g_evdev.get_name(dev), device_id);
                         } else {
                             g_evdev.free(dev);
                             g_seat.close_device(state->seat, device_id);
@@ -494,7 +506,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     if (state->taken_devices.empty()) {
-        kLog.Warn("No input devices could be opened under this seat.");
+        kWindowLog.Warn("No input devices opened (action=shutdown)");
         Shutdown(state);
         return nullptr;
     }
@@ -656,7 +668,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
                 }
 
                 if (state->ctrlDown && state->altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
-                    ZHLN::Log("Emergency Escape Hatch triggered! Restoring terminal...");
+                    kWindowLog.Warn("Escape hatch forced (action=restore-terminal)");
                     EmergencyRestore();
                     _exit(0);
                 }

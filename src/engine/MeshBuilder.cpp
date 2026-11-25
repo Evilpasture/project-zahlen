@@ -3,7 +3,6 @@
 
 #include "PrefabFactoryInternal.hpp"
 #include <engine/PrefabFactory.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
@@ -13,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <span>
 #include <vector>
 
@@ -38,7 +38,7 @@ struct VertexStreams {
 
 } // namespace
 
-auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     std::vector<VertexPosition> positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
     std::vector<uint32_t>       indices   = {0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2};
     VertexStreams               streams;
@@ -69,16 +69,23 @@ auto BuildTetrahedronMesh(RenderContext& gfx, bool buildBLAS) -> Mesh {
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreateTetrahedronMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto BuildPlaneMesh(RenderContext& gfx, float extent, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildPlaneMesh(RenderContext& gfx, float extent, ZHLN::FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
     Packed1010102 t = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
     PackedRGBA8   c = Math::PackColor(color.x, color.y, color.z, color.w);
@@ -113,16 +120,23 @@ auto BuildPlaneMesh(RenderContext& gfx, float extent, ZHLN::FVec4 color, bool bu
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreatePlaneMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto BuildBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     const float x = halfExtents.x;
     const float y = halfExtents.y;
     const float z = halfExtents.z;
@@ -210,16 +224,23 @@ auto BuildBoxMesh(RenderContext& gfx, ZHLN::FVec3 halfExtents, ZHLN::FVec4 color
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreateBoxMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto BuildSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -278,16 +299,23 @@ auto BuildSphereMesh(RenderContext& gfx, float radius, ZHLN::FVec4 color, bool b
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreateSphereMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
@@ -354,16 +382,23 @@ auto BuildCylinderMesh(RenderContext& gfx, float radius, float height, ZHLN::FVe
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreateCylinderMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto BuildConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> Mesh {
+[[nodiscard]] auto BuildConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 color, bool buildBLAS) -> std::expected<Mesh, ErrorCode> {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
     const float   h         = height > 1e-4f ? height : 1e-4f;
@@ -425,32 +460,21 @@ auto BuildConeMesh(RenderContext& gfx, float radius, float height, ZHLN::FVec4 c
         .meshletTriBuffer    = ml.triangles,
         .meshletCount        = ml.count,
     };
-    auto res = buildBLAS ? gfx.BuildMeshBLAS(finalMesh) : RenderResult {};
-    if (!res) [[unlikely]] {
-        if (!(res.error() == RenderFeatureError::FeatureNotSupported)) {
-            kLog.Warn("CreateConeMesh: Failed to build mesh BLAS: {}", res.error());
+    // The caller asked for a ray-traceable mesh, so a BLAS that failed for a
+    // reason other than "this device cannot build one" fails the call, and the
+    // buffers this function just allocated go with it. FeatureNotSupported is
+    // not a failure: no device in that class can build a BLAS, so failing every
+    // mesh would fail every scene.
+    if (buildBLAS) {
+        if (auto blas = gfx.BuildMeshBLAS(finalMesh); !blas) [[unlikely]] {
+            if (!(blas.error() == RenderFeatureError::FeatureNotSupported)) {
+                gfx.DestroyMesh(finalMesh);
+                return std::unexpected(blas.error());
+            }
         }
     }
     return finalMesh;
 }
 
-auto CreateTetrahedronMesh(RenderContext& gfx) -> Mesh {
-    return BuildTetrahedronMesh(gfx, true);
-}
-auto CreateBoxMesh(RenderContext& gfx, FVec3 halfExtents, FVec4 color) -> Mesh {
-    return BuildBoxMesh(gfx, halfExtents, color, true);
-}
-auto CreatePlaneMesh(RenderContext& gfx, float extent, FVec4 color) -> Mesh {
-    return BuildPlaneMesh(gfx, extent, color, true);
-}
-auto CreateSphereMesh(RenderContext& gfx, float radius, FVec4 color) -> Mesh {
-    return BuildSphereMesh(gfx, radius, color, true);
-}
-auto CreateCylinderMesh(RenderContext& gfx, float radius, float height, FVec4 color) -> Mesh {
-    return BuildCylinderMesh(gfx, radius, height, color, true);
-}
-auto CreateConeMesh(RenderContext& gfx, float radius, float height, FVec4 color) -> Mesh {
-    return BuildConeMesh(gfx, radius, height, color, true);
-}
 
 } // namespace ZHLN::PrefabFactory

@@ -455,9 +455,9 @@ struct RenderPipelinesTestSuite {
                     ZHLN::Println("    [INFO] a second engine was created; the single-instance claim is gone. Revisit this test.");
                     return {};
                 }
-                ZHLN::Println(
-                    "    [INFO] second CreateEngine refused: {}: {}", ZHLN::Error(secondRes.error()).Category(), ZHLN::Error(secondRes.error()).Message()
-                );
+                // Error and ErrorCode are one type now; the formatter prints
+                // "Category::Name: message" without a wrapper.
+                ZHLN::Println("    [INFO] second CreateEngine refused: {}", secondRes.error());
             }
 
             const ZHLN::Entity falling = first->Assets()->SpawnBox(

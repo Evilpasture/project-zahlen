@@ -17,12 +17,16 @@
 
 
 namespace ZHLN::Tests { namespace {
-void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Entity> visible, const Frustum& frustum, const CullingStats& stats) noexcept {
-    static bool testsRun = false;
-    if (testsRun) {
+// The latch is the caller's: VerifyCullingResults is a free function and stays
+// one, so the fact that it already ran travels in and out as data.
+void VerifyCullingResults(
+    CullingSystem::CullingQuery query, std::span<const Entity> visible, const Frustum& frustum, const CullingStats& stats,
+    bool& verified
+) noexcept {
+    if (verified) {
         return;
     }
-    testsRun = true;
+    verified = true;
 
     auto entities = query.Entities<Components::MeshComponent>();
     auto meshes   = query.Raw<Components::MeshComponent>();
@@ -301,7 +305,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, cons
 
     stats.CulledObjects = static_cast<uint32_t>(entities.size() - visibility.Visible().size());
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(query, visibility.Visible(), scratch.mainFrustum, stats);
+        ZHLN::Tests::VerifyCullingResults(query, visibility.Visible(), scratch.mainFrustum, stats, scratch.invariantsVerified);
     }
 }
 
