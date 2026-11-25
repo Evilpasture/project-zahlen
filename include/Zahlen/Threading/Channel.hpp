@@ -30,19 +30,30 @@ class Channel {
     Channel& operator=(const Channel&) = delete;
 
     void Push(T&& msg) {
+        Waiter wakeTarget {};
+        bool   hasWaiter = false;
+
         ZHLN::Lock(_mutex, [&] {
             if (!_waiters.empty()) {
-                Waiter waiter = _waiters.front();
+                wakeTarget = _waiters.front();
                 _waiters.pop();
 
-                *waiter.outMsg = std::move(msg);
-                waiter.signaled->store(true, std::memory_order::release);
-
-                TaskSystem::WakeUp(waiter.fiber);
+                *wakeTarget.outMsg = std::move(msg);
+                hasWaiter          = true;
             } else {
                 _queue.push(std::move(msg));
             }
         });
+
+        if (hasWaiter) {
+            // Two-phase wake: store Waking (1) before TaskSystem::WakeUp so the
+            // waiting fiber cannot yield again, then store Done (2) after WakeUp
+            // returns so the fiber cannot exit Wait(), destroy its stack frame,
+            // or recycle back into TaskSystem's freeQueue before queued is set.
+            wakeTarget.wakeState->store(1, std::memory_order::seq_cst);
+            TaskSystem::WakeUp(wakeTarget.fiber);
+            wakeTarget.wakeState->store(2, std::memory_order::release);
+        }
     }
 
     void Push(const T& msg) {
@@ -58,9 +69,9 @@ class Channel {
             return PopBlocking();
         }
 
-        T                  result;
-        ZHLN::Atomic<bool> signaled {false};
-        bool               got = false;
+        T                     result;
+        ZHLN::Atomic<uint8_t> wakeState {0};
+        bool                  got = false;
 
         ZHLN::Lock(_mutex, [&] {
             if (!_queue.empty()) {
@@ -70,15 +81,18 @@ class Channel {
                 return;
             }
 
-            _waiters.push(Waiter {.fiber = self, .outMsg = &result, .signaled = &signaled});
+            _waiters.push(Waiter {.fiber = self, .outMsg = &result, .wakeState = &wakeState});
         });
 
         if (got) {
             return result;
         }
 
-        while (!signaled.load(std::memory_order::acquire)) {
+        while (wakeState.load(std::memory_order::seq_cst) == 0) {
             Fiber::Yield();
+        }
+        while (wakeState.load(std::memory_order::acquire) < 2) {
+            CPURelax();
         }
 
         return result;
@@ -103,9 +117,9 @@ class Channel {
 
   private:
     struct Waiter {
-        Fiber*              fiber;
-        T*                  outMsg;
-        ZHLN::Atomic<bool>* signaled;
+        Fiber*                 fiber     = nullptr;
+        T*                     outMsg    = nullptr;
+        ZHLN::Atomic<uint8_t>* wakeState = nullptr;
     };
 
     T PopBlocking() {

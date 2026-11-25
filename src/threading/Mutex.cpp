@@ -190,12 +190,18 @@ constexpr size_t CACHE_LINE = std::hardware_destructive_interference_size;
 constexpr size_t CACHE_LINE = 64;
 #endif
 
+enum class WaitState : uint8_t {
+    Waiting = 0,
+    Waking  = 1,
+    Done    = 2,
+};
+
 struct alignas(CACHE_LINE) Waiter {
     const void*             address;
     Fiber*                  fiber;
     Waiter*                 next;
     std::condition_variable cond;
-    ZHLN::Atomic<bool>      signaled;
+    ZHLN::Atomic<uint8_t>   state {static_cast<uint8_t>(WaitState::Waiting)};
 };
 
 struct alignas(128) Bucket {
@@ -204,6 +210,42 @@ struct alignas(128) Bucket {
 };
 
 alignas(128) static Bucket s_parkingLot[BUCKET_COUNT];
+
+void WaitOnFiberNode(Waiter& node) noexcept {
+    while (node.state.load(std::memory_order::seq_cst) == static_cast<uint8_t>(WaitState::Waiting)) {
+        YieldFiber();
+    }
+    // Wait for the waker to finish TaskSystem::WakeUp(fiber) so `node` stays
+    // alive until the waker's final store and `fiber->queued` is already set
+    // before this fiber can finish its task and consider recycling.
+    while (node.state.load(std::memory_order::acquire) < static_cast<uint8_t>(WaitState::Done)) {
+        CPURelax();
+    }
+}
+
+// Caller must hold `bucket->mutex` so `waiter->cond` cannot be destroyed on the
+// waiter's stack before notify_one() completes.
+void WakeOsWaiterLocked(Waiter* waiter) noexcept {
+    waiter->state.store(static_cast<uint8_t>(WaitState::Done), std::memory_order::release);
+    waiter->cond.notify_one();
+}
+
+// Two-phase fiber wake: publish Waking (seq_cst) before WakeUp so the fiber
+// will not yield again, then Done (release) after WakeUp returns.
+void WakeFiberWaiter(Waiter* waiter) noexcept {
+    Fiber* const fiber = waiter->fiber;
+    waiter->state.store(static_cast<uint8_t>(WaitState::Waking), std::memory_order::seq_cst);
+    ZHLN::TaskSystem::WakeUp(fiber);
+    waiter->state.store(static_cast<uint8_t>(WaitState::Done), std::memory_order::release);
+}
+
+void WakeFiberWaiterList(Waiter* list) noexcept {
+    while (list != nullptr) {
+        Waiter* const next = list->next;
+        WakeFiberWaiter(list);
+        list = next;
+    }
+}
 
 template <size_t BUCKET_COUNT>
 [[nodiscard]] constexpr size_t HashAddress(const void* addr) noexcept {
@@ -260,7 +302,7 @@ void Mutex::LockSlow() noexcept {
         }
 
         if (!(val & HAS_WAITERS)) {
-            if (!_bits.compare_exchange_weak(val, val | HAS_WAITERS, std::memory_order::relaxed, std::memory_order::relaxed)) {
+            if (!_bits.compare_exchange_weak(val, val | HAS_WAITERS, std::memory_order::acq_rel, std::memory_order::relaxed)) {
                 continue;
             }
         }
@@ -273,11 +315,11 @@ void Mutex::LockSlow() noexcept {
         node.address = this;
         node.fiber   = is_worker_fiber ? self : nullptr;
         node.next    = nullptr;
-        node.signaled.store(false, std::memory_order::relaxed);
+        node.state.store(static_cast<uint8_t>(WaitState::Waiting), std::memory_order::relaxed);
 
         std::unique_lock<std::mutex> lock(bucket->mutex);
 
-        val = _bits.load(std::memory_order::relaxed);
+        val = _bits.load(std::memory_order::acquire);
         if (!(val & LOCKED) || !(val & HAS_WAITERS)) [[unlikely]] {
             lock.unlock();
             continue;
@@ -287,14 +329,10 @@ void Mutex::LockSlow() noexcept {
         bucket->head = &node;
 
         if (!is_worker_fiber) {
-            node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+            node.cond.wait(lock, [&]() { return node.state.load(std::memory_order::acquire) == static_cast<uint8_t>(WaitState::Done); });
         } else {
             lock.unlock();
-            while (!node.signaled.load(std::memory_order::acquire)) {
-                YieldFiber();
-            }
-
-            node.signaled.store(false, std::memory_order::relaxed);
+            WaitOnFiberNode(node);
         }
     }
 }
@@ -303,7 +341,7 @@ void Mutex::UnlockSlow() noexcept {
     uint8_t val = _bits.load(std::memory_order::relaxed);
     for (;;) {
         uint8_t desired = val & ~LOCKED;
-        if (_bits.compare_exchange_weak(val, desired, std::memory_order::release, std::memory_order::relaxed)) {
+        if (_bits.compare_exchange_weak(val, desired, std::memory_order::acq_rel, std::memory_order::relaxed)) {
             if (!(val & HAS_WAITERS)) {
                 return;
             }
@@ -311,42 +349,49 @@ void Mutex::UnlockSlow() noexcept {
         }
     }
 
-    size_t                      hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket*                     bucket = &s_parkingLot[hash];
-    std::lock_guard<std::mutex> lock(bucket->mutex);
+    size_t  hash        = HashAddress<BUCKET_COUNT>(this);
+    Bucket* bucket      = &s_parkingLot[hash];
+    Waiter* fiberToWake = nullptr;
 
-    Waiter** curr    = &bucket->head;
-    Waiter*  to_wake = nullptr;
-    bool     more    = false;
+    {
+        std::lock_guard<std::mutex> lock(bucket->mutex);
 
-    while (*curr != nullptr) {
-        if ((*curr)->address == this && to_wake == nullptr) {
-            to_wake = *curr;
-            *curr   = to_wake->next;
-            continue;
+        Waiter** curr    = &bucket->head;
+        Waiter*  to_wake = nullptr;
+        bool     more    = false;
+
+        while (*curr != nullptr) {
+            if ((*curr)->address == this && to_wake == nullptr) {
+                to_wake = *curr;
+                *curr   = to_wake->next;
+                continue;
+            }
+            if ((*curr)->address == this) {
+                more = true;
+            }
+            curr = &((*curr)->next);
         }
-        if ((*curr)->address == this) {
-            more = true;
-        }
-        curr = &((*curr)->next);
-    }
 
-    if (!more) {
-        val = _bits.load(std::memory_order::relaxed);
-        for (;;) {
-            if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order::relaxed, std::memory_order::relaxed)) {
-                break;
+        if (!more) {
+            val = _bits.load(std::memory_order::relaxed);
+            for (;;) {
+                if (_bits.compare_exchange_weak(val, val & ~HAS_WAITERS, std::memory_order::release, std::memory_order::relaxed)) {
+                    break;
+                }
+            }
+        }
+
+        if (to_wake != nullptr) {
+            if (to_wake->fiber == nullptr) {
+                WakeOsWaiterLocked(to_wake);
+            } else {
+                fiberToWake = to_wake;
             }
         }
     }
 
-    if (to_wake != nullptr) {
-        to_wake->signaled.store(true, std::memory_order::release);
-        if (to_wake->fiber == nullptr) {
-            to_wake->cond.notify_one();
-        } else {
-            ZHLN::TaskSystem::WakeUp(to_wake->fiber);
-        }
+    if (fiberToWake != nullptr) {
+        WakeFiberWaiter(fiberToWake);
     }
 }
 
@@ -361,113 +406,112 @@ void ConditionalVariable::Wait(Mutex& mutex) noexcept {
     node.address = this;
     node.fiber   = is_worker_fiber ? self : nullptr;
     node.next    = nullptr;
-    node.signaled.store(false, std::memory_order::relaxed);
-
-    _bits.store(1, std::memory_order::relaxed);
+    node.state.store(static_cast<uint8_t>(WaitState::Waiting), std::memory_order::relaxed);
 
     std::unique_lock<std::mutex> bucket_lock(bucket->mutex);
     node.next    = bucket->head;
     bucket->head = &node;
+    // Publish the waiter flag while holding `bucket->mutex` so a concurrent
+    // NotifyOne/NotifyAll cannot clear `_bits` to 0 after we set it and miss
+    // this newly enqueued waiter.
+    _bits.store(1, std::memory_order::seq_cst);
 
     if (!is_worker_fiber) {
         bucket_lock.unlock();
         mutex.unlock();
 
         bucket_lock.lock();
-        node.cond.wait(bucket_lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+        node.cond.wait(bucket_lock, [&]() { return node.state.load(std::memory_order::acquire) == static_cast<uint8_t>(WaitState::Done); });
         bucket_lock.unlock();
     } else {
         bucket_lock.unlock();
         mutex.unlock();
 
-        while (!node.signaled.load(std::memory_order::acquire)) {
-            YieldFiber();
-        }
-
-        node.signaled.store(false, std::memory_order::relaxed);
+        WaitOnFiberNode(node);
     }
 
     mutex.lock();
 }
 
 void ConditionalVariable::NotifyOne() noexcept {
-    if (_bits.load(std::memory_order::relaxed) == 0) {
+    if (_bits.load(std::memory_order::seq_cst) == 0) {
         return;
     }
 
-    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket* bucket = &s_parkingLot[hash];
+    size_t  hash        = HashAddress<BUCKET_COUNT>(this);
+    Bucket* bucket      = &s_parkingLot[hash];
+    Waiter* fiberToWake = nullptr;
 
-    std::lock_guard<std::mutex> lock(bucket->mutex);
+    {
+        std::lock_guard<std::mutex> lock(bucket->mutex);
 
-    Waiter** curr    = &bucket->head;
-    Waiter*  to_wake = nullptr;
-    bool     more    = false;
+        Waiter** curr    = &bucket->head;
+        Waiter*  to_wake = nullptr;
+        bool     more    = false;
 
-    while (*curr != nullptr) {
-        if ((*curr)->address == this && to_wake == nullptr) {
-            to_wake = *curr;
-            *curr   = to_wake->next;
-            continue;
+        while (*curr != nullptr) {
+            if ((*curr)->address == this && to_wake == nullptr) {
+                to_wake = *curr;
+                *curr   = to_wake->next;
+                continue;
+            }
+            if ((*curr)->address == this) {
+                more = true;
+            }
+            curr = &((*curr)->next);
         }
-        if ((*curr)->address == this) {
-            more = true;
+
+        if (!more) {
+            _bits.store(0, std::memory_order::release);
         }
-        curr = &((*curr)->next);
+
+        if (to_wake != nullptr) {
+            if (to_wake->fiber == nullptr) {
+                WakeOsWaiterLocked(to_wake);
+            } else {
+                fiberToWake = to_wake;
+            }
+        }
     }
 
-    if (!more) {
-        _bits.store(0, std::memory_order::relaxed);
-    }
-
-    if (to_wake != nullptr) {
-        to_wake->signaled.store(true, std::memory_order::release);
-        if (to_wake->fiber == nullptr) {
-            to_wake->cond.notify_one();
-        } else {
-            ZHLN::TaskSystem::WakeUp(to_wake->fiber);
-        }
+    if (fiberToWake != nullptr) {
+        WakeFiberWaiter(fiberToWake);
     }
 }
 
 void ConditionalVariable::NotifyAll() noexcept {
-    if (_bits.load(std::memory_order::relaxed) == 0) {
+    if (_bits.load(std::memory_order::seq_cst) == 0) {
         return;
     }
 
-    size_t  hash   = HashAddress<BUCKET_COUNT>(this);
-    Bucket* bucket = &s_parkingLot[hash];
+    size_t  hash           = HashAddress<BUCKET_COUNT>(this);
+    Bucket* bucket         = &s_parkingLot[hash];
+    Waiter* fiberWakeList  = nullptr;
 
-    std::lock_guard<std::mutex> lock(bucket->mutex);
+    {
+        std::lock_guard<std::mutex> lock(bucket->mutex);
 
-    Waiter** curr      = &bucket->head;
-    Waiter*  wake_list = nullptr;
+        Waiter** curr = &bucket->head;
+        while (*curr != nullptr) {
+            if ((*curr)->address == this) {
+                Waiter* waiter = *curr;
+                *curr          = waiter->next;
 
-    while (*curr != nullptr) {
-        if ((*curr)->address == this) {
-            Waiter* waiter = *curr;
-            *curr          = waiter->next;
-
-            waiter->next = wake_list;
-            wake_list    = waiter;
-        } else {
-            curr = &((*curr)->next);
+                if (waiter->fiber == nullptr) {
+                    WakeOsWaiterLocked(waiter);
+                } else {
+                    waiter->next  = fiberWakeList;
+                    fiberWakeList = waiter;
+                }
+            } else {
+                curr = &((*curr)->next);
+            }
         }
+
+        _bits.store(0, std::memory_order::release);
     }
 
-    _bits.store(0, std::memory_order::relaxed);
-
-    while (wake_list != nullptr) {
-        Waiter* waiter = wake_list;
-        wake_list      = waiter->next;
-
-        waiter->signaled.store(true, std::memory_order::release);
-        if (waiter->fiber == nullptr) {
-            waiter->cond.notify_one();
-        } else {
-            ZHLN::TaskSystem::WakeUp(waiter->fiber);
-        }
-    }
+    WakeFiberWaiterList(fiberWakeList);
 }
 
 namespace {
@@ -478,15 +522,6 @@ namespace {
 
 [[nodiscard]] auto ReaderParkingAddress(const SharedMutex* mutex) noexcept -> const void* {
     return reinterpret_cast<const std::byte*>(mutex) + 1;
-}
-
-void WakeWaiter(Waiter* waiter) noexcept {
-    waiter->signaled.store(true, std::memory_order::release);
-    if (waiter->fiber == nullptr) {
-        waiter->cond.notify_one();
-    } else {
-        ZHLN::TaskSystem::WakeUp(waiter->fiber);
-    }
 }
 
 } // namespace
@@ -528,7 +563,7 @@ void SharedMutex::LockSlow() noexcept {
         }
 
         if ((state & (WRITER_PENDING | WRITER_PARKED)) != (WRITER_PENDING | WRITER_PARKED)) {
-            if (!_state.compare_exchange_weak(state, state | WRITER_PENDING | WRITER_PARKED, std::memory_order::relaxed, std::memory_order::relaxed)) {
+            if (!_state.compare_exchange_weak(state, state | WRITER_PENDING | WRITER_PARKED, std::memory_order::acq_rel, std::memory_order::relaxed)) {
                 continue;
             }
         }
@@ -540,10 +575,10 @@ void SharedMutex::LockSlow() noexcept {
         node.address = writerAddr;
         node.fiber   = isWorkerFiber ? self : nullptr;
         node.next    = nullptr;
-        node.signaled.store(false, std::memory_order::relaxed);
+        node.state.store(static_cast<uint8_t>(WaitState::Waiting), std::memory_order::relaxed);
 
         std::unique_lock<std::mutex> lock(writerBucket->mutex);
-        state = _state.load(std::memory_order::relaxed);
+        state = _state.load(std::memory_order::acquire);
         if (((state & WRITER_ACTIVE) == 0 && (state >> READER_SHIFT) == 0) || (state & WRITER_PARKED) == 0) [[unlikely]] {
             lock.unlock();
             continue;
@@ -553,13 +588,10 @@ void SharedMutex::LockSlow() noexcept {
         writerBucket->head = &node;
 
         if (!isWorkerFiber) {
-            node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+            node.cond.wait(lock, [&]() { return node.state.load(std::memory_order::acquire) == static_cast<uint8_t>(WaitState::Done); });
         } else {
             lock.unlock();
-            while (!node.signaled.load(std::memory_order::acquire)) {
-                YieldFiber();
-            }
-            node.signaled.store(false, std::memory_order::relaxed);
+            WaitOnFiberNode(node);
         }
     }
 }
@@ -571,7 +603,7 @@ void SharedMutex::UnlockSlow() noexcept {
     for (;;) {
         wakeWriter             = (state & WRITER_PARKED) != 0;
         const uint32_t desired = wakeWriter ? ((state & ~WRITER_ACTIVE) | WRITER_PENDING) : (state & ~(WRITER_ACTIVE | WRITER_PENDING));
-        if (_state.compare_exchange_weak(state, desired, std::memory_order::release, std::memory_order::relaxed)) {
+        if (_state.compare_exchange_weak(state, desired, std::memory_order::acq_rel, std::memory_order::relaxed)) {
             break;
         }
     }
@@ -579,12 +611,14 @@ void SharedMutex::UnlockSlow() noexcept {
     if (wakeWriter) {
         const void* writerAddr   = WriterParkingAddress(this);
         Bucket*     writerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(writerAddr)];
-        Waiter*     toWake       = nullptr;
+        Waiter*     fiberToWake  = nullptr;
+        bool        wokeAny      = false;
         bool        moreWriters  = false;
 
         {
             std::lock_guard<std::mutex> lock(writerBucket->mutex);
-            Waiter**                    curr = &writerBucket->head;
+            Waiter*                     toWake = nullptr;
+            Waiter**                    curr   = &writerBucket->head;
             while (*curr != nullptr) {
                 if ((*curr)->address == writerAddr && toWake == nullptr) {
                     toWake = *curr;
@@ -597,50 +631,60 @@ void SharedMutex::UnlockSlow() noexcept {
                 curr = &((*curr)->next);
             }
             if (!moreWriters) {
-                _state.fetch_and(~WRITER_PARKED, std::memory_order::relaxed);
+                _state.fetch_and(~WRITER_PARKED, std::memory_order::release);
+            }
+            if (toWake != nullptr) {
+                wokeAny = true;
+                if (toWake->fiber == nullptr) {
+                    WakeOsWaiterLocked(toWake);
+                } else {
+                    fiberToWake = toWake;
+                }
             }
         }
 
-        if (toWake != nullptr) {
-            WakeWaiter(toWake);
+        if (wokeAny) {
+            if (fiberToWake != nullptr) {
+                WakeFiberWaiter(fiberToWake);
+            }
             return;
         }
 
-        uint32_t cur = _state.load(std::memory_order::relaxed);
+        uint32_t cur = _state.load(std::memory_order::acquire);
         while ((cur & (WRITER_ACTIVE | WRITER_PARKED)) == 0 && (cur & WRITER_PENDING) != 0) {
-            if (_state.compare_exchange_weak(cur, cur & ~WRITER_PENDING, std::memory_order::relaxed, std::memory_order::relaxed)) {
+            if (_state.compare_exchange_weak(cur, cur & ~WRITER_PENDING, std::memory_order::release, std::memory_order::relaxed)) {
                 break;
             }
         }
     }
 
-    if ((state & READER_PARKED) != 0 || (_state.load(std::memory_order::relaxed) & READER_PARKED) != 0) {
-        const void* readerAddr   = ReaderParkingAddress(this);
-        Bucket*     readerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(readerAddr)];
-        Waiter*     wakeList     = nullptr;
+    if ((state & READER_PARKED) != 0 || (_state.load(std::memory_order::acquire) & READER_PARKED) != 0) {
+        const void* readerAddr    = ReaderParkingAddress(this);
+        Bucket*     readerBucket  = &s_parkingLot[HashAddress<BUCKET_COUNT>(readerAddr)];
+        Waiter*     fiberWakeList = nullptr;
 
         {
             std::lock_guard<std::mutex> lock(readerBucket->mutex);
-            _state.fetch_and(~READER_PARKED, std::memory_order::relaxed);
+            _state.fetch_and(~READER_PARKED, std::memory_order::release);
 
             Waiter** curr = &readerBucket->head;
             while (*curr != nullptr) {
                 if ((*curr)->address == readerAddr) {
                     Waiter* waiter = *curr;
                     *curr          = waiter->next;
-                    waiter->next   = wakeList;
-                    wakeList       = waiter;
+                    if (waiter->fiber == nullptr) {
+                        WakeOsWaiterLocked(waiter);
+                    } else {
+                        waiter->next  = fiberWakeList;
+                        fiberWakeList = waiter;
+                    }
                 } else {
                     curr = &((*curr)->next);
                 }
             }
         }
 
-        while (wakeList != nullptr) {
-            Waiter* waiter = wakeList;
-            wakeList       = waiter->next;
-            WakeWaiter(waiter);
-        }
+        WakeFiberWaiterList(fiberWakeList);
     }
 }
 
@@ -675,7 +719,7 @@ void SharedMutex::LockSharedSlow() noexcept {
         }
 
         if ((state & READER_PARKED) == 0) {
-            if (!_state.compare_exchange_weak(state, state | READER_PARKED, std::memory_order::relaxed, std::memory_order::relaxed)) {
+            if (!_state.compare_exchange_weak(state, state | READER_PARKED, std::memory_order::acq_rel, std::memory_order::relaxed)) {
                 continue;
             }
         }
@@ -687,10 +731,10 @@ void SharedMutex::LockSharedSlow() noexcept {
         node.address = readerAddr;
         node.fiber   = isWorkerFiber ? self : nullptr;
         node.next    = nullptr;
-        node.signaled.store(false, std::memory_order::relaxed);
+        node.state.store(static_cast<uint8_t>(WaitState::Waiting), std::memory_order::relaxed);
 
         std::unique_lock<std::mutex> lock(readerBucket->mutex);
-        state = _state.load(std::memory_order::relaxed);
+        state = _state.load(std::memory_order::acquire);
         if ((state & (WRITER_ACTIVE | WRITER_PENDING)) == 0 || (state & READER_PARKED) == 0) [[unlikely]] {
             lock.unlock();
             continue;
@@ -700,13 +744,10 @@ void SharedMutex::LockSharedSlow() noexcept {
         readerBucket->head = &node;
 
         if (!isWorkerFiber) {
-            node.cond.wait(lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
+            node.cond.wait(lock, [&]() { return node.state.load(std::memory_order::acquire) == static_cast<uint8_t>(WaitState::Done); });
         } else {
             lock.unlock();
-            while (!node.signaled.load(std::memory_order::acquire)) {
-                YieldFiber();
-            }
-            node.signaled.store(false, std::memory_order::relaxed);
+            WaitOnFiberNode(node);
         }
     }
 }
@@ -714,12 +755,13 @@ void SharedMutex::LockSharedSlow() noexcept {
 void SharedMutex::UnlockSharedSlow() noexcept {
     const void* writerAddr   = WriterParkingAddress(this);
     Bucket*     writerBucket = &s_parkingLot[HashAddress<BUCKET_COUNT>(writerAddr)];
-    Waiter*     toWake       = nullptr;
+    Waiter*     fiberToWake  = nullptr;
     bool        moreWriters  = false;
 
     {
         std::lock_guard<std::mutex> lock(writerBucket->mutex);
-        Waiter**                    curr = &writerBucket->head;
+        Waiter*                     toWake = nullptr;
+        Waiter**                    curr   = &writerBucket->head;
         while (*curr != nullptr) {
             if ((*curr)->address == writerAddr && toWake == nullptr) {
                 toWake = *curr;
@@ -732,12 +774,19 @@ void SharedMutex::UnlockSharedSlow() noexcept {
             curr = &((*curr)->next);
         }
         if (!moreWriters) {
-            _state.fetch_and(~WRITER_PARKED, std::memory_order::relaxed);
+            _state.fetch_and(~WRITER_PARKED, std::memory_order::release);
+        }
+        if (toWake != nullptr) {
+            if (toWake->fiber == nullptr) {
+                WakeOsWaiterLocked(toWake);
+            } else {
+                fiberToWake = toWake;
+            }
         }
     }
 
-    if (toWake != nullptr) {
-        WakeWaiter(toWake);
+    if (fiberToWake != nullptr) {
+        WakeFiberWaiter(fiberToWake);
     }
 }
 
