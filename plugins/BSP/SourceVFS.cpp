@@ -3,13 +3,12 @@
 
 #include "SourceVFS.hpp"
 #include <Zahlen/COM/IAssetLibrary.hpp>
-#include <limits>
+#include <Zahlen/FileSystem/VFS.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstring>
-#include <fstream>
 
 namespace ZHLN::BSP {
 
@@ -34,7 +33,7 @@ auto SourceVFS::NormalizePath(std::string_view path) -> std::string {
         out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     }
 
-    // Collapse multiple consecutive slashes
+    // Collapse multiple consecutive slashes and trim trailing slashes
     std::string collapsed;
     collapsed.reserve(out.size());
     bool lastSlash = false;
@@ -49,40 +48,55 @@ auto SourceVFS::NormalizePath(std::string_view path) -> std::string {
             lastSlash = false;
         }
     }
+    while (!collapsed.empty() && collapsed.back() == '/') {
+        collapsed.pop_back();
+    }
     return collapsed;
 }
 
-void SourceVFS::AddSearchPath(std::string_view path) {
-    if (path.empty()) {
-        return;
-    }
-    std::string p(path);
-    if (std::find(_searchPaths.begin(), _searchPaths.end(), p) == _searchPaths.end()) {
-        _searchPaths.push_back(p);
-        _indexed = false;
-    }
+void SourceVFS::SetVirtualPrefix(std::string_view virtualPrefix) {
+    _virtualPrefix = NormalizePath(virtualPrefix);
 }
 
-void SourceVFS::IndexDirectory(const std::filesystem::path& root) {
-    std::error_code ec;
-    if (!std::filesystem::exists(root, ec) || !std::filesystem::is_directory(root, ec)) {
-        return;
+auto SourceVFS::ApplyPrefix(std::string_view normalizedPath) const -> std::string {
+    if (_virtualPrefix.empty()) {
+        return std::string(normalizedPath);
     }
+    if (normalizedPath.empty()) {
+        return _virtualPrefix;
+    }
+    std::string out;
+    out.reserve(_virtualPrefix.size() + 1 + normalizedPath.size());
+    out.append(_virtualPrefix);
+    out.push_back('/');
+    out.append(normalizedPath);
+    return out;
+}
 
-    for (const auto& entry: std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec)) {
-        if (ec) {
-            break;
-        }
-        if (entry.is_regular_file(ec)) {
-            const auto relPath = std::filesystem::relative(entry.path(), root, ec);
-            if (!ec) {
-                const std::string norm = NormalizePath(relPath.generic_string());
-                if (!_diskIndex.contains(norm)) {
-                    _diskIndex[norm] = entry.path().string();
-                }
-            }
+auto SourceVFS::BackingExists(std::string_view candidatePath) const -> bool {
+    if (_assets != nullptr && _assets->VirtualFileExists(candidatePath)) {
+        return true;
+    }
+    if (_vfs != nullptr && _vfs->Exists(candidatePath)) {
+        return true;
+    }
+    return false;
+}
+
+auto SourceVFS::BackingRead(std::string_view candidatePath) const -> std::optional<std::vector<std::byte>> {
+    if (_assets != nullptr) {
+        if (auto file = _assets->OpenVirtualFile(candidatePath)) {
+            const auto span = (*file)->Bytes();
+            return std::vector<std::byte>(span.data, span.data + span.size);
         }
     }
+    if (_vfs != nullptr) {
+        if (auto file = _vfs->Open(candidatePath)) {
+            const auto span = file->Bytes();
+            return std::vector<std::byte>(span.begin(), span.end());
+        }
+    }
+    return std::nullopt;
 }
 
 void SourceVFS::IndexPakfile(std::span<const std::byte> pakData) {
@@ -96,7 +110,7 @@ void SourceVFS::IndexPakfile(std::span<const std::byte> pakData) {
     const uint8_t* bytes    = reinterpret_cast<const uint8_t*>(_pakDataCopy.data());
     const size_t   totalLen = _pakDataCopy.size();
 
-    int64_t eocdPos = -1;
+    int64_t      eocdPos   = -1;
     const size_t maxSearch = std::min(totalLen, size_t {65557});
     for (size_t i = totalLen - 22; i + maxSearch >= totalLen && i > 0; --i) {
         if (bytes[i] == 0x50 && bytes[i + 1] == 0x4B && bytes[i + 2] == 0x05 && bytes[i + 3] == 0x06) {
@@ -109,8 +123,8 @@ void SourceVFS::IndexPakfile(std::span<const std::byte> pakData) {
         return;
     }
 
-    const uint8_t* eocd = bytes + eocdPos;
-    uint32_t cdOffset = 0;
+    const uint8_t* eocd     = bytes + eocdPos;
+    uint32_t       cdOffset = 0;
     std::memcpy(&cdOffset, eocd + 16, 4);
     uint16_t numEntries = 0;
     std::memcpy(&numEntries, eocd + 10, 2);
@@ -144,7 +158,7 @@ void SourceVFS::IndexPakfile(std::span<const std::byte> pakData) {
             break;
         }
 
-        std::string fileName(reinterpret_cast<const char*>(cur + 46), nameLen);
+        std::string       fileName(reinterpret_cast<const char*>(cur + 46), nameLen);
         const std::string normName = NormalizePath(fileName);
 
         // Calculate actual data offset from local file header
@@ -172,102 +186,80 @@ void SourceVFS::IndexPakfile(std::span<const std::byte> pakData) {
 
 void SourceVFS::SetPakfileData(std::span<const std::byte> pakData) {
     _pakIndex.clear();
+    _pakDataCopy.clear();
     IndexPakfile(pakData);
 }
 
 auto SourceVFS::ResolveFile(std::string_view virtualPath) const -> std::optional<std::string> {
-    if (virtualPath.empty()) {
+    if (virtualPath.empty() || virtualPath.front() == '/' || virtualPath.front() == '\\') {
         return std::nullopt;
     }
 
-    const auto normalized = NormalizePath(virtualPath);
-    if (_assets != nullptr && _assets->VirtualFileExists(std::string_view(normalized))) return normalized;
-
-    // 1. Direct check
-    std::error_code ec;
-    if (std::filesystem::exists(virtualPath, ec) && std::filesystem::is_regular_file(virtualPath, ec)) {
-        return std::string(virtualPath);
-    }
-
     const std::string norm = NormalizePath(virtualPath);
-
-    // 2. Check indexed disk cache
-    if (!_indexed) {
-        for (const auto& searchPath: _searchPaths) {
-            const_cast<SourceVFS*>(this)->IndexDirectory(searchPath);
-        }
-        _indexed = true;
+    if (norm.empty()) {
+        return std::nullopt;
     }
 
-    if (auto it = _diskIndex.find(norm); it != _diskIndex.end()) {
-        return it->second;
+    if (_pakIndex.contains(norm)) {
+        return norm;
     }
 
-    // 3. Fallback: try prefixing with each search path directly
-    for (const auto& searchPath: _searchPaths) {
-        std::filesystem::path candidate = std::filesystem::path(searchPath) / virtualPath;
-        if (std::filesystem::exists(candidate, ec) && std::filesystem::is_regular_file(candidate, ec)) {
-            _diskIndex[norm] = candidate.string();
-            return candidate.string();
-        }
+    const std::string prefixed = ApplyPrefix(norm);
+    if (BackingExists(prefixed)) {
+        return norm;
+    }
+
+    if (!_virtualPrefix.empty() && norm.size() > _virtualPrefix.size() + 1 &&
+        norm.starts_with(_virtualPrefix) && norm[_virtualPrefix.size()] == '/' &&
+        BackingExists(norm)) {
+        return norm;
     }
 
     return std::nullopt;
 }
 
 auto SourceVFS::Exists(std::string_view virtualPath) const -> bool {
-    const std::string norm = NormalizePath(virtualPath);
-    if (_pakIndex.contains(norm)) {
-        return true;
-    }
     return ResolveFile(virtualPath).has_value();
 }
 
 auto SourceVFS::ReadFile(std::string_view virtualPath) const -> std::optional<std::vector<std::byte>> {
-    const std::string norm = NormalizePath(virtualPath);
+    if (virtualPath.empty() || virtualPath.front() == '/' || virtualPath.front() == '\\') {
+        return std::nullopt;
+    }
 
-    // 1. Check embedded pakfile
+    const std::string norm = NormalizePath(virtualPath);
+    if (norm.empty()) {
+        return std::nullopt;
+    }
+
+    // 1. Check embedded pakfile first (map Lump 40 always overrides loose/mounted game assets).
     if (auto it = _pakIndex.find(norm); it != _pakIndex.end()) {
         const auto& entry = it->second;
         if (entry.offset + entry.compSize <= _pakDataCopy.size()) {
             if (entry.method == 0) { // Store (uncompressed)
                 std::vector<std::byte> result(entry.uncompSize);
-                std::memcpy(result.data(), _pakDataCopy.data() + entry.offset, entry.uncompSize);
+                if (entry.uncompSize > 0) {
+                    std::memcpy(result.data(), _pakDataCopy.data() + entry.offset, entry.uncompSize);
+                }
                 return result;
             }
         }
     }
 
-    // 2. Read the supplied capability VFS without a native cache borrow.
-    if (_assets != nullptr && _assets->VirtualFileExists(std::string_view(norm))) {
-        const auto required = _assets->ReadVirtualFile(std::string_view(norm), {});
-        if (!required.HasValue() || required.value > std::numeric_limits<size_t>::max()) return std::nullopt;
-        std::vector<std::byte> bytes(static_cast<size_t>(required.value));
-        const auto read = _assets->ReadVirtualFile(std::string_view(norm), {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
-        if (!read.HasValue() || read.value != bytes.size()) return std::nullopt;
+    // 2. Read from the backing VFS under `_virtualPrefix` (if any).
+    const std::string prefixed = ApplyPrefix(norm);
+    if (auto bytes = BackingRead(prefixed)) {
         return bytes;
     }
 
-    // 3. Check disk
-    const auto resolved = ResolveFile(virtualPath);
-    if (!resolved.has_value()) {
-        return std::nullopt;
+    if (!_virtualPrefix.empty() && norm.size() > _virtualPrefix.size() + 1 &&
+        norm.starts_with(_virtualPrefix) && norm[_virtualPrefix.size()] == '/') {
+        if (auto bytes = BackingRead(norm)) {
+            return bytes;
+        }
     }
 
-    std::ifstream file(*resolved, std::ios::binary | std::ios::ate);
-    if (!file) {
-        return std::nullopt;
-    }
-    const std::streamsize size = file.tellg();
-    if (size <= 0) {
-        return std::vector<std::byte> {};
-    }
-    file.seekg(0);
-    std::vector<std::byte> buffer(static_cast<size_t>(size));
-    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
-        return std::nullopt;
-    }
-    return buffer;
+    return std::nullopt;
 }
 
 auto SourceVFS::ResolveMaterial(std::string_view materialName) const -> std::optional<std::string> {

@@ -11,8 +11,6 @@
 #include <cmath>
 #include <cstdio>
 #include <format>
-#include <fstream>
-#include <sstream>
 
 
 namespace ZHLN::ReflectLua {
@@ -311,18 +309,6 @@ auto Vm::ExecuteString(std::string_view code, std::string_view chunkName) noexce
     auto runRes = _impl->RunProtected(0, 0, chunkName);
     lua_settop(_impl->state, baseTop);
     return runRes;
-}
-
-auto Vm::ExecuteFile(const std::filesystem::path& path) noexcept -> std::expected<void, ErrorCode> {
-    auto source = ReadFileText(path);
-    if (!source) {
-        if (_impl != nullptr) {
-            _impl->lastErrorDetail = std::format("failed to open or read '{}'", path.generic_string());
-        }
-        return std::unexpected(source.error());
-    }
-    const std::string chunkName = "@" + path.generic_string();
-    return ExecuteString(*source, chunkName);
 }
 
 auto Vm::LastErrorDetail() const noexcept -> std::string_view {
@@ -659,23 +645,6 @@ void Builder::SetElementTop(size_t zeroBasedIndex) noexcept {
         return;
     }
     lua_rawseti(_state, -2, static_cast<int>(zeroBasedIndex + 1u));
-}
-
-// ----------------------------------------------------------------------------
-// File helper
-// ----------------------------------------------------------------------------
-
-auto ReadFileText(const std::filesystem::path& path) noexcept -> std::expected<std::string, ErrorCode> {
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open()) {
-        return std::unexpected(LuaError::FileReadFailed);
-    }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    if (in.bad()) {
-        return std::unexpected(LuaError::FileReadFailed);
-    }
-    return buffer.str();
 }
 
 } // namespace ZHLN::ReflectLua

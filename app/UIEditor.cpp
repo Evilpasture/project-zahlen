@@ -28,8 +28,10 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/App.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 #include <Widget/TextFit.hpp>
@@ -833,7 +835,14 @@ auto main(int argc, char* argv[]) -> int {
         void Start(ZHLN::COM::IEngine& engine) {
             ui              = std::make_unique<ZHLN::HostUI>(engine);
             session->hostUI = ui.get();
-            auto baked      = ZHLN::Fonts::LoadBakedFont(engine.Assets(), ZHLN::Fonts::VendoredDefaultFontSource());
+            auto& assets    = *engine.Assets();
+            if (!assets.VirtualFileExists(ZHLN::Fonts::kVendoredFontVirtualPath)) {
+                if (const auto found = ZHLN::FS::Paths::FindDataFile(ZHLN::Fonts::kVendoredFontDataRelPath)) {
+                    const std::string fontsDir = found->parent_path().parent_path().string();
+                    (void)assets.MountDirectory(std::string_view(fontsDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "fonts"});
+                }
+            }
+            auto baked = ZHLN::Fonts::LoadBakedFont(assets, ZHLN::Fonts::VendoredDefaultFontSource());
             if (baked) {
                 ui->SetBakedFont(std::move(*baked));
             } else {

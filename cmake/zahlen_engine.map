@@ -140,18 +140,28 @@
     _ZN4ZHLN2FS5Paths8CacheDir[BE]*;                                /* @api ZHLN::FS::Paths::CacheDir */
     _ZN4ZHLN2FS5Paths12FindDataFile[BE]*;                           /* @api ZHLN::FS::Paths::FindDataFile */
 
-    /* include/Zahlen/FileSystem/VFS.hpp (private ExecuteLoad / *Locked stay local) */
+    /* include/Zahlen/FileSystem/VFS.hpp (private helpers stay local) */
+    _ZN4ZHLN2FS11VirtualFileC[12]EOS1_;                             /* @api ZHLN::FS::VirtualFile::VirtualFile */
+    _ZN4ZHLN2FS11VirtualFileD[012]Ev;                               /* @api ZHLN::FS::VirtualFile::~VirtualFile */
+    _ZN4ZHLN2FS11VirtualFileaSEOS1_;                                /* @api ZHLN::FS::VirtualFile::operator= */
+    _ZNK4ZHLN2FS11VirtualFile5Bytes[BE]*;                           /* @api ZHLN::FS::VirtualFile::Bytes const */
+    _ZNK4ZHLN2FS11VirtualFile4Text[BE]*;                            /* @api ZHLN::FS::VirtualFile::Text const */
+    _ZNK4ZHLN2FS11VirtualFile10IsZeroCopy[BE]*;                     /* @api ZHLN::FS::VirtualFile::IsZeroCopy const */
+    _ZNO4ZHLN2FS11VirtualFile9IntoBytes[BE]*;                       /* @api ZHLN::FS::VirtualFile::IntoBytes && */
+
     _ZN4ZHLN2FS17VirtualFileSystemC[12]Ev;                          /* @api ZHLN::FS::VirtualFileSystem::VirtualFileSystem */
     _ZN4ZHLN2FS17VirtualFileSystemD[012]Ev;                         /* @api ZHLN::FS::VirtualFileSystem::~VirtualFileSystem */
     _ZN4ZHLN2FS17VirtualFileSystem8MountPak[BE]*;                   /* @api ZHLN::FS::VirtualFileSystem::MountPak */
     _ZN4ZHLN2FS17VirtualFileSystem14MountDirectory[BE]*;            /* @api ZHLN::FS::VirtualFileSystem::MountDirectory */
     _ZN4ZHLN2FS17VirtualFileSystem16UnmountDirectory[BE]*;          /* @api ZHLN::FS::VirtualFileSystem::UnmountDirectory */
     _ZNK4ZHLN2FS17VirtualFileSystem21MountedDirectoryCount[BE]*;    /* @api ZHLN::FS::VirtualFileSystem::MountedDirectoryCount const */
-    _ZN4ZHLN2FS17VirtualFileSystem9LoadAsync[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::LoadAsync */
-    _ZN4ZHLN2FS17VirtualFileSystem8LoadSync[BE]*;                   /* @api ZHLN::FS::VirtualFileSystem::LoadSync */
-    _ZN4ZHLN2FS17VirtualFileSystem10FreeMemory[BE]*;                /* @api ZHLN::FS::VirtualFileSystem::FreeMemory */
+    _ZNK4ZHLN2FS17VirtualFileSystem9LoadAsync[BE]*;                 /* @api ZHLN::FS::VirtualFileSystem::LoadAsync const */
+    _ZNK4ZHLN2FS17VirtualFileSystem8LoadSync[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::LoadSync const */
     _ZNK4ZHLN2FS17VirtualFileSystem6Exists[BE]*;                    /* @api ZHLN::FS::VirtualFileSystem::Exists const */
-    _ZNK4ZHLN2FS17VirtualFileSystem8ReadFile[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::ReadFile const */
+    _ZNK4ZHLN2FS17VirtualFileSystem8FileSize[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::FileSize const */
+    _ZNK4ZHLN2FS17VirtualFileSystem4Open[BE]*;                      /* @api ZHLN::FS::VirtualFileSystem::Open const */
+    _ZNK4ZHLN2FS17VirtualFileSystem9ReadBytes[BE]*;                 /* @api ZHLN::FS::VirtualFileSystem::ReadBytes const */
+    _ZNK4ZHLN2FS17VirtualFileSystem8ReadText[BE]*;                  /* @api ZHLN::FS::VirtualFileSystem::ReadText const */
 
     /* include/Zahlen/Render/Meshlet.hpp */
     _ZN4ZHLN13BuildMeshlets[BE]*;                                   /* @api ZHLN::BuildMeshlets */

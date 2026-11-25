@@ -6,8 +6,11 @@
 // Binary-stable COM capability interface exposed by libzahlen_plugin_svg
 // alongside COM::IAppLayer. Hosts include only this header to rasterize SVG
 // assets at runtime without linking zahlen_svg or resvg.
+//
+// Strictly VFS/bytes-only: never reads from the host OS filesystem directly.
 
 #include "SVGTypes.hpp"
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
@@ -30,11 +33,9 @@ struct PluginConfig {
     COM::StringView fantasyFamily {};
     COM::StringView monospaceFamily {};
     COM::StringView languages {};
-    COM::StringView resourcesDir {};
     ShapeRendering  shapeRendering  = ShapeRendering::GeometricPrecision;
     TextRendering   textRendering   = TextRendering::OptimizeLegibility;
     ImageRendering  imageRendering  = ImageRendering::OptimizeQuality;
-    bool            loadSystemFonts = false;
 };
 
 static_assert(std::is_standard_layout_v<PluginConfig> && std::is_trivially_copyable_v<PluginConfig>);
@@ -46,8 +47,9 @@ struct ISvgRasterizer : COM::IObject {
         COM::Span<const uint8_t> svg
     ) const noexcept = 0;
 
-    [[nodiscard]] virtual COM::Result<Size> MeasureFile(
-        COM::StringView path
+    [[nodiscard]] virtual COM::Result<Size> MeasureVirtualFile(
+        COM::IAssetLibrary* assets,
+        COM::StringView     virtualPath
     ) const noexcept = 0;
 
     // Rasterizes into caller-owned `outPixels` (RGBA8888, width * height * 4
@@ -61,13 +63,14 @@ struct ISvgRasterizer : COM::IObject {
         COM::Span<uint8_t>       outPixels
     ) const noexcept = 0;
 
-    [[nodiscard]] virtual COM::Result<uint64_t> RasterizeFile(
-        COM::StringView    path,
-        uint32_t           width,
-        uint32_t           height,
-        FitMode            fit,
-        AlphaMode          alpha,
-        COM::Span<uint8_t> outPixels
+    [[nodiscard]] virtual COM::Result<uint64_t> RasterizeVirtualFile(
+        COM::IAssetLibrary* assets,
+        COM::StringView     virtualPath,
+        uint32_t            width,
+        uint32_t            height,
+        FitMode             fit,
+        AlphaMode           alpha,
+        COM::Span<uint8_t>  outPixels
     ) const noexcept = 0;
 
     // Rasterizes straight-alpha RGBA8888 and uploads directly to `graphics`.
@@ -81,10 +84,11 @@ struct ISvgRasterizer : COM::IObject {
         bool                     isSRGB
     ) const noexcept = 0;
 
-    [[nodiscard]] virtual COM::Result<TextureID> UploadFileTexture(
+    [[nodiscard]] virtual COM::Result<TextureID> UploadVirtualTexture(
         COM::IGraphicsDevice* graphics,
+        COM::IAssetLibrary*   assets,
         COM::StringView       name,
-        COM::StringView       path,
+        COM::StringView       virtualPath,
         uint32_t              width,
         uint32_t              height,
         FitMode               fit,

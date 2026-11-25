@@ -7,10 +7,9 @@
 // upgraded.
 
 #include <SVG/SVG.hpp>
-#include <cstdio>
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
+#include <cstdio>
 #include <string>
 
 // Distro packages built with cargo-c install the header as <resvg/resvg.h>
@@ -243,29 +242,17 @@ auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg
     if (!settings.languages.empty()) {
         resvg_options_set_languages(native, settings.languages.c_str());
     }
-    if (!settings.resourcesDir.empty()) {
-        resvg_options_set_resources_dir(native, settings.resourcesDir.c_str());
-    }
 
     resvg_options_set_shape_rendering_mode(native, ToNative(settings.shapeRendering));
     resvg_options_set_text_rendering_mode(native, ToNative(settings.textRendering));
     resvg_options_set_image_rendering_mode(native, ToNative(settings.imageRendering));
 
-    for (const auto& fontFile: settings.fontFiles) {
-        if (fontFile.empty()) {
-            continue;
-        }
-        if (resvg_options_load_font_file(native, fontFile.c_str()) != RESVG_OK) {
-            // Refused rather than logged and ignored: a document that asks for
-            // this face would otherwise render in a fallback and look like a
-            // layout bug rather than a missing file.
+    for (const auto& fontBytes: settings.fontData) {
+        if (fontBytes.empty()) {
             resvg_options_destroy(native);
             return std::unexpected(Error::FontLoadFailed);
         }
-    }
-
-    if (settings.loadSystemFonts) {
-        resvg_options_load_system_fonts(native);
+        resvg_options_load_font_data(native, reinterpret_cast<const char*>(fontBytes.data()), fontBytes.size());
     }
 
     return native;
@@ -598,43 +585,6 @@ auto Rasterizer::GetOptions() const noexcept -> const Options& {
     return _impl->settings;
 }
 
-auto Rasterizer::LoadFile(std::string_view path) const noexcept -> std::expected<Document, ErrorCode> {
-    if (!IsValid()) {
-        return std::unexpected(BuildError());
-    }
-    if (path.empty()) {
-        return std::unexpected(Error::FileOpenFailed);
-    }
-
-    // resvg wants NUL-terminated UTF-8. A UTF-8 path also works on Windows:
-    // Rust converts the str to UTF-16 rather than passing it to the ANSI API.
-    const std::string pathZ(path);
-
-    // Relative references -- an <image href="art/foo.png">, a font url() --
-    // resolve against resvg's resource directory. The resvg CLI derives it from
-    // the file being parsed; the C API does not, so derive it here when the
-    // caller did not pin one. Writing it into the native handle is invisible
-    // from outside: _impl->settings, which is what GetOptions() returns, keeps
-    // saying "derive", and the next load derives again. These methods are const
-    // because nothing the caller can observe changes -- a std::unique_ptr's
-    // constness does not extend to what it points at.
-    if (_impl->settings.resourcesDir.empty()) {
-        const std::string parent = std::filesystem::path(pathZ).parent_path().string();
-        resvg_options_set_resources_dir(_impl->native, parent.empty() ? nullptr : parent.c_str());
-    }
-
-    resvg_render_tree* tree = nullptr;
-    const int32_t      code = resvg_parse_tree_from_file(pathZ.c_str(), _impl->native, &tree);
-    if (code != RESVG_OK || tree == nullptr) {
-        if (tree != nullptr) {
-            resvg_tree_destroy(tree);
-        }
-        return std::unexpected(MapError(code));
-    }
-
-    return Document(tree);
-}
-
 auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::expected<Document, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(BuildError());
@@ -643,13 +593,6 @@ auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::e
         // resvg builds a Rust slice from (data, len) with no null check, so an
         // empty buffer is refused here instead of being handed down.
         return std::unexpected(Error::ParsingFailed);
-    }
-
-    // Undo whatever a previous LoadFile derived: bytes in memory have no
-    // location, so a resource directory left over from another file would
-    // silently resolve references against the wrong directory.
-    if (_impl->settings.resourcesDir.empty()) {
-        resvg_options_set_resources_dir(_impl->native, nullptr);
     }
 
     resvg_render_tree* tree = nullptr;
@@ -668,13 +611,34 @@ auto Rasterizer::LoadString(std::string_view svgText) const noexcept -> std::exp
     return LoadData({reinterpret_cast<const uint8_t*>(svgText.data()), svgText.size()});
 }
 
-auto Rasterizer::RasterizeFile(std::string_view path, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha) const noexcept
-    -> std::expected<Raster, ErrorCode> {
-    auto document = LoadFile(path);
-    if (!document.has_value()) {
-        return std::unexpected(document.error());
+auto Rasterizer::LoadVirtual(const COM::IAssetLibrary& assets, std::string_view virtualPath) const noexcept -> std::expected<Document, ErrorCode> {
+    if (!IsValid()) {
+        return std::unexpected(BuildError());
     }
-    return document->RenderFitted(width, height, fit, alpha);
+    if (virtualPath.empty()) {
+        return std::unexpected(Error::FileOpenFailed);
+    }
+    auto file = assets.OpenVirtualFile(virtualPath);
+    if (!file) {
+        return std::unexpected(Error::FileOpenFailed);
+    }
+    const auto span = (*file)->Bytes();
+    return LoadData({reinterpret_cast<const uint8_t*>(span.data), span.size});
+}
+
+auto Rasterizer::LoadVirtual(const FS::VirtualFileSystem& vfs, std::string_view virtualPath) const noexcept -> std::expected<Document, ErrorCode> {
+    if (!IsValid()) {
+        return std::unexpected(BuildError());
+    }
+    if (virtualPath.empty()) {
+        return std::unexpected(Error::FileOpenFailed);
+    }
+    auto file = vfs.Open(virtualPath);
+    if (!file) {
+        return std::unexpected(Error::FileOpenFailed);
+    }
+    const auto span = file->Bytes();
+    return LoadData({reinterpret_cast<const uint8_t*>(span.data()), span.size()});
 }
 
 auto Rasterizer::RasterizeData(std::span<const uint8_t> svg, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha) const noexcept
@@ -686,12 +650,37 @@ auto Rasterizer::RasterizeData(std::span<const uint8_t> svg, uint32_t width, uin
     return document->RenderFitted(width, height, fit, alpha);
 }
 
-// --- One-shot entry points -------------------------------------------------
-
-auto LoadFile(std::string_view path, const Options& options) noexcept -> std::expected<Document, ErrorCode> {
-    const Rasterizer rasterizer(options);
-    return rasterizer.LoadFile(path);
+auto Rasterizer::RasterizeVirtual(
+    const COM::IAssetLibrary& assets,
+    std::string_view          virtualPath,
+    uint32_t                  width,
+    uint32_t                  height,
+    FitMode                   fit,
+    AlphaMode                 alpha
+) const noexcept -> std::expected<Raster, ErrorCode> {
+    auto document = LoadVirtual(assets, virtualPath);
+    if (!document.has_value()) {
+        return std::unexpected(document.error());
+    }
+    return document->RenderFitted(width, height, fit, alpha);
 }
+
+auto Rasterizer::RasterizeVirtual(
+    const FS::VirtualFileSystem& vfs,
+    std::string_view             virtualPath,
+    uint32_t                     width,
+    uint32_t                     height,
+    FitMode                      fit,
+    AlphaMode                    alpha
+) const noexcept -> std::expected<Raster, ErrorCode> {
+    auto document = LoadVirtual(vfs, virtualPath);
+    if (!document.has_value()) {
+        return std::unexpected(document.error());
+    }
+    return document->RenderFitted(width, height, fit, alpha);
+}
+
+// --- One-shot entry points -------------------------------------------------
 
 auto LoadData(std::span<const uint8_t> svg, const Options& options) noexcept -> std::expected<Document, ErrorCode> {
     const Rasterizer rasterizer(options);
@@ -703,16 +692,48 @@ auto LoadString(std::string_view svgText, const Options& options) noexcept -> st
     return rasterizer.LoadString(svgText);
 }
 
-auto RasterizeFile(std::string_view path, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha, const Options& options) noexcept
-    -> std::expected<Raster, ErrorCode> {
+auto LoadVirtual(const COM::IAssetLibrary& assets, std::string_view virtualPath, const Options& options) noexcept
+    -> std::expected<Document, ErrorCode> {
     const Rasterizer rasterizer(options);
-    return rasterizer.RasterizeFile(path, width, height, fit, alpha);
+    return rasterizer.LoadVirtual(assets, virtualPath);
+}
+
+auto LoadVirtual(const FS::VirtualFileSystem& vfs, std::string_view virtualPath, const Options& options) noexcept
+    -> std::expected<Document, ErrorCode> {
+    const Rasterizer rasterizer(options);
+    return rasterizer.LoadVirtual(vfs, virtualPath);
 }
 
 auto RasterizeData(std::span<const uint8_t> svg, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha, const Options& options) noexcept
     -> std::expected<Raster, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.RasterizeData(svg, width, height, fit, alpha);
+}
+
+auto RasterizeVirtual(
+    const COM::IAssetLibrary& assets,
+    std::string_view          virtualPath,
+    uint32_t                  width,
+    uint32_t                  height,
+    FitMode                   fit,
+    AlphaMode                 alpha,
+    const Options&            options
+) noexcept -> std::expected<Raster, ErrorCode> {
+    const Rasterizer rasterizer(options);
+    return rasterizer.RasterizeVirtual(assets, virtualPath, width, height, fit, alpha);
+}
+
+auto RasterizeVirtual(
+    const FS::VirtualFileSystem& vfs,
+    std::string_view             virtualPath,
+    uint32_t                     width,
+    uint32_t                     height,
+    FitMode                      fit,
+    AlphaMode                    alpha,
+    const Options&               options
+) noexcept -> std::expected<Raster, ErrorCode> {
+    const Rasterizer rasterizer(options);
+    return rasterizer.RasterizeVirtual(vfs, virtualPath, width, height, fit, alpha);
 }
 
 // --- Library ---------------------------------------------------------------

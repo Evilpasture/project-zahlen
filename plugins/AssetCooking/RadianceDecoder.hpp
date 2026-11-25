@@ -39,9 +39,10 @@ enum class RadianceAssetError : uint8_t {
 // JPEG is left unchanged. ZRD2 copies already-prepared data without re-extracting.
 [[nodiscard]] auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode>;
 
-// Convenience for applications that source images from a mounted VFS asset or
-// a direct filesystem path. Loading never happens inside RenderSystem.
-[[nodiscard]] auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode>;
-[[nodiscard]] auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode>;
+// Convenience for applications that source images from a mounted VFS asset.
+// Loading never accesses the host filesystem directly and never happens inside
+// RenderSystem.
+[[nodiscard]] auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view virtualPath) -> std::expected<EnvironmentImage, ErrorCode>;
+[[nodiscard]] auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view virtualPath) -> std::expected<EnvironmentImage, ErrorCode>;
 
 } // namespace ZHLN::AssetCooking

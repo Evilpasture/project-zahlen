@@ -85,6 +85,7 @@
 
 #include <print>
 #include <Animation/Context.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <cstdio>
 #include <format>
 #include <Animation/AnimationSystem.hpp>
@@ -480,7 +481,7 @@ void ClearSubject(ZHLN::COM::IEngine& engine, Subject& subject) {
 }
 
 auto ImportSubject(ZHLN::COM::IEngine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    auto doc = ZHLN::GLTF::Decode(bytes, virtualPath, {}, {}, engine.Assets());
+    auto doc = ZHLN::GLTF::Decode(bytes, virtualPath, {}, engine.Assets());
     if (!doc) {
         ZHLN::COM::Log(engine.Logger(), "'{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
@@ -1335,10 +1336,14 @@ auto main(int argc, char* argv[]) -> int {
     }
 
 #if defined(ZHLN_HAS_FONTS)
-    // The composition root's default bake (see app/main.cpp): the vendored
-    // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
-    // that font and not core's embedded 8x8.
-    if (auto fontID = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+    // Mount dev-tree vendored fonts under "fonts/" if not already present in the VFS.
+    if (!engine->Assets()->VirtualFileExists(ZHLN::Fonts::kVendoredFontVirtualPath)) {
+        if (const auto found = ZHLN::FS::Paths::FindDataFile(ZHLN::Fonts::kVendoredFontDataRelPath)) {
+            const std::string fontsDir = found->parent_path().parent_path().string();
+            (void)engine->Assets()->MountDirectory(std::string_view(fontsDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "fonts"});
+        }
+    }
+    if (auto fontID = ZHLN::Fonts::LoadBakedFont(*engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
         ZHLN::COM::LoggerView{engine->Logger()}.Warn("Font asset failed to load ({}), using embedded default.", fontID.error());
     } else {
         ZHLN::GUI::SetDefaultBakedFont(std::move(*fontID));
@@ -1415,7 +1420,7 @@ auto main(int argc, char* argv[]) -> int {
 
     state.hostUI = std::make_unique<ZHLN::HostUI>(*engine);
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource())) {
+    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(*engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource())) {
         state.hostUI->SetBakedFont(std::move(*fontAsset));
     }
 #endif

@@ -34,7 +34,7 @@ namespace TaskSystem {
 struct Counter;
 }
 
-using AssetLoadRequest = FS::LoadRequest;
+using AssetAsyncLoad = FS::AsyncLoad;
 
 // No caller outside the engine names this type: a host holds an AssetLibrary
 // (Engine::Assets()), a graph node gets one from its bundle, and every public
@@ -53,18 +53,19 @@ class AssetManager {
     AssetManager(const AssetManager&)            = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 
-    bool MountPak(std::string_view pakFilePath);
-    bool MountDirectory(std::string_view directory);
-    bool UnmountDirectory(std::string_view directory);
+    auto MountPak(std::string_view pakFilePath) -> std::expected<void, ErrorCode>;
+    auto MountDirectory(std::string_view directory, FS::MountOptions options = {}) -> std::expected<void, ErrorCode>;
+    auto UnmountDirectory(std::string_view directory) -> std::expected<void, ErrorCode>;
 
-    void LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter);
-    bool LoadSync(AssetLoadRequest& request);
-    void FreeMemory(AssetLoadRequest& req);
+    void               LoadAsync(RestrictSpan<FS::AsyncLoad> requests, TaskSystem::Counter* counter) const;
+    [[nodiscard]] auto LoadSync(uint64_t assetID) const -> std::expected<FS::VirtualFile, ErrorCode>;
 
-    [[nodiscard]] auto ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t {
-        return _vfs.ReadFile(virtualPath, outData, outCapacity);
+    [[nodiscard]] auto OpenVirtualFile(std::string_view virtualPath) const -> std::expected<FS::VirtualFile, ErrorCode> {
+        return _vfs.Open(virtualPath);
     }
-    [[nodiscard]] auto ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>>;
+    [[nodiscard]] auto ReadVirtualBytes(std::string_view path) const -> std::expected<std::vector<std::byte>, ErrorCode> {
+        return _vfs.ReadBytes(path);
+    }
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
     [[nodiscard]] auto Exists(std::string_view virtualPath) const noexcept -> bool { return _vfs.Exists(virtualPath); }

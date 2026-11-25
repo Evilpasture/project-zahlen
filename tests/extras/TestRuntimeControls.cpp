@@ -7,6 +7,7 @@
 #include <Animation/AnimationSystem.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/COM/EngineFactory.hpp>
+#include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
@@ -22,9 +23,11 @@ using Test::ExpectTrue;
 // CI container and release checkouts clone without Git LFS (`tests/render/Uzi.glb`
 // stays a pointer file); fall back to the checked-in non-LFS skinned rig fixture.
 auto ReadSkinnedFixture(COM::IAssetLibrary* assets) {
-    auto doc = GLTF::Read(ZHLN_PROJECT_ROOT "/tests/render/Uzi.glb", {}, assets);
+    (void)assets->MountDirectory(ZHLN_PROJECT_ROOT "/tests/render", COM::MountDirectoryOptions {.virtualPrefix = "render"});
+    (void)assets->MountDirectory(ZHLN_PROJECT_ROOT "/resources/assets", COM::MountDirectoryOptions {.virtualPrefix = "assets"});
+    auto doc = GLTF::Read(*assets, "render/Uzi.glb");
     if (!doc) {
-        doc = GLTF::Read(ZHLN_PROJECT_ROOT "/resources/assets/ProceduralAnimationBaseRig.glb", {}, assets);
+        doc = GLTF::Read(*assets, "assets/ProceduralAnimationBaseRig.glb");
     }
     return doc;
 }

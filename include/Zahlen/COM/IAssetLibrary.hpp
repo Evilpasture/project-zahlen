@@ -19,12 +19,18 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Collect.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
+#include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -33,6 +39,32 @@ namespace ZHLN::COM {
 static_assert(std::is_standard_layout_v<PrefabFactory::SpawnParams> &&
                   std::is_trivially_copyable_v<PrefabFactory::SpawnParams>,
               "SpawnParams crosses via ChainInNode and must stay a fixed-layout value.");
+
+// Optional COM::InChain payload for IAssetLibrary::MountDirectoryRaw.
+struct MountDirectoryOptions {
+    StringView virtualPrefix   = {};
+    bool       caseInsensitive = false;
+};
+
+static_assert(std::is_standard_layout_v<MountDirectoryOptions> &&
+              std::is_trivially_copyable_v<MountDirectoryOptions>);
+
+// Refcounted read-only virtual file view returned by IAssetLibrary::OpenVirtualFile.
+// Uncompressed .pak entries pin the underlying mapped archive for zero-copy reads.
+struct IVirtualFile : IObject {
+    [[nodiscard]] virtual Span<const std::byte> Bytes() const noexcept = 0;
+    [[nodiscard]] virtual bool                  IsZeroCopy() const noexcept = 0;
+
+    [[nodiscard]] auto Text() const noexcept -> std::string_view {
+        const auto bytes = Bytes();
+        return {reinterpret_cast<const char*>(bytes.data), bytes.size};
+    }
+
+  protected:
+    ~IVirtualFile() = default;
+};
+
+static_assert(AuditInterfaceABI<IVirtualFile>(), "IVirtualFile violates the COM ABI rules.");
 
 // What a cached prefab contains, without handing over the prefab. Enough to
 // size a scene, drive an asset browser or assert in a test.
@@ -114,12 +146,19 @@ struct IAssetLibrary : IObject {
     // cleared or the engine is destroyed. Empty when the key is unknown.
     [[nodiscard]] virtual Span<const float> EnvironmentPixels(StringView key) const noexcept = 0;
 
-    virtual Result<void> MountDirectory(StringView path) noexcept = 0;
+    virtual Result<void> MountDirectoryRaw(StringView path, const ChainInNode* options) noexcept = 0;
     virtual Result<void> UnmountDirectory(StringView path) noexcept = 0;
     virtual Result<void> MountPak(StringView path) noexcept = 0;
     [[nodiscard]] virtual bool VirtualFileExists(StringView path) const noexcept = 0;
-    // Exact bytes; short buffers are untouched. A present empty file returns 0.
-    virtual Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept = 0;
+    [[nodiscard]] virtual Result<uint64_t> VirtualFileSize(StringView path) const noexcept = 0;
+    [[nodiscard]] virtual Result<IVirtualFile*> OpenVirtualFileRaw(StringView path) const noexcept = 0;
+    // Resolves and opens/maps `path` once and invokes `onBytes` with a borrowed
+    // read-only view (zero-copy for uncompressed .pak entries).
+    [[nodiscard]] virtual Result<void> VisitVirtualFileRaw(
+        StringView path,
+        void*      userData,
+        void     (*onBytes)(void* userData, Span<const std::byte> bytes) noexcept
+    ) const noexcept = 0;
     virtual void ClearCache() noexcept = 0;
     virtual Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept = 0;
     // Borrowed collision spans remain valid until cache replacement/clear or
@@ -138,6 +177,54 @@ struct IAssetLibrary : IObject {
     virtual Result<uint64_t> ReplacePrefabGPUResources(const ChainInNode* chain) noexcept = 0;
 
     // --- Ergonomics: compiled in the consumer's TU, never in the library ---
+
+    auto MountDirectory(StringView path) noexcept -> Result<void> {
+        return MountDirectoryRaw(path, nullptr);
+    }
+
+    auto MountDirectory(StringView path, const MountDirectoryOptions& options) noexcept -> Result<void> {
+        return MountDirectoryRaw(path, InChain(options));
+    }
+
+    [[nodiscard]] auto OpenVirtualFile(StringView path) const noexcept -> std::expected<Ref<IVirtualFile>, ErrorCode> {
+        const Result<IVirtualFile*> opened = OpenVirtualFileRaw(path);
+        if (!opened.HasValue()) return std::unexpected(opened.error);
+        return Ref<IVirtualFile>::Adopt(opened.value);
+    }
+
+    template <typename Fn>
+    auto WithVirtualBytes(StringView path, Fn&& fn) const noexcept -> Result<void> {
+        using FnType = std::remove_reference_t<Fn>;
+        FnType* ptr  = &fn;
+        return VisitVirtualFileRaw(
+            path,
+            const_cast<void*>(static_cast<const void*>(ptr)),
+            +[](void* userData, Span<const std::byte> bytes) noexcept {
+                (*static_cast<FnType*>(userData))(std::span<const std::byte>(bytes.data, bytes.size));
+            }
+        );
+    }
+
+    [[nodiscard]] auto ReadVirtualBytes(StringView path, uint64_t maxBytes = (256ULL << 20)) const
+        -> std::expected<std::vector<std::byte>, ErrorCode> {
+        const Result<uint64_t> sz = VirtualFileSize(path);
+        if (!sz.HasValue()) return std::unexpected(sz.error);
+        if (sz.value > maxBytes) return std::unexpected(Error::InvalidArgument);
+        auto opened = OpenVirtualFile(path);
+        if (!opened) return std::unexpected(opened.error());
+        const Span<const std::byte> bytes = (*opened)->Bytes();
+        return std::vector<std::byte>(bytes.data, bytes.data + bytes.size);
+    }
+
+    [[nodiscard]] auto ReadVirtualText(StringView path, uint64_t maxBytes = (16ULL << 20)) const
+        -> std::expected<std::string, ErrorCode> {
+        const Result<uint64_t> sz = VirtualFileSize(path);
+        if (!sz.HasValue()) return std::unexpected(sz.error);
+        if (sz.value > maxBytes) return std::unexpected(Error::InvalidArgument);
+        auto opened = OpenVirtualFile(path);
+        if (!opened) return std::unexpected(opened.error());
+        return std::string((*opened)->Text());
+    }
 
     auto FindPrefab(StringView virtualPath) const noexcept -> Result<uint64_t> {
         const uint64_t hash = PrefabHash(virtualPath);

@@ -4,6 +4,8 @@
 // Dynamically loadable COM::IAppLayer + SVG::ISvgRasterizer plugin. Seals
 // resvg (Rust) behind a runtime .so boundary so hosts can rasterize SVGs or
 // upload SVG textures without a compile/link dependency on resvg.
+//
+// Strictly VFS/bytes-only: never reads from the host OS filesystem directly.
 
 #include <SVG/ISvgRasterizer.hpp>
 #include <SVG/SVG.hpp>
@@ -41,11 +43,9 @@ using namespace ZHLN;
     opts.fantasyFamily     = CopyView(cfg.fantasyFamily);
     opts.monospaceFamily   = CopyView(cfg.monospaceFamily);
     opts.languages         = CopyView(cfg.languages);
-    opts.resourcesDir      = CopyView(cfg.resourcesDir);
     opts.shapeRendering    = cfg.shapeRendering;
     opts.textRendering     = cfg.textRendering;
     opts.imageRendering    = cfg.imageRendering;
-    opts.loadSystemFonts   = cfg.loadSystemFonts;
     return opts;
 }
 
@@ -91,11 +91,14 @@ class SvgPlugin final : public COM::Implements<SvgPlugin, COM::IAppLayer, SVG::I
         return doc->NativeSize();
     }
 
-    auto MeasureFile(COM::StringView path) const noexcept -> COM::Result<SVG::Size> override {
-        if (path.data == nullptr || path.size == 0) {
+    auto MeasureVirtualFile(COM::IAssetLibrary* assets, COM::StringView virtualPath) const noexcept -> COM::Result<SVG::Size> override {
+        if (assets == nullptr) {
+            return COM::Error::NullArgument;
+        }
+        if (virtualPath.data == nullptr || virtualPath.size == 0) {
             return COM::Error::InvalidArgument;
         }
-        const auto doc = _rasterizer.LoadFile(std::string_view(path.data, path.size));
+        const auto doc = _rasterizer.LoadVirtual(*assets, std::string_view(virtualPath.data, virtualPath.size));
         if (!doc) {
             return doc.error();
         }
@@ -131,15 +134,19 @@ class SvgPlugin final : public COM::Implements<SvgPlugin, COM::IAppLayer, SVG::I
         return static_cast<uint64_t>(raster->pixels.size());
     }
 
-    auto RasterizeFile(
-        COM::StringView    path,
-        uint32_t           width,
-        uint32_t           height,
-        SVG::FitMode       fit,
-        SVG::AlphaMode     alpha,
-        COM::Span<uint8_t> outPixels
+    auto RasterizeVirtualFile(
+        COM::IAssetLibrary* assets,
+        COM::StringView     virtualPath,
+        uint32_t            width,
+        uint32_t            height,
+        SVG::FitMode        fit,
+        SVG::AlphaMode      alpha,
+        COM::Span<uint8_t>  outPixels
     ) const noexcept -> COM::Result<uint64_t> override {
-        if (path.data == nullptr || path.size == 0) {
+        if (assets == nullptr) {
+            return COM::Error::NullArgument;
+        }
+        if (virtualPath.data == nullptr || virtualPath.size == 0) {
             return COM::Error::InvalidArgument;
         }
         if (width == 0 || height == 0) {
@@ -149,7 +156,7 @@ class SvgPlugin final : public COM::Implements<SvgPlugin, COM::IAppLayer, SVG::I
         if (outPixels.size < requiredBytes || outPixels.data == nullptr) {
             return COM::Error::InvalidArgument;
         }
-        const auto raster = _rasterizer.RasterizeFile(std::string_view(path.data, path.size), width, height, fit, alpha);
+        const auto raster = _rasterizer.RasterizeVirtual(*assets, std::string_view(virtualPath.data, virtualPath.size), width, height, fit, alpha);
         if (!raster) {
             return raster.error();
         }
@@ -181,23 +188,24 @@ class SvgPlugin final : public COM::Implements<SvgPlugin, COM::IAppLayer, SVG::I
         return graphics->CreateTexture(name, std::as_bytes(std::span(raster->pixels)), Extent2D {raster->width, raster->height}, isSRGB);
     }
 
-    auto UploadFileTexture(
+    auto UploadVirtualTexture(
         COM::IGraphicsDevice* graphics,
+        COM::IAssetLibrary*   assets,
         COM::StringView       name,
-        COM::StringView       path,
+        COM::StringView       virtualPath,
         uint32_t              width,
         uint32_t              height,
         SVG::FitMode          fit,
         bool                  isSRGB
     ) const noexcept -> COM::Result<TextureID> override {
-        if (graphics == nullptr) {
+        if (graphics == nullptr || assets == nullptr) {
             return COM::Error::NullArgument;
         }
-        if (path.data == nullptr || path.size == 0) {
+        if (virtualPath.data == nullptr || virtualPath.size == 0) {
             return COM::Error::InvalidArgument;
         }
-        const auto raster = _rasterizer.RasterizeFile(
-            std::string_view(path.data, path.size), width, height, fit, SVG::AlphaMode::Straight
+        const auto raster = _rasterizer.RasterizeVirtual(
+            *assets, std::string_view(virtualPath.data, virtualPath.size), width, height, fit, SVG::AlphaMode::Straight
         );
         if (!raster) {
             return raster.error();

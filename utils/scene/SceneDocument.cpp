@@ -8,6 +8,7 @@
 #include <toml/TOML.hpp>
 #if defined(ZHLN_SCENE_DOC_HAS_LUA)
 #include <lua/ReflectLua.hpp>
+#include <lua/ReflectLuaFile.hpp>
 #include <lua/SceneLua.hpp>
 #endif
 #include <fstream>

@@ -115,8 +115,12 @@ void AudioSystem(
 
             // Voices are created from the encoded asset bytes; the virtual
             // layer resolves the path on disk or in a pak archive.
-            if (auto encodedBytes = assets->ReadVirtualFile(std::string_view(src.filepath)); encodedBytes && !encodedBytes->empty()) {
-                src.voiceID = device.CreateVoice(*encodedBytes, desc);
+            if (auto opened = assets->OpenVirtualFile(std::string_view(src.filepath)); opened && !opened->Empty()) {
+                const auto bytes = opened->Bytes();
+                src.voiceID      = device.CreateVoice(
+                    std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()),
+                    desc
+                );
             }
 
             if (src.voiceID != VoiceID::Invalid && !src.isPaused) {

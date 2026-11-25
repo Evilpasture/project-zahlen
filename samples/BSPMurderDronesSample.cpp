@@ -1328,7 +1328,13 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::GUI::Context hudGui;
     ZHLN::HostUI       hostUI(*engine);
 #if defined(ZHLN_HAS_FONTS)
-    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
+    if (!engine->Assets()->VirtualFileExists(ZHLN::Fonts::kVendoredFontVirtualPath)) {
+        if (const auto found = ZHLN::FS::Paths::FindDataFile(ZHLN::Fonts::kVendoredFontDataRelPath)) {
+            const std::string fontsDir = found->parent_path().parent_path().string();
+            (void)engine->Assets()->MountDirectory(std::string_view(fontsDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "fonts"});
+        }
+    }
+    if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(*engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
         std::println(stderr, "[BSPSample] Font asset failed to load ({}), using embedded default.", fontAsset.error());
     } else {
         hostUI.SetBakedFont(std::move(*fontAsset));
@@ -1340,6 +1346,13 @@ auto main(int argc, char* argv[]) -> int {
     g_benchmarkViewer = &benchmarkViewer;
 
     // 5. Prepare & upload BSP world + brush submodels + static props over COM
+    if (!assetRoot.empty()) {
+        const std::string assetRootStr = assetRoot.string();
+        (void)engine->Assets()->MountDirectory(
+            std::string_view(assetRootStr),
+            ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "source", .caseInsensitive = true}
+        );
+    }
     ZHLN::BSP::ImportOptions importOpts {
         .convertCoordinates   = true,
         .unitScale            = 0.0254f,
@@ -1347,21 +1360,21 @@ auto main(int argc, char* argv[]) -> int {
         .importSkybox         = importSkybox,
         .gatherLights         = true,
         .buildColliders       = true,
-        .assetRoot            = assetRoot.string(),
+        .virtualPrefix        = assetRoot.empty() ? std::string {} : std::string("source"),
         .ambientOcclusion     = false,
         .useVradLightmaps     = true,
         .ingestVradBake       = false,
     };
 
-    const std::string virtualPath = mapPath.string();
+    const std::string virtualPath =
+        assetRoot.empty() ? ("maps/" + mapPath.filename().string()) : ("source/maps/" + mapPath.filename().string());
     g_rigImportOpts = importOpts;
     g_rigCubeMap    = &bspMap;
     std::println(stderr, "[BSPSample] Preparing and uploading BSP assets...");
 
     std::vector<ZHLN::TextureID> ownedTextures;
     const auto rawBspBytes = std::as_bytes(std::span(bspBytes));
-    ZHLN::BSP::SourceVFS vfs(*engine->Assets());
-    if (!assetRoot.empty()) vfs.AddSearchPath(assetRoot.string());
+    ZHLN::BSP::SourceVFS vfs(*engine->Assets(), importOpts.virtualPrefix);
     auto prepared = ZHLN::BSP::DecodeAssets(rawBspBytes, std::move(vfs), virtualPath, importOpts);
     if (!prepared || prepared->prefabs.empty()) {
         std::println(stderr, "[BSPSample] Failed to prepare BSP assets for '{}'", virtualPath);
@@ -1426,7 +1439,26 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::GLTF::Asset                         rigAsset {};
     std::optional<ZHLN::Animation::PrefabRig> rigInfo;
     auto tryLoadRig = [&](std::string_view candidate) -> bool {
-        auto d = ZHLN::GLTF::Read(candidate, {}, engine->Assets());
+        auto&       assets         = *engine->Assets();
+        std::string rigVirtualPath = std::string(candidate);
+        std::string tempMountDir;
+        if (!assets.VirtualFileExists(std::string_view(rigVirtualPath))) {
+            std::filesystem::path hostPath(candidate);
+            if (!std::filesystem::exists(hostPath)) {
+                if (const auto found = ZHLN::FS::Paths::FindDataFile("resources/assets/" + std::string(candidate))) {
+                    hostPath = *found;
+                }
+            }
+            if (std::filesystem::exists(hostPath)) {
+                tempMountDir = (hostPath.has_parent_path() ? hostPath.parent_path() : std::filesystem::current_path()).string();
+                (void)assets.MountDirectory(std::string_view(tempMountDir), ZHLN::COM::MountDirectoryOptions {.virtualPrefix = "rig"});
+                rigVirtualPath = "rig/" + hostPath.filename().string();
+            }
+        }
+        auto d = ZHLN::GLTF::Read(assets, rigVirtualPath);
+        if (!tempMountDir.empty()) {
+            (void)assets.UnmountDirectory(std::string_view(tempMountDir));
+        }
         if (d) {
             for (const auto& warning : d->warnings)
                 ZHLN::Log<ZHLN::LogSeverity::Warning>("glTF: {}", warning);

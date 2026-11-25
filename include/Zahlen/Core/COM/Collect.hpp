@@ -115,10 +115,11 @@ template <auto Method, typename Instance, typename... LeadingArgs>
 [[nodiscard]] auto Collect(Instance&& inst, LeadingArgs&&... args) -> typename CountFillTraits<Method>::ReturnType {
     using Info      = CountFillTraits<Method>;
     using Container = typename Info::Container;
+    using CapType   = typename Info::LastArg;
 
     constexpr bool kIsString = std::is_same_v<Container, std::string>;
 
-    auto invoke = [&](typename Info::ElementType* ptr, uint32_t cap) {
+    auto invoke = [&](typename Info::ElementType* ptr, CapType cap) {
         return (inst.*Method)(std::forward<LeadingArgs>(args)..., ptr, cap);
     };
 
@@ -126,30 +127,31 @@ template <auto Method, typename Instance, typename... LeadingArgs>
     // PrefabVirtualPath) need room for the terminator, exact-byte writers
     // (ClipboardText, SerializeBindings) simply never touch it, and the
     // resize to the reported count drops it either way.
-    constexpr uint32_t kSpare = kIsString ? 1u : 0u;
+    constexpr CapType kSpare = kIsString ? CapType {1} : CapType {0};
 
     if constexpr (Info::kIsFallible) {
-        const auto query = invoke(nullptr, 0);
+        const auto query = invoke(nullptr, CapType {0});
         if (!query.HasValue()) {
             return std::unexpected(query.error);
         }
-        const uint32_t count = query.value;
+        const CapType count = static_cast<CapType>(query.value);
         if (count == 0) return Container {};
 
-        Container  out(count + kSpare, typename Info::ValueType {});
-        const auto filled = invoke(out.data(), count + kSpare);
+        Container  out(static_cast<size_t>(count + kSpare), typename Info::ValueType {});
+        const auto filled = invoke(out.data(), static_cast<CapType>(count + kSpare));
         if (!filled.HasValue()) {
             return std::unexpected(filled.error);
         }
-        out.resize(filled.value < count ? filled.value : count);
+        const CapType written = static_cast<CapType>(filled.value);
+        out.resize(static_cast<size_t>(written < count ? written : count));
         return out;
     } else {
-        const uint32_t count = static_cast<uint32_t>(invoke(nullptr, 0));
+        const CapType count = static_cast<CapType>(invoke(nullptr, CapType {0}));
         if (count == 0) return Container {};
 
-        Container      out(count + kSpare, typename Info::ValueType {});
-        const uint32_t filled = static_cast<uint32_t>(invoke(out.data(), count + kSpare));
-        out.resize(filled < count ? filled : count);
+        Container     out(static_cast<size_t>(count + kSpare), typename Info::ValueType {});
+        const CapType filled = static_cast<CapType>(invoke(out.data(), static_cast<CapType>(count + kSpare)));
+        out.resize(static_cast<size_t>(filled < count ? filled : count));
         return out;
     }
 }

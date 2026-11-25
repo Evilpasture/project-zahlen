@@ -18,7 +18,8 @@ struct PluginImportOptions {
     bool            importSkybox         = false;
     bool            gatherLights         = true;
     bool            buildColliders       = true;
-    COM::StringView assetRoot {};
+    // Optional VFS prefix (e.g. "source") where Source assets are mounted.
+    COM::StringView virtualPrefix {};
 };
 
 static_assert(std::is_standard_layout_v<PluginImportOptions> && std::is_trivially_copyable_v<PluginImportOptions>);

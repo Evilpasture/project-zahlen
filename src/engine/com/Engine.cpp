@@ -97,10 +97,29 @@ static_assert(AuditInterfaceABI<IEntities>());
 static_assert(AuditInterfaceABI<ISimulation>());
 static_assert(AuditInterfaceABI<IAudioDevice>());
 static_assert(AuditInterfaceABI<IAssetLibrary>());
+static_assert(AuditInterfaceABI<IVirtualFile>());
 static_assert(AuditInterfaceABI<IActionContext>());
 static_assert(AuditInterfaceABI<IDebugDraw>());
 
 namespace {
+
+// Refcounted COM wrapper pinning an FS::VirtualFile (zero-copy .pak slice or owned buffer).
+class VirtualFileCOM final : public Implements<VirtualFileCOM, IVirtualFile> {
+  public:
+    explicit VirtualFileCOM(FS::VirtualFile file) noexcept: _file(std::move(file)) {}
+
+    [[nodiscard]] Span<const std::byte> Bytes() const noexcept override {
+        const auto bytes = _file.Bytes();
+        return Span<const std::byte>(bytes.data(), bytes.size());
+    }
+
+    [[nodiscard]] bool IsZeroCopy() const noexcept override {
+        return _file.IsZeroCopy();
+    }
+
+  private:
+    FS::VirtualFile _file;
+};
 
 // Validate boundary views before forming any std view or doing pointer arithmetic.
 template <typename T> bool Valid(Span<T> value) noexcept { return value.size == 0 || value.data != nullptr; }
@@ -1825,31 +1844,67 @@ class Engine final:
         return Span<const float>(view->rgba);
     }
 
-    Result<void> MountDirectory(StringView path) noexcept override {
+    Result<void> MountDirectoryRaw(StringView path, const ChainInNode* options) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
-        if (!path.size || !Library().VFS().MountDirectory(Text(path))) return Error::InvalidArgument;
+        if (!path.size) return Error::InvalidArgument;
+        FS::MountOptions mountOpts {};
+        if (options != nullptr) {
+            const auto parsed = DispatchInChain<MountDirectoryOptions>(
+                options,
+                [&](const MountDirectoryOptions& node) -> Result<void> {
+                    if (!Valid(node.virtualPrefix)) return Error::NullArgument;
+                    mountOpts.virtualPrefix   = Text(node.virtualPrefix);
+                    mountOpts.caseInsensitive = node.caseInsensitive;
+                    return {};
+                }
+            );
+            if (!parsed.HasValue()) return parsed.error;
+        }
+        const auto mounted = Library().VFS().MountDirectory(Text(path), mountOpts);
+        if (!mounted) return mounted.error();
         return {};
     }
     Result<void> UnmountDirectory(StringView path) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
-        if (!Library().VFS().UnmountDirectory(Text(path))) return Error::InvalidArgument;
+        const auto unmounted = Library().VFS().UnmountDirectory(Text(path));
+        if (!unmounted) return unmounted.error();
         return {};
     }
     Result<void> MountPak(StringView path) noexcept override {
         if (!Valid(path)) return Error::NullArgument;
-        if (!path.size || !Library().VFS().MountPak(Text(path))) return Error::InvalidArgument;
+        if (!path.size) return Error::InvalidArgument;
+        const auto mounted = Library().VFS().MountPak(Text(path));
+        if (!mounted) return mounted.error();
         return {};
     }
     [[nodiscard]] bool VirtualFileExists(StringView path) const noexcept override {
         return Valid(path) && path.size && Library().VFS().Exists(Text(path));
     }
-    Result<uint64_t> ReadVirtualFile(StringView path, Span<uint8_t> bytes) const noexcept override {
-        if (!Valid(path) || !Valid(bytes)) return Error::NullArgument;
-        if (!path.size || !Library().VFS().Exists(Text(path))) return Error::AssetNotCached;
-        const auto file = Library().ReadVirtualFile(Text(path));
-        if (!file) return uint64_t {0};
-        if (bytes.data && bytes.size >= file->size() && !file->empty()) std::memcpy(bytes.data, file->data(), file->size());
-        return static_cast<uint64_t>(file->size());
+    Result<uint64_t> VirtualFileSize(StringView path) const noexcept override {
+        if (!Valid(path)) return Error::NullArgument;
+        const auto size = Library().VFS().FileSize(Text(path));
+        if (!size) return size.error();
+        return *size;
+    }
+    Result<IVirtualFile*> OpenVirtualFileRaw(StringView path) const noexcept override {
+        if (!Valid(path)) return Error::NullArgument;
+        auto opened = Library().VFS().Open(Text(path));
+        if (!opened) return opened.error();
+        auto* obj = new (std::nothrow) VirtualFileCOM(std::move(*opened));
+        if (!obj) return Error::AllocationFailed;
+        return static_cast<IVirtualFile*>(obj);
+    }
+    Result<void> VisitVirtualFileRaw(
+        StringView path,
+        void*      userData,
+        void     (*onBytes)(void* userData, Span<const std::byte> bytes) noexcept
+    ) const noexcept override {
+        if (!Valid(path) || onBytes == nullptr) return Error::NullArgument;
+        auto opened = Library().VFS().Open(Text(path));
+        if (!opened) return opened.error();
+        const auto bytes = opened->Bytes();
+        onBytes(userData, Span<const std::byte>(bytes.data(), bytes.size()));
+        return {};
     }
     void ClearCache() noexcept override { Library().ClearCache(); }
     Result<void> CacheCollisionMesh(const ChainInNode* chain) noexcept override {

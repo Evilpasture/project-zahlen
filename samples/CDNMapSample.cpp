@@ -105,7 +105,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     ZHLN::COM::Log(engine->Logger(), "{} KiB", bytes->size() / 1024U);
 
-    auto doc = ZHLN::GLTF::Decode(std::span<const uint8_t>(*bytes), kAsset, {}, {}, engine->Assets());
+    auto doc = ZHLN::GLTF::Decode(std::span<const uint8_t>(*bytes), kAsset, {}, engine->Assets());
     if (!doc) {
         ZHLN::Log<ZHLN::LogSeverity::Error>("glTF decode failed for '{}': {}", kAsset, doc.error());
         return EXIT_FAILURE;

@@ -5,6 +5,7 @@
 #include <Zahlen/COM/AssetTypes.hpp>
 #include <Zahlen/COM/IAssetLibrary.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
@@ -63,14 +64,34 @@ struct Document {
     std::vector<std::string>          warnings;   // advisory import diagnostics (unsupported extensions, skipped data)
 };
 // All parse products own their CPU data; no cgltf pointer or input-byte borrow
-// survives this call. Optional assets serves external .bin/image paths through
-// VFS before disk. bytesPath is the original .gltf location for relative URIs.
+// survives this call. External .bin and image URIs resolve relative to
+// `virtualPath` strictly through the provided VFS (`assets` or `vfs`); self-
+// contained .glb / data-URI payloads succeed with a null VFS pointer.
 [[nodiscard]] auto Decode(
-    std::span<const uint8_t> bytes,
-    std::string_view         virtualPath,
-    std::string_view         bytesPath = {},
-    ImportOptions            options   = {},
-    COM::IAssetLibrary*      assets    = nullptr
+    std::span<const uint8_t>  bytes,
+    std::string_view          virtualPath,
+    ImportOptions             options = {},
+    const COM::IAssetLibrary* assets  = nullptr
 ) -> std::expected<Document, ErrorCode>;
-[[nodiscard]] auto Read(std::string_view path, ImportOptions options = {}, COM::IAssetLibrary* assets = nullptr) -> std::expected<Document, ErrorCode>;
+
+[[nodiscard]] auto Decode(
+    std::span<const uint8_t>     bytes,
+    std::string_view             virtualPath,
+    ImportOptions                options,
+    const FS::VirtualFileSystem* vfs
+) -> std::expected<Document, ErrorCode>;
+
+// Strict VFS read: reads `virtualPath` and all relative external dependencies
+// through `assets` / `vfs`. Never touches the OS filesystem directly.
+[[nodiscard]] auto Read(
+    const COM::IAssetLibrary& assets,
+    std::string_view          virtualPath,
+    ImportOptions             options = {}
+) -> std::expected<Document, ErrorCode>;
+
+[[nodiscard]] auto Read(
+    const FS::VirtualFileSystem& vfs,
+    std::string_view             virtualPath,
+    ImportOptions                options = {}
+) -> std::expected<Document, ErrorCode>;
 } // namespace ZHLN::GLTF

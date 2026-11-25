@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GLTFDocument.hpp"
-#include <format>
 #include "TangentGenerator.hpp"
 #include <Image/Image.hpp>
 #include <Zahlen/Math/Math3D.hpp>
@@ -14,9 +13,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <format>
-#include <fstream>
 #include <json/JSONSchema.hpp>
 #include <limits>
 #include <memory>
@@ -25,28 +22,79 @@
 
 namespace ZHLN::GLTF {
 namespace {
-auto ReadSourceBytes(COM::IAssetLibrary* assets, std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    if (assets && assets->VirtualFileExists(path)) {
-        const auto size = assets->ReadVirtualFile(path, {});
-        if (!size.HasValue() || size.value > SIZE_MAX)
-            return {};
-        std::vector<uint8_t> bytes(static_cast<size_t>(size.value));
-        const auto           read = assets->ReadVirtualFile(path, bytes);
-        if (!read.HasValue() || read.value != bytes.size())
-            return {};
-        return bytes;
+struct VirtualByteSource {
+    const COM::IAssetLibrary*    assets = nullptr;
+    const FS::VirtualFileSystem* vfs    = nullptr;
+};
+
+[[nodiscard]] auto JoinVirtualRelativePath(std::string_view baseVirtualPath, std::string_view uri) -> std::string {
+    if (uri.empty() || uri.front() == '/' || uri.front() == '\\' || uri.find(':') != std::string_view::npos) {
+        return {};
     }
-    std::ifstream file(std::filesystem::path(path), std::ios::binary | std::ios::ate);
-    if (!file)
-        return {};
-    const auto size = file.tellg();
-    if (size < 0)
-        return {};
-    std::vector<uint8_t> bytes(static_cast<size_t>(size));
-    file.seekg(0);
-    if (size && !file.read(reinterpret_cast<char*>(bytes.data()), size))
-        return {};
-    return bytes;
+    const size_t slashPos = baseVirtualPath.find_last_of("/\\");
+    std::string  combined;
+    if (slashPos != std::string_view::npos) {
+        combined.reserve(slashPos + 1 + uri.size());
+        combined.append(baseVirtualPath.substr(0, slashPos));
+        combined.push_back('/');
+        combined.append(uri);
+    } else {
+        combined.assign(uri);
+    }
+
+    std::vector<std::string_view> segments;
+    size_t                        pos = 0;
+    while (pos <= combined.size()) {
+        const size_t next = combined.find_first_of("/\\", pos);
+        const std::string_view seg =
+            (next == std::string::npos) ? std::string_view(combined).substr(pos) : std::string_view(combined).substr(pos, next - pos);
+        if (!seg.empty() && seg != ".") {
+            if (seg == "..") {
+                if (segments.empty()) {
+                    return {};
+                }
+                segments.pop_back();
+            } else {
+                segments.push_back(seg);
+            }
+        }
+        if (next == std::string::npos) {
+            break;
+        }
+        pos = next + 1;
+    }
+
+    std::string out;
+    for (size_t i = 0; i < segments.size(); ++i) {
+        if (i > 0) {
+            out.push_back('/');
+        }
+        out.append(segments[i]);
+    }
+    return out;
+}
+
+template <typename Fn>
+auto VisitVirtualBytes(VirtualByteSource source, std::string_view virtualPath, Fn&& fn) -> bool {
+    if (source.assets != nullptr) {
+        auto file = source.assets->OpenVirtualFile(virtualPath);
+        if (!file) {
+            return false;
+        }
+        const auto span = (*file)->Bytes();
+        fn(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(span.data), span.size));
+        return true;
+    }
+    if (source.vfs != nullptr) {
+        auto file = source.vfs->Open(virtualPath);
+        if (!file) {
+            return false;
+        }
+        const auto span = file->Bytes();
+        fn(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(span.data()), span.size()));
+        return true;
+    }
+    return false;
 }
 // The one custom member this importer reads: Blender writes CSG modifiers as a
 // JSON document inside a JSON string under a node's `extras.csg_data`, so the
@@ -226,14 +274,14 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path, std::ve
 }
 
 struct CPUTextureJob {
-    cgltf_image*        image = nullptr;
-    std::string         glbPath;
-    bool                isSRGB              = true;
-    uint32_t            maxTextureDimension = kGLTFDefaultMaxTextureDimension;
+    cgltf_image*         image = nullptr;
+    std::string          virtualPath;
+    bool                 isSRGB              = true;
+    uint32_t             maxTextureDimension = kGLTFDefaultMaxTextureDimension;
     std::vector<uint8_t> decodedPixels;
-    int                 width               = 0;
-    int                 height              = 0;
-    COM::IAssetLibrary* assets              = nullptr;
+    int                  width               = 0;
+    int                  height              = 0;
+    VirtualByteSource    source {};
 };
 
 struct CPUPrimitiveJob {
@@ -381,10 +429,14 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
                 decode({static_cast<const uint8_t*>(decoded), size});
                 std::free(decoded);
             }
-        } else if (!job.glbPath.empty()) {
-            auto path = (std::filesystem::path(job.glbPath).parent_path() / job.image->uri).lexically_normal().generic_string();
-            if (const auto bytes = ReadSourceBytes(job.assets, path); bytes && bytes->size() <= INT_MAX) {
-                decode(*bytes);
+        } else if (!job.virtualPath.empty()) {
+            const std::string resolved = JoinVirtualRelativePath(job.virtualPath, uri);
+            if (!resolved.empty()) {
+                (void)VisitVirtualBytes(job.source, resolved, [&](std::span<const uint8_t> bytes) {
+                    if (bytes.size() <= static_cast<size_t>(INT_MAX)) {
+                        decode(bytes);
+                    }
+                });
             }
         }
     }
@@ -985,22 +1037,22 @@ auto GatherImagesAndPrimitiveJobs(const cgltf_data* data) -> std::pair<std::vect
 }
 
 auto ProcessCPUTasks(
-    std::string_view                    textureSearchPath,
+    std::string_view                    virtualPath,
     std::span<const ImportedTextureRef> uniqueImages,
     std::span<CPUPrimitiveJob>          primitiveJobs,
     float                               emissiveFactorScale,
     uint32_t                            maxTextureDimension,
-    COM::IAssetLibrary*                 assets
+    VirtualByteSource                   source
 ) -> std::vector<CPUTextureJob> {
     std::vector<CPUTextureJob> outTextureJobs;
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
         outTextureJobs[i] = {
             .image               = uniqueImages[i].image,
-            .glbPath             = std::string(textureSearchPath),
+            .virtualPath         = std::string(virtualPath),
             .isSRGB              = uniqueImages[i].srgb,
             .maxTextureDimension = maxTextureDimension,
-            .assets              = assets
+            .source              = source
         };
     }
 
@@ -1022,28 +1074,37 @@ auto ProcessCPUTasks(
     return outTextureJobs;
 }
 
-} // namespace
-
-auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::string_view bytesPath, ImportOptions options, COM::IAssetLibrary* assets)
+auto DecodeImpl(std::span<const uint8_t> bytes, std::string_view virtualPath, ImportOptions options, VirtualByteSource source)
     -> std::expected<Document, ErrorCode> {
     if (virtualPath.empty() || virtualPath.size() >= 256 || !std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0 ||
         !options.maxTextureDimension)
         return std::unexpected(ImportError::InvalidDocument);
     cgltf_options opts {};
-    opts.file.user_data = assets;
+    opts.file.user_data = &source;
     opts.file.read      = +[](const cgltf_memory_options*, const cgltf_file_options* io, const char* path, cgltf_size* size, void** out) -> cgltf_result {
-        const auto read = ReadSourceBytes(static_cast<COM::IAssetLibrary*>(io->user_data), path);
-        if (!read)
+        if (path == nullptr || io == nullptr || io->user_data == nullptr) {
             return cgltf_result_file_not_found;
-        if (*size && read->size() < *size)
-            return cgltf_result_data_too_short;
-        void* buffer = std::malloc(std::max(size_t {1}, read->size()));
-        if (!buffer)
-            return cgltf_result_out_of_memory;
-        std::memcpy(buffer, read->data(), read->size());
-        *out  = buffer;
-        *size = read->size();
-        return cgltf_result_success;
+        }
+        const auto& src    = *static_cast<const VirtualByteSource*>(io->user_data);
+        cgltf_result res   = cgltf_result_file_not_found;
+        const bool   found = VisitVirtualBytes(src, std::string_view(path), [&](std::span<const uint8_t> data) {
+            if (*size != 0 && data.size() < *size) {
+                res = cgltf_result_data_too_short;
+                return;
+            }
+            void* buffer = std::malloc(std::max(size_t {1}, data.size()));
+            if (buffer == nullptr) {
+                res = cgltf_result_out_of_memory;
+                return;
+            }
+            if (!data.empty()) {
+                std::memcpy(buffer, data.data(), data.size());
+            }
+            *out  = buffer;
+            *size = data.size();
+            res   = cgltf_result_success;
+        });
+        return found ? res : cgltf_result_file_not_found;
     };
     opts.file.release = +[](const cgltf_memory_options*, const cgltf_file_options*, void* data, cgltf_size) { std::free(data); };
     cgltf_data* data  = nullptr;
@@ -1052,7 +1113,7 @@ auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::s
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> guard(data, &cgltf_free);
     std::vector<std::string> warnings;
     ValidateDeclaredExtensions(*data, virtualPath, warnings);
-    const std::string base(bytesPath);
+    const std::string base(virtualPath);
     if (cgltf_load_buffers(&opts, data, base.empty() ? nullptr : base.c_str()) != cgltf_result_success)
         return std::unexpected(ImportError::BufferReadFailed);
     // Structural validation, not an unsupported-extension veto.
@@ -1275,7 +1336,7 @@ auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::s
     }
 
     auto [images, jobs] = GatherImagesAndPrimitiveJobs(data);
-    auto textures       = ProcessCPUTasks(bytesPath, images, jobs, options.emissiveFactorScale, options.maxTextureDimension, assets);
+    auto textures       = ProcessCPUTasks(virtualPath, images, jobs, options.emissiveFactorScale, options.maxTextureDimension, source);
     for (auto& texture: textures) {
         TextureDocument image {.extent = {static_cast<uint32_t>(texture.width), static_cast<uint32_t>(texture.height)}, .isSRGB = texture.isSRGB};
         if (!texture.decodedPixels.empty()) {
@@ -1384,12 +1445,35 @@ auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, std::s
     return document;
 }
 
-auto Read(std::string_view path, ImportOptions options, COM::IAssetLibrary* assets) -> std::expected<Document, ErrorCode> {
-    if (const auto bytes = ReadSourceBytes(assets, path))
-        return Decode(*bytes, path, path, options, assets);
-    const auto legacy = "resources/assets/" + std::string(path);
-    if (const auto bytes = ReadSourceBytes(assets, legacy))
-        return Decode(*bytes, path, legacy, options, assets);
-    return std::unexpected(ImportError::BufferReadFailed);
+} // namespace
+
+auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, ImportOptions options, const COM::IAssetLibrary* assets)
+    -> std::expected<Document, ErrorCode> {
+    return DecodeImpl(bytes, virtualPath, options, VirtualByteSource {.assets = assets});
+}
+
+auto Decode(std::span<const uint8_t> bytes, std::string_view virtualPath, ImportOptions options, const FS::VirtualFileSystem* vfs)
+    -> std::expected<Document, ErrorCode> {
+    return DecodeImpl(bytes, virtualPath, options, VirtualByteSource {.vfs = vfs});
+}
+
+auto Read(const COM::IAssetLibrary& assets, std::string_view virtualPath, ImportOptions options) -> std::expected<Document, ErrorCode> {
+    auto file = assets.OpenVirtualFile(virtualPath);
+    if (!file) {
+        return std::unexpected(ImportError::BufferReadFailed);
+    }
+    const auto                     span = (*file)->Bytes();
+    const std::span<const uint8_t> bytes(reinterpret_cast<const uint8_t*>(span.data), span.size);
+    return Decode(bytes, virtualPath, options, &assets);
+}
+
+auto Read(const FS::VirtualFileSystem& vfs, std::string_view virtualPath, ImportOptions options) -> std::expected<Document, ErrorCode> {
+    auto file = vfs.Open(virtualPath);
+    if (!file) {
+        return std::unexpected(ImportError::BufferReadFailed);
+    }
+    const auto                     span = file->Bytes();
+    const std::span<const uint8_t> bytes(reinterpret_cast<const uint8_t*>(span.data()), span.size());
+    return Decode(bytes, virtualPath, options, &vfs);
 }
 } // namespace ZHLN::GLTF

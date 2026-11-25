@@ -25,7 +25,7 @@ enum class Error : uint8_t {
     NodeNotFound,          // No renderable node with that id (or a zero-sized one).
     InvalidDimensions,     // A zero-sized pixmap, which resvg aborts on rather than returning.
     RasterTooLarge,        // The requested pixmap is over kMaxRasterPixels.
-    FontLoadFailed,        // A font file named in Options::fontFiles could not be read.
+    FontLoadFailed,        // A font payload supplied in Options::fontData was empty or invalid.
     OptionsCreationFailed, // resvg_options_create returned NULL, so the Rasterizer has no settings to parse with.
     InvalidDocument,       // A default-constructed or moved-from Document (or Rasterizer) was used.
     Unknown,               // A resvg error code this build of the wrapper has not seen.

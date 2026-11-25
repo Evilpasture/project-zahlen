@@ -72,7 +72,9 @@ struct ImportOptions {
     bool        importSkybox         = false;
     bool        gatherLights         = true;
     bool        buildColliders       = true;
-    std::string assetRoot;
+    // Optional VFS prefix (e.g. "source") under which the host mounted the
+    // Source game/mod content directory. Strictly virtual — never an OS path.
+    std::string virtualPrefix;
 
     // Self-illuminated surfaces (lamp panels, screens, signs) become area-light
     // proxies for the PBR / RTGI / DDGI pipeline. Off means the map contributes

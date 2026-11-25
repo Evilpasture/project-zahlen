@@ -212,7 +212,7 @@ endif()
 if(TARGET zahlen_plugin_http)
     target_compile_definitions(Extras_Application PRIVATE ZHLN_HAS_HTTP_PLUGIN=1)
 endif()
-zahlen_register_extras_test(Extras_Application TIMEOUT 180)
+zahlen_register_extras_test(Extras_Application POOL gpu TIMEOUT 180 LABELS "GPU;Extras;COM")
 zahlen_add_extras_build_alias(Extras_Application TestApplication)
 zahlen_add_extras_build_alias(Extras_Application TestPlugin)
 

@@ -35,6 +35,8 @@
 
 #include "TestsFramework.hpp"
 #include <SVG/SVG.hpp>
+#include <SVG/SVGFile.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <expected>
@@ -795,24 +797,18 @@ struct SVGTestSuite {
                 ZHLN::Test::ExpectEq(translucent->NativeSize().width, 16.0f);
             }
 
-            // A font file that cannot be read is refused rather than ignored, so
-            // text never silently falls back to another face: the Rasterizer
-            // reports itself invalid and the reason survives to the first load.
-            // resvg built without its `text` feature ignores font loading
-            // entirely, which is why both branches are acceptable here -- what
-            // must not happen is a Rasterizer that claims to be valid and then
-            // hands resvg a NULL.
+            // An empty font payload in Options::fontData is refused rather than
+            // ignored, so text never silently falls back to another face: the
+            // Rasterizer reports itself invalid and the reason survives to the
+            // first load.
             ZHLN::SVG::Options brokenFonts;
-            brokenFonts.fontFiles.emplace_back("/nonexistent/zhln_svg_no_such_font.ttf");
+            brokenFonts.fontData.emplace_back();
             ZHLN::SVG::Rasterizer withBrokenFonts(brokenFonts);
-            if (!withBrokenFonts.IsValid()) {
-                const auto refused = withBrokenFonts.LoadString(kLogo);
-                ZHLN::Test::ExpectFalse(refused.has_value());
-                if (!refused) {
-                    ZHLN::Test::ExpectTrue(refused.error() == ZHLN::SVG::Error::FontLoadFailed);
-                }
-            } else {
-                ZHLN::Test::ExpectTrue(withBrokenFonts.LoadString(kLogo).has_value());
+            ZHLN::Test::ExpectFalse(withBrokenFonts.IsValid());
+            const auto refused = withBrokenFonts.LoadString(kLogo);
+            ZHLN::Test::ExpectFalse(refused.has_value());
+            if (!refused) {
+                ZHLN::Test::ExpectTrue(refused.error() == ZHLN::SVG::Error::FontLoadFailed);
             }
             return {};
         }
@@ -868,19 +864,36 @@ struct SVGTestSuite {
             return {};
         }
 
-        // --- 15. Files on disk, and the derived resource directory ---
+        // --- 15. VFS virtual loads and opt-in host file wrappers ---
         std::expected<void, ZHLN::ErrorCode> loads_a_file_from_disk() {
             const ScratchDir sandbox("file");
             const auto       path = sandbox.Write("art/cpp_logo.svg", kLogo);
 
+            // Core API reads strictly through a mounted VFS (never raw OS paths).
+            ZHLN::FS::VirtualFileSystem vfs;
+            ZHLN::Test::ExpectTrue(vfs.MountDirectory(sandbox.root.string()).has_value());
+            auto vfsDoc = ZHLN::SVG::LoadVirtual(vfs, "art/cpp_logo.svg");
+            if (!ZHLN::Test::ExpectTrue(vfsDoc.has_value())) {
+                return std::unexpected(SVGTestError::ParseFailed);
+            }
+            ZHLN::Test::ExpectEq(vfsDoc->NativeSize().width, 306.0f);
+            // Negative check: raw OS host path must be rejected by LoadVirtual.
+            ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadVirtual(vfs, path.string()).has_value());
+
+            auto vfsRaster = ZHLN::SVG::RasterizeVirtual(vfs, "art/cpp_logo.svg", 100, 100);
+            if (ZHLN::Test::ExpectTrue(vfsRaster.has_value())) {
+                ZHLN::Test::ExpectEq(vfsRaster->width, 100u);
+                ZHLN::Test::ExpectTrue(IsTransparent(vfsRaster->At(1, 50)));
+                ZHLN::Test::ExpectTrue(ExpectPixel(*vfsRaster, 50, 28, 255, 255, 255));
+            }
+
+            // Opt-in host-only SVGFile.hpp wrappers read bytes and delegate to LoadData.
             auto document = ZHLN::SVG::LoadFile(path.string());
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
             }
             ZHLN::Test::ExpectEq(document->NativeSize().width, 306.0f);
 
-            // The one-shot loader, which is the call an asset pipeline makes:
-            // Contain by default, straight alpha by default.
             auto raster = ZHLN::SVG::RasterizeFile(path.string(), 100, 100);
             if (ZHLN::Test::ExpectTrue(raster.has_value())) {
                 ZHLN::Test::ExpectEq(raster->width, 100u);
@@ -888,24 +901,10 @@ struct SVGTestSuite {
                 ZHLN::Test::ExpectTrue(ExpectPixel(*raster, 50, 28, 255, 255, 255));
             }
 
-            // A Rasterizer whose options named no resource directory points
-            // resvg at the file's own directory for that parse -- which is what
-            // lets an <image href="art/x.png"> resolve -- and then clears it
-            // again for a load from memory, which has no location to derive one
-            // from. Both halves are observable only as "the parse still works",
-            // so what is asserted here is that neither order breaks the next
-            // load.
             ZHLN::SVG::Rasterizer rasterizer;
-            ZHLN::Test::ExpectTrue(rasterizer.LoadFile(path.string()).has_value());
+            ZHLN::Test::ExpectTrue(ZHLN::SVG::LoadFile(rasterizer, path.string()).has_value());
             ZHLN::Test::ExpectTrue(rasterizer.LoadString(kLogo).has_value());
-            ZHLN::Test::ExpectTrue(rasterizer.LoadFile(path.string()).has_value());
-
-            // A pinned resource directory is left alone.
-            ZHLN::SVG::Options pinned;
-            pinned.resourcesDir = (sandbox.root / "elsewhere").string();
-            ZHLN::SVG::Rasterizer pinnedRasterizer(pinned);
-            ZHLN::Test::ExpectTrue(pinnedRasterizer.LoadFile(path.string()).has_value());
-            ZHLN::Test::ExpectEq(pinnedRasterizer.GetOptions().resourcesDir, pinned.resourcesDir);
+            ZHLN::Test::ExpectTrue(rasterizer.LoadVirtual(vfs, "art/cpp_logo.svg").has_value());
             return {};
         }
     };

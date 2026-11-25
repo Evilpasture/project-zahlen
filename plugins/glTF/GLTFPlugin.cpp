@@ -89,7 +89,6 @@ class GLTFPlugin final : public COM::Implements<GLTFPlugin, COM::IAppLayer, COM:
         const auto doc = GLTF::Decode(
             rawBytes,
             std::string_view(virtualPath.data, virtualPath.size),
-            {},
             importOpts,
             assets
         );
@@ -104,16 +103,16 @@ class GLTFPlugin final : public COM::Implements<GLTFPlugin, COM::IAppLayer, COM:
         return uploaded->hash;
     }
 
-    auto LoadFromPath(
+    auto LoadFromVirtualPath(
         COM::IAssetLibrary*     assets,
         COM::IGraphicsDevice*   graphics,
-        COM::StringView         path,
+        COM::StringView         virtualPath,
         const COM::ChainInNode* options
     ) noexcept -> COM::Result<uint64_t> override {
         if (assets == nullptr || graphics == nullptr) {
             return COM::Error::NullArgument;
         }
-        if (path.size == 0 || path.data == nullptr) {
+        if (virtualPath.size == 0 || virtualPath.data == nullptr) {
             return COM::Error::InvalidArgument;
         }
 
@@ -123,7 +122,7 @@ class GLTFPlugin final : public COM::Implements<GLTFPlugin, COM::IAppLayer, COM:
             return parsed.error;
         }
 
-        const auto doc = GLTF::Read(std::string_view(path.data, path.size), importOpts, assets);
+        const auto doc = GLTF::Read(*assets, std::string_view(virtualPath.data, virtualPath.size), importOpts);
         if (!doc) {
             return doc.error();
         }

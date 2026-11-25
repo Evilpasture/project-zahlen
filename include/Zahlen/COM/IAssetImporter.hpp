@@ -48,13 +48,14 @@ struct IAssetImporter : IObject {
         const ChainInNode*    options = nullptr
     ) noexcept = 0;
 
-    // Read a format asset from `path` (via VFS or filesystem according to the
-    // plugin), upload GPU resources, register the prefab(s) in `assets`, and
-    // return the primary prefab hash.
-    [[nodiscard]] virtual Result<uint64_t> LoadFromPath(
+    // Read a format asset strictly from `virtualPath` (and any relative
+    // dependencies) through `assets`'s VFS, upload GPU resources, register the
+    // prefab(s) in `assets`, and return the primary prefab hash. Importers
+    // must never touch the OS filesystem directly.
+    [[nodiscard]] virtual Result<uint64_t> LoadFromVirtualPath(
         IAssetLibrary*     assets,
         IGraphicsDevice*   graphics,
-        StringView         path,
+        StringView         virtualPath,
         const ChainInNode* options = nullptr
     ) noexcept = 0;
 

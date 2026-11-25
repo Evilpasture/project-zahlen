@@ -12,7 +12,6 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -454,40 +453,17 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     return map;
 }
 
-auto ReadUnpackedBytes(std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
-    std::ifstream in {std::string(path), std::ios::binary | std::ios::ate};
-    if (!in) {
-        return std::unexpected(RadianceAssetError::NotFound);
+auto MapVfsError(ErrorCode err) noexcept -> ErrorCode {
+    if (err == ErrorCode(FS::VFSError::NotFound) || err == ErrorCode(FS::VFSError::InvalidPath)) {
+        return RadianceAssetError::NotFound;
     }
-    const auto end = in.tellg();
-    if (end <= 0) {
-        return std::unexpected(RadianceAssetError::Truncated);
+    if (err == ErrorCode(FS::VFSError::FileTooLarge)) {
+        return RadianceAssetError::BadDimensions;
     }
-    const auto size = static_cast<size_t>(end);
-    if (size > kMaxRadianceFileBytes) {
-        return std::unexpected(RadianceAssetError::BadDimensions);
-    }
-    in.seekg(0);
-    std::vector<std::byte> bytes(size);
-    in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-    if (!in) {
-        return std::unexpected(RadianceAssetError::Truncated);
-    }
-    return bytes;
+    return RadianceAssetError::Truncated;
 }
 
-auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
-    const size_t vfsSize = vfs.ReadFile(path, nullptr, 0);
-    if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
-        std::vector<std::byte> bytes(vfsSize);
-        if (vfs.ReadFile(path, bytes.data(), bytes.size()) == vfsSize) {
-            return bytes;
-        }
-    }
-    return ReadUnpackedBytes(path);
-}
-
-}
+} // namespace
 
 auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode> {
     // A ZRD2 load only copies and validates prepared data. Legacy ZRD1 and
@@ -514,38 +490,40 @@ auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<Environme
     return finish(DecodeRgbe(bytes), true);
 }
 
-auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
-    if (path.empty()) {
+auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view virtualPath) -> std::expected<EnvironmentImage, ErrorCode> {
+    if (virtualPath.empty()) {
         return std::unexpected(RadianceAssetError::NotFound);
     }
-    auto bytes = ReadAssetBytes(vfs, path);
-    if (!bytes) {
-        return std::unexpected(bytes.error());
+    const auto file = vfs.Open(virtualPath);
+    if (!file) {
+        return std::unexpected(MapVfsError(file.error()));
     }
-    return DecodeRadiance(*bytes);
+    const auto bytes = file->Bytes();
+    if (bytes.empty()) {
+        return std::unexpected(RadianceAssetError::Truncated);
+    }
+    if (bytes.size() > kMaxRadianceFileBytes) {
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    }
+    return DecodeRadiance(bytes);
 }
 
-auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
-    if (path.empty()) {
+auto ReadEnvironmentImage(const COM::IAssetLibrary& assets, std::string_view virtualPath) -> std::expected<EnvironmentImage, ErrorCode> {
+    if (virtualPath.empty()) {
         return std::unexpected(RadianceAssetError::NotFound);
     }
-    const COM::StringView key {path.data(), path.size()};
-    if (assets.VirtualFileExists(key)) {
-        const auto size = assets.ReadVirtualFile(key, {});
-        if (size.HasValue() && size.value > 0 && size.value <= kMaxRadianceFileBytes) {
-            std::vector<std::byte> bytes(static_cast<size_t>(size.value));
-            const auto read = assets.ReadVirtualFile(
-                key, COM::Span<uint8_t> {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
-            if (read.HasValue() && read.value == size.value) {
-                return DecodeRadiance(bytes);
-            }
-        }
+    const auto opened = assets.OpenVirtualFile(COM::StringView(virtualPath));
+    if (!opened) {
+        return std::unexpected(MapVfsError(opened.error()));
     }
-    auto bytes = ReadUnpackedBytes(path);
-    if (!bytes) {
-        return std::unexpected(bytes.error());
+    const auto bytes = (*opened)->Bytes();
+    if (bytes.size == 0) {
+        return std::unexpected(RadianceAssetError::Truncated);
     }
-    return DecodeRadiance(*bytes);
+    if (bytes.size > kMaxRadianceFileBytes) {
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    }
+    return DecodeRadiance(std::span<const std::byte>(bytes.data, bytes.size));
 }
 
 } // namespace ZHLN::AssetCooking

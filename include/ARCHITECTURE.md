@@ -963,7 +963,10 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 3. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/<level>/`.
 4. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel. The virtual-path to cooked-file map is `build_assets/manifest.txt`, written by the generator and read only by `zcook pak`.
 5. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
-6. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+6. **VFS Loading & Plugin Filesystem Boundary**:
+   * `FS::VirtualFileSystem` (and its COM capability facade `COM::IAssetLibrary`) is the single virtual-asset read boundary for the engine and all plugins. `Open` / `OpenVirtualFile` return a move-only RAII `VirtualFile` / `COM::Ref<COM::IVirtualFile>` holding either a zero-copy pinned `.pak` slice or an owned loose-file byte buffer; `ReadBytes`, `ReadText`, `FileSize`, `LoadSync`, and `LoadAsync` return typed `std::expected<..., ErrorCode>` using `FS::VFSError`.
+   * Hosts own mount policy (`MountPak`, `MountDirectory` with `MountOptions` / `COM::MountDirectoryOptions { .virtualPrefix, .caseInsensitive }`) and process-directory discovery (`FS::Paths::FindDataFile`, `CacheDir`, etc.).
+   * **Plugins never touch the host OS filesystem directly**: `plugins/AssetCooking`, `plugins/Fonts`, `plugins/glTF`, `plugins/BSP` (`SourceVFS`), `plugins/SVG` (`ISvgRasterizer` / `SVG.hpp`), and core `plugins/lua/ReflectLua.hpp` read exclusively through `FS::VirtualFileSystem`, `COM::IAssetLibrary`, or caller-supplied byte spans — never `<filesystem>`, `<fstream>`, `FS::Paths`, CWD probes, or resvg file/system-font APIs. Opt-in host-only convenience headers (`plugins/SVG/SVGFile.hpp`, `plugins/lua/ReflectLuaFile.hpp`) are explicitly separated for host binaries/tools/tests and forbidden inside `plugins/` by `configure/check_plugin_fs_boundary.py`.
 
 ---
 

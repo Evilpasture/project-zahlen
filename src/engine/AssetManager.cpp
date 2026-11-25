@@ -16,28 +16,24 @@ AssetManager::~AssetManager() {
     ClearCache();
 }
 
-bool AssetManager::MountPak(std::string_view pakFilePath) {
+auto AssetManager::MountPak(std::string_view pakFilePath) -> std::expected<void, ErrorCode> {
     return _vfs.MountPak(pakFilePath);
 }
 
-bool AssetManager::MountDirectory(std::string_view directory) {
-    return _vfs.MountDirectory(directory);
+auto AssetManager::MountDirectory(std::string_view directory, FS::MountOptions options) -> std::expected<void, ErrorCode> {
+    return _vfs.MountDirectory(directory, options);
 }
 
-bool AssetManager::UnmountDirectory(std::string_view directory) {
+auto AssetManager::UnmountDirectory(std::string_view directory) -> std::expected<void, ErrorCode> {
     return _vfs.UnmountDirectory(directory);
 }
 
-void AssetManager::LoadAsync(RestrictSpan<AssetLoadRequest> requests, TaskSystem::Counter* counter) {
+void AssetManager::LoadAsync(RestrictSpan<FS::AsyncLoad> requests, TaskSystem::Counter* counter) const {
     _vfs.LoadAsync(requests, counter);
 }
 
-bool AssetManager::LoadSync(AssetLoadRequest& request) {
-    return _vfs.LoadSync(request);
-}
-
-void AssetManager::FreeMemory(AssetLoadRequest& req) {
-    _vfs.FreeMemory(req);
+auto AssetManager::LoadSync(uint64_t assetID) const -> std::expected<FS::VirtualFile, ErrorCode> {
+    return _vfs.LoadSync(assetID);
 }
 
 auto AssetManager::GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&> {
@@ -196,23 +192,6 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
             .contentHash  = image.contentHash,
         };
     });
-}
-
-auto AssetManager::ReadVirtualFile(std::string_view path) const -> std::optional<std::vector<uint8_t>> {
-    AssetLoadRequest req {};
-    req.assetID = HashAssetPath(path);
-    auto& self = const_cast<AssetManager&>(*this);
-    if (!self.LoadSync(req)) {
-        return std::nullopt;
-    }
-    if ((req.outData == nullptr) || (req.outSize == 0)) {
-        self.FreeMemory(req);
-        return std::nullopt;
-    }
-    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
-    std::vector<uint8_t> out(bytes, bytes + req.outSize);
-    self.FreeMemory(req);
-    return out;
 }
 
 } // namespace ZHLN

@@ -143,13 +143,17 @@ struct RadianceFixture {
     TempSandbox                 sandbox {"radiance"};
     ZHLN::FS::VirtualFileSystem vfs;
 
+    RadianceFixture() {
+        (void)vfs.MountDirectory(sandbox.rootPath.string());
+    }
+
     [[nodiscard]] auto Decode(std::span<const std::byte> bytes, std::string_view name = "environment.hdr")
         -> std::expected<ZHLN::EnvironmentImage, ZHLN::ErrorCode> {
         const fs::path path = sandbox.SubPath(name);
         if (!WriteRadianceFile(path, bytes)) {
             return std::unexpected(RadianceTestError::FixtureFailed);
         }
-        return ZHLN::AssetCooking::ReadEnvironmentImage(vfs, path.string());
+        return ZHLN::AssetCooking::ReadEnvironmentImage(vfs, name);
     }
 };
 
@@ -282,14 +286,18 @@ struct RadianceTestSuite {
                 !ZHLN::Test::ExpectEq(header[5], 0u) || !ZHLN::Test::ExpectEq(header[6], 0u)) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
-            auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, rawPath.string());
-            auto again   = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, cookedPath.string());
+            auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, rawPath.filename().string());
+            auto again   = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, cookedPath.filename().string());
             if (!decoded || !again) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
             if (!ZHLN::Test::ExpectEq(again->width, decoded->width) || !ZHLN::Test::ExpectEq(again->height, decoded->height) ||
                 !ZHLN::Test::ExpectEq(again->contentHash, decoded->contentHash) ||
                 !ZHLN::Test::ExpectTrue(std::ranges::equal(again->rgba, decoded->rgba))) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            // Raw host OS paths must never bypass the VFS boundary.
+            if (!ZHLN::Test::ExpectFalse(ZHLN::AssetCooking::ReadEnvironmentImage(fixture.vfs, rawPath.string()).has_value())) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
             return {};

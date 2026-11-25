@@ -84,7 +84,7 @@ class BSPPlugin final : public COM::Implements<BSPPlugin, COM::IAppLayer, COM::I
 
         auto prepared = BSP::DecodeAssets(
             std::span<const std::byte>(bytes.data, bytes.size),
-            BSP::SourceVFS(*assets),
+            BSP::SourceVFS(*assets, assetOpts.import.virtualPrefix),
             std::string_view(virtualPath.data, virtualPath.size),
             assetOpts.import
         );
@@ -94,16 +94,16 @@ class BSPPlugin final : public COM::Implements<BSPPlugin, COM::IAppLayer, COM::I
         return UploadPrepared(*assets, *graphics, *prepared, assetOpts);
     }
 
-    auto LoadFromPath(
+    auto LoadFromVirtualPath(
         COM::IAssetLibrary*     assets,
         COM::IGraphicsDevice*   graphics,
-        COM::StringView         path,
+        COM::StringView         virtualPath,
         const COM::ChainInNode* options
     ) noexcept -> COM::Result<uint64_t> override {
         if (assets == nullptr || graphics == nullptr) {
             return COM::Error::NullArgument;
         }
-        if (path.size == 0 || path.data == nullptr) {
+        if (virtualPath.size == 0 || virtualPath.data == nullptr) {
             return COM::Error::InvalidArgument;
         }
 
@@ -113,8 +113,8 @@ class BSPPlugin final : public COM::Implements<BSPPlugin, COM::IAppLayer, COM::I
         }
 
         auto prepared = BSP::ReadAssets(
-            BSP::SourceVFS(*assets),
-            std::string_view(path.data, path.size),
+            BSP::SourceVFS(*assets, assetOpts.import.virtualPrefix),
+            std::string_view(virtualPath.data, virtualPath.size),
             assetOpts.import
         );
         if (!prepared) {
@@ -147,8 +147,8 @@ class BSPPlugin final : public COM::Implements<BSPPlugin, COM::IAppLayer, COM::I
                     out.import.importSkybox         = value.importSkybox;
                     out.import.gatherLights         = value.gatherLights;
                     out.import.buildColliders       = value.buildColliders;
-                    if (value.assetRoot.data != nullptr && value.assetRoot.size > 0) {
-                        out.import.assetRoot.assign(value.assetRoot.data, value.assetRoot.size);
+                    if (value.virtualPrefix.data != nullptr && value.virtualPrefix.size > 0) {
+                        out.import.virtualPrefix.assign(value.virtualPrefix.data, value.virtualPrefix.size);
                     }
                 }
             }
