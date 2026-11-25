@@ -9,7 +9,6 @@
 #endif
 
 #include <audio/Audio.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Log.hpp>
@@ -739,8 +738,8 @@ struct VoiceSlot {
     std::vector<uint8_t>   encodedBytes;
     bool                   hasMemoryDecoder = false;
 
-    ZHLN::Atomic<uint32_t> generation {1};
-    ZHLN::Atomic<bool>     inUse {false};
+    std::atomic<uint32_t> generation {1};
+    std::atomic<bool>     inUse {false};
 
     AudioBusID           bus             = AudioBus::SFX;
     AudioPlaybackMode    playbackMode    = AudioPlaybackMode::Decompressed;

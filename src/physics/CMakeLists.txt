@@ -3,6 +3,7 @@
 
 
 add_library(zahlen_physics STATIC
+    AtomicBuffer.hpp
     Physics.cpp
     BodyTable.hpp
     CharacterManager.hpp

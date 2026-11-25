@@ -5,6 +5,8 @@
 #include <ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <memory>
 #include <span>
 #include <utility>
 #include <vector>
@@ -17,11 +19,11 @@ struct SystemGraphCore::NodePayload {
 };
 
 struct SystemGraphCore::ExecutionContext {
-    SystemGraphCore*                  graph   = nullptr;
-    void*                             carrier = nullptr;
-    TaskSystem::Counter               completionCounter {0};
-    std::span<ZHLN::Atomic<uint32_t>> dependencyCounts;
-    std::span<NodePayload>            payloads;
+    SystemGraphCore*                 graph   = nullptr;
+    void*                            carrier = nullptr;
+    TaskSystem::Counter              completionCounter {};
+    std::span<std::atomic<uint32_t>> dependencyCounts;
+    std::span<NodePayload>           payloads;
 };
 
 namespace {
@@ -165,26 +167,26 @@ void SystemGraphCore::Execute(void* carrier) {
     constexpr size_t kStackNodeLimit = 64;
     const size_t     nodeCount       = _nodes.size();
 
-    std::array<ZHLN::Atomic<uint32_t>, kStackNodeLimit> stackCounts {};
-    std::array<NodePayload, kStackNodeLimit>            stackPayloads {};
+    std::array<std::atomic<uint32_t>, kStackNodeLimit> stackCounts {};
+    std::array<NodePayload, kStackNodeLimit>           stackPayloads {};
 
-    std::vector<ZHLN::Atomic<uint32_t>> heapCounts;
-    std::vector<NodePayload>            heapPayloads;
+    std::unique_ptr<std::atomic<uint32_t>[]> heapCounts;
+    std::vector<NodePayload>                 heapPayloads;
 
-    std::span<ZHLN::Atomic<uint32_t>> countsSpan;
-    std::span<NodePayload>            payloadsSpan;
+    std::span<std::atomic<uint32_t>> countsSpan;
+    std::span<NodePayload>           payloadsSpan;
 
     if (nodeCount <= kStackNodeLimit) {
-        countsSpan   = std::span<ZHLN::Atomic<uint32_t>>(stackCounts.data(), nodeCount);
+        countsSpan   = std::span<std::atomic<uint32_t>>(stackCounts.data(), nodeCount);
         payloadsSpan = std::span<NodePayload>(stackPayloads.data(), nodeCount);
     } else {
-        heapCounts.resize(nodeCount);
+        heapCounts = std::make_unique<std::atomic<uint32_t>[]>(nodeCount);
         heapPayloads.resize(nodeCount);
-        countsSpan   = std::span<ZHLN::Atomic<uint32_t>>(heapCounts.data(), nodeCount);
+        countsSpan   = std::span<std::atomic<uint32_t>>(heapCounts.get(), nodeCount);
         payloadsSpan = std::span<NodePayload>(heapPayloads.data(), nodeCount);
     }
 
-    ExecutionContext ctx {.graph = this, .carrier = carrier, .completionCounter = {0}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
+    ExecutionContext ctx {.graph = this, .carrier = carrier, .completionCounter = {}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
 
     for (uint32_t i = 0; i < nodeCount; ++i) {
         ctx.dependencyCounts[i].store(_nodes[i].initialDependencyCount, std::memory_order::relaxed);

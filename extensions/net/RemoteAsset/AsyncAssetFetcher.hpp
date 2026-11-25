@@ -6,9 +6,9 @@
 #include <RemoteAsset/DiskCache.hpp>
 #include <RemoteAsset/FetchSlotTable.hpp>
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Error.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -61,10 +61,10 @@ class AsyncAssetFetcher {
     static void WorkerTrampoline(void* arg) noexcept;
     void        ExecuteJob(FetchJob* job) noexcept;
 
-    DiskCache              m_cache;
-    uint32_t               m_timeoutSeconds;
-    FetchSlotTable         m_slotTable;
-    ZHLN::Atomic<uint32_t> m_activeWorkers {0};
+    DiskCache             m_cache;
+    uint32_t              m_timeoutSeconds;
+    FetchSlotTable        m_slotTable;
+    std::atomic<uint32_t> m_activeWorkers {0};
 };
 
 } // namespace ZHLN::Remote

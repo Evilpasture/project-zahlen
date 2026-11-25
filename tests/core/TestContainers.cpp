@@ -4,7 +4,6 @@
 #include "TestsFramework.hpp"
 #include "helpers/TrackingMemoryResource.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -17,6 +16,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -163,7 +163,6 @@ enum class CoreContainersTestError : uint32_t {
     SkipListInvariantFailed ZHLN_ANNOTATION(ZHLN::Description<"SkipList ordering or concurrent GC failed.">{}),
     RadixSortFailed ZHLN_ANNOTATION(ZHLN::Description<"RadixSort64 produced unsorted or corrupted output.">{}),
     FixedStringFailed ZHLN_ANNOTATION(ZHLN::Description<"FixedString capacity truncation or manipulation failed.">{}),
-    AtomicInvariantFailed ZHLN_ANNOTATION(ZHLN::Description<"Atomic POD operations returned incorrect values.">{}),
     RangesPipelineFailed ZHLN_ANNOTATION(ZHLN::Description<"Ranges combinator returned unexpected output.">{}),
     LoopUnrollFailed ZHLN_ANNOTATION(ZHLN::Description<"Compile-time loop unrolling failed to execute exact iteration count.">{})
 };
@@ -583,8 +582,8 @@ struct ContainersTestSuite {
             // Multi-threaded Producer-Consumer Task
             constexpr int        kConcurrentItems = 2000;
             ZHLN::Queue<int, 64> concurrentQ;
-            ZHLN::Atomic<int>    totalPoppedSum {0};
-            ZHLN::Atomic<int>    popCount {0};
+            std::atomic<int>     totalPoppedSum {0};
+            std::atomic<int>     popCount {0};
 
             // Produce in parallel
             ZHLN::TaskSystem::ParallelFor(kConcurrentItems, 128, [&](uint32_t start, uint32_t end, uint32_t) {
@@ -708,35 +707,7 @@ struct ContainersTestSuite {
             return {};
         }
 
-        // --- 8. ZHLN::Atomic POD Correctness ---
-        std::expected<void, ZHLN::ErrorCode> atomic_pod_operations() {
-            ZHLN::Atomic<uint32_t> atom {};
-            atom.store(100);
-
-            ZHLN::Test::ExpectEq(atom.load(), 100u);
-            ZHLN::Test::ExpectEq(atom.fetch_add(50), 100u);
-            ZHLN::Test::ExpectEq(atom.load(), 150u);
-            ZHLN::Test::ExpectEq(atom.fetch_sub(25), 150u);
-            ZHLN::Test::ExpectEq(atom.load(), 125u);
-
-            // Bitwise operations
-            atom.store(0b1010);
-            ZHLN::Test::ExpectEq(atom.fetch_or(0b0101), 0b1010u);
-            ZHLN::Test::ExpectEq(atom.load(), 0b1111u);
-
-            ZHLN::Test::ExpectEq(atom.fetch_and(0b0011), 0b1111u);
-            ZHLN::Test::ExpectEq(atom.load(), 0b0011u);
-
-            // CAS loop
-            uint32_t expected = 0b0011;
-            bool     success  = atom.compare_exchange_strong(expected, 0b1000);
-            ZHLN::Test::ExpectTrue(success);
-            ZHLN::Test::ExpectEq(atom.load(), 0b1000u);
-
-            return {};
-        }
-
-        // --- 9. ZHLN::Ranges Extended Combinators ---
+        // --- 8. ZHLN::Ranges Extended Combinators ---
         std::expected<void, ZHLN::ErrorCode> ranges_extended_combinators() {
             using namespace ZHLN::Ranges;
 

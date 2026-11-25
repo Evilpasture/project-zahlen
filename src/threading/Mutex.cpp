@@ -8,6 +8,7 @@
 #include <Zahlen/Threading/SharedMutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <condition_variable>
@@ -201,7 +202,7 @@ struct alignas(CACHE_LINE) Waiter {
     Fiber*                  fiber;
     Waiter*                 next;
     std::condition_variable cond;
-    ZHLN::Atomic<uint8_t>   state {static_cast<uint8_t>(WaitState::Waiting)};
+    std::atomic<uint8_t>    state {static_cast<uint8_t>(WaitState::Waiting)};
 };
 
 struct alignas(128) Bucket {

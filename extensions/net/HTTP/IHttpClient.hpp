@@ -8,11 +8,11 @@
 // requests at runtime without linking zahlen_http or libcurl.
 
 #include "HTTPTypes.hpp"
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/COM/IObject.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Core/COM/Types.hpp>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <string_view>
@@ -32,7 +32,7 @@ struct ComRequest {
     COM::Span<const uint8_t>   body {};
     uint32_t                   timeoutSeconds  = 30;
     bool                       followRedirects = true;
-    const ZHLN::Atomic<bool>*  cancelSignal    = nullptr;
+    const std::atomic<bool>*   cancelSignal    = nullptr;
 };
 
 static_assert(std::is_standard_layout_v<ComHeader> && std::is_trivially_copyable_v<ComHeader>);

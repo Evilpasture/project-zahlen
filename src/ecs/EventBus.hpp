@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/PageVector.hpp>
 #include <Zahlen/Core/Pages.hpp>
+#include <atomic>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -218,8 +218,8 @@ class EventBus {
     // The bus slot and each writer/operation own one reference; no event storage
     // lives here, only a checked bus reference and its lifecycle lock.
     struct WriterBinding {
-        Atomic<size_t>   references {1};
-        SharedMutex      lifecycle;
+        std::atomic<size_t> references {1};
+        SharedMutex         lifecycle;
         Mutex            callsMutex {};
         WriterCallFrame* calls = nullptr;
         EventBus*        bus;
@@ -341,8 +341,8 @@ class EventBus {
     };
 
     struct ChannelNode {
-        uint32_t             hash          = 0;
-        Atomic<ChannelNode*> next          {nullptr};
+        uint32_t                  hash          = 0;
+        std::atomic<ChannelNode*> next {nullptr};
         void (*destroyFn)(ChannelNode*) noexcept     = nullptr;
         void (*clearEventsFn)(ChannelNode*) noexcept = nullptr;
     };
@@ -572,9 +572,9 @@ class EventBus {
     }
 
     std::pmr::memory_resource*                 _pages        = nullptr;
-    Atomic<ChannelNode*>                      _head         {nullptr};
+    std::atomic<ChannelNode*>                  _head {nullptr};
     SlabChunk*                                 _slab         = nullptr;
-    Atomic<size_t>                             _channelCount {0};
+    std::atomic<size_t>                        _channelCount {0};
     WriterBindingSlot                          _writerBinding;
     mutable Mutex                              _writerInitMutex {};
     mutable Mutex                              _channelCreateMutex {};

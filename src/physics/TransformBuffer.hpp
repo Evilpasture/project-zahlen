@@ -9,8 +9,8 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Real.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Core/Atomic.hpp>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -57,8 +57,8 @@ struct TransformFrame {
 static_assert(std::is_standard_layout_v<TransformFrame>);
 
 struct alignas(64) TransformBuffer {
-    ZHLN::Atomic<uint32_t>         frontIndex {0};
-    std::array<TransformFrame, 2>  frames {};
+    std::atomic<uint32_t>         frontIndex {0};
+    std::array<TransformFrame, 2> frames {};
     size_t                         capacity = 0;
 
     void Init(uint32_t maxBodies);

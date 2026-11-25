@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <atomic>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -102,14 +102,14 @@ class BoundedFiberQueue {
 
   private:
     struct Cell {
-        ZHLN::Atomic<size_t> sequence {0};
-        Fiber*               fiber = nullptr;
+        std::atomic<size_t> sequence {0};
+        Fiber*              fiber = nullptr;
     };
 
-    std::unique_ptr<Cell[]>          _cells;
-    size_t                           _mask = 0;
-    alignas(64) ZHLN::Atomic<size_t> _enqueuePos {0};
-    alignas(64) ZHLN::Atomic<size_t> _dequeuePos {0};
+    std::unique_ptr<Cell[]>         _cells;
+    size_t                          _mask = 0;
+    alignas(64) std::atomic<size_t> _enqueuePos {0};
+    alignas(64) std::atomic<size_t> _dequeuePos {0};
 };
 
 struct alignas(128) WorkerSlot {
@@ -131,12 +131,12 @@ std::vector<std::thread>      s_threads;
 
 // Lifecycle transitions (including worker joins) are serialized. WorkerMain's
 // hot queue loop is lock-free and only enters s_sleepMutex when parking.
-std::mutex                            s_lifecycleMutex;
-bool                                  s_running = false;
-alignas(64) ZHLN::Atomic<uint32_t>    s_workerCount {0};
-alignas(64) ZHLN::Atomic<uint32_t>    s_parkedWorkers {0};
-alignas(64) ZHLN::Atomic<bool>        s_stopRequested {false};
-alignas(64) ZHLN::Atomic<uint32_t>    s_dispatchCursor {0};
+std::mutex                          s_lifecycleMutex;
+bool                                s_running = false;
+alignas(64) std::atomic<uint32_t>   s_workerCount {0};
+alignas(64) std::atomic<uint32_t>   s_parkedWorkers {0};
+alignas(64) std::atomic<bool>       s_stopRequested {false};
+alignas(64) std::atomic<uint32_t>   s_dispatchCursor {0};
 std::mutex                            s_sleepMutex;
 std::condition_variable               s_sleepCv;
 

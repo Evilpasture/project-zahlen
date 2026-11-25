@@ -4,11 +4,10 @@
 #pragma once
 
 #include "PhysicsWorld.hpp"
-#include <Zahlen/Core/Atomic.hpp>
-#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
 #include <atomic>
 #include <cmath>
+#include <physics/Physics.hpp>
 
 namespace ZHLN::Physics {
 

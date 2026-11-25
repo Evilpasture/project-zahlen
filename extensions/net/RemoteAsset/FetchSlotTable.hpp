@@ -7,6 +7,7 @@
 #include <Zahlen/Threading/Mutex.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <optional>
 
@@ -32,9 +33,9 @@ class FetchSlotTable {
     static constexpr size_t kMaxSlots = 128;
 
     struct Slot {
-        ZHLN::Atomic<uint32_t> generation {1};
-        ZHLN::Atomic<bool>     occupied {false};
-        FetchJob*              job {nullptr};
+        std::atomic<uint32_t> generation {1};
+        std::atomic<bool>     occupied {false};
+        FetchJob*             job {nullptr};
     };
 
     FetchSlotTable() = default;

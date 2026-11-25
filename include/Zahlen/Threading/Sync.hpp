@@ -3,17 +3,16 @@
 
 #pragma once
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <atomic>
 
 namespace ZHLN {
 struct alignas(64) BufferSync {
-    ZHLN::Atomic<int> viewExportCount {0};
-    ZHLN::Mutex       shadowLock {};
+    std::atomic<int> viewExportCount {0};
+    ZHLN::Mutex      shadowLock {};
 };
 
 static_assert(std::is_nothrow_default_constructible_v<BufferSync>);
 static_assert(std::is_trivially_destructible_v<BufferSync>);
-static_assert(std::is_trivially_copyable_v<BufferSync>);
 static_assert(std::is_standard_layout_v<BufferSync>);
 }

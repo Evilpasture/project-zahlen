@@ -29,7 +29,7 @@
 // Response::headers can disagree with body.size().
 
 #include "HTTPTypes.hpp"
-#include <Zahlen/Core/Atomic.hpp>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -97,7 +97,7 @@ struct Request {
     // When non-null, libcurl polls this each progress tick and aborts with
     // CURLE_ABORTED_BY_CALLBACK (mapped to Error::TransferFailed) as soon
     // as it is true. The pointed-to atomic must outlive the Fetch call.
-    const ZHLN::Atomic<bool>* cancelSignal = nullptr;
+    const std::atomic<bool>* cancelSignal = nullptr;
 };
 
 // What came back. Engaged whenever the transfer completed, so statusCode is

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AtomicBuffer.hpp"
 #include "TransformBuffer.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -12,9 +13,9 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Body/MotionType.h>
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -46,18 +47,18 @@ struct SlotPredicate {
 // `slotBodyIDs`, and `joltIndexToBodyID` expose stable addresses for lock-free
 // spatial query filtering and ID validation across worker threads.
 struct alignas(64) BodyTable {
-    mutable ZHLN::Mutex  allocMutex {};
-    ZHLN::Atomic<size_t> count {0};
-    ZHLN::Atomic<size_t> freeCount {0};
-    size_t               slotCapacity = 0;
+    mutable ZHLN::Mutex allocMutex {};
+    std::atomic<size_t> count {0};
+    std::atomic<size_t> freeCount {0};
+    size_t              slotCapacity = 0;
 
-    JPH::Array<ZHLN::Atomic<uint32_t>>         generations;
-    JPH::Array<ZHLN::Atomic<SlotState>>        slotStates;
-    JPH::Array<ZHLN::Atomic<JPH::EMotionType>> slotMotionTypes;
-    JPH::Array<ZHLN::Atomic<uint32_t>>         slotBodyIDs;
-    JPH::Array<ZHLN::Atomic<uint32_t>>         slotMaterialIDs;
-    JPH::Array<ZHLN::Atomic<uint64_t>>         joltIndexToBodyID;
-    JPH::Array<const void*>                    joltBodyPtrs;
+    AtomicBuffer<uint32_t>         generations;
+    AtomicBuffer<SlotState>        slotStates;
+    AtomicBuffer<JPH::EMotionType> slotMotionTypes;
+    AtomicBuffer<uint32_t>         slotBodyIDs;
+    AtomicBuffer<uint32_t>         slotMaterialIDs;
+    AtomicBuffer<uint64_t>         joltIndexToBodyID;
+    JPH::Array<const void*>        joltBodyPtrs;
 
     JPH::Array<uint32_t>    slotToDense;
     JPH::Array<uint32_t>    denseToSlot;

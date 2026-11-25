@@ -10,10 +10,10 @@
 #include <Jolt/Physics/EActivation.h>
 #include <Jolt/Physics/Body/MotionType.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
-#include <physics/Physics.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <atomic>
+#include <physics/Physics.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -154,8 +154,8 @@ struct Command {
 // under `mutex`; at Phase 1 of `Step()`, `Drain()` swaps `incoming` and
 // `draining` in O(1) so command execution runs without holding any lock.
 struct alignas(64) CommandMailbox {
-    mutable ZHLN::Mutex  mutex {};
-    ZHLN::Atomic<bool>   hasPending {false};
+    mutable ZHLN::Mutex mutex {};
+    std::atomic<bool>   hasPending {false};
     JPH::Array<Command>  incoming;
     JPH::Array<Command>  draining;
 

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -37,7 +37,7 @@ enum class BackgroundDispatchError : uint8_t {
 };
 
 struct Counter {
-    ZHLN::Atomic<uint32_t> value {0};
+    std::atomic<uint32_t> value {0};
 };
 
 // ParallelFor assigns one stable chunk index to each callback. Systems that need

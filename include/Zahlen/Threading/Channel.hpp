@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <cstdlib>
@@ -69,9 +69,9 @@ class Channel {
             return PopBlocking();
         }
 
-        T                     result;
-        ZHLN::Atomic<uint8_t> wakeState {0};
-        bool                  got = false;
+        T                    result;
+        std::atomic<uint8_t> wakeState {0};
+        bool                 got = false;
 
         ZHLN::Lock(_mutex, [&] {
             if (!_queue.empty()) {
@@ -117,9 +117,9 @@ class Channel {
 
   private:
     struct Waiter {
-        Fiber*                 fiber     = nullptr;
-        T*                     outMsg    = nullptr;
-        ZHLN::Atomic<uint8_t>* wakeState = nullptr;
+        Fiber*                fiber     = nullptr;
+        T*                    outMsg    = nullptr;
+        std::atomic<uint8_t>* wakeState = nullptr;
     };
 
     T PopBlocking() {

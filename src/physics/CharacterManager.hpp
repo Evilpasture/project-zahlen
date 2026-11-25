@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "AtomicBuffer.hpp"
 #include "CommandMailbox.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -14,10 +15,10 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-#include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Physics/PhysicsIDs.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -36,11 +37,11 @@ struct CharacterManager {
     size_t                                      slotCapacity = 0;
     JPH::Array<JPH::Ref<JPH::CharacterVirtual>> instances;
     JPH::Array<JPH::CharacterVirtual*>          activeCharacters;
-    JPH::Array<ZHLN::Atomic<uint32_t>>          generations;
+    AtomicBuffer<uint32_t>                      generations;
     JPH::Array<float>                           groundOffsets;
-    JPH::Array<ZHLN::Atomic<float>>             velX;
-    JPH::Array<ZHLN::Atomic<float>>             velY;
-    JPH::Array<ZHLN::Atomic<float>>             velZ;
+    AtomicBuffer<float>                         velX;
+    AtomicBuffer<float>                         velY;
+    AtomicBuffer<float>                         velZ;
 
     std::unique_ptr<CharacterListener>                                                               listener;
     std::array<std::unique_ptr<JPH::TempAllocatorImplWithMallocFallback>, TaskSystem::MaxParallelForChunks> tempAllocators {};
