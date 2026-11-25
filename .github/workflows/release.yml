@@ -41,17 +41,17 @@ name: Release (Ubuntu 22.04 baseline)
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to create or update (default: v + PROJECT_VERSION from CMakeLists.txt)'
+        description: "Release tag to create or update (default: v + PROJECT_VERSION from CMakeLists.txt)"
         required: false
-        default: ''
+        default: ""
       gcc_version:
-        description: 'GCC version to download and build with (released 16.x; reflection needs 16)'
+        description: "GCC version to download and build with (released 16.x; reflection needs 16)"
         required: false
-        default: '16.2.0'
+        default: "16.2.0"
 
 # Releases are created and updated with the workflow token.
 permissions:
@@ -66,10 +66,10 @@ env:
   GCC_VERSION: ${{ inputs.gcc_version || '16.2.0' }}
   # The installed binaries are named after the major (gcc-16 / g++-16), so the
   # pin above can move to 16.3 without touching a single CMake flag.
-  GCC_BIN_SUFFIX: '16'
+  GCC_BIN_SUFFIX: "16"
   # Ubuntu 22.04 LTS. Anything a release links must stay at or below this, or
   # the artifact only runs on a distro newer than the one it claims to target.
-  GLIBC_BASELINE: '2.35'
+  GLIBC_BASELINE: "2.35"
 
 # A release never runs concurrently with itself: two jobs publishing to the same
 # tag would upload half of one build and half of another.
@@ -520,14 +520,39 @@ jobs:
 
       - name: Install a Vulkan driver the engine can use
         run: |
-          sudo add-apt-repository -y ppa:kisak/kisak-mesa
-          sudo apt-get update -qq
+          # Do the update explicitly below so it can use the same retry policy as
+          # package installation. The Launchpad content CDN has intermittently
+          # returned HTTP 503 for .deb downloads even when its package index was
+          # available; one transient response should not require a manual rerun.
+          sudo add-apt-repository --yes --no-update ppa:kisak/kisak-mesa
+
+          apt_retry() {
+            local attempt=1 max_attempts=4 delay=15
+            while true; do
+              if sudo apt-get -o Acquire::Retries=3 "$@"; then
+                return 0
+              fi
+              if [ "${attempt}" -ge "${max_attempts}" ]; then
+                echo "error: apt-get $* failed after ${max_attempts} attempts" >&2
+                return 1
+              fi
+              echo "apt-get $* failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s" >&2
+              sleep "${delay}"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+
+          # Translations are not used in CI and the PPA's Translation index was
+          # also returning 503s. Skipping it removes that unnecessary request.
+          apt_retry -o Acquire::Languages=none update -qq
+
           # The driver, plus the runtime libraries `ci-ubuntu-2204-env.sh
           # --consumer` installs on jammy, in noble's spelling (`libcurl4t64`):
           # the engine's shared objects dlopen/link these before Vulkan is even
           # reached, and this job runs the jammy-built cube on a machine that was
           # never provisioned for it.
-          sudo apt-get install -y --no-install-recommends \
+          apt_retry install -y --no-install-recommends \
             mesa-vulkan-drivers libvulkan1 vulkan-tools netpbm \
             libzstd1 libatomic1 libcurl4t64 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 \
