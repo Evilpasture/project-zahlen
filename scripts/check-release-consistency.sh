@@ -260,6 +260,16 @@ if [ "$check_versions" -eq 1 ]; then
         else
             [ -n "$expected_date" ] && pass "zpkg CalVer matches the release date"
         fi
+        # A self-referential _commit is impossible to satisfy: a commit cannot
+        # contain its own hash and --amend just mints a new one.
+        pin="$repo/scripts/pin-zpkg-pkgbuild.sh"
+        if [ -x "$pin" ]; then
+            if out=$("$pin" --check 2>&1); then
+                pass "${out#ok: }"
+            else
+                fail "PKGBUILD pin: $out"
+            fi
+        fi
         if [ -n "$zpkg_bin" ]; then
             if ! report=$("$zpkg_bin" --version 2>/dev/null); then
                 fail "cannot run $zpkg_bin --version"

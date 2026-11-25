@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,6 +109,17 @@ def main() -> int:
             "packaging/arch/PKGBUILD _commit must be the full 40-character hash "
             "the tarball is pinned to (archive/<sha>.tar.gz)"
         )
+    # A commit cannot contain its own hash, and --amend mints a new one: the
+    # pin must reference an EARLIER commit. The metadata edit is always a
+    # second commit. Skipped when building from a source tarball (no .git).
+    if (ROOT / ".git").exists() and shutil.which("git"):
+        pinned = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "pin-zpkg-pkgbuild.sh"), "--check"],
+            capture_output=True, text=True)
+        if pinned.returncode != 0:
+            problems.append((pinned.stderr or pinned.stdout).strip())
+        else:
+            notes.append(pinned.stdout.strip())
 
     # --- the tag, when asked ------------------------------------------------
     if args.tag:

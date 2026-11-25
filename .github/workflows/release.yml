@@ -150,6 +150,9 @@ jobs:
           CALVER: ${{ needs.version.outputs.calver }}
         run: scripts/bump-zpkg-calver.sh --check --date "${CALVER}"
 
+      - name: PKGBUILD pin must reference an earlier commit
+        run: scripts/pin-zpkg-pkgbuild.sh --check
+
       - name: Release key must be configured
         env:
           HAS_KEY: ${{ secrets.ZHLN_RELEASE_KEY_PEM != '' }}
