@@ -100,9 +100,9 @@ struct BuiltinHostOptions {
     auto opened = SharedLibrary::OpenPlugin(
         spec,
         PluginSearchOptions {
+            .stemPrefix = useDefaultStemPrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
             .envPath    = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {},
             .searchDirs = searchDirs,
-            .stemPrefix = useDefaultStemPrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
         }
     );
     if (!opened) {

@@ -192,9 +192,9 @@ struct LoadedAppLayerPlugin {
     auto opened = ZHLN::SharedLibrary::OpenPlugin(
         stem,
         ZHLN::PluginSearchOptions {
+            .stemPrefix = usePrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
             .envPath    = envPath,
             .searchDirs = searchDirs,
-            .stemPrefix = usePrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
         }
     );
     if (!opened || !opened->has_value()) {
@@ -203,12 +203,12 @@ struct LoadedAppLayerPlugin {
     ZHLN::SharedLibrary library = std::move((*opened)->library);
     const auto          factory = ZHLN::COM::ResolveVerifiedSymbol<&ZHLN::COM::CreateAppLayerRaw>(library);
     if (factory == nullptr) {
-        ZHLN::COM::LoggerView {logger}.Warning("Skipping optional plugin '{}': missing or incompatible ABI witness.", pluginName);
+        ZHLN::COM::LoggerView {logger}.Warn("Skipping optional plugin '{}': missing or incompatible ABI witness.", pluginName);
         return {};
     }
     auto created = ZHLN::COM::CreateAppLayer(factory, nullptr);
     if (!created) {
-        ZHLN::COM::LoggerView {logger}.Warning("Skipping optional plugin '{}': {}", pluginName, created.error());
+        ZHLN::COM::LoggerView {logger}.Warn("Skipping optional plugin '{}': {}", pluginName, created.error());
         return {};
     }
     return LoadedAppLayerPlugin {.library = std::move(library), .layer = std::move(*created)};
@@ -250,7 +250,7 @@ auto main(int argc, char* argv[]) -> int {
     LoadedAppLayerPlugin freecam = LoadOptionalRuntimePlugin("freecam", engine->Logger());
     if (freecam.layer) {
         if (const auto started = freecam.layer->OnStart(engine.Get()); !started.HasValue()) {
-            ZHLN::COM::LoggerView {engine->Logger()}.Warning("Optional freecam plugin failed to start: {}", started.error);
+            ZHLN::COM::LoggerView {engine->Logger()}.Warn("Optional freecam plugin failed to start: {}", started.error);
             freecam.layer = {};
             freecam.library.Close();
         }

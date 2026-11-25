@@ -15,7 +15,6 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Contract.hpp>
 #include <algorithm>
-#include <filesystem>
 #include <new>
 #include <span>
 #include <string_view>
@@ -124,8 +123,7 @@ class GLTFPlugin final : public COM::Implements<GLTFPlugin, COM::IAppLayer, COM:
             return parsed.error;
         }
 
-        const std::filesystem::path filePath(std::string_view(path.data, path.size));
-        const auto                  doc = GLTF::Read(filePath, importOpts, assets);
+        const auto doc = GLTF::Read(std::string_view(path.data, path.size), importOpts, assets);
         if (!doc) {
             return doc.error();
         }

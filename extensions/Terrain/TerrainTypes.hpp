@@ -4,6 +4,7 @@
 #pragma once
 
 #include "TerrainComponents.hpp"
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <cstdint>
