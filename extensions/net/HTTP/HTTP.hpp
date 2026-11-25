@@ -28,9 +28,8 @@
 // and not the wire bytes. That is also why Content-Length in
 // Response::headers can disagree with body.size().
 
+#include "HTTPTypes.hpp"
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Error.hpp>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -41,34 +40,6 @@
 #include <vector>
 
 namespace ZHLN::HTTP {
-
-// Hard ceiling on a response body, in bytes (256 MiB). Not a libcurl limit --
-// a guard, because curl hands the body to a callback that appends to a
-// std::vector and a URL that turns out to be a 40 GiB file would otherwise ask
-// for exactly that. Going over it aborts the transfer as TransferFailed.
-inline constexpr uint64_t kMaxBodyBytes = 268435456ULL;
-
-// How many redirects a request may follow before libcurl is told to stop,
-// which arrives as Error::TooManyRedirects.
-inline constexpr uint32_t kMaxRedirects = 20;
-
-// What stopped a transfer, grouped by the one thing a caller usually wants to
-// know: whether trying again could possibly help. ConnectionFailed and Timeout
-// are the network's doing and may succeed next time; InvalidURL and
-// MalformedRequest are the caller's, and fail identically until the request
-// changes; the rest are the client's or the peer's, and repeating the same
-// request repeats them.
-enum class Error : uint8_t {
-    ClientInitFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize CURL easy session"> {}) = 1,
-    ConnectionFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to connect to host"> {}),
-    Timeout            ZHLN_ANNOTATION(ZHLN::Description<"HTTP request timed out"> {}),
-    TransferFailed     ZHLN_ANNOTATION(ZHLN::Description<"HTTP data transfer error"> {}),
-    InvalidURL         ZHLN_ANNOTATION(ZHLN::Description<"Supplied URL is invalid or malformed"> {}),
-    MalformedRequest   ZHLN_ANNOTATION(ZHLN::Description<"Request method or header is malformed"> {}),
-    TooManyRedirects   ZHLN_ANNOTATION(ZHLN::Description<"Exceeded maximum redirect limit"> {}),
-    SSLHandshakeFailed ZHLN_ANNOTATION(ZHLN::Description<"TLS/SSL certificate or handshake error"> {}),
-    InternalError      ZHLN_ANNOTATION(ZHLN::Description<"Internal HTTP client error"> {})
-};
 
 // One header line, split at the first colon. Names arrive exactly as the peer
 // sent them: HTTP field names are case-insensitive, and folding them on the way

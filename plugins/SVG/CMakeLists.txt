@@ -271,6 +271,19 @@ endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
 
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_svg svg SVGPlugin.cpp)
+    target_link_libraries(zahlen_plugin_svg PRIVATE ${TARGET_NAME})
+endif()
+
+# Copy the manifest beside the compiled plugin in the build tree so
+# PluginManifestRegistry discovers it without an install step.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_svg.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_svg.manifest.toml
+    COPYONLY
+)
+
 # Nothing links zahlen_svg automatically: unlike the editor and the scripting
 # runtime, no part of the composition root consumes it yet, and an unused static
 # library is still a resvg dependency at link time for whoever inherits it. A

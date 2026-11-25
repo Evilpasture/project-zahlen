@@ -266,6 +266,22 @@ struct PlatformTestSuite {
                 // The path the loader rejected, not just the fact that it did.
                 ZHLN::Test::ExpectEq(rejected.error().attemptedPath.string(), badFile.string());
             }
+
+            // Passing an already-prefixed library stem with the default stemPrefix
+            // ("zahlen_plugin_") must not double-prefix to zahlen_plugin_zahlen_plugin_*.
+            const auto prefixedRejected = ZHLN::SharedLibrary::OpenPlugin(
+                "zahlen_plugin_bogus",
+                ZHLN::PluginSearchOptions {
+                    .envPath           = envDir.string(),
+                    .searchDirs        = dirs,
+                    .allowSystemSearch = false,
+                }
+            );
+            ZHLN::Test::ExpectFalse(prefixedRejected.has_value());
+            if (!prefixedRejected.has_value()) {
+                ZHLN::Test::ExpectTrue(prefixedRejected.error().code == ZHLN::SharedLibraryError::LoadFailed);
+                ZHLN::Test::ExpectEq(prefixedRejected.error().attemptedPath.string(), badFile.string());
+            }
             return {};
         }
     };

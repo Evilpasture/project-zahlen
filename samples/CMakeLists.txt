@@ -22,7 +22,7 @@ set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahl
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf_assets zahlen_animation zahlen_camera zahlen_ui)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf_assets zahlen_remote_asset zahlen_github zahlen_animation zahlen_ui)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf_assets zahlen_cdn zahlen_freecam zahlen_animation)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample "")
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf_assets zahlen_serialization zahlen_asset_cooking zahlen_netpbm zahlen_screenshot zahlen_animation)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_interaction zahlen_bsp_assets zahlen_scene zahlen_animation zahlen_locomotion zahlen_procedural_animation zahlen_gltf_assets zahlen_character_controller zahlen_camera zahlen_freecam zahlen_benchmark_viewer zahlen_ui)
 
@@ -84,6 +84,12 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
 
     if(TARGET cook_assets)
         add_dependencies(${SAMPLE_NAME} cook_assets)
+    endif()
+
+    if(SAMPLE_NAME STREQUAL "DeviceLostRecoverySample" AND TARGET zahlen_plugin_freecam)
+        # Build-order only: DeviceLostRecoverySample loads freecam dynamically
+        # via PluginManifestRegistry + SharedLibrary::OpenPlugin without linking it.
+        add_dependencies(${SAMPLE_NAME} zahlen_plugin_freecam)
     endif()
 
     if(USE_SANITIZERS AND WIN32 AND ASAN_DLL)

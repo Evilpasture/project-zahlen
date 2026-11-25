@@ -22,3 +22,11 @@ if(COMMAND zahlen_add_plugin)
     zahlen_add_plugin(zahlen_plugin_screenshot screenshot ScreenshotPlugin.cpp)
     target_link_libraries(zahlen_plugin_screenshot PRIVATE zahlen_screenshot)
 endif()
+
+# Copy the manifest beside the compiled plugin in the build tree so
+# PluginManifestRegistry discovers it without an install step.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_screenshot.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_screenshot.manifest.toml
+    COPYONLY
+)

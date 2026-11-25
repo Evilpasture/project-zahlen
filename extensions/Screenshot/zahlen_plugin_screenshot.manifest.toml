@@ -1,0 +1,10 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[plugin]
+name        = "screenshot"
+library     = "zahlen_plugin_screenshot"
+api         = 1
+description = "Single-shot PNG frame capture host layer"
+auto_load   = false
+hot_reload  = false

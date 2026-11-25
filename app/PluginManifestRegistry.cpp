@@ -84,10 +84,9 @@ auto PluginManifestRegistry::FindLibraryBeside(const std::filesystem::path& mani
 
 auto PluginManifestRegistry::Discover(std::vector<std::filesystem::path> searchDirs)
     -> std::expected<std::vector<DiscoveredPlugin>, RegistryIssue> {
-    std::vector<DiscoveredPlugin> discoveries;
+    std::vector<DiscoveredPlugin>           discoveries;
     std::unordered_map<std::string, size_t> nameToIndex;
-    std::unordered_set<std::string>        stemsWithManifest;
-    std::string                            firstIssueDetail;
+    std::string                             firstIssueDetail;
     RegistryIssueCode                      firstIssueCode = RegistryIssueCode::ManifestError;
     std::filesystem::path                  firstIssuePath;
 
@@ -108,7 +107,17 @@ auto PluginManifestRegistry::Discover(std::vector<std::filesystem::path> searchD
         } else {
             // Later search directories override earlier ones for the same name,
             // mirroring how SharedLibrary search order shadows earlier dirs.
-            discoveries[it->second] = std::move(plugin);
+            // Never let a synthesized manifest-less entry erase an explicit
+            // manifest discovered earlier; only fill in the library path.
+            auto& existing = discoveries[it->second];
+            if (existing.hasManifest && !plugin.hasManifest) {
+                if (!plugin.libraryPath.empty()) {
+                    existing.libraryPath  = std::move(plugin.libraryPath);
+                    existing.libraryFound = true;
+                }
+            } else {
+                existing = std::move(plugin);
+            }
         }
     };
 
@@ -119,8 +128,12 @@ auto PluginManifestRegistry::Discover(std::vector<std::filesystem::path> searchD
         }
         std::vector<std::filesystem::path> manifestFiles;
         std::vector<std::filesystem::path> libraryFiles;
+        std::unordered_set<std::string>    stemsWithManifest;
 
-        for (const auto& entry: std::filesystem::directory_iterator(searchDir)) {
+        for (const auto& entry: std::filesystem::directory_iterator(searchDir, ec)) {
+            if (ec) {
+                break;
+            }
             std::error_code entryEc;
             if (!entry.is_regular_file(entryEc)) {
                 continue;
@@ -133,6 +146,8 @@ auto PluginManifestRegistry::Discover(std::vector<std::filesystem::path> searchD
                 libraryFiles.push_back(entry.path());
             }
         }
+        std::sort(manifestFiles.begin(), manifestFiles.end());
+        std::sort(libraryFiles.begin(), libraryFiles.end());
 
         // Manifests first so their stems are known before we synthesize for
         // manifest-less libraries.
@@ -182,12 +197,14 @@ auto PluginManifestRegistry::Discover(std::vector<std::filesystem::path> searchD
             if (stemsWithManifest.contains(std::string(stem))) {
                 continue; // already described by a manifest
             }
+            PluginManifest synth     = SynthesizeManifest(stem, libraryPath);
+            std::string    synthName = synth.name;
             addDiscovered(DiscoveredPlugin {
-                .name         = std::string(stem),
+                .name         = std::move(synthName),
                 .libraryStem  = std::string(stem),
                 .manifestPath = std::filesystem::path {},
                 .libraryPath  = libraryPath,
-                .manifest     = SynthesizeManifest(stem, libraryPath),
+                .manifest     = std::move(synth),
                 .hasManifest  = false,
                 .libraryFound = true,
             });
@@ -296,10 +313,17 @@ auto PluginManifestRegistry::ResolveOrder(
     loadOrder.reserve(graph.Order().size());
     for (const auto& ordered: graph.Order()) {
         const auto* plugin = findPlugin(ordered.name);
+        if (plugin == nullptr) {
+            return std::unexpected(RegistryIssue {
+                .code   = RegistryIssueCode::UnknownPlugin,
+                .detail = ordered.name,
+            });
+        }
         loadOrder.push_back(LoadEntry {
-            .name       = ordered.name,
+            .name        = ordered.name,
             .libraryStem = plugin->libraryStem,
-            .hotReload  = plugin->manifest.hotReload,
+            .hotReload   = plugin->manifest.hotReload,
+            .before      = ordered.before,
         });
     }
     return loadOrder;

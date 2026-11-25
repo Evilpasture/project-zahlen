@@ -19,3 +19,16 @@ target_link_libraries(zahlen_bsp_assets
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_bsp_assets)
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_bsp bsp BSPPlugin.cpp)
+    target_link_libraries(zahlen_plugin_bsp PRIVATE zahlen_bsp_assets)
+endif()
+
+# Copy the manifest beside the compiled plugin in the build tree so
+# PluginManifestRegistry discovers it without an install step.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_bsp.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_bsp.manifest.toml
+    COPYONLY
+)

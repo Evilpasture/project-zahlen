@@ -939,7 +939,19 @@ set(_zhln_glibc_targets zahlen_engine)
 if(TARGET zcook)
     list(APPEND _zhln_glibc_targets zcook)
 endif()
-foreach(_zhln_plugin_target IN ITEMS zahlen_plugin_freecam zahlen_plugin_screenshot)
+foreach(_zhln_plugin_target IN ITEMS
+    zahlen_plugin_freecam
+    zahlen_plugin_screenshot
+    zahlen_plugin_character_controller
+    zahlen_plugin_animation
+    zahlen_plugin_terrain
+    zahlen_plugin_vfx
+    zahlen_plugin_gltf
+    zahlen_plugin_bsp
+    zahlen_plugin_interaction
+    zahlen_plugin_discord_rpc
+    zahlen_plugin_svg
+    zahlen_plugin_http)
     if(TARGET ${_zhln_plugin_target})
         list(APPEND _zhln_glibc_targets ${_zhln_plugin_target})
     endif()

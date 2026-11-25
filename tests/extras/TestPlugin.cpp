@@ -2,10 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Discord/IPresenceClient.hpp>
 #include <FreeCam/FreeCam.hpp>
+#include <HTTP/IHttpClient.hpp>
 #include <Image/Image.hpp>
+#include <SVG/ISvgRasterizer.hpp>
 #include <Screenshot/Screenshot.hpp>
+#include <Terrain/ITerrainLayer.hpp>
+#include <VFX/IVfxLayer.hpp>
 #include <Zahlen/App.hpp>
+#include <Zahlen/COM/IAssetImporter.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IPlugin.hpp>
@@ -436,7 +442,7 @@ void test_plugin_registry_orders_required_dependencies() {
         }
         out << "auto_load = false\n";
         out << "hot_reload = true\n";
-        const std::filesystem::path soPath = tmp.Path() / ("libzahlen_plugin_" + name + std::string(".so"));
+        const std::filesystem::path soPath = tmp.Path() / SharedLibrary::FormatFileNames("zahlen_plugin_" + name).front();
         std::ofstream               soOut(soPath, std::ios::binary);
         soOut << "dummy";
     };
@@ -444,6 +450,14 @@ void test_plugin_registry_orders_required_dependencies() {
     writePlugin("b");
     writePlugin("a", {"b"});
     writePlugin("c");
+
+    // Also place a manifest-less shared library beside the manifest-backed ones
+    // to verify synthesized discovery names match SynthesizeManifest().name.
+    const std::filesystem::path legacySo = tmp.Path() / SharedLibrary::FormatFileNames("zahlen_plugin_legacy").front();
+    {
+        std::ofstream legacyOut(legacySo, std::ios::binary);
+        legacyOut << "dummy";
+    }
 
     PluginManifestRegistry registry;
     const auto             discovered = registry.Discover({tmp.Path()});
@@ -462,7 +476,323 @@ void test_plugin_registry_orders_required_dependencies() {
     ExpectEq((*resolved)[1].libraryStem, std::string("zahlen_plugin_a"));
     ExpectTrue((*resolved)[1].hotReload);
 
+    const auto legacyOrder = registry.ResolveOrder(*discovered, std::vector<std::string> {"legacy"});
+    ExpectTrue(legacyOrder.has_value());
+    if (legacyOrder && ExpectEq(legacyOrder->size(), size_t {1})) {
+        ExpectEq((*legacyOrder)[0].name, std::string("legacy"));
+        ExpectEq((*legacyOrder)[0].libraryStem, std::string("zahlen_plugin_legacy"));
+    }
+
     const auto unknown = registry.ResolveOrder(*discovered, std::vector<std::string> {"no_such_plugin"});
     ExpectFalse(unknown.has_value());
+}
+
+namespace {
+
+[[nodiscard]] auto BuildTreePluginSearchDirs() -> std::vector<std::filesystem::path> {
+    const std::filesystem::path enginePath = SharedLibrary::RuntimeModulePath();
+    const std::filesystem::path exeDir     = FS::Paths::ExecutableDir();
+    const std::filesystem::path engineDir  = enginePath.parent_path();
+    const std::filesystem::path buildRoot  = exeDir.parent_path().parent_path();
+    return {
+        exeDir,
+        exeDir / "plugins",
+        exeDir.parent_path() / "lib",
+        exeDir.parent_path() / "bin",
+        engineDir / "lib",
+        engineDir,
+        buildRoot / "lib",
+        buildRoot / "bin",
+    };
+}
+
+struct OpenedTestPlugin {
+    // Library must outlive layer so Release() executes while plugin text is mapped.
+    SharedLibrary            library;
+    COM::Ref<COM::IAppLayer> layer;
+};
+
+[[nodiscard]] auto OpenTestPlugin(std::string_view name, const COM::ChainInNode* config = nullptr)
+    -> std::expected<OpenedTestPlugin, ErrorCode> {
+    const auto searchDirs = BuildTreePluginSearchDirs();
+    auto       opened     = SharedLibrary::OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs});
+    if (!opened) {
+        return std::unexpected(AppError::PluginLoadFailed);
+    }
+    if (!opened->has_value()) {
+        return std::unexpected(AppError::PluginNotFound);
+    }
+    SharedLibrary library = std::move((*opened)->library);
+    const auto    factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(library);
+    if (factory == nullptr) {
+        return std::unexpected(AppError::PluginAbiMismatch);
+    }
+    auto created = COM::CreateAppLayer(factory, config);
+    if (!created) {
+        return std::unexpected(created.error());
+    }
+    return OpenedTestPlugin {.library = std::move(library), .layer = std::move(*created)};
+}
+
+} // namespace
+
+void test_plugin_tier1_manifests_and_dependency_resolution() {
+    using ZHLN::Plugin::PluginManifestRegistry;
+
+    auto discoveryDirs = BuildTreePluginSearchDirs();
+    std::reverse(discoveryDirs.begin(), discoveryDirs.end());
+
+    PluginManifestRegistry registry;
+    const auto             discovered = registry.Discover(std::move(discoveryDirs));
+    if (!ExpectTrue(discovered.has_value())) {
+        return;
+    }
+
+    // All four Tier-1 runtime plugins ship manifests beside their .so libraries.
+    for (const std::string_view pluginName: {"freecam", "screenshot", "character_controller", "animation"}) {
+        const auto it = std::ranges::find_if(*discovered, [&](const auto& d) { return d.name == pluginName; });
+        if (!ExpectTrue(it != discovered->end())) {
+            continue;
+        }
+        ExpectTrue(it->hasManifest);
+        ExpectTrue(it->libraryFound);
+    }
+
+    // Requesting "animation" pulls in "character_controller" first via its manifest.
+    const auto order = registry.ResolveOrder(*discovered, std::vector<std::string> {"animation"});
+    if (ExpectTrue(order.has_value()) && ExpectEq(order->size(), size_t {2})) {
+        ExpectEq((*order)[0].name, std::string("character_controller"));
+        ExpectEq((*order)[1].name, std::string("animation"));
+
+        // Directly open each resolved entry via SharedLibrary::OpenPlugin using its
+        // manifest libraryStem (already prefixed with "zahlen_plugin_") + ABI witness.
+        const auto searchDirs = BuildTreePluginSearchDirs();
+        for (const auto& entry: *order) {
+            auto opened = SharedLibrary::OpenPlugin(entry.libraryStem, PluginSearchOptions {.searchDirs = searchDirs});
+            if (!ExpectTrue(opened.has_value() && opened->has_value())) {
+                continue;
+            }
+            SharedLibrary lib     = std::move((*opened)->library);
+            const auto    factory = COM::ResolveVerifiedSymbol<&COM::CreateAppLayerRaw>(lib);
+            if (!ExpectTrue(factory != nullptr)) {
+                continue;
+            }
+            auto layer = COM::CreateAppLayer(factory, nullptr);
+            ExpectTrue(layer.has_value());
+        }
+    }
+
+    // Exercise App::LoadPlugin("animation") end-to-end: App resolves the manifest
+    // graph, loads character_controller before animation, ticks 1 frame, and stops.
+    uint64_t   frames = 0;
+    const auto res    = BaseHeadlessApp("Tier1Animation")
+                            .MaxFrames(1)
+                            .LoadPlugin("animation")
+                            .AfterTick([&](COM::IEngine& e) { frames = e.CurrentFrame(); })
+                            .Run();
+    ExpectTrue(res.has_value());
+    ExpectEq(frames, uint64_t {1});
+}
+
+void test_plugin_terrain_and_vfx_secondary_com_interfaces() {
+    auto terrainPlugin = OpenTestPlugin("terrain");
+    auto vfxPlugin     = OpenTestPlugin("vfx");
+    if (!ExpectTrue(terrainPlugin.has_value()) || !ExpectTrue(vfxPlugin.has_value())) {
+        return;
+    }
+
+    auto terrain = terrainPlugin->layer.cast<Terrain::ITerrainLayer>();
+    auto vfx     = vfxPlugin->layer.cast<VFX::IVfxLayer>();
+    if (!ExpectTrue(static_cast<bool>(terrain)) || !ExpectTrue(static_cast<bool>(vfx))) {
+        return;
+    }
+
+    // Calling ITerrainLayer before OnStart fails with typed Terrain::Error::NotStarted
+    // whose description survives across the .so boundary via the engine error registry.
+    const auto notStarted = terrain->GenerateTile(Terrain::GenerateInfo {.sampleCount = 8});
+    ExpectFalse(notStarted.HasValue());
+    if (!notStarted.HasValue()) {
+        ExpectTrue(notStarted.error == Terrain::Error::NotStarted);
+        ExpectTrue(ZHLN::DescribeStaticError(notStarted.error).find("no engine binding") != std::string::npos);
+    }
+
+    bool     tileCreated     = false;
+    bool     heightTileOk    = false;
+    bool     sampleFinite    = false;
+    uint64_t tileCountAfter  = 0;
+    uint64_t explosionsAfter = 0;
+    uint64_t lightningAfter  = 0;
+
+    const auto runRes =
+        BaseHeadlessApp("PluginTerrainVfx")
+            .MaxFrames(1)
+            .AddPlugin(terrainPlugin->layer)
+            .AddPlugin(vfxPlugin->layer)
+            .OnStart([&](COM::IEngine&) {
+                const Terrain::CreateInfo createOpts {.createPhysics = false, .buildBLAS = false};
+                const auto gen = terrain->GenerateTile(Terrain::GenerateInfo {.sampleCount = 16, .worldSize = 32.0f, .maxHeight = 4.0f}, createOpts);
+                tileCreated    = gen.HasValue();
+                sampleFinite   = std::isfinite(terrain->SampleHeightAt(0.0f, 0.0f));
+                terrain->ClearTiles();
+
+                const std::vector<float> flatHeights(16, 1.5f);
+                const auto               fromHeights = terrain->CreateTileFromHeights(
+                    4, 16.0f, COM::Span<const float>(flatHeights), COM::Span<const float> {}, createOpts
+                );
+                heightTileOk   = fromHeights.HasValue();
+                tileCountAfter = terrain->TileCount();
+
+                const auto exp = vfx->SpawnExplosion(Explosion::SpawnInfo {.origin = {0.0f, 1.0f, 0.0f}, .scale = 1.0f});
+                const auto lgt = vfx->SpawnLightning(FVec3 {0.0f, 40.0f, 0.0f}, FVec3 {0.0f, 0.0f, 0.0f}, FVec3 {0.0f, 5.0f, 20.0f});
+                if (exp.HasValue()) {
+                    explosionsAfter = vfx->ExplosionCount();
+                }
+                if (lgt.HasValue()) {
+                    lightningAfter = vfx->LightningCount();
+                }
+            })
+            .Run();
+
+    // Release COM refs before plugin libraries close at scope exit.
+    terrain              = {};
+    vfx                  = {};
+    terrainPlugin->layer = {};
+    vfxPlugin->layer     = {};
+
+    ExpectTrue(runRes.has_value());
+    ExpectTrue(tileCreated);
+    ExpectTrue(sampleFinite);
+    ExpectTrue(heightTileOk);
+    ExpectEq(tileCountAfter, uint64_t {1});
+    ExpectEq(explosionsAfter, uint64_t {1});
+    ExpectEq(lightningAfter, uint64_t {1});
+}
+
+void test_plugin_capability_isolators_com_abi() {
+    // 1. glTF importer capability plugin (COM::IAssetImporter)
+    {
+        auto gltfPlugin = OpenTestPlugin("gltf");
+        if (ExpectTrue(gltfPlugin.has_value())) {
+            auto importer = gltfPlugin->layer.cast<COM::IAssetImporter>();
+            if (ExpectTrue(static_cast<bool>(importer))) {
+                ExpectEq(std::string(std::string_view(importer->FormatName())), std::string("gltf"));
+                const auto nullErr = importer->LoadFromBytes(nullptr, nullptr, {}, "mem://empty.glb", nullptr);
+                ExpectFalse(nullErr.HasValue());
+                if (!nullErr.HasValue()) {
+                    ExpectTrue(nullErr.error == COM::Error::NullArgument);
+                }
+            }
+            importer          = {};
+            gltfPlugin->layer = {};
+        }
+    }
+
+    // 2. BSP importer capability plugin (COM::IAssetImporter)
+    {
+        auto bspPlugin = OpenTestPlugin("bsp");
+        if (ExpectTrue(bspPlugin.has_value())) {
+            auto importer = bspPlugin->layer.cast<COM::IAssetImporter>();
+            if (ExpectTrue(static_cast<bool>(importer))) {
+                ExpectEq(std::string(std::string_view(importer->FormatName())), std::string("bsp"));
+                const auto nullErr = importer->LoadFromBytes(nullptr, nullptr, {}, "mem://empty.bsp", nullptr);
+                ExpectFalse(nullErr.HasValue());
+                if (!nullErr.HasValue()) {
+                    ExpectTrue(nullErr.error == COM::Error::NullArgument);
+                }
+            }
+            importer         = {};
+            bspPlugin->layer = {};
+        }
+    }
+
+    // 3. Discord Rich Presence IPC plugin (Discord::IPresenceClient)
+    {
+        auto discordPlugin = OpenTestPlugin("discord_rpc", COM::InChain(Discord::PluginConfig {.applicationId = "", .autoStart = false}));
+        if (ExpectTrue(discordPlugin.has_value())) {
+            auto presence = discordPlugin->layer.cast<Discord::IPresenceClient>();
+            if (ExpectTrue(static_cast<bool>(presence))) {
+                ExpectTrue(presence->State() == Discord::PresenceState::Stopped);
+                const auto startErr = presence->Start();
+                ExpectFalse(startErr.HasValue());
+                if (!startErr.HasValue()) {
+                    ExpectTrue(startErr.error == Discord::PresenceError::InvalidApplicationId);
+                }
+                presence->SetActivity(Discord::ComRichPresence {.details = "Testing", .state = "Headless"});
+                presence->ClearActivity();
+                presence->Stop();
+            }
+            presence             = {};
+            discordPlugin->layer = {};
+        }
+    }
+
+    // 4. Interaction gameplay layer plugin (COM::IAppLayer)
+    {
+        uint64_t   frames = 0;
+        const auto res    = BaseHeadlessApp("PluginInteraction")
+                                .MaxFrames(1)
+                                .LoadPlugin("interaction")
+                                .AfterTick([&](COM::IEngine& e) { frames = e.CurrentFrame(); })
+                                .Run();
+        ExpectTrue(res.has_value());
+        ExpectEq(frames, uint64_t {1});
+    }
+
+#ifdef ZHLN_HAS_SVG_PLUGIN
+    // 5. Optional SVG rasterizer plugin (SVG::ISvgRasterizer, isolates resvg)
+    {
+        auto svgPlugin = OpenTestPlugin("svg");
+        if (ExpectTrue(svgPlugin.has_value())) {
+            auto svg = svgPlugin->layer.cast<SVG::ISvgRasterizer>();
+            if (ExpectTrue(static_cast<bool>(svg))) {
+                ExpectTrue(svg->LibraryVersion().size > 0);
+                constexpr std::string_view kRedSquare =
+                    R"(<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#ff0000"/></svg>)";
+                const auto bytes = COM::Span<const uint8_t>(
+                    reinterpret_cast<const uint8_t*>(kRedSquare.data()), kRedSquare.size()
+                );
+                const auto size = svg->MeasureData(bytes);
+                if (ExpectTrue(size.HasValue())) {
+                    ExpectTrue(std::fabs(size.value.width - 4.0f) < 1e-3f);
+                    ExpectTrue(std::fabs(size.value.height - 4.0f) < 1e-3f);
+                }
+                std::vector<uint8_t> rgba(4 * 4 * 4, 0);
+                const auto written = svg->RasterizeData(
+                    bytes, 4, 4, SVG::FitMode::Contain, SVG::AlphaMode::Straight, COM::Span<uint8_t>(rgba)
+                );
+                if (ExpectTrue(written.HasValue())) {
+                    ExpectEq(written.value, uint64_t {64});
+                    ExpectEq(rgba[0], uint8_t {255});
+                    ExpectEq(rgba[1], uint8_t {0});
+                    ExpectEq(rgba[2], uint8_t {0});
+                    ExpectEq(rgba[3], uint8_t {255});
+                }
+            }
+            svg              = {};
+            svgPlugin->layer = {};
+        }
+    }
+#endif
+
+#ifdef ZHLN_HAS_HTTP_PLUGIN
+    // 6. Optional HTTP client plugin (HTTP::IHttpClient, isolates libcurl)
+    {
+        auto httpPlugin = OpenTestPlugin("http");
+        if (ExpectTrue(httpPlugin.has_value())) {
+            auto client = httpPlugin->layer.cast<HTTP::IHttpClient>();
+            if (ExpectTrue(static_cast<bool>(client))) {
+                // Header/URL validation fails locally without touching the network.
+                const auto badUrl = client->Get("http://bad\r\n.example/");
+                ExpectFalse(badUrl.has_value());
+                if (!badUrl) {
+                    ExpectTrue(badUrl.error() == HTTP::Error::InvalidURL);
+                    ExpectTrue(ZHLN::DescribeStaticError(badUrl.error()).find("URL") != std::string::npos);
+                }
+            }
+            client            = {};
+            httpPlugin->layer = {};
+        }
+    }
+#endif
 }
 } // namespace ZHLN::Test

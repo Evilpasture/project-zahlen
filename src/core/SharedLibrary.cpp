@@ -155,8 +155,10 @@ auto SharedLibrary::OpenPlugin(const std::string_view spec, const PluginSearchOp
     }
 
     std::string stem;
-    stem.reserve(options.stemPrefix.size() + spec.size());
-    stem.append(options.stemPrefix);
+    if (!options.stemPrefix.empty() && !spec.starts_with(options.stemPrefix)) {
+        stem.reserve(options.stemPrefix.size() + spec.size());
+        stem.append(options.stemPrefix);
+    }
     stem.append(spec);
     const auto names = FormatFileNames(stem);
 

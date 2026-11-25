@@ -29,3 +29,16 @@ if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
 
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_discord_rpc discord_rpc DiscordPlugin.cpp)
+    target_link_libraries(zahlen_plugin_discord_rpc PRIVATE ${TARGET_NAME})
+endif()
+
+# Copy the manifest beside the compiled plugin in the build tree so
+# PluginManifestRegistry discovers it without an install step.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_discord_rpc.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_discord_rpc.manifest.toml
+    COPYONLY
+)
+

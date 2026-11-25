@@ -1,0 +1,10 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[plugin]
+name        = "bsp"
+library     = "zahlen_plugin_bsp"
+api         = 1
+description = "Source BSP map asset importer capability plugin (COM::IAssetImporter)"
+auto_load   = false
+hot_reload  = false

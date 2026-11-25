@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 namespace ZHLN::GLTF {
 enum class CapabilityKind : uint8_t { Core, Extension };
 enum class CapabilitySupport : uint8_t { Supported, Partial };
@@ -79,5 +80,7 @@ struct ImportOptions {
     // higher resolution without changing other clients' imports.
     uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 };
+
+static_assert(std::is_standard_layout_v<ImportOptions> && std::is_trivially_copyable_v<ImportOptions>);
 
 } // namespace ZHLN::GLTF

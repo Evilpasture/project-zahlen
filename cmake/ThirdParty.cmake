@@ -850,7 +850,7 @@ if(NOT ZHLN_HAS_SIMDJSON)
     # disabling PCH on this single-TU library avoids building a throwaway .pch.
     set(SIMDJSON_HAS_BIT_HEADER TRUE CACHE BOOL "" FORCE)
     add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
-    set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+    set_target_properties(simdjson PROPERTIES SKIP_PRECOMPILE_HEADERS ON POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # --- test-harness toggles for vendor projects ---

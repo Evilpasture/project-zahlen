@@ -43,6 +43,7 @@
 // Uploading stays the engine's business: this header does not re-expose
 // CreateTexture, it only produces a buffer that one can be handed.
 
+#include "SVGTypes.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <expected>
@@ -55,101 +56,10 @@
 
 namespace ZHLN::SVG {
 
-// Hard ceiling on a rendered pixmap, in pixels (16384 x 16384). Not a resvg
-// limit -- a guard, because resvg renders into caller-allocated memory and a
-// mistyped scale factor would otherwise ask std::vector for terabytes.
-inline constexpr uint64_t kMaxRasterPixels = 268435456ULL;
-
-enum class Error : uint8_t {
-    NotUTF8 = 1,           // A path, an id or the document text was not valid UTF-8.
-    SVGZUnsupported,       // A .svgz document, and this resvg was built without SVGZ decoding.
-    FileOpenFailed,        // No such file, or no read permission.
-    MalformedGZip,         // A compressed document whose gzip stream is broken.
-    ElementsLimitReached,  // Over resvg's 1,000,000-element security limit.
-    InvalidSize,           // width/height <= 0, and no viewBox to fall back on.
-    ParsingFailed,         // Not an SVG document.
-    NodeNotFound,          // No renderable node with that id (or a zero-sized one).
-    InvalidDimensions,     // A zero-sized pixmap, which resvg aborts on rather than returning.
-    RasterTooLarge,        // The requested pixmap is over kMaxRasterPixels.
-    FontLoadFailed,        // A font file named in Options::fontFiles could not be read.
-    OptionsCreationFailed, // resvg_options_create returned NULL, so the Rasterizer has no settings to parse with.
-    InvalidDocument,       // A default-constructed or moved-from Document (or Rasterizer) was used.
-    Unknown,               // A resvg error code this build of the wrapper has not seen.
-};
-
-// Hints for elements whose own `shape-rendering` is `auto`. SVG.cpp maps each
-// enumerator onto its resvg counterpart by name, so these carry no numbering
-// contract with resvg_shape_rendering.
-enum class ShapeRendering : uint8_t { OptimizeSpeed, CrispEdges, GeometricPrecision };
-
-// Hints for elements whose own `text-rendering` is `auto`.
-enum class TextRendering : uint8_t { OptimizeSpeed, OptimizeLegibility, GeometricPrecision };
-
-// Hints for elements whose own `image-rendering` is `auto`.
-enum class ImageRendering : uint8_t { OptimizeQuality, OptimizeSpeed };
-
-// What the bytes in a Raster mean. See the note on premultiplication above.
-enum class AlphaMode : uint8_t { Premultiplied, Straight };
-
-// How a document's native size is mapped onto a pixmap of a different size.
-enum class FitMode : uint8_t {
-    Contain, // Whole document visible, aspect kept, letterboxed (CSS object-fit: contain).
-    Cover,   // Pixmap fully covered, aspect kept, overflow clipped (CSS object-fit: cover).
-    Stretch, // Pixmap fully covered, aspect NOT kept (CSS object-fit: fill).
-};
-
-// The document's own width/height, in SVG user units at Options::dpi.
-struct Size {
-    float width  = 0.0f;
-    float height = 0.0f;
-};
-
-struct Rect {
-    float x      = 0.0f;
-    float y      = 0.0f;
-    float width  = 0.0f;
-    float height = 0.0f;
-};
-
-// A row-major 2D affine transform: (x, y) maps to (a*x + c*y + e, b*x + d*y + f).
-// These are resvg's own six numbers (tiny-skia's Transform::from_row order),
-// which is why the render calls take one instead of a scale and an offset.
-struct Transform {
-    float a = 1.0f;
-    float b = 0.0f;
-    float c = 0.0f;
-    float d = 1.0f;
-    float e = 0.0f;
-    float f = 0.0f;
-
-    [[nodiscard]] static constexpr auto Identity() noexcept -> Transform {
-        return {};
-    }
-
-    [[nodiscard]] static constexpr auto Scale(float sx, float sy) noexcept -> Transform {
-        return {.a = sx, .b = 0.0f, .c = 0.0f, .d = sy, .e = 0.0f, .f = 0.0f};
-    }
-
-    [[nodiscard]] static constexpr auto Scale(float uniform) noexcept -> Transform {
-        return Scale(uniform, uniform);
-    }
-
-    [[nodiscard]] static constexpr auto Translate(float tx, float ty) noexcept -> Transform {
-        return {.a = 1.0f, .b = 0.0f, .c = 0.0f, .d = 1.0f, .e = tx, .f = ty};
-    }
-};
-
 // The transform that maps a @p native-sized document onto a @p width x @p height
 // pixmap under @p fit. Contain and Cover centre the result, the way CSS
 // object-fit does with the default object-position; Stretch does not need to.
 [[nodiscard]] auto FitTransform(Size native, uint32_t width, uint32_t height, FitMode fit = FitMode::Contain) noexcept -> Transform;
-
-struct Pixel {
-    uint8_t r = 0;
-    uint8_t g = 0;
-    uint8_t b = 0;
-    uint8_t a = 0;
-};
 
 // A rendered image: tightly packed RGBA8888 rows, always exactly
 // width * height * 4 bytes.

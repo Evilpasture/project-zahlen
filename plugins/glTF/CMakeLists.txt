@@ -15,3 +15,16 @@ target_link_libraries(zahlen_gltf_assets PUBLIC zahlen_engine
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(zahlen_gltf_assets)
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_gltf gltf GLTFPlugin.cpp)
+    target_link_libraries(zahlen_plugin_gltf PRIVATE zahlen_gltf_assets)
+endif()
+
+# Copy the manifest beside the compiled plugin in the build tree so
+# PluginManifestRegistry discovers it without an install step.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_gltf.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_gltf.manifest.toml
+    COPYONLY
+)

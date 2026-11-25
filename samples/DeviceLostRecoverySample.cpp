@@ -3,7 +3,6 @@
 
 // Exercises synchronous graphics device recreation and device-lost callback recovery over COM.
 
-#include <FreeCam/FreeCam.hpp>
 #include <print>
 #include <cstdio>
 #include <Signal/CrashHandler.hpp>
@@ -13,26 +12,35 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/IPlugin.hpp>
 #include <Zahlen/ConfigCli.hpp>
-#include <Zahlen/Error.hpp>
+#include <Zahlen/Core/COM/Contract.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
+#include <Zahlen/Core/SharedLibrary.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Input/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
+#include <Zahlen/PluginManifestRegistry.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/COM/ILogger.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <Zahlen/COM/LoggerView.hpp>
 
@@ -133,6 +141,79 @@ void OnDeviceLost(void* userdata) noexcept {
     ctx->rebuildDue = true;
 }
 
+struct LoadedAppLayerPlugin {
+    // Library must outlive layer so Release() runs while plugin code is mapped.
+    ZHLN::SharedLibrary                 library;
+    ZHLN::COM::Ref<ZHLN::COM::IAppLayer> layer;
+};
+
+[[nodiscard]] auto LoadOptionalRuntimePlugin(std::string_view pluginName, ZHLN::COM::ILogger* logger) -> LoadedAppLayerPlugin {
+    std::vector<std::filesystem::path> searchDirs;
+    if (const auto exeDir = ZHLN::FS::Paths::ExecutableDir(); !exeDir.empty()) {
+        searchDirs.push_back(exeDir);
+        searchDirs.push_back(exeDir / "plugins");
+        if (const auto prefix = exeDir.parent_path(); !prefix.empty() && prefix != exeDir) {
+            searchDirs.push_back(prefix / "lib" / "zahlen" / "plugins");
+            searchDirs.push_back(prefix / "lib64" / "zahlen" / "plugins");
+            searchDirs.push_back(prefix / "lib");
+            searchDirs.push_back(prefix / "lib64");
+        }
+    }
+    if (const auto engineDir = ZHLN::SharedLibrary::RuntimeModuleDirectory(); !engineDir.empty()) {
+        searchDirs.push_back(engineDir / "zahlen" / "plugins");
+        searchDirs.push_back(engineDir / "lib");
+        searchDirs.push_back(engineDir);
+    }
+
+    const char* const      rawEnv  = std::getenv("ZHLN_PLUGIN_PATH");
+    const std::string_view envPath = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {};
+
+    std::string stem(pluginName);
+    bool        usePrefix = true;
+    {
+        auto discoveryDirs = searchDirs;
+        std::reverse(discoveryDirs.begin(), discoveryDirs.end());
+        if (!envPath.empty()) {
+            auto envDirs = ZHLN::SharedLibrary::SplitSearchPath(envPath);
+            std::reverse(envDirs.begin(), envDirs.end());
+            for (auto& dir: envDirs) {
+                discoveryDirs.push_back(std::move(dir));
+            }
+        }
+        ZHLN::Plugin::PluginManifestRegistry registry;
+        if (const auto discovered = registry.Discover(std::move(discoveryDirs))) {
+            if (const auto order = registry.ResolveOrder(*discovered, {std::string(pluginName)}); order && !order->empty()) {
+                stem      = order->back().libraryStem;
+                usePrefix = false;
+            }
+        }
+    }
+
+    auto opened = ZHLN::SharedLibrary::OpenPlugin(
+        stem,
+        ZHLN::PluginSearchOptions {
+            .envPath    = envPath,
+            .searchDirs = searchDirs,
+            .stemPrefix = usePrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
+        }
+    );
+    if (!opened || !opened->has_value()) {
+        return {};
+    }
+    ZHLN::SharedLibrary library = std::move((*opened)->library);
+    const auto          factory = ZHLN::COM::ResolveVerifiedSymbol<&ZHLN::COM::CreateAppLayerRaw>(library);
+    if (factory == nullptr) {
+        ZHLN::COM::LoggerView {logger}.Warning("Skipping optional plugin '{}': missing or incompatible ABI witness.", pluginName);
+        return {};
+    }
+    auto created = ZHLN::COM::CreateAppLayer(factory, nullptr);
+    if (!created) {
+        ZHLN::COM::LoggerView {logger}.Warning("Skipping optional plugin '{}': {}", pluginName, created.error());
+        return {};
+    }
+    return LoadedAppLayerPlugin {.library = std::move(library), .layer = std::move(*created)};
+}
+
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
@@ -166,7 +247,14 @@ auto main(int argc, char* argv[]) -> int {
     if (!engineConfig.headless) {
         engine->FocusWindow(engine->PrimaryWindow());
     }
-    ZHLN::FreeCam::Attach(*engine->Entities());
+    LoadedAppLayerPlugin freecam = LoadOptionalRuntimePlugin("freecam", engine->Logger());
+    if (freecam.layer) {
+        if (const auto started = freecam.layer->OnStart(engine.Get()); !started.HasValue()) {
+            ZHLN::COM::LoggerView {engine->Logger()}.Warning("Optional freecam plugin failed to start: {}", started.error);
+            freecam.layer = {};
+            freecam.library.Close();
+        }
+    }
 
     RecoveryContext ctx {.engine = engine.Get(), .arena = BuildArena(*engine)};
     uint64_t callbackToken = 0;
@@ -217,15 +305,25 @@ auto main(int argc, char* argv[]) -> int {
             ctx.arena = BuildArena(*engine, ctx.arena);
         }
 
-        ZHLN::FreeCam::Step(*engine, dt);
+        if (freecam.layer) {
+            (void) freecam.layer->OnBeforeRender(engine.Get(), dt);
+        }
         const auto result = engine->Tick(dt);
         if (!result.HasValue()) {
             ZHLN::COM::LoggerView{engine->Logger()}.Error("frame failed: {}", result.error);
+            if (freecam.layer) {
+                freecam.layer->OnStop(engine.Get());
+                freecam.layer = {};
+            }
             engine->RemoveDeviceLostCallback(callbackToken);
             return EXIT_FAILURE;
         }
     }
 
+    if (freecam.layer) {
+        freecam.layer->OnStop(engine.Get());
+        freecam.layer = {};
+    }
     engine->RemoveDeviceLostCallback(callbackToken);
     return EXIT_SUCCESS;
 }

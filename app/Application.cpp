@@ -17,6 +17,7 @@
 #include <Zahlen/PluginManifestRegistry.hpp>
 #include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/LoggerView.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -27,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -60,11 +62,32 @@ struct BuiltinHostOptions {
     return dirs;
 }
 
+[[nodiscard]] auto PluginDiscoveryDirs() -> std::vector<std::filesystem::path> {
+    // PluginManifestRegistry::Discover gives later directories higher priority
+    // on duplicate plugin names, whereas OpenPlugin searches earlier dirs
+    // first. Reverse DefaultPluginSearchDirs() and append ZHLN_PLUGIN_PATH
+    // (also reversed) so manifest precedence matches library loading.
+    auto dirs = DefaultPluginSearchDirs();
+    std::ranges::reverse(dirs);
+    if (const char* const rawEnv = std::getenv("ZHLN_PLUGIN_PATH"); rawEnv != nullptr && *rawEnv != '\0') {
+        auto envDirs = SharedLibrary::SplitSearchPath(rawEnv);
+        std::ranges::reverse(envDirs);
+        for (auto& dir: envDirs) {
+            dirs.push_back(std::move(dir));
+        }
+    }
+    return dirs;
+}
+
 // The host's view of a plugin load: an open library, nothing at all, or a
 // failure. `std::expected<bool, ErrorCode>` could not say which of "loaded" and
 // "not found but optional" was which without a comment.
-[[nodiscard]] auto OpenPluginLibrary(std::string_view spec, bool required, COM::ILogger* logger)
-    -> std::expected<std::optional<SharedLibrary>, ErrorCode> {
+[[nodiscard]] auto OpenPluginLibrary(
+    std::string_view spec,
+    bool             required,
+    COM::ILogger*    logger,
+    bool             useDefaultStemPrefix = true
+) -> std::expected<std::optional<SharedLibrary>, ErrorCode> {
     // One view for the whole function: the null check, the channel and the
     // severity all live in the wrapper instead of in every call.
     const COM::LoggerView log {logger};
@@ -79,6 +102,7 @@ struct BuiltinHostOptions {
         PluginSearchOptions {
             .envPath    = (rawEnv != nullptr) ? std::string_view(rawEnv) : std::string_view {},
             .searchDirs = searchDirs,
+            .stemPrefix = useDefaultStemPrefix ? std::string_view("zahlen_plugin_") : std::string_view {},
         }
     );
     if (!opened) {
@@ -268,19 +292,41 @@ auto App::RunConfigured(
         }
     };
 
+    auto buildWireNodes = [](const std::vector<StoredChainNode>& chain) -> std::vector<COM::ChainInNode> {
+        std::vector<COM::ChainInNode> wireNodes(chain.size());
+        for (size_t i = 0; i < chain.size(); ++i) {
+            const auto& src = chain[i];
+            wireNodes[i]    = COM::ChainInNode {
+                .sType      = src.sType,
+                .layoutHash = src.layoutHash,
+                .size       = src.size,
+                .reserved   = 0,
+                .data       = src.hasPayload ? static_cast<const void*>(src.payload.data()) : nullptr,
+                .pNext      = (i + 1 < chain.size()) ? &wireNodes[i + 1] : nullptr,
+            };
+        }
+        return wireNodes;
+    };
+
     // `libraryStemOverride` names a manifest-resolved library to load; when empty
     // `req.spec` is used directly (a file path or a manifest-less plugin name).
     auto instantiatePlugin = [&](const PluginRequest& req, std::string_view libraryStemOverride,
-                                 std::vector<LayerSlot>& outSlots) -> std::expected<void, ErrorCode> {
+                                 std::vector<LayerSlot>& outSlots) -> std::expected<bool, ErrorCode> {
         if (req.invalidChain) {
             return std::unexpected(COM::Error::DuplicateExtension);
         }
-        auto opened = OpenPluginLibrary(libraryStemOverride.empty() ? req.spec : libraryStemOverride, req.required, runLog);
+        const bool useOverride = !libraryStemOverride.empty();
+        auto opened = OpenPluginLibrary(
+            useOverride ? libraryStemOverride : std::string_view(req.spec),
+            req.required,
+            runLog,
+            !useOverride
+        );
         if (!opened) {
             return std::unexpected(opened.error());
         }
         if (!opened->has_value()) {
-            return {};
+            return false;
         }
         // The library arrives open, already having said where it came from.
         SharedLibrary library = std::move(**opened);
@@ -294,19 +340,8 @@ auto App::RunConfigured(
             return std::unexpected(AppError::PluginSymbolMissing);
         }
 
-        std::vector<COM::ChainInNode> wireNodes(req.chain.size());
-        for (size_t i = 0; i < req.chain.size(); ++i) {
-            const auto& src = req.chain[i];
-            wireNodes[i]    = COM::ChainInNode {
-                .sType      = src.sType,
-                .layoutHash = src.layoutHash,
-                .size       = src.size,
-                .reserved   = 0,
-                .data       = src.hasPayload ? static_cast<const void*>(src.payload.data()) : nullptr,
-                .pNext      = (i + 1 < req.chain.size()) ? &wireNodes[i + 1] : nullptr,
-            };
-        }
-        const COM::ChainInNode* head = wireNodes.empty() ? nullptr : wireNodes.data();
+        auto                    wireNodes = buildWireNodes(req.chain);
+        const COM::ChainInNode* head      = wireNodes.empty() ? nullptr : wireNodes.data();
 
         auto created = COM::CreateAppLayer(factory, head);
         if (!created) {
@@ -315,7 +350,7 @@ auto App::RunConfigured(
         }
         pluginLibraries.push_back(std::move(library));
         outSlots.push_back(MakePluginSlot(std::move(*created)));
-        return {};
+        return true;
     };
 
     // Keep the Engine lifetime inside the shared process/task scope.
@@ -335,7 +370,7 @@ auto App::RunConfigured(
     };
 
     PluginManifestRegistry registry;
-    const auto             discovered = registry.Discover(DefaultPluginSearchDirs());
+    const auto             discovered = registry.Discover(PluginDiscoveryDirs());
     if (!discovered) {
         log.Error("Plugin discovery failed: {}", discovered.error().detail);
         return std::unexpected(AppError::PluginLoadFailed);
@@ -348,16 +383,16 @@ auto App::RunConfigured(
         bool          hotReload    = false;
     };
 
-    std::vector<std::string>     registryNames;
-    std::vector<PluginRequest>   registryReqs;
-    std::vector<PluginRequest>   directReqs;
+    std::vector<std::string>                     registryNames;
+    std::vector<PluginRequest>                   directReqs;
+    std::unordered_map<std::string, PluginRequest> configuredReqs;
     for (const auto& entry: _entries) {
         if (!entry.isPlugin) continue;
         if (IsPathSpec(entry.plugin.spec)) {
             directReqs.push_back(entry.plugin);
         } else {
             registryNames.push_back(entry.plugin.spec);
-            registryReqs.push_back(entry.plugin);
+            configuredReqs.try_emplace(entry.plugin.spec, entry.plugin);
         }
     }
     for (const auto& spec: cliPlugins) {
@@ -366,7 +401,7 @@ auto App::RunConfigured(
             directReqs.push_back(std::move(req));
         } else {
             registryNames.push_back(spec);
-            registryReqs.push_back(req);
+            configuredReqs.try_emplace(spec, std::move(req));
         }
     }
 
@@ -381,19 +416,15 @@ auto App::RunConfigured(
         }
         return false;
     };
-    std::vector<std::string>     knownNames;
-    std::vector<PluginRequest>   knownReqs;
-    for (size_t i = 0; i < registryNames.size(); ++i) {
-        if (isKnown(registryNames[i])) {
-            knownNames.push_back(registryNames[i]);
-            knownReqs.push_back(std::move(registryReqs[i]));
-        } else {
-            directReqs.push_back(std::move(registryReqs[i]));
+    std::vector<std::string> knownNames;
+    for (const auto& name: registryNames) {
+        if (isKnown(name)) {
+            knownNames.push_back(name);
+        } else if (auto it = configuredReqs.find(name); it != configuredReqs.end()) {
+            directReqs.push_back(it->second);
         }
-        registryReqs[i] = PluginRequest {};
     }
     registryNames = std::move(knownNames);
-    registryReqs  = std::move(knownReqs);
 
     // Resolve the registry-managed names into dependency order. A requested
     // name pulls in its required dependencies automatically; a dependency
@@ -417,10 +448,12 @@ auto App::RunConfigured(
     }
 
     struct HotReloadPlugin {
-        std::string                        libraryStem;
-        std::filesystem::path              manifestPath;
-        std::filesystem::file_time_type    lastWrite;
-        size_t                             layerIndex;
+        std::string                     libraryStem;
+        std::filesystem::path           manifestPath;
+        std::filesystem::file_time_type lastWrite;
+        PluginRequest                   request;
+        size_t                          layerIndex   = 0;
+        size_t                          libraryIndex = 0;
     };
     std::vector<LayerSlot> layers;
     layers.reserve(_entries.size() + cliPlugins.size());
@@ -428,21 +461,26 @@ auto App::RunConfigured(
     std::vector<HotReloadPlugin> hotReloadPlugins;
 
     auto loadOne = [&](const PendingPlugin& pp) -> std::expected<void, ErrorCode> {
-        if (auto loaded = instantiatePlugin(pp.req, pp.libraryStem, layers); !loaded) {
-            return loaded;
+        auto loaded = instantiatePlugin(pp.req, pp.libraryStem, layers);
+        if (!loaded) {
+            return std::unexpected(loaded.error());
+        }
+        if (!*loaded) {
+            return {}; // optional plugin not found on disk; skipped cleanly
         }
         if (pp.hotReload && !pp.libraryStem.empty()) {
-            std::error_code ec;
-            auto            it = manifestPathByStem.find(pp.libraryStem);
+            auto it = manifestPathByStem.find(pp.libraryStem);
             if (it != manifestPathByStem.end()) {
                 std::error_code mtimeEc;
                 const auto      mtime = std::filesystem::last_write_time(it->second, mtimeEc);
                 if (!mtimeEc) {
                     hotReloadPlugins.push_back(HotReloadPlugin {
-                        .libraryStem = pp.libraryStem,
+                        .libraryStem  = pp.libraryStem,
                         .manifestPath = it->second,
                         .lastWrite    = mtime,
+                        .request      = pp.req,
                         .layerIndex   = layers.size() - 1,
+                        .libraryIndex = pluginLibraries.size() - 1,
                     });
                 }
             }
@@ -450,8 +488,8 @@ auto App::RunConfigured(
         return {};
     };
 
-    // A plugin name → its position in `loadOrder`, for dependency-aware
-    // loading that preserves `_entries` order for non-plugin layers.
+    // A plugin name → its entry in `loadOrder`, for prerequisite-only loading
+    // that preserves `_entries` order for non-plugin layers.
     std::unordered_map<std::string, size_t> loadOrderIndex;
     loadOrderIndex.reserve(loadOrder.size());
     for (size_t i = 0; i < loadOrder.size(); ++i) {
@@ -461,26 +499,40 @@ auto App::RunConfigured(
     std::unordered_set<std::string> loadedNames;
     loadedNames.reserve(loadOrder.size() + directReqs.size());
 
-    auto loadResolved = [&](std::string_view name) -> std::expected<void, ErrorCode> {
-        auto it = loadOrderIndex.find(std::string(name));
+    auto loadResolved = [&](this auto&& self, std::string_view name, const PluginRequest* explicitReq) -> std::expected<void, ErrorCode> {
+        const std::string key(name);
+        if (loadedNames.contains(key)) {
+            return {};
+        }
+        auto it = loadOrderIndex.find(key);
         if (it == loadOrderIndex.end()) {
             return std::unexpected(AppError::PluginNotFound);
         }
-        const size_t end = it->second;
-        for (size_t i = 0; i <= end; ++i) {
-            if (!loadedNames.insert(loadOrder[i].name).second) {
-                continue; // already loaded by an earlier request
-            }
-            PendingPlugin pp {
-                .req        = PluginRequest {.spec = std::string(loadOrder[i].name), .required = true},
-                .libraryStem = loadOrder[i].libraryStem,
-                .hotReload  = loadOrder[i].hotReload,
-            };
-            if (auto loaded = loadOne(pp); !loaded) {
-                return loaded;
+        const LoadEntry& entry = loadOrder[it->second];
+        // Load only this plugin's prerequisites first so unrelated plugins
+        // stay in their registered `_entries` positions relative to C++ layers.
+        for (const auto& dep: entry.before) {
+            if (!loadedNames.contains(dep)) {
+                if (auto depLoaded = self(dep, nullptr); !depLoaded) {
+                    return depLoaded;
+                }
             }
         }
-        return {};
+        if (!loadedNames.insert(entry.name).second) {
+            return {};
+        }
+        PluginRequest req {.spec = entry.name, .required = true};
+        if (explicitReq != nullptr) {
+            req = *explicitReq;
+        } else if (auto cfgIt = configuredReqs.find(entry.name); cfgIt != configuredReqs.end()) {
+            req = cfgIt->second;
+        }
+        PendingPlugin pp {
+            .req         = std::move(req),
+            .libraryStem = entry.libraryStem,
+            .hotReload   = entry.hotReload,
+        };
+        return loadOne(pp);
     };
 
     // Process `_entries` in order so non-plugin layers keep their position
@@ -494,8 +546,8 @@ auto App::RunConfigured(
         if (loadedNames.contains(entry.plugin.spec)) {
             continue; // already loaded as a dependency of an earlier plugin
         }
-        if (isKnown(entry.plugin.spec)) {
-            if (auto loaded = loadResolved(entry.plugin.spec); !loaded) {
+        if (!IsPathSpec(entry.plugin.spec) && isKnown(entry.plugin.spec)) {
+            if (auto loaded = loadResolved(entry.plugin.spec, &entry.plugin); !loaded) {
                 return std::unexpected(loaded.error());
             }
             continue;
@@ -508,22 +560,16 @@ auto App::RunConfigured(
         loadedNames.insert(entry.plugin.spec);
     }
 
-    // Load any resolved registry plugins not requested by `_entries` (auto-
-    // pulled required dependencies), then direct path specs and unknown names
+    // Load any remaining resolved registry plugins (from CLI `--plugin` flags
+    // or auto-pulled dependencies), then direct path specs and unknown names
     // from `cliPlugins`, in their original order.
     for (const auto& entry: loadOrder) {
         if (loadedNames.contains(entry.name)) {
             continue;
         }
-        PendingPlugin pp {
-            .req        = PluginRequest {.spec = entry.name, .required = true},
-            .libraryStem = entry.libraryStem,
-            .hotReload  = entry.hotReload,
-        };
-        if (auto loaded = loadOne(pp); !loaded) {
+        if (auto loaded = loadResolved(entry.name, nullptr); !loaded) {
             return std::unexpected(loaded.error());
         }
-        loadedNames.insert(entry.name);
     }
     for (const auto& req: directReqs) {
         if (loadedNames.contains(req.spec)) {
@@ -612,15 +658,15 @@ auto App::RunConfigured(
             if (ec || mtime == hr.lastWrite) {
                 continue;
             }
-            COM::IEngine&            engineRef = *engine.Get();
-            auto&                    slot      = layers[hr.layerIndex];
-            auto&                    lib       = pluginLibraries[hr.layerIndex];
+            COM::IEngine& engineRef = *engine.Get();
+            auto&         slot      = layers[hr.layerIndex];
+            auto&         lib       = pluginLibraries[hr.libraryIndex];
             if (slot.stop != nullptr) {
                 slot.stop(slot.state.get(), engineRef);
             }
             slot = {}; // release the old plugin instance before dlclose
             lib.Close();
-            auto reopened = OpenPluginLibrary(hr.libraryStem, true, runLog);
+            auto reopened = OpenPluginLibrary(hr.libraryStem, true, runLog, false);
             if (!reopened || !reopened->has_value()) {
                 log.Error("Hot reload failed to reopen plugin '{}'.", hr.libraryStem);
                 hr.lastWrite = mtime;
@@ -633,7 +679,9 @@ auto App::RunConfigured(
                 hr.lastWrite = mtime;
                 continue;
             }
-            auto recreated = COM::CreateAppLayer(factory, nullptr);
+            auto                    wireNodes = buildWireNodes(hr.request.chain);
+            const COM::ChainInNode* head      = wireNodes.empty() ? nullptr : wireNodes.data();
+            auto                    recreated = COM::CreateAppLayer(factory, head);
             if (!recreated) {
                 log.Error("Hot-reloaded plugin '{}' failed to initialize: {}.", hr.libraryStem, recreated.error());
                 hr.lastWrite = mtime;
