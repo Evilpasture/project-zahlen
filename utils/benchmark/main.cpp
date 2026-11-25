@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <span>
+#include <print>
+
 
 namespace {
 
@@ -65,12 +67,12 @@ inline constexpr uint64_t kBenchmarkTicks    = 5000;
     const double engineRate = metrics.avgTickTimeMs > 0.0f ? 1000.0 / static_cast<double>(metrics.avgTickTimeMs) : 0.0;
     const double wallRate   = metrics.totalTimeSec > 0.0 ? static_cast<double>(metrics.totalTicks) / metrics.totalTimeSec : 0.0;
 
-    ZHLN::Log<ZHLN::LogChannel::StdOut>("[Bench] logic benchmark: {} entities, {} ticks", metrics.entityCount, metrics.totalTicks);
-    ZHLN::Log<ZHLN::LogChannel::StdOut>(
+    std::println("[Bench] logic benchmark: {} entities, {} ticks", metrics.entityCount, metrics.totalTicks);
+    std::println(
         "[Bench] tick ms: avg {:.3f}  min {:.3f}  max {:.3f}  last {:.3f}", metrics.avgTickTimeMs, metrics.minTickTimeMs, metrics.maxTickTimeMs,
         metrics.lastTickTimeMs
     );
-    ZHLN::Log<ZHLN::LogChannel::StdOut>(
+    std::println(
         "[Bench] throughput: {:.0f} ticks/s engine-only, {:.0f} ticks/s wall ({:.2f} s total)", engineRate, wallRate, metrics.totalTimeSec
     );
     return true;

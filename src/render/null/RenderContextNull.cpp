@@ -7,7 +7,6 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Math/Geometry2D.hpp>
@@ -86,7 +85,6 @@ struct RenderContext::Impl {
     ZHLN::Mutex                               _morphDeltaMutex;
     std::vector<std::pair<uint32_t, uint32_t>> _freeMorphDeltaRanges;
     bool                                      frameOpen       = false;
-    bool                                      destroyed       = false;
     std::unordered_set<uint64_t>              liveBuffers;
     std::unordered_set<uint64_t>              liveTextures {1, 2, 3};
     std::unordered_map<std::string, uint64_t> namedTextures;
@@ -130,24 +128,43 @@ RenderContext::~RenderContext() {
     Destroy();
 }
 
-void RenderContext::Destroy() noexcept {
-    if (!_impl || _impl->destroyed) {
+void RenderContext::ReleaseDevice() noexcept {
+    // There is no device to release, and the state this backend owns is a handful of
+    // containers plus a target reference -- so releasing it means emptying it in
+    // place, not handing the implementation back. Dropping the implementation here
+    // (as the Vulkan backend does) would turn every method a host is allowed to
+    // poll after teardown -- GetFramebufferSize, GetSettings, EndFrame, the buffer
+    // and texture handles -- into a null dereference, for no resources saved.
+    // _released is the state; operator bool() reports it.
+    if (_impl == nullptr || _released) {
         return;
     }
-    _impl->destroyed = true;
-    _impl->acquiredTargets.clear();
+    _released = true;
     _impl->gpuMeshes.clear();
     _impl->gpuMaterials.clear();
     _impl->namedTextures.clear();
     _impl->liveTextures.clear();
     _impl->liveBuffers.clear();
+    _impl->acquiredTargets.clear();
+    _impl->_freeMorphDeltaRanges.clear();
+    _impl->frameOpen = false;
+}
+
+void RenderContext::Destroy() noexcept {
+    // No device to drain and no fault report to dump: the release is the whole job.
+    ReleaseDevice();
+}
+
+void RenderContext::DumpDeviceFaultReport() noexcept {
+    // The null renderer has no device, so there is never a fault report to write.
 }
 
 auto RenderContext::GetPipelineBinaryData() const noexcept -> std::vector<uint8_t> {
     return {};
 }
 
-auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept
+    -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl = std::make_unique<Impl>(target, cfg);
     return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
 }
@@ -167,11 +184,11 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
 }
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
-    // No GPU ring to fence: retiring ranges are reusable immediately.
-    for (uint32_t slot = 0; slot < 3; ++slot) _impl->jointAllocator.ClearRetiringForSlot(slot, 3, [](uint32_t, uint32_t) noexcept {});
-    if (_impl->destroyed) {
+    if (!_impl) {
         return std::optional<FrameScope> {};
     }
+    // No GPU ring to fence: retiring ranges are reusable immediately.
+    for (uint32_t slot = 0; slot < 3; ++slot) _impl->jointAllocator.ClearRetiringForSlot(slot, 3, [](uint32_t, uint32_t) noexcept {});
     const auto fbSize = GetFramebufferSize();
     if (!fbSize.has_value() || fbSize->width == 0 || fbSize->height == 0) {
         return std::optional<FrameScope> {};
@@ -408,7 +425,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {
-    if (_impl->destroyed || target.WasClosed()) {
+    if (!_impl || target.WasClosed()) {
         return std::optional<FrameTarget> {};
     }
     const Extent2D ext = target.GetFramebufferExtent();
@@ -432,8 +449,12 @@ auto RenderContext::GetAcquiredTarget(const PresentationTarget& target) noexcept
     return std::nullopt;
 }
 
-void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
+auto RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept -> std::expected<void, ErrorCode> {
+    if (!_impl) {
+        return {};
+    }
     _impl->acquiredTargets.erase(reinterpret_cast<uintptr_t>(&target));
+    return {};
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool /*hdr*/) -> std::expected<TextureID, ErrorCode> {
@@ -549,8 +570,6 @@ void RenderContext::FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept {
     _impl->_freeMorphDeltaRanges = std::move(coalesced);
 }
 
-void RenderContext::WriteCheckpoint(std::string_view /*name*/) noexcept {
-}
 
 auto RenderContext::CapturePipelineStats() noexcept -> PipelineStatsCapture {
     return PipelineStatsCapture {_impl.get()};
@@ -568,8 +587,11 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
     return {};
 }
 
-void RenderContext::ProvokeDeviceLost() {
-    ZHLN::LogError("[DeviceLost] Simulated null-renderer device lost");
+auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    // The null renderer has no device to lose, so it does not log: it hands back
+    // the code the real renderer would produce, and the engine's recovery path
+    // reports it exactly as it would in production.
+    return std::unexpected(FrameResult::DeviceLost);
 }
 
 auto RenderContext::BakeProceduralTexture(

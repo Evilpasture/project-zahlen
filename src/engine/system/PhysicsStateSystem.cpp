@@ -13,6 +13,7 @@
 #include <physics/Physics.hpp>
 #include <vector>
 
+
 namespace ZHLN::Tests {
 static void VerifyRealVisualInterpolation(
     ECS::Query<
@@ -22,10 +23,10 @@ static void VerifyRealVisualInterpolation(
         const Components::CharacterMotorStateComponent,
         const Components::RagdollComponent> query,
     const PhysicsContext&                   physics,
-    float                                   alpha
+    float                                   alpha,
+    bool&                                   verified
 ) noexcept {
-    static bool testsRun = false;
-    if (testsRun) {
+    if (verified) {
         return;
     }
 
@@ -33,7 +34,7 @@ static void VerifyRealVisualInterpolation(
     if (entities.empty()) {
         return;
     }
-    testsRun = true;
+    verified = true;
 
     auto physComps     = query.Raw<Components::PhysicsComponent>();
     float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
@@ -65,9 +66,7 @@ static void VerifyRealVisualInterpolation(
         const auto expected = Lerp(snapshots[j].previousPosition, snapshots[j].currentPosition, clampedAlpha);
         const auto actual = trans->position;
         if ((actual - expected).LengthSquared() > 1e-3f) {
-            ZHLN::Log(
-                "[Test Fail] Real Visual Interpolation Invariant Failure on Entity {}: "
-                "Expected position ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
+            kLog.Warn("Visual interpolation drift on entity {}: expected ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
                 e.index, expected.x, expected.y, expected.z, actual.x, actual.y, actual.z, clampedAlpha
             );
         }
@@ -85,16 +84,17 @@ void VisualInterpolationSystem::Update(
         const Components::CharacterMotorStateComponent,
         const Components::RagdollComponent> query,
     ECS::Res<PhysicsContext>                physics,
-    FrameAlpha                              alpha
+    FrameAlpha                              alpha,
+    ECS::Local<InterpolationScratch>        scratch
 ) noexcept {
     auto entities = query.Entities<Components::PhysicsComponent>();
     auto phys     = query.Raw<Components::PhysicsComponent>();
 
     float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
 
-    thread_local std::vector<Physics::BodyID>        handles;
-    thread_local std::vector<size_t>                     sourceIndex;
-    thread_local std::vector<Physics::BodyStateSnapshot> snapshots;
+    auto& handles     = scratch->handles;
+    auto& sourceIndex = scratch->sourceIndex;
+    auto& snapshots   = scratch->snapshots;
     handles.clear();
     sourceIndex.clear();
     handles.reserve(entities.size());
@@ -132,7 +132,7 @@ void VisualInterpolationSystem::Update(
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyRealVisualInterpolation(query, *physics, alpha.value);
+        ZHLN::Tests::VerifyRealVisualInterpolation(query, *physics, alpha.value, scratch->invariantVerified);
     }
 }
 }

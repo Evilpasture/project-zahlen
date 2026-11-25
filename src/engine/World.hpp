@@ -35,7 +35,9 @@ class World {
   public:
     // Engine-owned Worlds opt into marking ECB destruction for scene cleanup;
     // standalone data-only Worlds retain immediate ECB playback by default.
-    static auto Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy = false) -> std::expected<std::unique_ptr<World>, ErrorCode>;
+    static auto Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy = false)
+        -> std::expected<std::unique_ptr<World>, ErrorCode>;
+
     ~World();
 
     World(const World&)                    = delete;

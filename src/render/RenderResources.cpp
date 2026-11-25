@@ -34,6 +34,7 @@
 #include <span>
 #include <utility>
 #include <vector>
+#include "render/RenderLog.hpp"
 
 namespace ZHLN {
 
@@ -111,7 +112,7 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
         return BufferID::Invalid;
     }
     if (particleStride == 0 || static_cast<size_t>(maxParticles) > std::numeric_limits<size_t>::max() / particleStride) {
-        ZHLN::LogWarning("[Render] Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
+        kRenderLog.Warn("Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
         return BufferID::Invalid;
     }
 
@@ -134,10 +135,9 @@ auto RenderContext::Impl::EnsureEmitterStorage(EmitterStorageMap& emitters, cons
     if (!created || *created == BufferID::Invalid) {
         if (!storage->allocationWarningLogged) {
             if (!created) {
-                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
+                kRenderLog.Warn("Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
             } else {
-                ZHLN::LogWarning(
-                    "[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
+                kRenderLog.Warn("Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles
                 );
             }
             storage->allocationWarningLogged = true;
@@ -362,7 +362,7 @@ void RenderContext::DrawBillboards(TextureID texture, std::span<const BillboardQ
         }
 
         if (auto updated = UpdateBuffer(slotBuf, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
-            ZHLN::Log("Particle buffer update failed.");
+            kRenderLog.Warn("Particle buffer update failed.");
             continue;
         }
         _impl->queues.ParticleEmitters().push_back(
@@ -378,7 +378,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {
-            ZHLN::Log("GPU cache clear aborted due to reason: {}", res.error());
+            kRenderLog.Warn("GPU cache clear aborted due to reason: {}", res.error());
             return;
         }
     }
@@ -400,11 +400,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->deletionQueue.Drain();
 }
 
-void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (auto* const cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
-        _impl->diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
-    }
-}
 
 PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
     if (!_impl->diagnostics.gpuProfiler.PipelineStatsAvailable()) {
@@ -714,7 +709,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const size_t bytes = Resource::blue_noise_rgba.size();
     const auto   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes) / 4));
     if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
-        ZHLN::Log("[BlueNoise] Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
+        Log("Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
         return std::unexpected(ErrorCode {BlueNoiseError::UnexpectedLayout});
     }
 
@@ -768,7 +763,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     }
     blueNoiseTexIdx = *blueNoiseIdx;
 
-    ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
+    Log("Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
 
@@ -994,11 +989,15 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
-        if (targets.ResizeShadows(incoming.shadows.resolution)) {
+        if (auto resized = targets.ResizeShadows(incoming.shadows.resolution); resized) {
             settings.shadows.resolution = incoming.shadows.resolution;
+        } else if (IsDeviceLost(resized.error())) {
+            // A dead device is not a rejected setting: keeping the old resolution and
+            // blaming the value would tell the caller the opposite of what happened.
+            // Not counted either -- recovery reports the loss.
+            kRenderLog.Error("GPU device lost while resizing shadow targets to {}x{}.", incoming.shadows.resolution, incoming.shadows.resolution);
         } else {
-            ZHLN::LogWarning(
-                "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
+            kRenderLog.Warn("failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
             );
             incoming.shadows.resolution = settings.shadows.resolution;
@@ -1010,7 +1009,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
     settings = incoming;
 
     if (settings.qualityPreset != previousTier) {
-        ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
+        Log("Graphics quality tier: {} -> {}", static_cast<int>(previousTier), static_cast<int>(settings.qualityPreset));
     }
 }
 
@@ -1119,12 +1118,12 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
     -> TextureID {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
+        kRenderLog.Warn("Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureID::Invalid;
     }
     const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
+        kRenderLog.Warn("Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureID::Invalid;
     }
     return *uploaded;
@@ -1187,10 +1186,13 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
                 }
             );
             !immediate) [[unlikely]] {
-            if (Vk::IsDeviceLost(immediate.error())) {
-                impl->deviceLost.store(true, std::memory_order::relaxed);
+            // A loss is not this site's line to write: recovery reports it once.
+            // What belongs here is the failure that is *not* a loss, with this
+            // site's name and its own code.
+            if (!IsDeviceLost(immediate.error())) {
+                kRenderLog.Warn("CaptureFrame: scene color transition failed ({}).", immediate.error());
             }
-            return std::unexpected(immediate.error());
+            return std::unexpected(AsFrameError(immediate.error()));
         }
 
         auto mapped = stagingBuffer.Map(impl->allocator);
@@ -1247,10 +1249,10 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
             }
         );
         !immediate) [[unlikely]] {
-        if (Vk::IsDeviceLost(immediate.error())) {
-            impl->deviceLost.store(true, std::memory_order::relaxed);
+        if (!IsDeviceLost(immediate.error())) {
+            kRenderLog.Warn("CaptureFrame: HDR scene color copy failed ({}).", immediate.error());
         }
-        return std::unexpected(immediate.error());
+        return std::unexpected(AsFrameError(immediate.error()));
     }
 
     auto mapped = stagingBuffer.Map(impl->allocator);
@@ -1310,13 +1312,15 @@ auto RenderContext::CaptureFrame() noexcept -> std::expected<CapturedFrame, Erro
     return result;
 }
 
-void RenderContext::ProvokeDeviceLost() {
-    if (auto provoked = _impl->ProvokeDeviceLostInternal(); !provoked) [[unlikely]] {
-        if (Vk::IsDeviceLost(provoked.error())) {
-            _impl->deviceLost.store(true, std::memory_order::relaxed);
-        }
-        ZHLN::Log("Failed to submit the device-loss dispatch.");
+auto RenderContext::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    auto provoked = _impl->ProvokeDeviceLostInternal();
+    if (!provoked) [[unlikely]] {
+        // Returned, not narrated: the recovery path reports the loss once it acts
+        // on it, and a caller that fails here propagates the same code up to the
+        // frame boundary, which is where it gets said.
+        return std::unexpected(AsFrameError(provoked.error()));
     }
+    return {};
 }
 
 } // namespace ZHLN

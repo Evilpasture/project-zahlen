@@ -353,6 +353,85 @@ hosting (`Engine.hpp`, `Kernel.hpp`), frame orchestration (`FramePlan.hpp`,
 subsystems (`EngineServices.hpp`, `PoseUploads.hpp`, `SystemContext.hpp`,
 `GameModule.hpp`, `AssetManager.hpp`, `World.hpp`).
 
+### Logging: two tiers, one seam
+
+Layer 0 (`include/Zahlen/Log.hpp`) knows no subsystem: a severity, a source
+(file, function, line and an optional open *channel* name), a sink value, and
+`Panic`/`Assert`. There is no enum of components in it. A subsystem names
+itself where it lives -- `inline constexpr ZHLN::LogChannel kVkLog {"Vulkan"};`
+in `src/vulkan/` -- and a call site reads `kVkLog.Warn(...)` or
+`ZHLN::Log<LogSeverity::Warning>(kVkLog, ...)`. A new plugin adds a channel
+without touching Core, and a sink matches on the channel name structurally
+(`source.channel == "DeviceLost"`) instead of parsing message text.
+
+`FormatLogLine` is header-inline and ABI-free: the console, a file sink, a test
+capture ring and a harness counter all render a line identically without
+agreeing on a `std::string` across a DSO.
+
+Message style follows from the same idea. A line reads `<subject> <action>
+(<key>=<value> ...)` -- `MeshShader fallback (vertices=32, budget=64)`,
+`Windowed session failed (stage=os-window-create)`, `Global texture slots
+exhausted (slots=4096, upload=refused)`. Lowercase after the subject, no trailing
+full stop, and no `[Vulkan]`-style tag pasted into the text: the channel already
+prefixes the rendered line, so a tag in the message would print twice. A leaf
+that returns an error does not also log it; the boundary that turns the code into
+a frame result is where it gets said.
+
+#### Free functions: report, inject, or batch
+
+The same rule binds a free function harder, because it has no `this` to hang a
+decision on. A free function that reaches for the ambient sink (`ZHLN::Log(...)`,
+`kSomeLog.Warn(...)`, `GetLogSink()`) is not a function of its arguments: it
+cannot be tested without a live logger, a caller cannot ask it to stay quiet, and
+two threads calling it contend on one sink. Three shapes keep it referentially
+transparent, in order of preference.
+
+1. **Return the failure.** A leaf that can fail returns `std::expected<T,
+   ErrorCode>` (or `COM::Result<T>`) and says nothing. The boundary that turns the
+   code into a frame result -- the ECS system, the module step, the COM method --
+   is the one that logs, and it is the only one that knows what the failure means
+   for a frame. `[[nodiscard]] auto ComputeMeshNormals(std::span<const FVec3>,
+   std::span<FVec3>) noexcept -> std::expected<void, ErrorCode>` beats a `void`
+   that prints.
+2. **Return the batch.** When several items can each fail without stopping the
+   pass, the function returns `BatchResult<T, E>` (`include/Zahlen/Core/
+   BatchResult.hpp`): successes on one side, per-item errors on the other. The
+   caller's `ForEachError` is the only place that decides what a line looks like,
+   so the leaf never needs a level, a channel, or a throttle. Use it rather than a
+   log per item; a batch of thirty misses is thirty lines nobody asked for. It is
+   not a licence to collect: three symbol names behind one decision are one error,
+   and the first name that failed is the whole of the news. Reach for a batch when
+   the caller will enumerate the misses, not when a `std::vector` was easier than
+   a `bool`.
+3. **Take the sink.** When tracing is intrinsic to the work -- progress over a
+   long bake, a per-item debug diagnostic -- the function takes `COM::LoggerView
+   log = {}` (a non-owning `(ILogger*, string_view channel)` pair). The default
+   empties, `log.Warn(...)` becomes one branch with no formatting cost, tests pass
+   a view over a capture logger, and the ambient sink is never touched.
+
+The state half of the same rule: a free function must not keep anything between
+calls. No `static bool warned = false;` throttle, no `static int state` latch, no
+`thread_local std::vector` scratch. Rate-limit state is state -- `struct
+SolverState { bool largeDtWarned = false; }`, an ECS component, or a field on the
+subsystem that owns the lifetime -- and it is passed in, so a test can set it, a
+debugger can show it, and two threads do not share it. A node's scratch belongs
+in `ECS::Local<T>`; a process-wide backend's belongs to the object that opened
+it. `static` inside a function is invisible in a profile and survives every test
+that meant to reset it.
+
+One exception, and only one: a third-party C hook with no userdata slot -- Jolt's
+`JPH::AssertFailed`, a POSIX signal handler -- has nowhere to put its state but
+the translation unit. There it is a single `std::atomic` with a comment saying
+which ABI forced it, not a struct named after a subsystem it does not have.
+
+`include/Zahlen/COM/` declares its own wire copies (`COM::LogSeverity`,
+`COM::LogSource`, `COM::LogContext`) and includes no Layer-0 header at all, so a
+strict COM consumer logs through `COM::Log(logger, "...", args...)` without
+acquiring `source_location` plumbing or the ambient sink. The two worlds meet in
+exactly one place, `src/engine/com/`: `LogBridge.hpp` publishes a COM logger as a
+Layer-0 `LogSink`, `RawSinkLogger.hpp` does the reverse for a host sink chained
+into a minted hub, and `configure/check_com_boundary.py` keeps it that way.
+
 Only pervasive definitions stay at the root of `include/Zahlen/`: `Common.h`
 (the `ZHLN_API` ABI macros), `Config.hpp`, `Error.hpp`, `Log.hpp`, and
 `Format.hpp` (whose formatter specializations span Entity, Jolt, and the

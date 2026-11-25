@@ -275,7 +275,9 @@ target_link_libraries(Extras_Serialization PRIVATE
     zahlen_serialization
     zahlen_lua
 )
-add_dependencies(Extras_Serialization zcook)
+if(TARGET zcook)
+    add_dependencies(Extras_Serialization zcook)
+endif()
 zahlen_register_extras_test(Extras_Serialization
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/.."
 )
@@ -549,7 +551,7 @@ zahlen_add_extras_group(Extras_GLTFAssets
 target_link_libraries(Extras_GLTFAssets PRIVATE zahlen_gltf_assets zahlen_signal zahlen_command_line)
 # ztest workers may run from a build/output directory, not the checkout root.
 target_compile_definitions(Extras_GLTFAssets PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-zahlen_register_extras_test(Extras_GLTFAssets TIMEOUT 180)
+zahlen_register_extras_test(Extras_GLTFAssets POOL gpu TIMEOUT 180 LABELS GPU Extras)
 
 
 # Scene orchestration is a consumer library; this executable links no native adapter.

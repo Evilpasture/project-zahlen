@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vulkan/presentation/Surface.hpp"
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <optional>
 #include <span>
 #include <utility>
 #include <vector>
-#include "vulkan/VkError.hpp"
 
 namespace ZHLN::Vk {
 
@@ -207,7 +205,7 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) 
 
     VkDisplayPlaneCapabilitiesKHR capabilities {};
     if (const auto res = vkGetDisplayPlaneCapabilitiesKHR(physicalDevice, plan->mode.displayMode, plan->planeIndex, &capabilities); res != VK_SUCCESS) {
-        return std::unexpected(ToError(res));
+        return std::unexpected(SurfaceCreationError::DisplayCapabilitiesQueryFailed);
     }
 
     VkExtent2D image_extent = plan->mode.parameters.visibleRegion;
@@ -233,11 +231,6 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice) 
     if (vkCreateDisplayPlaneSurfaceKHR(instance, &create_info, nullptr, &raw_surface) != VK_SUCCESS) {
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
-
-    ZHLN::Log(
-        "[Vulkan] Created TTY display surface {}x{} @ {:.2f} Hz (plane {}, stack {}).", image_extent.width, image_extent.height,
-        static_cast<double>(plan->mode.parameters.refreshRate) / 1000.0, plan->planeIndex, plan->stackIndex
-    );
 
     return DisplaySurface {
         .surface = Surface(instance, raw_surface),

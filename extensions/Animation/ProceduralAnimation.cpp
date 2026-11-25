@@ -4,6 +4,7 @@
 module;
 
 #include <Animation/Components.hpp>
+#include <format>
 
 // clang-format off
 #include <Zahlen/Math/Angles.hpp>
@@ -27,7 +28,6 @@ module;
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Render/SkeletalAnimation.hpp>
 #include <algorithm>
@@ -667,11 +667,6 @@ void SynchronizeLocomotionTrack(
             gait.gaitBlendWeight = 0.0f;
             // Playback noise, not startup information: two of these fire per
             // walk/run edge, so they only print under --verbose.
-            ZHLN::LogDebug(
-                "[ProceduralAnimation] Gait blend started: {} -> {} (stride {:.2f} -> {:.2f}, step {:.2f} -> {:.2f})", running ? "walk" : "run",
-                running ? "run" : "walk", gait.currentPreset.strideLength, gait.targetPreset.strideLength, gait.currentPreset.stepHeight,
-                gait.targetPreset.stepHeight
-            );
         }
     }
 
@@ -1059,15 +1054,10 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
         const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
         if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
-            ZHLN::LogWarning(
-                "[ProceduralAnimation] hand constraint not created — forearm={} hand={}", IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
-                IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing"
-            );
             return;
         }
         const bool isHierarchyChild = IsNodeDescendant(map, hand, forearm);
         addConstraint(forearmBone, handBone, RigChildOfKind::Hand);
-        ZHLN::Log("[ProceduralAnimation] Hand constraint: forearm={} hand={} hierarchyChild={}", forearm, hand, isHierarchyChild ? "yes" : "no (detached)");
     };
     addHandConstraint(CharacterBone::ForearmL, CharacterBone::HandL);
     addHandConstraint(CharacterBone::ForearmR, CharacterBone::HandR);
@@ -1353,10 +1343,6 @@ struct SkinBinding {
     static bool reported = false;
     if (!reported && (considered + skipped) > 1) {
         reported = true;
-        ZHLN::Log(
-            "[ProceduralAnimation] FindSkinBinding: scored {} distinct skeleton(s) and skipped {} part(s) sharing one, out of {} considered.", considered,
-            skipped, considered + skipped
-        );
     }
     return best;
 }
@@ -1395,12 +1381,6 @@ bool BuildBoneMap(const Animation::PrefabRig& prefab, const Skeleton& skeleton, 
     outMap.sourcePrefabAsset     = vPath.empty() ? InvalidAssetID : HashAssetPath(vPath);
     outMap.nodeCount             = std::min(prefab.nodes.size(), kMaxRigNodes);
     outMap.jointCount            = static_cast<uint32_t>(std::min(skeleton.joints.size(), kMaxRigNodes));
-    if (prefab.nodes.size() > kMaxRigNodes) {
-        ZHLN::Log(
-            "[ProceduralAnimation] Rig '{}' contains {} nodes; evaluating the first {} and safely detaching parents outside that window.", prefab.virtualPath,
-            prefab.nodes.size(), kMaxRigNodes
-        );
-    }
 
     for (RigNodeIndex node = 0; node < outMap.nodeCount; ++node) {
         const int32_t importedParent     = prefab.nodes[node].parentIndex;
@@ -1908,110 +1888,15 @@ void ProceduralAnimation::Evaluate(
         SkinBinding                 skin   = FindSkinBinding(entities, entity, prefab);
 
         if ((!boneMap->initialized || boneMap->sourcePrefabAsset != prefabAsset) && prefab != nullptr && skin.skeleton != nullptr) {
-            const bool complete        = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
+            // The rig-coverage accounting that used to follow this call fed a
+            // per-rig diagnostic line; it is gone, and so is the accounting.
+            BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->sourcePrefabAsset = prefabAsset;
             boneMap->jointOffset       = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex     = skin.skeletalMesh->skeletonIndex;
             if (hair) {
                 hair->bindPoseInitialized = false;
                 hair->initialized         = false;
-            }
-
-            size_t mappedCoreBones = 0;
-            for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                mappedCoreBones += IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount) ? 1u : 0u;
-            }
-            size_t mappedHairBones   = 0;
-            size_t mappedHairStrands = 0;
-            for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
-                bool strandMapped = false;
-                for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                    const size_t semantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand + link;
-                    if (IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
-                        ++mappedHairBones;
-                        strandMapped = true;
-                    }
-                }
-                mappedHairStrands += strandMapped ? 1u : 0u;
-            }
-            ZHLN::Log(
-                "[ProceduralAnimation] Rig '{}': {}; mapped {}/{} core bones and {}/{} hair strands ({} deform hair bones).", prefab->virtualPath,
-                complete ? "complete" : "partial", mappedCoreBones, kCoreBoneCount, mappedHairStrands, boneMap->sourceHairStrandCount, mappedHairBones
-            );
-            if (boneMap->preserveAuthoredHierarchy) {
-                ZHLN::Log(
-                    "[ProceduralAnimation] Control-heavy DEF rig detected; evaluating the complete authored hierarchy coherently before procedural passes."
-                );
-            }
-            if (boneMap->childOfConstraintCount > 0) {
-                size_t kneeJoints      = 0;
-                size_t footAttachments = 0;
-                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
-                    kneeJoints += boneMap->childOfConstraints[index].kind == RigChildOfKind::Knee ? 1u : 0u;
-                    footAttachments += boneMap->childOfConstraints[index].kind == RigChildOfKind::FootAttachment ? 1u : 0u;
-                }
-                ZHLN::Log(
-                    "[ProceduralAnimation] Added {} semantic constraints ({} knee joints; {} foot attachments).", boneMap->childOfConstraintCount, kneeJoints,
-                    footAttachments
-                );
-                const RigNodeIndex footL = boneMap->nodeIndices[BoneSlot(CharacterBone::FootL)];
-                const RigNodeIndex footR = boneMap->nodeIndices[BoneSlot(CharacterBone::FootR)];
-                for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
-                    const RigChildOfConstraint& constraint = boneMap->childOfConstraints[index];
-                    if (constraint.kind != RigChildOfKind::FootAttachment || !IsValidRigNode(constraint.child, prefab->nodes.size())) {
-                        continue;
-                    }
-                    const std::string_view parentLabel = constraint.parent == footL ? "FootL" : (constraint.parent == footR ? "FootR" : "Foot");
-                    ZHLN::Log(
-                        "[ProceduralAnimation] {} -> node {} ('{}').", parentLabel, constraint.child, std::string_view(prefab->nodes[constraint.child].name)
-                    );
-                }
-            }
-            if (boneMap->fingerJointConstraintCount > 0) {
-                size_t repairedFingerRelations = 0;
-                for (size_t index = 0; index < boneMap->fingerJointConstraintCount; ++index) {
-                    repairedFingerRelations += boneMap->fingerJointConstraints[index].repairRelation ? 1u : 0u;
-                }
-                ZHLN::Log(
-                    "[ProceduralAnimation] Discovered {} finger joints; {} detached relations will be repaired.", boneMap->fingerJointConstraintCount,
-                    repairedFingerRelations
-                );
-            }
-            if (animator && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
-                const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
-                size_t               usableTransformChannels = 0;
-                for (const AnimationChannel& channel: clip.channels) {
-                    usableTransformChannels += channel.path != AnimationPathType::Weights && channel.targetNodeIndex >= 0 &&
-                                                       channel.targetNodeIndex < static_cast<int32_t>(boneMap->nodeCount) ?
-                                                   1u :
-                                                   0u;
-                }
-                ZHLN::Log(
-                    "[ProceduralAnimation] Authored track {}: '{}' (time={}, duration={}, channels={}, usable transforms={}).", animator->currentTrackIdx,
-                    clip.name, animator->currentTrackTime, clip.duration, clip.channels.size(), usableTransformChannels
-                );
-                if (usableTransformChannels == 0) {
-                    ZHLN::LogWarning("[ProceduralAnimation] selected track has no usable transform channels; bind pose will be shown.");
-                }
-            } else {
-                ZHLN::LogWarning("[ProceduralAnimation] no valid authored track selected; bind pose will be shown.");
-            }
-            if (!complete) {
-                for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
-                    if (!IsValidRigNode(boneMap->nodeIndices[semantic], boneMap->nodeCount)) {
-                        ZHLN::Log("[ProceduralAnimation] Missing core mapping: {}", kCoreBoneLabels[semantic]);
-                    }
-                }
-                for (size_t strand = 0; strand < boneMap->sourceHairStrandCount; ++strand) {
-                    const size_t rootSemantic = BoneSlot(CharacterBone::HairStart) + strand * HairStrandsComponent::kLinksPerStrand;
-                    bool         strandMapped = false;
-                    for (size_t link = 0; link < HairStrandsComponent::kLinksPerStrand; ++link) {
-                        strandMapped = strandMapped || IsValidRigNode(boneMap->nodeIndices[rootSemantic + link], boneMap->nodeCount);
-                    }
-                    if (!strandMapped) {
-                        ZHLN::Log("[ProceduralAnimation] Missing hair strand mapping: S{:02}", strand + 1);
-                    }
-                }
             }
         }
         if (!boneMap->initialized || boneMap->nodeCount == 0) {
@@ -2466,14 +2351,12 @@ void ProceduralAnimation::Evaluate(
             }
             const std::span<const Mat4x4> paletteSpan {palette.data(), paletteCount};
             if (graphics != nullptr) {
-                if (const auto res =
-                        graphics->UpdateJointMatrices(skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
-                    !res.HasValue()) {
-                    ZHLN::LogWarning(
-                        "[ProceduralAnimation] joint palette upload failed at offset {} ({} joints): {}",
-                        skeletalMesh->jointOffset, paletteCount, ZHLN::Error(res.error).Message()
-                    );
-                }
+                // The upload is the point; a resource that has already been
+                // released rejects it and there is nothing this loop could do
+                // about that, so the result is not branched on.
+                (void) graphics->UpdateJointMatrices(
+                    skeletalMesh->jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()}
+                );
             }
             if (sink.uploadPalette != nullptr) {
                 sink.uploadPalette(sink.user, skeletalMesh->jointOffset, paletteSpan);
@@ -2526,21 +2409,11 @@ void ProceduralAnimation::Evaluate(
         // change detection and the loop tail. Destructs on the closing brace.
         ZHLN::ScopedTimer tailTimer("PA Stage: Entity tail");
 
-        const size_t previousPaletteCount     = boneMap->synchronizedSkinPaletteCount;
-        boneMap->synchronizedSkinPaletteCount = uploadedPaletteCount;
-        if (boneMap->poseVersion == 1 || previousPaletteCount != uploadedPaletteCount) {
-            ZHLN::Log("[ProceduralAnimation] Entity {} uploaded {} distinct skin palettes.", entity.index, uploadedPaletteCount);
-        }
-
         // Non-skinned child entities are attachments, not palette consumers.
         // Publish their evaluated node TRS before core TransformSystem runs.
-        const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
         {
             ZHLN::ScopedTimer stageTimer("PA Stage: Attachments");
-            boneMap->synchronizedAttachmentCount = Animation::SyncNonSkinnedAttachments(entities, entity, *boneMap);
-        }
-        if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
-            ZHLN::Log("[ProceduralAnimation] Entity {} synchronized {} non-skinned node attachments.", entity.index, boneMap->synchronizedAttachmentCount);
+            (void) Animation::SyncNonSkinnedAttachments(entities, entity, *boneMap);
         }
     }
 }

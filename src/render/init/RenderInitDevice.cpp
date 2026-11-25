@@ -4,6 +4,8 @@
 #include "render/OpenGLHacks/HostBlit.hpp"
 #include "render/PresentationSurface.hpp"
 #include "render/RenderInternal.hpp"
+#include "vulkan/DeviceDiagnostics.hpp"
+#include "vulkan/VulkanLog.hpp"
 #include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Error.hpp>
@@ -34,8 +36,8 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode validationMode) {
     constexpr VkSubgroupFeatureFlags kUsedSubgroupOps = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
 
-    return Vk::DeviceConfigurator<>(physical)
-        .OptionalPresentation(present)
+    auto configurator = Vk::DeviceConfigurator<>(physical);
+    return std::move(configurator).OptionalPresentation(present)
         .OptionalExtension("VK_KHR_portability_subset", isMac)
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
             f.multiview                          = VK_TRUE;
@@ -122,6 +124,7 @@ RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept:
 auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) noexcept
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl               = std::make_unique<Impl>(target);
+
     impl->appName           = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
@@ -220,6 +223,22 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                         .Build()
                         .transform([&](auto&& context) -> auto {
                             impl->ctx = std::forward<decltype(context)>(context);
+                            // The composition root for device negotiation: the
+                            // builders only collected facts, and this is the one
+                            // place that decides an operator hears them. The
+                            // ledger stays in the context, so a test reads the
+                            // same entries through ctx.Diagnostics() instead of
+                            // installing a sink.
+                            for (const Vk::DeviceDiagnostic& diagnostic: impl->ctx.Diagnostics()) {
+                                switch (diagnostic.severity) {
+                                    case Vk::DiagnosticSeverity::Warning:
+                                        ZHLN::kVkLog.Warn("[{}] {}", diagnostic.component, diagnostic.message);
+                                        break;
+                                    case Vk::DiagnosticSeverity::Info:
+                                        ZHLN::kVkLog.Info("[{}] {}", diagnostic.component, diagnostic.message);
+                                        break;
+                                }
+                            }
                             impl->diagnostics.gpuDiagnostics.Create(impl->ctx, {.crashDumpPath = cfg.crashDumpPath});
                         });
                 });
@@ -229,7 +248,7 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
                 if (mode == PresentationMode::HostBlit) {
                     const bool ok = HostBlit::Init(impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphicsFamily);
                     if (!ok) {
-                        ZHLN::LogWarning("HostBlit presenter failed to initialize; continuing offscreen-only.");
+                        kLog.Warn("HostBlit presenter failed to initialize; continuing offscreen-only.");
                         impl->presentationMode = PresentationMode::OffscreenOnly;
                     }
                 }
@@ -242,32 +261,57 @@ auto RenderContext::Create(PresentationTarget& target, const EngineConfig& cfg) 
         });
 }
 
+void RenderContext::ReleaseDevice() noexcept {
+    if (!_impl) {
+        return;
+    }
+    // Take ownership before touching anything. The move is the flag: a second call,
+    // and the destructor's Destroy() after it, return above -- and it gives the
+    // teardown a defined owner, so `impl` dies at the closing brace of this function
+    // and ~Impl runs here, in order, instead of when the host's unique_ptr unwinds.
+    _released = true;
+    auto impl  = std::move(_impl);
+
+    if (impl->ctx.Device() != VK_NULL_HANDLE) {
+        impl->DestroyDestinations();
+        if constexpr (isMac) {
+            if (impl->presentationMode == PresentationMode::HostBlit) {
+                HostBlit::Shutdown();
+            }
+        }
+    }
+} // ~Impl here: staging, caches, deletion queue, gpuDiagnostics.Shutdown()
+
+void RenderContext::DumpDeviceFaultReport() noexcept {
+    if (_impl) {
+        _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+    }
+}
+
 void RenderContext::Destroy() noexcept {
     if (!_impl) {
         return;
     }
-
-    if (_impl->ctx.Device() != nullptr) {
-        if (_impl->deviceLost.load(std::memory_order::relaxed)) {
-            _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
-        } else if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
-            if (Vk::IsDeviceLost(idle.error())) {
-                _impl->NoteDeviceLost("RenderContext::Destroy");
-                _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
+    if (_impl->ctx.Device() != VK_NULL_HANDLE) {
+        // Fault reports only exist until gpuDiagnostics.Shutdown(), which
+        // ReleaseDevice() performs through ~Impl, so a loss observed here has to be
+        // dumped here. One WaitIdle, one OnDeviceLost.
+        if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+            if (IsDeviceLost(idle.error())) {
+                // A loss found only here has no recovery to piggyback on, so it is
+                // reported as the teardown fact it is and deliberately not counted:
+                // the count means "a loss happened and the runtime recovered from
+                // it", and this is where one is found, not where one is handled.
+                kLog.Error("GPU device lost while destroying the renderer ({})", idle.error());
+                DumpDeviceFaultReport();
             } else {
-                ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
+                kLog.Error("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
         }
-
-        _impl->DestroyDestinations();
-        if constexpr (isMac) {
-            if (_impl->presentationMode == PresentationMode::HostBlit) {
-                HostBlit::Shutdown();
-            }
-        }
-        _impl->diagnostics.gpuDiagnostics.Shutdown();
-        _impl->submittedStaging.reset();
     }
+    // The release is the same operation recovery uses; the difference is only that
+    // this path did not already know the device was gone.
+    ReleaseDevice();
 }
 
 std::vector<uint8_t> RenderContext::GetPipelineBinaryData() const noexcept {

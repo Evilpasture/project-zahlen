@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <Zahlen/COM/IEntities.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Config.hpp>
 namespace ZHLN::COM {
@@ -13,6 +15,8 @@ struct LogicWorldInfo {
 // from this reference-counted owner, or Query/Ref::As may retain them separately.
 // One host thread drives it. No registry, World or Jolt object crosses COM.
 struct ILogicWorld: IObject {
+    [[nodiscard]] virtual ILogger*       Logger() noexcept   = 0;
+    [[nodiscard]] virtual IErrorRegistry* Errors() noexcept  = 0;
     [[nodiscard]] virtual IEntities*   Entities() noexcept                   = 0;
     [[nodiscard]] virtual ISimulation* Simulation() noexcept                 = 0;
     virtual Result<void> GetInfo(ChainOutNode*) const noexcept = 0;

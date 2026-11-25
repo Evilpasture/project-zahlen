@@ -4,25 +4,34 @@
 #include "vulkan/diagnostics/GPUDiagnostics.hpp"
 #include "vulkan/diagnostics/GPUAddressTracker.hpp"
 #include "vulkan/Rendering.hpp"
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <cstdio>
 #include <format>
 #include <fstream>
 #include <vector>
 
+
 namespace ZHLN::Vk {
 
 namespace {
+
+// Fault dumps are async text with no ErrorCode channel; they go straight
+// to stderr like every other pre-logger diagnostic in this layer.
+void FaultLine(const std::string_view line) noexcept {
+    std::fprintf(stderr, "[Vulkan] %.*s\n", static_cast<int>(line.size()), line.data());
+}
 
 void LogFaultAddress(const GPUAddressTracker* tracker, std::string_view label, const VkDeviceFaultAddressInfoKHR& address) noexcept {
     if (address.addressType == VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR) {
         return;
     }
 
-    ZHLN::Log("  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType));
+    FaultLine(std::format("  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType)));
 
     if (tracker == nullptr || !tracker->Enabled()) {
         return;
@@ -30,7 +39,7 @@ void LogFaultAddress(const GPUAddressTracker* tracker, std::string_view label, c
 
     const auto symbols = tracker->Resolve(address.reportedAddress);
     if (symbols.empty()) {
-        ZHLN::Log("    -> No live device-address binding covers this address (possibly freed or out-of-bounds).");
+        FaultLine(std::format("    -> No live device-address binding covers this address (possibly freed or out-of-bounds)."));
         return;
     }
 
@@ -38,10 +47,10 @@ void LogFaultAddress(const GPUAddressTracker* tracker, std::string_view label, c
         const std::string_view name   = symbol.name.empty() ? (symbol.isDriverInternal ? "[Driver-Internal Object]" : "[Unnamed Vulkan Object]") :
                                                               std::string_view(symbol.name);
         const std::string_view origin = symbol.isDriverInternal ? "driver-internal" : "application";
-        ZHLN::Log(
+        FaultLine(std::format(
             "    -> {} ({}, type={}, handle=0x{:016X}, base=0x{:016X}, size={} bytes, offset=+0x{:X})", name, origin,
             ZHLN::Reflect::EnumToString(symbol.objectType), symbol.objectHandle, symbol.baseAddress, symbol.size, address.reportedAddress - symbol.baseAddress
-        );
+        ));
     }
 }
 
@@ -49,7 +58,7 @@ void LogVendorInfo(std::string_view label, const VkDeviceFaultVendorInfoKHR& ven
     if (vendor.description[0] == '\0' && vendor.vendorFaultCode == 0 && vendor.vendorFaultData == 0) {
         return;
     }
-    ZHLN::Log("  {}: code=0x{:08X} data=0x{:016X} \"{}\"", label, vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description);
+    FaultLine(std::format("  {}: code=0x{:08X} data=0x{:016X} \"{}\"", label, vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description));
 }
 
 void WriteVendorBinary(const void* data, size_t size, std::string_view destination) noexcept {
@@ -57,7 +66,7 @@ void WriteVendorBinary(const void* data, size_t size, std::string_view destinati
         return;
     }
     if (destination.empty()) {
-        ZHLN::Log("  Vendor crash dump not written: no destination configured (DiagnosticConfig::crashDumpPath).");
+        FaultLine(std::format("  Vendor crash dump not written: no destination configured (DiagnosticConfig::crashDumpPath)."));
         return;
     }
 
@@ -68,11 +77,11 @@ void WriteVendorBinary(const void* data, size_t size, std::string_view destinati
     }
     std::ofstream out(path, std::ios::binary);
     if (!out) {
-        ZHLN::Log("  Failed to write vendor crash dump ({} bytes) to '{}'", size, path.string());
+        FaultLine(std::format("  Failed to write vendor crash dump ({} bytes) to '{}'", size, path.string()));
         return;
     }
     out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
-    ZHLN::Log("  Saved vendor crash dump: {} ({} bytes)", path.string(), size);
+    FaultLine(std::format("  Saved vendor crash dump: {} ({} bytes)", path.string(), size));
 }
 
 void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
@@ -90,7 +99,7 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
         std::memcpy(&length, cursor, sizeof(length));
         cursor += sizeof(uint64_t);
         if (length > static_cast<uint64_t>(end - cursor)) {
-            ZHLN::Log("  Abort Msg #{}: truncated (claimed {} bytes, {} remain)", index, length, static_cast<uint64_t>(end - cursor));
+            FaultLine(std::format("  Abort Msg #{}: truncated (claimed {} bytes, {} remain)", index, length, static_cast<uint64_t>(end - cursor)));
             break;
         }
 
@@ -100,7 +109,7 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
             const char ch = static_cast<char>(cursor[i]);
             text.push_back((ch >= 0x20 && ch < 0x7F) ? ch : '.');
         }
-        ZHLN::Log("  Abort Msg #{} ({} bytes): \"{}\"", index, length, text);
+        FaultLine(std::format("  Abort Msg #{} ({} bytes): \"{}\"", index, length, text));
         cursor += length;
 
         const auto addr    = reinterpret_cast<uintptr_t>(cursor);
@@ -121,27 +130,27 @@ void DumpKhrDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::
     uint32_t count = 0;
     VkResult res   = vkGetDeviceFaultReportsKHR(device, 0, &count, nullptr);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-        ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR count query failed ({})", ZHLN::Reflect::EnumToString(res));
+        FaultLine(std::format("vkGetDeviceFaultReportsKHR count query failed ({})", ZHLN::Reflect::EnumToString(res)));
         return;
     }
 
     if (count == 0) {
-        ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR returned 0 reports");
+        FaultLine(std::format("vkGetDeviceFaultReportsKHR returned 0 reports"));
     } else {
         std::vector<VkDeviceFaultInfoKHR> reports(count, VkDeviceFaultInfoKHR {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_KHR});
         res = vkGetDeviceFaultReportsKHR(device, 0, &count, reports.data());
         if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-            ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultReportsKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res));
+            FaultLine(std::format("vkGetDeviceFaultReportsKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res)));
             return;
         }
 
         for (uint32_t i = 0; i < count; ++i) {
             const auto& report = reports[i];
             std::string flags;
-            ZHLN::Log(
+            FaultLine(std::format(
                 "\n[GPU DEVICE FAULT] #{} group={} flags={} \"{}\"", i, report.groupId,
                 ZHLN::Reflect::EnumToFlagsString(static_cast<VkDeviceFaultFlagBitsKHR>(report.flags), flags), report.description
-            );
+            ));
             LogFaultAddress(tracker, "Fault Addr", report.faultAddressInfo);
             LogFaultAddress(tracker, "Instruction Addr", report.instructionAddressInfo);
             LogVendorInfo("Vendor Info", report.vendorInfo);
@@ -173,7 +182,7 @@ void DumpKhrDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::
 
     res = vkGetDeviceFaultDebugInfoKHR(device, &debugInfo);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-        ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultDebugInfoKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res));
+        FaultLine(std::format("vkGetDeviceFaultDebugInfoKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res)));
         return;
     }
 
@@ -189,7 +198,7 @@ void DumpExtDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::
     VkDeviceFaultCountsEXT counts {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
     VkResult               res = vkGetDeviceFaultInfoEXT(device, &counts, nullptr);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-        ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultInfoEXT count query failed ({})", ZHLN::Reflect::EnumToString(res));
+        FaultLine(std::format("vkGetDeviceFaultInfoEXT count query failed ({})", ZHLN::Reflect::EnumToString(res)));
         return;
     }
 
@@ -206,11 +215,11 @@ void DumpExtDeviceFault(VkDevice device, const GPUAddressTracker* tracker, std::
 
     res = vkGetDeviceFaultInfoEXT(device, &counts, &info);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-        ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultInfoEXT payload query failed ({})", ZHLN::Reflect::EnumToString(res));
+        FaultLine(std::format("vkGetDeviceFaultInfoEXT payload query failed ({})", ZHLN::Reflect::EnumToString(res)));
         return;
     }
 
-    ZHLN::Log("\n[GPU DEVICE FAULT] {}", info.description);
+    FaultLine(std::format("\n[GPU DEVICE FAULT] {}", info.description));
     for (uint32_t i = 0; i < counts.addressInfoCount; ++i) {
         LogFaultAddress(tracker, std::format("Fault Addr #{}", i), addressInfos[i]);
     }

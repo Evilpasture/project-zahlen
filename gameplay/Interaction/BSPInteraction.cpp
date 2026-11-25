@@ -10,7 +10,6 @@
 #include <Zahlen/Core/COM/Chain.hpp>
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/ECS/Components.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -231,7 +230,6 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
 
     if (auto* door = entities.Get<DoorComponent>(entity)) {
         if ((door->flags & DoorFlags::Locked) != DoorFlags::None && input != "Unlock") {
-            Log("[Interaction] Door '{}' is locked", label);
             return;
         }
         if (input == "Open") {
@@ -263,7 +261,6 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
 
     if (auto* button = entities.Get<ButtonComponent>(entity)) {
         if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None && input != "Unlock") {
-            Log("[Interaction] Button '{}' is locked", label);
             return;
         }
         if (input == "Press" || input == "Use" || input == "Toggle") {
@@ -321,11 +318,8 @@ void FireEntityInput(COM::IEntities& entities, Entity entity, std::string_view i
         }
     }
 
-    if (const auto* usable = entities.Get<UsableComponent>(entity)) {
-        if (input == "Use" && usable->scriptHash != 0) {
-            Log("[Interaction] Entity '{}' dispatched script {:#X}", label, usable->scriptHash);
-        }
-    }
+    // UsableComponent::scriptHash used to be reported from here; the entity
+    // carries it and the script layer dispatches it, this function does not.
 }
 
 void FireEntityInput(COM::IEntities& entities, std::string_view targetname, std::string_view input,

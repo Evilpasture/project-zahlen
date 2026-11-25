@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "EngineGlobals.hpp"
+#include "diagnostics/SanitizerBridges.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -57,7 +58,7 @@ void InitRenderDocAPI() {
     }
 #endif
     if (s_RDocAPI != nullptr) {
-        ZHLN::Log("[RenderDoc] In-App API successfully bound.");
+        Log("RenderDoc In-App API successfully bound.");
     }
 }
 
@@ -116,7 +117,7 @@ auto AcquireGlfw() -> bool {
 
 
     glfwSetErrorCallback([](int error, const char* description) -> void {
-        ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
+        kLog.Error("GLFW error {}: {}", error, description ? description : "(null)");
     });
 
     if constexpr (isLinux) {
@@ -129,8 +130,10 @@ auto AcquireGlfw() -> bool {
     if (!glfwInit()) {
         const char* desc = nullptr;
         const int   err  = glfwGetError(&desc);
+        // Logged here, not returned-only: GLFW's own description is the part that
+        // says *why*, and the boolean this function returns cannot carry it.
         if (desc != nullptr) {
-            ZHLN::Log("[GLFW] glfwInit failed: ({}) {}", err, desc);
+            kLog.Error("GLFW init failed (code={}, reason={})", err, desc);
         }
         return false;
     }

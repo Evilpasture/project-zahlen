@@ -10,7 +10,6 @@
 #include <Scene/Scene.hpp>
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <cmath>
 #include <cstring>

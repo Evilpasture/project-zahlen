@@ -6,7 +6,6 @@
 #include "render/Renderer.hpp"
 #include "render/passes/culling/CullingResources.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 
 namespace ZHLN::Passes {

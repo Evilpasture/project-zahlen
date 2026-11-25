@@ -33,7 +33,6 @@
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Math3D.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>

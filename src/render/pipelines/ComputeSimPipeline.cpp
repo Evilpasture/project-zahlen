@@ -9,6 +9,7 @@
 #include "render/passes/volumetric/VolumetricPasses.hpp"
 #include "vulkan/graph/RenderGraph.hpp"
 #include <ShaderBindings.hpp>
+#include "render/DeviceLoss.hpp" // IsDeviceLost; Impl comes from ComputeSimPipeline.hpp
 #include <Zahlen/Log.hpp>
 
 namespace ZHLN::Pipelines {
@@ -101,10 +102,11 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     auto submitted = Vk::QueueSubmit(impl.ctx.ComputeQueue(), std::move(*executable), std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}, compSync.Signal());
 
     if (!submitted) [[unlikely]] {
-        if (Vk::IsDeviceLost(submitted.error())) {
-            impl.NoteDeviceLost("DispatchSimulations");
-        } else {
-            ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());
+        // One channel per branch: recovery owns the loss line, and this site owns
+        // everything else -- including its own name and code, which is what the
+        // blanket loss line cannot carry.
+        if (!IsDeviceLost(submitted.error())) {
+            kLog.Warn("Compute submission failed ({}).", submitted.error());
         }
         return std::unexpected(AsFrameError(submitted.error()));
     }

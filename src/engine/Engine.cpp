@@ -1,4 +1,5 @@
 #include "ArticulationContext.hpp"
+#include "EngineErrors.hpp"
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -15,6 +16,7 @@
 #include "SystemWiring.hpp"
 #include <audio/Audio.hpp>
 #include <Zahlen/COM/FrameTypes.hpp>
+#include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <Zahlen/Core/HashMap.hpp>
@@ -54,16 +56,19 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "engine/EngineLog.hpp"
 
 namespace ZHLN {
 
-enum class EngineInitError : uint8_t {
-    EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
-};
-
 struct EngineImpl {
+    // The session owns World, the renderer and audio, and restores the
+    // Layer-0 sink this engine replaced when it is destroyed. The Logger it
+    // borrowed is the host's (or COM::Engine's) and is never held here: the
+    // engine only receives the plain LogSink above. Declaration order still
+    // matters -- kernel first, so everything it owns tears down before
+    // anything else in the engine does.
     std::unique_ptr<KernelSession> kernel;
-    std::unique_ptr<World>  world;
+    std::unique_ptr<World>         world;
 
     // Host-owned custom draw hooks, keyed by stable window identity.
     ZHLN::HashMap<WindowID, Engine::WindowDrawCallback> windowDrawCallbacks;
@@ -184,7 +189,7 @@ void Engine::TraceDiagnostics() const noexcept {
 Engine::Engine(): _impl(nullptr) {
 }
 
-auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+auto Engine::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<void, ErrorCode> {
     // Dropping the old RenderContext retires emitter buffers in Destroy(); the
     // replacement renderer is created after that. Component authoring data survives.
     auto& reg = _impl->world->GetRegistry();
@@ -196,7 +201,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         owned.mesh = {}; // the old context will reclaim its pool; never destroy these on the new device
     }
 
-    if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
+    if (auto rebuilt = _impl->kernel->HandleDeviceLost(drainDevice); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
     ++_impl->deviceGeneration;
@@ -226,19 +231,20 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     return {};
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, ErrorCode> {
+auto Engine::Create(const EngineConfig& cfg, const ZHLN::LogSink ambientSink)
+    -> std::expected<std::unique_ptr<Engine>, ErrorCode> {
     auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
     }
 
-    if (auto result = instance->InitInternal(cfg); !result) {
+    if (auto result = instance->InitInternal(cfg, ambientSink); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
+auto Engine::InitInternal(const EngineConfig& cfg, const ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
     _impl         = std::make_unique<EngineImpl>();
@@ -253,7 +259,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->world = std::move(world_res.value());
 
-    auto kernel_res = KernelSession::Create(cfg);
+    auto kernel_res = KernelSession::Create(cfg, ambientSink);
     if (!kernel_res) {
         return std::unexpected(kernel_res.error());
     }
@@ -401,8 +407,18 @@ void Engine::EvaluateInput(Engine& engine, float, FrameContext&) {
 void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
     auto renderRes = RenderSystem::Update(engine, engine.Registry(), engine._impl->sceneData, engine._impl->poseUploads, dt);
     if (!renderRes && renderRes.error() == FrameResult::DeviceLost) {
+        // One line and one DeviceLostCount increment per loss, emitted where the
+        // loss is *observed*. Recovery is also reachable deliberately
+        // (IEngine::RecreateGraphicsDevice on a healthy device), and a reset is not
+        // a loss, so it must not look like one.
+        kDeviceLostLog.Error("device lost; recreating the renderer");
+        // The fault report is evidence of *this* loss and it dies with the device, so
+        // it is taken here, in the observer, like the count. Recovery stays pure, and
+        // a deliberate reset can no longer reach it: on a healthy device the dump
+        // would report "0 fault reports" to stderr.
+        engine.Render().DumpDeviceFaultReport();
         if (auto lostRes = engine.HandleDeviceLost(); !lostRes) {
-            ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lostRes.error());
+            kLog.Error("Fatal: GPU device recovery failed: {}", lostRes.error());
             ctx.error = lostRes.error();
             engine.Session().CloseWindow();
         }
@@ -410,34 +426,34 @@ void Engine::Present(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 namespace PrefabFactory {
-auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(Engine& engine, ZHLN::FVec3 halfExtents, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params);
 }
-auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params);
 }
-auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
-auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params);
 }
-auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> Entity {
+auto CreatePlane(Engine& engine, float extent, ZHLN::FVec4 color, const SpawnParams& params) -> std::expected<Entity, ErrorCode> {
     return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params);
 }
-auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateBoxConfigured(Engine& engine, FVec3 halfExtents, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateBoxInternal(engine.Render(), engine.Registry(), engine.Physics(), halfExtents, params, buildBLAS);
 }
-auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreatePlaneConfigured(Engine& engine, float extent, FVec4 color, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreatePlaneInternal(engine.Render(), engine.Registry(), engine.Physics(), extent, color, params, buildBLAS);
 }
-auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateSphereConfigured(Engine& engine, float radius, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateSphereInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, params, buildBLAS);
 }
-auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateCylinderConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateCylinderInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
-auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> Entity {
+auto CreateConeConfigured(Engine& engine, float radius, float height, const SpawnParams& params, bool buildBLAS) -> std::expected<Entity, ErrorCode> {
     return CreateConeInternal(engine.Render(), engine.Registry(), engine.Physics(), radius, height, params, buildBLAS);
 }
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
@@ -691,8 +707,19 @@ void Engine::AddTeardownHook(TeardownHook hook) {
     }
 }
 
-void Engine::ProvokeDeviceLost() {
-    _impl->kernel->ProvokeDeviceLost();
+// The test hook. Recovery only runs when the provoked submission *reports* the
+// loss: a dispatch that is accepted while the device dies asynchronously returns
+// success here, and the loss surfaces on a later frame like any other.
+auto Engine::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    auto provoked = _impl->kernel->ProvokeDeviceLost();
+    if (!provoked && provoked.error() == FrameResult::DeviceLost) {
+        // Same path a captured frame takes, so DeviceLostCount moves for the
+        // reason production would, not because a test-only branch logged.
+        kDeviceLostLog.Error("device lost; recreating the renderer");
+        Render().DumpDeviceFaultReport();
+        return HandleDeviceLost();
+    }
+    return provoked;
 }
 
 namespace {
@@ -778,7 +805,6 @@ auto Engine::Tick(float dt) -> std::expected<void, ErrorCode> {
 
 auto Engine::Run(const EngineConfig& config, FrameCallback onFrame, ModuleInstaller installModules, EventPoller pollEvents) -> std::expected<void, ErrorCode> {
     Platform::Init();
-    SetLogLevel(config.logLevel);
     // Construct before the engine so its destructor (and any cleanup tasks)
     // finishes before the worker threads and fibers are retired.
     TaskSystem::Scope tasks;

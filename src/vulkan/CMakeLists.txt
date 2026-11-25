@@ -21,7 +21,6 @@ add_library(
   memory/StagingContext.cpp
   execution/CommandRecorder.cpp
   execution/RenderQueue.cpp
-  execution/Commands.cpp
   execution/SemaphorePool.cpp
   pipeline/PipelineBuilder.cpp
   pipeline/PipelineBinaries.cpp

@@ -21,7 +21,7 @@ inline auto CommandPool<QType>::Create(const VkDevice device, const uint32_t que
     };
     VkCommandPool pool = VK_NULL_HANDLE;
     if (const VkResult res = vkCreateCommandPool(device, &info, nullptr, &pool); res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(res));
+        return std::unexpected(CommandPoolError::CreationFailed);
     }
 
     CommandPool result;
@@ -91,7 +91,7 @@ inline auto CommandPool<QType>::AllocateLevel(const uint32_t count, const VkComm
         .commandBufferCount = count,
     };
     if (const VkResult res = vkAllocateCommandBuffers(_device, &info, allocated.data()); res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(res));
+        return std::unexpected(CommandPoolError::AllocationFailed);
     }
     _buffers.insert(_buffers.end(), allocated.begin(), allocated.end());
     return {};
@@ -103,7 +103,10 @@ inline auto CommandPool<QType>::Reset(const VkCommandPoolResetFlags flags) noexc
         return std::unexpected(CommandPoolError::PoolNotReady);
     }
     if (const VkResult res = vkResetCommandPool(_device, _pool, flags); res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(res));
+        if (res == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(CommandPoolError::DeviceLost);
+        }
+        return std::unexpected(CommandPoolError::ResetFailed);
     }
     return {};
 }

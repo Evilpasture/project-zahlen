@@ -18,6 +18,14 @@ namespace ZHLN::Vk {
 
 class Context;
 
+// Failures of the semaphore/submission machinery shared by CommandRing and
+// FrameSync. Every site that produces one is a wait or a submit whose caller
+// asks whether the device is still there.
+enum class CommandRingError : uint8_t {
+    WaitFailed ZHLN_ANNOTATION(ZHLN::Description<"Waiting on a submission timeline failed"> {}) = 1,
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)"> {}),
+};
+
 [[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept;
 
 [[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(

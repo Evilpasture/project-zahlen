@@ -20,6 +20,7 @@
 #include <Zahlen/PluginManifest.hpp>
 #include <Zahlen/PluginManifestGraph.hpp>
 #include <Zahlen/PluginManifestRegistry.hpp>
+#include <Zahlen/Core/ErrorDescribe.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -183,7 +184,7 @@ void test_plugin_screenshot_dynamic_load_and_error_propagation() {
     ExpectFalse(badRes.has_value());
     if (!badRes) {
         ExpectTrue(badRes.error() == Screenshot::Error::WriteFailed);
-        ExpectEq(badRes.error().ToError().Message(), std::string_view {"Failed to encode or write captured frame PNG"});
+        ExpectTrue(ZHLN::DescribeStaticError(badRes.error()).find("Failed to encode or write captured frame PNG") != std::string::npos);
     }
 }
 
@@ -271,8 +272,10 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     };
 
     for (const std::string_view name: {"freecam", "screenshot"}) {
-        SharedLibrary lib;
-        ExpectTrue(lib.OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs}) == SharedLibraryOpenStatus::Opened);
+        auto opened = SharedLibrary::OpenPlugin(name, PluginSearchOptions {.searchDirs = searchDirs});
+        if (!ExpectTrue(opened.has_value() && opened->has_value()))
+            continue;
+        SharedLibrary lib = std::move((*opened)->library);
         if (!ExpectTrue(lib.IsOpen()))
             continue;
 
@@ -320,7 +323,7 @@ void test_plugin_mangled_entrypoint_direct_dlsym_and_missing_symbol() {
     ExpectFalse(noSym.has_value());
     if (!noSym) {
         ExpectTrue(noSym.error() == AppError::PluginSymbolMissing);
-        ExpectEq(noSym.error().ToError().Message(), std::string_view {"Plugin shared library does not export ZHLN::COM::CreateAppLayerRaw"});
+        ExpectTrue(ZHLN::DescribeStaticError(noSym.error()).find("does not export") != std::string::npos);
     }
 }
 

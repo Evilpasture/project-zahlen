@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 // clang-format off
 // clang-format on
@@ -313,7 +314,11 @@ struct Layer {
     ClientSession* session = nullptr;
 
     void Tick(COM::IEngine& engine, float dt) {
-        if (session != nullptr) session->PrePhysicsTick(engine, dt);
+        if (session != nullptr) {
+            // The session's leaf logging resolves through the ambient
+            // sink (the engine's hub, installed at engine creation).
+            session->PrePhysicsTick(engine, dt);
+        }
     }
 
     void BeforeRender(COM::IEngine& engine, float dt) {
@@ -321,7 +326,9 @@ struct Layer {
     }
 
     void Stop(COM::IEngine& engine) noexcept {
-        if (session != nullptr) session->OnEngineTeardown(engine);
+        if (session != nullptr) {
+            session->OnEngineTeardown(engine);
+        }
     }
 };
 

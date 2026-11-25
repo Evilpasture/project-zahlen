@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vulkan/core/Extensions.hpp"
-#include <Zahlen/Log.hpp>
+#include <algorithm>
 #include <expected>
 
 namespace ZHLN::Vk {
 
 enum class ExtensionBuilderError : uint8_t {
-    MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
+    MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing"> {}) = 1,
 };
 
 namespace {
@@ -49,9 +49,7 @@ auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties
     if (volkInitialize() != VK_SUCCESS || vkEnumerateInstanceExtensionProperties == nullptr) {
         return {};
     }
-    return EnumerateProperties([](uint32_t* count, VkExtensionProperties* props) {
-        return vkEnumerateInstanceExtensionProperties(nullptr, count, props);
-    });
+    return EnumerateProperties([](uint32_t* count, VkExtensionProperties* props) { return vkEnumerateInstanceExtensionProperties(nullptr, count, props); });
 }
 
 auto EnumerateDeviceExtensions(const VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties> {
@@ -64,9 +62,7 @@ auto EnumerateDeviceExtensions(const VkPhysicalDevice physical) noexcept -> std:
 }
 
 auto HasExtension(const std::span<const VkExtensionProperties> available, const std::string_view name) noexcept -> bool {
-    return std::ranges::any_of(available, [name](const VkExtensionProperties& prop) {
-        return name == prop.extensionName;
-    });
+    return std::ranges::any_of(available, [name](const VkExtensionProperties& prop) { return name == prop.extensionName; });
 }
 
 auto IsInstanceExtensionSupported(const std::string_view extension) noexcept -> bool {
@@ -104,7 +100,8 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
-ExtensionBuilder::ExtensionBuilder(std::vector<std::string> available) noexcept: _available(std::move(available)) {}
+ExtensionBuilder::ExtensionBuilder(std::vector<std::string> available) noexcept: _available(std::move(available)) {
+}
 
 auto ExtensionBuilder::ForDevice(const VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
     return ExtensionBuilder(ExtensionNames(EnumerateDeviceExtensions(physical)));
@@ -132,7 +129,14 @@ auto ExtensionBuilder::Require(const std::string_view name) noexcept -> Extensio
 }
 
 auto ExtensionBuilder::Optional(const std::string_view name) noexcept -> ExtensionBuilder& {
-    if (const auto* matched = FindAvailable(name); matched != nullptr && !std::ranges::contains(_active, *matched)) {
+    const auto* matched = FindAvailable(name);
+    if (matched == nullptr) {
+        if (!std::ranges::contains(_skipped, name)) {
+            _skipped.emplace_back(name);
+        }
+        return *this;
+    }
+    if (!std::ranges::contains(_active, *matched)) {
         _active.push_back(*matched);
     }
     return *this;
@@ -148,10 +152,11 @@ auto ExtensionBuilder::OptionalGroup(const std::initializer_list<std::string_vie
 }
 
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ErrorCode> {
+    // A required extension that is not there is a hard failure, not a line: the
+    // error code is the answer and the names stay on the builder
+    // (MissingRequired()) for a caller that wants to say which. Nothing here
+    // touches a sink -- that decision belongs to whoever built the device.
     if (!_missingRequired.empty()) {
-        for (const auto& name: _missingRequired) {
-            ZHLN::LogError("[Vulkan] Required extension is not supported: {}", name);
-        }
         return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }
     return ExtensionResult(std::move(_active));

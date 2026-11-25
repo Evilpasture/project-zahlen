@@ -15,7 +15,6 @@
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Zahlen/Render/Vertex.hpp>
 #include <vector>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 
@@ -80,7 +79,6 @@ auto ShapeCache::GetOrCreate(ShapeType type, float p1, float p2, float p3, float
     }
 
     if (newShape == nullptr) {
-        ZHLN::Log("Failed to create Jolt Shape! Degenerate parameters?");
         return nullptr;
     }
 

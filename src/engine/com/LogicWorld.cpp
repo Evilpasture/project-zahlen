@@ -4,6 +4,7 @@
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/ECS/Components.hpp>
+#include "LogBridge.hpp"
 #include <ecs/ECS.hpp>
 #include <engine/World.hpp>
 #include <physics/Physics.hpp>
@@ -124,12 +125,29 @@ auto                 FindLogic(StringView name) noexcept -> const LogicComponent
 } // namespace
 class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, ISimulation> {
   public:
-    explicit LogicWorld(std::unique_ptr<World> world, PhysicsConfig config): m_world(std::move(world)), m_config(config) {
+    LogicWorld(std::unique_ptr<World> world, PhysicsConfig config, Ref<ILogger> logger, Ref<IErrorRegistry> errors)
+        : m_world(std::move(world)), m_config(config), m_logger(std::move(logger)), m_errors(std::move(errors)) {
+        // Standalone worlds (no engine around them) contribute their hub as
+        // the ambient sink. Spawned inside a running engine the sink is
+        // already the engine's -- installing ours would silently divert
+        // every ambient line (including test capture and fidelity harnesses)
+        // for as long as this world lives, so leave it alone.
+        if (ZHLN::GetLogSink().write == nullptr) {
+            m_previousSink  = ZHLN::GetLogSink();
+            ZHLN::SetLogSink(ZHLN::LogBridge::ToSink(m_logger.Get()));
+            m_installedSink = true;
+        }
         Reflect::ForEachNestedType<Components>([&]<class T>() {
             constexpr auto name = Reflect::CanonicalTypeName<T>();
             m_engineNames.insert(name);
             ECS::Registry::InternAndMapNameToFamilyID(name, ECS::ComponentFamily::GetTypeID<T>());
         });
+    }
+    [[nodiscard]] ILogger* Logger() noexcept override {
+        return m_logger.Get();
+    }
+    [[nodiscard]] IErrorRegistry* Errors() noexcept override {
+        return m_errors.Get();
     }
     IEntities* Entities() noexcept override;
     ISimulation* Simulation() noexcept override {
@@ -484,7 +502,13 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
 
   private:
     friend class Implements<LogicWorld, ILogicWorld, IEntities, ISimulation>;
-    ~LogicWorld() = default;
+    ~LogicWorld() {
+        // Restore the sink that predates this world (usually a session's
+        // hub bridge or the test capture sink) before m_logger is released.
+        if (m_installedSink) {
+            ZHLN::SetLogSink(m_previousSink);
+        }
+    }
     auto Registry() const noexcept -> ECS::Registry& {
         return m_world->GetRegistry();
     }
@@ -498,6 +522,10 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     }
     std::unique_ptr<World>               m_world;
     PhysicsConfig                        m_config;
+    Ref<ILogger>                         m_logger;
+    ZHLN::LogSink                        m_previousSink {};
+    bool                                 m_installedSink = false;
+    Ref<IErrorRegistry>                  m_errors;
     std::unordered_set<uint32_t>         m_dynamicFamilies;
     std::unordered_set<std::string_view> m_engineNames;
 };
@@ -507,18 +535,53 @@ IEntities* LogicWorld::Entities() noexcept {
 }
 auto CreateLogicWorldRaw(const ChainInNode* config) noexcept -> Result<ILogicWorld*> {
     PhysicsConfig physics {};
-    auto          read = DispatchInChain<PhysicsConfig>(config, [&](const PhysicsConfig& c) -> Result<void> {
-        physics = c;
-        return {};
-    });
+    LoggerConfig  loggerNode {};
+    ErrorConfig   errorNode {};
+    // One dispatch over every node this factory accepts. Two sequential
+    // DispatchInChain calls could never both succeed: each rejects any node in
+    // the chain that is not in its own AllowedTs list, so a chain carrying
+    // PhysicsConfig failed the LoggerConfig/ErrorConfig pass and a chain
+    // carrying either of those failed the PhysicsConfig pass. Only a null chain
+    // got through.
+    const auto read = DispatchInChain<PhysicsConfig, LoggerConfig, ErrorConfig>(
+        config, [&]<typename Node>(const Node& node) -> Result<void> {
+            if constexpr (std::is_same_v<Node, PhysicsConfig>) {
+                physics = node;
+            } else if constexpr (std::is_same_v<Node, LoggerConfig>) {
+                loggerNode = node;
+            } else {
+                errorNode = node;
+            }
+            return {};
+        }
+    );
     if (!read.HasValue())
         return read.error;
     if (!physics.maxBodies || !physics.maxBodyPairs || !physics.maxContactConstraints || !physics.tempAllocatorSize)
         return Error::InvalidArgument;
-    auto world = World::Create(physics);
+    Ref<ILogger>        logger;
+    Ref<IErrorRegistry> errors(errorNode.registry);
+    if (loggerNode.logger != nullptr) {
+        logger = Ref<ILogger>(loggerNode.logger);
+    } else {
+        // Honor the level the caller asked for: a world created without a
+        // LoggerConfig node still gets the console default, but one that named
+        // a level gets that level instead of the factory's Info.
+        auto made = CreateLogger(InChain(LoggerConfig {.logger = nullptr, .level = loggerNode.level}));
+        if (!made) return made.error();
+        logger = Ref<ILogger>(made->Get());
+    }
+    if (errors.Get() == nullptr) {
+        // A caller-supplied registry (above) already carries whatever detail it
+        // recorded; this branch only runs when there is nothing to seed from.
+        auto made = CreateErrorRegistry();
+        if (!made) return made.error();
+        errors = std::move(*made);
+    }
+    auto world = World::Create(physics, false);
     if (!world)
         return world.error();
-    auto* object = new (std::nothrow) LogicWorld(std::move(*world), physics);
+    auto* object = new (std::nothrow) LogicWorld(std::move(*world), physics, std::move(logger), std::move(errors));
     if (!object)
         return Error::AllocationFailed;
     return static_cast<ILogicWorld*>(object);

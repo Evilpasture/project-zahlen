@@ -8,17 +8,11 @@
 #include "render/RenderTargetTags.hpp"
 #include "vulkan/Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <expected>
 
 namespace ZHLN {
-
-enum class ShadowResolutionError : uint8_t {
-    DeviceLost       ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map"> {}) = 1,
-    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed"> {}),
-};
 
 class TargetManager {
   public:

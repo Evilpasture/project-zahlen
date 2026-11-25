@@ -61,7 +61,10 @@ std::expected<void, ErrorCode> SubmitInfos(
 
     const VkResult result = vkQueueSubmit2(queue, 1, &submit, VK_NULL_HANDLE);
     if (result != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(result));
+        if (result == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(VulkanCallError::DeviceLost);
+        }
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
     return {};
 }
@@ -71,7 +74,10 @@ std::expected<void, ErrorCode> SubmitInfos(
 std::expected<void, ErrorCode> WaitIdle(const VkQueue queue) noexcept {
     const VkResult result = vkQueueWaitIdle(queue);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToError(result));
+        if (result == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(VulkanCallError::DeviceLost);
+        }
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
     return {};
 }

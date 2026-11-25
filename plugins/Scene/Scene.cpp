@@ -15,6 +15,7 @@
 #include <array>
 #include <type_traits>
 
+
 namespace ZHLN::Scene {
 
 namespace {
@@ -137,7 +138,6 @@ auto Instantiate(
         if (NeedsMaterial(entity.material) || entity.shape == ShapeKind::Box || entity.shape == ShapeKind::Plane) {
             auto material = BuildMaterial(graphics, entity.material);
             if (!material) {
-                ZHLN::Log("[Scene] entity '{}': material creation failed", entity.name);
                 return std::unexpected(Error::MaterialCreationFailed);
             }
             params.materialOverride = *material;
@@ -286,7 +286,6 @@ auto Instantiate(
     for (const Light& light: description.lights) {
         const auto type = ZHLN::Reflect::StringToEnum<LightType>(light.type);
         if (!type) {
-            ZHLN::Log("[Scene] light '{}': '{}' is not a LightType", light.name, light.type);
             return std::unexpected(Error::UnknownLightType);
         }
 
@@ -352,10 +351,6 @@ auto Instantiate(
     }
 
     committed = true;
-    ZHLN::Log(
-        "[Scene] '{}' instantiated: {} entities, {} lights", description.name.empty() ? std::string {"untitled"} : description.name, instance.entities.size(),
-        instance.lights.size()
-    );
     return instance;
 }
 

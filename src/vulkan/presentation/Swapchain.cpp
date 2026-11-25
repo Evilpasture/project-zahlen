@@ -16,7 +16,7 @@ template <typename T, typename Enumerate>
         uint32_t count  = 0;
         VkResult result = enumerate(&count, nullptr);
         if (result != VK_SUCCESS) {
-            return std::unexpected(ToError(result));
+            return std::unexpected(SwapchainError::SurfaceQueryFailed);
         }
         if (count == 0) {
             return values;
@@ -29,7 +29,7 @@ template <typename T, typename Enumerate>
             return values;
         }
         if (result != VK_INCOMPLETE) {
-            return std::unexpected(ToError(result));
+            return std::unexpected(SwapchainError::SurfaceQueryFailed);
         }
     }
 }
@@ -37,13 +37,13 @@ template <typename T, typename Enumerate>
 [[nodiscard]] auto QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept -> std::expected<SwapchainSupport, ErrorCode> {
     if (physical == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || vkGetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr ||
         vkGetPhysicalDeviceSurfaceFormatsKHR == nullptr || vkGetPhysicalDeviceSurfacePresentModesKHR == nullptr) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        return std::unexpected(SwapchainError::InvalidArguments);
     }
 
     SwapchainSupport support {};
     VkResult         result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &support.capabilities);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToError(result));
+        return std::unexpected(SwapchainError::SurfaceQueryFailed);
     }
 
     auto formats = EnumerateSurfaceValues<VkSurfaceFormatKHR>([physical, surface](uint32_t* count, VkSurfaceFormatKHR* values) {
@@ -168,10 +168,10 @@ template <typename T, typename Enumerate>
         uint32_t count  = 0;
         VkResult result = vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr);
         if (result != VK_SUCCESS) {
-            return std::unexpected(ToError(result));
+            return std::unexpected(SwapchainError::ImageRetrievalFailed);
         }
         if (count == 0) {
-            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+            return std::unexpected(SwapchainError::ImageRetrievalFailed);
         }
 
         images.resize(count);
@@ -181,7 +181,7 @@ template <typename T, typename Enumerate>
             return images;
         }
         if (result != VK_INCOMPLETE) {
-            return std::unexpected(ToError(result));
+            return std::unexpected(SwapchainError::ImageRetrievalFailed);
         }
     }
 }
@@ -217,8 +217,11 @@ auto Swapchain::Rebuild(
     const bool                enablePresentTiming,
     const bool                allowMutableFormat
 ) noexcept -> std::expected<void, ErrorCode> {
-    if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || (Valid() && _device != device)) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+    if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE) {
+        return std::unexpected(SwapchainError::InvalidArguments);
+    }
+    if (Valid() && _device != device) {
+        return std::unexpected(SwapchainError::DeviceMismatch);
     }
 
     auto support_result = QuerySwapchainSupport(physical.handle, surface);
@@ -227,13 +230,13 @@ auto Swapchain::Rebuild(
     }
     const SwapchainSupport& support = *support_result;
     if (support.formats.empty() || support.presentModes.empty()) {
-        return std::unexpected(ToError(VK_ERROR_FORMAT_NOT_SUPPORTED));
+        return std::unexpected(SwapchainError::SurfaceUnsupported);
     }
 
     const VkSurfaceFormatKHR format       = ChooseFormat(support.formats);
     const VkPresentModeKHR   present_mode = ChoosePresentMode(support.presentModes, requestedPresentMode, vsync);
     if (present_mode == VK_PRESENT_MODE_MAX_ENUM_KHR) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        return std::unexpected(SwapchainError::SurfaceUnsupported);
     }
     const VkExtent2D chosen_extent = ChooseExtent(support.capabilities, extent);
 
@@ -245,7 +248,7 @@ auto Swapchain::Rebuild(
         image_count = support.capabilities.maxImageCount;
     }
     if (image_count == 0) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        return std::unexpected(SwapchainError::SurfaceUnsupported);
     }
 
     const std::array<uint32_t, 2> queue_families {physical.graphicsFamily, physical.presentFamily};
@@ -305,7 +308,7 @@ auto Swapchain::Rebuild(
         created           = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
     }
     if (created != VK_SUCCESS) {
-        return std::unexpected(ToError(created));
+        return std::unexpected(SwapchainError::CreationFailed);
     }
 
     auto images_result = RetrieveImages(device, new_handle);
@@ -341,7 +344,7 @@ auto Swapchain::Rebuild(
                 }
             }
             vkDestroySwapchainKHR(device, new_handle, nullptr);
-            return std::unexpected(ToError(view_created));
+            return std::unexpected(SwapchainError::ImageViewCreationFailed);
         }
     }
 
@@ -355,7 +358,7 @@ auto Swapchain::Rebuild(
 auto Swapchain::AcquireNext(VkSemaphore signalSemaphore, uint64_t timeout) noexcept
     -> std::expected<AcquiredSwapchainImage, ErrorCode> {
     if (!Valid()) {
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        return std::unexpected(SwapchainError::NotInitialized);
     }
 
     uint32_t imageIndex = 0;
@@ -365,7 +368,10 @@ auto Swapchain::AcquireNext(VkSemaphore signalSemaphore, uint64_t timeout) noexc
         return std::unexpected(SwapchainAcquireError::OutOfDate);
     }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-        return std::unexpected(ToError(res));
+        if (res == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(SwapchainError::DeviceLost);
+        }
+        return std::unexpected(SwapchainError::AcquireFailed);
     }
 
     return AcquiredSwapchainImage {

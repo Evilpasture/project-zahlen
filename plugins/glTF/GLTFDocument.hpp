@@ -60,6 +60,7 @@ struct Document {
     std::vector<TextureDocument>      textures;
     std::vector<PrimitiveDocument>    primitives; // shared source primitives uploaded once
     std::vector<PartDocument>         parts;      // one instance binding per source node
+    std::vector<std::string>          warnings;   // advisory import diagnostics (unsupported extensions, skipped data)
 };
 // All parse products own their CPU data; no cgltf pointer or input-byte borrow
 // survives this call. Optional assets serves external .bin/image paths through

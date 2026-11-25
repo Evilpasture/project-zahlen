@@ -10,6 +10,7 @@
 #include <numbers>
 #include <string_view>
 
+
 namespace ZHLN {
 
 void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& ecb, ECS::Res<AssetManager> assets) {
@@ -54,7 +55,7 @@ void EnvironmentSunSystem::Update(SunEnvQuery query, ECS::EntityCommandBuffer& e
             }
         }
         if (authoredSun && sun != nullptr) {
-            Log("[IBL] Authored sun replaces cooked HDR sun; conditioned IBL and original visible sky remain in use.");
+            Log("Authored sun replaces cooked HDR sun; conditioned IBL and original visible sky remain in use.");
         }
         return;
     }

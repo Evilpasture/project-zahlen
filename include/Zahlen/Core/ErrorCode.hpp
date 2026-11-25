@@ -7,95 +7,79 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/Reflection/Core.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
-#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <optional>
-#include <string_view>
 #include <type_traits>
 
 namespace ZHLN {
 
-class Error;
+extern void ERROR_CODE_CANNOT_BE_ZERO();
 
-
-struct ErrorCategory {
+struct ErrorText {
     std::string_view name;
-    std::string_view (*to_string)(uint32_t) noexcept;
-    std::string_view (*to_name)(uint32_t) noexcept;
+    std::string_view message;
+};
+
+// One enumerator of a statically anchored error category. Registration
+// COPIES these into engine-owned strings (see ErrorRegistry.cpp), so no
+// function pointer or string view into a registrant's DSO is ever stored:
+// a plugin may be dlclosed without leaving anything dangling behind, and
+// no Unregister call is required.
+struct StaticErrorEntry {
+    uint32_t         value = 0;
+    std::string_view name;
+    std::string_view message;
 };
 
 namespace TemplatedDetail {
 
-constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
-    return Hash32(str);
-}
+// The static error-category table lives in libzahlen_engine (one copy per
+// process, reached through this exported function) -- never as an inline
+// table in this header, which every DSO would duplicate under `local: *;`
+// symbol hiding.
+ZHLN_API auto RegisterStaticErrorCategoryRaw(uint32_t categoryHash, std::string_view categoryName, std::span<const StaticErrorEntry> entries) noexcept -> bool;
 
-struct EnumErrorEntry {
-    uint32_t         value = 0;
-    std::string_view name {};
-    std::string_view message {};
-};
-
-struct ResolvedErrorStrings {
-    std::string_view category = "None";
-    std::string_view name     = "None";
-    std::string_view message  = "None";
-};
-
-// The error-category registry lives inside libzahlen_engine so the engine, the
-// host executable, and dynamically loaded plugin shared libraries share one
-// table across ELF, Mach-O, and PE. Enum categories copy their reflected name
-// and description strings into engine-owned storage on first registration so a
-// plugin can return a typed ErrorCode and be unloaded via dlclose/FreeLibrary
-// without leaving dangling .data/.rodata/.text pointers behind.
-ZHLN_API void RegisterEnumCategory(
-    uint32_t              hash,
-    std::string_view      categoryName,
-    const EnumErrorEntry* entries,
-    std::size_t           entryCount
-) noexcept;
-
-ZHLN_API auto LookupErrorStrings(uint32_t hash, uint32_t value) noexcept -> ResolvedErrorStrings;
-
+// Anchors enum E's reflection entries to its ErrorCode category, once per
+// enum per process. Called from the ErrorCode(E) constructor, so any enum
+// that is ever carried by an ErrorCode can be formatted readably -- no
+// per-consumer RegisterEnum bookkeeping.
 template <typename E>
-    requires std::is_enum_v<E>
-consteval auto MakeEnumErrorTable() -> std::array<EnumErrorEntry, Reflect::kEnumEntries<E>.size()> {
-    constexpr auto&                                             src = Reflect::kEnumEntries<E>;
-    std::array<EnumErrorEntry, Reflect::kEnumEntries<E>.size()> out {};
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        out[i] = EnumErrorEntry {
-            .value   = static_cast<uint32_t>(src[i].value),
-            .name    = src[i].name,
-            .message = !src[i].message.empty() ? src[i].message : src[i].name,
-        };
-    }
-    return out;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-struct CategoryRegistration {
-    static inline bool registered = []() noexcept -> bool {
-        static constexpr auto table = MakeEnumErrorTable<E>();
-        RegisterEnumCategory(
-            HashTypeName(ZHLN::Reflect::ScopedTypeName<E>()),
-            ZHLN::Reflect::ScopedTypeName<E>(),
-            table.data(),
-            table.size()
-        );
-        return true;
+inline void AnchorEnumCategory() noexcept {
+    static const bool anchored = []() noexcept {
+        std::array<StaticErrorEntry, Reflect::kEnumEntries<E>.size()> entries {};
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            const auto& entry = Reflect::kEnumEntries<E>[i];
+            entries[i]        = StaticErrorEntry {
+                .value   = static_cast<uint32_t>(entry.value),
+                .name    = entry.name,
+                .message = !entry.message.empty() ? entry.message : entry.name,
+            };
+        }
+        return RegisterStaticErrorCategoryRaw(Hash32(Reflect::ScopedTypeName<E>()), Reflect::ScopedTypeName<E>(), entries);
     }();
-};
+    (void) anchored;
+}
 
 } // namespace TemplatedDetail
 
-ZHLN_API void RegisterErrorCategory(uint32_t hash, const ErrorCategory* category) noexcept;
 
-extern void ERROR_CODE_CANNOT_BE_ZERO();
-
-
+// The one error carrier (the former ZHLN::Error wrapper is gone: it was the
+// same two words with a second, divergent category hash). ErrorCode is pure
+// data -- constructing one has no side effects and touches no registry. The
+// category word is Hash32 of the enum's canonical type name, the same name
+// ChainTypeID and InterfaceIdOf hash, so an enumerator's category, its
+// IErrorRegistry registration, and get<E>() can never disagree. Turning a code
+// into text is IErrorRegistry::Describe's job (Zahlen/COM/IErrorRegistry.hpp);
+// nothing in this header knows that interface exists. The name hashed is
+// Reflect::ScopedTypeName, not CanonicalTypeName: canonical names reject
+// anonymous-namespace enums, which are legitimate .cpp-local error enums.
+// Constructing from an enum also anchors that enum's category in the
+// engine-owned static describe table (run-time path only; consteval
+// construction stays side-effect free). The two words remain pure data.
 struct ErrorCode {
     constexpr ErrorCode() noexcept = default;
     constexpr ErrorCode(uint32_t cat, uint32_t val) noexcept: category(cat), value(val) {
@@ -107,8 +91,8 @@ struct ErrorCode {
         static_assert(
             !Reflect::EnumHasValue<E>(0),
             "Error enums must not contain a 0 enumerator: ErrorCode's value word uses 0 for 'no "
-            "error'. Start error enumerators at 1; convert foreign codes (e.g. VkResult) "
-            "with Vk::ToError instead."
+            "error'. Start error enumerators at 1; translate foreign codes at the "
+            "boundary into the domain enum that owns them instead."
         );
         if (static_cast<uint32_t>(val) == 0) {
             if consteval {
@@ -116,10 +100,14 @@ struct ErrorCode {
             } else {
                 DebugBreak();
             }
-        }
-        if consteval {
         } else {
-            [[maybe_unused]] bool dummy = TemplatedDetail::CategoryRegistration<E>::registered;
+            if consteval {
+            } else {
+                // Anchor at construction: formatting this code anywhere --
+                // any DSO, any thread, no registry in hand -- resolves to
+                // "Category::Name: message" (see Zahlen/Core/ErrorDescribe.hpp).
+                TemplatedDetail::AnchorEnumCategory<E>();
+            }
         }
     }
 
@@ -139,15 +127,18 @@ struct ErrorCode {
         return std::nullopt;
     }
 
-    constexpr auto operator==(const ErrorCode& other) const noexcept -> bool = default;
+    [[nodiscard]] constexpr auto CategoryHash() const noexcept -> uint32_t {
+        return category;
+    }
+    [[nodiscard]] constexpr auto Value() const noexcept -> uint32_t {
+        return value;
+    }
 
-    [[nodiscard]] Error ToError() const noexcept;
+    constexpr auto operator==(const ErrorCode& other) const noexcept -> bool = default;
 
   private:
     uint32_t category = 0;
     uint32_t value    = 0;
-
-    friend class Error;
 };
 
 static_assert(sizeof(ErrorCode) == 8);

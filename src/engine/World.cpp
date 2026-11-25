@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ArticulationContext.hpp"
+#include "EngineErrors.hpp"
 #include "Hierarchy.hpp"
 #include "EngineGlobals.hpp"
 #include <Zahlen/Core/Profiler.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <engine/EngineServices.hpp>
-#include <Zahlen/Log.hpp>
 #include <engine/World.hpp>
 #include <engine/VisibilityState.hpp>
 #include <ecs/ECS.hpp>
@@ -20,12 +20,6 @@
 #include <vector>
 
 namespace ZHLN {
-
-
-enum class WorldInitError : uint8_t {
-    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}) = 1,
-    WorldAllocationFailed       ZHLN_ANNOTATION(ZHLN::Description<"World instance allocation failed"> {}),
-};
 
 struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
@@ -42,13 +36,14 @@ struct World::Impl {
     bool joltAcquired = false;
 };
 
-auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> std::expected<std::unique_ptr<World>, ErrorCode> {
+auto World::Create(const PhysicsConfig& physicsConfig, const bool deferECBDestroy)
+    -> std::expected<std::unique_ptr<World>, ErrorCode> {
     auto instance = std::unique_ptr<World>(new (std::nothrow) World());
     if (!instance) {
         return std::unexpected(WorldInitError::WorldAllocationFailed);
     }
 
-    instance->_impl = std::make_unique<Impl>();
+    instance->_impl  = std::make_unique<Impl>();
     auto& impl      = *instance->_impl;
 
     impl.registry.RegisterAllComponentsIn<Components>();

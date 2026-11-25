@@ -50,7 +50,7 @@ class InstanceView {
     }
 
   private:
-    VkInstance _handle            = VK_NULL_HANDLE;
+    VkInstance _handle = VK_NULL_HANDLE;
     bool       _debugUtilsEnabled = false;
 };
 
@@ -73,6 +73,7 @@ class Instance {
         std::span<const std::string_view> extensions = {},
         ValidationMode                    validation = ValidationMode::On
     ) noexcept -> std::expected<Instance, ErrorCode>;
+
 
     [[nodiscard]] auto Handle() const noexcept -> VkInstance {
         return _handle;

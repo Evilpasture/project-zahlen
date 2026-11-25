@@ -12,9 +12,11 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <cmath>
 #include <format>
 #include <utility>
+
 
 namespace ZHLN::FallbackScene {
 
@@ -129,7 +131,7 @@ void DefaultPreset::BuildFallbackScene(COM::IEngine& engine, Scene::InstantiateO
     _owner  = COM::Ref<COM::IEngine>(&engine);
     _popup  = true;
 
-    Log("[DefaultPreset] No scene document selected; showing diagnostic scene.");
+    ZHLN::COM::Log(engine.Logger(), "No scene document selected; showing diagnostic scene.");
 
     // ========================================================================
     // 1. 3D SCENE SETUP
@@ -146,7 +148,7 @@ void DefaultPreset::BuildFallbackScene(COM::IEngine& engine, Scene::InstantiateO
         // did not boot is the half of this scene that matters, so it is still
         // built: the handles below stay null and Update()'s animation patches
         // nothing.
-        Log("[DefaultPreset] fallback scene rejected: {}", instance.error());
+        ZHLN::COM::Log(engine.Logger(), "fallback scene rejected: {}", instance.error());
     } else {
         if (instance->entities.size() > kEmblemIndex) {
             _emblem = instance->entities[kEmblemIndex];
@@ -171,7 +173,7 @@ void DefaultPreset::Update(COM::IEngine& engine, float dt) {
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
     if (engine.Actions()->KeyPressed(KeyCode::Escape, kPrimarySeat)) {
         _popup = !_popup;
-        Log("[DefaultPreset] GUI Popup {}.", _popup ? "Restored" : "Minimized");
+        ZHLN::COM::Log(engine.Logger(), "GUI Popup {}.", _popup ? "Restored" : "Minimized");
     }
 
     // 1. Animate 3D Emblem & Orbit Light

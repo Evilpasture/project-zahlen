@@ -5,7 +5,6 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include "vulkan/VkError.hpp"
 #include "vulkan/execution/RenderQueue.hpp"
 
 #include <Zahlen/Core/Description.hpp>
@@ -21,6 +20,12 @@ namespace ZHLN::Vk {
 enum class CommandPoolError : uint8_t {
     PoolNotReady ZHLN_ANNOTATION(ZHLN::Description<"Command pool device handle is not initialized">{}) = 1,
     NullDevice ZHLN_ANNOTATION(ZHLN::Description<"Cannot create a command pool with a null device">{}),
+    CreationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Command pool creation failed">{}),
+    AllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Command buffer allocation failed">{}),
+    ResetFailed      ZHLN_ANNOTATION(ZHLN::Description<"Command pool reset failed">{}),
+    // Only Reset is a per-frame call whose caller checks; Create and
+    // Allocate fail at startup, where there is nothing to recover into.
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)">{}),
 };
 
 template <Vk::QueueType QType = Vk::QueueType::Graphics>

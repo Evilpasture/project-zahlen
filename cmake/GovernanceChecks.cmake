@@ -14,6 +14,8 @@
 #   - check_macro_governance.py     (every #define allowlisted in configure/macro_allowlist.json)
 #   - check_include_governance.py   (unconditional Platform.hpp; Jolt.hpp wrapper in app layers)
 #   - check_namespace_governance.py (TemplatedDetail vs allowlisted plain detail; no TU/module detail)
+#   - check_com_boundary.py         (no public include/Zahlen header includes COM/, and nothing outside
+#                                    src/engine/com/ does, so the two logging worlds cannot leak)
 #   - check_module_linkage.py       (inline rules across module interface/implementation units)
 #   - check_error_ordinals.py       (no raw ErrorCode ordinal casts outside allowlist)
 #   - check_include_provenance.pl   (direct/transitive header provenance across tracked symbols)

@@ -38,9 +38,9 @@
 // and a reason, which is what the panel draws.
 
 #include "SystemProbe.hpp"
+#include <format>
 #include <Zahlen/Core/SharedLibrary.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -595,9 +595,6 @@ auto NvmlProbe::Init(std::string_view gpuNameHint) -> std::expected<void, ErrorC
 
     _device = chosen->first;
     _name   = std::move(chosen->second);
-    if (!gpuNameHint.empty() && !_name.empty() && _name != gpuNameHint) {
-        ZHLN::Log("[Bench] system telemetry: NVML reports '{}' while the renderer draws on '{}'.", _name, gpuNameHint);
-    }
     return {};
 }
 
@@ -661,15 +658,6 @@ class LinuxProbe final: public SystemProbe {
         InitGpu(gpuNameHint);
 
         _backend = BackendLabel(_cores > 0 ? "procfs" : "", GpuSourceLabel());
-
-        ZHLN::Log(
-            "[Bench] system telemetry: {} CPU cores ({} clocks, {} usage), GPU counters: {}.", _cores,
-            _cpufreqLive ? "cpufreq" : (_cpuInfoMHz ? "/proc/cpuinfo" : "none exposed"), _cores > 0 ? "procfs" : "none exposed",
-            GpuSourceLabel().empty() ? "none exposed" : GpuSourceLabel()
-        );
-        if (const std::string_view name = GpuName(); !name.empty()) {
-            ZHLN::Log("[Bench] system telemetry: GPU '{}'.", name);
-        }
     }
 
     [[nodiscard]] auto Sample() noexcept -> std::optional<ProbeSample> override {
@@ -789,15 +777,12 @@ class LinuxProbe final: public SystemProbe {
     }
 
     void InitGpu(std::string_view gpuNameHint) {
+        // No NVML is the common case on a machine without the NVIDIA driver,
+        // and it is not a fault: the sysfs cards get their turn below.
         auto nvml = std::make_unique<NvmlProbe>();
-        if (std::expected<void, ErrorCode> ready = nvml->Init(gpuNameHint); ready) {
+        if (nvml->Init(gpuNameHint)) {
             _nvml = std::move(nvml);
             return;
-        } else {
-            // No NVML is the common case on a machine without the NVIDIA driver,
-            // and it is not a fault: the reason goes in the log line and the sysfs
-            // cards get their turn.
-            ZHLN::Log("[Bench] system telemetry: NVML unavailable ({}).", ready.error());
         }
 
         // The sysfs cards, matched to the renderer's name by vendor, then by

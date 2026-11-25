@@ -84,6 +84,23 @@ class ExtensionBuilder {
 
     [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ErrorCode>;
 
+    // What the negotiation dropped, as borrowed views. Build() records nothing
+    // and logs nothing: a missing optional extension is normal on Lavapipe and
+    // headless runs, so the caller decides whether it is worth a line, and a test
+    // asserts on it instead of intercepting the ambient sink.
+    //
+    // Views, not copies: every name the builder is asked about is either a
+    // VK_*_EXTENSION_NAME literal or a string the caller is still holding (the
+    // engine's own extension list), so materialising them into std::strings only
+    // to hand back a reference would be pure waste. The caller keeps the names
+    // alive for as long as it looks at the builder.
+    [[nodiscard]] auto MissingRequired() const noexcept -> std::span<const std::string_view> {
+        return _missingRequired;
+    }
+    [[nodiscard]] auto SkippedOptional() const noexcept -> std::span<const std::string_view> {
+        return _skipped;
+    }
+
   private:
     explicit ExtensionBuilder(std::vector<std::string> available) noexcept;
 
@@ -93,7 +110,8 @@ class ExtensionBuilder {
 
     std::vector<std::string> _available;
     std::vector<std::string> _active;
-    std::vector<std::string> _missingRequired;
+    std::vector<std::string_view> _missingRequired;
+    std::vector<std::string_view> _skipped;
 };
 
 }

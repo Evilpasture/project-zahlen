@@ -278,13 +278,17 @@ auto CreateBoxInternal(
     ZHLN::FVec3                     halfExtents,
     const SpawnParams&              params,
     bool                            buildBLAS
-) -> Entity {
+) -> std::expected<Entity, ErrorCode> {
     auto boxColor = params.materialOverride.baseColorFactor;
     if (!(boxColor.w >= 0.0f)) {
         boxColor = {0.8f, 0.4f, 0.2f, 1.0f};
     }
 
-    Mesh mesh = BuildBoxMesh(gfx, halfExtents, boxColor, buildBLAS);
+    auto built = BuildBoxMesh(gfx, halfExtents, boxColor, buildBLAS);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+    Mesh mesh = std::move(*built);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -408,14 +412,19 @@ auto SpawnPrimitive(
 } // namespace
 
 auto CreateSphereInternal(RenderContext& gfx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params, bool buildBLAS)
-    -> Entity {
+    -> std::expected<Entity, ErrorCode> {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
+    auto built = BuildSphereMesh(gfx, radius, resolved.color, buildBLAS);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+
     return SpawnPrimitive(
-        gfx, reg, pc, "Sphere", BuildSphereMesh(gfx, radius, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Sphere,
+        gfx, reg, pc, "Sphere", std::move(*built), Components::OwnedMeshComponent::Shape::Sphere,
         FVec3 {radius, 0.0f, 0.0f}, radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved, buildBLAS
     );
 }
@@ -428,14 +437,19 @@ auto CreateCylinderInternal(
     float                           height,
     const SpawnParams&              params,
     bool                            buildBLAS
-) -> Entity {
+) -> std::expected<Entity, ErrorCode> {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
+    auto built = BuildCylinderMesh(gfx, radius, height, resolved.color, buildBLAS);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+
     return SpawnPrimitive(
-        gfx, reg, pc, "Cylinder", BuildCylinderMesh(gfx, radius, height, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Cylinder,
+        gfx, reg, pc, "Cylinder", std::move(*built), Components::OwnedMeshComponent::Shape::Cylinder,
         FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
         height * 0.5f * maxScale, resolved, buildBLAS
     );
@@ -449,14 +463,19 @@ auto CreateConeInternal(
     float                           height,
     const SpawnParams&              params,
     bool                            buildBLAS
-) -> Entity {
+) -> std::expected<Entity, ErrorCode> {
     SpawnParams resolved = params;
     if (resolved.color.w < 0.0f) {
         resolved.color = {0.8f, 0.4f, 0.2f, 1.0f};
     }
     const float maxScale = std::max({params.scale.x, params.scale.y, params.scale.z});
+    auto built = BuildConeMesh(gfx, radius, height, resolved.color, buildBLAS);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+
     return SpawnPrimitive(
-        gfx, reg, pc, "Cone", BuildConeMesh(gfx, radius, height, resolved.color, buildBLAS), Components::OwnedMeshComponent::Shape::Cone,
+        gfx, reg, pc, "Cone", std::move(*built), Components::OwnedMeshComponent::Shape::Cone,
         FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale,
         height * 0.5f * maxScale, resolved, buildBLAS
     );
@@ -470,8 +489,12 @@ auto CreatePlaneInternal(
     ZHLN::FVec4                     color,
     const SpawnParams&              params,
     bool                            buildBLAS
-) -> Entity {
-    Mesh mesh = BuildPlaneMesh(gfx, extent, color, buildBLAS);
+) -> std::expected<Entity, ErrorCode> {
+    auto built = BuildPlaneMesh(gfx, extent, color, buildBLAS);
+    if (!built) [[unlikely]] {
+        return std::unexpected(built.error());
+    }
+    Mesh mesh = std::move(*built);
 
     Material mat;
     if (params.materialOverride.pipeline != PipelineID::Invalid) {
@@ -673,7 +696,7 @@ auto InstantiatePrefabInternal(
 }
 
 void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& reg) {
-    ZHLN::Log("[Engine] Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
+    kLog.Warn("Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     gfx.ClearGPUCaches();
 
@@ -686,21 +709,61 @@ void RebuildVulkanResources(RenderContext& gfx, ECS::Registry& reg) {
     for (size_t i = 0; i < entities.size(); ++i) {
         auto& owned = owners[i];
         switch (owned.shape) {
-            case Shape::Box:
-                owned.mesh = BuildBoxMesh(gfx, owned.dimensions, owned.color, owned.buildBLAS);
+            case Shape::Box: {
+                auto rebuilt = BuildBoxMesh(gfx, owned.dimensions, owned.color, owned.buildBLAS);
+                if (!rebuilt) [[unlikely]] {
+                    kLog.Error("Procedural mesh rebuild failed (shape=box, error={})", rebuilt.error());
+                    // Whatever IDs it still holds died with the old context.
+                    owned.mesh = {};
+                    break;
+                }
+                owned.mesh = std::move(*rebuilt);
                 break;
-            case Shape::Plane:
-                owned.mesh = BuildPlaneMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
+            }
+            case Shape::Plane: {
+                auto rebuilt = BuildPlaneMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
+                if (!rebuilt) [[unlikely]] {
+                    kLog.Error("Procedural mesh rebuild failed (shape=plane, error={})", rebuilt.error());
+                    // Whatever IDs it still holds died with the old context.
+                    owned.mesh = {};
+                    break;
+                }
+                owned.mesh = std::move(*rebuilt);
                 break;
-            case Shape::Sphere:
-                owned.mesh = BuildSphereMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
+            }
+            case Shape::Sphere: {
+                auto rebuilt = BuildSphereMesh(gfx, owned.dimensions.x, owned.color, owned.buildBLAS);
+                if (!rebuilt) [[unlikely]] {
+                    kLog.Error("Procedural mesh rebuild failed (shape=sphere, error={})", rebuilt.error());
+                    // Whatever IDs it still holds died with the old context.
+                    owned.mesh = {};
+                    break;
+                }
+                owned.mesh = std::move(*rebuilt);
                 break;
-            case Shape::Cylinder:
-                owned.mesh = BuildCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
+            }
+            case Shape::Cylinder: {
+                auto rebuilt = BuildCylinderMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
+                if (!rebuilt) [[unlikely]] {
+                    kLog.Error("Procedural mesh rebuild failed (shape=cylinder, error={})", rebuilt.error());
+                    // Whatever IDs it still holds died with the old context.
+                    owned.mesh = {};
+                    break;
+                }
+                owned.mesh = std::move(*rebuilt);
                 break;
-            case Shape::Cone:
-                owned.mesh = BuildConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
+            }
+            case Shape::Cone: {
+                auto rebuilt = BuildConeMesh(gfx, owned.dimensions.x, owned.dimensions.y, owned.color, owned.buildBLAS);
+                if (!rebuilt) [[unlikely]] {
+                    kLog.Error("Procedural mesh rebuild failed (shape=cone, error={})", rebuilt.error());
+                    // Whatever IDs it still holds died with the old context.
+                    owned.mesh = {};
+                    break;
+                }
+                owned.mesh = std::move(*rebuilt);
                 break;
+            }
             case Shape::None:
                 continue;
         }

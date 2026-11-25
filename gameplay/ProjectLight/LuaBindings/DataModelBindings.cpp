@@ -33,7 +33,9 @@
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
+
 }
+
 
 namespace ZHLN::ProjectLight {
 namespace {
@@ -112,6 +114,7 @@ struct LuaConnectionRecord {
 struct LuaBindingContext {
     lua_State* state = nullptr;
     DataModel* dataModel = nullptr;
+    std::string   lastCallbackError; // most recent Lua callback failure
     bool alive = true;
     std::vector<std::shared_ptr<LuaConnectionRecord>> connections;
 
@@ -1315,7 +1318,10 @@ void InvokeLuaConnection(const std::weak_ptr<LuaConnectionRecord>& weakConnectio
     pushArguments(state, std::forward<decltype(arguments)>(arguments)...);
     if (lua_pcall(state, static_cast<int>(sizeof...(arguments)), 0, 0) != LUA_OK) {
         const char* error = lua_tostring(state, -1);
-        if (error != nullptr) LogWarning("[ProjectLight] Lua DataModel event callback failed: {}", error);
+        if (LuaBindingContext* context = GetBindingContext(state); context != nullptr) {
+            context->lastCallbackError = error != nullptr ? error : "unknown Lua callback error";
+            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel{"Script"}, "Lua callback failed: {}", context->lastCallbackError);
+        }
     }
     lua_settop(state, originalTop);
 }

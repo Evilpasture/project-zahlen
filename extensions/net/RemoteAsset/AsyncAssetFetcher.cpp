@@ -345,10 +345,9 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
             } else if (conditional) {
                 req.headers.push_back({.name = "If-Modified-Since", .value = job->cached->origin.lastModified});
             }
-            auto resp = HTTP::Fetch(req);
+            auto resp = HTTP::FetchDetailed(req);
             if (!resp) {
-                const Error err = resp.error();
-                miss(resp.error(), std::format("{} ({})", err.Category(), err.Message()));
+                miss(resp.error().code, std::format("fetch failed ({}: {})", resp.error().code, resp.error().detail));
                 break;
             }
             if (job->cancelSignal.load(std::memory_order::relaxed)) {

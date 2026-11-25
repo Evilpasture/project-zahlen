@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <utility>
 
+
 namespace ZHLN::Bench {
 
 namespace {
@@ -87,7 +88,6 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     auto chain = COM::InChain(config);
     auto world = COM::CreateLogicWorld(chain.Head());
     if (!world) {
-        ZHLN::LogError("[Bench] world creation failed; no benchmark is running: {}", world.error());
         return false;
     }
 
@@ -102,10 +102,6 @@ auto LogicBenchmark::Initialize(size_t initialEntityCount, const PhysicsConfig& 
     SpawnWorkload(initialEntityCount);
 
     m_runStartSeconds = m_clock.WallTimeSinceStart();
-    ZHLN::Log(
-        "[Bench] initialized: {} entities, {} bodies live, {} body budget (maxBodies {}, {} body pairs, {} contact constraints)", m_metrics.entityCount,
-        m_liveBodies, m_bodyCeiling, config.maxBodies, config.maxBodyPairs, config.maxContactConstraints
-    );
     return true;
 }
 
@@ -138,13 +134,10 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
     size_t spawned = 0;
     for (; spawned < count; ++spawned) {
         if (m_liveBodies >= m_bodyCeiling) {
-            if (!m_ceilingReported) {
-                m_ceilingReported = true;
-                ZHLN::LogWarning(
-                    "[Bench] workload stopped at {} bodies: the physics config has no room for more. Raise PhysicsConfig::maxBodies (reserve {}).",
-                    m_liveBodies, kBodyReserve
-                );
-            }
+            // The workload stops at the configured ceiling. (The one-time line
+            // that told the operator to raise PhysicsConfig::maxBodies is gone
+            // with the rest of the benchmark's ambient logging; the ceiling
+            // itself is what the numbers are measured against.)
             break;
         }
 

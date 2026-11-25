@@ -2,26 +2,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <CDN/CDN.hpp>
+#include <format>
 
 #include <RemoteAsset/URLResolver.hpp>
 #include <memory>
 #include <Zahlen/FileSystem/Paths.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Log.hpp>
 
 #include <cstddef>
 #include <utility>
 
+
 namespace ZHLN::CDN {
 
 namespace {
 
-// Logs the enumerator's annotated message, formatted with the failure site's
-// context, and hands back the code to return. The log line and the code come
-// from the same enumerator, so they cannot disagree.
+// Hands back the enumerator's code; callers report it (the annotated
+// message travels with the code and is rendered via IErrorRegistry). The
+// values that explain the refusal are logged here, at Debug, through the
+// ambient sink: the return type is a two-word code and cannot carry them, so
+// discarding them -- which is what the `((void) args, ...);` version did -- made
+// every call site's carefully chosen context dead weight.
 template <typename... Args>
-[[nodiscard]] auto Refuse(Error error, Args&&... args) -> ZHLN::ErrorCode {
-    ZHLN::LogError("[CDN] {}", ZHLN::Reflect::FormatEnumMessage(error, std::forward<Args>(args)...));
+[[nodiscard]] auto Refuse(const Error error, const Args&... args) -> ZHLN::ErrorCode {
+    if constexpr (sizeof...(Args) > 0) {
+        if (ZHLN::AmbientLogEnabled(ZHLN::LogSeverity::Debug)) {
+            std::string detail;
+            ((detail += std::format(" {}", args)), ...);
+            ZHLN::Log<ZHLN::LogSeverity::Debug>(ZHLN::LogChannel{"Network"}, 
+                "CDN refused {}{}", ZHLN::Reflect::EnumToString(error), detail
+            );
+        }
+    }
     return error;
 }
 

@@ -17,6 +17,3 @@
 #include <lua/LuaValueTypes.hpp>
 #include <lua/ReflectLua.hpp>
 
-namespace ZHLN::ReflectLua {
-
-} // namespace ZHLN::ReflectLua

@@ -27,6 +27,7 @@
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -37,6 +38,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
+
 
 namespace ZHLN::ProjectLight {
 namespace {
@@ -244,7 +247,7 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
             material.value.metallicFactor  = object.metallic;
             params.materialOverride        = material.value;
         } else {
-            Log("[ProjectLight] Could not create material for '{}': {}", object.name, Error(material.error).Message());
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("Could not create material for '{}': {}", object.name, material.error);
         }
 
         const FVec3 halfExtents = FVec3::Splat(0.5f);
@@ -584,8 +587,7 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
                 if (entities.IsAlive(bound)) ++liveEntityCount;
             }
         }
-        Log("[ProjectLight][scene] initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}",
-            state.objects.size(), partCount, lightCount, boundEntityCount, liveEntityCount, state.workspaceUid, state.localPlayerUid, state.localRootPartUid);
+        ZHLN::COM::Log(engine.Logger(), "initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}", state.objects.size(), partCount, lightCount, boundEntityCount, liveEntityCount, state.workspaceUid, state.localPlayerUid, state.localRootPartUid);
         std::unordered_map<std::string, size_t> classCounts;
         for (const auto& [uid, object]: state.objects) {
             (void)uid;
@@ -600,11 +602,11 @@ void SceneMirror::SyncSceneEntities(COM::IEngine& engine, SceneMirrorState& stat
             if (!classSummary.empty()) classSummary += ", ";
             classSummary += std::format("{}={}", distribution[i].first, distribution[i].second);
         }
-        Log("[ProjectLight][scene] parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
         if (partCount == 0 && lightCount == 0) {
-            LogWarning("[ProjectLight][scene] snapshot completed but contains no renderable Part/MeshPart or light objects.");
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("snapshot completed but contains no renderable Part/MeshPart or light objects.");
         } else if (liveEntityCount == 0) {
-            LogWarning("[ProjectLight][scene] replicated renderables exist, but no live ECS render entities were created.");
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("replicated renderables exist, but no live ECS render entities were created.");
         }
         state.summaryLogged = true;
     }
@@ -673,7 +675,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     const auto charRes        = sim.CreateCharacter(COM::InChain(charDesc));
     state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::BodyID::Null();
     if (state.localControllerBody == Physics::BodyID::Null()) {
-        Log("[ProjectLight] Could not create the local player CharacterVirtual body.");
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("Could not create the local player CharacterVirtual body.");
         return;
     }
 

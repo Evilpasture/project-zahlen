@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "vulkan/DeviceDiagnostics.hpp"
 #include "vulkan/VulkanHeader.hpp"
 #include "vulkan/core/Device.hpp"
 #include "vulkan/core/Features.hpp"
@@ -22,6 +23,7 @@ enum class ContextError : uint8_t {
     InvalidInstance            ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
     LoaderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan loader initialization failed"> {}),
     NoSuitableDeviceFound      ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
+    DeviceCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Logical device creation failed"> {}),
 };
 
 class GPUAddressTracker;
@@ -37,6 +39,7 @@ struct DevicePresentSupport {
 class Context {
   public:
     Context() noexcept = default;
+
     ~Context() noexcept;
 
     Context(const Context&)                    = delete;
@@ -71,6 +74,16 @@ class Context {
     }
     [[nodiscard]] auto PhysicalInfo() const noexcept -> const PhysicalDeviceInfo& {
         return _physical;
+    }
+
+    // What device negotiation decided, in order, as a borrowed view. The cold
+    // path collected it and logged nothing; whoever built this context decides
+    // what to say, and a test reads the same entries directly instead of
+    // installing a sink. The ledger stays owned by the context for its whole
+    // life -- a few short strings -- so reading it never depends on whether the
+    // composition root has already drained it.
+    [[nodiscard]] auto Diagnostics() const noexcept -> std::span<const DeviceDiagnostic> {
+        return _diagnostics.Entries();
     }
 
     [[nodiscard]] auto BufferAddress(const VkBuffer buffer) const noexcept -> VkDeviceAddress {
@@ -143,6 +156,7 @@ class Context {
     LogicalDevice               _device;
     DevicePresentSupport        _present {};
     EnabledFeatureSet           _enabledFeatures;
+    DiagnosticLedger            _diagnostics {};
     GPUAddressTracker*          _addressTracker              = nullptr;
     bool                        _addressBindingReportEnabled = false;
 };
@@ -161,6 +175,7 @@ class ContextBuilder {
         _instance = instance;
         return *this;
     }
+
     auto Instance(Vk::Instance&& instance) noexcept -> ContextBuilder& {
         _ownedInstance.emplace(std::move(instance));
         _instance = InstanceView(*_ownedInstance);

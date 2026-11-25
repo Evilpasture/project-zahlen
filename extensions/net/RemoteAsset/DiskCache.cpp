@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <HTTP/HTTP.hpp>
+#include <cstdio>
+#include <format>
 #include <RemoteAsset/DiskCache.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -167,10 +168,6 @@ void ReportEvictions(const EvictionBatch& evictions, const std::filesystem::path
     if (!evictions.HasErrors()) {
         return;
     }
-    ZHLN::LogWarning(
-        "DiskCache: {} entr{} under '{}' could not be evicted after {}; the cache may exceed its budget.", evictions.ErrorCount(),
-        evictions.ErrorCount() == 1 ? "y" : "ies", root.string(), after
-    );
 }
 
 [[nodiscard]] auto BodyHash(std::span<const uint8_t> bytes) noexcept -> uint64_t {

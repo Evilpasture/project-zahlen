@@ -99,7 +99,7 @@ enum class Error : uint8_t {
 struct Failure {
     // The failure's code, in the engine-wide std::expected<T, ZHLN::ErrorCode>
     // convention: the same two words as ZHLN::Error, without the machinery that
-    // turns them into text. Format()/ToError() promote it on the way out.
+    // turns them into text. Format() renders it on the way out.
     ZHLN::ErrorCode code {};
     // Byte offset in the stream where the failure was detected.
     uint64_t offset {};
@@ -115,7 +115,7 @@ struct Failure {
 
     // Single-line, fully annotated diagnostic.
     [[nodiscard]] auto Format() const -> std::string {
-        std::string text = std::format("ZHLN.Wire: {}", details.empty() ? std::string(code.ToError().Message()) : details);
+        std::string text = std::format("ZHLN.Wire: {}", details.empty() ? std::format("{}", code) : details);
         if (!path.empty()) {
             text += std::format(" [at {} @ byte {}]", path, offset);
         }
@@ -125,8 +125,8 @@ struct Failure {
         return text;
     }
 
-    [[nodiscard]] auto ToError() const noexcept -> ZHLN::Error {
-        return code.ToError();
+    [[nodiscard]] auto ToError() const noexcept -> ZHLN::ErrorCode {
+        return code;
     }
 
     auto operator==(const Failure& other) const noexcept -> bool = default;

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Animation/Context.hpp>
+#include <print>
+#include <cstdio>
 #include <Animation/Components.hpp>
 #include <Animation/PrefabRig.hpp>
 #include <Animation/ProceduralMath.hpp>
@@ -57,6 +59,7 @@
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <glTF/GLTFAssets.hpp>
 #include <glTF/GLTFDocument.hpp>
 
@@ -74,7 +77,6 @@ import ZHLN.ProceduralAnimation;
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -87,6 +89,8 @@ import ZHLN.ProceduralAnimation;
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <Zahlen/COM/LoggerView.hpp>
+
 
 namespace {
 
@@ -733,7 +737,6 @@ void CollectFirstPersonHeadMeshes(
             state.headMeshes.push_back({.entity = entity, .originalFlags = mesh->flags});
         }
     }
-    ZHLN::Log("[BSPSample] First-person head hide set contains {} mesh part(s) of {}.", state.headMeshes.size(), prefab.virtualPath);
 }
 
 /** Turns the sample's first-person head/hair hiding on or off for the collected parts. */
@@ -817,32 +820,18 @@ auto AttachCharacterRig(
     firstPerson.hideHead       = true;
     firstPerson.hideHair       = true;
 
-    ZHLN::Log(
-        "[BSPSample] Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper",
-        animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension
-    );
-    ZHLN::Log(
-        "[BSPSample] Procedural layers: gait={}, gravity bounce={}, leg IK={}, acceleration tilt={}, upper body={}, secondary motion={}.",
-        animationConfig.enableGait, animationConfig.enableGravityBounce, animationConfig.enableLegIK, animationConfig.enableAccelerationTilt,
-        animationConfig.enableUpperBody, animationConfig.enableSecondaryMotion
-    );
-    ZHLN::Log(
-        "[BSPSample] Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.",
-        animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection,
-        animationConfig.pelvisDropWeight
-    );
-    ZHLN::Log(
-        "[BSPSample] IK limits: extension={}, body tilt={} deg, ankle sideways={} deg, ankle forward={} deg.", animationConfig.maxLegExtension,
-        animationConfig.maxIKBodyTiltDegrees, animationConfig.maxAnkleSidewaysDegrees, animationConfig.maxAnkleForwardDegrees
-    );
+    ZHLN::COM::Log(engine.Logger(), "Pose interpolation: {} (stiffness={}, damping factor={}, bicubic tension={}).", useBicubic ? "bicubic" : "spring-damper", animationConfig.springStiffness, animationConfig.springDampingFactor, animationConfig.bicubicTension);
+    ZHLN::COM::Log(engine.Logger(), "Procedural layers: gait={}, gravity bounce={}, leg IK={}, acceleration tilt={}, upper body={}, secondary motion={}.", animationConfig.enableGait, animationConfig.enableGravityBounce, animationConfig.enableLegIK, animationConfig.enableAccelerationTilt, animationConfig.enableUpperBody, animationConfig.enableSecondaryMotion);
+    ZHLN::COM::Log(engine.Logger(), "Leg IK weight={}; authored X/Z=true; world lock={}; max height correction={}; pelvis-drop weight={}.", animationConfig.enableLegIK ? animationConfig.legIKWeight : 0.0f, animationConfig.worldLockFeet, animationConfig.maxFootHeightCorrection, animationConfig.pelvisDropWeight);
+    ZHLN::COM::Log(engine.Logger(), "IK limits: extension={}, body tilt={} deg, ankle sideways={} deg, ankle forward={} deg.", animationConfig.maxLegExtension, animationConfig.maxIKBodyTiltDegrees, animationConfig.maxAnkleSidewaysDegrees, animationConfig.maxAnkleForwardDegrees);
     if (animationConfig.authoredPoseOnly) {
-        ZHLN::Log("[BSPSample] Authored-pose-only isolation enabled; all procedural layers are bypassed.");
+        ZHLN::COM::Log(engine.Logger(), "Authored-pose-only isolation enabled; all procedural layers are bypassed.");
     } else if (!animationConfig.enableLegIK) {
-        ZHLN::Log("[BSPSample] Leg IK disabled; gait/keyframe layers remain active.");
+        ZHLN::COM::Log(engine.Logger(), "Leg IK disabled; gait/keyframe layers remain active.");
     }
 
     if (prefab) {
-        ZHLN::Log("[BSPSample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
+        ZHLN::COM::Log(engine.Logger(), "GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
         int32_t idleTrack = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "idle") : -1;
         if (idleTrack < 0 && !prefab->animations.empty()) {
@@ -852,10 +841,10 @@ auto AttachCharacterRig(
         const int32_t runTrack  = rigInfo ? ZHLN::FindAnimationTrack(*rigInfo, "run") : -1;
         if (idleTrack >= 0) {
             const auto& clip = prefab->animations[static_cast<size_t>(idleTrack)];
-            ZHLN::Log("[BSPSample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
-            ZHLN::Log("[BSPSample] Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
+            ZHLN::COM::Log(engine.Logger(), "Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, std::string_view(clip.name), clip.duration, clip.channels.size());
+            ZHLN::COM::Log(engine.Logger(), "Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
-            ZHLN::LogWarning("[BSPSample] '{}' contains no authored animation track; bind pose will be shown.", glbPath);
+            ZHLN::COM::LoggerView{engine.Logger()}.Warn("'{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
@@ -905,7 +894,7 @@ auto AttachCharacterRig(
             std::move(locomotion), std::move(hair), std::move(lookAt), animationConfig, std::move(firstPerson)
         );
     } else {
-        ZHLN::Log("[BSPSample] Notice: '{}' not found. Falling back to in-memory procedural rig.", glbPath);
+        ZHLN::COM::LoggerView{engine.Logger()}.Warn("'{}' not found; falling back to the in-memory procedural rig.", glbPath);
 
         ZHLN::RigBoneMap proceduralRig {};
         ZHLN::BuildStandardProceduralRig(proceduralRig);
@@ -1019,10 +1008,7 @@ void ApplyProceduralView(ZHLN::COM::IEngine& engine, bool firstPerson) {
     }
 
     g_view.firstPerson = firstPerson;
-    ZHLN::Log(
-        "[BSPSample] Character view: {}.",
-        firstPerson ? "FIRST PERSON / FREE LOOK, HEAD HIDDEN" : "THIRD PERSON / PROCEDURAL ORBIT (hold RMB to orbit, T returns to the eye)"
-    );
+    ZHLN::COM::Log(engine.Logger(), "Character view: {}.", firstPerson ? "FIRST PERSON / FREE LOOK, HEAD HIDDEN" : "THIRD PERSON / PROCEDURAL ORBIT (hold RMB to orbit, T returns to the eye)");
 }
 
 /** Adopts whatever is currently driving the camera as the sample's own look. */
@@ -1163,27 +1149,27 @@ void FirstPersonCameraStep(ZHLN::COM::IEngine& engine) {
 // present.
 
 void PrintControlsBanner(std::string_view mapPath) {
-    ZHLN::Log("==================================================================");
-    ZHLN::Log("       Zahlen Engine :: Source World Ingestion Sample             ");
-    ZHLN::Log("==================================================================");
-    ZHLN::Log("Map: {}", mapPath);
-    ZHLN::Log("Controls:");
-    ZHLN::Log("  WASD          - Move");
-    ZHLN::Log("  Mouse         - Look around (captured; no button to hold)");
-    ZHLN::Log("  Space         - Jump");
-    ZHLN::Log("  Left Shift    - Sprint");
-    ZHLN::Log("  E             - Interact with doors, buttons, and triggers");
-    ZHLN::Log("  V             - Toggle free camera (WASD fly, Space/E up, Q down, Left Shift fast)");
-    ZHLN::Log("                  The character waits where you left it; V puts the view back on it.");
-    ZHLN::Log("  T             - Toggle the procedural third-person orbit rig (hold RMB to orbit; rig and head shown)");
-    ZHLN::Log("                  First person keeps the free look and hides the imported head and hair.");
-    ZHLN::Log("  F3            - Toggle the logic benchmark panel (extensions/Benchmark; its own world, not this map)");
-    ZHLN::Log("  F4            - Toggle the frame telemetry panel (average FPS, 1%/0.1% frame-time lows, GPU stage timings)");
-    ZHLN::Log("                  Its Capture button writes one CSV row per frame under build/cache/captures/.");
-    ZHLN::Log("  F             - Log what the crosshair is over");
-    ZHLN::Log("  M             - Toggle mouse capture (release the cursor to use the window)");
-    ZHLN::Log("  Escape        - Quit sample");
-    ZHLN::Log("==================================================================");
+    std::println(stderr, "==================================================================");
+    std::println(stderr, "       Zahlen Engine :: Source World Ingestion Sample             ");
+    std::println(stderr, "==================================================================");
+    std::println(stderr, "Map: {}", mapPath);
+    std::println(stderr, "Controls:");
+    std::println(stderr, "  WASD          - Move");
+    std::println(stderr, "  Mouse         - Look around (captured; no button to hold)");
+    std::println(stderr, "  Space         - Jump");
+    std::println(stderr, "  Left Shift    - Sprint");
+    std::println(stderr, "  E             - Interact with doors, buttons, and triggers");
+    std::println(stderr, "  V             - Toggle free camera (WASD fly, Space/E up, Q down, Left Shift fast)");
+    std::println(stderr, "                  The character waits where you left it; V puts the view back on it.");
+    std::println(stderr, "  T             - Toggle the procedural third-person orbit rig (hold RMB to orbit; rig and head shown)");
+    std::println(stderr, "                  First person keeps the free look and hides the imported head and hair.");
+    std::println(stderr, "  F3            - Toggle the logic benchmark panel (extensions/Benchmark; its own world, not this map)");
+    std::println(stderr, "  F4            - Toggle the frame telemetry panel (average FPS, 1%/0.1% frame-time lows, GPU stage timings)");
+    std::println(stderr, "                  Its Capture button writes one CSV row per frame under build/cache/captures/.");
+    std::println(stderr, "  F             - Log what the crosshair is over");
+    std::println(stderr, "  M             - Toggle mouse capture (release the cursor to use the window)");
+    std::println(stderr, "  Escape        - Quit sample");
+    std::println(stderr, "==================================================================");
 }
 
 // --- Void-fall diagnostic -----------------------------------------------------
@@ -1217,10 +1203,8 @@ struct VoidPropTracker {
             const auto tr = reg.Get<ZHLN::Components::TransformComponent>(e);
             if (!tr || tr->position.y > thresholdY) continue;
             reported.insert(e.index);
-            ZHLN::Log(
-                "[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}).",
-                PickLabel(reg, e), tr->position.x, tr->position.y, tr->position.z
-            );
+            std::println(stderr, "VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}).",
+                PickLabel(reg, e), tr->position.x, tr->position.y, tr->position.z);
         }
     }
 };
@@ -1263,14 +1247,13 @@ auto main(int argc, char* argv[]) -> int {
 
     auto optionsRes = ZHLN::ParseEngineConfig(std::span(argv, static_cast<size_t>(argc)), engineConfig, skyboxHandlers);
     if (!optionsRes) {
-        ZHLN::LogError("[Sample] command line: {}", ZHLN::Error(optionsRes.error()).Message());
+        std::println(stderr, "[Sample] command line: {}", optionsRes.error());
         return EXIT_FAILURE;
     }
     if (optionsRes->helpRequested || optionsRes->versionRequested || optionsRes->graphRequested) {
         return EXIT_SUCCESS;
     }
 
-    ZHLN::SetLogLevel(engineConfig.logLevel);
 
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
@@ -1286,8 +1269,8 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (!std::filesystem::exists(mapPath)) {
-        ZHLN::LogError("BSP file not found: '{}'", mapPath.string());
-        ZHLN::LogError("Please verify that 'import/engine_assets/maps/gm_murder_drones.bsp' exists.");
+        std::println(stderr, "BSP file not found: '{}'", mapPath.string());
+        std::println(stderr, "Please verify that 'import/engine_assets/maps/gm_murder_drones.bsp' exists.");
         return EXIT_FAILURE;
     }
 
@@ -1299,36 +1282,34 @@ auto main(int argc, char* argv[]) -> int {
         assetRoot = std::filesystem::path("..") / assetRoot;
     }
 
-    ZHLN::Log("[BSPSample] Target map: {}", mapPath.string());
-    ZHLN::Log("[BSPSample] Asset root: {}", assetRoot.string());
+    std::println(stderr, "[BSPSample] Target map: {}", mapPath.string());
+    std::println(stderr, "[BSPSample] Asset root: {}", assetRoot.string());
     // 2. Read BSP file bytes
     auto bspBytesOpt = ReadFileBytes(mapPath);
     if (!bspBytesOpt) {
-        ZHLN::LogError("[BSPSample] Failed to read BSP file: {}", mapPath.string());
+        std::println(stderr, "[BSPSample] Failed to read BSP file: {}", mapPath.string());
         return EXIT_FAILURE;
     }
     const auto& bspBytes = *bspBytesOpt;
-    ZHLN::Log("[BSPSample] Loaded BSP file ({} KiB)", bspBytes.size() / 1024U);
+    std::println(stderr, "[BSPSample] Loaded BSP file ({} KiB)", bspBytes.size() / 1024U);
 
     // 3. Parse BSP headers & lumps
     auto bspMapExp = ZHLN::BSP::Parse(bspBytes);
     if (!bspMapExp) {
-        ZHLN::LogError("[BSPSample] Failed to parse BSP: {}", ZHLN::Error(bspMapExp.error()).Message());
+        std::println(stderr, "[BSPSample] Failed to parse BSP: {}", bspMapExp.error());
         return EXIT_FAILURE;
     }
     const auto& bspMap = *bspMapExp;
     g_rigCubeMap       = &bspMap;
-    ZHLN::Log("[BSPSample] Map version: {}", bspMap.version);
-    ZHLN::Log(
-        "[BSPSample] Entities: {}, Static Props: {}, Models: {}, Displacements: {}", bspMap.entities.size(), bspMap.staticProps.size(), bspMap.models.size(),
-        bspMap.dispInfos.size()
-    );
+    std::println(stderr, "[BSPSample] Map version: {}", bspMap.version);
+    std::println(stderr, "[BSPSample] Entities: {}, Static Props: {}, Models: {}, Displacements: {}", bspMap.entities.size(), bspMap.staticProps.size(), bspMap.models.size(),
+        bspMap.dispInfos.size());
 
     // 4. Initialize Engine
     ZHLN::Platform::Init();
     auto engineRes = ZHLN::COM::CreateEngine(engineConfig);
     if (!engineRes) {
-        ZHLN::LogError("[BSPSample] Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
+        std::println(stderr, "[BSPSample] Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -1341,14 +1322,14 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::FreeCam::Detach(*engine->Entities());
     if (!engineConfig.headless) {
         SetMouseCaptured(*engine, true);
-        ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
+        std::println(stderr, "[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
     }
 
     ZHLN::GUI::Context hudGui;
     ZHLN::HostUI       hostUI(*engine);
 #if defined(ZHLN_HAS_FONTS)
     if (auto fontAsset = ZHLN::Fonts::LoadBakedFont(engine->Assets(), ZHLN::Fonts::VendoredDefaultFontSource()); !fontAsset) {
-        ZHLN::LogWarning("[BSPSample] Font asset failed to load ({}), using embedded default.", ZHLN::Error(fontAsset.error()).Message());
+        std::println(stderr, "[BSPSample] Font asset failed to load ({}), using embedded default.", fontAsset.error());
     } else {
         hostUI.SetBakedFont(std::move(*fontAsset));
     }
@@ -1375,7 +1356,7 @@ auto main(int argc, char* argv[]) -> int {
     const std::string virtualPath = mapPath.string();
     g_rigImportOpts = importOpts;
     g_rigCubeMap    = &bspMap;
-    ZHLN::Log("[BSPSample] Preparing and uploading BSP assets...");
+    std::println(stderr, "[BSPSample] Preparing and uploading BSP assets...");
 
     std::vector<ZHLN::TextureID> ownedTextures;
     const auto rawBspBytes = std::as_bytes(std::span(bspBytes));
@@ -1383,7 +1364,7 @@ auto main(int argc, char* argv[]) -> int {
     if (!assetRoot.empty()) vfs.AddSearchPath(assetRoot.string());
     auto prepared = ZHLN::BSP::DecodeAssets(rawBspBytes, std::move(vfs), virtualPath, importOpts);
     if (!prepared || prepared->prefabs.empty()) {
-        ZHLN::LogError("[BSPSample] Failed to prepare BSP assets for '{}'", virtualPath);
+        std::println(stderr, "[BSPSample] Failed to prepare BSP assets for '{}'", virtualPath);
         return EXIT_FAILURE;
     }
 
@@ -1392,7 +1373,7 @@ auto main(int argc, char* argv[]) -> int {
         auto uploaded = ZHLN::BSP::UploadAsset(*engine->Assets(), *engine->Graphics(), prepared->source, prepared->prefabs[i], {.import = importOpts, .buildBLAS = true});
         if (!uploaded) {
             if (i == 0) {
-                ZHLN::LogError("[BSPSample] Failed to upload world BSP asset: {}", ZHLN::Error(uploaded.error()).Message());
+                std::println(stderr, "[BSPSample] Failed to upload world BSP asset: {}", uploaded.error());
                 return EXIT_FAILURE;
             }
             continue;
@@ -1412,13 +1393,13 @@ auto main(int argc, char* argv[]) -> int {
             }
         }
     }
-    ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
+    std::println(stderr, "[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
 
     // 6. Describe and Instantiate Scene
     const ZHLN::Scene::Document sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);
     auto instanceExp = ZHLN::Scene::Instantiate(*engine, sceneDesc);
     if (!instanceExp) {
-        ZHLN::LogError("[BSPSample] Failed to instantiate scene: {}", ZHLN::Error(instanceExp.error()).Message());
+        std::println(stderr, "[BSPSample] Failed to instantiate scene: {}", instanceExp.error());
         return EXIT_FAILURE;
     }
     const auto& instance = *instanceExp;
@@ -1446,6 +1427,10 @@ auto main(int argc, char* argv[]) -> int {
     std::optional<ZHLN::Animation::PrefabRig> rigInfo;
     auto tryLoadRig = [&](std::string_view candidate) -> bool {
         auto d = ZHLN::GLTF::Read(candidate, {}, engine->Assets());
+        if (d) {
+            for (const auto& warning : d->warnings)
+                ZHLN::Log<ZHLN::LogSeverity::Warning>("glTF: {}", warning);
+        }
         if (!d) return false;
         auto u = ZHLN::GLTF::Upload(*engine->Assets(), *engine->Graphics(), *d);
         if (!u) return false;
@@ -1473,7 +1458,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto bodyRes = engine->Simulation()->CreateCharacter(ZHLN::COM::InChain(ZHLN::Physics::CharacterCreateDesc {.position = spawnCenter.Cast<double>(), .maxSlopeRadians = (std::numbers::pi_v<float> / 180.0f) * 50.0f}, playerHull));
         if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
-            ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
+            ZHLN::Log<ZHLN::LogSeverity::Error>("Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
         const ZHLN::Physics::BodyID playerBody = bodyRes.value;
@@ -1503,10 +1488,9 @@ auto main(int argc, char* argv[]) -> int {
         AttachCharacterRig(*engine, g_player, rigPath, rigDoc, rigInfo, rigAsset.hash, g_view, characterHeight);
         ApplyProceduralView(*engine, g_view.firstPerson);
 
-        ZHLN::Log(
-            "[BSPSample] Spawned procedural character ({}) at ({:.2f}, {:.2f}, {:.2f})",
-            hasPlayerStart ? "info_player_start" : "fallback view position", spawnCenter.x, spawnCenter.y, spawnCenter.z
-        );
+        ZHLN::COM::Log(engine->Logger(),
+            "Spawned procedural character ({}) at ({:.2f}, {:.2f}, {:.2f})",
+            hasPlayerStart ? "info_player_start" : "fallback view position", spawnCenter.x, spawnCenter.y, spawnCenter.z);
     }
 
     // 9. Lighting & Post-Processing Setup
@@ -1592,13 +1576,12 @@ auto main(int argc, char* argv[]) -> int {
             const bool pickKeyDown = input.KeyDown(ZHLN::KeyCode::F, ZHLN::kPrimarySeat);
             if (pickKeyDown && !pickKeyWasDown) {
                 if (g_pick.hasHit) {
-                    ZHLN::Log(
-                        "[BSPSample] CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal ({:.2f}, {:.2f}, {:.2f})  body {}",
+                    ZHLN::COM::Log(engine->Logger(),
+                        "CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal ({:.2f}, {:.2f}, {:.2f})  body {}",
                         g_pick.label, g_pick.distance, g_pick.position.x, g_pick.position.y, g_pick.position.z,
-                        g_pick.normal.x, g_pick.normal.y, g_pick.normal.z, g_pick.bodyIndex
-                    );
+                        g_pick.normal.x, g_pick.normal.y, g_pick.normal.z, g_pick.bodyIndex);
                 } else {
-                    ZHLN::Log("[BSPSample] CROSSHAIR no hit within {:.1f} m.", kPickDistance);
+                    ZHLN::COM::Log(engine->Logger(), "CROSSHAIR no hit within {:.1f} m.", kPickDistance);
                 }
             }
             pickKeyWasDown = pickKeyDown;
@@ -1639,7 +1622,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (auto tick = engine->Tick(dt); !tick.HasValue()) {
-            ZHLN::LogError("[BSPMurderDrones] frame failed: {}", ZHLN::Error(tick.error).Message());
+            ZHLN::Log<ZHLN::LogSeverity::Error>("frame failed: {}", tick.error);
             break;
         }
         UpdatePlayerRigAmbientCube(*engine);
@@ -1654,6 +1637,6 @@ auto main(int argc, char* argv[]) -> int {
     for (ZHLN::TextureID tex : ownedTextures) {
         if (tex != ZHLN::TextureID::Invalid) engine->Graphics()->UnloadTexture(tex);
     }
-    ZHLN::Log("[BSPSample] Exiting cleanly.");
+    ZHLN::COM::Log(engine->Logger(), "Exiting cleanly.");
     return EXIT_SUCCESS;
 }

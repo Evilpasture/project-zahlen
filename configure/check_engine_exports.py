@@ -189,10 +189,9 @@ FORBIDDEN_CANARY_SYMBOLS: tuple[str, ...] = (
 REQUIRED_DSO_PREFIXES: tuple[tuple[str, str], ...] = (
     ("ZHLN::COM::CreateEngineRaw", "_ZN4ZHLN3COM15CreateEngineRaw"),
     ("ZHLN::COM::CreateLogicWorldRaw", "_ZN4ZHLN3COM19CreateLogicWorldRaw"),
+    ("ZHLN::COM::CreateErrorRegistryRaw", "_ZN4ZHLN3COM22CreateErrorRegistryRaw"),
+    ("ZHLN::COM::CreateLoggerRaw", "_ZN4ZHLN3COM15CreateLoggerRaw"),
     ("ZHLN::COM::RenderGraphDump", "_ZN4ZHLN3COM15RenderGraphDump"),
-    ("ZHLN::TemplatedDetail::RegisterEnumCategory", "_ZN4ZHLN15TemplatedDetail20RegisterEnumCategory"),
-    ("ZHLN::TemplatedDetail::LookupErrorStrings", "_ZN4ZHLN15TemplatedDetail18LookupErrorStrings"),
-    ("ZHLN::RegisterErrorCategory", "_ZN4ZHLN21RegisterErrorCategory"),
 )
 
 _COMMENT_OR_STR_RE = re.compile(

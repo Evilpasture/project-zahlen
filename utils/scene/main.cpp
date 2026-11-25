@@ -4,6 +4,7 @@
 // Diagnostic document/fallback host. Application owns the engine reference,
 // process scope, GUI context/font atlas and explicit frame staging.
 #include "SceneDocument.hpp"
+#include <cstdio>
 #if defined(ZHLN_SCENE_HOST_HAS_CONSOLE)
 #include <Console/ConsoleDebugger.hpp>
 #endif
@@ -33,6 +34,10 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
+
 
 namespace {
 struct HostLaunchConfig {
@@ -73,7 +78,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesyst
     const ZHLN::GraphicsSettings base    = engine.Graphics()->Settings();
     ZHLN::GraphicsSettings       staging = base;
     if (auto res = applyOverlay(staging); !res) {
-        ZHLN::LogWarning("[Graphics] '{}' rejected ({}); keeping live settings.", path.string(), res.error());
+        ZHLN::Log<ZHLN::LogSeverity::Warning>("'{}' rejected ({}); keeping live settings.", path.string(), res.error());
         return;
     }
 
@@ -86,7 +91,7 @@ void ApplyGraphicsProfileFromLua(ZHLN::COM::IEngine& engine, const std::filesyst
     }
 
     engine.Graphics()->ApplySettings(staging);
-    ZHLN::Log("[Graphics] applied declarative profile '{}' (preset={}).", path.string(), staging.qualityPreset);
+    ZHLN::COM::Log(engine.Logger(), "applied declarative profile '{}' (preset={}).", path.string(), ZHLN::Reflect::EnumToString(staging.qualityPreset));
 }
 #endif
 
@@ -110,7 +115,7 @@ struct DiagnosticHost {
 #if defined(ZHLN_SCENE_HOST_HAS_DISCORD)
         presence = std::make_unique<ZHLN::Discord::PresenceClient>("1548152303939358720");
         if (const auto started = presence->Start(); !started) {
-            ZHLN::LogWarning("[Discord] Failed to start presence: {}", started.error());
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("Failed to start presence: {}", ZHLN::Reflect::EnumToString(started.error()));
             presence.reset();
         } else {
             ZHLN::Discord::RichPresence activity;
@@ -135,7 +140,7 @@ struct DiagnosticHost {
             fallback.BuildFallbackScene(engine, {.buildBLAS = !launch->rasterOnly});
         } else if (!ZHLN::Tools::LoadSceneDocument(engine, launch->scenePath, {.buildBLAS = !launch->rasterOnly})) {
             engine.ClearScene();
-            ZHLN::LogWarning("[Scene] continuing with the default scene after '{}' failed.", launch->scenePath.string());
+            ZHLN::Log<ZHLN::LogSeverity::Warning>("continuing with the default scene after '{}' failed.", launch->scenePath.string());
         }
 #if defined(ZHLN_SCENE_HOST_HAS_CONSOLE)
         for (const auto& command: launch->consoleCommands) {
@@ -147,7 +152,7 @@ struct DiagnosticHost {
             if (!entry) continue;
             const std::string_view line = entry->text;
             [[maybe_unused]] const float r = entry->color.r, g = entry->color.g, b = entry->color.b, a = entry->color.a;
-            ZHLN::Log("[Console] {}", line);
+            ZHLN::COM::Log(engine.Logger(), "{}", line);
         }
 #else
         if (!launch->consoleCommands.empty())
@@ -163,7 +168,7 @@ struct DiagnosticHost {
                     ApplyGraphicsProfileFromLua(engine, path);
             });
             if (!watch)
-                ZHLN::LogWarning("[Graphics] could not watch '{}'.", path.string());
+                ZHLN::COM::LoggerView{engine.Logger()}.Warn("could not watch '{}'.", path.string());
         }
 #endif
         return {};
@@ -271,7 +276,7 @@ int main(int argc, char* argv[]) {
 #if !defined(ZHLN_SCENE_HOST_HAS_LUA)
     app.BeforeEngineCreate([&]() -> std::expected<void, ZHLN::ErrorCode> {
         if (launch.graphicsConfigPath != "config/graphics.lua") {
-            ZHLN::LogError("[SceneHost] --graphics-config requires the Lua extension");
+            std::println(stderr, "[SceneHost] --graphics-config requires the Lua extension");
             return std::unexpected(ZHLN::COM::Error::UnsupportedExtension);
         }
         return {};

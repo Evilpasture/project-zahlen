@@ -32,6 +32,11 @@ struct CullingScratch {
     Frustum                  shadowFrustum {};
     std::array<FVec3, 8> frustumCorners {};
     bool                     wasFrozen = false;
+
+    // The dev-only invariant check runs once per pass instance. That it already
+    // ran is state, so it sits here with the pass that owns it instead of inside
+    // a function-local static in a free function.
+    bool invariantsVerified = false;
 };
 
 class CullingSystem {

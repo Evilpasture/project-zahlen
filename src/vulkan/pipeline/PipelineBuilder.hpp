@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "vulkan/FormatTags.hpp" // Format::HasStencilFormat
-#include "vulkan/VkError.hpp"
 #include "vulkan/pipeline/PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
 #include <optional>

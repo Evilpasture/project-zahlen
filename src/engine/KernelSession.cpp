@@ -1,6 +1,8 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "EngineErrors.hpp"
+
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
 #include "tty/TTYBackend.hpp"
@@ -13,6 +15,7 @@
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <render/Render.hpp>
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
@@ -23,6 +26,7 @@
 #include <fstream>
 #include <new>
 #include <vector>
+#include "render/RenderLog.hpp"
 
 namespace ZHLN {
 
@@ -112,30 +116,24 @@ void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::sp
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            ZHLN::Log("[KernelSession] Could not open '{}' for writing the pipeline binaries.", temp.string());
+            kLog.Warn("Could not open '{}' for writing the pipeline binaries.", temp.string());
             return;
         }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
     }
     std::filesystem::rename(temp, target, ec);
     if (ec) {
-        ZHLN::Log("[KernelSession] Renaming '{}' into place failed: {}", temp.string(), ec.message());
+        kLog.Warn("Renaming '{}' into place failed: {}", temp.string(), ec.message());
         std::filesystem::remove(temp, ec);
         return;
     }
-    ZHLN::Log("[KernelSession] Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
+    Log("Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
 }
 
 } // namespace
 
-enum class KernelInitError : uint8_t {
-    WindowCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
-    TTYInitializationFailed    ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
-    RenderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
-    KernelAllocationFailed     ZHLN_ANNOTATION(ZHLN::Description<"Kernel instance allocation failed"> {}),
-};
-
 struct KernelSession::Impl {
+    ZHLN::LogSink        ambientSink {};
     std::unique_ptr<FS::FileSystemWatcher> fileSystemWatcher;
     std::unique_ptr<RenderContext>         renderContext;
     std::unique_ptr<AudioContext>          audioContext;
@@ -153,6 +151,7 @@ struct KernelSession::Impl {
     std::vector<WindowID>               windowIDs {WindowID::Primary};
 
     EngineConfig config;
+    ZHLN::LogSink previousSink {};
     // Own the bytes backing config.initialPipelineBinaryData across renderer
     // recreation. Only persist cache data loaded by the kernel itself.
     std::vector<uint8_t> pipelineBinaryData;
@@ -187,19 +186,33 @@ struct KernelSession::Impl {
     }
 };
 
-auto KernelSession::Create(const EngineConfig& config) -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
+auto KernelSession::Create(const EngineConfig& config, const ZHLN::LogSink ambientSink)
+    -> std::expected<std::unique_ptr<KernelSession>, ErrorCode> {
     auto instance = std::unique_ptr<KernelSession>(new (std::nothrow) KernelSession());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
     }
-    if (auto result = instance->InitInternal(config); !result) {
+    if (auto result = instance->InitInternal(config, ambientSink); !result) {
         return std::unexpected(result.error());
     }
     return instance;
 }
 
-auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
+
+
+auto KernelSession::InitInternal(const EngineConfig& cfg, const ZHLN::LogSink ambientSink) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
+    _impl->ambientSink       = ambientSink;
+    // Engine boundary: adapt the incoming logger into Core's ambient sink
+    // once, here. From this point every thread in the process -- including
+    // TaskSystem workers, which never pass through an install point --
+    // logs through the engine's hub instead of the stderr default. The
+    // previous Layer-0 sink is saved here and restored in ~KernelSession,
+    // before this session's hub can be released by its owner.
+    _impl->previousSink = ZHLN::GetLogSink();
+    if (ambientSink.write != nullptr) {
+        ZHLN::SetLogSink(ambientSink);
+    }
     _impl->config            = cfg;
     const auto inputReceiver = MakeInputReceiver(_impl->primaryInput);
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
@@ -223,7 +236,7 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
         if (!TTYBackend::IsSupported()) {
             return std::unexpected(KernelInitError::WindowCreationFailed);
         }
-        ZHLN::Log("[KernelSession] GLFW unavailable; falling back to a direct-to-display TTY session.");
+        Log("GLFW unavailable; falling back to a direct-to-display TTY session.");
         _impl->primaryHost = PlatformHost::CreateTTY(cfg.width, cfg.height, inputReceiver);
         if (!_impl->primaryHost.Valid()) {
             return std::unexpected(KernelInitError::TTYInitializationFailed);
@@ -238,6 +251,7 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
 
     InitRenderDocAPI();
 
+
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
@@ -246,27 +260,34 @@ auto KernelSession::InitInternal(const EngineConfig& cfg) -> std::expected<void,
     _impl->primaryExtent = _impl->primaryHost.GetSize();
     _impl->BeginShaderObservation();
 
+    // AudioContext logs its device init through the ambient logger
+    // installed above -- no second, redundant scope needed.
     _impl->audioContext = std::make_unique<AudioContext>(AudioConfig {.headless = cfg.headless});
     _impl->assetManager = std::make_unique<AssetManager>();
     _impl->assetManager->UseRenderContext(*_impl->renderContext);
 
     if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
         if (_impl->assetManager->MountPak(pak->string())) {
-            ZHLN::Log("Mounted asset pack: {}", pak->string());
+            Log("Mounted asset pack: {}", pak->string());
         } else {
-            ZHLN::LogWarning("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+            kLog.Warn("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
         }
     } else {
-        ZHLN::LogWarning("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
+        kLog.Warn("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};
 }
 
 KernelSession::~KernelSession() {
+    // Restore the Layer-0 sink that predates this session first: after
+    // this point the session's hub may be released by its owner, and no
+    // teardown line may be routed into it (or left pointing at it).
+    ZHLN::SetLogSink(_impl ? _impl->previousSink : ZHLN::LogSink {});
     if (_impl == nullptr) {
         return;
     }
+
 
     // Prefab buffers belong to the asset cache; it must release them while
     // the renderer that allocated them is still alive.
@@ -348,7 +369,20 @@ void KernelSession::RemoveWindow(WindowID id) {
     if (id == WindowID::Primary) return;
     auto* window = WindowFor(id);
     if (window == nullptr) return;
-    if (_impl->renderContext) _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window));
+    if (_impl->renderContext && *_impl->renderContext) {
+        // A removed window has no frame to fail and no recovery to attach to, so a
+        // failed release is reported here as the teardown fact it is -- the same
+        // treatment RenderContext::Destroy() gives one -- and deliberately not
+        // counted, because nothing recovered from it. API is void, so this is the
+        // only channel it has.
+        if (const auto released = _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(*window)); !released) {
+            if (released.error() == FrameResult::DeviceLost) {
+                kLog.Error("GPU device lost while releasing a removed window's target ({}).", released.error());
+            } else {
+                kRenderLog.Warn("Failed to release a removed window's target ({}).", released.error());
+            }
+        }
+    }
     // Save identity before destroying the window; never read through a freed reference.
     std::erase_if(_impl->secondaryWindows, [window](const auto& owned) { return owned.get() == window; });
     _impl->secondaryInputs.erase(id);
@@ -478,13 +512,37 @@ auto KernelSession::GetConfig() const noexcept -> const EngineConfig& {
     return _impl->config;
 }
 
-auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+auto KernelSession::HandleDeviceLost(const bool drainDevice) noexcept -> std::expected<void, ErrorCode> {
+    if (!_impl->renderContext || !*_impl->renderContext) {
+        // Recovery can be entered with nothing to recover -- no renderer at all, or
+        // one whose Destroy() has already taken the implementation: say so instead
+        // of dereferencing either.
+        return std::unexpected(RenderSystemError::RenderContextUnavailable);
+    }
+    // Pure recovery: nothing is logged or counted here. This is also the path a
+    // deliberate reset takes (IEngine::RecreateGraphicsDevice), and a reset is not a
+    // loss. The loss line is emitted where a loss is observed -- Engine::Present and
+    // Engine::ProvokeDeviceLost.
     _impl->assetManager->InvalidateGPUMeshes();
     _impl->StopShaderObservation();
     // jointOffset must survive device loss (IAssetLibrary contract): move
     // the tiny allocator state across RenderContext recreation here, in the
     // owner of RenderContext lifetime, instead of putting it back in World.
     auto jointAllocator = _impl->renderContext->ExtractJointAllocator();
+    // Nothing is logged here either way: the observer that saw the loss wrote the
+    // line -- and took the fault report. What differs is the drain. A recovery is
+    // running *because* the device is gone, so it releases without a WaitIdle; a
+    // caller resetting a healthy device (IEngine::RecreateGraphicsDevice) has GPU
+    // work in flight and must drain before the swapchain, semaphores, command
+    // pools and buffers it is about to destroy stop being referenced by pending
+    // submissions. Destroy() is that path: WaitIdle, dump a fault report if the
+    // drain itself finds a loss, then release. Either way the context is released
+    // exactly once, and the destructor's Destroy() finds !_impl and does nothing.
+    if (drainDevice) {
+        _impl->renderContext->Destroy();
+    } else {
+        _impl->renderContext->ReleaseDevice();
+    }
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->config);
@@ -498,8 +556,11 @@ auto KernelSession::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode
     return {};
 }
 
-void KernelSession::ProvokeDeviceLost() {
-    _impl->renderContext->ProvokeDeviceLost();
+auto KernelSession::ProvokeDeviceLost() -> std::expected<void, ErrorCode> {
+    if (!_impl->renderContext || !*_impl->renderContext) {
+        return std::unexpected(RenderSystemError::RenderContextUnavailable);
+    }
+    return _impl->renderContext->ProvokeDeviceLost();
 }
 
 } // namespace ZHLN

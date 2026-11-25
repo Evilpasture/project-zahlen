@@ -3,7 +3,6 @@
 
 #include "diagnostics/DiagnosticsInternal.hpp"
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/Log.hpp>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>

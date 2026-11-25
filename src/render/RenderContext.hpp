@@ -68,11 +68,36 @@ class RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
-    // Explicit teardown: drains the device and releases destinations,
-    // diagnostics and pending staging work. The destructor calls this;
-    // hosts may also call it to release GPU resources before the
-    // RenderContext itself goes away.
+    // False once the renderer has been released (Destroy(), ReleaseDevice()): the
+    // renderer is gone, and every other method here has a live renderer as its
+    // precondition. Both backends answer the same way -- the Vulkan one by having
+    // moved its implementation out, the null one by having cleared its state in
+    // place -- so a host that keys its teardown off this reads one contract.
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return _impl != nullptr && !_released;
+    }
+
+    // Explicit teardown: drains the device and dumps a pending fault report, then
+    // releases everything through ReleaseDevice(). The destructor always calls it, so
+    // hosts may call it early to release GPU resources: a repeat call is a no-op, and
+    // the renderer's state is destroyed here, in order, rather than whenever the
+    // RenderContext itself is finally freed. The object is inert afterwards -- the
+    // renderer is gone, not merely drained -- and reports false.
     void Destroy() noexcept;
+
+    // The release half of Destroy(): destinations, per-window presentation state and
+    // every remaining vkDestroy*, with no idle drain and no fault report. For callers
+    // that already know why the device is going away -- recovery, which is running
+    // *because* of the loss, or a context that is simply going out of scope. Nothing
+    // is logged; the move is the flag, so a repeat call does nothing.
+    void ReleaseDevice() noexcept;
+
+    // Write the device's fault report to the crash-dump path, if it has one and crash
+    // dumps are enabled; a no-op otherwise, and a no-op after release. This is not
+    // "reporting a loss" -- it is the only record of *why* the device died, and it can
+    // only be taken while the dying device still exists, so recovery asks for it
+    // before releasing instead of waiting for a teardown that follows.
+    void DumpDeviceFaultReport() noexcept;
 
     // The captured GPU pipeline binaries as raw bytes, for the host to
     // persist however it likes (disk, VFS, embedded blob). The renderer
@@ -170,7 +195,7 @@ class RenderContext {
 
     [[nodiscard]] std::optional<FrameTarget> GetAcquiredTarget(const PresentationTarget& target) noexcept;
 
-    void ReleaseTarget(const PresentationTarget& target) noexcept;
+    [[nodiscard]] auto ReleaseTarget(const PresentationTarget& target) noexcept -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureID, ErrorCode>;
     void               DestroyRenderTexture(TextureID handle) noexcept;
@@ -233,14 +258,13 @@ class RenderContext {
     // allocation; out-of-range or zero counts are ignored.
     void FreeMorphDeltas(uint32_t offset, uint32_t count) noexcept;
 
-    void WriteCheckpoint(std::string_view name) noexcept;
 
     [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
 
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
-    void                                         ProvokeDeviceLost();
+    [[nodiscard]] auto                           ProvokeDeviceLost() -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto
         BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureID, ErrorCode>;
@@ -284,6 +308,11 @@ class RenderContext {
     void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
 
     std::unique_ptr<Impl> _impl;
+    // Set by whichever backend's ReleaseDevice() ran. The null backend keeps its
+    // (now empty) implementation alive -- it has no device to tear down and a
+    // host polling a torn-down headless context must not dereference nullptr --
+    // so "released" cannot be read off _impl alone.
+    bool _released = false;
 };
 
 class PipelineStatsCapture {

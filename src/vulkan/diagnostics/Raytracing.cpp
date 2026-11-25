@@ -108,7 +108,7 @@ auto CreateAccelerationStructure(
     };
     VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
     if (const VkResult result = vkCreateAccelerationStructureKHR(device, &createInfo, nullptr, &handle); result != VK_SUCCESS) {
-        return std::unexpected(ToError(result));
+        return std::unexpected(RaytracingError::AccelerationStructureCreationFailed);
     }
     return AccelerationStructure(device, handle);
 }

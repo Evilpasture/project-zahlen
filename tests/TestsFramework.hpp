@@ -10,7 +10,12 @@
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Log.hpp>
+#include <mutex>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -21,6 +26,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
@@ -492,26 +498,164 @@ struct Param {
 template <typename... Us>
 Param(Us&&...) -> Param<typename TemplatedDetail::StructuralParamDecay<Us>::Type...>;
 
-// Telemetry counters populated via ZHLN::SetLogObserver without plumbing test
-// sinks through EngineConfig, RenderContext, or RHI instance internals.
+// Telemetry counters populated by the CaptureLogger sink on the framework
+// hub (CaptureHub below); engines created with that hub feed them.
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
 
-inline void OnTestLog(ZHLN::LogSeverity severity, std::string_view message) noexcept {
-    if (severity != ZHLN::LogSeverity::Error) {
-        return;
-    }
-    if (message.starts_with("[Vulkan]")) {
-        g_validationErrors.fetch_add(1, std::memory_order::relaxed);
-    } else if (message.starts_with("[DeviceLost]")) {
-        g_deviceLost.fetch_add(1, std::memory_order::relaxed);
-    }
+// CaptureLogger replaces the old global log observer/capture ring: it is a
+// COM sink on the framework's own logger hub, and that hub is the ambient sink
+// for the whole run (see CaptureHub()). Every line therefore takes one path --
+// ambient or explicit, engine or leaf library -- and this sink is what counts
+// the validation/device-lost telemetry and buffers the per-test log, capped at
+// kMaxCapturedLines.
+// Lines are stored and echoed through ZHLN::FormatLogLine, the same rendering
+// the console sink uses, so a failing test's dump keeps the [file:line], fiber,
+// channel and severity instead of a bare message. Verbose runs echo live;
+// otherwise the buffer is only printed when a case fails.
+inline std::atomic<bool> g_captureEchoToStderr {false};
+
+// Wire -> native, for the two things a captured line needs (formatting and
+// domain matching).
+[[nodiscard]] inline auto NativeLogSource(const COM::LogSource source) noexcept -> ZHLN::LogSource {
+    return ZHLN::LogSource {
+        .file     = source.file.size != 0 ? std::string_view(source.file.data, source.file.size) : std::string_view {},
+        .function = source.function.size != 0 ? std::string_view(source.function.data, source.function.size) : std::string_view {},
+        .channel  = source.channel.size != 0 ? std::string_view(source.channel.data, source.channel.size) : std::string_view {},
+        .line     = source.line,
+    };
 }
 
-inline const bool g_testLogObserverInstalled = []() noexcept {
-    ZHLN::SetLogObserver(&OnTestLog);
-    return true;
-}();
+class CaptureLogger final: public COM::Implements<CaptureLogger, COM::ILogger> {
+  public:
+    [[nodiscard]] auto IsEnabled(COM::LogSeverity) const noexcept -> bool override {
+        return true;
+    }
+
+    void Write(COM::LogSeverity severity, COM::LogSource source, COM::StringView message) const noexcept override {
+        // Validation and device-lost lines are told apart by their open channel
+        // names -- no substring-matching on messages or source paths.
+        // Device-lost lines count as device-lost only: recovery tests
+        // assert ValidationErrorCount() == 0 across a simulated loss.
+        if (source.channel == std::string_view {"DeviceLost"}) {
+            g_deviceLost.fetch_add(1, std::memory_order::relaxed);
+        } else if (source.channel == std::string_view {"Vulkan"} && severity == COM::LogSeverity::Error) {
+            g_validationErrors.fetch_add(1, std::memory_order::relaxed);
+        }
+        // One formatting pass, the same one the console sink runs: a captured
+        // line keeps its origin, fiber, channel and severity, and a failed case
+        // dumps what was actually logged rather than a message with the context
+        // stripped off.
+        const std::string line = ZHLN::FormatLogLine(
+            static_cast<ZHLN::LogSeverity>(severity), NativeLogSource(source),
+            message.size != 0 ? std::string_view(message.data, message.size) : std::string_view {}, false
+        );
+        if (g_captureEchoToStderr.load(std::memory_order::relaxed)) {
+            std::fprintf(stderr, "%s\n", line.c_str());
+        }
+        std::scoped_lock lock(_mutex);
+        if (_capturing) {
+            // Bounded, as the base logging layer's ring was: a Verbose
+            // multi-hundred-frame test must not grow this without limit. When it
+            // fills, the oldest quarter goes, so the tail -- where a failure
+            // usually is -- is what survives.
+            if (_captured.size() >= kMaxCapturedLines) {
+                _captured.erase(_captured.begin(), _captured.begin() + static_cast<std::ptrdiff_t>(kMaxCapturedLines / 4));
+            }
+            _captured.push_back(line);
+        }
+    }
+
+    void Flush() const noexcept override {}
+
+    void BeginCapture() noexcept {
+        std::scoped_lock lock(_mutex);
+        _captured.clear();
+        _capturing = true;
+    }
+
+    auto EndCapture() noexcept -> std::vector<std::string> {
+        std::scoped_lock lock(_mutex);
+        _capturing = false;
+        return std::move(_captured);
+    }
+
+  private:
+    static constexpr size_t  kMaxCapturedLines = 512;
+    mutable ZHLN::Mutex      _mutex;
+    mutable bool             _capturing = false;
+    mutable std::vector<std::string> _captured;
+};
+
+inline auto CaptureSink() noexcept -> CaptureLogger* {
+    static const COM::Ref<CaptureLogger> sink = [] {
+        auto* created = new (std::nothrow) CaptureLogger();
+        return COM::Ref<CaptureLogger>::Adopt(created);
+    }();
+    return sink.Get();
+}
+
+// The framework hub: a default logger (console sink) plus CaptureLogger.
+// Pass it through COM::LoggerConfig when creating engines in tests so their
+// diagnostics land in the capture buffer and telemetry counters.
+// A COM logger as a Layer-0 sink, for the rare moment the framework needs the
+// ambient sink before an engine exists (capture installation). Same four-word
+// value the engine's own bridge builds; written out here because a test may not
+// include src/engine/com/, and src/ is not allowed into include/Zahlen/COM/.
+// The capture sink is three captureless noexcept lambdas, exactly like the
+// engine's LogBridge::ToSink: each converts to its plain function pointer, so
+// the thunks need no namespace and no exported symbol to hide behind.
+inline auto MakeCaptureSink(COM::ILogger* logger) noexcept -> ZHLN::LogSink {
+    if (logger == nullptr) {
+        return {};
+    }
+    return ZHLN::LogSink {
+        .filter = [](const ZHLN::LogSeverity severity, void* const userData) noexcept -> bool {
+            const auto* target = static_cast<const COM::ILogger*>(userData);
+            return target != nullptr && target->IsEnabled(static_cast<COM::LogSeverity>(severity));
+        },
+        .write = [](const ZHLN::LogSeverity severity, const ZHLN::LogSource source, const std::string_view message, void* const userData) noexcept -> void {
+            if (const auto* target = static_cast<const COM::ILogger*>(userData); target != nullptr) {
+                const COM::LogSource wire {
+                    .file     = COM::StringView(source.file),
+                    .function = COM::StringView(source.function),
+                    .channel  = COM::StringView(source.channel),
+                    .line     = source.line,
+                };
+                target->Write(
+                    static_cast<COM::LogSeverity>(severity), wire, COM::StringView(message.data(), message.size())
+                );
+            }
+        },
+        .flush    = nullptr,
+        .userData = logger,
+    };
+}
+
+inline auto CaptureHub() noexcept -> COM::ILoggerHub* {
+    static const COM::Ref<COM::ILoggerHub> hub = []() noexcept {
+        auto made = COM::CreateLogger(COM::InChain(COM::LoggerConfig {.logger = CaptureSink(), .level = ZHLN::LogLevel::Verbose}));
+        return made ? std::move(*made) : COM::Ref<COM::ILoggerHub> {};
+    }();
+    // The hub itself is the ambient sink: its gate is the framework's level
+    // (Debug, so nothing a case logs is dropped) and its writer is the capture
+    // sink above. Installing a bare writer with a null gate here -- what this
+    // used to do -- left the ambient path gated by the process default instead,
+    // so `ztest -q` never reached ambient lines and every Debug line was
+    // thrown away before it could be captured.
+    //
+    // An engine created without a LoggerConfig mints its own hub, chains this
+    // sink into it (see CreateEngineRaw) and restores it on teardown, so ambient
+    // logging keeps landing here either way.
+    static const bool installed = []() noexcept {
+        if (hub.Get() != nullptr) {
+            ZHLN::SetLogSink(MakeCaptureSink(hub.Get()));
+        }
+        return true;
+    }();
+    (void) installed;
+    return hub.Get();
+}
 
 [[nodiscard]] inline uint32_t ValidationErrorCount() noexcept {
     return g_validationErrors.load(std::memory_order::relaxed);
@@ -1177,7 +1321,7 @@ inline void ClearFailedTestSummaries() noexcept {
 template <typename T>
 concept ErrorCodeTestResult = requires(T t) {
     { t.has_value() } -> std::convertible_to<bool>;
-    { t.error() } -> std::convertible_to<ZHLN::Error>;
+    { t.error() } -> std::convertible_to<ZHLN::ErrorCode>;
 };
 
 template <typename T>
@@ -1878,7 +2022,15 @@ inline auto ParseRunnerOptions(int argc, char** argv) -> RunnerOptions {
             .shortKey    = "-q",
             .description = "Silence engine console logs during worker execution",
             .action      = [&](std::string_view) -> std::expected<void, ZHLN::CommandLineError> {
-                ZHLN::SetLogLevel(ZHLN::LogLevel::Quiet);
+                // Quiet means "nothing on the console", not "capture less":
+                // CaptureHub() has no console sink at all, and an engine that
+                // mints a hub chains this capture sink in through LoggerConfig,
+                // so the minted hub adds no console sink either. The per-case
+                // buffer and the telemetry counters keep everything, including
+                // Debug lines, while the process default silences anything that
+                // still owns a console sink.
+                ZHLN::SetLogLevel(ZHLN::LogSeverity::Off);
+                if (auto* hub = CaptureHub()) hub->SetMinSeverity(COM::LogSeverity::Off);
                 return {};
             },
         },
@@ -2209,6 +2361,11 @@ struct CaseDescriptor {
     auto (*invoke)(void* receiver, FixtureRuntimeContext& fixtures) -> CaseInvokeOutcome = nullptr;
 };
 
+// Error text is compile-time anchored (Zahlen/Core/ErrorDescribe.hpp):
+// constructing any ErrorCode from an enum anchors its category into the
+// one engine-owned table, so std::format("{}", code) renders
+// "Category::Name: message" anywhere -- no seeding registry needed here.
+
 template <typename ReturnType>
 auto ConvertTestReturn(ReturnType&& res) -> CaseInvokeOutcome {
     if (res.has_value()) {
@@ -2218,9 +2375,8 @@ auto ConvertTestReturn(ReturnType&& res) -> CaseInvokeOutcome {
     CaseInvokeOutcome out {.ok = false};
     if constexpr (ErrorCodeTestResult<ReturnType>) {
         if (res.error() != TestFrameworkError::AssertionFailed) {
-            const ZHLN::Error err {res.error()};
-            out.fatalBanner  = std::format("{}::{}: {}", err.Category(), err.Name(), err.Message());
-            out.fatalSummary = std::format("{}::{}", err.Category(), err.Name());
+            out.fatalBanner  = std::format("test failure: {}", res.error());
+            out.fatalSummary = out.fatalBanner;
         }
     } else if constexpr (StringTestResult<ReturnType>) {
         out.fatalBanner  = std::string {std::string_view {res.error()}};
@@ -2839,9 +2995,7 @@ inline auto ExecuteSuiteRuntime(
     bool           needsSuiteObject = false;
     SkipUntilState probeSkip        = skipState;
 
-    if (ZHLN::GetLogObserver() == nullptr) {
-        ZHLN::SetLogObserver(&OnTestLog);
-    }
+    (void) CaptureHub(); // installs the CaptureLogger sink, counters + log observer
 
     for (const auto& desc: cases) {
         if (opts.maxFail > 0 && cumulativeFailed >= opts.maxFail) {
@@ -2942,11 +3096,10 @@ inline auto ExecuteSuiteRuntime(
         const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order::relaxed);
         const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order::relaxed);
 
-        const bool           captureTestLogs = !opts.verbose;
-        const ZHLN::LogLevel outerLogLevel   = ZHLN::GetLogLevel();
+        const bool captureTestLogs = !opts.verbose;
+        g_captureEchoToStderr.store(opts.verbose, std::memory_order::relaxed);
         if (captureTestLogs) {
-            ZHLN::SetLogLevel(ZHLN::LogLevel::Verbose);
-            ZHLN::BeginLogCapture(true);
+            CaptureSink()->BeginCapture();
         }
 
         const auto startSteady = std::chrono::steady_clock::now();
@@ -3001,8 +3154,7 @@ inline auto ExecuteSuiteRuntime(
 
         std::vector<std::string> capturedTestLogs;
         if (captureTestLogs) {
-            capturedTestLogs = ZHLN::EndLogCapture();
-            ZHLN::SetLogLevel(outerLogLevel);
+            capturedTestLogs = CaptureSink()->EndCapture();
         }
 
         const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order::relaxed);

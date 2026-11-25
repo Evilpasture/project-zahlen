@@ -22,6 +22,7 @@
 #include <type_traits>
 #include <vector>
 
+
 // ============================================================================
 // Reflection-driven TOML
 //
@@ -101,6 +102,15 @@ class Value {
 };
 
 // Owns the parsed node tree.
+// Rich parse failure: the ErrorCode says what kind of failure, the line
+// and detail say where and why. Returned by ParseWithDiagnostics so pure
+// parsing code never needs a logger just to explain itself.
+struct ParseFailure {
+    ErrorCode   code;
+    uint32_t    line = 0;
+    std::string detail;
+};
+
 class Document {
   public:
     Document();
@@ -114,6 +124,9 @@ class Document {
     // Parses a whole document. On failure the offending line is logged and
     // TOMLError::InvalidTOML (or DuplicateKey) is returned.
     [[nodiscard]] static auto Parse(std::string_view tomlText) noexcept -> std::expected<Document, ErrorCode>;
+    // Same parse, but the failure carries the line and the reason the
+    // parser computed (pure data -- the caller decides how to report it).
+    [[nodiscard]] static auto ParseWithDiagnostics(std::string_view tomlText) -> std::expected<Document, ParseFailure>;
 
     [[nodiscard]] auto GetRoot() const noexcept -> Value;
 
@@ -171,11 +184,21 @@ namespace TemplatedDetail {
 } // namespace TemplatedDetail
 
 template <typename T>
-auto ParseObject(Value reader) -> std::expected<T, ErrorCode>;
+auto ParseObject(Value reader, ParseFailure* failure = nullptr) -> std::expected<T, ErrorCode>;
 
+// Reads one value as FieldType. On failure, when `failure` is non-null it
+// receives which field/array/enum token failed and why -- pure data, so
+// this reflection layer never needs a logger to explain itself.
 template <typename FieldType>
-auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
+auto GetValue(Value reader, ParseFailure* failure = nullptr) -> std::expected<FieldType, ErrorCode> {
     using Decayed = std::decay_t<FieldType>;
+
+    const auto fail = [failure](ErrorCode code, std::string detail) -> std::unexpected<ErrorCode> {
+        if (failure != nullptr) {
+            *failure = ParseFailure {.code = code, .line = 0, .detail = std::move(detail)};
+        }
+        return std::unexpected(code);
+    };
 
     if constexpr (std::is_same_v<Decayed, bool>) {
         return reader.GetBool();
@@ -192,8 +215,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         }
         const auto parsed = ZHLN::Reflect::StringToEnum<Decayed>(*res);
         if (!parsed) {
-            ZHLN::Log("[TOML] '{}' is not a value of enum {}", *res, ZHLN::Reflect::TypeName<Decayed>());
-            return std::unexpected(TOMLError::TypeMismatch);
+            return fail(TOMLError::TypeMismatch, std::format("invalid enum token '{}'", *res));
         }
         return *parsed;
     } else if constexpr (std::is_integral_v<Decayed>) {
@@ -219,7 +241,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         return static_cast<Decayed>(*res);
     } else if constexpr (TemplatedDetail::OptionalLike<Decayed>) {
         // std::optional: a present key means an engaged value.
-        auto parsed = GetValue<typename Decayed::value_type>(reader);
+        auto parsed = GetValue<typename Decayed::value_type>(reader, failure);
         if (!parsed) {
             return std::unexpected(parsed.error());
         }
@@ -235,8 +257,11 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!entry) {
                 return std::unexpected(entry.error());
             }
-            auto parsed = GetValue<typename Decayed::mapped_type>(*entry);
+            auto parsed = GetValue<typename Decayed::mapped_type>(*entry, failure);
             if (!parsed) {
+                if (failure != nullptr && !failure->detail.empty()) {
+                    failure->detail = std::format("key '{}': {}", key, failure->detail);
+                }
                 return std::unexpected(parsed.error());
             }
             container.emplace(std::string {key}, std::move(*parsed));
@@ -249,8 +274,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         constexpr size_t kCapacity = std::tuple_size<Decayed>::value;
         const size_t     size      = reader.GetArraySize();
         if (size > kCapacity) {
-            ZHLN::Log("[TOML] array of {} values does not fit {}[{}]", size, ZHLN::Reflect::TypeName<Decayed>(), kCapacity);
-            return std::unexpected(TOMLError::TypeMismatch);
+            return fail(TOMLError::TypeMismatch, std::format("array of {} elements exceeds fixed capacity {}", size, kCapacity));
         }
         // Short arrays keep the defaults of the trailing elements, the same way
         // a missing key keeps the default of a field.
@@ -260,7 +284,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!element) {
                 return std::unexpected(element.error());
             }
-            auto parsed = GetValue<typename Decayed::value_type>(*element);
+            auto parsed = GetValue<typename Decayed::value_type>(*element, failure);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -278,7 +302,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
             if (!element) {
                 return std::unexpected(element.error());
             }
-            auto parsed = GetValue<typename Decayed::value_type>(*element);
+            auto parsed = GetValue<typename Decayed::value_type>(*element, failure);
             if (!parsed) {
                 return std::unexpected(parsed.error());
             }
@@ -293,8 +317,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         constexpr size_t kCapacity = ZHLN::Reflect::FieldCount<Decayed>();
         const size_t     size      = reader.GetArraySize();
         if (size > kCapacity) {
-            ZHLN::Log("[TOML] array of {} values does not fit {}[{}]", size, ZHLN::Reflect::TypeName<Decayed>(), kCapacity);
-            return std::unexpected(TOMLError::TypeMismatch);
+            return fail(TOMLError::TypeMismatch, std::format("array of {} elements exceeds field capacity {}", size, kCapacity));
         }
 
         Decayed              container {};
@@ -310,7 +333,7 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
                 err = element.error();
                 return;
             }
-            auto parsed = GetValue<std::remove_cvref_t<decltype(component)>>(*element);
+            auto parsed = GetValue<std::remove_cvref_t<decltype(component)>>(*element, failure);
             if (!parsed) {
                 err = parsed.error();
                 return;
@@ -322,28 +345,30 @@ auto GetValue(Value reader) -> std::expected<FieldType, ErrorCode> {
         }
         return container;
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
-        return ParseObject<Decayed>(reader);
+        return ParseObject<Decayed>(reader, failure);
     } else {
         return std::unexpected(TOMLError::UnsupportedType);
     }
 }
 
-// Fills a reflected struct from a table. Absent keys keep their default;
-// keys the struct does not declare are logged and skipped.
+// Fills a reflected struct from a table. Absent keys keep their default; keys
+// the struct does not declare are skipped -- a document may carry fields a
+// given reader does not know (an older binary against a newer file), and this
+// parser has no warning channel to report them through: ParseWithDiagnostics
+// reports failures, and tolerating a surplus key is not one.
 template <typename T>
-auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
+auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorCode> {
     if (!reader.IsValid()) {
         return std::unexpected(TOMLError::MissingField);
     }
 
-    auto documentKeys = reader.GetTableKeys();
-    if (!documentKeys) {
+    // Proves the reader is a table before anything is read out of it.
+    if (const auto documentKeys = reader.GetTableKeys(); !documentKeys) {
         return std::unexpected(documentKeys.error());
     }
 
-    T                    obj {};
+    T                       obj {};
     std::optional<ErrorCode> err;
-    std::vector<bool>    consumed(documentKeys->size(), false);
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> void {
         if (err) {
@@ -352,12 +377,6 @@ auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
 
         using FieldType = std::decay_t<decltype(fieldVal)>;
 
-        for (size_t i = 0; i < documentKeys->size(); ++i) {
-            if ((*documentKeys)[i] == fieldName) {
-                consumed[i] = true;
-            }
-        }
-
         auto keyReader = reader.GetKey(fieldName);
         if (!keyReader) {
             // Absent: the field keeps whatever the type declared as its
@@ -365,10 +384,18 @@ auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
             return;
         }
 
-        auto value = GetValue<FieldType>(*keyReader);
+        ParseFailure fieldFailure {};
+        auto         value = GetValue<FieldType>(*keyReader, &fieldFailure);
         if (!value) {
-            ZHLN::Log("[TOML] field '{}' of {} rejected the document value", fieldName, ZHLN::Reflect::TypeName<T>());
             err = value.error();
+            if (failure != nullptr) {
+                *failure = ParseFailure {
+                    .code   = *err,
+                    .line   = 0,
+                    .detail = fieldFailure.detail.empty() ? std::format("field '{}' did not match the expected type", fieldName)
+                                                          : std::format("field '{}': {}", fieldName, fieldFailure.detail),
+                };
+            }
             return;
         }
 
@@ -377,12 +404,6 @@ auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
 
     if (err) {
         return std::unexpected(*err);
-    }
-
-    for (size_t i = 0; i < documentKeys->size(); ++i) {
-        if (!consumed[i]) {
-            ZHLN::Log("[TOML] {} has no field named '{}' -- key ignored", ZHLN::Reflect::TypeName<T>(), (*documentKeys)[i]);
-        }
     }
 
     return obj;
@@ -395,6 +416,23 @@ auto Parse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
         return std::unexpected(doc.error());
     }
     return ParseObject<T>(doc->GetRoot());
+}
+
+template <typename T>
+auto ParseWithDiagnostics(std::string_view tomlText) -> std::expected<T, ParseFailure> {
+    auto doc = Document::ParseWithDiagnostics(tomlText);
+    if (!doc) {
+        return std::unexpected(doc.error());
+    }
+    ParseFailure failure {};
+    auto         obj = ParseObject<T>(doc->GetRoot(), &failure);
+    if (!obj) {
+        if (failure.detail.empty()) {
+            failure = ParseFailure {.code = obj.error(), .line = 0, .detail = "document did not match the target type"};
+        }
+        return std::unexpected(failure);
+    }
+    return std::move(*obj);
 }
 
 // Panics on a malformed document. For call sites where a bad document is a

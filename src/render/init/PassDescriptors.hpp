@@ -73,12 +73,11 @@ template <typename PassT>
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
-                ZHLN::LogError("Failed to hot-reload pipeline '{}': {}", name, reload.error());
+                kLog.Error("Failed to hot-reload pipeline '{}': {}", name, reload.error());
             } else {
-                ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+                Log("Pipeline '{}' hot-reloaded successfully.", name);
             }
-        }
-    );
+        });
     return {};
 }
 
@@ -91,12 +90,12 @@ template <typename BuildFn>
         return std::unexpected(res.error());
     }
     if constexpr (isDev) {
-        self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn]() -> auto {
+        self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn, self]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
-                ZHLN::LogError("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
+                kLog.Error("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
             } else {
-                ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
+                Log("Pipeline '{}' hot-reloaded successfully.", name);
             }
         });
     }

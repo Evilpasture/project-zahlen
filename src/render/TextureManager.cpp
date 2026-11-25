@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "render/RenderLog.hpp"
 #include "render/TextureManager.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Hash.hpp>
@@ -92,7 +93,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
 
     ZHLN::Assert(pixels != nullptr && texelBytes != 0u && pixelBytes > 0, "TextureManager::Upload('{}'): no pixel data for a {}x{} texture", identifier, width, height);
     if (pixels == nullptr || pixelBytes == 0) {
-        ZHLN::Log("[TextureManager] Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
+        kLog.Warn("Refusing upload '{}': {}x{} with {} pixel data.", identifier, width, height, pixels == nullptr ? "no" : "empty");
         return std::unexpected(TextureUploadError::NoPixelData);
     }
     if (id <= static_cast<uint64_t>(SystemTextures::FlatNormal)) {
@@ -138,8 +139,8 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         }
         if (state == ExistingTexture::Changed) {
             oldSlot = previous->gpuBindlessIndex;
-            ZHLN::Log(
-                "[TextureManager] Texture '{}' re-uploaded with different contents ({}x{} -> {}x{}); retiring bindless slot {}.", identifier, previous->width,
+            Log(
+                "Texture '{}' re-uploaded with different contents ({}x{} -> {}x{}); retiring bindless slot {}.", identifier, previous->width,
                 previous->height, width, height, *oldSlot
             );
         }
@@ -195,8 +196,8 @@ uint32_t TextureManager::GetBindlessIndex(TextureID handle) const noexcept {
 
         if constexpr (isDev) {
             if (_missingIDWarningCount++ < 5) {
-                ZHLN::Log(
-                    "[Warning] TextureID {:#X} was not found in registry! "
+                Log(
+                    "TextureID {:#X} was not found in registry! "
                     "Did you pass a raw integer instead of a registered asset handle?",
                     id
                 );
@@ -283,7 +284,10 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
         _freeSlots.pop_back();
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
-            ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            // Kept, unlike the other log-and-return sites: nothing between here
+            // and the frame boundary reports this code, so dropping the line would
+            // leave a refused upload with no trace at all.
+            kRenderLog.Error("Global texture slots exhausted (slots={}, upload=refused)", kGlobalTextureSlots);
 
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);

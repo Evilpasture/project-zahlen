@@ -29,8 +29,8 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 
     if (!diagnostics.warnedUnwrittenTarget) {
-        ZHLN::Log(
-            "[Render] Acquired window target (extent {}x{}) was not written this frame; presenting the background instead.",
+        Log(
+            "Acquired window target (extent {}x{}) was not written this frame; presenting the background instead.",
             image.image.extent.width, image.image.extent.height
         );
         diagnostics.warnedUnwrittenTarget = true;
@@ -55,7 +55,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
         auto                    recording     = destinations.FindRecording(windowId);
         if (!recording || !recording->recorder.IsRecording()) {
-            ZHLN::Log("[Render] Window target has no command stream to present.");
+            Log("Window target has no command stream to present.");
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotRecorded});
@@ -64,7 +64,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         geometry.RecordPendingUpdates(recording->recorder.Handle());
         const auto reconciled = ReconcileDestination(dest, recording->recorder);
         if (!reconciled) {
-            ZHLN::Log("[Render] Window target cannot be presented: {}.", reconciled.error());
+            kLog.Error("Window target cannot be presented: {}.", reconciled.error());
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             presented.EmplaceSuccess(PresentOutcome {.windowId = windowId, .disposition = PresentDisposition::NotReconcilable});
@@ -100,10 +100,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
         destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
-            const bool lost = Vk::IsDeviceLost(executable.error());
-            if (lost) {
-                NoteDeviceLost("PresentUsedWindows::End");
-            }
+            const bool lost = IsDeviceLost(executable.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(executable.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
@@ -119,11 +116,8 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             std::span<const Vk::SemaphoreSubmit> {waits.data(), waitCount}
         );
         if (!result) {
-            const bool lost = Vk::IsDeviceLost(result.error());
-            if (lost) {
-                NoteDeviceLost("PresentUsedWindows::Present");
-            }
-            ZHLN::Log("[Render] Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
+            const bool lost = IsDeviceLost(result.error());
+            kLog.Error("Present for window {:p} failed ({}); presenting other windows.", static_cast<const void*>(dest.target), result.error());
             presented.EmplaceError(PresentFailure {.windowId = windowId, .error = AsFrameError(result.error())});
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
@@ -155,7 +149,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> PresentBatch {
             const Extent2D size = dest.target != nullptr ? dest.target->GetFramebufferExtent() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
-                    ZHLN::Log("[Render] Window rebuild after present failed; retrying next frame.");
+                    kLog.Warn("Window rebuild after present failed; retrying next frame.");
                 }
             }
 

@@ -4,6 +4,9 @@
 // Lifecycle/capture helper owned by the standalone installed-package consumer.
 #include "InstalledCubeSmoke.hpp"
 #include <Zahlen/Zahlen.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/Core/COM/Reflect.hpp>
+#include <new>
 #include <Zahlen/Render/CapturedFrame.hpp>
 #include <vector>
 #include <print>
@@ -17,10 +20,19 @@ using namespace ZHLN;
 
 namespace {
 std::atomic<unsigned> validationErrors {0};
-void ObserveLog(LogSeverity severity, std::string_view message) noexcept {
-    if (severity == LogSeverity::Error && message.find("[Vulkan]") != std::string_view::npos)
-        validationErrors.fetch_add(1, std::memory_order_relaxed);
-}
+// Counts Vulkan validation errors through a sink on the app's logger hub,
+// replacing the old global log observer.
+class ValidationCountingSink final: public COM::Implements<ValidationCountingSink, COM::ILogger> {
+  public:
+    [[nodiscard]] auto IsEnabled(COM::LogSeverity) const noexcept -> bool override {
+        return true;
+    }
+    void Write(COM::LogSeverity severity, COM::LogSource source, COM::StringView /*message*/) const noexcept override {
+        if (severity == COM::LogSeverity::Error && source.channel == std::string_view {"Vulkan"})
+            validationErrors.fetch_add(1, std::memory_order_relaxed);
+    }
+    void Flush() const noexcept override {}
+};
 // Format encoding belongs to the installed Netpbm plugin, not this test.
 bool WriteCapture(const char* path, const CapturedFrame& frame) {
     bool nonconstant = false;
@@ -67,8 +79,11 @@ bool RunInstalledCubeSmoke(void (*createScene)(COM::IEngine&), const char* ppmPa
     };
     bool captured = false;
     std::vector<uint8_t> pixels(size_t(config.width) * config.height * 8);
-    SetLogObserver(&ObserveLog);
+    auto countingSink = COM::Ref<ValidationCountingSink>::Adopt(new (std::nothrow) ValidationCountingSink());
+    auto appLogger    = COM::CreateLogger();
+    if (appLogger) (void) (*appLogger)->AddSink(countingSink.Get());
     auto application = App(config);
+    if (appLogger) application.Logger(appLogger->Get());
     // The standalone consumer supplies its own scene callback. No engine
     // application source is copied, included, or needed by this project.
     application.OnStart(createScene);
@@ -84,7 +99,9 @@ bool RunInstalledCubeSmoke(void (*createScene)(COM::IEngine&), const char* ppmPa
         if (!copied.HasValue() || copied.value > pixels.size()) {
             // ErrorCode's public formatter includes category and reason. A Tick
             // counter is not proof that a drawable GPU frame was completed.
-            LogError("CaptureFrame failed after {} engine tick(s): {}", tickCount, copied.error);
+            ZHLN::Log<ZHLN::LogSeverity::Error>(ZHLN::LogChannel{"Render"}, 
+                "CaptureFrame failed after {} engine tick(s): {}", tickCount, copied.error
+            );
         } else {
             const CapturedFrame storage {.extent = info.extent, .format = info.format,
                 .pixels = std::vector<uint8_t>(pixels.begin(), pixels.begin() + copied.value), .metrics = info.metrics};
@@ -109,7 +126,6 @@ bool RunInstalledCubeSmoke(void (*createScene)(COM::IEngine&), const char* ppmPa
         if (!captured) std::println(stderr, "Rendered frame/readback/PPM validation failed");
         engine.RequestClose();
     });
-    SetLogObserver(nullptr);
     const auto errors = validationErrors.load(std::memory_order_relaxed);
     if (errors) std::println(stderr, "{} Vulkan validation errors", errors);
     return result && captured && errors == 0;

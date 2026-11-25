@@ -223,23 +223,19 @@ struct PlatformTestSuite {
             ZHLN::Test::ExpectTrue(std::filesystem::create_directories(envDir, ec));
             ZHLN::Test::ExpectTrue(std::filesystem::create_directories(searchDir, ec));
 
-            ZHLN::SharedLibrary         lib;
-            std::filesystem::path       resolved;
             const std::filesystem::path dirs[] = {searchDir};
 
-            ZHLN::Test::ExpectTrue(
-                lib.OpenPlugin(
-                    "definitely_missing_plugin_xyz",
-                    ZHLN::PluginSearchOptions {
-                        .envPath           = envDir.string(),
-                        .searchDirs        = dirs,
-                        .allowSystemSearch = false,
-                    },
-                    &resolved
-                ) == ZHLN::SharedLibraryOpenStatus::NotFound
+            // Nothing anywhere: success with no value, not an error.
+            const auto missing = ZHLN::SharedLibrary::OpenPlugin(
+                "definitely_missing_plugin_xyz",
+                ZHLN::PluginSearchOptions {
+                    .envPath           = envDir.string(),
+                    .searchDirs        = dirs,
+                    .allowSystemSearch = false,
+                }
             );
-            ZHLN::Test::ExpectFalse(lib.IsOpen());
-            ZHLN::Test::ExpectTrue(resolved.empty());
+            ZHLN::Test::ExpectTrue(missing.has_value());
+            ZHLN::Test::ExpectFalse(missing.has_value() && missing->has_value());
 
             const auto names = ZHLN::SharedLibrary::FormatFileNames("zahlen_plugin_bogus");
             if (!ZHLN::Test::ExpectFalse(names.empty())) {
@@ -254,19 +250,22 @@ struct PlatformTestSuite {
                 std::ofstream out(badFile, std::ios::binary);
                 out << "not a valid shared library";
             }
-            ZHLN::Test::ExpectTrue(
-                lib.OpenPlugin(
-                    "bogus",
-                    ZHLN::PluginSearchOptions {
-                        .envPath           = envDir.string(),
-                        .searchDirs        = dirs,
-                        .allowSystemSearch = false,
-                    },
-                    &resolved
-                ) == ZHLN::SharedLibraryOpenStatus::LoadFailed
+            // A file that exists and will not load is an error, and stops the
+            // search rather than sliding on to the next candidate.
+            const auto rejected = ZHLN::SharedLibrary::OpenPlugin(
+                "bogus",
+                ZHLN::PluginSearchOptions {
+                    .envPath           = envDir.string(),
+                    .searchDirs        = dirs,
+                    .allowSystemSearch = false,
+                }
             );
-            ZHLN::Test::ExpectFalse(lib.IsOpen());
-            ZHLN::Test::ExpectEq(resolved.string(), badFile.string());
+            ZHLN::Test::ExpectFalse(rejected.has_value());
+            if (!rejected.has_value()) {
+                ZHLN::Test::ExpectTrue(rejected.error().code == ZHLN::SharedLibraryError::LoadFailed);
+                // The path the loader rejected, not just the fact that it did.
+                ZHLN::Test::ExpectEq(rejected.error().attemptedPath.string(), badFile.string());
+            }
             return {};
         }
     };

@@ -14,7 +14,7 @@
 // The tree is a deque of nodes so that node addresses stay stable while the
 // document is still being built (Value holds raw pointers into it).
 
-#include <Zahlen/Log.hpp>
+#include <format>
 #include <charconv>
 #include <cstdlib>
 #include <deque>
@@ -96,6 +96,10 @@ class Parser {
         }
     }
 
+    [[nodiscard]] auto Failure() const noexcept -> const ParseFailure& {
+        return _failure;
+    }
+
   private:
     [[nodiscard]] auto AtEnd() const noexcept -> bool {
         return _pos >= _text.size();
@@ -116,7 +120,7 @@ class Parser {
     }
 
     auto Fail(std::string_view reason, ErrorCode error = TOMLError::InvalidTOML) -> std::unexpected<ErrorCode> {
-        ZHLN::Log("[TOML] line {}: {}", Line(), reason);
+        _failure = ParseFailure {.code = error, .line = static_cast<uint32_t>(Line()), .detail = std::string(reason)};
         return std::unexpected(error);
     }
 
@@ -586,6 +590,7 @@ class Parser {
     }
 
     std::string_view  _text;
+    ParseFailure     _failure {};
     std::deque<Node>& _arena;
     size_t            _pos = 0;
 };
@@ -613,6 +618,14 @@ Document::Document(Document&&) noexcept                    = default;
 auto Document::operator=(Document&&) noexcept -> Document& = default;
 
 auto Document::Parse(std::string_view tomlText) noexcept -> std::expected<Document, ErrorCode> {
+    auto parsed = ParseWithDiagnostics(tomlText);
+    if (!parsed) {
+        return std::unexpected(parsed.error().code);
+    }
+    return std::move(*parsed);
+}
+
+auto Document::ParseWithDiagnostics(std::string_view tomlText) -> std::expected<Document, ParseFailure> {
     Document doc;
 
     doc._impl->arena.emplace_back();
@@ -623,7 +636,7 @@ auto Document::Parse(std::string_view tomlText) noexcept -> std::expected<Docume
     Parser     parser(tomlText, doc._impl->arena);
     const auto result = parser.ParseDocument(*doc._impl->root);
     if (!result) {
-        return std::unexpected(result.error());
+        return std::unexpected(parser.Failure());
     }
     return doc;
 }

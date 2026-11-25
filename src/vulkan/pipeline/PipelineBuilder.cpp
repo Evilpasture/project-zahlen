@@ -55,7 +55,10 @@ auto CreateGraphicsPipeline(const VkDevice device, const VkGraphicsPipelineCreat
     VkPipeline     pipeline = VK_NULL_HANDLE;
     const VkResult result   = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToError(result));
+        if (result == VK_ERROR_OUT_OF_HOST_MEMORY) {
+            return std::unexpected(PipelineBuilderError::OutOfHostMemory);
+        }
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
     return pipeline;
 }
@@ -76,7 +79,10 @@ auto CreateComputePipeline(const VkDevice device, const VkComputePipelineCreateI
     VkPipeline     pipeline = VK_NULL_HANDLE;
     const VkResult result   = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToError(result));
+        if (result == VK_ERROR_OUT_OF_HOST_MEMORY) {
+            return std::unexpected(PipelineBuilderError::OutOfHostMemory);
+        }
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
     return pipeline;
 }

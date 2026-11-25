@@ -41,7 +41,7 @@ namespace {
 
     const Vk::SwapchainTarget& image = **acquired;
     if (dest.cachedGeneration != 0 && dest.cachedGeneration != image.generation) {
-        ZHLN::Log("[Render] Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
+        kLog.Debug("Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
     }
     dest.cachedGeneration = image.generation;
 
@@ -173,7 +173,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
     }
     FrameDestinations::Window& dest = *found->entry;
     if (found->created) {
-        ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
+        Log("Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
 
     // Rebuild an auxiliary swapchain before the renderer allocates its matching
@@ -197,9 +197,6 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
 
     const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
     if (!acquired) {
-        if (acquired.error() == FrameResult::DeviceLost) {
-            NoteDeviceLost("AcquireDestinationImage");
-        }
         return std::unexpected(acquired.error());
     }
     if (!acquired->has_value()) {
@@ -270,27 +267,33 @@ auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
     return recording ? recording->recorder.Handle() : VK_NULL_HANDLE;
 }
 
-void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept {
+auto RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept -> std::expected<void, ErrorCode> {
     auto entry = destinations.Find(aux);
     if (!entry || entry->IsPrimary()) {
-        return;
+        return {};
     }
-    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            NoteDeviceLost("ReleaseTarget");
+    // Finish the release whatever happens, and carry a failed drain out instead of
+    // logging it into the void: the caller gets a code it can act on, and a loss is
+    // reported by whatever recovery it triggers. Nothing is remembered here.
+    std::expected<void, ErrorCode> outcome {};
+    if (ctx.Device() != VK_NULL_HANDLE) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
+            outcome = std::unexpected(AsFrameError(waited.error()));
         }
     }
     destinations.AbortRecording(entry->id);
     entry->depthTarget.Destroy(allocator);
     destinations.Detach(aux);
+    return outcome;
 }
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
-    if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
-            NoteDeviceLost("DestroyDestinations");
-        }
-    }
+    // No idle wait of its own: the only caller is RenderContext::ReleaseDevice(),
+    // and the paths that reach it differ exactly here -- Destroy() has just
+    // drained the device (which is also how a deliberate reset through
+    // IEngine::RecreateGraphicsDevice drains a *healthy* device before its
+    // destinations go away), while recovery does not drain at all, because the
+    // device it is releasing is already gone.
     destinations.AbortRecordings();
     for (auto& destination: destinations.Windows()) {
         if (!destination.IsPrimary()) {

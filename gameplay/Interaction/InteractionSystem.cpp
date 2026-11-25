@@ -15,7 +15,6 @@
 #include <Zahlen/Core/COM/Ref.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Vec3.hpp>
@@ -35,19 +34,6 @@ void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float dur
             .duration = duration,
         });
     }
-}
-
-[[nodiscard]] auto DebugLabel(const COM::IEntities& entities, Entity e) -> std::string {
-    if (const auto* meta = entities.Get<BSPEntityMetadataComponent>(e)) {
-        if (!meta->className.empty()) {
-            return std::string(meta->className.c_str()) +
-                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
-        }
-    }
-    if (const auto* name = entities.Get<Components::NameComponent>(e); name != nullptr && !name->name.empty()) {
-        return std::string(name->name.c_str());
-    }
-    return "entity#" + std::to_string(e.index);
 }
 
 [[nodiscard]] auto FindPlayerEntity(const COM::IEntities& entities) noexcept -> Entity {
@@ -82,7 +68,6 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
         }
     }
     if (destEnt == Entity::Null()) {
-        Log("[Interaction] trigger_teleport target '{}' not found -- no info_teleport_destination with that name", destination);
         return;
     }
     const auto* destTrans = entities.Get<Components::TransformComponent>(destEnt);
@@ -108,7 +93,6 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
     }
 
     PostBeep(audio, 0.15f, 440.0f, 0.06f);
-    Log("[Interaction] Teleported player to '{}'", destination);
 }
 
 } // namespace
@@ -155,14 +139,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             const bool newlyEntered = ((trigger->flags & TriggerFlags::PlayerInside) == TriggerFlags::None);
             trigger->flags |= TriggerFlags::PlayerInside;
 
-            if (interactJustPressed) {
-                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}",
-                    DebugLabel(entities, triggerEnt), static_cast<uint32_t>(trigger->flags), std::string_view(trigger->target),
-                    (trigger->flags & TriggerFlags::TouchOpens) != TriggerFlags::None,
-                    (trigger->flags & TriggerFlags::UseOpens) != TriggerFlags::None,
-                    (trigger->flags & TriggerFlags::TriggerOnce) != TriggerFlags::None);
-            }
-
             if (newlyEntered) {
                 const String64     target          = trigger->target;
                 const TriggerFlags savedFlags      = trigger->flags;
@@ -208,10 +184,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                                 trigger->flags &= ~TriggerFlags::PlayerInside;
                                 processed = true;
 
-                                Log("Picked up item hash ID: {}", itemId);
                                 PostBeep(audio, 0.25f, 880.0f, 0.1f);
                             } else {
-                                Log("Inventory full!");
                                 PostBeep(audio, 0.25f, 220.0f, 0.15f);
                             }
                         }
@@ -221,7 +195,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                 if (!processed) {
                     if (const auto* usable = entities.Get<UsableComponent>(triggerEnt);
                         usable != nullptr && usable->scriptHash != 0) {
-                        Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
                         PostBeep(audio, 0.20f, 550.0f, 0.08f);
                     }
                 }
@@ -249,12 +222,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             }
             if (interactJustPressed && (door->flags & DoorFlags::UseOpens) != DoorFlags::None) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None) {
-                    Log("[Interaction] Door '{}' is locked: {}", std::string_view(door->targetname),
-                        std::string_view(door->message));
                     PostBeep(audio, 0.20f, 300.0f, 0.10f);
-                    if (door->scriptHash != 0) {
-                        Log("[Interaction] Dispatching script hash for locked door: {:#X}", door->scriptHash);
-                    }
                 } else {
                     const std::string_view action = ((door->flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
                     FireEntityInput(entities, doorEnt, action, "", audio);
@@ -279,7 +247,6 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             }
             if (interactJustPressed && (button->flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None) {
-                    Log("[Interaction] Button '{}' is locked", std::string_view(button->targetname));
                     PostBeep(audio, 0.20f, 250.0f, 0.10f);
                 } else {
                     FireEntityInput(entities, buttonEnt, "Press", "", audio);

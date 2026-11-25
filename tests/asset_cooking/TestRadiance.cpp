@@ -6,6 +6,7 @@
 #include "helpers/CookerFixture.hpp"
 #include <AssetCooking/EnvironmentPreparation.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
 #include <AssetCooking/RadianceEncoder.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <algorithm>
@@ -31,6 +32,16 @@ enum class RadianceTestError : uint8_t {
 };
 
 namespace {
+
+auto DescribeName(const ZHLN::ErrorCode code) -> std::string {
+    auto registry = ZHLN::COM::CreateErrorRegistry();
+    if (!registry) return {};
+    (void) ZHLN::COM::RegisterEnum<ZHLN::AssetCooking::RadianceAssetError>(**registry);
+    ZHLN::COM::ErrorDescription desc;
+    auto pack = ZHLN::COM::OutChain(desc);
+    (void) registry.value()->Describe(code, pack.Head());
+    return std::string(std::string_view(desc.name));
+}
 
 using ZHLN::Test::BinaryWriter;
 
@@ -394,7 +405,7 @@ struct RadianceTestSuite {
             RadianceFixture fixture;
             auto decoded = fixture.Decode(headerOnly, "truncated.jpg");
             if (!ZHLN::Test::ExpectFalse(decoded.has_value()) ||
-                !ZHLN::Test::ExpectEq(ZHLN::Error(decoded.error()).Name(), std::string_view {"LdrDecodeFailed"})) {
+                !ZHLN::Test::ExpectTrue(DescribeName(decoded.error()) == "LdrDecodeFailed")) {
                 return std::unexpected(RadianceTestError::DecodeFailed);
             }
             return {};

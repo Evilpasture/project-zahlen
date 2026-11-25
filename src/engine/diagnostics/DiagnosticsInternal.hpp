@@ -8,16 +8,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace ZHLN::Diagnostics {
 
-void WriteToChannel(LogChannel channel, std::string_view msg) noexcept;
+void WriteToChannel(LogTarget channel, std::string_view msg) noexcept;
 
 inline void WriteErr(std::string_view msg) noexcept {
-    WriteToChannel(LogChannel::StdErr, msg);
+    WriteToChannel(LogTarget::StdErr, msg);
 }
 
 auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcept -> bool;
 
 } // namespace ZHLN::Diagnostics
+
+namespace ZHLN {
+
+// Engine-internal (formerly declared in Zahlen/Log.hpp, which is Layer 0 and
+// carries no engine-only diagnostics): the raw backtrace formatter used by
+// InternalPanic and the GPU fault dumps. The public capture/format entry
+// points stay in Zahlen/Core/Diagnostics.hpp.
+[[nodiscard]] auto GetPoorMansStacktrace() -> std::string;
+
+} // namespace ZHLN

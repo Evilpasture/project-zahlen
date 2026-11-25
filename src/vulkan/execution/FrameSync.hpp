@@ -5,7 +5,6 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include "vulkan/VkError.hpp"
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -99,7 +98,10 @@ class FrameSync {
                     .pValues        = &value,
                 };
                 if (const VkResult res = vkWaitSemaphores(_device, &info, UINT64_MAX); res != VK_SUCCESS) {
-                    return std::unexpected(ToError(res));
+                    if (res == VK_ERROR_DEVICE_LOST) {
+                        return std::unexpected(CommandRingError::DeviceLost);
+                    }
+                    return std::unexpected(CommandRingError::WaitFailed);
                 }
             }
         }
@@ -115,7 +117,10 @@ class FrameSync {
                     .pValues        = &value,
                 };
                 if (const VkResult res = vkWaitSemaphores(_device, &info, UINT64_MAX); res != VK_SUCCESS) {
-                    return std::unexpected(ToError(res));
+                    if (res == VK_ERROR_DEVICE_LOST) {
+                        return std::unexpected(CommandRingError::DeviceLost);
+                    }
+                    return std::unexpected(CommandRingError::WaitFailed);
                 }
             }
         }

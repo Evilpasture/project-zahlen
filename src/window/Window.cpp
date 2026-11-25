@@ -5,7 +5,6 @@
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input/Input.hpp>
-#include <Zahlen/Log.hpp>
 #include <window/Window.hpp>
 #include <array>
 #include <cctype>
@@ -558,7 +557,6 @@ void Window::ProcessEvents() {
         rx.onGamepadState(rx.userdata, slot, sample);
     }
 }
-
 
 auto Window::GetSize() const -> Extent2D {
     return _impl->target.GetFramebufferExtent();

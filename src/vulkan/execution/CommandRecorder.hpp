@@ -18,6 +18,9 @@ enum class CommandRecordingError : uint8_t {
     NullCommandBuffer ZHLN_ANNOTATION(ZHLN::Description<"Cannot begin a null command buffer">{}) = 1,
     NotRecording ZHLN_ANNOTATION(ZHLN::Description<"Command buffer is not recording">{}),
     NotExecutable ZHLN_ANNOTATION(ZHLN::Description<"Command buffer has not been ended">{}),
+    BeginFailed ZHLN_ANNOTATION(ZHLN::Description<"Beginning command buffer recording failed">{}),
+    EndFailed   ZHLN_ANNOTATION(ZHLN::Description<"Ending command buffer recording failed">{}),
+    DeviceLost  ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)">{}),
 };
 
 class ExecutableCommands {

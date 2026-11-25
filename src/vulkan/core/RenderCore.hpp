@@ -5,7 +5,6 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
-#include "vulkan/VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -27,6 +26,9 @@ using Color4 = ZHLN::Color4;
 
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed"> {}) = 1,
+    // vkDeviceWaitIdle, vkQueueWaitIdle and vkQueueSubmit2 can all report it,
+    // and every caller of WaitIdle/QueueSubmit asks (IsDeviceLost below).
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)"> {}),
 };
 
 [[nodiscard]] auto WaitIdle(VkDevice device) noexcept -> std::expected<void, ErrorCode>;

@@ -38,7 +38,7 @@ auto Semaphore::CreateBinary(const VkDevice device) noexcept -> std::expected<Se
     };
     VkSemaphore handle = VK_NULL_HANDLE;
     if (const VkResult result = vkCreateSemaphore(device, &info, nullptr, &handle); result != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(result));
+        return std::unexpected(SemaphoreError::CreationFailed);
     }
     return Semaphore {device, handle};
 }
@@ -57,7 +57,7 @@ auto Semaphore::CreateTimeline(const VkDevice device, const uint64_t initialValu
     };
     VkSemaphore handle = VK_NULL_HANDLE;
     if (const VkResult result = vkCreateSemaphore(device, &info, nullptr, &handle); result != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToError(result));
+        return std::unexpected(SemaphoreError::CreationFailed);
     }
     return Semaphore {device, handle};
 }

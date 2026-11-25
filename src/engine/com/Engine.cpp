@@ -27,6 +27,8 @@
 #include <Zahlen/COM/IAudioDevice.hpp>
 #include <Zahlen/COM/IDebugDraw.hpp>
 #include <Zahlen/COM/IEngine.hpp>
+#include <Zahlen/COM/IErrorRegistry.hpp>
+#include <Zahlen/COM/ILogger.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/IFramePipeline.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
@@ -57,6 +59,9 @@
 #include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
 #include <Zahlen/Render/Meshlet.hpp>
+#include "LogBridge.hpp"
+#include "RawSinkLogger.hpp"
+#include "engine/EngineLog.hpp"
 #include <render/RenderContext.hpp>
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
@@ -79,6 +84,11 @@
 #include <vector>
 
 namespace ZHLN::COM {
+
+
+static_assert(AuditInterfaceABI<ILogger>(), "ILogger violates the COM ABI rules.");
+static_assert(AuditInterfaceABI<ILoggerHub>(), "ILoggerHub violates the COM ABI rules.");
+static_assert(AuditInterfaceABI<IErrorRegistry>(), "IErrorRegistry violates the COM ABI rules.");
 
 static_assert(AuditInterfaceABI<IEngine>());
 static_assert(AuditInterfaceABI<IFramePipeline>());
@@ -271,7 +281,12 @@ class Engine final:
         IDebugDraw,
         IFramePipeline> {
   public:
-    explicit Engine(std::unique_ptr<ZHLN::Engine> engine) noexcept : m_engine(std::move(engine)) {}
+    // The logger and registry are COM objects the engine borrows as a plain
+    // LogSink; holding the Refs here (declared before m_engine, so they are
+    // destroyed after it) is what keeps the hub alive for the engine's whole
+    // life -- and what makes IEngine::Logger()/Errors() answerable.
+    Engine(std::unique_ptr<ZHLN::Engine> engine, Ref<ILogger> logger, Ref<IErrorRegistry> errors) noexcept
+        : m_logger(std::move(logger)), m_errors(std::move(errors)), m_engine(std::move(engine)) {}
 
     void TraceDiagnostics() const noexcept override;
 
@@ -320,6 +335,14 @@ class Engine final:
         m_engine->ClearScene();
     }
 
+    [[nodiscard]] ILogger* Logger() noexcept override {
+        return m_logger.Get();
+    }
+
+    [[nodiscard]] IErrorRegistry* Errors() noexcept override {
+        return m_errors.Get();
+    }
+
     [[nodiscard]] IGraphicsDevice* Graphics() noexcept override {
         return static_cast<IGraphicsDevice*>(this);
     }
@@ -357,7 +380,10 @@ class Engine final:
     Result<void> RecreateGraphicsDevice() noexcept override {
         if (m_engine->FramePending())
             return FramePipelineError::FrameInProgress;
-        const auto result = m_engine->HandleDeviceLost();
+        // A deliberate reset runs on a device that still works: drain it before
+        // the renderer is torn down, or the teardown frees resources the GPU is
+        // still executing against. Recovery paths pass false instead.
+        const auto result = m_engine->HandleDeviceLost(/*drainDevice=*/true);
         if (!result) return result.error();
         return {};
     }
@@ -998,17 +1024,41 @@ class Engine final:
                 }
             }
         } else if (boxDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildBoxMesh(gfx, boxDesc->halfExtents, boxDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (planeDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildPlaneMesh(gfx, planeDesc->extent, planeDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildPlaneMesh(gfx, planeDesc->extent, planeDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (sphereDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildSphereMesh(gfx, sphereDesc->radius, sphereDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildSphereMesh(gfx, sphereDesc->radius, sphereDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (cylinderDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height, cylinderDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildCylinderMesh(gfx, cylinderDesc->radius, cylinderDesc->height, cylinderDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (coneDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color, options.buildBLAS);
+            auto built = PrefabFactory::BuildConeMesh(gfx, coneDesc->radius, coneDesc->height, coneDesc->color, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         } else if (tetraDesc.has_value()) {
-            createdMesh = PrefabFactory::BuildTetrahedronMesh(gfx, options.buildBLAS);
+            auto built = PrefabFactory::BuildTetrahedronMesh(gfx, options.buildBLAS);
+            if (!built) [[unlikely]] {
+                return built.error();
+            }
+            createdMesh = std::move(*built);
         }
 
         return DispatchOutChain<ZHLN::Mesh>(outMeshChain, [&](ZHLN::Mesh& outMesh) -> Result<void> {
@@ -1723,26 +1773,36 @@ class Engine final:
                     resolved.materialOverride.baseColorFactor = boxDesc->color;
                 }
             }
-            return PrefabFactory::CreateBoxConfigured(*m_engine, boxDesc->halfExtents, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateBoxConfigured(*m_engine, boxDesc->halfExtents, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (planeDesc.has_value()) {
             const FVec4 planeColor = planeDesc->color.w >= 0.0F ? planeDesc->color : FVec4 {0.6F, 0.6F, 0.6F, 1.0F};
-            return PrefabFactory::CreatePlaneConfigured(*m_engine, planeDesc->extent, planeColor, params, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreatePlaneConfigured(*m_engine, planeDesc->extent, planeColor, params, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (sphereDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (sphereDesc->color.w >= 0.0F) resolved.color = sphereDesc->color;
-            return PrefabFactory::CreateSphereConfigured(*m_engine, sphereDesc->radius, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateSphereConfigured(*m_engine, sphereDesc->radius, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (cylinderDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (cylinderDesc->color.w >= 0.0F) resolved.color = cylinderDesc->color;
-            return PrefabFactory::CreateCylinderConfigured(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateCylinderConfigured(*m_engine, cylinderDesc->radius, cylinderDesc->height, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         if (coneDesc.has_value()) {
             PrefabFactory::SpawnParams resolved = params;
             if (coneDesc->color.w >= 0.0F) resolved.color = coneDesc->color;
-            return PrefabFactory::CreateConeConfigured(*m_engine, coneDesc->radius, coneDesc->height, resolved, options.buildBLAS);
+            const auto spawned = PrefabFactory::CreateConeConfigured(*m_engine, coneDesc->radius, coneDesc->height, resolved, options.buildBLAS);
+            if (!spawned) return spawned.error();
+            return *spawned;
         }
         return Error::InvalidArgument;
     }
@@ -2402,6 +2462,11 @@ private:
         uint64_t nextToken = 1;
     };
     uint64_t m_nextPrefabGPURevision = 1;
+    // Declared before m_engine: members are destroyed in reverse order, so the
+    // logger and registry outlive every teardown log line and error record the
+    // engine and its session produce.
+    Ref<ILogger>        m_logger;
+    Ref<IErrorRegistry> m_errors;
     std::unique_ptr<ZHLN::Engine> m_engine;
     std::shared_ptr<DeviceLostListeners> m_deviceLostListeners;
 };
@@ -2415,9 +2480,11 @@ void Engine::TraceDiagnostics() const noexcept {
 auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*> {
     EngineConfig config {};
     uint32_t     maxFramesPerSecond = 0;
+    LoggerConfig loggerNode {};
+    ErrorConfig  errorNode {};
 
     const Result<void> chainRes =
-        DispatchInChain<AppConfig, WindowConfig, RenderConfig, PhysicsConfig, DiagnosticsInfo>(
+        DispatchInChain<AppConfig, WindowConfig, RenderConfig, PhysicsConfig, DiagnosticsInfo, LoggerConfig, ErrorConfig>(
             configChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, DiagnosticsInfo>) {
                     if (!Valid(node.crashDumpPath)) return Error::NullArgument;
@@ -2440,19 +2507,74 @@ auto CreateEngineRaw(const ChainInNode* configChain) noexcept -> Result<IEngine*
                     config.initialPipelineBinaryData = std::span<const uint8_t>(node.initialPipelineBinary);
                 } else if constexpr (std::is_same_v<NodeT, PhysicsConfig>) {
                     config.physics = node;
+                } else if constexpr (std::is_same_v<NodeT, LoggerConfig>) {
+                    loggerNode = node;
+                } else if constexpr (std::is_same_v<NodeT, ErrorConfig>) {
+                    errorNode = node;
                 }
                 return {};
             });
     if (!chainRes.HasValue()) return chainRes.error;
 
     config.fpsLimit = maxFramesPerSecond;
-    auto created = ZHLN::Engine::Create(config);
+
+    // The logger and registry exist before the engine so startup failures
+    // log into the caller's sink and the returned code can be Described by
+    // the caller's registry. Defaults are created here when the chain did
+    // not supply them; the logger's level honors AppConfig::logLevel.
+    ILogger*            logger = loggerNode.logger;
+    Ref<ILoggerHub>     ownedLogger;
+    Ref<ILogger>        chainedHost;
+    Ref<IErrorRegistry> errors(errorNode.registry);
+    if (logger == nullptr) {
+        // A sink published before this factory ran is a *host* sink: a test
+        // framework's capture ring, a harness counter, an app's own writer. It
+        // must keep seeing every line -- DeviceLostCount and friends read from
+        // it -- but the minted hub must not join it with a console sink behind
+        // the host's back: that second stderr sink answers to config.logLevel,
+        // not to `ztest -q`'s SetLogLevel(Off), so quiet test runs grew a
+        // duplicate copy of every engine line on stderr.
+        //
+        // So the host sink is chained in the hub's *configuration*
+        // (LoggerConfig::logger counts as a sink, so CreateLoggerRaw adds no
+        // console sink) instead of being added afterwards on top of one.
+        ILogger* inChain = nullptr;
+        if (const ZHLN::LogSink previous = ZHLN::GetLogSink(); previous.write != nullptr) {
+            // A host sink is a Layer-0 value, not a COM object, so it enters the
+            // hub through the adapter every other external observer uses.
+            auto* adapter = new (std::nothrow) RawSinkLogger(previous);
+            if (adapter == nullptr) return ErrorCode(Error::AllocationFailed);
+            chainedHost = Ref<ILogger>::Adopt(adapter);
+            inChain     = adapter; // CreateLoggerRaw takes its own reference
+        }
+        auto made = CreateLogger(InChain(LoggerConfig {.logger = inChain, .level = config.logLevel}));
+        if (!made) return made.error();
+        ownedLogger = std::move(*made);
+        logger      = ownedLogger.Get();
+    }
+    if (errors.Get() == nullptr) {
+        auto made = CreateErrorRegistry();
+        if (!made) return made.error();
+        errors = std::move(*made);
+    }
+
+    // The engine is engine-first: it receives the host logger as a plain
+    // Layer-0 sink (gate + writer in one value) and never names ILogger. The
+    // Refs above keep the COM objects alive for the engine's whole life.
+    //
+    // That sink becomes the process ambient sink in BOTH cases, so every ambient
+    // ZHLN::Log inside Vulkan, Render, Audio and the frame loop lands in the same
+    // pipeline as the engine's explicit lines: one format, one level. A minted
+    // hub already chained whatever the host had installed (above), so nothing is
+    // added behind a caller's back.
+    const ZHLN::LogSink ambientSink = ZHLN::LogBridge::ToSink(logger);
+    auto created = ZHLN::Engine::Create(config, ambientSink);
     if (!created) return created.error();
 
     (*created)->SetMaxFramesPerSecond(maxFramesPerSecond);
     (*created)->EmplaceService<EngineConfig>((*created)->Configuration());
 
-    auto* instance = new (std::nothrow) Engine(std::move(*created));
+    auto* instance = new (std::nothrow) Engine(std::move(*created), Ref<ILogger>(logger), std::move(errors));
     if (instance == nullptr) return ErrorCode(Error::AllocationFailed);
     return static_cast<IEngine*>(instance);
 }

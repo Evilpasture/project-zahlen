@@ -51,6 +51,7 @@
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/GraphicsSettings.hpp>
+#include "render/DeviceLoss.hpp"
 #include <Zahlen/Log.hpp>
 #include <render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -85,7 +86,7 @@ struct TaskSystemScheduler {
 namespace ZHLN {
 
 [[nodiscard]] inline auto AsFrameError(ErrorCode code) noexcept -> ErrorCode {
-    return Vk::IsDeviceLost(code) ? ErrorCode {FrameResult::DeviceLost} : code;
+    return IsDeviceLost(code) ? ErrorCode {FrameResult::DeviceLost} : code;
 }
 
 void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
@@ -299,7 +300,7 @@ struct RenderContext::Impl: Renderer {
     };
     [[nodiscard]] auto ResolveTarget(const FrameTarget& target) noexcept -> std::expected<ResolvedTarget, ErrorCode>;
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
-    void               ReleaseTarget(const PresentationTarget& aux) noexcept;
+    [[nodiscard]] auto ReleaseTarget(const PresentationTarget& aux) noexcept -> std::expected<void, ErrorCode>;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureID, ErrorCode>;
     void               DestroyRenderTexture(TextureID handle) noexcept;
@@ -316,13 +317,12 @@ struct RenderContext::Impl: Renderer {
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
     RenderDiagnostics diagnostics;
-    std::atomic<bool> deviceLost {false};
-
-    void NoteDeviceLost(std::string_view site) noexcept {
-        if (!deviceLost.exchange(true, std::memory_order::relaxed)) {
-            ZHLN::LogError("[DeviceLost] Vulkan device lost ({})", site);
-        }
-    }
+    // No loss state lives here. Whether the device is gone is carried by the code a
+    // call returns -- IsDeviceLost (render/DeviceLoss.hpp) is the predicate, and it
+    // remembers nothing -- while the one channel "DeviceLost" line per loss is
+    // emitted by whoever observes the loss (Engine::Present or
+    // Engine::ProvokeDeviceLost), never by recovery, which is also reached by a
+    // deliberate reset.
 
     PipelineRegistry pipelines;
 
@@ -349,17 +349,13 @@ struct RenderContext::Impl: Renderer {
     }
 
     ~Impl() {
-        if (ctx.Device() != VK_NULL_HANDLE && !deviceLost.load(std::memory_order::relaxed)) {
-            if (auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
-                if (Vk::IsDeviceLost(waited.error())) {
-                    NoteDeviceLost("RenderContext::~Impl");
-                } else {
-                    ZHLN::LogError("[Render] device idle wait during teardown failed: {}", waited.error());
-                }
-            }
-        }
+        // Runs from RenderContext::ReleaseDevice(), which takes ownership of this
+        // object on entry: so it runs at a defined point, in order, and only once,
+        // instead of whenever the host's unique_ptr happens to unwind. The drain and
+        // the fault dump belong to higher callers -- Destroy() drains and dumps when
+        // it observes a loss, the frame observer dumps before recovery -- so nothing
+        // is waited for or dumped here.
         submittedStaging.reset();
-        DestroyDestinations();
         frameOpen = false;
 
         ClearEmitterBuffers();

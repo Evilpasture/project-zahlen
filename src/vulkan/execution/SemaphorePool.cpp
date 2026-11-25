@@ -55,7 +55,7 @@ void SemaphorePool::Rebuild(const VkDevice device, const uint32_t count) noexcep
 
 auto SemaphorePool::operator[](const uint32_t index) const noexcept -> VkSemaphore {
     if (index >= _count) [[unlikely]] {
-        ZHLN::Panic("[Vk] SemaphorePool index {} out of bounds (size {}).", index, _count);
+        ZHLN::Panic("SemaphorePool index out of bounds (index={}, size={})", index, _count);
     }
     return _semaphores[index];
 }

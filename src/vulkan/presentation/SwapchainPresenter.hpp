@@ -36,6 +36,12 @@ enum class PresentationError : uint8_t {
     SyncCreationFailed            ZHLN_ANNOTATION(ZHLN::Description<"Frame sync or command pool creation failed"> {}),
     PresentFormatMismatch         ZHLN_ANNOTATION(ZHLN::Description<"Viewport present format does not match the primary swapchain"> {}),
     OffscreenTargetUnavailable    ZHLN_ANNOTATION(ZHLN::Description<"A headless destination has no offscreen color target to draw into"> {}),
+    PresentFailed                 ZHLN_ANNOTATION(ZHLN::Description<"vkQueuePresentKHR failed"> {}),
+    PresentTimingQueueFull        ZHLN_ANNOTATION(ZHLN::Description<"The present timing queue is full, so timing info was not recorded (VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)"> {}),
+    // vkQueuePresentKHR reports loss as well, and RenderPresentation asks:
+    // a lost device has to stop the window loop rather than read as a
+    // per-window present failure.
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)"> {}),
 };
 
 struct SwapchainTarget {

@@ -5,6 +5,7 @@
 
 #include "vulkan/VulkanHeader.hpp"
 
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
@@ -12,6 +13,12 @@
 #include <utility>
 
 namespace ZHLN::Vk {
+
+// Creating a semaphore is the only fallible operation on a raw handle
+// wrapper, and it happens at setup, so this vocabulary has one word.
+enum class SemaphoreError : uint8_t {
+    CreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Semaphore creation failed"> {}) = 1,
+};
 
 struct DestroyPipeline {
     void operator()(VkDevice device, VkPipeline handle) const noexcept;

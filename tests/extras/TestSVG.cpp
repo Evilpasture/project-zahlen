@@ -726,7 +726,7 @@ struct SVGTestSuite {
             ZHLN::Test::ExpectFalse(truncated.has_value());
             if (!truncated) {
                 ZHLN::Test::ExpectTrue(truncated.error().get<ZHLN::SVG::Error>().has_value());
-                ZHLN::Println("    [SVG] {} bytes of {} -> {}", kLogo.size() / 2, kLogo.size(), ZHLN::Error(truncated.error()).Message());
+                ZHLN::Println("    [SVG] {} bytes of {} -> {}", kLogo.size() / 2, kLogo.size(), truncated.error());
             }
 
             // resvg builds a Rust slice from (data, length) with no null check,
@@ -752,13 +752,11 @@ struct SVGTestSuite {
             // sits at the far end of resvg_error -- so this is the second half
             // of the check the missing file above starts: a header behind its
             // library turns it into a code no constant names. Every failure in
-            // this test is an Error, which is what makes Error::Message()
-            // print something useful about it.
+            // this test carries an annotated error enumerator.
             const auto garbage = ZHLN::SVG::LoadString(kNotSvg);
             if (!garbage) {
                 ZHLN::Test::ExpectTrue(garbage.error() == ZHLN::SVG::Error::ParsingFailed);
-                ZHLN::Test::ExpectFalse(ZHLN::Error(garbage.error()).Message().empty());
-                ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, ZHLN::Error(garbage.error()).Message());
+                ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, garbage.error());
             }
             return {};
         }

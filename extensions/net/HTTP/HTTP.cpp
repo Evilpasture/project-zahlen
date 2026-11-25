@@ -7,13 +7,14 @@
 // libcurl is upgraded.
 
 #include <HTTP/HTTP.hpp>
-#include <Zahlen/Log.hpp>
+#include <cstdio>
 #include <array>
 #include <curl/curl.h>
 #include <optional>
 #include <span>
 #include <string>
 #include <utility>
+#include <Zahlen/Core/Reflection/EnumFormat.hpp>
 
 // What this file is written against: the option names it sets (all of them
 // decades old except the two _STR protocol options, which are guarded on their
@@ -492,18 +493,22 @@ auto Perform(const NativeRequest& request, NativeResponse& response) noexcept ->
 }
 
 // Error says which kind of thing went wrong; the detail says which host,
-// which field, which certificate. That text has nowhere to live in a
-// std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
-// whoever is debugging a fetch, silent by default.
-void LogFailure(const Request& request, Error failure, std::string_view detail) {
-    ZHLN::LogError<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, failure, detail);
-}
+// which field, which certificate. The detail travels in FetchFailure --
+// plain data the caller logs -- so this leaf never needs a logger.
 
 // ---------------------------------------------------------------------------
 
 } // namespace
 
 auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode> {
+    auto detailed = FetchDetailed(request);
+    if (!detailed) {
+        return std::unexpected(detailed.error().code);
+    }
+    return std::move(*detailed);
+}
+
+auto FetchDetailed(const Request& request) noexcept -> std::expected<Response, FetchFailure> {
     const NativeRequest native {
         .url             = request.url,
         .method          = request.method,
@@ -518,15 +523,13 @@ auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode
 
     // Refused before a handle exists for it, and before anything is sent.
     if (const auto fault = RequestFault(native)) {
-        LogFailure(request, fault->first, fault->second);
-        return std::unexpected(fault->first);
+        return std::unexpected(FetchFailure {.code = fault->first, .detail = fault->second});
     }
 
     const auto [code, detail] = Perform(native, transferred);
     if (code != CURLE_OK) {
         const auto failure = MapCURLError(code);
-        LogFailure(request, failure, detail);
-        return std::unexpected(failure);
+        return std::unexpected(FetchFailure {.code = failure, .detail = detail});
     }
 
     Response response;

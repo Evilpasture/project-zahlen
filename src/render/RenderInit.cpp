@@ -21,9 +21,9 @@ auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::Fra
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!ctx.RayTracingSupported()) {
-        ZHLN::LogWarning("Ray tracing not enabled on this device. RTR will be disabled.");
+        kLog.Warn("Ray tracing not enabled on this device. RTR will be disabled.");
     } else {
-        ZHLN::Log("Ray tracing enabled (acceleration structure + ray query).");
+        Log("Ray tracing enabled (acceleration structure + ray query).");
     }
 
     const bool meshShaderQueries = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
@@ -33,7 +33,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
         return std::unexpected(res.error());
     }
     if (!diagnostics.gpuProfiler.Enabled()) {
-        ZHLN::LogWarning("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
+        kLog.Warn("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
     }
 
     return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphicsFamily)

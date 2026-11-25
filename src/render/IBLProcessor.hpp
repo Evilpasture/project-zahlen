@@ -23,6 +23,8 @@
 #include <numbers>
 #include <span>
 #include <utility>
+#include <format>
+
 
 namespace ZHLN {
 
@@ -63,9 +65,9 @@ class IBLProcessor {
         const int      environmentMode = hasRadiance ? (radiance.renderSkybox == 0 ? 2 : (useVisualSky ? 3 : 1)) : 0;
 
         if (hasRadiance) {
-            ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips from a {}x{} radiance map...", radiance.width, radiance.height);
+            Log("Baking BRDF LUT / SH / specular mips from a {}x{} radiance map...", radiance.width, radiance.height);
         } else {
-            ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (procedural sky)...");
+            Log("Baking BRDF LUT / SH / specular mips (procedural sky)...");
         }
 
         // 1. Compile Bake Compute Pipelines

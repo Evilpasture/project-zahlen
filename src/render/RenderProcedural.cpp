@@ -38,8 +38,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
         return std::unexpected(build_res.error());
     }
 
-    ZHLN::Log(
-        "[Shader] GPU Procedural Bake Compute Pipeline initialized with specialization "
+    kLog.Debug("GPU Procedural Bake Compute Pipeline initialized with specialization "
         "variants."
     );
     return {};

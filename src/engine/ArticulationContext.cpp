@@ -11,7 +11,6 @@
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/ECS/Components.hpp>
 #include <engine/SceneResources.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Transform.hpp>
 #include <engine/ModelPrefab.hpp>
 #include <render/Render.hpp>
@@ -23,6 +22,7 @@
 #include <algorithm>
 #include <span>
 #include <string>
+#include <format>
 
 namespace ZHLN {
 
@@ -83,9 +83,7 @@ bool ArticulationContext::AttachRagdoll(
                         .isAddedToPhysics = false
                     }
     );
-    ZHLN::Log("[ArticulationContext] Skeletal ragdoll attached to entity {} ({} parts).", rootEntity.index, authoredParts.size());
     return true;
 }
-
 
 }

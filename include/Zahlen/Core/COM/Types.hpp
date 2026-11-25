@@ -35,6 +35,7 @@ enum class Error : uint8_t {
     UnsupportedExtension ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains an unrecognized structure type."> {}) = 5,
     DuplicateExtension   ZHLN_ANNOTATION(ZHLN::Description<"COM chain contains duplicate structure types or a cycle."> {}) = 6,
     InvalidArgument      ZHLN_ANNOTATION(ZHLN::Description<"COM descriptor arguments are incomplete or invalid."> {}) = 7,
+    NotRegistered        ZHLN_ANNOTATION(ZHLN::Description<"The requested code, category or record is not present in the registry."> {}) = 8,
 };
 
 struct StringView {

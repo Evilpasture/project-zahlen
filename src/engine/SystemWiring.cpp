@@ -33,6 +33,8 @@
 #include <window/PlatformHost.hpp>
 #include <window/Window.hpp>
 #include <string_view>
+#include <cstdio>
+
 
 namespace ZHLN {
 namespace { namespace Steps {
@@ -119,7 +121,7 @@ void BuildCoreFramePlan(FramePlan& plan, FrameStepFn presentStep, FrameStepFn ui
     // duplicated only by a careless edit here.
     const auto require = [](std::expected<void, FramePlanError> placed) -> void {
         if (!placed) {
-            ZHLN::LogError("[Engine] core frame plan rejected a step: {}", ToString(placed.error()));
+            ZHLN::Panic("core frame plan rejected a step: {}", ToString(placed.error()));
         }
     };
 

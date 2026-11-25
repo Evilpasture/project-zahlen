@@ -316,7 +316,6 @@ class Registry {
     auto GetRawArray() const noexcept -> ZHLN::RestrictSpan<T> {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
-            ZHLN::Log("Unknown component: {}", BoxedName<T>());
             return ZHLN::RestrictSpan<T>(nullptr, 0);
         }
         auto* set = _components[id];

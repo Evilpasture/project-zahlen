@@ -10,6 +10,9 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Angles.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
+
 
 struct Game {
     void Start(ZHLN::COM::IEngine& engine) {
@@ -47,7 +50,7 @@ struct Game {
                 .castsShadow = true});
         if (floor == ZHLN::Entity::Null() || box == ZHLN::Entity::Null() ||
             sun == ZHLN::Entity::Null()) {
-            ZHLN::LogError("Could not create the example scene");
+            ZHLN::COM::LoggerView{engine.Logger()}.Error("Could not create the example scene");
             engine.RequestClose();
         }
     }

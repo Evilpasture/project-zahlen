@@ -5,9 +5,13 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Error.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -20,10 +24,18 @@ enum class SharedLibraryBind : uint8_t {
     Global = 1,
 };
 
-enum class SharedLibraryOpenStatus : uint8_t {
-    Opened     = 0,
-    NotFound   = 1,
-    LoadFailed = 2,
+// Why a probed candidate could not be loaded. "Not there" is not an error and
+// has no entry here: it is the std::nullopt half of the factory's return.
+enum class SharedLibraryError : uint8_t {
+    LoadFailed ZHLN_ANNOTATION(ZHLN::Description<"A candidate library file exists but the OS loader rejected it"> {}) = 1,
+};
+
+// A failed load, with the file the loader choked on. The path is known the
+// moment the candidate exists, so throwing it away here is what made a caller
+// unable to say which library was broken.
+struct LoadFailure {
+    SharedLibraryError    code = SharedLibraryError::LoadFailed;
+    std::filesystem::path attemptedPath {};
 };
 
 struct PluginSearchOptions {
@@ -33,6 +45,13 @@ struct PluginSearchOptions {
     SharedLibraryBind                      bind              = SharedLibraryBind::Local;
     bool                                   allowSystemSearch = true;
 };
+
+class SharedLibrary;
+
+// A library that is open, and the file it came from. The pair is the reason the
+// old `OpenPlugin(spec, options, std::filesystem::path* out)` needed an
+// out-parameter; as a value it costs nothing and cannot be left half-written.
+struct LoadedPlugin;
 
 // OS-neutral dynamic shared library wrapper. Platform calls (dlopen/dlsym/
 // dlclose/dladdr on POSIX, LoadLibrary/GetProcAddress/FreeLibrary/
@@ -82,14 +101,18 @@ class SharedLibrary {
     // Resolves and opens a plugin by short name (e.g. "freecam") or explicit
     // path/filename, searching `options.envPath` (split on kEnvPathSeparator),
     // `options.searchDirs`, and optionally the OS loader's default search path.
-    // Distinguishes `NotFound` from `LoadFailed` (candidate file exists on disk
-    // but the OS loader rejected it) and records the attempted/loaded path in
-    // `outResolvedPath` when non-null.
-    [[nodiscard]] ZHLN_API auto OpenPlugin(
-        std::string_view           spec,
-        const PluginSearchOptions& options         = {},
-        std::filesystem::path*     outResolvedPath = nullptr
-    ) -> SharedLibraryOpenStatus;
+    //
+    // Three outcomes, as three value states rather than a status byte plus an
+    // out-parameter:
+    //   unexpected(LoadFailure)                     a candidate exists and the OS
+    //                                              loader rejected it -- hard, and
+    //                                              it names the file it tried
+    //   std::nullopt                                nothing matched anywhere it
+    //                                              was allowed to look -- benign
+    //   LoadedPlugin                                open, plus where it came from
+    [[nodiscard]] ZHLN_API static auto OpenPlugin(
+        std::string_view spec, const PluginSearchOptions& options = {}
+    ) -> std::expected<std::optional<LoadedPlugin>, LoadFailure>;
 
     [[nodiscard]] auto OpenAny(std::span<const char* const> candidates, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         for (const char* path: candidates) {
@@ -141,6 +164,13 @@ class SharedLibrary {
 
   private:
     void* _handle = nullptr;
+};
+
+// Complete only here: the library member needs SharedLibrary to be a complete
+// type, and the factory above only needs the name.
+struct LoadedPlugin {
+    SharedLibrary         library;
+    std::filesystem::path path;
 };
 
 } // namespace ZHLN

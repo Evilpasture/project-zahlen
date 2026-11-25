@@ -3,20 +3,15 @@
 
 #include "vulkan/core/DeviceConfigurator.hpp"
 #include "vulkan/core/PhysicalDevice.hpp"
-#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
+// Pure verdicts: the caller decides what to say about them. Keeping them
+// side-effect free is what lets OptionalMeshShaders/OptionalRayTracing use them
+// as accept predicates (a captureless lambda cannot carry a ledger), and it is
+// why a headless Lavapipe run no longer prints a warning per optional feature.
 auto MeshShaderLimitsSufficient(const VkPhysicalDevice physical) noexcept -> bool {
-    const MeshShaderLimits limits = QueryMeshShaderLimits(physical);
-    if (!MeshShaderLimitsSufficient(limits)) {
-        ZHLN::Log(
-            "[Vulkan] Mesh shader limits insufficient (vertices={}, primitives={}, taskInvocations={}, meshInvocations={}); using vertex pipelines.",
-            limits.maxMeshOutputVertices, limits.maxMeshOutputPrimitives, limits.maxTaskWorkGroupInvocations, limits.maxMeshWorkGroupInvocations
-        );
-        return false;
-    }
-    return true;
+    return MeshShaderLimitsSufficient(QueryMeshShaderLimits(physical));
 }
 
 auto RayTracingDriverUsable(const VkPhysicalDevice physical) noexcept -> bool {
@@ -26,22 +21,15 @@ auto RayTracingDriverUsable(const VkPhysicalDevice physical) noexcept -> bool {
     VkPhysicalDeviceSubgroupProperties subgroup {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
     VkPhysicalDeviceProperties2        properties {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     vkGetPhysicalDeviceProperties2(physical, &properties);
-    // Mesa Lavapipe's PLOC acceleration-structure builder (vk_bvh) writes out
-    // of bounds at 128-bit SIMD width (subgroupSize == 4, default on AArch64
+    // Mesa Lavapipe's PLOC acceleration-structure builder (vk_bvh) writes out of
+    // bounds at 128-bit SIMD width (subgroupSize == 4, the default on AArch64
     // NEON and pre-AVX2 x86_64), faulting a compute worker thread inside
     // vkCmdBuildAccelerationStructuresKHR. Hardware GPUs and >=256-bit software
     // devices (subgroupSize >= 8) stay enabled.
-    if (properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && subgroup.subgroupSize > 0 && subgroup.subgroupSize < 8) {
-        ZHLN::Log(
-            "[Vulkan] CPU device '{}' has subgroup width {} (< 8); disabling acceleration structures to avoid 128-bit Lavapipe BVH fault.",
-            properties.properties.deviceName, subgroup.subgroupSize
-        );
-        return false;
-    }
-    return true;
+    return !(properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && subgroup.subgroupSize > 0 && subgroup.subgroupSize < 8);
 }
 
-void ReportSubgroupSupport(const VkPhysicalDevice physical, const VkSubgroupFeatureFlags requiredOps) noexcept {
+void ReportSubgroupSupport(const VkPhysicalDevice physical, const VkSubgroupFeatureFlags requiredOps, DiagnosticLedger& diagnostics) noexcept {
     if (physical == VK_NULL_HANDLE || vkGetPhysicalDeviceProperties2 == nullptr) {
         return;
     }
@@ -49,12 +37,10 @@ void ReportSubgroupSupport(const VkPhysicalDevice physical, const VkSubgroupFeat
     VkPhysicalDeviceProperties2        properties {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     vkGetPhysicalDeviceProperties2(physical, &properties);
     if ((subgroup.supportedOperations & requiredOps) != requiredOps) {
-        ZHLN::LogWarning(
-            "[Vulkan] subgroup width {} supports operations {:#x}, missing requested operations {:#x}; using fallback paths where available.",
+        diagnostics.Add(DiagnosticSeverity::Info, "Subgroups",
+            "Subgroup width {} supports operations {:#x}, missing requested operations {:#x}; using fallback paths where available.",
             subgroup.subgroupSize, subgroup.supportedOperations, requiredOps & ~subgroup.supportedOperations
         );
-    } else {
-        ZHLN::Log("[Vulkan] Subgroup width {} supports requested operations {:#x}.", subgroup.subgroupSize, requiredOps);
     }
 }
 

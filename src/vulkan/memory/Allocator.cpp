@@ -36,8 +36,7 @@ enum class AllocatorError : uint8_t {
 };
 
 enum class StagingRingBufferError : uint8_t {
-    OutOfHostMemory             ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory"> {}) = 1,
-    StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed"> {}),
+    StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed"> {}) = 1,
 };
 
 namespace {
@@ -585,7 +584,7 @@ auto StagingRingBuffer::Init(Allocator& allocator, VkDevice device, VkQueue queu
 
     auto timeline = Semaphore::CreateTimeline(_device);
     if (!timeline) [[unlikely]] {
-        return std::unexpected(StagingRingBufferError::OutOfHostMemory);
+        return std::unexpected(timeline.error());
     }
     _timelineSemaphore = std::move(*timeline);
 

@@ -19,6 +19,7 @@
 #include <limits>
 #include <vector>
 
+
 namespace ZHLN::Animation {
 
 namespace {
@@ -933,7 +934,10 @@ void Context::Step(
             if (graphics != nullptr) {
                 if (const auto res = graphics->UpdateJointMatrices(slice.jointOffset, COM::Span<const Mat4x4> {paletteSpan.data(), paletteSpan.size()});
                     !res.HasValue()) {
-                    LogWarning("[Animation] joint palette upload failed at offset {} ({} joints): {}", slice.jointOffset, slice.jointCount, Error(res.error).Message());
+                    // The palette upload is best-effort per frame, but a
+                    // failure is not nothing: the skinning of this instance
+                    // stays at whatever the GPU held last.
+                    ZHLN::Log<ZHLN::LogSeverity::Warning>(ZHLN::LogChannel{"Render"}, "Joint palette upload failed for offset {}: {}", slice.jointOffset, res.error);
                 }
             }
             if (sink.uploadPalette != nullptr) {

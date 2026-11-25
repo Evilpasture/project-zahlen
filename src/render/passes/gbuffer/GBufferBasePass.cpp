@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <array>
 #include <tuple>
+#include <cstdio>
+
 
 namespace ZHLN::Passes {
 
@@ -137,7 +139,7 @@ void RecordCpuCulled(
         // chunk failed and why. A chunk is one worker's slice of the draw range,
         // so this also says how much of the pass was lost.
         chunks.ForEachError([](const Vk::RecordingFailure& failure) {
-            ZHLN::Log("[Render] Parallel G-buffer chunk {} could not be recorded ({}); the batch was not submitted.", failure.index, failure.error);
+            kLog.Warn("Parallel G-buffer chunk {} could not be recorded ({}); the batch was not submitted.", failure.index, failure.error);
         });
     }
 }

@@ -20,6 +20,14 @@
 
 namespace ZHLN::COM {
 
+// Forward declarations, not includes: IEngine is included by nearly every
+// consumer and the two logging interfaces bring in the error/format surface
+// with them. A caller that *uses* the returned object -- rather than handing
+// the pointer straight back to the engine -- includes <Zahlen/COM/ILogger.hpp>
+// or <Zahlen/COM/IErrorRegistry.hpp> itself.
+struct ILogger;
+struct ILoggerHub;
+struct IErrorRegistry;
 struct IGraphicsDevice;
 struct IEntities;
 struct ISimulation;
@@ -43,6 +51,10 @@ struct IEngine : IObject {
     // they live exactly as long as the reference you already hold and must not
     // be Released. Use Query<T>() / Ref<T>::As<T>() when you want to own one
     // independently; that path adds a reference the way COM expects.
+    // Borrowed: owned by whoever created the engine (or by the engine
+    // itself when the factory made defaults). Valid while the engine lives.
+    [[nodiscard]] virtual ILogger*      Logger() noexcept = 0;
+    [[nodiscard]] virtual IErrorRegistry* Errors() noexcept = 0;
     [[nodiscard]] virtual IGraphicsDevice* Graphics() noexcept = 0;
     [[nodiscard]] virtual IEntities*       Entities() noexcept = 0;
     [[nodiscard]] virtual ISimulation*     Simulation() noexcept = 0;

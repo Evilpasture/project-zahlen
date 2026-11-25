@@ -107,15 +107,62 @@ global gain drifts. The previously failing modes (sample AO at `-0.06`,
 both GTAOs at `+0.05`) pass on structure; the checks that already were
 noise-relative are untouched.
 
+## 3b. Where `DeviceLostCount()` comes from
+
+`DeviceLostCount()` counts lines whose channel is `"DeviceLost"`. Exactly one line
+produces them: the loss branch of `Engine::Present`, and the same line in
+`Engine::ProvokeDeviceLost` -- i.e. where a loss is *observed*. Nothing else logs
+one and nothing counts one, so the count means "a loss happened and the runtime
+recovered from it", not "recovery ran".
+
+That distinction is load-bearing. `IEngine::RecreateGraphicsDevice` enters the same
+recovery path deliberately, on a healthy device; it is not a loss, it does not count
+as one, and it does not dump a fault report. A loss seen only during teardown --
+`RenderContext::Destroy`, or a window being removed -- is logged as a general
+error-severity fact on no channel at all, and not counted, because it has no recovery
+to attach to.
+
+For the count to move at all, ambient `ZHLN::Log` lines have to reach the capture
+sink. `COM::CreateEngineRaw` installs the logger it is going to use as the process
+ambient sink in both cases -- one the chain supplied, or the console default it
+mints -- so ambient lines share the engine's format and level. A minted hub must not
+swallow what the host already installed, though: whatever sink was installed before
+creation (in a test, the sink `CaptureHub()` publishes) is chained into the minted hub
+through its `LoggerConfig`, which is what makes the counters live -- and what keeps the
+minted hub from adding a console sink of its own. Tests get that chain without
+asking for it; a host that installed its own sink before creating an engine keeps
+receiving lines after it.
+
+What is *not* exercised in-tree: `Engine::ProvokeDeviceLost`, the C++ entry point
+that provokes a real loss rather than a deliberate reset. The test surface is COM,
+which exposes only `RecreateGraphicsDevice`, so the hook has no caller today.
+Recovery is therefore reasoned about rather than proven from the suites -- and a
+test that only ticks `IEngine` sees the count move only if a loss actually happens.
+
+On timing: a loss produced by a *frame* (`DispatchSimulations`, a pool reset, a
+present, a destination acquire) is counted inside `Tick`, when `Engine::Present`
+sees `FrameResult::DeviceLost`, not at the moment the Vulkan call failed. A test
+that calls `RenderContext` directly gets the returned `FrameResult::DeviceLost` but
+will not see the count move, because recovery never ran.
+
 ## 4. Quiet logs
 
 The runner now captures engine logs per test instead of streaming them:
 
-- Every test runs at `Verbose` with output suppressed into a bounded buffer
-  (`ZHLN::BeginLogCapture`, `src/engine/Log.cpp`). A passing test prints
-  only its `[ RUN ]`/`[ PASS ]` lines; a failing test prints its usual
-  failure details plus the captured engine log (head 15 + tail 50 lines,
-  omission counted).
+- Every test runs with the framework's capture sink registered as the ambient
+  `LogSink` (`Test::CaptureHub()`, `tests/TestsFramework.hpp`), so engine lines
+  land in a per-test buffer instead of the terminal. The buffer is bounded at
+  `kMaxCapturedLines` (512); when it fills, the oldest quarter is dropped, so the tail
+  -- where a failure usually is -- is what survives a Verbose frame loop. A passing test prints
+  only its `[ RUN ]`/`[ PASS ]` lines; a failing test prints its usual failure
+  details plus the captured engine log (head 15 + tail 50 lines, omission counted).
+  That same buffer is what `DeviceLostCount()` and `ValidationErrorCount()` read.
+- `-q/--quiet` sets the process level to `Off` and the capture hub's minimum
+  severity to `Off`. Silence comes from there being no console sink in the default
+  hub at all -- not from the process default gating anything -- so an engine that
+  mints a hub still takes its level from `AppConfig::logLevel`; that hub has no
+  console sink precisely because the capture sink is chained in through its
+  `LoggerConfig`.
 - `ZHLN_TEST_LOG=verbose` disables the capture and streams engine logs,
   for debugging.
 - Panics bypass suppression, so a fatal always prints.
