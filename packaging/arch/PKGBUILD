@@ -1,10 +1,8 @@
 # Maintainer: Evilpasture <housemaster@evilpasture.org>
 
 pkgname=zahlen-zpkg
-_commit=61456affc498adbb58eb52ba4f1328121741890a
-# zpkg CalVer, mirrored from utils/zpkg/VERSION by scripts/bump-zpkg-calver.sh.
-# After merging a change to utils/zpkg/, update _commit to that commit and run
-# updpkgsums: the pinned tarball must contain the VERSION and keys/ files below.
+_commit=8e717a43d99d36dd6aef3909bda4024aba032e56
+
 pkgver=2026.11.25
 pkgrel=1
 pkgdesc='Per-user package manager for Zahlen engine packages'
@@ -12,11 +10,9 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/Evilpasture/project-zahlen"
 license=('GPL-3.0-or-later')
 
-# simdjson is linked dynamically for manifests and store indices
 depends=('gcc-libs' 'zlib' 'zstd' 'openssl' 'curl' 'simdjson')
 makedepends=('cmake' 'ninja' 'gcc')
 
-# Pinned commit tarball; update _commit and pkgver, then run updpkgsums
 source=("${pkgname}-${_commit}.tar.gz::https://github.com/Evilpasture/project-zahlen/archive/${_commit}.tar.gz")
 sha256sums=('8201129852809cabaf3776de7e74e6b1ecf112c155bff8dc83c09717acbe45c9')
 
@@ -35,9 +31,6 @@ check() {
 
 package() {
     install -Dm755 build/zpkg "${pkgdir}/usr/bin/zpkg"
-    # Out-of-band trust anchor: the key lives in git history, not only inside
-    # the release it signs. `zpkg key add /usr/share/zahlen/zahlen-release-key.pub`
-    # is a one-time step for Arch users.
     install -Dm644 "project-zahlen-${_commit}/packaging/keys/zahlen-release.pub" \
         "${pkgdir}/usr/share/zahlen/zahlen-release-key.pub"
     install -Dm644 "project-zahlen-${_commit}/LICENSE.md" \
