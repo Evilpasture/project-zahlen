@@ -16,28 +16,6 @@ template <typename T>
 struct Vec3 {
     T x, y, z;
 
-    [[nodiscard]] constexpr T* data() noexcept {
-        return &x;
-    }
-    [[nodiscard]] constexpr const T* data() const noexcept {
-        return &x;
-    }
-    [[nodiscard]] constexpr std::size_t size() const noexcept {
-        return 3;
-    }
-    [[nodiscard]] constexpr T* begin() noexcept {
-        return &x;
-    }
-    [[nodiscard]] constexpr const T* begin() const noexcept {
-        return &x;
-    }
-    [[nodiscard]] constexpr T* end() noexcept {
-        return &x + 3;
-    }
-    [[nodiscard]] constexpr const T* end() const noexcept {
-        return &x + 3;
-    }
-
     [[nodiscard]] constexpr operator std::span<T, 3>() & noexcept {
         return std::span<T, 3> {&x, 3};
     }
