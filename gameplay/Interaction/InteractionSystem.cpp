@@ -27,12 +27,14 @@ namespace {
 
 void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float duration) noexcept {
     if (audio != nullptr && audio->Initialized()) {
-        audio->PostEvent(AudioEvent {
-            .type     = AudioEventType::ProceduralBeep,
-            .volume   = volume,
-            .param1   = frequency,
-            .duration = duration,
-        });
+        audio->PostEvent(
+            AudioEvent {
+                .type     = AudioEventType::ProceduralBeep,
+                .volume   = volume,
+                .param1   = frequency,
+                .duration = duration,
+            }
+        );
     }
 }
 
@@ -49,8 +51,7 @@ void PostBeep(COM::IAudioDevice* audio, float volume, float frequency, float dur
     return Entity::Null();
 }
 
-void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity playerEnt,
-                    std::string_view destination, COM::IAudioDevice* audio) {
+void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity playerEnt, std::string_view destination, COM::IAudioDevice* audio) {
     if (destination.empty() || physics == nullptr) {
         return;
     }
@@ -60,7 +61,7 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
     }
 
     Entity destEnt = Entity::Null();
-    for (const Entity e : entities.EntitiesWith<TeleportDestinationComponent>()) {
+    for (const Entity e: entities.EntitiesWith<TeleportDestinationComponent>()) {
         const auto* nameComp = entities.Get<Components::NameComponent>(e);
         if (nameComp != nullptr && std::string_view(nameComp->name) == destination) {
             destEnt = e;
@@ -97,8 +98,7 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
 
 } // namespace
 
-void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, COM::ISimulation* physics,
-                               COM::IAudioDevice* audio) {
+void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, COM::ISimulation* physics, COM::IAudioDevice* audio) {
     const Entity playerEnt = FindPlayerEntity(entities);
     if (playerEnt == Entity::Null()) {
         return;
@@ -112,7 +112,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
     const bool  interactJustPressed = useIntent.JustPressed();
 
     // 1. Trigger volumes (AABB or sphere)
-    for (const Entity triggerEnt : entities.EntitiesWith<TriggerComponent>()) {
+    for (const Entity triggerEnt: entities.EntitiesWith<TriggerComponent>()) {
         auto* trigger = entities.Get<TriggerComponent>(triggerEnt);
         if (trigger == nullptr) {
             continue;
@@ -130,7 +130,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
         bool        inside          = false;
         if (trigger->halfExtents.LengthSquared() > 1e-4f) {
             const auto delta = (playerPos - triggerPosition).Abs();
-            inside = delta.x <= trigger->halfExtents.x && delta.y <= trigger->halfExtents.y && delta.z <= trigger->halfExtents.z;
+            inside           = delta.x <= trigger->halfExtents.x && delta.y <= trigger->halfExtents.y && delta.z <= trigger->halfExtents.z;
         } else {
             inside = (triggerPosition - playerPos).Length() <= trigger->radius;
         }
@@ -163,9 +163,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                 bool processed = false;
 
                 if (auto* pickup = entities.Get<PickupComponent>(triggerEnt)) {
-                    if (const auto* itemBase = entities.Get<ItemBaseComponent>(triggerEnt)) {
-                        const uint32_t itemId    = itemBase->id;
-                        auto*          container = entities.Get<ContainerComponent>(playerEnt);
+                    if (entities.Get<ItemBaseComponent>(triggerEnt) != nullptr) {
+                        auto* container = entities.Get<ContainerComponent>(playerEnt);
                         if (container == nullptr) {
                             container = entities.Attach(playerEnt, ContainerComponent {});
                         }
@@ -193,8 +192,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                 }
 
                 if (!processed) {
-                    if (const auto* usable = entities.Get<UsableComponent>(triggerEnt);
-                        usable != nullptr && usable->scriptHash != 0) {
+                    if (const auto* usable = entities.Get<UsableComponent>(triggerEnt); usable != nullptr && usable->scriptHash != 0) {
                         PostBeep(audio, 0.20f, 550.0f, 0.08f);
                     }
                 }
@@ -208,7 +206,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
     }
 
     // 2. Door proximity & use interaction
-    for (const Entity doorEnt : entities.EntitiesWith<DoorComponent>()) {
+    for (const Entity doorEnt: entities.EntitiesWith<DoorComponent>()) {
         auto*       door  = entities.Get<DoorComponent>(doorEnt);
         const auto* trans = entities.Get<Components::TransformComponent>(doorEnt);
         if (door == nullptr || trans == nullptr) {
@@ -218,7 +216,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             if ((door->flags & DoorFlags::TouchOpens) != DoorFlags::None && door->state == DoorState::Closed) {
                 FireEntityInput(entities, doorEnt, "Open", "", audio);
                 door = entities.Get<DoorComponent>(doorEnt);
-                if (door == nullptr) continue;
+                if (door == nullptr)
+                    continue;
             }
             if (interactJustPressed && (door->flags & DoorFlags::UseOpens) != DoorFlags::None) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None) {
@@ -233,7 +232,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
     }
 
     // 3. Button proximity & use interaction
-    for (const Entity buttonEnt : entities.EntitiesWith<ButtonComponent>()) {
+    for (const Entity buttonEnt: entities.EntitiesWith<ButtonComponent>()) {
         auto*       button = entities.Get<ButtonComponent>(buttonEnt);
         const auto* trans  = entities.Get<Components::TransformComponent>(buttonEnt);
         if (button == nullptr || trans == nullptr) {
@@ -243,7 +242,8 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
             if ((button->flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button->state == ButtonState::Off) {
                 FireEntityInput(entities, buttonEnt, "Press", "", audio);
                 button = entities.Get<ButtonComponent>(buttonEnt);
-                if (button == nullptr) continue;
+                if (button == nullptr)
+                    continue;
             }
             if (interactJustPressed && (button->flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None) {
@@ -258,7 +258,7 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
 }
 
 void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimulation* physics, COM::IAudioDevice* audio) {
-    for (const Entity e : entities.EntitiesWith<DoorComponent>()) {
+    for (const Entity e: entities.EntitiesWith<DoorComponent>()) {
         auto* door  = entities.Get<DoorComponent>(e);
         auto* trans = entities.Get<Components::TransformComponent>(e);
         if (door == nullptr || trans == nullptr) {
@@ -280,7 +280,8 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
                     }
                     door  = entities.Get<DoorComponent>(e);
                     trans = entities.Get<Components::TransformComponent>(e);
-                    if (door == nullptr || trans == nullptr) continue;
+                    if (door == nullptr || trans == nullptr)
+                        continue;
                 }
                 break;
             }
@@ -292,7 +293,8 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
                         FireEntityOutputs(entities, e, "OnStartClosing", audio);
                         door  = entities.Get<DoorComponent>(e);
                         trans = entities.Get<Components::TransformComponent>(e);
-                        if (door == nullptr || trans == nullptr) continue;
+                        if (door == nullptr || trans == nullptr)
+                            continue;
                     }
                 }
                 break;
@@ -306,7 +308,8 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
                     FireEntityOutputs(entities, e, "OnFullyClosed", audio);
                     door  = entities.Get<DoorComponent>(e);
                     trans = entities.Get<Components::TransformComponent>(e);
-                    if (door == nullptr || trans == nullptr) continue;
+                    if (door == nullptr || trans == nullptr)
+                        continue;
                 }
                 break;
             }
@@ -321,8 +324,7 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
         }
 
         if (physics != nullptr) {
-            if (const auto* phys = entities.Get<Components::PhysicsComponent>(e);
-                phys != nullptr && phys->physicsID.Pack() != 0) {
+            if (const auto* phys = entities.Get<Components::PhysicsComponent>(e); phys != nullptr && phys->physicsID.Pack() != 0) {
                 physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation);
             }
         }
@@ -330,7 +332,7 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
 }
 
 void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimulation* physics, COM::IAudioDevice* audio) {
-    for (const Entity e : entities.EntitiesWith<ButtonComponent>()) {
+    for (const Entity e: entities.EntitiesWith<ButtonComponent>()) {
         auto* button = entities.Get<ButtonComponent>(e);
         auto* trans  = entities.Get<Components::TransformComponent>(e);
         if (button == nullptr || trans == nullptr) {
@@ -347,7 +349,8 @@ void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimu
                     FireEntityOutputs(entities, e, "OnIn", audio);
                     button = entities.Get<ButtonComponent>(e);
                     trans  = entities.Get<Components::TransformComponent>(e);
-                    if (button == nullptr || trans == nullptr) continue;
+                    if (button == nullptr || trans == nullptr)
+                        continue;
                 }
                 break;
             }
@@ -355,15 +358,14 @@ void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimu
                 if (button->wait >= 0.0f && (button->flags & ButtonFlags::Toggle) == ButtonFlags::None) {
                     button->waitTimer -= dt;
                     if (button->waitTimer <= 0.0f) {
-                        button->state = ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None)
-                                            ? ButtonState::Off
-                                            : ButtonState::MovingOut;
+                        button->state = ((button->flags & ButtonFlags::DontMove) != ButtonFlags::None) ? ButtonState::Off : ButtonState::MovingOut;
                         if (button->state == ButtonState::Off) {
                             button->progress = 0.0f;
                             FireEntityOutputs(entities, e, "OnOut", audio);
                             button = entities.Get<ButtonComponent>(e);
                             trans  = entities.Get<Components::TransformComponent>(e);
-                            if (button == nullptr || trans == nullptr) continue;
+                            if (button == nullptr || trans == nullptr)
+                                continue;
                         }
                     }
                 }
@@ -377,7 +379,8 @@ void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimu
                     FireEntityOutputs(entities, e, "OnOut", audio);
                     button = entities.Get<ButtonComponent>(e);
                     trans  = entities.Get<Components::TransformComponent>(e);
-                    if (button == nullptr || trans == nullptr) continue;
+                    if (button == nullptr || trans == nullptr)
+                        continue;
                 }
                 break;
             }
@@ -388,8 +391,7 @@ void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimu
         if ((button->flags & ButtonFlags::DontMove) == ButtonFlags::None) {
             trans->position = button->unpressedPosition + (button->pressedPosition - button->unpressedPosition) * button->progress;
             if (physics != nullptr) {
-                if (const auto* phys = entities.Get<Components::PhysicsComponent>(e);
-                    phys != nullptr && phys->physicsID.Pack() != 0) {
+                if (const auto* phys = entities.Get<Components::PhysicsComponent>(e); phys != nullptr && phys->physicsID.Pack() != 0) {
                     physics->SetKinematicPose(phys->physicsID, trans->position.Cast<double>(), trans->rotation);
                 }
             }
@@ -403,7 +405,7 @@ void Step(COM::IEngine& engine, float dt, bool& wasUseDown) {
         return;
     }
     auto* physics = engine.Simulation();
-    auto* audio = engine.Audio();
+    auto* audio   = engine.Audio();
     auto* actions = engine.Actions();
 
     const bool use = actions ? actions->KeyDown(KeyCode::E, kPrimarySeat) : false;

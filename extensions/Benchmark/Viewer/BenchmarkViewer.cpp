@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Benchmark/Viewer/BenchmarkViewer.hpp>
-#include <cstdio>
-#include <format>
 #include <Widget/BarStrip.hpp>
 #include <Widget/HoverCard.hpp>
 #include <Widget/TextFit.hpp>
 #include <Zahlen/COM/IGraphicsDevice.hpp>
+#include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/COM/LoggerView.hpp>
 #include <Zahlen/Engine/Clock.hpp>
 #include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/COM/ILogger.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <format>
 #include <optional>
 #include <span>
@@ -23,8 +23,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include <Zahlen/COM/LoggerView.hpp>
-
 
 namespace ZHLN::Bench {
 
@@ -66,14 +64,14 @@ inline constexpr float kSparkBarGap          = 1.0f;
 // still about the same height -- narrowing the cells rather than growing the
 // panel. Past kCoreCellsMax the label in a cell no longer fits and the cell
 // becomes its own history alone.
-inline constexpr size_t kCoreGridRows      = 6; // rows aimed for before the grid widens
-inline constexpr size_t kCoreCellsMin      = 4;
-inline constexpr size_t kCoreCellsMax      = 10;
-inline constexpr float  kCoreCellFontSize  = 10.0f;
-inline constexpr float  kCoreCellGap       = 4.0f;
-inline constexpr float  kCoreSparkHeight   = 10.0f;
-inline constexpr float  kCoreSparkBarGap   = 1.0f;
-inline constexpr size_t kCoreSparkBars     = 12;
+inline constexpr size_t kCoreGridRows     = 6; // rows aimed for before the grid widens
+inline constexpr size_t kCoreCellsMin     = 4;
+inline constexpr size_t kCoreCellsMax     = 10;
+inline constexpr float  kCoreCellFontSize = 10.0f;
+inline constexpr float  kCoreCellGap      = 4.0f;
+inline constexpr float  kCoreSparkHeight  = 10.0f;
+inline constexpr float  kCoreSparkBarGap  = 1.0f;
+inline constexpr size_t kCoreSparkBars    = 12;
 
 // The smallest a row's sparkline scales to, in ms. Bars are drawn against the
 // row's own peak, so a row whose whole window sits at the noise floor -- a pass
@@ -137,8 +135,8 @@ struct TableStyle {
 // <Widget/TextFit.hpp> for all three instead of carrying its own copy of rules
 // that every panel needs.
 using ZHLN::GUI::Widget::AdvancePerChar;
-using ZHLN::GUI::Widget::FitToWidth;
 using ZHLN::GUI::Widget::FitsWidth;
+using ZHLN::GUI::Widget::FitToWidth;
 
 // The widest name in a run of rows, in pixels. Not a measurement of the glyphs
 // (that would be a pass per row per frame for a number that only moves when the
@@ -172,8 +170,8 @@ const FVec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
 
 // The machine section: a core cell's history bar, and the red a core at its
 // ceiling is drawn in.
-const FVec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
-const FVec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
+[[maybe_unused]] const FVec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
+const FVec4                  kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
 
 // A hovered line's card: a shade apart from the panel it floats over, so it
 // reads as a card on top of the panel rather than as more panel.
@@ -205,10 +203,8 @@ const FVec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
     const float peak = *static_cast<const float*>(user);
     const float fill = peak > 0.0f ? std::clamp(value / peak, 0.0f, 1.0f) : 0.0f;
     return FVec4 {
-        kFastBarInk.x + ((kSlowBarInk.x - kFastBarInk.x) * fill),
-        kFastBarInk.y + ((kSlowBarInk.y - kFastBarInk.y) * fill),
-        kFastBarInk.z + ((kSlowBarInk.z - kFastBarInk.z) * fill),
-        1.0f
+        kFastBarInk.x + ((kSlowBarInk.x - kFastBarInk.x) * fill), kFastBarInk.y + ((kSlowBarInk.y - kFastBarInk.y) * fill),
+        kFastBarInk.z + ((kSlowBarInk.z - kFastBarInk.z) * fill), 1.0f
     };
 }
 
@@ -232,9 +228,7 @@ const FVec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
     // An empty label is a caller that has already named the thing earlier on the
     // line -- the GPU's device name, say -- so the numbers stand on their own
     // and that caller spaces them.
-    return std::format(
-        "{}{}{}   avg {}   p1 {}   p99 {}", label, label.empty() ? "" : "  ", at(series.last), at(series.avg), at(series.p1), at(series.p99)
-    );
+    return std::format("{}{}{}   avg {}   p1 {}   p99 {}", label, label.empty() ? "" : "  ", at(series.last), at(series.avg), at(series.p1), at(series.p99));
 }
 
 // A bar is this much of the chart at minimum, so an idle frame still leaves a
@@ -432,7 +426,7 @@ void Viewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
         return;
     }
 
-    const Metrics&   metrics = benchmark->GetMetrics();
+    const Metrics&            metrics = benchmark->GetMetrics();
     const std::vector<float>& history = benchmark->GetTickHistory();
 
     // Ticks per second over the run, and the last second of history: the two
@@ -484,24 +478,26 @@ void Viewer::Impl::DrawBenchmarkPanel(GUI::Frame& ui) {
                 // The scale is the run's worst tick, floored so an empty history
                 // cannot divide by zero: the window's own tallest tick is at most
                 // that, so a bar scrolling out does not rescale the bars left in.
-                float       worst   = std::max(metrics.maxTickTimeMs, 0.001f);
-                const auto  samples = std::span<const float>(history).subspan(history.size() - shown);
+                float      worst   = std::max(metrics.maxTickTimeMs, 0.001f);
+                const auto samples = std::span<const float>(history).subspan(history.size() - shown);
 
                 ui.Box(
-                    "BenchmarkChart",
-                    GUI::BoxConfig {.width = {.fixed = kPanelContentWidth}, .height = {.fixed = kChartHeight}, .color = kChartInk},
+                    "BenchmarkChart", GUI::BoxConfig {.width = {.fixed = kPanelContentWidth}, .height = {.fixed = kChartHeight}, .color = kChartInk},
                     [&]() -> void {
-                        GUI::Widget::BarStrip(ui, samples, GUI::Widget::BarStripStyle {
-                            .width        = kPanelContentWidth,
-                            .height       = kChartHeight,
-                            .gap          = kBarGap,
-                            .minBarHeight = kMinBarHeight,
-                            .scale        = GUI::Widget::BarScale::OwnPeak,
-                            .peakFloor    = worst,
-                            .inkFor       = TickBarInk,
-                            .inkUser      = &worst,
-                            .idBase       = "BenchmarkBar",
-                        });
+                        GUI::Widget::BarStrip(
+                            ui, samples,
+                            GUI::Widget::BarStripStyle {
+                                .width        = kPanelContentWidth,
+                                .height       = kChartHeight,
+                                .gap          = kBarGap,
+                                .minBarHeight = kMinBarHeight,
+                                .scale        = GUI::Widget::BarScale::OwnPeak,
+                                .peakFloor    = worst,
+                                .inkFor       = TickBarInk,
+                                .inkUser      = &worst,
+                                .idBase       = "BenchmarkBar",
+                            }
+                        );
                     }
                 );
             }
@@ -534,20 +530,22 @@ void Viewer::Impl::DrawFrameTimeChart(GUI::Frame& ui, std::span<const float> sam
     // The strip draws its own box, so the chart's background goes on the box
     // behind it -- same width, same height, and the bars fill it exactly.
     ui.Box(
-        "TelemetryChart", GUI::BoxConfig {.width = {.fixed = telemetryContent}, .height = {.fixed = kTelemetryChartHeight}, .color = kChartInk},
-        [&]() -> void {
-            GUI::Widget::BarStrip(ui, samples, GUI::Widget::BarStripStyle {
-                .width        = telemetryContent,
-                .height       = kTelemetryChartHeight,
-                .gap          = kBarGap,
-                .minBarHeight = kMinBarHeight,
-                .scale        = GUI::Widget::BarScale::Shared,
-                .sharedPeak   = std::max({stats.frameMsAvg * kChartScaleAverage, stats.frameMsLow1 * kChartScaleLows, 1.0f}),
-                .threshold    = stats.frameMsLow1,
-                .ink          = kFastBarInk,
-                .hotInk       = kSlowBarInk,
-                .idBase       = "tchart",
-            });
+        "TelemetryChart", GUI::BoxConfig {.width = {.fixed = telemetryContent}, .height = {.fixed = kTelemetryChartHeight}, .color = kChartInk}, [&]() -> void {
+            GUI::Widget::BarStrip(
+                ui, samples,
+                GUI::Widget::BarStripStyle {
+                    .width        = telemetryContent,
+                    .height       = kTelemetryChartHeight,
+                    .gap          = kBarGap,
+                    .minBarHeight = kMinBarHeight,
+                    .scale        = GUI::Widget::BarScale::Shared,
+                    .sharedPeak   = std::max({stats.frameMsAvg * kChartScaleAverage, stats.frameMsLow1 * kChartScaleLows, 1.0f}),
+                    .threshold    = stats.frameMsLow1,
+                    .ink          = kFastBarInk,
+                    .hotInk       = kSlowBarInk,
+                    .idBase       = "tchart",
+                }
+            );
         }
     );
 }
@@ -568,13 +566,7 @@ void Viewer::Impl::DrawStageColumns(GUI::Frame& ui, std::span<const FrameStageRo
     );
 }
 
-void Viewer::Impl::DrawStageColumn(
-    GUI::Frame&                    ui,
-    std::span<const FrameStageRow> rows,
-    const TableStyle&              style,
-    std::string_view               prefix,
-    size_t                         column
-) {
+void Viewer::Impl::DrawStageColumn(GUI::Frame& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column) {
     if (rows.empty()) {
         return;
     }
@@ -589,14 +581,7 @@ void Viewer::Impl::DrawStageColumn(
     });
 }
 
-void Viewer::Impl::DrawStageRow(
-    GUI::Frame&          ui,
-    const FrameStageRow& row,
-    const TableStyle&    style,
-    std::string_view     prefix,
-    size_t               column,
-    size_t               index
-) {
+void Viewer::Impl::DrawStageRow(GUI::Frame& ui, const FrameStageRow& row, const TableStyle& style, std::string_view prefix, size_t column, size_t index) {
     // Heights are left to fit their content rather than pinned to a row height:
     // a metric whose name is wider than its column then makes its row taller,
     // instead of drawing its second line over the row below. The name itself is
@@ -604,7 +589,7 @@ void Viewer::Impl::DrawStageRow(
     // A row the profiler has stopped hearing from is drawn as history: its name
     // and its number dimmed, because that number is the last one it had rather
     // than what the frame is paying now (see FrameStageRow::IsStale).
-    const bool      stale    = row.IsStale();
+    const bool  stale    = row.IsStale();
     const FVec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
     const FVec4 valueInk = stale ? kStaleInk : kBodyInk;
 
@@ -636,18 +621,21 @@ void Viewer::Impl::DrawStageRow(
             // small bars rather than a full block that cannot move.
             const size_t blank = row.spark.size() - std::min(row.filled, row.spark.size());
 
-            GUI::Widget::BarStrip(ui, row.spark, GUI::Widget::BarStripStyle {
-                .width        = style.sparkWidth,
-                .height       = kStageSparkHeight,
-                .gap          = kSparkBarGap,
-                .minBarHeight = kMinBarHeight,
-                .scale        = GUI::Widget::BarScale::OwnPeak,
-                .peakFloor    = kSparkFloorMs,
-                .absentBars   = blank,
-                .ink          = row.gpuStage ? kGpuSparkInk : kCpuSparkInk,
-                .absentInk    = kChartInk,
-                .idBase       = TableId(prefix, column, index, 2),
-            });
+            GUI::Widget::BarStrip(
+                ui, row.spark,
+                GUI::Widget::BarStripStyle {
+                    .width        = style.sparkWidth,
+                    .height       = kStageSparkHeight,
+                    .gap          = kSparkBarGap,
+                    .minBarHeight = kMinBarHeight,
+                    .scale        = GUI::Widget::BarScale::OwnPeak,
+                    .peakFloor    = kSparkFloorMs,
+                    .absentBars   = blank,
+                    .ink          = row.gpuStage ? kGpuSparkInk : kCpuSparkInk,
+                    .absentInk    = kChartInk,
+                    .idBase       = TableId(prefix, column, index, 2),
+                }
+            );
         }
     );
 
@@ -664,9 +652,7 @@ void Viewer::Impl::DrawStageRow(
 
         GUI::Widget::AddHoverLine(hover, row.name);
         if (row.filled > 0) {
-            GUI::Widget::AddHoverLine(
-                hover, std::format("last {:.2f} ms   highest of the last {} frames {:.2f} ms", row.lastMs, row.filled, windowPeak)
-            );
+            GUI::Widget::AddHoverLine(hover, std::format("last {:.2f} ms   highest of the last {} frames {:.2f} ms", row.lastMs, row.filled, windowPeak));
         } else {
             GUI::Widget::AddHoverLine(hover, std::format("last {:.2f} ms", row.lastMs));
         }
@@ -762,7 +748,7 @@ void Viewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& sys
 
         const std::string      all     = std::format("GPU  {}{}", name, readings);
         const float            advance = AdvanceAt(12.0f);
-        const FVec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
+        const FVec4            ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
         const std::string_view id      = TableId("hw", 0, 2, 0);
 
         ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
@@ -784,9 +770,8 @@ void Viewer::Impl::DrawHardwareSection(GUI::Frame& ui, const SystemSnapshot& sys
             }
         }
     } else {
-        const std::string_view reason =
-            system.gpuUnavailableReason.empty() ? std::string_view("no utilization or clock counters are exposed on this machine")
-                                                : std::string_view(system.gpuUnavailableReason);
+        const std::string_view reason = system.gpuUnavailableReason.empty() ? std::string_view("no utilization or clock counters are exposed on this machine") :
+                                                                              std::string_view(system.gpuUnavailableReason);
         ui.Text(FitToWidth(std::format("GPU counters  {}", reason), telemetryContent, AdvanceAt(11.0f)), 11.0f, kCpuNameInk);
     }
 }
@@ -842,8 +827,7 @@ void Viewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_
     const std::string_view id = TableId("core", 0, cell, 0);
 
     ui.Box(
-        id,
-        GUI::BoxConfig {.width = {.fixed = cellWidth}, .gap = 2.0f, .direction = GUI::Direction::Column, .alignCross = GUI::Alignment::Start},
+        id, GUI::BoxConfig {.width = {.fixed = cellWidth}, .gap = 2.0f, .direction = GUI::Direction::Column, .alignCross = GUI::Alignment::Start},
         [&]() -> void {
             // "c07 91% 2.13G" -- the core, its usage now, and its clock -- is
             // what a cell says when it is wide enough to say it; below that the
@@ -878,18 +862,21 @@ void Viewer::Impl::DrawCoreCell(GUI::Frame& ui, const CoreTelemetry& core, size_
             // reading: the strip draws them in the dim ink, so a young machine
             // does not look idle and busy at once, and the rest take the load
             // ramp the cell's own percentage uses.
-            GUI::Widget::BarStrip(ui, history, GUI::Widget::BarStripStyle {
-                .width        = cellWidth,
-                .height       = kCoreSparkHeight,
-                .gap          = kCoreSparkBarGap,
-                .minBarHeight = kMinBarHeight,
-                .scale        = GUI::Widget::BarScale::Shared,
-                .sharedPeak   = 100.0f,
-                .absentBars   = blank,
-                .absentInk    = kChartInk,
-                .inkFor       = CoreBarInk,
-                .idBase       = TableId("core", 0, cell, 2),
-            });
+            GUI::Widget::BarStrip(
+                ui, history,
+                GUI::Widget::BarStripStyle {
+                    .width        = cellWidth,
+                    .height       = kCoreSparkHeight,
+                    .gap          = kCoreSparkBarGap,
+                    .minBarHeight = kMinBarHeight,
+                    .scale        = GUI::Widget::BarScale::Shared,
+                    .sharedPeak   = 100.0f,
+                    .absentBars   = blank,
+                    .absentInk    = kChartInk,
+                    .inkFor       = CoreBarInk,
+                    .idBase       = TableId("core", 0, cell, 2),
+                }
+            );
         }
     );
 
@@ -963,8 +950,7 @@ void Viewer::Impl::DrawTelemetryPanel(GUI::Frame& ui, ZHLN::COM::IEngine& engine
             // a section grows, the panel scrolls as a whole; the framework's bar
             // on the right edge is the affordance, and it tracks whatever is
             // below the fold.
-            const float panelScrollH =
-                std::max(240.0f, static_cast<float>(viewport.height) - (2.0f * kPanelMargin) - (2.0f * kPanelPadding));
+            const float panelScrollH = std::max(240.0f, static_cast<float>(viewport.height) - (2.0f * kPanelMargin) - (2.0f * kPanelPadding));
             ui.ScrollArea(
                 "TelemetryPanelScroll",
                 GUI::BoxConfig {
@@ -1077,7 +1063,7 @@ void Viewer::Attach(ZHLN::COM::IEngine& engine, size_t initialEntities) {
 
     m_impl->benchmark = std::make_unique<LogicBenchmark>();
     if (!m_impl->benchmark->Initialize(initialEntities)) {
-        ZHLN::COM::LoggerView{engine.Logger()}.Error("the benchmark world failed to initialize, so there is nothing to draw.");
+        ZHLN::COM::LoggerView {engine.Logger()}.Error("the benchmark world failed to initialize, so there is nothing to draw.");
         m_impl->benchmark.reset();
         return;
     }

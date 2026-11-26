@@ -16,6 +16,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -27,7 +28,7 @@ namespace ZHLN::BSP {
 // namespace.
 namespace {
 
-constexpr float kPi = 3.14159265358979323846f;
+constexpr float kPi = std::numbers::pi_v<float>;
 
 // Source bspflags.h. Only the bits the lighting pass reads.
 
@@ -61,15 +62,6 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     return out;
 }
 
-[[nodiscard]] auto ContainsIgnoreCase(std::string_view text, std::string_view needle) noexcept -> bool {
-    if (needle.empty() || text.size() < needle.size()) {
-        return false;
-    }
-    const std::string haystack = ToLower(text);
-    const std::string target   = ToLower(needle);
-    return haystack.find(target) != std::string::npos;
-}
-
 [[nodiscard]] auto KeyFloat(const Entity& entity, std::string_view key, float fallback) noexcept -> float {
     return entity.FindFloat(key).value_or(fallback);
 }
@@ -81,16 +73,10 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     if (v.empty()) {
         return std::nullopt;
     }
-    float out = 0.0f;
+    float out            = 0.0f;
     const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
-    (void)ptr;
+    (void) ptr;
     return ec == std::errc {} ? std::optional<float> {out} : std::nullopt;
-}
-
-// The luminance the renderer itself uses for light-importance sorting, so the
-// emissive ranking and the engine agree on what "bright" means.
-[[nodiscard]] auto Rec709Luma(std::span<const float, 3> rgb) noexcept -> float {
-    return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
 }
 
 // Reads up to four whitespace-separated floats out of a keyvalue. Returns how
@@ -120,8 +106,8 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 // Source's angle triple -> unit direction, in Source's Z-up space with pitch
 // positive down.
 [[nodiscard]] auto AngleDirection(std::array<float, 3> angles) noexcept -> FVec3 {
-    const auto pitch = DegF{angles[0]}.ToRadians();
-    const auto yaw = DegF{angles[1]}.ToRadians();
+    const auto  pitch = DegF {angles[0]}.ToRadians();
+    const auto  yaw   = DegF {angles[1]}.ToRadians();
     const float cp    = Cos(pitch);
     return {cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
 }
@@ -334,8 +320,8 @@ auto ReadEnvironmentAmbient(const Map& map) noexcept -> AmbientTerm {
             (void) ParseFloats(text, rgba);
         }
         const float scale = std::max(entity.FindFloat("_AmbientScaleHDR").value_or(1.0f), 0.0f);
-        out.color = {std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f)};
-        out.intensity = std::max(rgba[3], 0.0f) * scale;
+        out.color         = {std::clamp(rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(rgba[2] / 255.0f, 0.0f, 1.0f)};
+        out.intensity     = std::max(rgba[3], 0.0f) * scale;
         return out; // one light_environment per map; the first one wins
     }
     return {};
@@ -351,7 +337,7 @@ auto EnvironmentSunDirection(const Map& map) noexcept -> FVec3 {
     // No light_environment at all: fall back to a 45-degree elevation sun from
     // the +X/+Y quadrant rather than returning a zero vector, which the engine
     // would normalise into NaN and silently delete the directional term.
-    return FVec3{0.5f, 0.5f, 1.0f}.Normalized();
+    return FVec3 {0.5f, 0.5f, 1.0f}.Normalized();
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +398,7 @@ auto VmtTint(const VMTMaterial& vmt) noexcept -> FVec3 {
         std::array<float, 4> rgb {1.0f, 1.0f, 1.0f, 1.0f};
         if (ParseFloats(*found, rgb) == 3) {
             const float divisor = (found->front() == '{') ? 255.0f : 1.0f;
-            return FVec3{std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f)};
+            return FVec3 {std::clamp(rgb[0] / divisor, 0.0f, 4.0f), std::clamp(rgb[1] / divisor, 0.0f, 4.0f), std::clamp(rgb[2] / divisor, 0.0f, 4.0f)};
         }
     }
     return FVec3::Splat(1.0f);
@@ -514,10 +500,12 @@ auto BuildLight(const Entity& entity, const ImportOptions& options, LightEntityK
     }
 
     const auto originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-    light.position       = ConvertPosition(options, FVec3{originArr[0], originArr[1], originArr[2]});
+    light.position       = ConvertPosition(options, FVec3 {originArr[0], originArr[1], originArr[2]});
 
     // Colour: Source stores 0-255 bytes; the engine wants linear 0-1.
-    light.color = {std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)};
+    light.color = {
+        std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)
+    };
 
     // Brightness: the point/spot constant, the sun constant for the
     // directional term. A light with no brightness lane at all (legacy
@@ -567,7 +555,7 @@ auto BuildLight(const Entity& entity, const ImportOptions& options, LightEntityK
             // atan(width / 2 / length).
             const float width  = KeyFloat(entity, "spotlightwidth", kSpotlightDefaultWidthInches);
             const float length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
-            outerDegrees       = RadF{std::atan(std::max(width, 0.0f) * 0.5f / length)}.ToDegrees().value;
+            outerDegrees       = RadF {std::atan(std::max(width, 0.0f) * 0.5f / length)}.ToDegrees().value;
         } else if (light.className == "env_projectedtexture") {
             outerDegrees = KeyFloat(entity, "lightfov", KeyFloat(entity, "fov", kProjectedTextureDefaultFovDegrees));
         } else {
@@ -581,8 +569,8 @@ auto BuildLight(const Entity& entity, const ImportOptions& options, LightEntityK
             innerDegrees = outerDegrees * (2.0f / 3.0f);
         }
         innerDegrees           = std::clamp(innerDegrees, 0.0f, outerDegrees);
-        light.outerConeRadians = DegF{std::clamp(outerDegrees, 1.0f, 179.0f)}.ToRadians().value;
-        light.innerConeRadians = DegF{std::clamp(innerDegrees, 0.0f, outerDegrees)}.ToRadians().value;
+        light.outerConeRadians = DegF {std::clamp(outerDegrees, 1.0f, 179.0f)}.ToRadians().value;
+        light.innerConeRadians = DegF {std::clamp(innerDegrees, 0.0f, outerDegrees)}.ToRadians().value;
     }
 
     // Range from Source's attenuation window.
@@ -634,9 +622,9 @@ auto GatherEntityLights(const Map& map, const ImportOptions& options) -> std::ve
             const SourceLightValue value = ParseRenderColorValue(entity);
             if (auto light = BuildLight(entity, options, kind, value, true)) {
                 const FVec3 dir    = light->direction;
-                const float     length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
-                light->position        = light->position + dir * (length * options.unitScale);
-                light->radius          = std::max(length * options.unitScale, 0.05f);
+                const float length = std::max(KeyFloat(entity, "spotlightlength", kSpotlightDefaultLengthInches), 1.0f);
+                light->position    = light->position + dir * (length * options.unitScale);
+                light->radius      = std::max(length * options.unitScale, 0.05f);
                 out.push_back(std::move(*light));
             }
             continue;
@@ -688,15 +676,15 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         std::string material;
         float       areaSquareInches = 0.0f;
         float       areaSquareMetres = 0.0f;
-        FVec3   weighted {0.0f, 0.0f, 0.0f};
-        FVec3   weightedNormal {0.0f, 0.0f, 0.0f};
-        FVec3   color {0.0f, 0.0f, 0.0f};
+        FVec3       weighted {0.0f, 0.0f, 0.0f};
+        FVec3       weightedNormal {0.0f, 0.0f, 0.0f};
+        FVec3       color {0.0f, 0.0f, 0.0f};
         float       strength         = 0.0f;
         float       reflectivityLuma = -1.0f;
         bool        noLightFlag      = false;
         uint32_t    faces            = 0;
     };
-    std::vector<Bucket>                                 buckets;
+    std::vector<Bucket>                                  buckets;
     std::unordered_map<std::string, std::vector<size_t>> cells;
     buckets.reserve(surfaces.size());
     cells.reserve(surfaces.size());
@@ -718,12 +706,11 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
             // a housing's sheets are consecutive and overlap each other, so the
             // centroid tracks the fixture as it grows.
             const FVec3 centroid = existing.weighted * (1.0f / existing.areaSquareMetres);
-            const float     distSq   = (centroid - surface.position).LengthSquared();
+            const float distSq   = (centroid - surface.position).LengthSquared();
             if (distSq >= bestDistSq) {
                 continue;
             }
-            const FVec3 normal =
-                (existing.weightedNormal.LengthSquared() > 1e-8f) ? existing.weightedNormal.Normalized() : FVec3::UnitY();
+            const FVec3 normal = (existing.weightedNormal.LengthSquared() > 1e-8f) ? existing.weightedNormal.Normalized() : FVec3::UnitY();
             if (Dot(normal, surface.normal) < kEmissiveFixtureCoplanarCos) {
                 continue;
             }
@@ -746,7 +733,7 @@ auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::sp
         bucket.strength         = std::max(bucket.strength, surface.strength);
         bucket.reflectivityLuma = surface.reflectivityLuma;
         bucket.noLightFlag      = bucket.noLightFlag || surface.noLightFlag;
-        bucket.faces            += surface.faceCount;
+        bucket.faces += surface.faceCount;
     }
 
     std::vector<EmissiveSurface> out;
@@ -914,7 +901,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const Map& map, const ImportOpt
     if (ambientIrradiance <= kAmbientFloorRadiance) {
         const float hueLuma    = Rec709Luma(data.ambient.color);
         const float hueScale   = (hueLuma > 1e-4f) ? (0.34f / hueLuma) : 0.0f;
-        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : FVec3{0.30f, 0.34f, 0.42f};
+        data.ambient.color     = (hueLuma > 1e-4f) ? (data.ambient.color * hueScale) : FVec3 {0.30f, 0.34f, 0.42f};
         data.ambient.intensity = kAmbientFloorRadiance * kAmbientBrightnessLadder / 0.34f;
         data.ambient.authored  = true;
         intervened             = true;
@@ -931,15 +918,15 @@ auto EnforceLightingFloor(ImportedMapData& data, const Map& map, const ImportOpt
         fill.className    = "info_fill_light";
         fill.fromEmissive = true;
         fill.type         = LightType::Point;
-        fill.color = {0.85f, 0.88f, 1.0f};
+        fill.color        = {0.85f, 0.88f, 1.0f};
         fill.intensity    = kFillLightIntensity;
         fill.range        = kFillLightRangeMetres;
         fill.startsOn     = true;
         if (!map.models.empty()) {
-            const DModel&   world = map.models.front();
-            const FVec3 mins{world.mins[0], world.mins[1], world.mins[2]};
-            const FVec3 maxs{world.maxs[0], world.maxs[1], world.maxs[2]};
-            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + FVec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.25f});
+            const DModel& world = map.models.front();
+            const FVec3   mins {world.mins[0], world.mins[1], world.mins[2]};
+            const FVec3   maxs {world.maxs[0], world.maxs[1], world.maxs[2]};
+            fill.position = ConvertPosition(options, (mins + maxs) * 0.5f + FVec3 {0.0f, 0.0f, (maxs.z - mins.z) * 0.25f});
         }
         data.lights.push_back(std::move(fill));
         intervened = true;

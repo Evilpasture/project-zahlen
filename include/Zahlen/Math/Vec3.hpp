@@ -7,6 +7,7 @@
 #include <Zahlen/Math/Scalar.hpp>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <type_traits>
 
 namespace ZHLN {
@@ -14,6 +15,35 @@ namespace ZHLN {
 template <typename T>
 struct Vec3 {
     T x, y, z;
+
+    [[nodiscard]] constexpr T* data() noexcept {
+        return &x;
+    }
+    [[nodiscard]] constexpr const T* data() const noexcept {
+        return &x;
+    }
+    [[nodiscard]] constexpr std::size_t size() const noexcept {
+        return 3;
+    }
+    [[nodiscard]] constexpr T* begin() noexcept {
+        return &x;
+    }
+    [[nodiscard]] constexpr const T* begin() const noexcept {
+        return &x;
+    }
+    [[nodiscard]] constexpr T* end() noexcept {
+        return &x + 3;
+    }
+    [[nodiscard]] constexpr const T* end() const noexcept {
+        return &x + 3;
+    }
+
+    [[nodiscard]] constexpr operator std::span<T, 3>() & noexcept {
+        return std::span<T, 3> {&x, 3};
+    }
+    [[nodiscard]] constexpr operator std::span<const T, 3>() const noexcept {
+        return std::span<const T, 3> {&x, 3};
+    }
 
     // --- Existing ---
     static constexpr auto Zero() -> Vec3 {
@@ -103,35 +133,54 @@ struct Vec3 {
     [[nodiscard]] friend constexpr auto operator*(T scalar, Vec3 v) noexcept -> Vec3 {
         return v * scalar;
     }
-    constexpr auto operator+=(Vec3 rhs) noexcept -> Vec3& { return *this = *this + rhs; }
-    constexpr auto operator-=(Vec3 rhs) noexcept -> Vec3& { return *this = *this - rhs; }
-    constexpr auto operator*=(T scalar) noexcept -> Vec3& { return *this = *this * scalar; }
-    constexpr auto operator/=(T scalar) noexcept -> Vec3& { return *this = *this / scalar; }
+    constexpr auto operator+=(Vec3 rhs) noexcept -> Vec3& {
+        return *this = *this + rhs;
+    }
+    constexpr auto operator-=(Vec3 rhs) noexcept -> Vec3& {
+        return *this = *this - rhs;
+    }
+    constexpr auto operator*=(T scalar) noexcept -> Vec3& {
+        return *this = *this * scalar;
+    }
+    constexpr auto operator/=(T scalar) noexcept -> Vec3& {
+        return *this = *this / scalar;
+    }
 
     // maxDistanceSquared is the squared Euclidean distance, not a per-lane tolerance.
     [[nodiscard]] constexpr auto IsClose(Vec3 other, T maxDistanceSquared = (sizeof(T) <= sizeof(float) ? T(1e-12) : T(1e-24))) const noexcept -> bool
-        requires std::is_floating_point_v<T> {
+        requires std::is_floating_point_v<T>
+    {
         return (*this - other).LengthSquared() <= maxDistanceSquared;
     }
     // For signed integers, the absolute value must be representable in T.
     [[nodiscard]] constexpr auto Abs() const noexcept -> Vec3 {
         return {ZHLN::Abs(x), ZHLN::Abs(y), ZHLN::Abs(z)};
     }
-    [[nodiscard]] constexpr auto LengthSquared() const noexcept -> T { return x * x + y * y + z * z; }
-    [[nodiscard]] auto Length() const noexcept -> T requires std::is_floating_point_v<T> {
+    [[nodiscard]] constexpr auto LengthSquared() const noexcept -> T {
+        return x * x + y * y + z * z;
+    }
+    [[nodiscard]] auto Length() const noexcept -> T
+        requires std::is_floating_point_v<T>
+    {
         return std::hypot(x, y, z);
     }
     // Zero vectors normalize to zero; non-finite inputs propagate as usual.
-    [[nodiscard]] auto Normalized() const noexcept -> Vec3 requires std::is_floating_point_v<T> {
+    [[nodiscard]] auto Normalized() const noexcept -> Vec3
+        requires std::is_floating_point_v<T>
+    {
         const T length = Length();
         return length == T(0) ? Zero() : *this / length;
     }
 
     // Component-wise equivalents of Math3D's FVec3 helpers.
-    [[nodiscard]] auto Floor() const noexcept -> Vec3 requires std::is_floating_point_v<T> {
+    [[nodiscard]] auto Floor() const noexcept -> Vec3
+        requires std::is_floating_point_v<T>
+    {
         return {std::floor(x), std::floor(y), std::floor(z)};
     }
-    [[nodiscard]] auto Fract() const noexcept -> Vec3 requires std::is_floating_point_v<T> {
+    [[nodiscard]] auto Fract() const noexcept -> Vec3
+        requires std::is_floating_point_v<T>
+    {
         return *this - Floor();
     }
 };

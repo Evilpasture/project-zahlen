@@ -12,13 +12,13 @@
 // COM interface. Only src/engine/com/ includes it.
 
 #include <Zahlen/COM/ILogger.hpp>
+#include <Zahlen/Core/COM/Reflect.hpp>
 #include <Zahlen/Log.hpp>
-
 #include <string_view>
 
 namespace ZHLN::COM {
 
-class RawSinkLogger final : public Implements<RawSinkLogger, ILogger> {
+class RawSinkLogger final: public Implements<RawSinkLogger, ILogger> {
   public:
     explicit RawSinkLogger(ZHLN::LogSink sink) noexcept: _sink(sink) {
     }
@@ -42,8 +42,7 @@ class RawSinkLogger final : public Implements<RawSinkLogger, ILogger> {
                 .channel  = std::string_view(source.channel.data, source.channel.size),
                 .line     = source.line,
             },
-            std::string_view(message.data, message.size),
-            _sink.userData
+            std::string_view(message.data, message.size), _sink.userData
         );
     }
 
