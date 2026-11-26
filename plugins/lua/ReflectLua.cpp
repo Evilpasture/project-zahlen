@@ -686,7 +686,7 @@ auto Vm::RegisterUserdataTypeRaw(TypeID typeId, const MetatableSpec& spec) noexc
     return {};
 }
 
-auto Vm::WithFrame(FunctionRef<void(CallFrame&)> populate) noexcept -> std::expected<void, ErrorCode> {
+auto Vm::WithFrame(FunctionRef<void(CallFrame&) const> populate) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(LuaError::AllocationFailed);
     }

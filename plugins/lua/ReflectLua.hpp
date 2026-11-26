@@ -94,11 +94,8 @@ class CallFrame;
 // `std::shared_ptr<T>`), `std::function`, containers, and RAII handles are
 // rejected at compile time so Lua GC and C++ lifetimes never entangle.
 template <typename T>
-concept LuaPodUserdata =
-    std::is_object_v<std::remove_cvref_t<T>> &&
-    !std::is_pointer_v<std::remove_cvref_t<T>> &&
-    std::is_trivially_copyable_v<std::remove_cvref_t<T>> &&
-    std::is_trivially_destructible_v<std::remove_cvref_t<T>>;
+concept LuaPodUserdata = std::is_object_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>> &&
+                         std::is_trivially_copyable_v<std::remove_cvref_t<T>> && std::is_trivially_destructible_v<std::remove_cvref_t<T>>;
 
 // Unique per-type process-wide identity token (`const void*` address of an
 // `inline constexpr char` variable template). Works for named and TU-local
@@ -121,7 +118,7 @@ template <typename T>
 // Monotonic handle into the VM-internal Lua listener table. Inert `uint64_t`:
 // valid only while registered in the owning `Vm`, and safe to copy into POD
 // userdata or C++ signal lambdas without pinning Lua references from C++ dtors.
-using ListenerID                                = uint64_t;
+using ListenerID                               = uint64_t;
 inline constexpr ListenerID kInvalidListenerID = 0;
 
 using HostCallback = auto (*)(CallFrame&) -> int;
@@ -224,16 +221,13 @@ class ZHLN_STATIC_API Vm {
 
     // Runs `populate` with a fresh, stack-balanced `CallFrame` so host bindings
     // can build global tables/functions/constants without touching `lua_State*`.
-    [[nodiscard]] auto WithFrame(FunctionRef<void(CallFrame&)> populate) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto WithFrame(FunctionRef<void(CallFrame&) const> populate) noexcept -> std::expected<void, ErrorCode>;
 
     // Listener lifecycle and budgeted protected callback invocation.
     void               UnregisterListener(ListenerID id) noexcept;
     [[nodiscard]] auto HasListener(ListenerID id) const noexcept -> bool;
-    [[nodiscard]] auto InvokeListener(
-        ListenerID                    id,
-        FunctionRef<void(CallFrame&)> pushArgs,
-        std::string_view              contextName = "callback"
-    ) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto InvokeListener(ListenerID id, FunctionRef<void(CallFrame&)> pushArgs, std::string_view contextName = "callback") noexcept
+        -> std::expected<void, ErrorCode>;
 
   private:
     friend class CallFrame;
