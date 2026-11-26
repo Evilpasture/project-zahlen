@@ -1,4 +1,4 @@
-# Lua as a Pure State & Configuration Engine (`ReflectLua` Roadmap)
+# Lua as a Pure State & Configuration Engine (`Lua` Roadmap)
 
 ## Overview & Diagnosis
 
@@ -35,7 +35,7 @@ Before the completed Lua-state refactor, `extensions/Scripting/Lua/` (~6,034 lin
    - Lua never holds authoritative state across frames in Lua globals or closures; re-evaluating a `.lua` file from scratch is always idempotent.
 2. **Zero Per-Frame Lua Execution:**
    - There is no `TickUpdate(dt)` hook. Lua only evaluates at discrete boundaries (startup profile evaluation, scene/prefab hydration, file hot-reload, discrete state-transition events, or interactive developer console commands).
-3. **The C++26 Reflected Type *Is* the Schema (`ReflectLua`):**
+3. **The C++26 Reflected Type *Is* the Schema (`Lua`):**
    - Mirrors `plugins/toml/TOML.hpp` (`ReflectTOML`) and `plugins/json/JSONSchema.hpp`: field names, types, defaults, and enums come directly from `ZHLN::Reflect::ForEachFieldAccessor<T>` and `ZHLN::Reflect::EnumNames<E>` / `StringToEnum<E>`.
    - **Missing keys** leave C++ default member initializers (or existing live values during `ApplyPatch`) untouched.
    - **Unknown keys** fail or warn with `lua_Debug` source/line provenance so typos (`giIntensty = 1.5`) never drop silently.
@@ -43,7 +43,7 @@ Before the completed Lua-state refactor, `extensions/Scripting/Lua/` (~6,034 lin
 4. **Hermetic, Bounded Sandbox (`LuaVm`):**
    - Opens only pure data libraries: `base` (with `dofile`, `loadfile`, `collectgarbage` stripped), `math`, `string`, `table`, and `bit`.
    - **Never opens `ffi`, `io`, `os`, `package`, or `debug`** in state-evaluation VMs.
-   - Enforces a deterministic instruction ceiling via `lua_sethook(..., LUA_MASKCOUNT, maxInstructions)` and an optional arena/byte ceiling via custom `lua_Alloc`, returning `LuaError::InstructionBudgetExceeded` / `LuaError::MemoryBudgetExceeded` instead of hanging or OOM-ing the process.
+   - Enforces a deterministic instruction ceiling via `lua_sethook(..., LUA_MASKCOUNT, maxInstructions)` and an optional arena/byte ceiling via custom `lua_Alloc`, returning `Error::InstructionBudgetExceeded` / `Error::MemoryBudgetExceeded` instead of hanging or OOM-ing the process.
 5. **Monadic C++26 APIs:**
    - Pure `std::expected<T, ErrorCode>` and `ZHLN::Optional<T>` value-oriented signatures throughout — zero C# `bool TryRead(..., T& out)` out-parameter idioms and zero `(void)` cast noise.
 6. **Baseline vs. Non-Destructive Delta Discipline (`ARCHITECTURE.md` 1.1 Rule 5):**
@@ -58,7 +58,7 @@ Placed under `plugins/lua/` (`zahlen_lua`) alongside `plugins/toml/` (`zahlen_to
 ```cpp
 namespace ZHLN {
 
-enum class LuaError : uint8_t {
+enum class Error : uint8_t {
     AllocationFailed = 1,
     FileReadFailed,
     SyntaxError,
@@ -73,13 +73,13 @@ enum class LuaError : uint8_t {
     OutOfRange,
 };
 
-struct LuaBudget {
+struct Budget {
     uint32_t maxInstructions = 1'000'000;
     size_t   maxMemoryBytes  = 16 * 1024 * 1024;
     bool     rejectUnknownFields = true;
 };
 
-namespace ReflectLua {
+namespace Lua {
 
 // Opt-in vector trait (mirrors ReflectTOML::TOMLVector in plugins/toml/SceneTOML.hpp)
 // Accepts both positional `{ 1.0, 2.0, 3.0 }` and named `{ x = 1.0, y = 2.0, z = 3.0 }`.
@@ -88,38 +88,33 @@ struct LuaVector : std::false_type {};
 
 class LuaVm {
   public:
-    [[nodiscard]] static auto Create(LuaBudget budget = {}) noexcept -> std::expected<LuaVm, ErrorCode>;
+    [[nodiscard]] static auto Create(Budget budget = {}) noexcept -> std::expected<LuaVm, ErrorCode>;
 
     // Escape hatch for isolated host adapters (e.g. ProjectLight DataModelBindings).
     [[nodiscard]] auto RawState() noexcept -> lua_State*;
 };
 
-// 1. Evaluate a Lua chunk/file returning a table -> construct T from defaults + table overrides
+// 1. Evaluate an in-memory Lua chunk returning a table -> construct T from defaults + table overrides
 template <typename T>
-[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", LuaBudget budget = {})
-    -> std::expected<T, ErrorCode>;
-
-template <typename T>
-[[nodiscard]] auto EvaluateFile(const std::filesystem::path& path, LuaBudget budget = {})
+[[nodiscard]] auto EvaluateString(std::string_view chunk, std::string_view chunkName = "chunk", Budget budget = {})
     -> std::expected<T, ErrorCode>;
 
 // 2. Evaluate a pure Lua function `return function(in1, in2, ...) -> table` with reflected C++ inputs
 template <typename OutT, typename... InArgs>
-[[nodiscard]] auto EvaluateCall(std::string_view chunk, std::string_view chunkName, LuaBudget budget, const InArgs&... inputs)
+[[nodiscard]] auto EvaluateCall(std::string_view chunk, std::string_view chunkName, Budget budget, const InArgs&... inputs)
     -> std::expected<OutT, ErrorCode>;
 
 // 3. Transactional partial patch onto an existing C++ struct / ECS component
 template <typename T>
-[[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", LuaBudget budget = {})
+[[nodiscard]] auto ApplyPatchString(T& target, std::string_view chunk, std::string_view chunkName = "patch", Budget budget = {})
     -> std::expected<void, ErrorCode>;
 
-template <typename T>
-[[nodiscard]] auto ApplyPatchFile(T& target, const std::filesystem::path& path, LuaBudget budget = {})
-    -> std::expected<void, ErrorCode>;
-
-} // namespace ReflectLua
+} // namespace Lua
 } // namespace ZHLN
 ```
+
+Filesystem wrappers were deliberately dropped: hosts mount or read bytes and pass them through
+`FromAsset` (VFS) or `FromString` / `Compile` (in-memory text and byte spans).
 
 ---
 
@@ -127,25 +122,25 @@ template <typename T>
 
 ### Phase 1: Introduce `plugins/lua/` (`zahlen_lua`) & Unit Tests
 - [x] Create `plugins/lua/CMakeLists.txt` (`zahlen_lua`, linking `zahlen_engine` + `LuaJIT`, `zahlen_enable_reflection(zahlen_lua)`), guarded by `ZHLN_BUILD_LUA` (default `ON` when `ZHLN_BUILD_EXTRAS=ON`), with hermetic VM isolation (`luaopen_ffi` / `luaopen_package` never opened).
-- [x] Implement `plugins/lua/ReflectLua.hpp` and `plugins/lua/ReflectLua.cpp`:
-  - Custom `lua_Alloc` wrapper tracking live bytes against `LuaBudget::maxMemoryBytes` + `LUA_MASKCOUNT` hook enforcing `LuaBudget::maxInstructions` (with JIT trace compilation disabled in interpreter state VMs so `LUA_MASKCOUNT` triggers deterministically).
+- [x] Implement `plugins/lua/Lua.hpp` and `plugins/lua/Lua.cpp`:
+  - Custom `lua_Alloc` wrapper tracking live bytes against `Budget::maxMemoryBytes` + `LUA_MASKCOUNT` hook enforcing `Budget::maxInstructions` (with JIT trace compilation disabled in interpreter state VMs so `LUA_MASKCOUNT` triggers deterministically).
   - Sandboxed global environment (`base` whitelist, `math`, `string`, `table`, `bit`; no `ffi`, `io`, `os`, `package`, `debug`; text-only `"t"` loader rejecting binary bytecode).
   - P2996 reflection hydration (`ForEachFieldAccessor<T>`) and serialization (`PushValue<T>` for passing read-only C++ context structs into Lua pure functions):
     - `bool`, integral types (with integer/range checks), floating-point types, `std::string`, `std::string_view`, fixed `char[N]`, fixed `T[N]` C arrays, `FixedString<N>` component fields, reflected enums (exact + case-insensitive `Reflect::StringToEnum<E>`), `std::optional<U>` / `ZHLN::Optional<U>`, `std::array<U, N>`, `std::vector<U>`, string-keyed maps, nested reflected structs, and `LuaVector<T>` / `LuaValueTrait<T>` specializations.
     - Transactional `ApplyPatch*` & `ApplyCallPatchString`: clone `target` on stack, overlay present table keys, reject unknown keys on demand, commit only on full success.
-- [x] Create `plugins/lua/SceneLua.hpp` (mirroring `plugins/toml/SceneTOML.hpp`) specializing `JPH::Float3`, `JPH::Float4`, `JPH::Vec3`, `JPH::Vec4`, and `JPH::Quat`.
-- [x] Add `tests/extras/TestReflectLua.cpp` (`ReflectLuaSuite`: `6/6` passed) covering:
+- [x] Create `plugins/lua/Scene.hpp` (mirroring `plugins/toml/SceneTOML.hpp`) specializing `JPH::Float3`, `JPH::Float4`, `JPH::Vec3`, `JPH::Vec4`, and `JPH::Quat`.
+- [x] Add `tests/extras/TestLua.cpp` (`LuaSuite`: `6/6` passed) covering:
   - Default-preserving hydration, nested structs, enums, `JPH::Float3/4/Vec3/Vec4/Quat` array & `{x,y,z}` forms, fixed arrays, and `Optional`.
   - Procedural `ZHLN::Scene::Document` recipe generation (`TestProceduralSceneRecipe`).
   - Pure function evaluation `EvaluateCallString<GraphicsSettings>` + shipped `config/graphics.lua` & `config/ragdoll_humanoid.lua` (`TestShippedConfigProfiles`).
   - Transactional `ApplyPatchString` (verifying `target` is unchanged when a deep field fails validation).
-  - Sandbox enforcement (`while true do end` -> `LuaError::InstructionBudgetExceeded`, exponential string allocation -> `LuaError::MemoryBudgetExceeded`, binary bytecode -> `LuaError::SyntaxError`, `io`/`os`/`ffi`/`package`/`debug`/`jit` -> `nil`).
+  - Sandbox enforcement (`while true do end` -> `Error::InstructionBudgetExceeded`, exponential string allocation -> `Error::MemoryBudgetExceeded`, binary bytecode -> `Error::SyntaxError`, `io`/`os`/`ffi`/`package`/`debug`/`jit` -> `nil`).
 
 ### Phase 2: Decouple `ConsoleDebugger` & Migrate `ProjectLight/LuaBindings`
 - [x] Trim `extensions/Scripting/` into a lean, Lua-free reflection property inspector (`ScriptBinder` + `ScriptECSBridge`) used by `extensions/Console/ConsoleDebugger.cpp`:
   - Removed imperative `ScriptMethod` / PMF method invocation and heap-allocated `OwnedObject` (`std::shared_ptr<void>`), keeping only reflected field get/set/element access over trivially copyable components and value types (`TestScripting`: `3/3` passed).
   - Removed the unimplemented `call` line from `ConsoleDebugger`'s help text and added transactional `patch <entity_id> <Component> <lua_table_expr>` (when `zahlen_lua` is linked) across both `ZHLN::Components` and `ZHLN::GUI` (`ConsoleDebuggerTestSuite`: `9/9` passed).
-- [x] Migrated `gameplay/ProjectLight/LuaBindings` and `tests/extras/TestLuaDataModel.cpp` onto `ZHLN::ReflectLua::LuaVm` (`TestLuaDataModelSuite`: `1/1` passed).
+- [x] Migrated `gameplay/ProjectLight/LuaBindings` and `tests/extras/TestLuaDataModel.cpp` onto `ZHLN::Lua::LuaVm` (`TestLuaDataModelSuite`: `1/1` passed).
 
 ### Phase 3: Retire the Imperative FFI / Fennel / Per-Frame Scripting Stack (~10,137 Net LoC Reduction)
 - [x] Deleted 24 imperative Lua/Fennel runtime & FFI layout files (`76 files changed, 3,220 insertions(+), 13,357 deletions(-)`):
@@ -165,14 +160,14 @@ template <typename T>
 - [x] **1. Hardware-Adaptive Graphics Profile (`config/graphics.lua`):**
   - Added Core-pure `ApplyGraphicsSettings(Engine&, const GraphicsSettings&)` in `src/engine/system/GraphicsSettingsSync.{hpp,cpp}` and wired `config/graphics.lua` (`ZHLN::RenderInfo` -> `ZHLN::GraphicsSettings` overlay + preset expansion + `FileSystemWatcher` hot-reload in `FramePhase::HotReload` after `"StateAndShaderReload"`) in `app/main.cpp` (`--graphics-config <file.lua>`).
 - [x] **2. Parametric Scene Recipes (`--scene <file.toml|file.lua>`):**
-  - Added `.lua` and `.toml` scene document loading in `app/main.cpp` (`ReflectLua::EvaluateFile<ZHLN::Scene::Document>(path)` -> `ZHLN::Scene::Instantiate(engine, *scene)`).
+  - Added `.lua` and `.toml` scene document loading in `app/main.cpp` (`Lua::EvaluateFile<ZHLN::Scene::Document>(path)` -> `ZHLN::Scene::Instantiate(engine, *scene)`).
 - [x] **3. Data-Driven Ragdoll Authoring Policy (`gameplay/RagdollAuthoring` + `config/ragdoll_humanoid.lua`):**
   - Replaced `SetupRagdollArgs` / `ScriptCommandRegistry` with reflected `RagdollRecipe` (`RagdollJointRule`, `RagdollPartSpec`, `RagdollShapeKind`), `LoadRecipeFromLuaString` / `LoadRecipeFromLuaFile`, and shipped `config/ragdoll_humanoid.lua`.
 
 ### Phase 5: Verification & Governance Sign-Off
 - [x] `python3 configure/run_governance_checks.py --no-cache` + `check_include_governance.py`: **100% pass** across Core/layer boundary, Layer DAG, `tests/` public-API boundary, Subsystem include boundary, PIMPL encapsulation, Reflection boundary, Macro governance (0 banned, 0 allowlist additions), Namespace governance, Module linkage, Error ordinals, and Include provenance (834 source files).
 - [x] GCC 16.2 (`-std=c++26 -freflection -fno-exceptions -fno-rtti -Wall -Wextra -Werror`) non-renderer suite & syntax verification:
-  - `ReflectLuaSuite`: `6/6` passed (including shipped `config/graphics.lua` + `config/ragdoll_humanoid.lua`).
+  - `LuaSuite`: `6/6` passed (including shipped `config/graphics.lua` + `config/ragdoll_humanoid.lua`).
   - `ConsoleDebuggerTestSuite`: `9/9` passed (including transactional Lua `patch` & rollback).
   - `TestScripting`: `3/3` passed.
   - `TestLuaDataModelSuite`: `1/1` passed.

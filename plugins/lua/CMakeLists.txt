@@ -8,13 +8,13 @@
 # hermetic, instruction- and memory-bounded VM (no ffi/io/os/package/debug,
 # no per-frame TickUpdate) to construct or transactionally patch reflected C++
 # structs and ECS components, or expose POD userdata/listeners via LuaInterop.
-# Lua headers stay strictly private to ReflectLua.cpp so consumers never
+# Lua headers stay strictly private to Lua.cpp so consumers never
 # include <lua.h> or touch raw lua_State*.
 
 set(TARGET_NAME zahlen_lua)
 
 add_library(${TARGET_NAME} STATIC
-    ReflectLua.cpp
+    Lua.cpp
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
@@ -40,3 +40,14 @@ target_include_directories(${TARGET_NAME} PUBLIC
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})
 endif()
+
+if(COMMAND zahlen_add_plugin)
+    zahlen_add_plugin(zahlen_plugin_lua lua LuaPlugin.cpp)
+    target_link_libraries(zahlen_plugin_lua PRIVATE zahlen_lua LuaJIT)
+endif()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/zahlen_plugin_lua.manifest.toml
+    ${CMAKE_BINARY_DIR}/lib/zahlen_plugin_lua.manifest.toml
+    COPYONLY
+)

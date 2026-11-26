@@ -38,11 +38,11 @@ class FunctionRef<R(Args...) const> {
     constexpr FunctionRef(F&& callable) noexcept:
         object_(std::addressof(callable)),
         invoke_([](const void* object, Args... args) -> R {
-            const auto& callable = *static_cast<const std::remove_cvref_t<F>*>(object);
+            const auto& fn = *static_cast<const std::remove_cvref_t<F>*>(object);
             if constexpr (std::is_void_v<R>) {
-                std::invoke(callable, std::forward<Args>(args)...);
+                std::invoke(fn, std::forward<Args>(args)...);
             } else {
-                return std::invoke(callable, std::forward<Args>(args)...);
+                return std::invoke(fn, std::forward<Args>(args)...);
             }
         }) {}
 

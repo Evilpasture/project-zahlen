@@ -282,12 +282,12 @@ zahlen_add_extras_build_alias(Extras_Simulation TestTwoBoneIK)
 zahlen_add_extras_build_alias(Extras_Simulation TestALife)
 zahlen_add_extras_build_alias(Extras_Simulation TestDataModel)
 
-# 4. Extras_Serialization: JSON, TOML, ReflectLua, and zcook GLB container inspection.
+# 4. Extras_Serialization: JSON, TOML, Lua, and zcook GLB container inspection.
 zahlen_add_extras_group(Extras_Serialization
     ${PROJECT_SOURCE_DIR}/tests/TestsMain.cpp
     TestJSON.cpp
     TestTOML.cpp
-    TestReflectLua.cpp
+    TestLua.cpp
     TestCookerGLB.cpp
 )
 target_link_libraries(Extras_Serialization PRIVATE
@@ -303,7 +303,7 @@ zahlen_register_extras_test(Extras_Serialization
 )
 zahlen_add_extras_build_alias(Extras_Serialization TestJSON)
 zahlen_add_extras_build_alias(Extras_Serialization TestTOML)
-zahlen_add_extras_build_alias(Extras_Serialization TestReflectLua)
+zahlen_add_extras_build_alias(Extras_Serialization TestLua)
 zahlen_add_extras_build_alias(Extras_Serialization TestCookerGLB)
 
 # 5. Extras_HTTP: loopback HTTP, RemoteAsset cache/fetcher, and CDN layer.
@@ -390,8 +390,8 @@ if(TARGET zahlen_project_light_lua)
         ZHLN_ZTEST_SOURCE_FILES "${_lua_dm_files}"
     )
 
-    # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/ReflectLua.hpp> and
-    # calls ReflectLua::Vm::Create / ExecuteString alongside DataModelLuaSession.
+    # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/Lua.hpp> and
+    # calls Lua::VirtualMachine::Create / ExecuteString alongside DataModelLuaSession.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_lua
         zahlen_project_light_lua

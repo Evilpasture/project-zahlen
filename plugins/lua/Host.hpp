@@ -9,7 +9,7 @@
 //   1. Classic Lua C API (`lua_*` / `luaL_*`) is strictly quarantined inside
 //      `plugins/lua/*.cpp`; downstream layers never include `<lua.h>` or touch
 //      a raw `lua_State*`.
-//   2. Zero cross-heap GC co-ownership (`LuaPodUserdata`): every userdata slot
+//   2. Zero cross-heap GC co-ownership (`TrivialUserdata`): every userdata slot
 //      allocated on the Lua heap is trivially copyable and trivially
 //      destructible (value types and opaque integer IDs such as `InstanceId`),
 //      so Lua GC sweeps plain memory with zero C++ `__gc` destructors while C++
@@ -17,11 +17,11 @@
 //   3. Lua closures stay on the Lua heap inside a VM-owned listener table keyed
 //      by monotonic `ListenerID`s, and every C++ -> Lua callback enters through
 //      the same deterministic instruction- and memory-budgeted protected call
-//      path as `Vm::ExecuteString`.
+//      path as `VirtualMachine::ExecuteString`.
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <lua/ReflectLua.hpp>
+#include <lua/Lua.hpp>
 
 #include <array>
 #include <cmath>
@@ -32,7 +32,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace ZHLN::ReflectLua {
+namespace ZHLN::Lua {
 
 namespace TemplatedDetail {
 
@@ -142,19 +142,19 @@ class ZHLN_STATIC_API CallFrame {
     }
 
     // Typed POD userdata inspection (`nullptr` on type or metatable mismatch).
-    template <LuaPodUserdata T>
+    template <TrivialUserdata T>
     [[nodiscard]] auto TestUserdata(int index) const noexcept -> const std::remove_cvref_t<T>* {
         using Clean = std::remove_cvref_t<T>;
         return static_cast<const Clean*>(TestUserdataRaw(index, TypeIdOf<Clean>()));
     }
 
-    template <LuaPodUserdata T>
+    template <TrivialUserdata T>
     [[nodiscard]] auto TestMutableUserdata(int index) noexcept -> std::remove_cvref_t<T>* {
         using Clean = std::remove_cvref_t<T>;
         return static_cast<Clean*>(TestMutableUserdataRaw(index, TypeIdOf<Clean>()));
     }
 
-    // Non-owning host context bound onto the owning `Vm` via `Vm::SetHostContext<T>`.
+    // Non-owning host context bound onto the owning `VirtualMachine` via `VirtualMachine::SetHostContext<T>`.
     template <typename T>
     [[nodiscard]] auto HostContext() const noexcept -> T* {
         using Clean = std::remove_cvref_t<T>;
@@ -179,7 +179,7 @@ class ZHLN_STATIC_API CallFrame {
         PushString(TemplatedDetail::CanonicalEnumName(value));
     }
 
-    template <LuaPodUserdata T>
+    template <TrivialUserdata T>
     void PushUserdata(const T& value) noexcept {
         using Clean = std::remove_cvref_t<T>;
         PushUserdataRaw(TypeIdOf<Clean>(), &value, sizeof(Clean), alignof(Clean));
@@ -190,7 +190,7 @@ class ZHLN_STATIC_API CallFrame {
     // Lua userdata identity (`rawequal`, `==`, and table-key identity), while
     // allowing Lua GC to collect unreferenced userdata freely with zero C++
     // finalizers.
-    template <LuaPodUserdata T>
+    template <TrivialUserdata T>
     void PushInternedUserdata(uint64_t cacheKey, const T& value) noexcept {
         using Clean = std::remove_cvref_t<T>;
         PushInternedUserdataRaw(TypeIdOf<Clean>(), cacheKey, &value, sizeof(Clean), alignof(Clean));
@@ -213,7 +213,8 @@ class ZHLN_STATIC_API CallFrame {
     [[nodiscard]] auto HasListener(ListenerID id) const noexcept -> bool;
 
   private:
-    friend class Vm;
+    friend class VirtualMachine;
+    friend struct HostAccessBridge;
     struct Context;
 
     explicit CallFrame(Context& ctx) noexcept: _ctx(ctx) {
@@ -234,4 +235,4 @@ class ZHLN_STATIC_API CallFrame {
     Context& _ctx;
 };
 
-} // namespace ZHLN::ReflectLua
+} // namespace ZHLN::Lua

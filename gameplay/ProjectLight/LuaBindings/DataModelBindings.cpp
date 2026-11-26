@@ -1,18 +1,18 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// ProjectLight's DataModel <-> ReflectLua::Vm adapter.
+// ProjectLight's DataModel <-> Lua::VirtualMachine adapter.
 //
 // Zero cross-heap GC co-ownership:
 //   * Every Lua userdata payload (`LuaInstanceRef`, `LuaVector3`, `LuaColor3`,
-//     `LuaSignalRef`, `LuaConnectionRef`) satisfies `ReflectLua::LuaPodUserdata`
+//     `LuaSignalRef`, `LuaConnectionRef`) satisfies `Lua::TrivialUserdata`
 //     (trivially copyable + trivially destructible, no `__gc` destructors).
 //   * Live C++ `Instance`s are resolved on each boundary crossing through
 //     `DataModel::FindById` (with permanent tombstones guaranteeing destroyed
 //     IDs never alias new allocations).
 //   * C++ `DataModelSignal::Connection` tokens live on the C++ heap inside
 //     `DataModelLuaSession::Impl`; Lua closures live on the Lua heap inside
-//     `ReflectLua::Vm`'s listener table and execute through `Vm::InvokeListener`
+//     `Lua::VirtualMachine`'s listener table and execute through `VirtualMachine::InvokeListener`
 //     under the VM's instruction and memory budgets.
 
 #include <DataModel/DataModel.hpp>
@@ -21,8 +21,8 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Vec3.hpp>
-#include <lua/LuaInterop.hpp>
-#include <lua/ReflectLua.hpp>
+#include <lua/Host.hpp>
+#include <lua/Lua.hpp>
 
 #include <algorithm>
 #include <array>
@@ -42,14 +42,14 @@ namespace ZHLN::ProjectLight {
 
 namespace {
 
-    using ZHLN::ReflectLua::CallFrame;
-    using ZHLN::ReflectLua::ListenerID;
-    using ZHLN::ReflectLua::MetatableSpec;
-    using ZHLN::ReflectLua::MethodEntry;
-    using ZHLN::ReflectLua::Vm;
+    using ZHLN::Lua::CallFrame;
+    using ZHLN::Lua::ListenerID;
+    using ZHLN::Lua::MetatableSpec;
+    using ZHLN::Lua::MethodEntry;
+    using ZHLN::Lua::VirtualMachine;
 
     // ------------------------------------------------------------------------
-    // Pure POD userdata payloads (`ReflectLua::LuaPodUserdata`)
+    // Pure POD userdata payloads (`Lua::TrivialUserdata`)
     // ------------------------------------------------------------------------
 
     struct LuaInstanceRef {
@@ -91,11 +91,11 @@ namespace {
         uint64_t connectionId = 0;
     };
 
-    static_assert(ZHLN::ReflectLua::LuaPodUserdata<LuaInstanceRef>);
-    static_assert(ZHLN::ReflectLua::LuaPodUserdata<LuaVector3>);
-    static_assert(ZHLN::ReflectLua::LuaPodUserdata<LuaColor3>);
-    static_assert(ZHLN::ReflectLua::LuaPodUserdata<LuaSignalRef>);
-    static_assert(ZHLN::ReflectLua::LuaPodUserdata<LuaConnectionRef>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaInstanceRef>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaVector3>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaColor3>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaSignalRef>);
+    static_assert(ZHLN::Lua::TrivialUserdata<LuaConnectionRef>);
 
     // ------------------------------------------------------------------------
     // C++-owned session & connection state
@@ -103,13 +103,13 @@ namespace {
 
     struct ConnectionSlot {
         uint64_t              id         = 0;
-        ListenerID            listenerId = ZHLN::ReflectLua::kInvalidListenerID;
+        ListenerID            listenerId = ZHLN::Lua::kInvalidListenerID;
         bool                  connected  = true;
         std::function<void()> disconnectCppSignal;
     };
 
     struct BindingHostState {
-        Vm*                         vm        = nullptr;
+        VirtualMachine*                         vm        = nullptr;
         DataModel*                  dataModel = nullptr;
         bool                        alive     = true;
         uint64_t                    nextConnId = 1;
@@ -158,10 +158,10 @@ namespace {
                 slot->disconnectCppSignal = {};
                 fn();
             }
-            if (vm != nullptr && slot->listenerId != ZHLN::ReflectLua::kInvalidListenerID) {
+            if (vm != nullptr && slot->listenerId != ZHLN::Lua::kInvalidListenerID) {
                 vm->UnregisterListener(slot->listenerId);
             }
-            slot->listenerId = ZHLN::ReflectLua::kInvalidListenerID;
+            slot->listenerId = ZHLN::Lua::kInvalidListenerID;
         }
 
         void DisconnectAll() noexcept {
@@ -175,10 +175,10 @@ namespace {
                     slot.disconnectCppSignal = {};
                     fn();
                 }
-                if (vm != nullptr && slot.listenerId != ZHLN::ReflectLua::kInvalidListenerID) {
+                if (vm != nullptr && slot.listenerId != ZHLN::Lua::kInvalidListenerID) {
                     vm->UnregisterListener(slot.listenerId);
                 }
-                slot.listenerId = ZHLN::ReflectLua::kInvalidListenerID;
+                slot.listenerId = ZHLN::Lua::kInvalidListenerID;
             }
             connections.clear();
         }
@@ -1192,17 +1192,14 @@ namespace {
             return;
         }
         const ConnectionSlot* slot = host->FindConnection(connId);
-        if (slot == nullptr || !slot->connected || slot->listenerId == ZHLN::ReflectLua::kInvalidListenerID) {
+        if (slot == nullptr || !slot->connected || slot->listenerId == ZHLN::Lua::kInvalidListenerID) {
             return;
         }
         const ListenerID listenerId = slot->listenerId;
-        const auto       res        = host->vm->InvokeListener(
-            listenerId,
-            [&](CallFrame& cbFrame) {
-                pushArguments(cbFrame, std::forward<decltype(arguments)>(arguments)...);
-            },
-            signalLabel
-        );
+        const auto pushArgs = [&](CallFrame& cbFrame) {
+            pushArguments(cbFrame, std::forward<decltype(arguments)>(arguments)...);
+        };
+        const auto res = host->vm->InvokeListener(listenerId, pushArgs, signalLabel);
         if (!res) {
             const std::string_view detail = host->vm->LastErrorDetail();
             host->lastCallbackError = detail.empty() ? "unknown Lua callback error" : std::string(detail);
@@ -1220,7 +1217,7 @@ namespace {
         PushArguments                          pushArguments
     ) {
         const ListenerID listenerId = frame.RegisterListener(callbackIndex);
-        if (listenerId == ZHLN::ReflectLua::kInvalidListenerID) {
+        if (listenerId == ZHLN::Lua::kInvalidListenerID) {
             frame.PushNil();
             return;
         }
@@ -1421,9 +1418,9 @@ auto DataModelLuaSession::LastCallbackError() const noexcept -> std::string_view
     return m_impl->host->lastCallbackError;
 }
 
-auto DataModelLuaSession::Bind(Vm& vm, DataModel& dataModel) -> std::expected<DataModelLuaSession, ZHLN::ErrorCode> {
+auto DataModelLuaSession::Bind(VirtualMachine& vm, DataModel& dataModel) -> std::expected<DataModelLuaSession, ZHLN::ErrorCode> {
     if (!vm.IsValid()) {
-        return std::unexpected(ZHLN::LuaError::AllocationFailed);
+        return std::unexpected(ZHLN::Lua::Error::AllocationFailed);
     }
 
     static constexpr std::array<MethodEntry, 3> kVector3Methods = {{
@@ -1505,7 +1502,7 @@ auto DataModelLuaSession::Bind(Vm& vm, DataModel& dataModel) -> std::expected<Da
     vm.SetHostContext<BindingHostState>(impl->host.get());
     vm.SetHostContext<std::shared_ptr<BindingHostState>>(&impl->host);
 
-    const auto globalsRes = vm.WithFrame([&](CallFrame& frame) {
+    const auto populateGlobals = [&](CallFrame& frame) {
         // Vector3 global table
         frame.BeginTable(0, 6);
         frame.PushFunction(&Vector3New);
@@ -1552,7 +1549,8 @@ auto DataModelLuaSession::Bind(Vm& vm, DataModel& dataModel) -> std::expected<Da
             PushInstance(frame, workspace);
             frame.SetGlobalTop("workspace");
         }
-    });
+    };
+    const auto globalsRes = vm.WithFrame(populateGlobals);
 
     if (!globalsRes) {
         impl->Teardown();

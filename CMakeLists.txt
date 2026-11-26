@@ -771,7 +771,7 @@ if(ZHLN_BUILD_EXTRAS)
     # fact about the build, not something a script should be inspecting for.
     #
     # Keep the optional layers distinct in both the source tree and build graph.
-    # Plugins establish the shared serializer and ReflectLua state layer first;
+    # Plugins establish the shared serializer and Lua state layer first;
     # extensions then provide the reusable runtime/network systems; gameplay
     # composes those targets.
     add_subdirectory(plugins)
@@ -868,6 +868,20 @@ endif()
 # ZHLN::App host without linking immediate-mode UI or optional gameplay archives.
 target_link_libraries(zahlen PRIVATE zahlen_application zahlen_warnings)
 target_link_libraries(zahlen_cube PRIVATE zahlen_application zahlen_warnings)
+
+# The Lua-driven sandbox is a separate executable that loads zahlen_plugin_lua
+# across the COM boundary. The default `zahlen` host stays Lua-free in every
+# configuration; CMake, not the preprocessor, decides which binaries exist.
+if(TARGET zahlen_plugin_lua)
+    add_executable(zahlen_lua_sandbox app/LuaSandboxMain.cpp)
+    set_target_properties(zahlen_lua_sandbox PROPERTIES CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF OUTPUT_NAME "zahlen-lua-sandbox")
+    target_link_libraries(zahlen_lua_sandbox PRIVATE zahlen_application zahlen_lua zahlen_warnings)
+    target_include_directories(zahlen_lua_sandbox PRIVATE ${PROJECT_SOURCE_DIR}/plugins)
+    zahlen_set_bin_output(zahlen_lua_sandbox)
+    zahlen_add_runtime_dlls(zahlen_lua_sandbox)
+    zahlen_enable_reflection(zahlen_lua_sandbox)
+endif()
 
 # Tool-specific dependencies stay on tool targets. The core-only build still
 # produces a callable-driven game; extras add standalone editor, scene host and

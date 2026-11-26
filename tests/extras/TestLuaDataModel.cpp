@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Exercises the DataModel <-> ReflectLua::Vm adapter:
+// Exercises the DataModel <-> Lua::VirtualMachine adapter:
 //   * Zero-co-ownership POD `InstanceId` userdata identity, equality, and weak
 //     table interning (`rawequal` and table-key identity).
 //   * Tree operations, Vector3/Color3 value types, reflected enums, and typed
@@ -9,15 +9,15 @@
 //   * Safe tombstone behavior after `Instance::Destroy()` (no dangling pointers,
 //     no ID reuse, `IsDestroyed == true`, `tostring == "Instance<expired>"`).
 //   * Signal `Connect`/`Disconnect`, session teardown lifetime decoupling
-//     (destroying `Vm` + `DataModelLuaSession` before `DataModel`, or destroying
-//     `DataModelLuaSession` before `Vm`), and budgeted callback protection.
+//     (destroying `VirtualMachine` + `DataModelLuaSession` before `DataModel`, or destroying
+//     `DataModelLuaSession` before `VirtualMachine`), and budgeted callback protection.
 
 #include "TestsFramework.hpp"
 
 #include <DataModel/DataModel.hpp>
 #include <LuaBindings/DataModelBindings.hpp>
 #include <Zahlen/Error.hpp>
-#include <lua/ReflectLua.hpp>
+#include <lua/Lua.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -53,7 +53,7 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(player->SetParent(players).has_value());
             ZHLN::Test::ExpectTrue(players->SetLocalPlayer(player).has_value());
 
-            auto vm = ZHLN::ReflectLua::Vm::Create();
+            auto vm = ZHLN::Lua::VirtualMachine::Create();
             ZHLN::Test::ExpectTrue(vm.has_value());
             if (!vm) {
                 return {};
@@ -221,8 +221,8 @@ struct TestLuaDataModelSuite {
             const uint32_t refCountBeforeLua = rawPartPtr->GetRefCount();
 
             {
-                ZHLN::LuaBudget budget {.maxInstructions = 16'384, .maxMemoryBytes = 4 * 1024 * 1024};
-                auto            vm = ZHLN::ReflectLua::Vm::Create(budget);
+                ZHLN::Lua::Budget budget {.maxInstructions = 16'384, .maxMemoryBytes = 4 * 1024 * 1024};
+                auto            vm = ZHLN::Lua::VirtualMachine::Create(budget);
                 ZHLN::Test::ExpectTrue(vm.has_value());
                 if (!vm) {
                     return {};
@@ -293,7 +293,7 @@ struct TestLuaDataModelSuite {
                 ZHLN::Test::ExpectTrue(session->LastCallbackError().find("instruction budget exceeded") != std::string_view::npos);
             }
 
-            // Both `DataModelLuaSession` and `Vm` are now destroyed; firing C++
+            // Both `DataModelLuaSession` and `VirtualMachine` are now destroyed; firing C++
             // signals on the surviving `DataModel` must be a clean no-op.
             auto afterVmPart = dataModel.Create<Part>("AfterVmClosed");
             ZHLN::Test::ExpectTrue(afterVmPart.has_value());

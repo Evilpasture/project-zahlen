@@ -523,7 +523,7 @@ zhln_toolchain_source_package(Lua
     CHECK_TARGET zahlen_lua
     DEPENDS Engine Scene
     HEADER_DIRS plugins/lua
-    SOURCES plugins/lua/ReflectLua.cpp
+    SOURCES plugins/lua/Lua.cpp
     PUBLIC_LINKS Zahlen::Engine Zahlen::Scene
     PRIVATE_LINKS LuaJIT)
 
@@ -564,23 +564,12 @@ zhln_toolchain_source_package(Scripting
     SOURCES extensions/Scripting/ScriptECSBridge.cpp
     PUBLIC_LINKS Zahlen::Engine)
 
-if(TARGET zahlen_lua)
-    zhln_toolchain_source_package(Console
-        CHECK_TARGET zahlen_console
-        DEPENDS Engine Scripting Lua
-        HEADER_DIRS extensions/Console
-        SOURCES extensions/Console/Console.cpp extensions/Console/ConsoleDebugger.cpp extensions/Console/SymbolResolver.cpp
-        PUBLIC_LINKS Zahlen::Engine Zahlen::Scripting
-        PRIVATE_LINKS Zahlen::Lua
-        PRIVATE_DEFS ZHLN_CONSOLE_HAS_LUA=1)
-else()
-    zhln_toolchain_source_package(Console
-        CHECK_TARGET zahlen_console
-        DEPENDS Engine Scripting
-        HEADER_DIRS extensions/Console
-        SOURCES extensions/Console/Console.cpp extensions/Console/ConsoleDebugger.cpp extensions/Console/SymbolResolver.cpp
-        PUBLIC_LINKS Zahlen::Engine Zahlen::Scripting)
-endif()
+zhln_toolchain_source_package(Console
+    CHECK_TARGET zahlen_console
+    DEPENDS Engine Scripting
+    HEADER_DIRS extensions/Console
+    SOURCES extensions/Console/Console.cpp extensions/Console/ConsoleDebugger.cpp extensions/Console/SymbolResolver.cpp
+    PUBLIC_LINKS Zahlen::Engine Zahlen::Scripting)
 
 zhln_toolchain_source_package(Editor
     CHECK_TARGET zahlen_editor

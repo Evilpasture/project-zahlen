@@ -15,9 +15,9 @@ filesystem directly:
      `<sys/stat.h>`), or call `std::filesystem`, `std::*fstream`, `fopen`,
      `FS::Paths::`, or resvg's file/directory/system-font C APIs.
   2. No file inside `plugins/` (including `*Plugin.cpp`) may include the
-     opt-in host convenience headers (`SVGFile.hpp`, `ReflectLuaFile.hpp`).
-     Those headers exist solely for host binaries, CLI tools, and tests that
-     explicitly read OS paths at the host boundary.
+     opt-in host convenience header (`SVGFile.hpp`). Lua has no disk-path
+     wrapper at all: scripts arrive through `FromAsset` (VFS) or `FromString`
+     (in-memory text/byte spans), never through an OS file open.
 
 Hosts own mount policy (`IAssetLibrary::MountDirectory` with optional
 `MountDirectoryOptions{.virtualPrefix, .caseInsensitive}`, or `MountPak`) and
@@ -43,14 +43,13 @@ SOURCE_SUFFIXES = frozenset({
 # under `plugins/`.
 HOST_FILE_WRAPPER_ALLOWLIST: dict[str, str] = {
     "plugins/SVG/SVGFile.hpp": "opt-in host-only disk-read wrapper over SVG::LoadData / RasterizeData",
-    "plugins/lua/ReflectLuaFile.hpp": "opt-in host-only disk-read wrapper over ReflectLua::*String",
 }
 
 FORBIDDEN_INCLUDE_RE = re.compile(
     r'^\s*#\s*include\s*[<"]('
     r'filesystem|fstream|Zahlen/FileSystem/Paths\.hpp|'
     r'fcntl\.h|unistd\.h|dirent\.h|sys/stat\.h|'
-    r'(?:SVG/)?SVGFile\.hpp|(?:lua/)?ReflectLuaFile\.hpp'
+    r'(?:SVG/)?SVGFile\.hpp'
     r')[>"]',
     re.MULTILINE,
 )

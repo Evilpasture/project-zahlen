@@ -1,26 +1,6 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// GCC 16.2.0 (the release toolchain) miscompiles the TU that instantiates the
-// ReflectLua patch templates when it is built with -O1..-O3 and -fPIC: the
-// `Value` cursor handed to the patch callback arrives with `_state` holding
-// the callback's own address, and the first lua_type() dereferences a code
-// address. Every TU in this tree is built with -fPIC because zahlen_engine is
-// SHARED, so the crash follows from the flags rather than from anything this
-// file does; ~all Lua cases take the same path and pass, which is why it shows
-// up as two seemingly unrelated segfaults (ReflectLuaSuite::
-// TestShippedConfigProfiles and ConsoleDebuggerTestSuite::
-// patch_applies_lua_table_and_rolls_back_on_error). GCC 16.2.1 fixes it but
-// conda-forge publishes no 16.2.1, so the lane keeps 16.2.0 and this file opts
-// its own translation unit out of inlining -- measured: the same source at
-// -O3 -fPIC is clean at -O0 and clean with inlining disabled, and stays broken
-// with every single inliner knob (-fno-ipa-sra, -fno-inline-small-functions,
-// -fno-inline-functions, -fno-early-inlining, -fno-tree-vectorize, ...) turned
-// off individually. See zahlen-release-2204.md, Follow-ups 22-23.
-#if defined(__GNUC__) && !defined(__clang__) && defined(__OPTIMIZE__)
-#pragma GCC optimize("no-inline")
-#endif
-
 #include "ConsoleDebugger.hpp"
 #include <format>
 #include "SymbolResolver.hpp"
@@ -31,11 +11,6 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
-
-#if defined(ZHLN_CONSOLE_HAS_LUA)
-#include <lua/LuaValueTypes.hpp>
-#include <lua/ReflectLua.hpp>
-#endif
 
 #include <charconv>
 #include <cstdint>
@@ -52,16 +27,6 @@
 namespace ZHLN {
 
 namespace {
-
-    auto TrimAscii(std::string_view sv) noexcept -> std::string_view {
-        while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
-            sv.remove_prefix(1);
-        }
-        while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
-            sv.remove_suffix(1);
-        }
-        return sv;
-    }
 
     auto Tokenize(std::string_view str) -> std::vector<std::string> {
         std::vector<std::string> tokens;
@@ -86,28 +51,6 @@ namespace {
         return tokens;
     }
 
-    // Extracts the raw tail after the Nth whitespace-delimited token so Lua table
-    // expressions preserve spaces, quotes, and arithmetic verbatim.
-    auto SliceAfterTokens(std::string_view line, size_t tokenCount) noexcept -> std::string_view {
-        size_t pos      = 0;
-        bool   inQuotes = false;
-        for (size_t t = 0; t < tokenCount; ++t) {
-            while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos]))) {
-                ++pos;
-            }
-            while (pos < line.size()) {
-                const char c = line[pos];
-                if (c == '"') {
-                    inQuotes = !inQuotes;
-                } else if (std::isspace(static_cast<unsigned char>(c)) && !inQuotes) {
-                    break;
-                }
-                ++pos;
-            }
-        }
-        return TrimAscii(line.substr(pos));
-    }
-
     auto ParseEntity(std::string_view sv) -> std::optional<Entity> {
         uint64_t raw   = 0;
         auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), raw);
@@ -129,25 +72,7 @@ namespace {
         return std::nullopt;
     }
 
-#if defined(ZHLN_CONSOLE_HAS_LUA)
-    using ComponentPatchFn = std::expected<void, ErrorCode> (*)(void* rawComp, std::string_view luaChunk);
 
-    template <typename CompT>
-    auto PatchTypedComponent(void* rawComp, std::string_view luaChunk) -> std::expected<void, ErrorCode> {
-        return ReflectLua::ApplyPatchString(*static_cast<CompT*>(rawComp), luaChunk, "console_patch");
-    }
-
-    auto ComponentPatchTable() -> const std::unordered_map<std::string_view, ComponentPatchFn>& {
-        static const auto kTable = []() {
-            std::unordered_map<std::string_view, ComponentPatchFn> map;
-            Reflect::ForEachNestedType<Components>([&]<typename Comp>() {
-                map.emplace(Reflect::TypeName<Comp>(), &PatchTypedComponent<Comp>);
-            });
-            return map;
-        }();
-        return kTable;
-    }
-#endif
 
 } // namespace
 
@@ -181,7 +106,7 @@ void ConsoleDebugger::Execute(ScriptComponentAccess inspection, GameConsole& con
         console.Log("  entity <id>                   - Inspect all active components on an entity");
         console.Log("  get <id> <Comp>.<field>       - Read a component field value");
         console.Log("  set <id> <Comp>.<field> <v>   - Modify a single component field value");
-        console.Log("  patch <id> <Comp> { k = v }   - Transactionally patch a component via Lua table");
+        console.Log("  patch <id> <Comp> { k = v }   - Lua table patching lives in the Lua plugin, not Console");
         console.Log("  sym <address>                 - Resolve raw hex pointer to demangled C++ symbol");
         console.Log("  find <Name>                   - Find entity with NameComponent");
         return;
@@ -350,55 +275,7 @@ void ConsoleDebugger::Execute(ScriptComponentAccess inspection, GameConsole& con
     // 7. PATCH <id> <Component> { field = expr, ... }
     // ========================================================================
     if (cmd == "patch") {
-#if defined(ZHLN_CONSOLE_HAS_LUA)
-        const std::string_view luaExpr = SliceAfterTokens(commandLine, 3);
-        if (tokens.size() < 4 || luaExpr.empty()) {
-            console.Log("Usage: patch <id> <Component> { field = expr, ... }", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-            return;
-        }
-        auto ent = ParseEntity(tokens[1]);
-        if (!ent || !inspection.IsAlive(*ent)) {
-            console.Log("Entity not found.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-            return;
-        }
-
-        const std::string_view compName = tokens[2];
-        if (!inspection.IsRegistered(compName)) {
-            console.Log(std::format("Component '{}' is not registered.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-            return;
-        }
-        if (!inspection.CanWrite(compName)) {
-            console.Log("Resource-owning components are read-only; use the owning COM capability.");
-            return;
-        }
-        void* compPtr = inspection.Component(*ent, compName);
-        if (compPtr == nullptr) {
-            console.Log(std::format("Entity {} does not own '{}'.", ent->Pack(), compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-            return;
-        }
-
-        const auto& patchers = ComponentPatchTable();
-        const auto  patchIt  = patchers.find(compName);
-        if (patchIt == patchers.end()) {
-            console.Log(std::format("Component '{}' does not support Lua patching.", compName), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-            return;
-        }
-
-        std::string chunk;
-        if (luaExpr.starts_with('{')) {
-            chunk = std::format("return {}", luaExpr);
-        } else {
-            chunk.assign(luaExpr);
-        }
-
-        if (auto res = patchIt->second(compPtr, chunk); !res) {
-            console.Log(std::format("Failed to patch {}: {}", compName, res.error()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-        } else {
-            console.Log(std::format("Patched {} on entity {}", compName, ent->Pack()), {.r = 0.3f, .g = 1.0f, .b = 0.3f, .a = 1.0f});
-        }
-#else
-        console.Log("Lua patching is disabled in this build.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
-#endif
+        console.Log("Lua patching is not available in this build.", {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
         return;
     }
 

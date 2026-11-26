@@ -505,7 +505,7 @@ endif()
 
 # --- LuaJIT ---
 # Lua is strictly a sandboxed, reflection-driven state and configuration layer
-# (plugins/lua/ReflectLua); FFI isolation is enforced at VM creation by never
+# (plugins/lua/Lua); FFI isolation is enforced at VM creation by never
 # opening luaopen_ffi or luaopen_package.
 #
 # Prefer a system LuaJIT 2.1+ package on Unix when available (e.g. `luajit` on

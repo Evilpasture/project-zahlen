@@ -9,10 +9,6 @@ target_link_libraries(zahlen_scene_documents PUBLIC zahlen_scene zahlen_serializ
     PRIVATE zahlen_warnings)
 target_include_directories(zahlen_scene_documents PUBLIC ${PROJECT_SOURCE_DIR}/utils/scene)
 zahlen_enable_reflection(zahlen_scene_documents)
-if(TARGET zahlen_lua)
-    target_link_libraries(zahlen_scene_documents PRIVATE zahlen_lua)
-    target_compile_definitions(zahlen_scene_documents PRIVATE ZHLN_SCENE_DOC_HAS_LUA=1)
-endif()
 
 # Unlike the game executable, this opt-in host tests document loading,
 # fallback and graphics-file watching (plus Discord when that target exists).
@@ -29,10 +25,6 @@ if(TARGET zahlen_fallback_scene)
     if(TARGET zahlen_terrain AND TARGET zahlen_vfx)
         target_link_libraries(zahlen_scene_host PRIVATE zahlen_terrain zahlen_vfx)
         target_compile_definitions(zahlen_scene_host PRIVATE ZHLN_SCENE_HOST_HAS_TERRAIN=1)
-    endif()
-    if(TARGET zahlen_lua)
-        target_link_libraries(zahlen_scene_host PRIVATE zahlen_lua)
-        target_compile_definitions(zahlen_scene_host PRIVATE ZHLN_SCENE_HOST_HAS_LUA=1)
     endif()
     if(TARGET zahlen_discord_rpc)
         target_link_libraries(zahlen_scene_host PRIVATE zahlen_discord_rpc)

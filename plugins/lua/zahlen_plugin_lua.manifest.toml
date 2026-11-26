@@ -1,0 +1,10 @@
+# Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[plugin]
+name        = "lua"
+library     = "zahlen_plugin_lua"
+api         = 1
+description = "Sandboxed Lua virtual machines (COM::IAppLayer + Lua::IPlugin)"
+auto_load   = false
+hot_reload  = false

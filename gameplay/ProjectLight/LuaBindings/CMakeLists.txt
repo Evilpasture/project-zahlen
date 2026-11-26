@@ -1,11 +1,11 @@
 # Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# gameplay/ProjectLight/LuaBindings -- the DataModel <-> ReflectLua::Vm adapter
+# gameplay/ProjectLight/LuaBindings -- the DataModel <-> Lua::VirtualMachine adapter
 # (zahlen_project_light_lua).
 #
 # Links ProjectLight's canonical DataModel with plugins/lua (zahlen_lua) via
-# <lua/LuaInterop.hpp>. Never includes <lua.h> or links LuaJIT directly; the
+# <lua/Host.hpp>. Never includes <lua.h> or links LuaJIT directly; the
 # classic Lua C API remains strictly private to plugins/lua/.
 
 set(TARGET_NAME zahlen_project_light_lua)

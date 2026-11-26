@@ -13,8 +13,8 @@
 #include <expected>
 #include <format>
 #include <lua.hpp>
-#include <lua/LuaInterop.hpp>
-#include <lua/ReflectLua.hpp>
+#include <lua/Host.hpp>
+#include <lua/Lua.hpp>
 #include <luajit.h>
 #include <memory>
 #include <optional>
@@ -24,11 +24,23 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN::ReflectLua {
+namespace ZHLN::Lua {
 
 namespace {
 
 constexpr int kHookSliceInstructions = 4096;
+
+// Permission::Bit values from <lua/Lua.hpp>, duplicated here so the core VM
+// stays independent of the high-level scripting header. Keep in sync.
+constexpr uint64_t kScriptBitMath         = 1ULL << 0;
+constexpr uint64_t kScriptBitTable        = 1ULL << 1;
+constexpr uint64_t kScriptBitString       = 1ULL << 2;
+constexpr uint64_t kScriptBitBitOp        = 1ULL << 3;
+constexpr uint64_t kScriptBitPrint        = 1ULL << 4;
+constexpr uint64_t kScriptBitRandom       = 1ULL << 5;
+constexpr uint64_t kScriptBitGlobalsWrite = 1ULL << 6;
+constexpr uint64_t kScriptDefaultYes =
+    kScriptBitMath | kScriptBitTable | kScriptBitString | kScriptBitBitOp | kScriptBitPrint;
 
 // Registry-key sentinels whose unique static addresses partition the Lua
 // registry without string-key collisions or cross-VM sharing.
@@ -71,6 +83,10 @@ auto SafeLogPrint(lua_State* state) -> int {
     }
     ZHLN::Log<ZHLN::LogSeverity::Info>(ZHLN::LogChannel {"Script"}, "{}", line);
     return 0;
+}
+
+auto DenySandboxWrite(lua_State* state) -> int {
+    return luaL_error(state, "ZHLN::Lua: sandbox value is read-only");
 }
 
 auto OpenSandboxLibsC(lua_State* state) -> int {
@@ -136,17 +152,17 @@ struct RegisteredTypeEntry {
 } // namespace
 
 struct CallFrame::Context {
-    Vm::Impl*  vm     = nullptr;
+    VirtualMachine::Impl*  vm     = nullptr;
     lua_State* state  = nullptr;
     int        argTop = 0;
     bool       oomHit = false;
 };
 
-struct Vm::Impl {
+struct VirtualMachine::Impl {
     lua_State*                       state                     = nullptr;
     lua_Alloc                        baseAlloc                 = nullptr;
     void*                            baseAllocUd               = nullptr;
-    LuaBudget                        budget                    = {};
+    Budget                        budget                    = {};
     size_t                           usedBytes                 = 0;
     uint32_t                         protectedCallDepth        = 0;
     int64_t                          remainingInstructions     = 0;
@@ -156,6 +172,138 @@ struct Vm::Impl {
     std::string                      lastErrorDetail;
     std::vector<HostContextEntry>    hostContexts;
     std::vector<RegisteredTypeEntry> registeredTypes;
+
+    struct HostFunctionEntry {
+        std::string   name;
+        HostCallback  callback = nullptr;
+    };
+    std::vector<HostFunctionEntry> hostFunctions;
+    int                          compiledChunkRef = LUA_NOREF;
+    int                          sharedLibsRef    = LUA_NOREF;
+    uint64_t                     scriptPermissions = kScriptDefaultYes;
+
+    // Build the frozen library/host-function table once per virtual machine.
+    // Library proxies carry a read-only metatable and `_G`/`rawset` are denied,
+    // so sharing this table across invocations cannot leak script writes.
+    [[nodiscard]] auto RebuildSharedLibs() noexcept -> bool {
+        lua_State* L = state;
+        if (!lua_checkstack(L, 16)) {
+            return false;
+        }
+        const int baseTop = lua_gettop(L);
+        lua_newtable(L); // frozen libraries table
+        const int libsIdx = ToAbsIndex(L, -1);
+
+        auto addLib = [&](const char* name) {
+            lua_getglobal(L, name);
+            if (!lua_istable(L, -1)) {
+                lua_pop(L, 1);
+                return;
+            }
+            const int realIdx = ToAbsIndex(L, -1);
+            lua_newtable(L);
+            const int proxyIdx = ToAbsIndex(L, -1);
+            lua_pushnil(L);
+            while (lua_next(L, realIdx) != 0) {
+                lua_pushvalue(L, -2); // key copy
+                lua_pushvalue(L, -2); // value copy
+                lua_rawset(L, proxyIdx);
+                lua_pop(L, 1); // value, leave key for lua_next
+            }
+            lua_newtable(L);
+            lua_pushcfunction(L, &DenySandboxWrite);
+            lua_setfield(L, -2, "__newindex");
+            lua_pushboolean(L, 0);
+            lua_setfield(L, -2, "__metatable");
+            lua_setmetatable(L, proxyIdx);
+
+            lua_pushvalue(L, proxyIdx);
+            lua_setfield(L, libsIdx, name);
+            lua_pop(L, 2); // proxy, real lib
+        };
+
+        if ((scriptPermissions & kScriptBitMath) != 0u) {
+            addLib(LUA_MATHLIBNAME);
+        }
+        if ((scriptPermissions & kScriptBitTable) != 0u) {
+            addLib(LUA_TABLIBNAME);
+        }
+        if ((scriptPermissions & kScriptBitString) != 0u) {
+            addLib(LUA_STRLIBNAME);
+        }
+        if ((scriptPermissions & kScriptBitBitOp) != 0u) {
+            addLib(LUA_BITLIBNAME);
+        }
+
+        // Safe base globals: these are pure functions (or `pairs`/`ipairs`
+        // adapters) that callers expect even in a locked-down sandbox. The
+        // dangerous base entries (`load`, `dofile`, `getfenv`, ...) were
+        // removed when the base library was opened in OpenSandboxLibsC.
+        for (const char* name: {"assert", "error", "ipairs", "next", "pairs", "pcall", "select",
+                                "tonumber", "tostring", "type", "unpack", "xpcall"}) {
+            lua_getglobal(L, name);
+            if (lua_isfunction(L, -1)) {
+                lua_setfield(L, libsIdx, name);
+            } else {
+                lua_pop(L, 1);
+            }
+        }
+
+        if ((scriptPermissions & kScriptBitPrint) != 0u) {
+            lua_getglobal(L, "print");
+            if (lua_isfunction(L, -1)) {
+                lua_setfield(L, libsIdx, "print");
+            } else {
+                lua_pop(L, 1);
+            }
+        }
+
+        for (const HostFunctionEntry& entry: hostFunctions) {
+            if (entry.callback == nullptr) {
+                continue;
+            }
+            PushWrappedCallback(entry.callback);
+            lua_setfield(L, libsIdx, entry.name.c_str());
+        }
+
+        if (sharedLibsRef != LUA_NOREF) {
+            luaL_unref(L, LUA_REGISTRYINDEX, sharedLibsRef);
+            sharedLibsRef = LUA_NOREF;
+        }
+        sharedLibsRef = luaL_ref(L, LUA_REGISTRYINDEX); // pops libs
+        lua_settop(L, baseTop);
+        return sharedLibsRef != LUA_REFNIL;
+    }
+
+    // A call environment is just an empty table whose metatable indexes the
+    // shared libs table. No per-call library copying or metatable cloning.
+    auto PushCallEnv() noexcept -> bool {
+        lua_State* L = state;
+        if (!lua_checkstack(L, 8)) {
+            return false;
+        }
+        if (sharedLibsRef == LUA_NOREF && !RebuildSharedLibs()) {
+            return false;
+        }
+        const int baseTop = lua_gettop(L);
+        lua_newtable(L); // env
+        const int envIdx = ToAbsIndex(L, -1);
+
+        lua_newtable(L); // env metatable
+        const int mtIdx = ToAbsIndex(L, -1);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sharedLibsRef);
+        lua_setfield(L, mtIdx, "__index");
+        if ((scriptPermissions & kScriptBitGlobalsWrite) == 0u) {
+            lua_pushcfunction(L, &DenySandboxWrite);
+            lua_setfield(L, mtIdx, "__newindex");
+        }
+        lua_pushboolean(L, 0);
+        lua_setfield(L, mtIdx, "__metatable");
+        lua_setmetatable(L, envIdx);
+
+        lua_settop(L, baseTop + 1); // leave env on top
+        return true;
+    }
 
     static auto AllocWrapper(void* ud, void* ptr, size_t osize, size_t nsize) noexcept -> void* {
         auto* self = static_cast<Impl*>(ud);
@@ -378,8 +526,15 @@ struct Vm::Impl {
 
     [[nodiscard]] auto LoadTextChunk(std::string_view code, std::string_view chunkName) noexcept -> std::expected<void, ErrorCode> {
         memoryBudgetExceeded = false;
+        // LuaRocks 2026 lesson: mode "t" is ignored by Lua 5.1 / LuaJIT, and
+        // LuaJIT never validates bytecode. Reject the ESC bytecode signature
+        // before the loader sees it; buffers arrive only from VFS text or
+        // in-memory spans, never from an implicit OS file open.
+        if (!code.empty() && static_cast<unsigned char>(code.front()) == 0x1Bu) {
+            lastErrorDetail = std::format("binary Lua bytecode rejected in '{}' (text-only chunks)", chunkName);
+            return std::unexpected(Error::SyntaxError);
+        }
         const std::string nameBuf(chunkName);
-        // Mode "t" permits plain-text Lua source only and rejects binary bytecode.
         const int rc = luaL_loadbufferx(state, code.data(), code.size(), nameBuf.c_str(), "t");
         if (rc == 0) {
             return {};
@@ -388,11 +543,11 @@ struct Vm::Impl {
         if (rc == LUA_ERRMEM || memoryBudgetExceeded) {
             lastErrorDetail = std::format("memory budget exceeded while parsing '{}': {}", chunkName, msg);
             lua_pop(state, 1);
-            return std::unexpected(LuaError::MemoryBudgetExceeded);
+            return std::unexpected(Error::MemoryBudgetExceeded);
         }
         lastErrorDetail = std::format("syntax error in '{}': {}", chunkName, msg);
         lua_pop(state, 1);
-        return std::unexpected(LuaError::SyntaxError);
+        return std::unexpected(Error::SyntaxError);
     }
 
     [[nodiscard]] auto RunProtected(int nargs, int nresults, std::string_view chunkName) noexcept -> std::expected<void, ErrorCode> {
@@ -407,23 +562,31 @@ struct Vm::Impl {
         if (instructionBudgetExceeded) {
             lastErrorDetail = std::format("instruction budget exceeded in '{}': {}", chunkName, msg);
             lua_pop(state, 1);
-            return std::unexpected(LuaError::InstructionBudgetExceeded);
+            return std::unexpected(Error::InstructionBudgetExceeded);
         }
         if (rc == LUA_ERRMEM || memoryBudgetExceeded) {
             lastErrorDetail = std::format("memory budget exceeded in '{}': {}", chunkName, msg);
             lua_pop(state, 1);
-            return std::unexpected(LuaError::MemoryBudgetExceeded);
+            return std::unexpected(Error::MemoryBudgetExceeded);
         }
         lastErrorDetail = std::format("runtime error in '{}': {}", chunkName, msg);
         lua_pop(state, 1);
-        return std::unexpected(LuaError::RuntimeError);
+        return std::unexpected(Error::RuntimeError);
     }
 };
 
-Vm::Vm() noexcept = default;
+VirtualMachine::VirtualMachine() noexcept = default;
 
-Vm::~Vm() {
+VirtualMachine::~VirtualMachine() {
     if (_impl && _impl->state != nullptr) {
+        if (_impl->compiledChunkRef != LUA_NOREF) {
+            luaL_unref(_impl->state, LUA_REGISTRYINDEX, _impl->compiledChunkRef);
+            _impl->compiledChunkRef = LUA_NOREF;
+        }
+        if (_impl->sharedLibsRef != LUA_NOREF) {
+            luaL_unref(_impl->state, LUA_REGISTRYINDEX, _impl->sharedLibsRef);
+            _impl->sharedLibsRef = LUA_NOREF;
+        }
         lua_sethook(_impl->state, nullptr, 0, 0);
         if (_impl->baseAlloc != nullptr) {
             lua_setallocf(_impl->state, _impl->baseAlloc, _impl->baseAllocUd);
@@ -433,13 +596,13 @@ Vm::~Vm() {
     }
 }
 
-Vm::Vm(Vm&& other) noexcept                    = default;
-auto Vm::operator=(Vm&& other) noexcept -> Vm& = default;
+VirtualMachine::VirtualMachine(VirtualMachine&& other) noexcept                    = default;
+auto VirtualMachine::operator=(VirtualMachine&& other) noexcept -> VirtualMachine& = default;
 
-auto Vm::Create(LuaBudget budget) noexcept -> std::expected<Vm, ErrorCode> {
+auto VirtualMachine::Create(Budget budget) noexcept -> std::expected<VirtualMachine, ErrorCode> {
     lua_State* raw = luaL_newstate();
     if (raw == nullptr) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
 
     // Run in LuaJIT's fast interpreter rather than compiling traces for one-shot
@@ -454,7 +617,7 @@ auto Vm::Create(LuaBudget budget) noexcept -> std::expected<Vm, ErrorCode> {
 
     if (budget.maxMemoryBytes > 0u && impl->usedBytes > budget.maxMemoryBytes) {
         lua_close(raw);
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     lua_setallocf(raw, &Impl::AllocWrapper, impl.get());
@@ -463,30 +626,37 @@ auto Vm::Create(LuaBudget budget) noexcept -> std::expected<Vm, ErrorCode> {
         const bool oom = impl->memoryBudgetExceeded;
         lua_setallocf(raw, impl->baseAlloc, impl->baseAllocUd);
         lua_close(raw);
-        return std::unexpected(oom ? LuaError::MemoryBudgetExceeded : LuaError::AllocationFailed);
+        return std::unexpected(oom ? Error::MemoryBudgetExceeded : Error::AllocationFailed);
     }
 
-    Vm vm;
+    if (!impl->RebuildSharedLibs()) {
+        const bool oom = impl->memoryBudgetExceeded;
+        lua_setallocf(raw, impl->baseAlloc, impl->baseAllocUd);
+        lua_close(raw);
+        return std::unexpected(oom ? Error::MemoryBudgetExceeded : Error::AllocationFailed);
+    }
+
+    VirtualMachine vm;
     vm._impl = std::move(impl);
     return vm;
 }
 
-auto Vm::IsValid() const noexcept -> bool {
+auto VirtualMachine::IsValid() const noexcept -> bool {
     return _impl != nullptr && _impl->state != nullptr;
 }
 
-auto Vm::Budget() const noexcept -> const LuaBudget& {
-    static constexpr LuaBudget kDefault {};
+auto VirtualMachine::GetBudget() const noexcept -> const Budget& {
+    static constexpr Budget kDefault {};
     return _impl != nullptr ? _impl->budget : kDefault;
 }
 
-auto Vm::UsedMemoryBytes() const noexcept -> size_t {
+auto VirtualMachine::UsedMemoryBytes() const noexcept -> size_t {
     return _impl != nullptr ? _impl->usedBytes : 0u;
 }
 
-auto Vm::ExecuteString(std::string_view code, std::string_view chunkName) noexcept -> std::expected<void, ErrorCode> {
+auto VirtualMachine::ExecuteString(std::string_view code, std::string_view chunkName) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     const int baseTop = lua_gettop(_impl->state);
     if (auto loadRes = _impl->LoadTextChunk(code, chunkName); !loadRes) {
@@ -498,18 +668,18 @@ auto Vm::ExecuteString(std::string_view code, std::string_view chunkName) noexce
     return runRes;
 }
 
-auto Vm::LastErrorDetail() const noexcept -> std::string_view {
+auto VirtualMachine::LastErrorDetail() const noexcept -> std::string_view {
     return _impl != nullptr ? std::string_view(_impl->lastErrorDetail) : std::string_view {};
 }
 
-auto Vm::EvaluateTop(
+auto VirtualMachine::EvaluateTop(
     std::string_view code,
     std::string_view chunkName,
     const void*      consumeCtx,
     std::expected<void, ErrorCode> (*consume)(const void* ctx, Value root)
 ) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     lua_State* state   = _impl->state;
     const int  baseTop = lua_gettop(state);
@@ -530,7 +700,7 @@ auto Vm::EvaluateTop(
     return res;
 }
 
-auto Vm::EvaluateCallTop(
+auto VirtualMachine::EvaluateCallTop(
     std::string_view code,
     std::string_view chunkName,
     const void*      pushCtx,
@@ -539,7 +709,7 @@ auto Vm::EvaluateCallTop(
     std::expected<void, ErrorCode> (*consume)(const void* ctx, Value result)
 ) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     lua_State* state   = _impl->state;
     const int  baseTop = lua_gettop(state);
@@ -555,7 +725,7 @@ auto Vm::EvaluateCallTop(
 
     if (lua_type(state, -1) != LUA_TFUNCTION) {
         lua_settop(state, baseTop);
-        return std::unexpected(LuaError::NotAFunction);
+        return std::unexpected(Error::NotAFunction);
     }
 
     Builder   builder(state);
@@ -568,7 +738,7 @@ auto Vm::EvaluateCallTop(
 
     if (_impl->memoryBudgetExceeded) {
         lua_settop(state, baseTop);
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     const int   resIdx = lua_gettop(state);
@@ -578,24 +748,195 @@ auto Vm::EvaluateCallTop(
     return res;
 }
 
-void Vm::SetHostContextRaw(TypeID typeId, void* context) noexcept {
+auto VirtualMachine::CompileChunk(std::string_view code, std::string_view chunkName) noexcept -> std::expected<void, ErrorCode> {
+    if (!IsValid()) {
+        return std::unexpected(Error::AllocationFailed);
+    }
+    lua_State* state   = _impl->state;
+    const int  baseTop = lua_gettop(state);
+
+    if (auto loadRes = _impl->LoadTextChunk(code, chunkName); !loadRes) {
+        lua_settop(state, baseTop);
+        return loadRes;
+    }
+
+    if (_impl->compiledChunkRef != LUA_NOREF) {
+        luaL_unref(state, LUA_REGISTRYINDEX, _impl->compiledChunkRef);
+        _impl->compiledChunkRef = LUA_NOREF;
+    }
+    _impl->compiledChunkRef = luaL_ref(state, LUA_REGISTRYINDEX);
+    lua_settop(state, baseTop);
+    if (_impl->compiledChunkRef == LUA_REFNIL) {
+        _impl->compiledChunkRef = LUA_NOREF;
+        return std::unexpected(Error::ScriptLoadFailed);
+    }
+    return {};
+}
+
+auto VirtualMachine::HasCompiledChunk() const noexcept -> bool {
+    return IsValid() && _impl->compiledChunkRef != LUA_NOREF;
+}
+
+auto VirtualMachine::ApplyScriptPermissions(uint64_t allowedBits) noexcept -> std::expected<void, ErrorCode> {
+    if (!IsValid()) {
+        return std::unexpected(Error::AllocationFailed);
+    }
+    _impl->scriptPermissions = allowedBits;
+    lua_State* state = _impl->state;
+
+    // Hide the shared string metatable even from C++-visible introspection;
+    // the Lua-side escape hatches are removed below.
+    if (lua_checkstack(state, 4)) {
+        lua_pushliteral(state, "");
+        if (lua_getmetatable(state, -1) != 0) {
+            lua_pushboolean(state, 0);
+            lua_setfield(state, -2, "__metatable");
+            lua_pop(state, 1);
+        }
+        lua_pop(state, 1);
+    }
+
+    constexpr std::array<const char*, 5> kAlwaysDenied = {
+        "getmetatable", "setmetatable", "rawset", "rawget", "_G",
+    };
+    for (const char* name: kAlwaysDenied) {
+        lua_pushnil(state);
+        lua_setglobal(state, name);
+    }
+    if ((allowedBits & kScriptBitPrint) == 0u) {
+        lua_pushnil(state);
+        lua_setglobal(state, "print");
+    }
+    if ((allowedBits & kScriptBitRandom) == 0u) {
+        lua_getglobal(state, LUA_MATHLIBNAME);
+        if (lua_istable(state, -1)) {
+            lua_pushnil(state);
+            lua_setfield(state, -2, "random");
+            lua_pushnil(state);
+            lua_setfield(state, -2, "randomseed");
+        }
+        lua_pop(state, 1);
+    }
+    if (!_impl->RebuildSharedLibs()) {
+        return std::unexpected(Error::MemoryBudgetExceeded);
+    }
+    return {};
+}
+
+auto VirtualMachine::RegisterHostFunction(std::string_view name, HostCallback callback) noexcept -> std::expected<void, ErrorCode> {
+    if (!IsValid() || name.empty() || callback == nullptr) {
+        return std::unexpected(Error::RuntimeError);
+    }
+    for (Impl::HostFunctionEntry& entry: _impl->hostFunctions) {
+        if (entry.name == name) {
+            entry.callback = callback;
+            if (!_impl->RebuildSharedLibs()) {
+                return std::unexpected(Error::MemoryBudgetExceeded);
+            }
+            return {};
+        }
+    }
+    _impl->hostFunctions.push_back(Impl::HostFunctionEntry {.name = std::string(name), .callback = callback});
+    if (!_impl->RebuildSharedLibs()) {
+        return std::unexpected(Error::MemoryBudgetExceeded);
+    }
+    return {};
+}
+
+auto VirtualMachine::EvaluateCompiledCallTop(
+    const void*      pushCtx,
+    PushArgsFn       pushArgs,
+    const void*      consumeCtx,
+    ConsumeFn        consume,
+    std::string_view chunkName
+) noexcept -> std::expected<void, ErrorCode> {
+    if (!IsValid() || _impl->compiledChunkRef == LUA_NOREF) {
+        return std::unexpected(Error::ScriptLoadFailed);
+    }
+    lua_State* state   = _impl->state;
+    const int  baseTop = lua_gettop(state);
+    if (!lua_checkstack(state, 16)) {
+        return std::unexpected(Error::MemoryBudgetExceeded);
+    }
+
+    if (!_impl->PushCallEnv()) {
+        lua_settop(state, baseTop);
+        return std::unexpected(Error::MemoryBudgetExceeded);
+    }
+    const int envIdx = lua_gettop(state);
+
+    lua_rawgeti(state, LUA_REGISTRYINDEX, _impl->compiledChunkRef);
+    lua_pushvalue(state, envIdx);
+    lua_setfenv(state, -2);
+
+    Builder builder(state);
+    const int chunkIdx = lua_gettop(state);
+    const int argc     = (pushArgs != nullptr) ? pushArgs(pushCtx, builder) : 0;
+    int       argIdx   = chunkIdx + 1;
+    auto      pushArgCopies = [&] {
+        for (int i = 0; i < argc; ++i) {
+            lua_pushvalue(state, argIdx + i);
+        }
+    };
+
+    // Move the chunk above the saved arguments so lua_pcall sees the usual
+    // `function, args...` layout while the originals stay pinned below it.
+    lua_pushvalue(state, chunkIdx);
+    lua_remove(state, chunkIdx);
+    --argIdx;
+    pushArgCopies();
+    if (auto first = _impl->RunProtected(argc, 1, chunkName); !first) {
+        lua_settop(state, baseTop);
+        return first;
+    }
+
+    if (lua_isfunction(state, -1)) {
+        // The returned closure is already on top; move a copy below the saved
+        // argument values so lua_pcall sees `closure, args...` without asking
+        // the C++ caller to serialize the state a second time.
+        const int fnIdx = lua_gettop(state);
+        lua_pushvalue(state, fnIdx);
+        lua_remove(state, fnIdx);
+        pushArgCopies();
+        if (auto second = _impl->RunProtected(argc, 1, chunkName); !second) {
+            lua_settop(state, baseTop);
+            return second;
+        }
+    } else if (!lua_istable(state, -1)) {
+        lua_settop(state, baseTop);
+        return std::unexpected(Error::NotATable);
+    }
+
+    if (_impl->memoryBudgetExceeded) {
+        lua_settop(state, baseTop);
+        return std::unexpected(Error::MemoryBudgetExceeded);
+    }
+
+    const int   resIdx = lua_gettop(state);
+    const Value outVal(state, resIdx, &_impl->budget, chunkName);
+    auto        res = consume(consumeCtx, outVal);
+    lua_settop(state, baseTop);
+    return res;
+}
+
+void VirtualMachine::SetHostContextRaw(TypeID typeId, void* context) noexcept {
     if (IsValid()) {
         _impl->SetHostContext(typeId, context);
     }
 }
 
-auto Vm::HostContextRaw(TypeID typeId) const noexcept -> void* {
+auto VirtualMachine::HostContextRaw(TypeID typeId) const noexcept -> void* {
     return IsValid() ? _impl->FindHostContext(typeId) : nullptr;
 }
 
-auto Vm::RegisterUserdataTypeRaw(TypeID typeId, const MetatableSpec& spec) noexcept -> std::expected<void, ErrorCode> {
+auto VirtualMachine::RegisterUserdataTypeRaw(TypeID typeId, const MetatableSpec& spec) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     lua_State* state   = _impl->state;
     const int  baseTop = lua_gettop(state);
     if (!lua_checkstack(state, 8)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     _impl->memoryBudgetExceeded = false;
@@ -681,19 +1022,19 @@ auto Vm::RegisterUserdataTypeRaw(TypeID typeId, const MetatableSpec& spec) noexc
 
     lua_settop(state, baseTop);
     if (_impl->memoryBudgetExceeded) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
     return {};
 }
 
-auto Vm::WithFrame(FunctionRef<void(CallFrame&) const> populate) noexcept -> std::expected<void, ErrorCode> {
+auto VirtualMachine::WithFrame(FunctionRef<void(CallFrame&) const> populate) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     lua_State* state   = _impl->state;
     const int  baseTop = lua_gettop(state);
     if (!lua_checkstack(state, 8)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     _impl->memoryBudgetExceeded = false;
@@ -707,12 +1048,12 @@ auto Vm::WithFrame(FunctionRef<void(CallFrame&) const> populate) noexcept -> std
     populate(frame);
     lua_settop(state, baseTop);
     if (frameCtx.oomHit || _impl->memoryBudgetExceeded) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
     return {};
 }
 
-void Vm::UnregisterListener(ListenerID id) noexcept {
+void VirtualMachine::UnregisterListener(ListenerID id) noexcept {
     if (!IsValid() || id == kInvalidListenerID) {
         return;
     }
@@ -733,7 +1074,7 @@ void Vm::UnregisterListener(ListenerID id) noexcept {
     lua_settop(state, baseTop);
 }
 
-auto Vm::HasListener(ListenerID id) const noexcept -> bool {
+auto VirtualMachine::HasListener(ListenerID id) const noexcept -> bool {
     if (!IsValid() || id == kInvalidListenerID) {
         return false;
     }
@@ -756,25 +1097,25 @@ auto Vm::HasListener(ListenerID id) const noexcept -> bool {
     return present;
 }
 
-auto Vm::InvokeListener(ListenerID id, FunctionRef<void(CallFrame&)> pushArgs, std::string_view contextName) noexcept -> std::expected<void, ErrorCode> {
+auto VirtualMachine::InvokeListener(ListenerID id, FunctionRef<void(CallFrame&) const> pushArgs, std::string_view contextName) noexcept -> std::expected<void, ErrorCode> {
     if (!IsValid()) {
-        return std::unexpected(LuaError::AllocationFailed);
+        return std::unexpected(Error::AllocationFailed);
     }
     if (id == kInvalidListenerID) {
-        return std::unexpected(LuaError::NotAFunction);
+        return std::unexpected(Error::NotAFunction);
     }
 
     lua_State* state   = _impl->state;
     const int  baseTop = lua_gettop(state);
     if (!lua_checkstack(state, 8)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     lua_pushlightuserdata(state, &kListenerTableRegistryKey);
     lua_rawget(state, LUA_REGISTRYINDEX);
     if (!lua_istable(state, -1)) {
         lua_settop(state, baseTop);
-        return std::unexpected(LuaError::NotAFunction);
+        return std::unexpected(Error::NotAFunction);
     }
 
     std::array<char, sizeof(uint64_t)> keyBytes {};
@@ -785,7 +1126,7 @@ auto Vm::InvokeListener(ListenerID id, FunctionRef<void(CallFrame&)> pushArgs, s
 
     if (lua_type(state, -1) != LUA_TFUNCTION) {
         lua_settop(state, baseTop);
-        return std::unexpected(LuaError::NotAFunction);
+        return std::unexpected(Error::NotAFunction);
     }
 
     const int          fnIndex = lua_gettop(state);
@@ -799,7 +1140,7 @@ auto Vm::InvokeListener(ListenerID id, FunctionRef<void(CallFrame&)> pushArgs, s
     pushArgs(frame);
     if (frameCtx.oomHit || _impl->memoryBudgetExceeded) {
         lua_settop(state, baseTop);
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     const int nargs  = std::max(0, lua_gettop(state) - fnIndex);
@@ -1197,7 +1538,7 @@ auto Value::IsTable() const noexcept -> bool {
 auto Value::GetBool() const noexcept -> std::expected<bool, ErrorCode> {
     lua_State* state = AsLuaState(_rawState);
     if (!IsValid() || lua_type(state, _index) != LUA_TBOOLEAN) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     return lua_toboolean(state, _index) != 0;
 }
@@ -1205,17 +1546,17 @@ auto Value::GetBool() const noexcept -> std::expected<bool, ErrorCode> {
 auto Value::GetInt() const noexcept -> std::expected<int64_t, ErrorCode> {
     lua_State* state = AsLuaState(_rawState);
     if (!IsValid() || lua_type(state, _index) != LUA_TNUMBER) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     const double num = lua_tonumber(state, _index);
     if (!std::isfinite(num) || std::floor(num) != num) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     // Exact integer range check against double -> int64 conversion bounds.
     constexpr double kMinInt64 = -9223372036854775808.0; // -2^63 (exact in IEEE-754 double)
     constexpr double kMaxExcl  = 9223372036854775808.0;  // +2^63 (first out-of-range power of 2)
     if (num < kMinInt64 || num >= kMaxExcl) {
-        return std::unexpected(LuaError::OutOfRange);
+        return std::unexpected(Error::OutOfRange);
     }
     return static_cast<int64_t>(num);
 }
@@ -1223,15 +1564,15 @@ auto Value::GetInt() const noexcept -> std::expected<int64_t, ErrorCode> {
 auto Value::GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode> {
     lua_State* state = AsLuaState(_rawState);
     if (!IsValid() || lua_type(state, _index) != LUA_TNUMBER) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     const double num = lua_tonumber(state, _index);
     if (!std::isfinite(num) || std::floor(num) != num || num < 0.0) {
-        return std::unexpected(num < 0.0 ? LuaError::OutOfRange : LuaError::TypeMismatch);
+        return std::unexpected(num < 0.0 ? Error::OutOfRange : Error::TypeMismatch);
     }
     constexpr double kMaxExcl = 18446744073709551616.0; // +2^64
     if (num >= kMaxExcl) {
-        return std::unexpected(LuaError::OutOfRange);
+        return std::unexpected(Error::OutOfRange);
     }
     return static_cast<uint64_t>(num);
 }
@@ -1239,11 +1580,11 @@ auto Value::GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode> {
 auto Value::GetDouble() const noexcept -> std::expected<double, ErrorCode> {
     lua_State* state = AsLuaState(_rawState);
     if (!IsValid() || lua_type(state, _index) != LUA_TNUMBER) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     const double num = lua_tonumber(state, _index);
     if (!std::isfinite(num)) {
-        return std::unexpected(LuaError::OutOfRange);
+        return std::unexpected(Error::OutOfRange);
     }
     return num;
 }
@@ -1252,12 +1593,12 @@ auto Value::GetString() const noexcept -> std::expected<std::string_view, ErrorC
     lua_State* state = AsLuaState(_rawState);
     // Strictly check LUA_TSTRING first so Lua never mutates numbers in-place on the stack.
     if (!IsValid() || lua_type(state, _index) != LUA_TSTRING) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     size_t      len = 0;
     const char* ptr = lua_tolstring(state, _index, &len);
     if (ptr == nullptr) {
-        return std::unexpected(LuaError::TypeMismatch);
+        return std::unexpected(Error::TypeMismatch);
     }
     return std::string_view(ptr, len);
 }
@@ -1301,11 +1642,11 @@ auto Value::SequenceLength() const noexcept -> std::optional<size_t> {
 
 auto Value::GetTableStringKeys() const -> std::expected<std::vector<std::string>, ErrorCode> {
     if (!IsTable()) {
-        return std::unexpected(LuaError::NotATable);
+        return std::unexpected(Error::NotATable);
     }
     lua_State* state = AsLuaState(_rawState);
     if (!lua_checkstack(state, 4)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     std::vector<std::string> keys;
@@ -1314,7 +1655,7 @@ auto Value::GetTableStringKeys() const -> std::expected<std::vector<std::string>
         lua_pop(state, 1); // pop value, keep key on top
         if (lua_type(state, -1) != LUA_TSTRING) {
             lua_pop(state, 1);
-            return std::unexpected(LuaError::TypeMismatch);
+            return std::unexpected(Error::TypeMismatch);
         }
         size_t      len = 0;
         const char* str = lua_tolstring(state, -1, &len);
@@ -1326,11 +1667,11 @@ auto Value::GetTableStringKeys() const -> std::expected<std::vector<std::string>
 auto Value::WithKey(std::string_view key, const void* ctx, std::expected<void, ErrorCode> (*visit)(const void* ctx, Value child)) const noexcept
     -> std::expected<bool, ErrorCode> {
     if (!IsTable()) {
-        return std::unexpected(LuaError::NotATable);
+        return std::unexpected(Error::NotATable);
     }
     lua_State* state = AsLuaState(_rawState);
     if (!lua_checkstack(state, 4)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     lua_pushlstring(state, key.data(), key.size());
@@ -1361,11 +1702,11 @@ auto Value::WithKey(std::string_view key, const void* ctx, std::expected<void, E
 auto Value::WithElement(size_t zeroBasedIndex, const void* ctx, std::expected<void, ErrorCode> (*visit)(const void* ctx, Value element)) const noexcept
     -> std::expected<void, ErrorCode> {
     if (!IsTable()) {
-        return std::unexpected(LuaError::NotATable);
+        return std::unexpected(Error::NotATable);
     }
     lua_State* state = AsLuaState(_rawState);
     if (!lua_checkstack(state, 4)) {
-        return std::unexpected(LuaError::MemoryBudgetExceeded);
+        return std::unexpected(Error::MemoryBudgetExceeded);
     }
 
     lua_rawgeti(state, _index, static_cast<int>(zeroBasedIndex + 1u));
@@ -1450,4 +1791,22 @@ void Builder::SetElementTop(size_t zeroBasedIndex) noexcept {
     lua_rawseti(state, -2, static_cast<int>(zeroBasedIndex + 1u));
 }
 
-} // namespace ZHLN::ReflectLua
+auto HostAccessBridge::ArgCount(const CallFrame& frame) noexcept -> int {
+    return lua_gettop(frame._ctx.state);
+}
+
+auto HostAccessBridge::ArgValue(const CallFrame& frame, int oneBased) noexcept -> Value {
+    lua_State* state = frame._ctx.state;
+    return Value(state, ToAbsIndex(state, oneBased), &frame._ctx.vm->budget, "host_arg");
+}
+
+void HostAccessBridge::RaiseError(const CallFrame& frame, std::string_view message) {
+    luaL_error(frame._ctx.state, "%.*s", static_cast<int>(message.size()), message.data());
+}
+
+void HostAccessBridge::PushWith(CallFrame& frame, void* value, void (*pusher)(Builder&, void*)) noexcept {
+    Builder builder(frame._ctx.state);
+    pusher(builder, value);
+}
+
+} // namespace ZHLN::Lua
