@@ -26,10 +26,13 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <lua/LuaInterop.hpp>
 #include <lua/ReflectLua.hpp>
 #include <lua/ReflectLuaFile.hpp>
 #include <lua/SceneLua.hpp>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -67,6 +70,103 @@ struct HardwareProbe {
     bool        supportsRayQuery = true;
     std::string adapterName      = "Test GPU";
 };
+
+struct PodVec2 {
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+struct PodEntityRef {
+    uint64_t id = 0;
+};
+
+struct NonPodHolder {
+    std::shared_ptr<int> owned;
+};
+
+static_assert(ZHLN::ReflectLua::LuaPodUserdata<PodVec2>);
+static_assert(ZHLN::ReflectLua::LuaPodUserdata<PodEntityRef>);
+static_assert(!ZHLN::ReflectLua::LuaPodUserdata<NonPodHolder>);
+static_assert(!ZHLN::ReflectLua::LuaPodUserdata<std::string>);
+static_assert(!ZHLN::ReflectLua::LuaPodUserdata<int*>);
+
+struct InteropCounterHost {
+    int64_t                         observedSum = 0;
+    ZHLN::ReflectLua::ListenerID    listener    = ZHLN::ReflectLua::kInvalidListenerID;
+};
+
+auto PodVec2New(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    frame.PushUserdata(PodVec2 {
+        .x = frame.ReadFloat(1).value_or(0.0f),
+        .y = frame.ReadFloat(2).value_or(0.0f),
+    });
+    return 1;
+}
+
+auto PodVec2Index(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    const auto* v   = frame.TestUserdata<PodVec2>(1);
+    const auto  key = frame.ReadStringView(2);
+    if (v == nullptr || !key) {
+        frame.PushNil();
+        return 1;
+    }
+    if (*key == "x") {
+        frame.PushFloat(v->x);
+    } else if (*key == "y") {
+        frame.PushFloat(v->y);
+    } else {
+        frame.PushNil();
+    }
+    return 1;
+}
+
+auto PodVec2Add(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    const auto* a = frame.TestUserdata<PodVec2>(1);
+    const auto* b = frame.TestUserdata<PodVec2>(2);
+    if (a == nullptr || b == nullptr) {
+        frame.PushNil();
+        return 1;
+    }
+    frame.PushUserdata(PodVec2 {.x = a->x + b->x, .y = a->y + b->y});
+    return 1;
+}
+
+auto PodVec2LengthSq(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    const auto* v = frame.TestUserdata<PodVec2>(1);
+    frame.PushFloat(v != nullptr ? (v->x * v->x + v->y * v->y) : 0.0f);
+    return 1;
+}
+
+auto PodEntityGetInterned(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    const uint64_t id = frame.ReadUInt64(1).value_or(0);
+    frame.PushInternedUserdata(id, PodEntityRef {.id = id});
+    return 1;
+}
+
+auto PodEntityEq(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    const auto* a = frame.TestUserdata<PodEntityRef>(1);
+    const auto* b = frame.TestUserdata<PodEntityRef>(2);
+    frame.PushBool(a != nullptr && b != nullptr && a->id == b->id);
+    return 1;
+}
+
+auto RegisterCallbackHostFn(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    auto* host = frame.HostContext<InteropCounterHost>();
+    if (host == nullptr || !frame.IsFunction(1)) {
+        frame.PushBool(false);
+        return 1;
+    }
+    host->listener = frame.RegisterListener(1);
+    frame.PushBool(host->listener != ZHLN::ReflectLua::kInvalidListenerID);
+    return 1;
+}
+
+auto ReportSumHostFn(ZHLN::ReflectLua::CallFrame& frame) -> int {
+    if (auto* host = frame.HostContext<InteropCounterHost>()) {
+        host->observedSum += frame.ReadInt64(1).value_or(0);
+    }
+    return 0;
+}
 
 auto Near(float a, float b, float eps = 1e-4f) noexcept -> bool {
     return std::fabs(a - b) <= eps;
@@ -446,6 +546,112 @@ struct ReflectLuaSuite {
                 return std::unexpected(LuaSuiteFail::WrongValue);
             }
 
+            return {};
+        }
+
+        auto TestPodUserdataAndBudgetedListenerInterop() -> std::expected<void, ZHLN::ErrorCode> {
+            if (ZHLN::ReflectLua::TypeIdOf<PodVec2>() == ZHLN::ReflectLua::TypeIdOf<PodEntityRef>()) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            ZHLN::LuaBudget budget {.maxInstructions = 16'384, .maxMemoryBytes = 2 * 1024 * 1024};
+            auto            vm = ZHLN::ReflectLua::Vm::Create(budget);
+            if (!vm) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+
+            static constexpr std::array<ZHLN::ReflectLua::MethodEntry, 1> kVec2Methods = {{
+                {"LengthSq", &PodVec2LengthSq},
+            }};
+            if (!vm->RegisterUserdataType<PodVec2>(ZHLN::ReflectLua::MetatableSpec {
+                    .debugName = "Test.PodVec2",
+                    .index     = &PodVec2Index,
+                    .add       = &PodVec2Add,
+                    .methods   = kVec2Methods,
+                })) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (!vm->RegisterUserdataType<PodEntityRef>(ZHLN::ReflectLua::MetatableSpec {
+                    .debugName = "Test.PodEntityRef",
+                    .eq        = &PodEntityEq,
+                })) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+
+            InteropCounterHost host {};
+            vm->SetHostContext(&host);
+
+            const auto setupOk = vm->WithFrame([](ZHLN::ReflectLua::CallFrame& frame) {
+                frame.BeginTable(0, 1);
+                frame.PushFunction(&PodVec2New);
+                frame.SetFieldTop("new");
+                frame.SetGlobalTop("Vec2");
+
+                frame.PushFunction(&PodEntityGetInterned);
+                frame.SetGlobalTop("GetEntity");
+                frame.PushFunction(&RegisterCallbackHostFn);
+                frame.SetGlobalTop("OnStep");
+                frame.PushFunction(&ReportSumHostFn);
+                frame.SetGlobalTop("Report");
+            });
+            if (!setupOk) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+
+            // Verify POD userdata arithmetic, methods, metatable hiding, and interned identity.
+            if (!vm->ExecuteString(R"lua(
+                local a = Vec2.new(3, 4)
+                local b = Vec2.new(1, -1)
+                local c = a + b
+                assert(c.x == 4 and c.y == 3)
+                assert(a:LengthSq() == 25)
+                assert(getmetatable(a) == false)
+
+                local e1 = GetEntity(42)
+                local e2 = GetEntity(42)
+                local e3 = GetEntity(99)
+                assert(rawequal(e1, e2))
+                assert(e1 == e2 and e1 ~= e3)
+
+                assert(OnStep(function(delta, vec)
+                    Report(delta + vec:LengthSq())
+                end))
+            )lua")) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+
+            if (!vm->HasListener(host.listener)) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            if (!vm->InvokeListener(host.listener, [](ZHLN::ReflectLua::CallFrame& frame) {
+                    frame.PushInt64(5);
+                    frame.PushUserdata(PodVec2 {.x = 3.0f, .y = 4.0f});
+                })) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            if (host.observedSum != 30) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+
+            vm->UnregisterListener(host.listener);
+            if (vm->HasListener(host.listener)) {
+                return std::unexpected(LuaSuiteFail::WrongValue);
+            }
+            auto missingCall = vm->InvokeListener(host.listener, [](ZHLN::ReflectLua::CallFrame&) {});
+            if (missingCall || !(missingCall.error() == ZHLN::LuaError::NotAFunction)) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+
+            // Register an infinite-loop listener and verify InvokeListener enforces maxInstructions.
+            if (!vm->ExecuteString("assert(OnStep(function() while true do end end))")) {
+                return std::unexpected(LuaSuiteFail::UnexpectedError);
+            }
+            auto runaway = vm->InvokeListener(host.listener, [](ZHLN::ReflectLua::CallFrame&) {}, "runaway_cb");
+            if (runaway || !(runaway.error() == ZHLN::LuaError::InstructionBudgetExceeded)) {
+                return std::unexpected(LuaSuiteFail::WrongErrorCode);
+            }
+
+            vm->ClearHostContext<InteropCounterHost>();
             return {};
         }
     };

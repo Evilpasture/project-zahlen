@@ -21,6 +21,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -45,8 +47,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-struct lua_State;
 
 namespace ZHLN {
 
@@ -87,6 +87,65 @@ struct ValueTrait {
 
 class Value;
 class Builder;
+class CallFrame;
+
+// Every userdata payload stored inside the Lua GC heap must be pure POD:
+// trivially copyable and trivially destructible. Smart pointers (`Ref<T>`,
+// `std::shared_ptr<T>`), `std::function`, containers, and RAII handles are
+// rejected at compile time so Lua GC and C++ lifetimes never entangle.
+template <typename T>
+concept LuaPodUserdata =
+    std::is_object_v<std::remove_cvref_t<T>> &&
+    !std::is_pointer_v<std::remove_cvref_t<T>> &&
+    std::is_trivially_copyable_v<std::remove_cvref_t<T>> &&
+    std::is_trivially_destructible_v<std::remove_cvref_t<T>>;
+
+// Unique per-type process-wide identity token (`const void*` address of an
+// `inline constexpr char` variable template). Works for named and TU-local
+// anonymous-namespace types alike with O(1) pointer comparison.
+using TypeID = const void*;
+
+namespace TemplatedDetail {
+
+template <typename T>
+inline constexpr char kLuaTypeTagAnchor = '\0';
+
+} // namespace TemplatedDetail
+
+template <typename T>
+[[nodiscard]] constexpr auto TypeIdOf() noexcept -> TypeID {
+    using Clean = std::remove_cvref_t<T>;
+    return &TemplatedDetail::kLuaTypeTagAnchor<Clean>;
+}
+
+// Monotonic handle into the VM-internal Lua listener table. Inert `uint64_t`:
+// valid only while registered in the owning `Vm`, and safe to copy into POD
+// userdata or C++ signal lambdas without pinning Lua references from C++ dtors.
+using ListenerID                                = uint64_t;
+inline constexpr ListenerID kInvalidListenerID = 0;
+
+using HostCallback = auto (*)(CallFrame&) -> int;
+
+struct MethodEntry {
+    std::string_view name;
+    HostCallback     callback = nullptr;
+};
+
+// Metamethod set for a `LuaPodUserdata` type. Note the deliberate absence of
+// `__gc`: POD userdata require no finalizer.
+struct MetatableSpec {
+    std::string_view             debugName;
+    HostCallback                 index    = nullptr;
+    HostCallback                 newIndex = nullptr;
+    HostCallback                 toString = nullptr;
+    HostCallback                 eq       = nullptr;
+    HostCallback                 add      = nullptr;
+    HostCallback                 sub      = nullptr;
+    HostCallback                 mul      = nullptr;
+    HostCallback                 div      = nullptr;
+    HostCallback                 unm      = nullptr;
+    std::span<const MethodEntry> methods {};
+};
 
 template <typename T>
 concept SequenceContainer = std::ranges::range<T> && requires(T& c, typename T::value_type v) { c.push_back(std::move(v)); };
@@ -136,12 +195,54 @@ class ZHLN_STATIC_API Vm {
         std::expected<void, ErrorCode> (*consume)(const void* ctx, Value result)
     ) noexcept -> std::expected<void, ErrorCode>;
 
-    // Escape hatch for isolated C-API host bindings (e.g. ProjectLight DataModelBindings).
-    [[nodiscard]] auto RawState() noexcept -> lua_State*;
+    // Host interop API (`<lua/LuaInterop.hpp>`): binds non-owning C++ context
+    // pointers, registers `LuaPodUserdata` metatables, populates globals, and
+    // dispatches Lua-side listeners under this VM's instruction/memory budgets.
+    template <typename T>
+    void SetHostContext(T* context) noexcept {
+        using Clean = std::remove_cvref_t<T>;
+        SetHostContextRaw(TypeIdOf<Clean>(), static_cast<void*>(context));
+    }
+
+    template <typename T>
+    void ClearHostContext() noexcept {
+        using Clean = std::remove_cvref_t<T>;
+        SetHostContextRaw(TypeIdOf<Clean>(), nullptr);
+    }
+
+    template <typename T>
+    [[nodiscard]] auto HostContext() const noexcept -> T* {
+        using Clean = std::remove_cvref_t<T>;
+        return static_cast<Clean*>(HostContextRaw(TypeIdOf<Clean>()));
+    }
+
+    template <LuaPodUserdata T>
+    [[nodiscard]] auto RegisterUserdataType(const MetatableSpec& spec) noexcept -> std::expected<void, ErrorCode> {
+        using Clean = std::remove_cvref_t<T>;
+        return RegisterUserdataTypeRaw(TypeIdOf<Clean>(), spec);
+    }
+
+    // Runs `populate` with a fresh, stack-balanced `CallFrame` so host bindings
+    // can build global tables/functions/constants without touching `lua_State*`.
+    [[nodiscard]] auto WithFrame(FunctionRef<void(CallFrame&)> populate) noexcept -> std::expected<void, ErrorCode>;
+
+    // Listener lifecycle and budgeted protected callback invocation.
+    void               UnregisterListener(ListenerID id) noexcept;
+    [[nodiscard]] auto HasListener(ListenerID id) const noexcept -> bool;
+    [[nodiscard]] auto InvokeListener(
+        ListenerID                    id,
+        FunctionRef<void(CallFrame&)> pushArgs,
+        std::string_view              contextName = "callback"
+    ) noexcept -> std::expected<void, ErrorCode>;
 
   private:
+    friend class CallFrame;
     struct Impl;
     std::unique_ptr<Impl> _impl;
+
+    void               SetHostContextRaw(TypeID typeId, void* context) noexcept;
+    [[nodiscard]] auto HostContextRaw(TypeID typeId) const noexcept -> void*;
+    [[nodiscard]] auto RegisterUserdataTypeRaw(TypeID typeId, const MetatableSpec& spec) noexcept -> std::expected<void, ErrorCode>;
 };
 
 // Non-owning view of a value on an active Vm stack frame.
@@ -149,12 +250,9 @@ class ZHLN_STATIC_API Vm {
 class ZHLN_STATIC_API Value {
   public:
     Value() noexcept = default;
-    Value(lua_State* state, int absIndex, const LuaBudget* budget, std::string_view path) noexcept:
-        _state(state), _index(absIndex), _budget(budget), _path(path) {
-    }
 
     [[nodiscard]] auto IsValid() const noexcept -> bool {
-        return _state != nullptr && _index > 0;
+        return _rawState != nullptr && _index > 0;
     }
     [[nodiscard]] auto IsNil() const noexcept -> bool;
     [[nodiscard]] auto IsTable() const noexcept -> bool;
@@ -188,18 +286,20 @@ class ZHLN_STATIC_API Value {
     }
 
   private:
-    lua_State*       _state  = nullptr;
-    int              _index  = 0;
-    const LuaBudget* _budget = nullptr;
+    friend class Vm;
+    Value(void* rawState, int absIndex, const LuaBudget* budget, std::string_view path) noexcept:
+        _rawState(rawState), _index(absIndex), _budget(budget), _path(path) {
+    }
+
+    void*            _rawState = nullptr;
+    int              _index    = 0;
+    const LuaBudget* _budget   = nullptr;
     std::string_view _path;
 };
 
 // Stack-balanced value pusher for passing read-only C++ inputs into pure Lua functions.
 class ZHLN_STATIC_API Builder {
   public:
-    explicit Builder(lua_State* state) noexcept: _state(state) {
-    }
-
     void PushNil() noexcept;
     void PushBool(bool value) noexcept;
     void PushInt(int64_t value) noexcept;
@@ -212,7 +312,11 @@ class ZHLN_STATIC_API Builder {
     void SetElementTop(size_t zeroBasedIndex) noexcept;
 
   private:
-    lua_State* _state = nullptr;
+    friend class Vm;
+    explicit Builder(void* rawState) noexcept: _rawState(rawState) {
+    }
+
+    void* _rawState = nullptr;
 };
 
 namespace TemplatedDetail {

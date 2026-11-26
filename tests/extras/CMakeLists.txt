@@ -391,8 +391,7 @@ if(TARGET zahlen_project_light_lua)
     )
 
     # zahlen_lua directly: TestLuaDataModel.cpp includes <lua/ReflectLua.hpp> and
-    # calls ReflectLua::Vm::Create / ExecuteString. It used to arrive only
-    # through zahlen_project_light_lua's PUBLIC zahlen_lua, which is gone.
+    # calls ReflectLua::Vm::Create / ExecuteString alongside DataModelLuaSession.
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_lua
         zahlen_project_light_lua

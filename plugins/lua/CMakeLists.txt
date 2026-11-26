@@ -1,13 +1,15 @@
 # Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# plugins/lua -- reflection-driven Lua state evaluation and patching (zahlen_lua).
+# plugins/lua -- reflection-driven Lua state evaluation, patching, and
+# zero-co-ownership C API interop (zahlen_lua).
 #
 # Peer to plugins/toml and plugins/json: Lua chunks are evaluated in a
 # hermetic, instruction- and memory-bounded VM (no ffi/io/os/package/debug,
 # no per-frame TickUpdate) to construct or transactionally patch reflected C++
-# structs and ECS components. Lua headers stay private to ReflectLua.cpp so
-# consumers never inherit <lua.h> macros.
+# structs and ECS components, or expose POD userdata/listeners via LuaInterop.
+# Lua headers stay strictly private to ReflectLua.cpp so consumers never
+# include <lua.h> or touch raw lua_State*.
 
 set(TARGET_NAME zahlen_lua)
 
