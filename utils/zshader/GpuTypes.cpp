@@ -44,14 +44,8 @@
 //     StructuredBuffer stride -- the number the engine uploads by -- is 8.
 //     The walk trusts Slang for member offsets and recomputes the rest.
 
-#include "ZShader.hpp"
-
 #include "SlangReflect.hpp" // CompileSlangEntry: the compile this mode shares with the catalog
-
-#include <slang-com-helper.h> // Slang SDK utilities, next to slang.h
-#include <slang-com-ptr.h>    // Slang::ComPtr
-#include <slang.h>
-
+#include "ZShader.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <format>
@@ -59,6 +53,9 @@
 #include <limits>
 #include <memory>
 #include <ranges>
+#include <slang-com-helper.h> // Slang SDK utilities, next to slang.h
+#include <slang-com-ptr.h>    // Slang::ComPtr
+#include <slang.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,9 +67,9 @@ namespace {
 // wrapper's type, and the entry point that anchors the link. Literals, not
 // flags: a gpu_abi that renames any of these is a different module, and the
 // walk fails naming what it cannot find.
-constexpr std::string_view kAbiGlobal  = "abi";
-constexpr std::string_view kAbiWrapper = "GpuAbiTypes";
-constexpr std::string_view kEntryPoint = "CSMain";
+constexpr std::string_view kAbiGlobal   = "abi";
+constexpr std::string_view kAbiWrapper  = "GpuAbiTypes";
+constexpr std::string_view kEntryPoint  = "CSMain";
 constexpr std::string_view kSceneGlobal = "scene";
 constexpr std::string_view kHeapStruct  = "DescriptorHeapPushData";
 
@@ -111,10 +108,7 @@ auto CheckDiagnostics(std::string_view module, std::string_view stage, slang::IB
     if (text.empty()) {
         return;
     }
-    Fail(
-        "gpu types: Slang reported diagnostics {} '{}'; the ABI modules compile warning-free:\n{}", stage, module,
-        FormatSlangDiagnostics(text, module)
-    );
+    Fail("gpu types: Slang reported diagnostics {} '{}'; the ABI modules compile warning-free:\n{}", stage, module, FormatSlangDiagnostics(text, module));
 }
 
 // A Slang reflection kind as a word: the Fail messages below name what the
@@ -150,10 +144,10 @@ enum class CxxForm { Scalar, Enum, Vec, Mat, Array, Struct };
 
 struct CxxType {
     CxxForm                  form = CxxForm::Scalar;
-    std::string              spelling {}; // Scalar/Enum/Vec/Mat/Struct; Array recurses instead
-    std::unique_ptr<CxxType> element {}; // Array element
-    uint32_t                 count = 0; // Array length
-    uint32_t                 size  = 0;
+    std::string              spelling {};  // Scalar/Enum/Vec/Mat/Struct; Array recurses instead
+    std::unique_ptr<CxxType> element {};   // Array element
+    uint32_t                 count    = 0; // Array length
+    uint32_t                 size     = 0;
     uint32_t                 cxxAlign = 0;
 };
 
@@ -209,7 +203,7 @@ struct EnumValue {
 };
 
 struct EnumDef {
-    std::string          name {};
+    std::string            name {};
     std::vector<EnumValue> values {};
 };
 
@@ -227,13 +221,8 @@ auto ReadAlignment(std::string_view structName, std::string_view memberName, sla
 // Reflects one Slang enum case list into a type-safe C++ enum. The GPU ABI
 // currently uses only four-byte uint enums; rejecting other layouts here keeps
 // the generated type and the shader's storage representation explicit.
-auto ReflectEnum(
-    std::string_view structName,
-    std::string_view memberName,
-    slang::TypeReflection* type,
-    slang::TypeLayoutReflection* layout
-) -> EnumDef {
-    const char*            rawName = type->getName();
+auto ReflectEnum(std::string_view structName, std::string_view memberName, slang::TypeReflection* type, slang::TypeLayoutReflection* layout) -> EnumDef {
+    const char* rawName = type->getName();
     if (rawName == nullptr || rawName[0] == '\0') {
         Fail("gpu types: {}.{} has an unnamed enum type", structName, memberName);
     }
@@ -246,11 +235,7 @@ auto ReflectEnum(
     const int32_t align = layout->getAlignment(kUniform);
     if (size != sizeof(uint32_t) || align != alignof(uint32_t)) {
         Fail(
-            "gpu types: {}.{} enum '{}' occupies {} bytes with alignment {}; generated enums require uint32_t storage",
-            structName,
-            memberName,
-            enumName,
-            size,
+            "gpu types: {}.{} enum '{}' occupies {} bytes with alignment {}; generated enums require uint32_t storage", structName, memberName, enumName, size,
             align
         );
     }
@@ -262,14 +247,17 @@ auto ReflectEnum(
     result.values.reserve(type->getFieldCount());
     for (unsigned i: std::views::iota(0u, type->getFieldCount())) {
         slang::VariableReflection* value = type->getFieldByIndex(i);
-        const char*               name  = value->getName();
+        const char*                name  = value->getName();
         if (name == nullptr || name[0] == '\0' || !IsIdentifier(name)) {
             Fail("gpu types: {}.{} enum '{}' has a case that is not a C++ identifier", structName, memberName, enumName);
         }
-        int64_t integer = 0;
-        if (SLANG_FAILED(value->getDefaultValueInt(&integer))) {
+        int64_t                     integer = 0;
+        Slang::ComPtr<slang::IBlob> blob;
+        if (SLANG_FAILED(value->getDefaultValueBlob(blob.writeRef())) || !blob || blob->getBufferSize() > sizeof(integer)) {
             Fail("gpu types: {}.{} enum '{}.{}' has no reflected integer value", structName, memberName, enumName, name);
         }
+
+        std::memcpy(&integer, blob->getBufferPointer(), blob->getBufferSize());
         if (integer < 0 || static_cast<uint64_t>(integer) > std::numeric_limits<uint32_t>::max()) {
             Fail("gpu types: {}.{} enum '{}.{}' value {} does not fit uint32_t", structName, memberName, enumName, name, integer);
         }
@@ -295,29 +283,29 @@ auto SameEnum(const EnumDef& lhs, const EnumDef& rhs) -> bool {
 // ZHLN::Mat4x4, scalar kinds map to stdint, and a Slang enum gets a generated
 // enum. Fixed arrays map to std::array when their reflected stride is tight.
 auto MapMember(
-    std::string_view structName,
-    std::string_view memberName,
-    slang::TypeReflection* type,
+    std::string_view             structName,
+    std::string_view             memberName,
+    slang::TypeReflection*       type,
     slang::TypeLayoutReflection* layout,
-    std::vector<EnumDef>& enums
+    std::vector<EnumDef>&        enums
 ) -> CxxType {
-    using Kind = slang::TypeReflection::Kind;
-    const Kind             kind = type->getKind();
-    const auto             scalar = type->getScalarType();
-    const bool             isFloat32 = scalar == slang::TypeReflection::ScalarType::Float32;
+    using Kind           = slang::TypeReflection::Kind;
+    const Kind kind      = type->getKind();
+    const auto scalar    = type->getScalarType();
+    const bool isFloat32 = scalar == slang::TypeReflection::ScalarType::Float32;
 
     if (kind == Kind::Enum) {
-        EnumDef definition = ReflectEnum(structName, memberName, type, layout);
-        const auto existing = std::ranges::find_if(enums, [&definition](const EnumDef& candidate) { return candidate.name == definition.name; });
+        EnumDef    definition = ReflectEnum(structName, memberName, type, layout);
+        const auto existing   = std::ranges::find_if(enums, [&definition](const EnumDef& candidate) { return candidate.name == definition.name; });
         if (existing == enums.end()) {
             enums.push_back(std::move(definition));
         } else if (!SameEnum(*existing, definition)) {
             Fail("gpu types: enum '{}' is reflected with conflicting case lists", definition.name);
         }
         return {
-            .form = CxxForm::Enum,
+            .form     = CxxForm::Enum,
             .spelling = std::format("::ZHLN::Slang::{}", type->getName()),
-            .size = sizeof(uint32_t),
+            .size     = sizeof(uint32_t),
             .cxxAlign = alignof(uint32_t),
         };
     }
@@ -338,9 +326,9 @@ auto MapMember(
         return {.form = CxxForm::Mat, .spelling = std::string {kMat4}, .size = 64, .cxxAlign = 16};
     }
     if (kind == Kind::Array) {
-        slang::TypeReflection*      elementType   = type->getElementType();
+        slang::TypeReflection*       elementType   = type->getElementType();
         slang::TypeLayoutReflection* elementLayout = layout->getElementTypeLayout();
-        const Kind                  elementKind   = elementType->getKind();
+        const Kind                   elementKind   = elementType->getKind();
         if (elementKind == Kind::Array) {
             Fail("gpu types: {}.{} is multi-dimensional; only one-dimensional fixed arrays map", structName, memberName);
         }
@@ -363,10 +351,7 @@ auto MapMember(
         CxxType element = MapMember(structName, memberName, elementType, elementLayout, enums);
         if (stride != element.size) {
             Fail(
-                "gpu types: {}.{} strides {} but its element occupies {}; padded elements have no C++ spelling here",
-                structName,
-                memberName,
-                stride,
+                "gpu types: {}.{} strides {} but its element occupies {}; padded elements have no C++ spelling here", structName, memberName, stride,
                 element.size
             );
         }
@@ -376,7 +361,7 @@ auto MapMember(
         return {.form = CxxForm::Array, .element = std::move(boxed), .count = count, .size = footprint, .cxxAlign = elementAlign};
     }
     if (kind == Kind::Vector) {
-        using Scalar = slang::TypeReflection::ScalarType;
+        using Scalar              = slang::TypeReflection::ScalarType;
         const uint32_t components = static_cast<uint32_t>(type->getElementCount());
         if (components < 2 || components > 4) {
             Fail("gpu types: {}.{} has {} vector components; only 2, 3 and 4 map", structName, memberName, components);
@@ -393,9 +378,9 @@ auto MapMember(
             // alignment (often 8 for uint2/int2) is emitted separately.
             const std::string_view lane = scalar == Scalar::UInt32 ? "uint32_t" : "int32_t";
             return {
-                .form = CxxForm::Vec,
+                .form     = CxxForm::Vec,
                 .spelling = std::format("::std::array<{}, {}>", lane, components),
-                .size = 4 * components,
+                .size     = 4 * components,
                 .cxxAlign = 4,
             };
         }
@@ -439,33 +424,31 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
     std::ranges::sort(members, {}, [](slang::VariableLayoutReflection* member) { return member->getOffset(kUniform); });
 
     StructBuildResult result {.definition = StructDef {.name = std::string {structName}}};
-    StructDef& def = result.definition;
-    uint32_t  cursor   = 0;
-    uint32_t  padIndex = 0;
+    StructDef&        def      = result.definition;
+    uint32_t          cursor   = 0;
+    uint32_t          padIndex = 0;
     for (slang::VariableLayoutReflection* member: members) {
         const char* name = member->getName();
         if (name == nullptr || name[0] == '\0') {
-            Fail(
-                "gpu types: {}.<unnamed> at offset {} has no name; a field has nothing to be checked by",
-                structName,
-                member->getOffset(kUniform)
-            );
+            Fail("gpu types: {}.<unnamed> at offset {} has no name; a field has nothing to be checked by", structName, member->getOffset(kUniform));
         }
         const std::string_view memberName = name;
-        const uint32_t           offset      = static_cast<uint32_t>(member->getOffset(kUniform));
+        const uint32_t         offset     = static_cast<uint32_t>(member->getOffset(kUniform));
         if (offset < cursor) {
             Fail("gpu types: {}.{} at offset {} overlaps the previous member ending at {}", structName, memberName, offset, cursor);
         }
         if (offset > cursor) {
             const uint32_t gap = offset - cursor;
-            def.fields.push_back(Field {
-                .name       = std::format("_pad{}", padIndex++),
-                .offset     = cursor,
-                .size       = gap,
-                .slangAlign = 1,
-                .cxxAlign   = 1,
-                .isPad      = true,
-            });
+            def.fields.push_back(
+                Field {
+                    .name       = std::format("_pad{}", padIndex++),
+                    .offset     = cursor,
+                    .size       = gap,
+                    .slangAlign = 1,
+                    .cxxAlign   = 1,
+                    .isPad      = true,
+                }
+            );
             cursor = offset;
         }
 
@@ -481,8 +464,8 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
         if (memberType == nullptr) {
             Fail("gpu types: {}.{} has no reflected variable type", structName, memberName);
         }
-        const uint32_t         slangAlign = ReadAlignment(structName, memberName, memberLayout);
-        CxxType                mapped     = MapMember(structName, memberName, memberType, memberLayout, enums);
+        const uint32_t slangAlign = ReadAlignment(structName, memberName, memberLayout);
+        CxxType        mapped     = MapMember(structName, memberName, memberType, memberLayout, enums);
 
         // A nested struct recurses through the same builder; anything else
         // takes its mapped spelling, held against the member size Slang
@@ -494,17 +477,14 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
                 Fail("gpu types: {}.{} is an unnamed struct; a nested type has nothing to be checked by", structName, memberName);
             }
             StructBuildResult inner = BuildStruct(nestedName, memberLayout, enums);
-            mapped.spelling = inner.definition.name;
-            mapped.size     = inner.definition.size;
-            mapped.cxxAlign = inner.definition.align;
+            mapped.spelling         = inner.definition.name;
+            mapped.size             = inner.definition.size;
+            mapped.cxxAlign         = inner.definition.align;
             std::ranges::move(inner.nested, std::back_inserter(result.nested));
             result.nested.push_back(std::move(inner.definition));
         } else if (static_cast<uint32_t>(memberLayout->getSize(kUniform)) != mapped.size) {
             Fail(
-                "gpu types: {}.{} occupies {} bytes but its spelling spans {}; only tight layouts map",
-                structName,
-                memberName,
-                memberLayout->getSize(kUniform),
+                "gpu types: {}.{} occupies {} bytes but its spelling spans {}; only tight layouts map", structName, memberName, memberLayout->getSize(kUniform),
                 mapped.size
             );
         }
@@ -513,28 +493,32 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
         const uint32_t cxxAlign  = mapped.cxxAlign;
         cursor                   = offset + footprint;
         def.align                = std::max(def.align, slangAlign);
-        def.fields.push_back(Field {
-            .name       = std::string {memberName},
-            .type       = std::move(mapped),
-            .offset     = offset,
-            .size       = footprint,
-            .slangAlign = slangAlign,
-            .cxxAlign   = cxxAlign,
-        });
+        def.fields.push_back(
+            Field {
+                .name       = std::string {memberName},
+                .type       = std::move(mapped),
+                .offset     = offset,
+                .size       = footprint,
+                .slangAlign = slangAlign,
+                .cxxAlign   = cxxAlign,
+            }
+        );
     }
     if (def.fields.empty()) {
         Fail("gpu types: {} declares no members; an empty struct has no C++ spelling here", structName);
     }
     def.size = AlignUp(cursor, def.align);
     if (def.size > cursor) {
-        def.fields.push_back(Field {
-            .name       = std::format("_pad{}", padIndex),
-            .offset     = cursor,
-            .size       = def.size - cursor,
-            .slangAlign = 1,
-            .cxxAlign   = 1,
-            .isPad      = true,
-        });
+        def.fields.push_back(
+            Field {
+                .name       = std::format("_pad{}", padIndex),
+                .offset     = cursor,
+                .size       = def.size - cursor,
+                .slangAlign = 1,
+                .cxxAlign   = 1,
+                .isPad      = true,
+            }
+        );
     }
     return result;
 }
@@ -583,9 +567,7 @@ namespace ZHLN::Slang {
 
 auto EmitField(std::string& out, const Field& field, std::string_view structName) -> void {
     if (field.isPad) {
-        std::format_to(
-            std::back_inserter(out), "    uint8_t {}[{}]; // offset {}, size {}\n", field.name, field.size, field.offset, field.size
-        );
+        std::format_to(std::back_inserter(out), "    uint8_t {}[{}]; // offset {}, size {}\n", field.name, field.size, field.offset, field.size);
         return;
     }
     const Spelling    spelling  = Render(field.type, structName, field.name);
@@ -621,27 +603,30 @@ auto EmitEnum(std::string& out, const EnumDef& def) -> void {
 struct FrameAddressRow {
     std::string pushField {};
     std::string registryField {};
-    uint32_t    binding = 0;
-    uint32_t    offset  = 0;
+    uint32_t    binding       = 0;
+    uint32_t    offset        = 0;
     bool        uniformBuffer = false;
 };
 
 auto EmitFrameAddresses(std::string& out, std::span<const FrameAddressRow> rows) -> void {
-    std::format_to(std::back_inserter(out), "\n// The frame-address run: field placement is generated (above), CPU resource\n// selection is engine policy (src/render/RenderFrame.cpp).\nenum class FrameAddressField : uint32_t {{\n");
+    std::format_to(
+        std::back_inserter(out), "\n// The frame-address run: field placement is generated (above), CPU resource\n// selection is engine policy "
+                                 "(src/render/RenderFrame.cpp).\nenum class FrameAddressField : uint32_t {{\n"
+    );
     for (const FrameAddressRow& row: rows) {
         std::format_to(std::back_inserter(out), "    {},\n", row.pushField);
     }
-    std::format_to(std::back_inserter(out), "}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n", rows.size(), rows.size());
+    std::format_to(
+        std::back_inserter(out),
+        "}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    "
+        "uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t "
+        "kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n",
+        rows.size(), rows.size()
+    );
     for (const FrameAddressRow& row: rows) {
         std::format_to(
-            std::back_inserter(out),
-            "    {{FrameAddressField::{}, \"{}\", \"{}\", {}u, {}u, {}}},\n",
-            row.pushField,
-            row.pushField,
-            row.registryField,
-            row.binding,
-            row.offset,
-            row.uniformBuffer ? "true" : "false"
+            std::back_inserter(out), "    {{FrameAddressField::{}, \"{}\", \"{}\", {}u, {}u, {}}},\n", row.pushField, row.pushField, row.registryField,
+            row.binding, row.offset, row.uniformBuffer ? "true" : "false"
         );
     }
     std::format_to(std::back_inserter(out), "}}}};\n");
@@ -676,15 +661,15 @@ auto EmitScenePushLayout(std::string& out, const ScenePushLayout& layout) -> voi
         "    .heapIndexOffset     = {}u,\n"
         "    .requiredSize        = {}u,\n"
         "}};\n",
-        offsets,
-        layout.frameAddressOffsets.size(),
-        layout.heapIndexOffset,
-        layout.requiredSize
+        offsets, layout.frameAddressOffsets.size(), layout.heapIndexOffset, layout.requiredSize
     );
 }
 
 auto EmitStructsHeader(
-    std::span<const StructDef> defs, std::span<const EnumDef> enums, std::span<const FrameAddressRow> frameRows, const ScenePushLayout& scenePush
+    std::span<const StructDef>       defs,
+    std::span<const EnumDef>         enums,
+    std::span<const FrameAddressRow> frameRows,
+    const ScenePushLayout&           scenePush
 ) -> std::string {
     std::string text {kStructsPreamble};
     for (const EnumDef& def: enums) {
@@ -723,19 +708,20 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     // .defines stays empty (the mode takes no -D flags) and .stage names the
     // [shader("compute")] CSMain gpu_abi.slang declares, so the lookup checks
     // what the old findEntryPointByName took on faith.
-    const SlangProgram program = CompileSlangEntry(SlangCompileArgs{
-        .module            = options.module,
-        .entry             = kEntryPoint,
-        .stage             = SLANG_STAGE_COMPUTE,
-        .searchPaths       = options.searchPaths,
-        .debugInfoLevel    = SLANG_DEBUG_INFO_LEVEL_MAXIMAL,
-        .optimizationLevel = SLANG_OPTIMIZATION_LEVEL_NONE,
-    });
+    const SlangProgram program = CompileSlangEntry(
+        SlangCompileArgs {
+            .module            = options.module,
+            .entry             = kEntryPoint,
+            .stage             = SLANG_STAGE_COMPUTE,
+            .searchPaths       = options.searchPaths,
+            .debugInfoLevel    = SLANG_DEBUG_INFO_LEVEL_MAXIMAL,
+            .optimizationLevel = SLANG_OPTIMIZATION_LEVEL_NONE,
+        }
+    );
 
     Slang::ComPtr<slang::IBlob> diagnostics;
     Slang::ComPtr<slang::IBlob> code;
-    if (SLANG_FAILED(program.linked->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef())) ||
-        code.get() == nullptr) {
+    if (SLANG_FAILED(program.linked->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef())) || code.get() == nullptr) {
         Fail("gpu types: Slang cannot emit code for '{}': {}", options.module, DiagText(diagnostics.get()));
     }
     CheckDiagnostics(options.module, "emitting code for", diagnostics.get());
@@ -756,11 +742,11 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     if (globalsLayout == nullptr) {
         Fail("gpu types: '{}' declares globals without a layout; it is not the gpu_abi module", options.module);
     }
-    slang::VariableLayoutReflection* abi = nullptr;
+    slang::VariableLayoutReflection* abi   = nullptr;
     slang::VariableLayoutReflection* scene = nullptr;
     for (unsigned i: std::views::iota(0u, globalsLayout->getFieldCount())) {
         slang::VariableLayoutReflection* field = globalsLayout->getFieldByIndex(i);
-        const char*                       name  = field->getName();
+        const char*                      name  = field->getName();
         if (name != nullptr && std::string_view {name} == kAbiGlobal) {
             abi = field;
         }
@@ -773,22 +759,13 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     }
     slang::TypeLayoutReflection* abiLayout = abi->getTypeLayout();
     if (abiLayout->getType()->getKind() != slang::TypeReflection::Kind::ConstantBuffer) {
-        Fail(
-            "gpu types: '{}.{}' is a {}, not the ConstantBuffer wrapper",
-            options.module,
-            kAbiGlobal,
-            KindName(abiLayout->getType()->getKind())
-        );
+        Fail("gpu types: '{}.{}' is a {}, not the ConstantBuffer wrapper", options.module, kAbiGlobal, KindName(abiLayout->getType()->getKind()));
     }
     slang::TypeLayoutReflection* wrapperLayout = abiLayout->getElementTypeLayout();
-    const char*                  wrapperName    = wrapperLayout->getName();
+    const char*                  wrapperName   = wrapperLayout->getName();
     if (wrapperName == nullptr || std::string_view {wrapperName} != kAbiWrapper) {
         Fail(
-            "gpu types: '{}.{}' wraps '{}', not the '{}' wrapper",
-            options.module,
-            kAbiGlobal,
-            wrapperName != nullptr ? wrapperName : "<unnamed>",
-            kAbiWrapper
+            "gpu types: '{}.{}' wraps '{}', not the '{}' wrapper", options.module, kAbiGlobal, wrapperName != nullptr ? wrapperName : "<unnamed>", kAbiWrapper
         );
     }
 
@@ -797,16 +774,14 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     std::vector<StructDef> structs;
     for (unsigned i: std::views::iota(0u, wrapperLayout->getFieldCount())) {
         slang::VariableLayoutReflection* member       = wrapperLayout->getFieldByIndex(i);
-        slang::TypeLayoutReflection*    memberLayout = member->getTypeLayout();
-        const char*                     name         = member->getName();
+        slang::TypeLayoutReflection*     memberLayout = member->getTypeLayout();
+        const char*                      name         = member->getName();
         if (name == nullptr || name[0] == '\0') {
             Fail("gpu types: '{}' wraps an unnamed member; a struct has nothing to be checked by", options.module);
         }
         if (memberLayout->getType()->getKind() != slang::TypeReflection::Kind::Struct) {
             Fail(
-                "gpu types: '{}.{}' holds a {}, not a struct; the wrapper holds structs only",
-                options.module,
-                name,
+                "gpu types: '{}.{}' holds a {}, not a struct; the wrapper holds structs only", options.module, name,
                 KindName(memberLayout->getType()->getKind())
             );
         }
@@ -831,12 +806,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     }
     slang::TypeLayoutReflection* sceneLayout = scene->getTypeLayout();
     if (sceneLayout->getType()->getKind() != slang::TypeReflection::Kind::ParameterBlock) {
-        Fail(
-            "gpu types: '{}.{}' is a {}, not the ParameterBlock wrapper",
-            options.module,
-            kSceneGlobal,
-            KindName(sceneLayout->getType()->getKind())
-        );
+        Fail("gpu types: '{}.{}' is a {}, not the ParameterBlock wrapper", options.module, kSceneGlobal, KindName(sceneLayout->getType()->getKind()));
     }
     slang::TypeLayoutReflection* registryLayout = sceneLayout->getElementTypeLayout();
 
@@ -853,13 +823,12 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     std::vector<FrameAddressRow> frameRows;
     uint32_t                     registryIndex = 0;
     for (unsigned i: std::views::iota(0u, registryLayout->getFieldCount())) {
-        slang::VariableLayoutReflection* member      = registryLayout->getFieldByIndex(i);
-        slang::TypeLayoutReflection*     memberLayout = member->getTypeLayout();
-        const slang::TypeReflection::Kind kind        = memberLayout->getType()->getKind();
-        const SlangResourceShape          shape       = memberLayout->getType()->getResourceShape();
-        const bool uniformBuffer = kind == slang::TypeReflection::Kind::ConstantBuffer;
-        const bool storageBuffer = kind == slang::TypeReflection::Kind::Resource
-                                   && (shape & SLANG_RESOURCE_BASE_SHAPE_MASK) == SLANG_STRUCTURED_BUFFER;
+        slang::VariableLayoutReflection*  member        = registryLayout->getFieldByIndex(i);
+        slang::TypeLayoutReflection*      memberLayout  = member->getTypeLayout();
+        const slang::TypeReflection::Kind kind          = memberLayout->getType()->getKind();
+        const SlangResourceShape          shape         = memberLayout->getType()->getResourceShape();
+        const bool                        uniformBuffer = kind == slang::TypeReflection::Kind::ConstantBuffer;
+        const bool storageBuffer = kind == slang::TypeReflection::Kind::Resource && (shape & SLANG_RESOURCE_BASE_SHAPE_MASK) == SLANG_STRUCTURED_BUFFER;
         if (!uniformBuffer && !storageBuffer) {
             continue;
         }
@@ -870,13 +839,15 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         if (memberName == nullptr || memberName[0] == '\0') {
             Fail("gpu types: '{}.{}' member {} is unnamed; the frame-address rows name both halves", options.module, kSceneGlobal, i);
         }
-        frameRows.push_back(FrameAddressRow {
-            .pushField      = {},
-            .registryField  = memberName,
-            .binding        = member->getBindingIndex(),
-            .offset         = 0,
-            .uniformBuffer  = uniformBuffer,
-        });
+        frameRows.push_back(
+            FrameAddressRow {
+                .pushField     = {},
+                .registryField = memberName,
+                .binding       = member->getBindingIndex(),
+                .offset        = 0,
+                .uniformBuffer = uniformBuffer,
+            }
+        );
         ++registryIndex;
     }
 
@@ -890,9 +861,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         if (words.size() != frameRows.size()) {
             Fail(
                 "gpu types: DescriptorHeapPushData declares {} 8-byte words but {} has {} buffer bindings; the frame-address run is one word per binding",
-                words.size(),
-                kSceneGlobal,
-                frameRows.size()
+                words.size(), kSceneGlobal, frameRows.size()
             );
         }
         for (size_t i = 0; i < words.size(); ++i) {
@@ -920,13 +889,10 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     constexpr size_t kMaxFrameAddresses = 16;
     if (scenePush.frameAddressOffsets.size() > kMaxFrameAddresses) {
         Fail(
-            "gpu types: '{}' seats {} frame addresses; Vk::HeapPushDataLayout holds {}",
-            kHeapStruct,
-            scenePush.frameAddressOffsets.size(),
-            kMaxFrameAddresses
+            "gpu types: '{}' seats {} frame addresses; Vk::HeapPushDataLayout holds {}", kHeapStruct, scenePush.frameAddressOffsets.size(), kMaxFrameAddresses
         );
     }
-    const uint32_t afterAddresses = scenePush.frameAddressOffsets.back() + static_cast<uint32_t>(sizeof(uint64_t));
+    const uint32_t afterAddresses  = scenePush.frameAddressOffsets.back() + static_cast<uint32_t>(sizeof(uint64_t));
     uint32_t       heapIndexOffset = std::numeric_limits<uint32_t>::max();
     for (const Field& field: heapDef->fields) {
         if (field.isPad || field.offset < afterAddresses || field.size < sizeof(uint32_t) || (field.offset % alignof(uint32_t)) != 0) {
@@ -935,10 +901,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         heapIndexOffset = field.offset < heapIndexOffset ? field.offset : heapIndexOffset;
     }
     if (heapIndexOffset == std::numeric_limits<uint32_t>::max()) {
-        Fail(
-            "gpu types: '{}' declares no 4-byte member after its last frame address; the heap writer patches a descriptor index nothing holds",
-            kHeapStruct
-        );
+        Fail("gpu types: '{}' declares no 4-byte member after its last frame address; the heap writer patches a descriptor index nothing holds", kHeapStruct);
     }
     scenePush.heapIndexOffset = heapIndexOffset;
     scenePush.requiredSize    = heapIndexOffset + static_cast<uint32_t>(sizeof(uint32_t));

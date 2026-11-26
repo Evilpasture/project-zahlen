@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Math/Vec3.hpp>
 #include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Error.hpp>
 #include <expected>
 #include <functional>
 #include <optional>
@@ -34,9 +33,9 @@ struct VMTMaterial {
     float alphaCutoff   = 0.5f;  // $alphatestreference
     bool  noCull        = false; // $nocull 1
 
-    FVec4 baseColor {1.0f, 1.0f, 1.0f, 1.0f}; // $color / $color2
+    FVec4 baseColor {1.0f, 1.0f, 1.0f, 1.0f};  // $color / $color2
     FVec4 envMapTint {1.0f, 1.0f, 1.0f, 1.0f}; // $envmaptint, scalar use is preserved in MaterialDesc
-    bool        baseAlphaEnvMapMask = false; // $basealphaenvmapmask 1
+    bool  baseAlphaEnvMapMask = false;         // $basealphaenvmapmask 1
 
     // All parameters preserved in lowercase (e.g. "$basetexture", "$surfaceprop")
     std::unordered_map<std::string, std::string> parameters;
@@ -54,7 +53,10 @@ struct VMTMaterial {
 
 // Shared Source-material rules used by importing and lighting.
 [[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float;
-[[nodiscard]] auto Rec709Luma(const FVec3& rgb) noexcept -> float;
+
+[[nodiscard]] inline auto Rec709Luma(std::span<const float, 3> rgb) noexcept -> float {
+    return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
+}
 
 // Parses a VMT KeyValues script. Nested shader-class blocks
 // ("LightmappedGeneric_DX9 { ... }") are merged into parameters, because that

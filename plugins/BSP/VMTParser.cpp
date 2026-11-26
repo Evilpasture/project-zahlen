@@ -3,7 +3,6 @@
 
 #include "VMTParser.hpp"
 #include <Zahlen/Math/Vec3.hpp>
-
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -24,19 +23,15 @@ auto ToLower(std::string_view s) -> std::string {
 }
 
 struct Token {
-    enum class Kind {
-        String,
-        OpenBrace,
-        CloseBrace,
-        EndOfFile
-    };
+    enum class Kind { String, OpenBrace, CloseBrace, EndOfFile };
     Kind        kind = Kind::EndOfFile;
     std::string value;
 };
 
 class Tokenizer {
   public:
-    explicit Tokenizer(std::string_view source) : _src(source) {}
+    explicit Tokenizer(std::string_view source): _src(source) {
+    }
 
     auto Next() -> Token {
         SkipWhitespaceAndComments();
@@ -76,8 +71,8 @@ class Tokenizer {
 
         // Bare word
         const size_t start = _cursor;
-        while (_cursor < _src.size() && !std::isspace(static_cast<unsigned char>(_src[_cursor])) &&
-               _src[_cursor] != '{' && _src[_cursor] != '}' && _src[_cursor] != '"') {
+        while (_cursor < _src.size() && !std::isspace(static_cast<unsigned char>(_src[_cursor])) && _src[_cursor] != '{' && _src[_cursor] != '}' &&
+               _src[_cursor] != '"') {
             _cursor++;
         }
         return Token {.kind = Token::Kind::String, .value = std::string(_src.substr(start, _cursor - start))};
@@ -125,7 +120,7 @@ void ParseColorValues(std::string_view val, FVec4& outColor) {
         if (cur >= end) {
             break;
         }
-        float f = 0.0f;
+        float f        = 0.0f;
         auto [ptr, ec] = std::from_chars(cur, end, f);
         if (ec != std::errc {}) {
             break;
@@ -162,8 +157,8 @@ auto VMTMaterial::Get(std::string_view key, std::string_view defaultVal) const n
 
 auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
     const std::string name = ToLower(shader);
-    if (name == "unlitgeneric" || name == "unlittwotexture" || name == "monitorscreen" || name == "sprite" || name == "spritecard" ||
-        name == "cable" || name == "beam") {
+    if (name == "unlitgeneric" || name == "unlittwotexture" || name == "monitorscreen" || name == "sprite" || name == "spritecard" || name == "cable" ||
+        name == "beam") {
         return 1.0f;
     }
     if (name == "vertexlitgeneric" || name == "vertexlittwotexture") {
@@ -222,7 +217,7 @@ void ParseBlockPairs(Tokenizer& tokenizer, std::unordered_map<std::string, std::
         if (tok.kind != Token::Kind::String) {
             continue;
         }
-        const std::string key = ToLower(tok.value);
+        const std::string key    = ToLower(tok.value);
         const Token       valTok = tokenizer.Next();
         if (valTok.kind == Token::Kind::EndOfFile) {
             return;
@@ -252,11 +247,11 @@ bool IsIgnoredNestedBlock(std::string_view lowerKey) {
 // parsing and after every patch merge, so a "replace" overlay that retargets
 // $basetexture or $bumpmap is not lost to a field the merge never touched.
 auto DeriveVmtFields(VMTMaterial& mat) noexcept -> void {
-    mat.baseTexture  = mat.parameters.contains("$basetexture") ? mat.parameters["$basetexture"] : std::string {};
-    mat.bumpMap      = mat.parameters.contains("$bumpmap")     ? mat.parameters["$bumpmap"]
-                       : mat.parameters.contains("$normalmap") ? mat.parameters["$normalmap"]
-                                                               : std::string {};
-    mat.surfaceProp  = mat.parameters.contains("$surfaceprop") ? mat.parameters["$surfaceprop"] : std::string {};
+    mat.baseTexture   = mat.parameters.contains("$basetexture") ? mat.parameters["$basetexture"] : std::string {};
+    mat.bumpMap       = mat.parameters.contains("$bumpmap")   ? mat.parameters["$bumpmap"] :
+                        mat.parameters.contains("$normalmap") ? mat.parameters["$normalmap"] :
+                                                                std::string {};
+    mat.surfaceProp   = mat.parameters.contains("$surfaceprop") ? mat.parameters["$surfaceprop"] : std::string {};
     mat.isTranslucent = mat.parameters.contains("$translucent") && mat.parameters["$translucent"] == "1";
     mat.isAlphaTest   = mat.parameters.contains("$alphatest") && mat.parameters["$alphatest"] == "1";
     mat.noCull        = mat.parameters.contains("$nocull") && mat.parameters["$nocull"] == "1";
@@ -319,9 +314,9 @@ auto ParseVMT(std::string_view text) -> std::expected<VMTMaterial, ErrorCode> {
             continue;
         }
 
-        const std::string key     = std::move(tok.value);
+        const std::string key      = std::move(tok.value);
         const std::string lowerKey = ToLower(key);
-        Token             valTok  = tokenizer.Next();
+        Token             valTok   = tokenizer.Next();
         if (valTok.kind == Token::Kind::EndOfFile) {
             break;
         }

@@ -9,12 +9,10 @@
 // BSPLighting.hpp for the lighting rules.
 
 #include "BSPGeometry.hpp"
-#include <Zahlen/Math/Angles.hpp>
-#include <Zahlen/Math/Vec3.hpp>
-
 #include "BSPBakeField.hpp"
 #include "BSPLighting.hpp"
-
+#include <Zahlen/Math/Angles.hpp>
+#include <Zahlen/Math/Vec3.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -54,15 +52,6 @@ void UpdateBounds(FVec3& boundsMin, FVec3& boundsMax, bool& first, FVec3 p) {
     boundsMax.x = std::max(boundsMax.x, p.x);
     boundsMax.y = std::max(boundsMax.y, p.y);
     boundsMax.z = std::max(boundsMax.z, p.z);
-}
-
-// Source angle triples are (pitch, yaw, roll) degrees, pitch positive down,
-// around a Z-up world. Pitch/yaw -> unit direction in source space.
-[[nodiscard]] auto AngleDirection(FVec3 angles) -> FVec3 {
-    const auto pitch = DegF{angles.x}.ToRadians();
-    const auto yaw = DegF{angles.y}.ToRadians();
-    const float cp    = Cos(pitch);
-    return {cp * Cos(yaw), cp * Sin(yaw), -Sin(pitch)};
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
@@ -108,12 +97,11 @@ void UpdateBounds(FVec3& boundsMin, FVec3& boundsMax, bool& first, FVec3 p) {
 
 struct FaceProjection {
     FVec3 sDir {1.0f, 0.0f, 0.0f};
-    float     sOffset = 0.0f;
+    float sOffset = 0.0f;
     FVec3 tDir {0.0f, 1.0f, 0.0f};
-    float     tOffset = 0.0f;
-    float     width   = 512.0f;
-    float     height  = 512.0f;
-
+    float tOffset = 0.0f;
+    float width   = 512.0f;
+    float height  = 512.0f;
 };
 
 [[nodiscard]] auto ProjectionFor(const Map& map, const DFace& face) -> std::optional<FaceProjection> {
@@ -126,9 +114,9 @@ struct FaceProjection {
     }
     const DTexData& texData = map.texDatas[static_cast<size_t>(texInfo.texdata)];
     FaceProjection  out;
-    out.sDir = {texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]};
+    out.sDir    = {.x = texInfo.textureVecs[0][0], .y = texInfo.textureVecs[0][1], .z = texInfo.textureVecs[0][2]};
     out.sOffset = texInfo.textureVecs[0][3];
-    out.tDir = {texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]};
+    out.tDir    = {.x = texInfo.textureVecs[1][0], .y = texInfo.textureVecs[1][1], .z = texInfo.textureVecs[1][2]};
     out.tOffset = texInfo.textureVecs[1][3];
     out.width   = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
     out.height  = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
@@ -245,9 +233,9 @@ auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxL
         }
     }
     result.parts.push_back(MaterialStreams {});
-    result.parts.back().materialName  = std::string(name);
-    result.parts.back().skyboxLayer   = skyboxLayer;
-    result.parts.back().lightmapPage  = lightmapPage;
+    result.parts.back().materialName = std::string(name);
+    result.parts.back().skyboxLayer  = skyboxLayer;
+    result.parts.back().lightmapPage = lightmapPage;
     return result.parts.back();
 }
 
@@ -273,12 +261,12 @@ auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxL
 // material group renders both ways, and reversed copies of its triangles join
 // the collision stream so dynamic bodies contact the back side too.
 struct TwinRecord {
-    double                 cn[3] {0.0, 0.0, 0.0};                      // canonical plane normal (dominant component positive)
-    double                 cd = 0.0;                                   // plane constant in the canonical frame
-    double                 ownN[3] {0.0, 0.0, 0.0};                    // authored front (Source coords)
-    double                 uLo = 0.0, uHi = 0.0, vLo = 0.0, vHi = 0.0; // extents in canonical plane axes
-    double                 area      = 0.0;
-    size_t                 partIndex = 0;
+    double             cn[3] {0.0, 0.0, 0.0};                      // canonical plane normal (dominant component positive)
+    double             cd = 0.0;                                   // plane constant in the canonical frame
+    double             ownN[3] {0.0, 0.0, 0.0};                    // authored front (Source coords)
+    double             uLo = 0.0, uHi = 0.0, vLo = 0.0, vHi = 0.0; // extents in canonical plane axes
+    double             area      = 0.0;
+    size_t             partIndex = 0;
     std::vector<FVec3> winding; // Source-space corners in emitted (post-flip) order
 };
 
@@ -312,7 +300,7 @@ constexpr int32_t kContentsSolid = 0x1;
     int32_t node = map.models.front().headnode;
     for (int guard = 0; guard < 8192; ++guard) {
         if (node < 0) {
-            const size_t leaf = static_cast<size_t>(-1 - node);
+            const auto leaf = static_cast<size_t>(-1 - node);
             return leaf < map.leafs.size() ? map.leafs[leaf].contents : kContentsSolid;
         }
         if (static_cast<size_t>(node) >= map.nodes.size()) {
@@ -377,8 +365,8 @@ void ApplyTwinAudit(const Map& map, ImportedMapData& result, std::span<const Twi
             // Open air behind the face (centroid and a few edge midpoints,
             // sampled close and far)? Without it nobody can ever see or touch
             // the back side, so the twin-less sheets is fine single-sided.
-            const auto n = DVec3{rec.ownN[0], rec.ownN[1], rec.ownN[2]}.Cast<float>();
-            FVec3       centre = FVec3::Zero();
+            const auto n      = DVec3 {rec.ownN[0], rec.ownN[1], rec.ownN[2]}.Cast<float>();
+            FVec3      centre = FVec3::Zero();
             for (const FVec3& corner: rec.winding) {
                 centre += corner;
             }
@@ -425,18 +413,18 @@ void ApplyTwinAudit(const Map& map, ImportedMapData& result, std::span<const Twi
 // the forward texture projection in source space. Bounds are tracked on both
 // the owning part and the whole map as positions are emitted.
 void EmitVertex(
-    MaterialStreams&          part,
-    const ImportOptions&      options,
-    const FaceProjection&     projection,
-    const Map&             map,
-    const DFace&              face,
-    const VradLightmapAtlas&  lightmaps,
-    const VradLightmapChart*  lightmapChart,
-    FVec3                 sourcePos,
-    FVec3                 sourceNormal,
-    ImportedMapData&          result,
-    bool&                     partBoundsFirst,
-    bool&                     mapBoundsFirst
+    MaterialStreams&         part,
+    const ImportOptions&     options,
+    const FaceProjection&    projection,
+    const Map&               map,
+    const DFace&             face,
+    const VradLightmapAtlas& lightmaps,
+    const VradLightmapChart* lightmapChart,
+    FVec3                    sourcePos,
+    FVec3                    sourceNormal,
+    ImportedMapData&         result,
+    bool&                    partBoundsFirst,
+    bool&                    mapBoundsFirst
 ) {
     const float u = (Dot(sourcePos, projection.sDir) + projection.sOffset) / projection.width;
     const float v = (Dot(sourcePos, projection.tDir) + projection.tOffset) / projection.height;
@@ -449,17 +437,16 @@ void EmitVertex(
     float lightV = 0.0f;
     if (lightmapChart != nullptr && lightmapChart->page < lightmaps.pages.size() && face.texinfo >= 0 &&
         static_cast<size_t>(face.texinfo) < map.texInfos.size()) {
-        const DTexInfo& lightInfo = map.texInfos[static_cast<size_t>(face.texinfo)];
-        const VradLightmapPage& page = lightmaps.pages[lightmapChart->page];
+        const DTexInfo&         lightInfo = map.texInfos[static_cast<size_t>(face.texinfo)];
+        const VradLightmapPage& page      = lightmaps.pages[lightmapChart->page];
         // lightmapVecs are luxels per world unit (Source's lightmapVecsLuxelsPerWorldUnits),
         // so dot + offset is already a luxel coordinate. Dividing by 16 here
         // shrinks every face's sample grid and mis-addresses the chart.
-        const float s = sourcePos.x * lightInfo.lightmapVecs[0][0] + sourcePos.y * lightInfo.lightmapVecs[0][1] +
-                        sourcePos.z * lightInfo.lightmapVecs[0][2] + lightInfo.lightmapVecs[0][3];
-        const float t = sourcePos.x * lightInfo.lightmapVecs[1][0] + sourcePos.y * lightInfo.lightmapVecs[1][1] +
-                        sourcePos.z * lightInfo.lightmapVecs[1][2] + lightInfo.lightmapVecs[1][3];
-        lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) /
-                 static_cast<float>(page.width);
+        const float s = sourcePos.x * lightInfo.lightmapVecs[0][0] + sourcePos.y * lightInfo.lightmapVecs[0][1] + sourcePos.z * lightInfo.lightmapVecs[0][2] +
+                        lightInfo.lightmapVecs[0][3];
+        const float t = sourcePos.x * lightInfo.lightmapVecs[1][0] + sourcePos.y * lightInfo.lightmapVecs[1][1] + sourcePos.z * lightInfo.lightmapVecs[1][2] +
+                        lightInfo.lightmapVecs[1][3];
+        lightU = (static_cast<float>(lightmapChart->x) + (s - static_cast<float>(face.lightmapTextureMinsInLuxels[0])) + 0.5f) / static_cast<float>(page.width);
         lightV = (static_cast<float>(lightmapChart->y) + (t - static_cast<float>(face.lightmapTextureMinsInLuxels[1])) + 0.5f) /
                  static_cast<float>(page.height);
     }
@@ -470,7 +457,7 @@ void EmitVertex(
     // Handedness so that bitangent = cross(normal, tangent.xyz) * tangent.w,
     // which is the glTF convention the renderer's tangent frames assume.
     const FVec3 crossNT    = Cross(normal, tangent);
-    const float     handedness = (Dot(crossNT, projection.tDir) < 0.0f) ? -1.0f : 1.0f;
+    const float handedness = (Dot(crossNT, projection.tDir) < 0.0f) ? -1.0f : 1.0f;
 
     const FVec3 enginePos     = ConvertPosition(options, sourcePos);
     const FVec3 engineNormal  = ConvertDirection(options, normal);
@@ -479,13 +466,11 @@ void EmitVertex(
     part.positions.push_back(VertexPosition {{enginePos.x, enginePos.y, enginePos.z}});
     part.tangentFrames.push_back(
         VertexTangentFrame {
-            Math::PackNormal(engineNormal.x, engineNormal.y, engineNormal.z),
-            Math::PackNormal(engineTangent.x, engineTangent.y, engineTangent.z, handedness),
+            .normal  = Math::PackNormal(engineNormal.x, engineNormal.y, engineNormal.z),
+            .tangent = Math::PackNormal(engineTangent.x, engineTangent.y, engineTangent.z, handedness),
         }
     );
-    part.surfaces.push_back(
-        VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(lightU, lightV)}
-    );
+    part.surfaces.push_back(VertexSurface {.uv = Math::PackUV(u, v), .color = Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), .uv1 = Math::PackUV(lightU, lightV)});
 
     UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
     UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
@@ -501,7 +486,7 @@ void EmitVertex(
 // every surface a mapper excluded from the lightmap bake, which for a non-tool
 // material means the surface is its own light source. Every self-illuminated
 // face in a compiled map carries it; an ordinary wall never does.
-[[nodiscard]] auto HasSurfNoLight(const Map& map, const DFace& face) noexcept -> bool {
+[[nodiscard]] static auto HasSurfNoLight(const Map& map, const DFace& face) noexcept -> bool {
     if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
         return false;
     }
@@ -546,22 +531,28 @@ namespace {
 // Source AngleMatrix (SDK convention): columns are forward/left/up from
 // pitch=x, yaw=y, roll=z in degrees. Stored row-major for TransformSkybox*.
 void SkyboxRotation(float pitchDeg, float yawDeg, float rollDeg, float out[9]) {
-    const auto pitch = DegF{pitchDeg}.ToRadians();
-    const auto yaw = DegF{yawDeg}.ToRadians();
-    const auto roll = DegF{rollDeg}.ToRadians();
-    const float sp = Sin(pitch), cp = Cos(pitch);
-    const float sy = Sin(yaw), cy = Cos(yaw);
-    const float sr = Sin(roll), cr = Cos(roll);
-    out[0] = cp * cy;
-    out[3] = cp * sy;
-    out[6] = -sp;
-    const float crcy = cr * cy, crsy = cr * sy, srcy = sr * cy, srsy = sr * sy;
-    out[1] = sp * srcy - crsy;
-    out[4] = sp * srsy + crcy;
-    out[7] = sr * cp;
-    out[2] = sp * crcy + srsy;
-    out[5] = sp * crsy - srcy;
-    out[8] = cr * cp;
+    const auto  pitch = DegF {pitchDeg}.ToRadians();
+    const auto  yaw   = DegF {yawDeg}.ToRadians();
+    const auto  roll  = DegF {rollDeg}.ToRadians();
+    const float sp    = Sin(pitch);
+    const float cp    = Cos(pitch);
+    const float sy    = Sin(yaw);
+    const float cy    = Cos(yaw);
+    const float sr    = Sin(roll);
+    const float cr    = Cos(roll);
+    out[0]            = cp * cy;
+    out[3]            = cp * sy;
+    out[6]            = -sp;
+    const float crcy  = cr * cy;
+    const float crsy  = cr * sy;
+    const float srcy  = sr * cy;
+    const float srsy  = sr * sy;
+    out[1]            = sp * srcy - crsy;
+    out[4]            = sp * srsy + crcy;
+    out[7]            = sr * cp;
+    out[2]            = sp * crcy + srsy;
+    out[5]            = sp * crsy - srcy;
+    out[8]            = cr * cp;
 }
 
 void ParseVec3(std::string_view text, float out[3]) {
@@ -581,7 +572,7 @@ void ParseVec3(std::string_view text, float out[3]) {
     }
     const size_t end = std::min(static_cast<size_t>(face.firstedge) + static_cast<size_t>(face.numedges), map.surfEdges.size());
     size_t       n   = 0;
-    for (size_t i = static_cast<size_t>(face.firstedge); i < end; ++i) {
+    for (auto i = static_cast<size_t>(face.firstedge); i < end; ++i) {
         const int32_t se = map.surfEdges[i];
         const DEdge&  e  = map.edges[static_cast<size_t>(se < 0 ? -se : se)];
         if (e.v[0] < map.vertices.size()) {
@@ -663,10 +654,10 @@ auto MakeSkyboxTransform(const Map& map, bool importSkybox) noexcept -> SkyboxTr
     // 1024-unit band below the sky_camera when no gap is found.
     t.zFloor = t.origin[2] - 1024.0f;
     {
-        constexpr int   kBin = 256;
-        constexpr int   kBins = 48; // +-6144 units around the sky_camera z
+        constexpr int          kBin  = 256;
+        constexpr int          kBins = 48; // +-6144 units around the sky_camera z
         std::array<int, kBins> hist {};
-        const int baseZ = static_cast<int>(std::floor(t.origin[2] / kBin)) - kBins / 2;
+        const int              baseZ = static_cast<int>(std::floor(t.origin[2] / kBin)) - kBins / 2;
         for (const DFace& face: map.faces) {
             const auto c = FaceCentroidSource(map, face);
             if (std::abs(c[0] - t.origin[0]) > t.xyHalf || std::abs(c[1] - t.origin[1]) > t.xyHalf) {
@@ -729,7 +720,7 @@ auto MakeSkyboxTransform(const Map& map, bool importSkybox) noexcept -> SkyboxTr
         float placedHi[2] = {-1e30f, -1e30f};
         for (const DFace& face: map.faces) {
             const auto  centroid = FaceCentroidSource(map, face);
-            const float c[3] = {centroid[0], centroid[1], centroid[2]};
+            const float c[3]     = {centroid[0], centroid[1], centroid[2]};
             if (!IsSkyboxPoint(t, c)) {
                 continue;
             }
@@ -771,16 +762,15 @@ auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool 
 }
 
 auto IsSkyboxHidden(const SkyboxTransform& t, const float placed[3]) noexcept -> bool {
-    return placed[0] >= t.worldMin[0] - t.hiddenMargin && placed[0] <= t.worldMax[0] + t.hiddenMargin &&
-           placed[1] >= t.worldMin[1] - t.hiddenMargin && placed[1] <= t.worldMax[1] + t.hiddenMargin &&
-           placed[2] >= t.worldMin[2] - t.hiddenMargin && placed[2] <= t.worldMax[2] + t.hiddenMargin;
+    return placed[0] >= t.worldMin[0] - t.hiddenMargin && placed[0] <= t.worldMax[0] + t.hiddenMargin && placed[1] >= t.worldMin[1] - t.hiddenMargin &&
+           placed[1] <= t.worldMax[1] + t.hiddenMargin && placed[2] >= t.worldMin[2] - t.hiddenMargin && placed[2] <= t.worldMax[2] + t.hiddenMargin;
 }
 
 void TransformSkyboxPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept {
     const float v[3] = {(p[0] - t.origin[0]) * t.scale, (p[1] - t.origin[1]) * t.scale, (p[2] - t.origin[2]) * t.scale};
-    out[0] = t.anchor[0] + t.rot[0] * v[0] + t.rot[1] * v[1] + t.rot[2] * v[2];
-    out[1] = t.anchor[1] + t.rot[3] * v[0] + t.rot[4] * v[1] + t.rot[5] * v[2];
-    out[2] = t.anchor[2] + t.rot[6] * v[0] + t.rot[7] * v[1] + t.rot[8] * v[2];
+    out[0]           = t.anchor[0] + t.rot[0] * v[0] + t.rot[1] * v[1] + t.rot[2] * v[2];
+    out[1]           = t.anchor[1] + t.rot[3] * v[0] + t.rot[4] * v[1] + t.rot[5] * v[2];
+    out[2]           = t.anchor[2] + t.rot[6] * v[0] + t.rot[7] * v[1] + t.rot[8] * v[2];
 }
 
 void TransformSkyboxVector(const SkyboxTransform& t, const float v[3], float out[3]) noexcept {
@@ -821,7 +811,7 @@ auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -
         if (modelIndex < 1 || static_cast<size_t>(modelIndex) >= map.models.size()) {
             continue;
         }
-        if (std::any_of(result.begin(), result.end(), [&](const InteractiveSubmodel& sub) { return sub.modelIndex == modelIndex; })) {
+        if (std::ranges::any_of(result, [&](const InteractiveSubmodel& sub) { return sub.modelIndex == modelIndex; })) {
             continue;
         }
 
@@ -829,12 +819,12 @@ auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -
         sub.modelIndex = modelIndex;
         sub.rotating   = (className == "func_door_rotating" || className == "func_rot_button" || className == "momentary_rot_button");
 
-        const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
-        const FVec3 mins{bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]};
-        const FVec3 maxs{bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]};
-        FVec3       pivot = (mins + maxs) * 0.5f;
+        const DModel& bspModel = map.models[static_cast<size_t>(modelIndex)];
+        const FVec3   mins {bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]};
+        const FVec3   maxs {bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]};
+        FVec3         pivot = (mins + maxs) * 0.5f;
         if (const auto originKey = entity.FindVector("origin")) {
-            pivot = {(*originKey)[0], (*originKey)[1], (*originKey)[2]};
+            pivot = {.x = (*originKey)[0], .y = (*originKey)[1], .z = (*originKey)[2]};
         }
         sub.pivot = ConvertPosition(options, pivot);
 
@@ -848,9 +838,7 @@ auto CollectInteractiveSubmodels(const Map& map, const ImportOptions& options) -
 // records: winding, area, centroid, normal, material name, texdata
 // reflectivity and the SURF_NOLIGHT flag. Kept in step with the inline version
 // in ImportMapGeometry -- if one changes, the other must.
-auto GatherEmissiveAreaLights(
-    const Map& map, const ImportOptions& options, std::span<const PointLight> entityLights
-) -> std::vector<PointLight> {
+auto GatherEmissiveAreaLights(const Map& map, const ImportOptions& options, std::span<const PointLight> entityLights) -> std::vector<PointLight> {
     std::vector<PointLight> out;
     if (!options.gatherEmissiveSurfaces) {
         return out;
@@ -863,7 +851,7 @@ auto GatherEmissiveAreaLights(
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
             continue;
         }
-        if (std::find(options.skipModels.begin(), options.skipModels.end(), static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
+        if (std::ranges::find(options.skipModels, static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
             continue;
         }
         const DModel& model = map.models[modelIdx];
@@ -872,7 +860,7 @@ auto GatherEmissiveAreaLights(
         }
         const size_t faceEnd = std::min(static_cast<size_t>(model.firstface) + static_cast<size_t>(model.numfaces), map.faces.size());
 
-        for (size_t faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
+        for (auto faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
             const DFace& face = map.faces[faceIndex];
 
             auto winding = FaceWinding(map, face);
@@ -884,8 +872,8 @@ auto GatherEmissiveAreaLights(
                 continue;
             }
             if (sky.active) {
-                const FVec3 c    = WindingCentroid(*winding);
-                const float     src[3] = {c.x, c.y, c.z};
+                const FVec3 c      = WindingCentroid(*winding);
+                const float src[3] = {c.x, c.y, c.z};
                 if (IsSkyboxPoint(sky, src)) {
                     // Background scenery keeps its lamp entities; its panels do
                     // not compete for the play area's emissive-proxy budget.
@@ -910,14 +898,14 @@ auto GatherEmissiveAreaLights(
             }
 
             EmissiveSurface surface;
-            surface.materialName     = std::string(materialName);
-            surface.position         = ConvertPosition(options, WindingCentroid(*winding));
+            surface.materialName = std::string(materialName);
+            surface.position     = ConvertPosition(options, WindingCentroid(*winding));
             // The face's plane normal, +N out of the solid (see the winding
             // orientation note in ImportMapGeometry).
             FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal = {plane.normal[0], plane.normal[1], plane.normal[2]};
+                faceNormal          = {.x = plane.normal[0], .y = plane.normal[1], .z = plane.normal[2]};
             }
             surface.normal           = ConvertDirection(options, faceNormal);
             surface.areaSquareInches = static_cast<float>(areaInches);
@@ -929,8 +917,7 @@ auto GatherEmissiveAreaLights(
         }
     }
 
-    const std::vector<EmissiveSurface> proxies =
-        FinalizeEmissiveSurfaces(faces, entityLights, options.unitScale, options.maxEmissiveLights);
+    const std::vector<EmissiveSurface> proxies = FinalizeEmissiveSurfaces(faces, entityLights, options.unitScale, options.maxEmissiveLights);
 
     out.reserve(proxies.size());
     for (const EmissiveSurface& surface: proxies) {
@@ -966,7 +953,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
     // different atlas page. Keep the VPL reconstruction mutually exclusive:
     // one compiled bake must reach the renderer through exactly one path.
     if (options.useVradLightmaps) {
-        result.lightmaps = BuildVradLightmapAtlas(map, options.lightmapAtlasSize, options.lightmapAtlasGutter);
+        result.lightmaps                   = BuildVradLightmapAtlas(map, options.lightmapAtlasSize, options.lightmapAtlasGutter);
         result.stats.lightmapFaces         = result.lightmaps.faceCount;
         result.stats.lightmapPages         = static_cast<uint32_t>(result.lightmaps.pages.size());
         result.stats.lightmapRejectedFaces = result.lightmaps.rejectedFaceCount;
@@ -980,7 +967,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
             continue;
         }
-        if (std::find(options.skipModels.begin(), options.skipModels.end(), static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
+        if (std::ranges::find(options.skipModels, static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
             continue;
         }
         const DModel& model = map.models[modelIdx];
@@ -988,7 +975,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             continue;
         }
         const size_t faceEnd = std::min(static_cast<size_t>(model.firstface) + static_cast<size_t>(model.numfaces), map.faces.size());
-        for (size_t faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
+        for (auto faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
             const DFace& face = map.faces[faceIndex];
 
             auto winding = FaceWinding(map, face);
@@ -1012,8 +999,8 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             bool skyFace = false;
             if (sky.active) {
                 const FVec3 centroid = WindingCentroid(*winding);
-                const float    src[3] = {centroid.x, centroid.y, centroid.z};
-                skyFace = IsSkyboxPoint(sky, src);
+                const float src[3]   = {centroid.x, centroid.y, centroid.z};
+                skyFace              = IsSkyboxPoint(sky, src);
                 if (skyFace && !sky.enabled) {
                     ++result.stats.skyboxFacesDropped;
                     continue;
@@ -1023,7 +1010,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                         const float p[3] = {corner.x, corner.y, corner.z};
                         float       out[3];
                         TransformSkyboxPoint(sky, p, out);
-                        corner = {out[0], out[1], out[2]};
+                        corner = {.x = out[0], .y = out[1], .z = out[2]};
                     }
                 }
             }
@@ -1050,21 +1037,20 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             FVec3 faceNormal = FVec3::UnitZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal = {plane.normal[0], plane.normal[1], plane.normal[2]};
+                faceNormal          = {.x = plane.normal[0], .y = plane.normal[1], .z = plane.normal[2]};
             }
             if (skyFace) {
                 const float n[3] = {faceNormal.x, faceNormal.y, faceNormal.z};
                 float       out[3];
                 TransformSkyboxVector(sky, n, out);
-                faceNormal = {out[0], out[1], out[2]};
+                faceNormal = {.x = out[0], .y = out[1], .z = out[2]};
             }
             {
                 FVec3 windingNormal = FVec3::Zero();
                 for (size_t i = 0; i < winding->size(); ++i) {
                     const FVec3& a = (*winding)[i];
                     const FVec3& b = (*winding)[(i + 1) % winding->size()];
-                    windingNormal += FVec3{(a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x),
-                    (a.x - b.x) * (a.y + b.y)};
+                    windingNormal += FVec3 {(a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y)};
                 }
                 if (Dot(windingNormal, faceNormal) < 0.0f) {
                     std::reverse(winding->begin(), winding->end());
@@ -1105,12 +1091,10 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             // runtime camera-relative skybox transforms arrive in phase three.
             // Its transformed positions cannot use Source's raw lightmap basis,
             // so it stays unbound until that dedicated sky pass owns the basis.
-            const VradLightmapChart* lightmapChart =
-                (!skyFace && options.useVradLightmaps) ? result.lightmaps.ChartForFace(faceIndex) : nullptr;
-            const uint32_t lightmapPage = lightmapChart != nullptr ? lightmapChart->page : kInvalidVradLightmapPage;
-            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ?
-                                       result.collisionOnly :
-                                       FindOrMakePart(result, std::string(materialName), skyFace, lightmapPage);
+            const VradLightmapChart* lightmapChart = (!skyFace && options.useVradLightmaps) ? result.lightmaps.ChartForFace(faceIndex) : nullptr;
+            const uint32_t           lightmapPage  = lightmapChart != nullptr ? lightmapChart->page : kInvalidVradLightmapPage;
+            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly :
+                                                                                      FindOrMakePart(result, std::string(materialName), skyFace, lightmapPage);
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
             }
@@ -1123,23 +1107,23 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             if (options.gatherEmissiveSurfaces && disposition == FaceDisposition::Render && IsEmissiveMaterialName(materialName) && !skyFace) {
                 const double areaInches = WindingArea(*winding);
                 if (areaInches > 0.0) {
-                    const float areaMetres      = static_cast<float>(areaInches) * options.unitScale * options.unitScale;
+                    const float     areaMetres = static_cast<float>(areaInches) * options.unitScale * options.unitScale;
                     EmissiveSurface surface;
-                    surface.materialName       = std::string(materialName);
-                    surface.position           = ConvertPosition(options, WindingCentroid(*winding));
-                    surface.normal             = ConvertDirection(options, faceNormal);
-                    surface.areaSquareInches   = static_cast<float>(areaInches);
-                    surface.areaSquareMetres   = areaMetres;
-                    surface.faceCount          = 1;
+                    surface.materialName     = std::string(materialName);
+                    surface.position         = ConvertPosition(options, WindingCentroid(*winding));
+                    surface.normal           = ConvertDirection(options, faceNormal);
+                    surface.areaSquareInches = static_cast<float>(areaInches);
+                    surface.areaSquareMetres = areaMetres;
+                    surface.faceCount        = 1;
                     // Texdata reflectivity: a (1,1,1) panel is a lit white
                     // surface, not necessarily a lamp, and the probe uses that
                     // to damp the strength.
-                    surface.reflectivityLuma   = TexDataReflectivityLuma(map, face);
+                    surface.reflectivityLuma = TexDataReflectivityLuma(map, face);
                     // SURF_NOLIGHT is vbsp saying "do not bake light onto this
                     // surface" -- the only per-surface self-illumination bit in
                     // the whole .bsp, and the one that separates a real emitter
                     // from a bright albedo.
-                    surface.noLightFlag        = HasSurfNoLight(map, face);
+                    surface.noLightFlag = HasSurfNoLight(map, face);
                     emissiveFaces.push_back(std::move(surface));
                 }
             }
@@ -1160,8 +1144,8 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                 const int32_t    power     = dispInfo.power;
                 bool             rangeFits = false;
                 if (power >= 1 && power <= 4) {
-                    const size_t side = static_cast<size_t>((1u << static_cast<uint32_t>(power)) + 1u);
-                    rangeFits         = static_cast<size_t>(dispInfo.dispVertStart) + side * side <= map.dispVerts.size();
+                    const auto side = static_cast<size_t>((1u << static_cast<uint32_t>(power)) + 1u);
+                    rangeFits       = static_cast<size_t>(dispInfo.dispVertStart) + side * side <= map.dispVerts.size();
                 }
                 if (!rangeFits) {
                     displaced = false;
@@ -1178,7 +1162,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                 const uint32_t gridSize = 1u << static_cast<uint32_t>(power);
                 const uint32_t side     = gridSize + 1;
 
-                const FVec3 dispStartPos{dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]};
+                const FVec3 dispStartPos {dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]};
                 // Rotate the base quad so corner 0 is the displacement's start
                 // position, keeping winding order. Skybox windings were already
                 // moved into placed space above (scaled by sky.scale around the
@@ -1191,7 +1175,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                     const float s[3] = {dispStartPos.x, dispStartPos.y, dispStartPos.z};
                     float       out[3];
                     TransformSkyboxPoint(sky, s, out);
-                    matchStartPos = {out[0], out[1], out[2]};
+                    matchStartPos = {.x = out[0], .y = out[1], .z = out[2]};
                 }
                 size_t startIndex = 0;
                 float  bestDistSq = 1e30f;
@@ -1209,7 +1193,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                     (*winding)[(startIndex + 3) % 4],
                 };
 
-                const size_t vertBase = static_cast<size_t>(dispInfo.dispVertStart);
+                const auto vertBase = static_cast<size_t>(dispInfo.dispVertStart);
                 if (vertBase + static_cast<size_t>(side) * side > map.dispVerts.size()) {
                     continue;
                 }
@@ -1225,8 +1209,8 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                         const FVec3 base = row0 + (row1 - row0) * fv;
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
-                        const FVec3  dispVec{dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]};
-                        FVec3        offset = dispVec * dispVert.dist;
+                        const FVec3      dispVec {dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]};
+                        FVec3            offset = dispVec * dispVert.dist;
                         if (skyFace) {
                             // The base quad already carries sky.scale (the
                             // miniscape is magnified into place), but the
@@ -1237,7 +1221,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                             const float d[3] = {offset.x, offset.y, offset.z};
                             float       out[3];
                             TransformSkyboxVector(sky, d, out);
-                            offset = FVec3{out[0], out[1], out[2]} * sky.scale;
+                            offset = FVec3 {out[0], out[1], out[2]} * sky.scale;
                         }
                         grid[static_cast<size_t>(j) * side + i] = base + offset;
                     }
@@ -1246,10 +1230,10 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                 std::vector<FVec3> vertexNormals(static_cast<size_t>(side) * side, FVec3::Zero());
                 for (uint32_t j = 0; j < gridSize; ++j) {
                     for (uint32_t i = 0; i < gridSize; ++i) {
-                        const FVec3& p00 = grid[static_cast<size_t>(j) * side + i];
-                        const FVec3& p10 = grid[static_cast<size_t>(j) * side + i + 1];
-                        const FVec3& p01 = grid[static_cast<size_t>(j + 1) * side + i];
-                        const FVec3 cell = Cross(p10 - p00, p01 - p00);
+                        const FVec3& p00  = grid[static_cast<size_t>(j) * side + i];
+                        const FVec3& p10  = grid[static_cast<size_t>(j) * side + i + 1];
+                        const FVec3& p01  = grid[static_cast<size_t>(j + 1) * side + i];
+                        const FVec3  cell = Cross(p10 - p00, p01 - p00);
                         for (uint32_t corner = 0; corner < 4; ++corner) {
                             const uint32_t ci = i + (corner & 1u);
                             const uint32_t cj = j + ((corner >> 1) & 1u);
@@ -1266,8 +1250,10 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
                         } else if (Dot(vertexNormal, faceNormal) < 0.0f) {
                             vertexNormal = -vertexNormal;
                         }
-                        EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart,
-                                   grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
+                        EmitVertex(
+                            part, options, *projection, map, face, result.lightmaps, lightmapChart, grid[static_cast<size_t>(j) * side + i], vertexNormal,
+                            result, partBoundsFirst, globalBoundsFirst
+                        );
                     }
                 }
 
@@ -1292,8 +1278,9 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             } else {
                 // Fan triangulation: Source faces are convex planar polygons.
                 for (const auto& corner: *winding) {
-                    EmitVertex(part, options, *projection, map, face, result.lightmaps, lightmapChart, corner, faceNormal, result, partBoundsFirst,
-                               globalBoundsFirst);
+                    EmitVertex(
+                        part, options, *projection, map, face, result.lightmaps, lightmapChart, corner, faceNormal, result, partBoundsFirst, globalBoundsFirst
+                    );
                 }
                 for (size_t i = 1; i + 1 < winding->size(); ++i) {
                     part.indices.push_back(baseVertex);
@@ -1324,40 +1311,63 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             // drew from both sides, which is what puts pale slabs and ribbons
             // across the backdrop.
             if (disposition == FaceDisposition::Render && !displaced && !skyFace) {
-                TwinRecord rec;
-                rec.partIndex   = static_cast<size_t>(&part - result.parts.data());
-                rec.ownN[0]     = faceNormal.x;
-                rec.ownN[1]     = faceNormal.y;
-                rec.ownN[2]     = faceNormal.z;
-                const double nx = rec.ownN[0], ny = rec.ownN[1], nz = rec.ownN[2];
-                const double ax = std::abs(nx), ay = std::abs(ny), az = std::abs(nz);
-                const int    dom        = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
-                const double domV       = dom == 0 ? nx : (dom == 1 ? ny : nz);
-                const double sgn        = domV < 0.0 ? -1.0 : 1.0;
-                rec.cn[0]               = nx * sgn;
-                rec.cn[1]               = ny * sgn;
-                rec.cn[2]               = nz * sgn;
-                rec.winding             = *winding;
-                const FVec3& anchor = rec.winding.front();
-                rec.cd                  = rec.cn[0] * anchor.x + rec.cn[1] * anchor.y + rec.cn[2] * anchor.z;
-                const int au = (dom + 1) % 3, av = (dom + 2) % 3;
-                auto      comp = [](const FVec3& p, int axis) { return axis == 0 ? p.x : (axis == 1 ? p.y : p.z); };
-                rec.uLo = rec.vLo = 1e30;
-                rec.uHi = rec.vHi = -1e30;
-                for (const FVec3& p: rec.winding) {
-                    const float uu = comp(p, au), vv = comp(p, av);
-                    rec.uLo = std::min(rec.uLo, static_cast<double>(uu));
-                    rec.uHi = std::max(rec.uHi, static_cast<double>(uu));
-                    rec.vLo = std::min(rec.vLo, static_cast<double>(vv));
-                    rec.vHi = std::max(rec.vHi, static_cast<double>(vv));
+                const auto   partIndex = static_cast<size_t>(&part - result.parts.data());
+                const auto   nx        = static_cast<double>(faceNormal.x);
+                const auto   ny        = static_cast<double>(faceNormal.y);
+                const auto   nz        = static_cast<double>(faceNormal.z);
+                const double ax        = std::abs(nx);
+                const double ay        = std::abs(ny);
+                const double az        = std::abs(nz);
+                const int    dom       = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
+                const double domV      = dom == 0 ? nx : (dom == 1 ? ny : nz);
+                const double sgn       = domV < 0.0 ? -1.0 : 1.0;
+
+                const double cn0 = nx * sgn;
+                const double cn1 = ny * sgn;
+                const double cn2 = nz * sgn;
+
+                const FVec3& anchor = winding->front();
+                const double cd     = cn0 * static_cast<double>(anchor.x) + cn1 * static_cast<double>(anchor.y) + cn2 * static_cast<double>(anchor.z);
+
+                const int au   = (dom + 1) % 3;
+                const int av   = (dom + 2) % 3;
+                auto      comp = [](const FVec3& p, int axis) noexcept -> double { return static_cast<double>(axis == 0 ? p.x : (axis == 1 ? p.y : p.z)); };
+
+                double uLo = std::numeric_limits<double>::infinity();
+                double vLo = std::numeric_limits<double>::infinity();
+                double uHi = -std::numeric_limits<double>::infinity();
+                double vHi = -std::numeric_limits<double>::infinity();
+                for (const FVec3& p: *winding) {
+                    const double uu = comp(p, au);
+                    const double vv = comp(p, av);
+                    uLo             = std::min(uLo, uu);
+                    uHi             = std::max(uHi, uu);
+                    vLo             = std::min(vLo, vv);
+                    vHi             = std::max(vHi, vv);
                 }
-                for (size_t i = 1; i + 1 < rec.winding.size(); ++i) {
-                    const FVec3 a  = rec.winding[i] - rec.winding[0];
-                    const FVec3 b  = rec.winding[i + 1] - rec.winding[0];
+
+                double area = 0.0;
+                for (size_t i = 1; i + 1 < winding->size(); ++i) {
+                    const FVec3 a  = (*winding)[i] - (*winding)[0];
+                    const FVec3 b  = (*winding)[i + 1] - (*winding)[0];
                     const FVec3 cr = Cross(a, b);
-                    rec.area += 0.5 * static_cast<double>(cr.Length());
+                    area += 0.5 * static_cast<double>(cr.Length());
                 }
-                twinRecords.push_back(std::move(rec));
+
+                const TwinRecord rec {
+                    .cn        = {cn0, cn1, cn2},
+                    .cd        = cd,
+                    .ownN      = {nx, ny, nz},
+                    .uLo       = uLo,
+                    .uHi       = uHi,
+                    .vLo       = vLo,
+                    .vHi       = vHi,
+                    .area      = area,
+                    .partIndex = partIndex,
+                    .winding   = *winding,
+                };
+
+                twinRecords.push_back(rec);
             }
 
             if (disposition != FaceDisposition::CollisionOnly) {
@@ -1390,8 +1400,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
     if (options.gatherEmissiveSurfaces && !emissiveFaces.empty()) {
         const size_t before    = result.lights.size();
         const size_t faceCount = emissiveFaces.size();
-        result.emissive =
-            FinalizeEmissiveSurfaces(emissiveFaces, result.lights, options.unitScale, options.maxEmissiveLights);
+        result.emissive        = FinalizeEmissiveSurfaces(emissiveFaces, result.lights, options.unitScale, options.maxEmissiveLights);
 
         // One point light per surviving proxy. These are the lights that carry
         // a self-illuminated surface into the PBR path, and the ones RTGI/DDGI
@@ -1407,21 +1416,21 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
             }
         }
 
-        result.stats.emissiveSurfaces  = static_cast<uint32_t>(result.emissive.size());
-        result.stats.emissiveFaces     = 0;
-        float areaMetres               = 0.0f;
-        uint32_t damped                = 0;
+        result.stats.emissiveSurfaces = static_cast<uint32_t>(result.emissive.size());
+        result.stats.emissiveFaces    = 0;
+        float    areaMetres           = 0.0f;
+        uint32_t damped               = 0;
         for (const EmissiveSurface& surface: result.emissive) {
             result.stats.emissiveFaces += surface.faceCount;
             areaMetres += surface.areaSquareMetres;
             damped += (surface.fixtureDamping < 1.0f) ? 1u : 0u;
         }
-        diagnostics.emissiveFaces           = result.stats.emissiveFaces;
-        diagnostics.emissiveSurfaces        = result.stats.emissiveSurfaces;
+        diagnostics.emissiveFaces            = result.stats.emissiveFaces;
+        diagnostics.emissiveSurfaces         = result.stats.emissiveSurfaces;
         diagnostics.emissiveAreaSquareMetres = areaMetres;
-        diagnostics.emissiveFixtureDamped   = damped;
-        diagnostics.emissiveDroppedCap = (faceCount > result.emissive.size()) ? static_cast<uint32_t>(faceCount - result.emissive.size()) : 0u;
-        diagnostics.totalEmissiveIntensity = 0.0f;
+        diagnostics.emissiveFixtureDamped    = damped;
+        diagnostics.emissiveDroppedCap       = (faceCount > result.emissive.size()) ? static_cast<uint32_t>(faceCount - result.emissive.size()) : 0u;
+        diagnostics.totalEmissiveIntensity   = 0.0f;
         for (size_t i = before; i < result.lights.size(); ++i) {
             diagnostics.totalEmissiveIntensity += result.lights[i].intensity;
         }
@@ -1435,7 +1444,7 @@ auto ImportMapGeometry(const Map& map, const ImportOptions& options) -> Imported
     if (options.ingestVradBake && !options.useVradLightmaps && options.gatherLights && !map.lighting.empty()) {
         const BakeField field = BuildBakeField(map, options, options.bakeVplBudget, options.bakeVplWeight);
         if (field.hasBake) {
-            result.ambient      = field.ambient;
+            result.ambient          = field.ambient;
             result.stats.bakeLuxels = field.sampleCount;
             for (const PointLight& vpl: field.vpls) {
                 result.lights.push_back(vpl);

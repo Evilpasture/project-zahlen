@@ -2,16 +2,16 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "HostBlitLog.hpp"
 #if defined(__APPLE__)
-
-#include <Zahlen/Log.hpp>
-#include "render/OpenGLHacks/HostBlitLog.hpp"
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION
+#endif
+#include "vulkan/Rendering.hpp"
 #include <GLFW/glfw3.h>
 #include <OpenGL/gl.h>
-#include "vulkan/Rendering.hpp"
-
+#include <Zahlen/Log.hpp>
 #include <cstdint>
-#include <cstdio>
 #include <utility>
 
 #ifndef GL_BGRA
@@ -48,14 +48,16 @@ bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
     for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
         const VkMemoryPropertyFlags f = props.memoryTypes[i].propertyFlags;
         const bool usable = (typeBits & (1u << i)) != 0 && (f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 && (f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
-        if (!usable)
+        if (!usable) {
             continue;
+        }
         if ((f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0) {
             out = i;
             return true;
         }
-        if (fallback == UINT32_MAX)
+        if (fallback == UINT32_MAX) {
             fallback = i;
+        }
     }
     if (fallback != UINT32_MAX) {
         out = fallback;
@@ -66,8 +68,9 @@ bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
 
 void DestroyStaging() noexcept {
     if (g.staging != VK_NULL_HANDLE) {
-        if (g.mapped != nullptr)
+        if (g.mapped != nullptr) {
             vkUnmapMemory(g.device, g.memory);
+        }
         vkDestroyBuffer(g.device, g.staging, nullptr);
         vkFreeMemory(g.device, g.memory, nullptr);
         g.staging  = VK_NULL_HANDLE;
@@ -78,8 +81,9 @@ void DestroyStaging() noexcept {
 }
 
 bool EnsureStaging(VkDeviceSize bytes) noexcept {
-    if (bytes <= g.capacity)
+    if (bytes <= g.capacity) {
         return true;
+    }
     DestroyStaging();
 
     const VkBufferCreateInfo bi {
@@ -126,10 +130,14 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
 
 bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
     auto acquired = g.ring.Acquire();
-    if (!acquired) { return false; }
-    auto slot = *acquired;
+    if (!acquired) {
+        return false;
+    }
+    auto slot      = *acquired;
     auto recording = Vk::CommandRecorder::Begin(slot.cmd);
-    if (!recording) { return false; }
+    if (!recording) {
+        return false;
+    }
     const VkCommandBuffer cmd = recording->Handle();
 
     view.Transition(
@@ -145,7 +153,9 @@ bool ReadBackPixels(Vk::ImageView view, uint32_t width, uint32_t height, VkImage
     );
 
     auto executable = std::move(*recording).End();
-    if (!executable || !g.ring.Submit(g.queue, slot, std::move(*executable))) { return false; }
+    if (!executable || !g.ring.Submit(g.queue, slot, std::move(*executable))) {
+        return false;
+    }
     return g.ring.WaitValue(g.ring.CompletionValue(slot.index)) == VK_SUCCESS;
 }
 
@@ -164,7 +174,8 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         return nullptr;
     }
 
-    int fbW = static_cast<int>(width), fbH = static_cast<int>(height);
+    int fbW = static_cast<int>(width);
+    int fbH = static_cast<int>(height);
     if (requested != nullptr) {
         glfwGetFramebufferSize(requested, &fbW, &fbH);
     }
@@ -186,7 +197,7 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     int fbW = 0;
     int fbH = 0;
     glfwGetFramebufferSize(glfwGetCurrentContext(), &fbW, &fbH);
-    if (fbW <= 0 || fbH <= 0 || !g.mapped) {
+    if (fbW <= 0 || fbH <= 0 || (g.mapped == nullptr)) {
         return;
     }
 
@@ -225,13 +236,13 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     glPixelZoom(1.0f, 1.0f);
 }
 
-}
-
+} // namespace
 void Shutdown() noexcept;
 
 [[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept {
-    if (g.ready)
+    if (g.ready) {
         return true;
+    }
     if (gpu == VK_NULL_HANDLE || device == VK_NULL_HANDLE || queue == VK_NULL_HANDLE) {
         return false;
     }
@@ -241,7 +252,7 @@ void Shutdown() noexcept;
     g.queueFamily = queueFamily;
 
     if (auto res = g.ring.Init(device, queueFamily); !res) {
-        kLog.Error("HostBlit: Command ring init failed: {}", res.error());
+        kHostBlitLog.Error("HostBlit: Command ring init failed: {}", res.error());
         Shutdown();
         return false;
     }
@@ -250,15 +261,18 @@ void Shutdown() noexcept;
 }
 
 [[nodiscard]] bool Present(const ZHLN::Vk::Image& src, void* nativeWindow, uint32_t width, uint32_t height, VkFormat format, VkImageLayout srcLayout) noexcept {
-    if (!g.ready || !src.Valid() || width == 0 || height == 0)
+    if (!g.ready || !src.Valid() || width == 0 || height == 0) {
         return false;
+    }
 
     GLFWwindow* target = ResolveWindow(static_cast<GLFWwindow*>(nativeWindow), width, height);
-    if (target == nullptr)
+    if (target == nullptr) {
         return false;
+    }
     glfwPollEvents();
-    if (glfwWindowShouldClose(target))
+    if (glfwWindowShouldClose(target)) {
         return false;
+    }
 
     bool catchUp = false;
     if (target == g.glWindow) {
@@ -271,10 +285,11 @@ void Shutdown() noexcept;
         }
     }
 
-    if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
+    if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4)) {
         return false;
+    }
     if (!ReadBackPixels(src.View().Mip(0), width, height, srcLayout)) {
-        return !glfwWindowShouldClose(target);
+        return glfwWindowShouldClose(target) == 0;
     }
 
     glfwMakeContextCurrent(target);
@@ -282,21 +297,24 @@ void Shutdown() noexcept;
         GlBlit(width, height, format);
     }
     glfwSwapBuffers(target);
-    return !glfwWindowShouldClose(target);
+    return glfwWindowShouldClose(target) == 0;
 }
 
 void Shutdown() noexcept {
     if (g.device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(g.device);
         DestroyStaging();
-        g.ring.Cleanup();
+        if (auto res = g.ring.Cleanup(); !res) {
+            kHostBlitLog.Error("HostBlit: Command ring cleanup failed: {}", res.error());
+        }
     }
-    if (g.glWindow != nullptr)
+    if (g.glWindow != nullptr) {
         glfwDestroyWindow(g.glWindow);
+    }
     g = State {};
 }
 
-}
+} // namespace ZHLN::HostBlit
 
 #else
 
@@ -315,6 +333,6 @@ namespace ZHLN::HostBlit {
 void Shutdown() noexcept {
 }
 
-}
+} // namespace ZHLN::HostBlit
 
 #endif

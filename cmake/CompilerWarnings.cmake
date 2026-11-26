@@ -43,7 +43,7 @@ set(ZHLN_WARNING_CANDIDATES
     -Wlogical-op
 
     # Clang-only diagnostics (GCC drops them in the probe)
-    -Wweak-vtables
+    # -Wweak-vtables # This doesn't help us much.
     -Rpass-missed=loop-vectorize=.*ZHLN.*
 )
 

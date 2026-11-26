@@ -9,10 +9,10 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/GUI/UIData.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Render/Vertex.hpp>
-#include <Zahlen/GUI/UIData.hpp>
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -115,11 +115,10 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         return std::unexpected(UIRendererError::SetupFailed);
     }
 
-    impl.mappings =
-        Vk::HeapMappingBuilder(ctx.heapManager)
-            .Sampler(0, 0, ctx.globalSamplerSlot)
-            .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlotID())
-            .Build();
+    impl.mappings = Vk::HeapMappingBuilder(ctx.heapManager)
+                        .Sampler(0, 0, ctx.globalSamplerSlot)
+                        .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlotID())
+                        .Build();
 
     auto uiShaders = Vk::ShaderStagesView::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();
     if (!uiShaders) {
@@ -137,11 +136,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     const VkFormat presentFormat = ctx.presenter.GetPresentFormat();
     auto           MakeBuilder   = [&]() {
         Vk::PipelineBuilder builder;
-        builder.Shaders(*uiShaders)
-            .Binaries(&ctx.pipelineBinaries)
-            .HeapMappings(mappings, mappings)
-            .AlphaBlend()
-            .CullNone();
+        builder.Shaders(*uiShaders).Binaries(&ctx.pipelineBinaries).HeapMappings(mappings, mappings).AlphaBlend().CullNone();
         return builder;
     };
     auto BuildVariant = [&]<Vk::Format::IsFormat FormatTag>(auto& pipeline) -> std::expected<void, ErrorCode> {
@@ -165,7 +160,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     {
         struct VariantFailure {
             VkFormat  format = VK_FORMAT_UNDEFINED;
-            ErrorCode error {};
+            ErrorCode error;
         };
         BatchResult<VkFormat, VariantFailure> built;
 
@@ -190,8 +185,9 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
             impl.pipelines.pipelines
         );
 
-        built.ForEachError([&ctx](const VariantFailure& failure) {
-            kLog.Warn("UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
+        built.ForEachError([](const VariantFailure& failure) {
+            kLog.Warn(
+                "UIRenderer: no UI pipeline for VkFormat {} ({}); UI targets in that format will be refused rather than drawn.",
                 static_cast<uint32_t>(failure.format), failure.error
             );
         });
@@ -211,8 +207,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     ZHLN::defer  rollback([&] { DestroyBuffers(ctx.allocator); });
     const size_t bufferSize = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexSurface));
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-        auto res =
-            Vk::Buffer::Create(ctx.allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
+        auto res = Vk::Buffer::Create(ctx.allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -274,7 +269,7 @@ void UIRenderer::RecordBatches(
     auto mapped = vbo.Map(*impl.allocator);
     if (!mapped)
         return;
-    auto* positions = mapped->cast<VertexPosition>();
+    auto* positions      = mapped->cast<VertexPosition>();
     auto* basePosPtr     = positions + vertexOffset;
     auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(positions + maxVertices) + vertexOffset;
     std::memcpy(basePosPtr, uiData.positions.data(), safeCount * sizeof(VertexPosition));
@@ -285,12 +280,10 @@ void UIRenderer::RecordBatches(
     UIObjectConstants uipc {};
     // Preserve the UI's top-left-origin projection (unlike the 3D ortho
     // helper, this has a positive Y scale).
-    const float uiWidth = static_cast<float>(width);
+    const float uiWidth  = static_cast<float>(width);
     const float uiHeight = static_cast<float>(height);
-    uipc.orthoMatrix = Mat4x4::FromCols(
-        {2.0f / uiWidth, 0.0f, 0.0f, 0.0f}, {0.0f, 2.0f / uiHeight, 0.0f, 0.0f},
-        {0.0f, 0.0f, 1.0f, 0.0f}, {-1.0f, -1.0f, 0.0f, 1.0f}
-    );
+    uipc.orthoMatrix =
+        Mat4x4::FromCols({2.0f / uiWidth, 0.0f, 0.0f, 0.0f}, {0.0f, 2.0f / uiHeight, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}, {-1.0f, -1.0f, 0.0f, 1.0f});
 
     const VkRect2D defaultScissor = {
         .offset = {.x = 0, .y = 0},
@@ -320,7 +313,7 @@ void UIRenderer::RecordBatches(
                                           VkRect2D {
                                               .offset = {.x = batch.scissorRect.x, .y = batch.scissorRect.y},
                                               .extent = {.width = batch.scissorRect.width, .height = batch.scissorRect.height},
-                                        } :
+                                          } :
                                           defaultScissor,
                           .fallback = defaultScissor}
         );
@@ -361,24 +354,18 @@ void UIRenderer::RecordFallback(
     }
     const VkPipeline pipeline = _impl->fallbackPipeline.Get();
     RecordBatches(encoder, width, height, frameIndex, uiData, [pipeline](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
-        cmd.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
-            {.pipeline = pipeline, .vertexCount = count, .instanceCount = 1}, constants
-        );
+        cmd.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>({.pipeline = pipeline, .vertexCount = count, .instanceCount = 1}, constants);
     });
 }
 
-template void UIRenderer::Record<Vk::Format::B8G8R8A8_SRGB>(
-    const UIColorPass<Vk::Format::B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
-) noexcept;
-template void UIRenderer::Record<Vk::Format::B8G8R8A8_UNorm>(
-    const UIColorPass<Vk::Format::B8G8R8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
-) noexcept;
-template void UIRenderer::Record<Vk::Format::R8G8B8A8_SRGB>(
-    const UIColorPass<Vk::Format::R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
-) noexcept;
-template void UIRenderer::Record<Vk::Format::R8G8B8A8_UNorm>(
-    const UIColorPass<Vk::Format::R8G8B8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData
-) noexcept;
+template void UIRenderer::Record<
+    Vk::Format::B8G8R8A8_SRGB>(const UIColorPass<Vk::Format::B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
+template void UIRenderer::Record<
+    Vk::Format::B8G8R8A8_UNorm>(const UIColorPass<Vk::Format::B8G8R8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
+template void UIRenderer::Record<
+    Vk::Format::R8G8B8A8_SRGB>(const UIColorPass<Vk::Format::R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
+template void UIRenderer::Record<
+    Vk::Format::R8G8B8A8_UNorm>(const UIColorPass<Vk::Format::R8G8B8A8_UNorm>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, UIDrawData) noexcept;
 template void UIRenderer::Record<Vk::Format::R16G16B16A16_SFloat>(
     const UIColorPass<Vk::Format::R16G16B16A16_SFloat>&,
     Vk::CommandEncoder&,

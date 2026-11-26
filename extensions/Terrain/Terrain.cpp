@@ -131,7 +131,7 @@ auto System::Create(Geometry geometry, const CreateInfo& info) -> std::expected<
         const auto body = engine.Simulation()->CreateRigidBody(
             COM::InChain(
                 Physics::HeightFieldShapeDesc {.heights = tile.geometry.heights.data(), .sampleCount = n, .worldSize = tile.geometry.worldSize},
-                Physics::RigidBodyPose {.position = {info.position.x, info.position.y, info.position.z}, .motionType = Physics::MotionType::Static},
+                Physics::RigidBodyPose {.position = info.position.Cast<double>(), .motionType = Physics::MotionType::Static},
                 Physics::RigidBodyFilter {.layer = Physics::ObjectLayer::NonMoving, .hasExplicitLayer = true}
             )
         );

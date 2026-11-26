@@ -22,7 +22,6 @@
 #include <type_traits>
 #include <vector>
 
-
 // ============================================================================
 // Reflection-driven TOML
 //
@@ -153,33 +152,33 @@ class Document {
 // Fields are read and written in declaration order through reflection, so a
 // specialisation is one line and supplies no accessors.
 template <typename T>
-struct Vector : std::false_type {};
+struct Vector: std::false_type {};
 
 namespace TemplatedDetail {
 
-    // std::array and other fixed-size ranges: sized at compile time, so they
-    // are filled by index instead of push_back.
-    template <typename T>
-    concept FixedArray = requires(T& t) {
-        typename T::value_type;
-        { std::tuple_size<T>::value } -> std::convertible_to<size_t>;
-    };
+// std::array and other fixed-size ranges: sized at compile time, so they
+// are filled by index instead of push_back.
+template <typename T>
+concept FixedArray = requires(T& t) {
+    typename T::value_type;
+    { std::tuple_size<T>::value } -> std::convertible_to<size_t>;
+};
 
-    template <typename T>
-    concept StringLike = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>;
+template <typename T>
+concept StringLike = std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>;
 
-    template <typename T>
-    concept MapLike = requires {
-        typename T::key_type;
-        typename T::mapped_type;
-    };
+template <typename T>
+concept MapLike = requires {
+    typename T::key_type;
+    typename T::mapped_type;
+};
 
-    // A struct that opted in to array form via Vector.
-    template <typename T>
-    concept VectorLike = Vector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
+// A struct that opted in to array form via Vector.
+template <typename T>
+concept VectorLike = Vector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
-    template <typename T>
-    concept OptionalLike = requires { typename T::value_type; } && std::is_same_v<T, std::optional<typename T::value_type>>;
+template <typename T>
+concept OptionalLike = requires { typename T::value_type; } && std::is_same_v<T, std::optional<typename T::value_type>>;
 
 } // namespace TemplatedDetail
 
@@ -267,6 +266,41 @@ auto GetValue(Value reader, ParseFailure* failure = nullptr) -> std::expected<Fi
             container.emplace(std::string {key}, std::move(*parsed));
         }
         return container;
+    } else if constexpr (TemplatedDetail::VectorLike<Decayed>) {
+        // `[x, y, z]` back into the fields, in declaration order.
+        if (!reader.IsArray()) {
+            return std::unexpected(TOMLError::TypeMismatch);
+        }
+        constexpr size_t kCapacity = ZHLN::Reflect::FieldCount<Decayed>();
+        const size_t     size      = reader.GetArraySize();
+        if (size > kCapacity) {
+            return fail(TOMLError::TypeMismatch, std::format("array of {} elements exceeds field capacity {}", size, kCapacity));
+        }
+
+        Decayed                  container {};
+        std::optional<ErrorCode> err;
+        size_t                   index = 0;
+        ZHLN::Reflect::ForEachField(container, [&](auto& component) -> void {
+            const size_t at = index++;
+            if (err || at >= size) {
+                return; // A short array leaves the trailing components alone.
+            }
+            auto element = reader.GetArrayElement(at);
+            if (!element) {
+                err = element.error();
+                return;
+            }
+            auto parsed = GetValue<std::remove_cvref_t<decltype(component)>>(*element, failure);
+            if (!parsed) {
+                err = parsed.error();
+                return;
+            }
+            component = std::move(*parsed);
+        });
+        if (err) {
+            return std::unexpected(*err);
+        }
+        return container;
     } else if constexpr (TemplatedDetail::FixedArray<Decayed>) {
         if (!reader.IsArray()) {
             return std::unexpected(TOMLError::TypeMismatch);
@@ -309,41 +343,6 @@ auto GetValue(Value reader, ParseFailure* failure = nullptr) -> std::expected<Fi
             container.push_back(std::move(*parsed));
         }
         return container;
-    } else if constexpr (TemplatedDetail::VectorLike<Decayed>) {
-        // `[x, y, z]` back into the fields, in declaration order.
-        if (!reader.IsArray()) {
-            return std::unexpected(TOMLError::TypeMismatch);
-        }
-        constexpr size_t kCapacity = ZHLN::Reflect::FieldCount<Decayed>();
-        const size_t     size      = reader.GetArraySize();
-        if (size > kCapacity) {
-            return fail(TOMLError::TypeMismatch, std::format("array of {} elements exceeds field capacity {}", size, kCapacity));
-        }
-
-        Decayed              container {};
-        std::optional<ErrorCode> err;
-        size_t               index = 0;
-        ZHLN::Reflect::ForEachField(container, [&](auto& component) -> void {
-            const size_t at = index++;
-            if (err || at >= size) {
-                return; // A short array leaves the trailing components alone.
-            }
-            auto element = reader.GetArrayElement(at);
-            if (!element) {
-                err = element.error();
-                return;
-            }
-            auto parsed = GetValue<std::remove_cvref_t<decltype(component)>>(*element, failure);
-            if (!parsed) {
-                err = parsed.error();
-                return;
-            }
-            component = std::move(*parsed);
-        });
-        if (err) {
-            return std::unexpected(*err);
-        }
-        return container;
     } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
         return ParseObject<Decayed>(reader, failure);
     } else {
@@ -367,7 +366,7 @@ auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorC
         return std::unexpected(documentKeys.error());
     }
 
-    T                       obj {};
+    T                        obj {};
     std::optional<ErrorCode> err;
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> void {
@@ -392,8 +391,8 @@ auto ParseObject(Value reader, ParseFailure* failure) -> std::expected<T, ErrorC
                 *failure = ParseFailure {
                     .code   = *err,
                     .line   = 0,
-                    .detail = fieldFailure.detail.empty() ? std::format("field '{}' did not match the expected type", fieldName)
-                                                          : std::format("field '{}': {}", fieldName, fieldFailure.detail),
+                    .detail = fieldFailure.detail.empty() ? std::format("field '{}' did not match the expected type", fieldName) :
+                                                            std::format("field '{}': {}", fieldName, fieldFailure.detail),
                 };
             }
             return;
@@ -452,271 +451,283 @@ namespace ReflectTOML {
 
 namespace TemplatedDetail {
 
-    // Serialises as a TOML table: [header] on its own, rather than inline
-    // after an `=`.
-    template <typename T>
-    consteval auto IsTOMLTable() -> bool {
-        using Decayed = std::remove_cvref_t<T>;
-        if constexpr (StringLike<Decayed> || std::is_enum_v<Decayed> || std::is_arithmetic_v<Decayed>) {
-            return false;
-        } else if constexpr (VectorLike<Decayed>) {
-            return false; // `[x, y, z]` after an `=`, not a table of its own.
-        } else if constexpr (MapLike<Decayed>) {
-            return true;
-        } else if constexpr (FixedArray<Decayed> || std::ranges::range<Decayed>) {
-            return false;
-        } else {
-            return ZHLN::Reflect::FieldCount<Decayed>() > 0;
-        }
+// Serialises as a TOML table: [header] on its own, rather than inline
+// after an `=`.
+template <typename T>
+consteval auto IsTOMLTable() -> bool {
+    using Decayed = std::remove_cvref_t<T>;
+    if constexpr (StringLike<Decayed> || std::is_enum_v<Decayed> || std::is_arithmetic_v<Decayed>) {
+        return false;
+    } else if constexpr (VectorLike<Decayed>) {
+        return false; // `[x, y, z]` after an `=`, not a table of its own.
+    } else if constexpr (MapLike<Decayed>) {
+        return true;
+    } else if constexpr (FixedArray<Decayed> || std::ranges::range<Decayed>) {
+        return false;
+    } else {
+        return ZHLN::Reflect::FieldCount<Decayed>() > 0;
     }
+}
 
-    // Serialises as [[array of tables]]: a sequence of struct-shaped things.
-    template <typename T>
-    consteval auto IsTOMLTableArray() -> bool {
-        using Decayed = std::remove_cvref_t<T>;
-        if constexpr (StringLike<Decayed> || MapLike<Decayed>) {
-            return false;
-        } else if constexpr (std::ranges::range<Decayed>) {
-            return IsTOMLTable<std::ranges::range_value_t<Decayed>>();
-        } else {
-            return false;
-        }
+// Serialises as [[array of tables]]: a sequence of struct-shaped things.
+template <typename T>
+consteval auto IsTOMLTableArray() -> bool {
+    using Decayed = std::remove_cvref_t<T>;
+    if constexpr (std::ranges::range<Decayed> && !StringLike<Decayed> && !MapLike<Decayed> && !VectorLike<Decayed>) {
+        return IsTOMLTable<std::ranges::range_value_t<Decayed>>();
     }
-
-    // TOML bare keys are [A-Za-z0-9_-]+; anything else has to be quoted.
-    inline void AppendTOMLKey(std::string& out, std::string_view key) {
-        const bool bare = !key.empty() && std::ranges::all_of(key, [](char c) {
-                              return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-                          });
-        if (bare) {
-            out += key;
-            return;
-        }
-        out += '"';
-        for (const char c: key) {
-            if (c == '"' || c == '\\') {
-                out += '\\';
-            }
-            out += c;
-        }
-        out += '"';
+    return false;
+}
+// TOML bare keys are [A-Za-z0-9_-]+; anything else has to be quoted.
+inline void AppendTOMLKey(std::string& out, std::string_view key) {
+    const bool bare = !key.empty() && std::ranges::all_of(key, [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+    });
+    if (bare) {
+        out += key;
+        return;
     }
+    out += '"';
+    for (const char c: key) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+        }
+        out += c;
+    }
+    out += '"';
+}
 
-    inline void AppendTOMLString(std::string& out, std::string_view text) {
-        static constexpr std::string_view kHexDigits {"0123456789abcdef"};
+inline void AppendTOMLString(std::string& out, std::string_view text) {
+    static constexpr std::string_view kHexDigits {"0123456789abcdef"};
 
-        out += '"';
-        for (const char c: text) {
-            switch (c) {
-                case '"':  out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\n': out += "\\n"; break;
-                case '\t': out += "\\t"; break;
-                case '\r': out += "\\r"; break;
-                case '\b': out += "\\b"; break;
-                case '\f': out += "\\f"; break;
-                default: {
-                    const auto byte = static_cast<unsigned char>(c);
-                    if (byte < 0x20 || byte == 0x7F) {
-                        out += "\\u00";
-                        out += kHexDigits[(byte >> 4) & 0xF];
-                        out += kHexDigits[byte & 0xF];
-                    } else {
-                        out += c;
-                    }
+    out += '"';
+    for (const char c: text) {
+        switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\b':
+                out += "\\b";
+                break;
+            case '\f':
+                out += "\\f";
+                break;
+            default: {
+                const auto byte = static_cast<unsigned char>(c);
+                if (byte < 0x20 || byte == 0x7F) {
+                    out += "\\u00";
+                    out += kHexDigits[(byte >> 4) & 0xF];
+                    out += kHexDigits[byte & 0xF];
+                } else {
+                    out += c;
                 }
             }
         }
-        out += '"';
+    }
+    out += '"';
+}
+
+// TOML distinguishes 1 from 1.0, and a float field that emitted `1` would
+// come back as an integer node. Every float therefore carries a fraction
+// or an exponent.
+//
+// Format at the field's own precision. Promoting float to double first
+// turns 0.1f into 0.10000000149011612, which is not a number anyone wrote
+// and is not what `std::format("{}")` prints for the original float.
+template <typename F>
+    requires std::is_floating_point_v<F>
+inline void AppendTOMLFloat(std::string& out, F value) {
+    if (std::isnan(value)) {
+        out += "nan";
+        return;
+    }
+    if (std::isinf(value)) {
+        out += value > 0 ? "inf" : "-inf";
+        return;
     }
 
-    // TOML distinguishes 1 from 1.0, and a float field that emitted `1` would
-    // come back as an integer node. Every float therefore carries a fraction
-    // or an exponent.
-    //
-    // Format at the field's own precision. Promoting float to double first
-    // turns 0.1f into 0.10000000149011612, which is not a number anyone wrote
-    // and is not what `std::format("{}")` prints for the original float.
-    template <typename F>
-        requires std::is_floating_point_v<F>
-    inline void AppendTOMLFloat(std::string& out, F value) {
-        if (std::isnan(value)) {
-            out += "nan";
-            return;
-        }
-        if (std::isinf(value)) {
-            out += value > 0 ? "inf" : "-inf";
-            return;
-        }
-
-        const std::string text = std::format("{}", value);
-        out += text;
-        if (text.find_first_of(".eE") == std::string::npos) {
-            out += ".0";
-        }
+    const std::string text = std::format("{}", value);
+    out += text;
+    if (text.find_first_of(".eE") == std::string::npos) {
+        out += ".0";
     }
+}
 
-    template <typename T>
-    void AppendTOMLInline(std::string& out, const T& value);
+template <typename T>
+void AppendTOMLInline(std::string& out, const T& value);
 
-    template <typename T>
-    void AppendTOMLInlineTable(std::string& out, const T& value) {
+template <typename T>
+void AppendTOMLInlineTable(std::string& out, const T& value) {
+    out += '{';
+    bool first = true;
+    ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+        if (!first) {
+            out += ", ";
+        }
+        first = false;
+        AppendTOMLKey(out, fieldName);
+        out += " = ";
+        AppendTOMLInline(out, fieldVal);
+    });
+    out += '}';
+}
+
+// Everything that can sit to the right of an `=`.
+template <typename T>
+void AppendTOMLInline(std::string& out, const T& value) {
+    using Decayed = std::remove_cvref_t<T>;
+
+    if constexpr (std::is_same_v<Decayed, bool>) {
+        out += value ? "true" : "false";
+    } else if constexpr (std::is_enum_v<Decayed>) {
+        AppendTOMLString(out, ZHLN::Reflect::EnumToString(value));
+    } else if constexpr (std::is_integral_v<Decayed>) {
+        out += std::format("{}", value);
+    } else if constexpr (std::is_floating_point_v<Decayed>) {
+        AppendTOMLFloat(out, value);
+    } else if constexpr (StringLike<Decayed>) {
+        AppendTOMLString(out, value);
+    } else if constexpr (std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*>) {
+        AppendTOMLString(out, value != nullptr ? std::string_view {value} : std::string_view {});
+    } else if constexpr (std::is_array_v<Decayed> && std::is_same_v<std::remove_extent_t<Decayed>, char>) {
+        AppendTOMLString(out, std::string_view {value});
+    } else if constexpr (requires { value.has_value(); }) {
+        if (value.has_value()) {
+            AppendTOMLInline(out, *value);
+        } else {
+            // Unreachable through AppendTOMLTableBody, which drops empty
+            // optionals rather than writing them: TOML has no null.
+            out += "\"\"";
+        }
+    } else if constexpr (MapLike<Decayed>) {
         out += '{';
         bool first = true;
-        ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+        for (const auto& [key, mapped]: value) {
             if (!first) {
                 out += ", ";
             }
             first = false;
+            AppendTOMLKey(out, key);
+            out += " = ";
+            AppendTOMLInline(out, mapped);
+        }
+        out += '}';
+
+    } else if constexpr (VectorLike<Decayed>) {
+        out += '[';
+        bool first = true;
+        ZHLN::Reflect::ForEachField(value, [&](const auto& component) {
+            if (!first) {
+                out += ", ";
+            }
+            first = false;
+            AppendTOMLInline(out, component);
+        });
+        out += ']';
+
+    } else if constexpr (std::ranges::range<Decayed> || FixedArray<Decayed>) {
+        out += '[';
+        bool first = true;
+        for (const auto& element: value) {
+            if (!first) {
+                out += ", ";
+            }
+            first = false;
+            AppendTOMLInline(out, element);
+        }
+        out += ']';
+    } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
+        AppendTOMLInlineTable(out, value);
+    } else {
+        static_assert(!sizeof(Decayed), "Serialize: unsupported field type (see the supported set in toml/TOML.hpp)");
+    }
+}
+
+inline void AppendTOMLHeader(std::string& out, std::string_view path, bool arrayElement) {
+    if (!out.empty() && !out.ends_with("\n\n")) {
+        out += '\n';
+    }
+    out += arrayElement ? "[[" : "[";
+    out += path;
+    out += arrayElement ? "]]\n" : "]\n";
+}
+
+[[nodiscard]] inline auto JoinTOMLPath(std::string_view prefix, std::string_view key) -> std::string {
+    std::string path;
+    if (!prefix.empty()) {
+        path += prefix;
+        path += '.';
+    }
+    AppendTOMLKey(path, key);
+    return path;
+}
+
+template <typename T>
+void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path);
+
+// One sub-table, whatever shape it takes: struct, map of structs, or a
+// sequence that becomes [[array of tables]].
+template <typename T>
+void AppendTOMLSubTable(std::string& out, const T& value, std::string_view path) {
+    using Decayed = std::remove_cvref_t<T>;
+
+    if constexpr (IsTOMLTableArray<Decayed>()) {
+        for (const auto& element: value) {
+            AppendTOMLHeader(out, path, true);
+            AppendTOMLTableBody(out, element, path);
+        }
+    } else if constexpr (MapLike<Decayed>) {
+        for (const auto& [key, mapped]: value) {
+            const std::string childPath = JoinTOMLPath(path, key);
+            AppendTOMLHeader(out, childPath, false);
+            AppendTOMLTableBody(out, mapped, childPath);
+        }
+    } else {
+        AppendTOMLHeader(out, path, false);
+        AppendTOMLTableBody(out, value, path);
+    }
+}
+
+// Scalars first, then sub-tables. TOML binds a bare key to the header
+// above it, so a `key = value` emitted after a [sub.table] would silently
+// land in the wrong table -- this ordering is a correctness requirement,
+// not a style choice.
+template <typename T>
+void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path) {
+    ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+        using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
+        if constexpr (!IsTOMLTable<FieldType>() && !IsTOMLTableArray<FieldType>()) {
+            if constexpr (requires { fieldVal.has_value(); }) {
+                if (!fieldVal.has_value()) {
+                    return; // TOML says "absent" by omission.
+                }
+            }
             AppendTOMLKey(out, fieldName);
             out += " = ";
             AppendTOMLInline(out, fieldVal);
-        });
-        out += '}';
-    }
-
-    // Everything that can sit to the right of an `=`.
-    template <typename T>
-    void AppendTOMLInline(std::string& out, const T& value) {
-        using Decayed = std::remove_cvref_t<T>;
-
-        if constexpr (std::is_same_v<Decayed, bool>) {
-            out += value ? "true" : "false";
-        } else if constexpr (std::is_enum_v<Decayed>) {
-            AppendTOMLString(out, ZHLN::Reflect::EnumToString(value));
-        } else if constexpr (std::is_integral_v<Decayed>) {
-            out += std::format("{}", value);
-        } else if constexpr (std::is_floating_point_v<Decayed>) {
-            AppendTOMLFloat(out, value);
-        } else if constexpr (StringLike<Decayed>) {
-            AppendTOMLString(out, value);
-        } else if constexpr (std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*>) {
-            AppendTOMLString(out, value != nullptr ? std::string_view {value} : std::string_view {});
-        } else if constexpr (std::is_array_v<Decayed> && std::is_same_v<std::remove_extent_t<Decayed>, char>) {
-            AppendTOMLString(out, std::string_view {value});
-        } else if constexpr (requires { value.has_value(); }) {
-            if (value.has_value()) {
-                AppendTOMLInline(out, *value);
-            } else {
-                // Unreachable through AppendTOMLTableBody, which drops empty
-                // optionals rather than writing them: TOML has no null.
-                out += "\"\"";
-            }
-        } else if constexpr (MapLike<Decayed>) {
-            out += '{';
-            bool first = true;
-            for (const auto& [key, mapped]: value) {
-                if (!first) {
-                    out += ", ";
-                }
-                first = false;
-                AppendTOMLKey(out, key);
-                out += " = ";
-                AppendTOMLInline(out, mapped);
-            }
-            out += '}';
-        } else if constexpr (std::ranges::range<Decayed> || FixedArray<Decayed>) {
-            out += '[';
-            bool first = true;
-            for (const auto& element: value) {
-                if (!first) {
-                    out += ", ";
-                }
-                first = false;
-                AppendTOMLInline(out, element);
-            }
-            out += ']';
-        } else if constexpr (VectorLike<Decayed>) {
-            out += '[';
-            bool first = true;
-            ZHLN::Reflect::ForEachField(value, [&](const auto& component) {
-                if (!first) {
-                    out += ", ";
-                }
-                first = false;
-                AppendTOMLInline(out, component);
-            });
-            out += ']';
-        } else if constexpr (ZHLN::Reflect::FieldCount<Decayed>() > 0) {
-            AppendTOMLInlineTable(out, value);
-        } else {
-            static_assert(!sizeof(Decayed), "Serialize: unsupported field type (see the supported set in toml/TOML.hpp)");
-        }
-    }
-
-    inline void AppendTOMLHeader(std::string& out, std::string_view path, bool arrayElement) {
-        if (!out.empty() && !out.ends_with("\n\n")) {
             out += '\n';
         }
-        out += arrayElement ? "[[" : "[";
-        out += path;
-        out += arrayElement ? "]]\n" : "]\n";
-    }
+    });
 
-    [[nodiscard]] inline auto JoinTOMLPath(std::string_view prefix, std::string_view key) -> std::string {
-        std::string path;
-        if (!prefix.empty()) {
-            path += prefix;
-            path += '.';
+    ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
+        using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
+        if constexpr (IsTOMLTable<FieldType>() || IsTOMLTableArray<FieldType>()) {
+            AppendTOMLSubTable(out, fieldVal, JoinTOMLPath(path, fieldName));
         }
-        AppendTOMLKey(path, key);
-        return path;
-    }
-
-    template <typename T>
-    void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path);
-
-    // One sub-table, whatever shape it takes: struct, map of structs, or a
-    // sequence that becomes [[array of tables]].
-    template <typename T>
-    void AppendTOMLSubTable(std::string& out, const T& value, std::string_view path) {
-        using Decayed = std::remove_cvref_t<T>;
-
-        if constexpr (IsTOMLTableArray<Decayed>()) {
-            for (const auto& element: value) {
-                AppendTOMLHeader(out, path, true);
-                AppendTOMLTableBody(out, element, path);
-            }
-        } else if constexpr (MapLike<Decayed>) {
-            for (const auto& [key, mapped]: value) {
-                const std::string childPath = JoinTOMLPath(path, key);
-                AppendTOMLHeader(out, childPath, false);
-                AppendTOMLTableBody(out, mapped, childPath);
-            }
-        } else {
-            AppendTOMLHeader(out, path, false);
-            AppendTOMLTableBody(out, value, path);
-        }
-    }
-
-    // Scalars first, then sub-tables. TOML binds a bare key to the header
-    // above it, so a `key = value` emitted after a [sub.table] would silently
-    // land in the wrong table -- this ordering is a correctness requirement,
-    // not a style choice.
-    template <typename T>
-    void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path) {
-        ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
-            using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
-            if constexpr (!IsTOMLTable<FieldType>() && !IsTOMLTableArray<FieldType>()) {
-                if constexpr (requires { fieldVal.has_value(); }) {
-                    if (!fieldVal.has_value()) {
-                        return; // TOML says "absent" by omission.
-                    }
-                }
-                AppendTOMLKey(out, fieldName);
-                out += " = ";
-                AppendTOMLInline(out, fieldVal);
-                out += '\n';
-            }
-        });
-
-        ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
-            using FieldType = std::remove_cvref_t<decltype(fieldVal)>;
-            if constexpr (IsTOMLTable<FieldType>() || IsTOMLTableArray<FieldType>()) {
-                AppendTOMLSubTable(out, fieldVal, JoinTOMLPath(path, fieldName));
-            }
-        });
-    }
+    });
+}
 
 } // namespace TemplatedDetail
 
