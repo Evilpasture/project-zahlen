@@ -291,7 +291,7 @@ auto PatchVector(T& target, Value table, std::string* detail = nullptr) -> std::
 // receives what failed (field path composed by PatchObject, string
 // lengths, enum tokens, array overflow) -- pure data, so this layer
 // never needs a logger to explain itself.
-template <SequenceContainer T>
+template <typename T>
 auto ReadInto(T& dst, Value reader, std::string* detail = nullptr) -> std::expected<void, ErrorCode> {
     using Decayed = std::remove_cvref_t<T>;
 
