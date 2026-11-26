@@ -1,40 +1,40 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Math/Matrix.hpp>
-#include <Zahlen/Math/Vec4.hpp>
-#include <Zahlen/Math/Vec3.hpp>
 #include "RenderSystem.hpp"
 #include "../EngineErrors.hpp"
 #include "../KernelSession.hpp"
-#include <engine/AssetManager.hpp>
-#include <render/SceneData.hpp>
-#include <Zahlen/Core/Defer.hpp>
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
-#include <Zahlen/Math/Camera.hpp>
-#include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <engine/PrefabFactory.hpp>
-#include <engine/World.hpp>
-#include <engine/Engine.hpp>
-#include <Zahlen/Log.hpp>
-#include <Zahlen/Math/Math3D.hpp>
-#include <window/PlatformHost.hpp>
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Profiler.hpp>
-#include <engine/PoseUploads.hpp>
-#include <render/Render.hpp>
-#include <window/Window.hpp>
-#include <ecs/ECS.hpp>
-#include <ecs/SystemParameters.hpp>
-#include <physics/Physics.hpp>
+#include <Zahlen/ECS/Components.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Math3D.hpp>
+#include <Zahlen/Math/Matrix.hpp>
+#include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Math/Vec4.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ecs/ECS.hpp>
+#include <ecs/SystemParameters.hpp>
+#include <engine/AssetManager.hpp>
+#include <engine/Engine.hpp>
+#include <engine/PoseUploads.hpp>
+#include <engine/PrefabFactory.hpp>
+#include <engine/World.hpp>
 #include <optional>
+#include <physics/Physics.hpp>
+#include <render/Render.hpp>
+#include <render/SceneData.hpp>
 #include <span>
+#include <window/PlatformHost.hpp>
+#include <window/Window.hpp>
 
 namespace ZHLN {
 namespace {
@@ -46,8 +46,6 @@ namespace {
 // UI is permanently on screen.
 
 } // namespace
-
-
 
 namespace {
 
@@ -89,9 +87,8 @@ using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
         kLog.Warn("No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
     }
-    const std::span<const std::array<float, 3>> sh = pixels->sun
-        ? std::span<const std::array<float, 3>> {pixels->sun->diffuseSH}
-        : std::span<const std::array<float, 3>> {};
+    const std::span<const std::array<float, 3>> sh = pixels->sun ? std::span<const std::array<float, 3>> {pixels->sun->diffuseSH} :
+                                                                   std::span<const std::array<float, 3>> {};
     return rc.SetEnvironmentRadiance({
         .rgba         = pixels->rgba,
         .lightingRgba = pixels->lightingRgba,
@@ -102,13 +99,13 @@ using EnvironmentQuery = ECS::Query<const Components::EnvironmentMapComponent>;
     });
 }
 
-
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
 // The simulation description stays in ECS; only a stable emitter identity crosses
 // the API. Persistent particle buffers are private to the RenderContext.
-using ParticleSubmitQuery = ECS::Query<const Components::CameraComponent, const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
+using ParticleSubmitQuery =
+    ECS::Query<const Components::CameraComponent, const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent>;
 
 void SubmitParticleEmitters(ParticleSubmitQuery query, SceneData& scene) {
     // The frame's camera, when the world has one: an attachment is a scene decision
@@ -161,12 +158,16 @@ void UploadPosePalettes(RenderContext& rc, PoseUploadQueue& poseUploads) {
 }
 
 using MeshSubmitQuery = ECS::Query<
-    const Components::MeshComponent, const Components::OwnedMeshComponent, Components::SkeletalMeshComponent&,
-    const Components::MorphTargetComponent, const Components::WorldTransformComponent, const Components::PBRComponent,
-    const Components::CSGComponent, const Components::AmbientCubeComponent>;
+    const Components::MeshComponent,
+    const Components::OwnedMeshComponent,
+    Components::SkeletalMeshComponent&,
+    const Components::MorphTargetComponent,
+    const Components::WorldTransformComponent,
+    const Components::PBRComponent,
+    const Components::CSGComponent,
+    const Components::AmbientCubeComponent>;
 
 void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
-
     auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
     for (Entity e: query.Entities<Components::MeshComponent>()) {
@@ -214,9 +215,9 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<con
         bool     isSkinned   = skelMesh.has_value();
         uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
 
-        uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
-        uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        auto morphWeights = Components::MorphTargetComponent {}.weights;
+        uint32_t morphOffset      = morphComp ? morphComp->offset : 0;
+        uint32_t activeMorphCount = morphComp ? morphComp->activeCount : 0;
+        auto     morphWeights     = Components::MorphTargetComponent {}.weights;
         if (morphComp) {
             morphWeights = morphComp->weights;
         }
@@ -271,8 +272,8 @@ void SubmitVisibleMeshes(MeshSubmitQuery query, RenderContext& rc, std::span<con
                         auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
                         auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
-                            auto       cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                            auto       cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            auto cutSkelMesh   = query.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                            auto cutWorldTrans = query.Get<Components::WorldTransformComponent>(mod.operandEntity);
                             auto cutWorldMat   = Mat4x4::Identity();
                             auto cutPrevMat    = Mat4x4::Identity();
                             if (cutWorldTrans) {
@@ -344,20 +345,21 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
     }
     if (auto world = query.Get<Components::WorldTransformComponent>(cameraEnt)) {
         const Mat4x4& worldMat = world->world;
-        extra.position = {worldMat[0, 3], worldMat[1, 3], worldMat[2, 3]};
+        extra.position         = {worldMat[0, 3], worldMat[1, 3], worldMat[2, 3]};
     }
     return extra;
 }
 
-[[nodiscard]] auto MakeViewFor(ViewCameraQuery query, const RenderContext& rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
-    -> std::optional<SceneView> {
+[[nodiscard]] auto
+    MakeViewFor(ViewCameraQuery query, const RenderContext& rc, uint64_t frameIndex, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
+        -> std::optional<SceneView> {
     auto cComp = query.Get<Components::CameraComponent>(cameraEnt);
 
     // The view's camera is the entity's own component when it has one; a bare
     // transform entity gets a viewport camera built from the main camera's optics
     // at that entity's position. An entity with neither has no view to build, and
     // the caller skips it rather than rendering from a camera nobody asked for.
-    Camera     cam {};
+    Camera cam {};
     if (cComp) {
         cam = cComp->camera;
     } else if (auto fallback = MakeViewportCamera(query, cameraEnt)) {
@@ -365,10 +367,10 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
     } else {
         return std::nullopt;
     }
-    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.GetViewportAspect();
-    const auto view = cam.GetViewMatrix();
-    const auto proj = cam.GetProjectionMatrix(aspect);
-    auto viewProj = proj * view;
+    const float aspect   = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : rc.GetViewportAspect();
+    const auto  view     = cam.GetViewMatrix();
+    const auto  proj     = cam.GetProjectionMatrix(aspect);
+    auto        viewProj = proj * view;
     if (cComp) {
         viewProj = cComp->viewProj;
     }
@@ -393,11 +395,9 @@ using ViewCameraQuery = ECS::Query<const Components::CameraComponent, const Comp
     };
 }
 
-}
+} // namespace
 
-std::expected<void, ErrorCode> RenderSystem::Update(
-    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, float dt
-) {
+std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, float dt) {
     auto shadowProjView = Mat4x4::Identity();
 
     auto mainResult = RenderMain(engine, reg, sceneData, poseUploads, shadowProjView, dt);
@@ -411,12 +411,10 @@ std::expected<void, ErrorCode> RenderSystem::Update(
     return {};
 }
 
-FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
-    Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads,
-    Mat4x4& outShadowProjView, float dt
-) {
-    auto& rc = engine.Render();
-    defer clearUI([&] { rc.ClearSubmittedUI(); });
+FrameOutcome<FrameSkipped>
+    RenderSystem::RenderMain(Engine& engine, ECS::Registry& reg, SceneData& sceneData, PoseUploadQueue& poseUploads, Mat4x4& outShadowProjView, float dt) {
+    auto&                  rc = engine.Render();
+    defer                  clearUI([&] { rc.ClearSubmittedUI(); });
     const RenderFrameQuery query {reg};
     // The frame's pose, and where "there is nothing to render from" is decided:
     // the component lookup answers emptiness, so the caller checks it before
@@ -428,7 +426,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     // A copy: the pose this frame renders with. Holding a reference into the
     // registry across the whole submit would dangle if that component's storage
     // ever moved.
-    const Camera cam            = camera->camera;
+    const Camera cam = camera->camera;
 
     Mat4x4 vp {};
     Mat4x4 unjitteredVp {};
@@ -478,7 +476,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     // environment exposure. Convert its irradiance/pi to directional radiance
     // (pi * irradiance), then apply that same exposure only to cooked suns.
     const float sunIntensity = sun.intensity * (sun.fromEnvironment ? gfx.environment.ambientExposure : 1.0f);
-    const FVec3 sunRadiance = sun.color * sunIntensity;
+    const FVec3 sunRadiance  = sun.color * sunIntensity;
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
@@ -486,11 +484,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     float textelSize = shadowWidth / static_cast<float>(shadowResolution);
 
     FVec3 shadowCenter = cam.position;
-    shadowCenter.x = std::round(shadowCenter.x / textelSize) * textelSize;
-    shadowCenter.y = std::round(shadowCenter.y / textelSize) * textelSize;
-    shadowCenter.z = std::round(shadowCenter.z / textelSize) * textelSize;
+    shadowCenter.x     = std::round(shadowCenter.x / textelSize) * textelSize;
+    shadowCenter.y     = std::round(shadowCenter.y / textelSize) * textelSize;
+    shadowCenter.z     = std::round(shadowCenter.z / textelSize) * textelSize;
 
-    FVec3  lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
+    FVec3      lightPos  = shadowCenter + sunDirection * Shadows::FarOffset;
     const auto lightView = CreateLookAt(lightPos, shadowCenter, {0.0f, 1.0f, 0.0f});
 
     float      halfWidth = shadowWidth * 0.5f;
@@ -520,12 +518,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     frame.probeMax               = gfx.environment.probeMax;
     frame.probePos               = gfx.environment.probePos;
     frame.useLocalProbe          = gfx.environment.useLocalProbe;
-    // `enableRTR` is "may a shader trace against the BVH this frame?", the same
-    // question RenderGraphDetail::AssembleScenePushConstants answers for the push
-    // block -- and now with the same answer. It used to be reflections-only, which
-    // quietly made the sun contact ray a function of the reflection toggle. The
-    // TLAS-availability half of that test is the renderer's (the engine cannot
-    // know it here); the flags' half is the engine's, and it is both of them.
     frame.enableRTR              = (gfx.rayTracing.enableReflections || gfx.rayTracing.enableShadows) ? 1 : 0;
     frame.fullBright             = gfx.environment.fullBright;
     frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());
@@ -533,9 +525,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     frame.shadowResolution       = gfx.shadows.resolution;
     frame.sunSize                = gfx.shadows.sunSize;
     frame.ambientExposure        = gfx.environment.ambientExposure;
-    frame.skyZenith  = gfx.environment.skyZenith;
-    frame.skyHorizon = gfx.environment.skyHorizon;
-    frame.skyGround  = gfx.environment.skyGround;
+    frame.skyZenith              = gfx.environment.skyZenith;
+    frame.skyHorizon             = gfx.environment.skyHorizon;
+    frame.skyGround              = gfx.environment.skyGround;
 
     sceneData.dt = dt;
 
@@ -550,7 +542,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     }
 
     const ViewportRect viewport = rc.GetViewport();
-    const auto target = engine.AcquireTarget();
+    const auto         target   = engine.AcquireTarget();
     if (!target) {
         return std::unexpected(target.error());
     }
@@ -558,21 +550,19 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         return {};
     }
     const FrameTarget attachment = **target;
-    const auto       sceneView   = MakeViewFor(query.Project<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
+    const auto        sceneView  = MakeViewFor(query.Project<ViewCameraQuery>(), rc, engine.GetCurrentFrame(), cameraEntity, attachment, viewport);
     if (!sceneView) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
     if (auto scene_res = gpuFrame.RenderScene(
-            SceneRenderPass {
-                .view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx
-            },
-            sceneData
+            SceneRenderPass {.view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx}, sceneData
         );
         !scene_res) {
         return std::unexpected(scene_res.error());
     }
 
-    if (auto drawn = gpuFrame.RenderSubmittedUI(WindowID::Primary, attachment); !drawn) return std::unexpected(drawn.error());
+    if (auto drawn = gpuFrame.RenderSubmittedUI(WindowID::Primary, attachment); !drawn)
+        return std::unexpected(drawn.error());
 
     // Every other window in the session, in the same frame: the host's draw hook
     // for that window runs against that window's own acquired image, so one Tick
@@ -582,13 +572,16 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
     // (a custom cursor, an overlay). Skipping it here was why a primary-window
     // draw callback silently never fired.
     if (const auto draw = engine.GetWindowDrawCallback(WindowID::Primary); draw && static_cast<bool>(*draw)) {
-        (*draw)(engine, Engine::WindowRenderView {
-                             .id         = WindowID::Primary,
-                             .target     = attachment,
-                             .size       = engine.Session().WindowExtent(),
-                             .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-                         },
-                gpuFrame);
+        (*draw)(
+            engine,
+            Engine::WindowRenderView {
+                .id         = WindowID::Primary,
+                .target     = attachment,
+                .size       = engine.Session().WindowExtent(),
+                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+            },
+            gpuFrame
+        );
     }
 
     // Every other window in the session, in the same frame: its own UI, then its
@@ -598,8 +591,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         if (id == WindowID::Primary) {
             continue;
         }
-        const auto draw = engine.GetWindowDrawCallback(id);
-        const bool hasUI  = rc.HasSubmittedUI(id);
+        const auto draw  = engine.GetWindowDrawCallback(id);
+        const bool hasUI = rc.HasSubmittedUI(id);
         if ((!draw || !static_cast<bool>(*draw)) && !hasUI) {
             continue;
         }
@@ -614,18 +607,21 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(
         if (!windowTarget->has_value()) {
             continue; // minimized or not presentable this frame
         }
-        const FrameTarget target = **windowTarget;
-        if (auto ui_res = gpuFrame.RenderSubmittedUI(id, target); !ui_res) {
+        const FrameTarget other_target = **windowTarget;
+        if (auto ui_res = gpuFrame.RenderSubmittedUI(id, other_target); !ui_res) {
             return std::unexpected(ui_res.error());
         }
         if (draw && static_cast<bool>(*draw)) {
-            (*draw)(engine, Engine::WindowRenderView {
-                                 .id         = id,
-                                 .target     = target,
-                                 .size       = size,
-                                 .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-                             },
-                    gpuFrame);
+            (*draw)(
+                engine,
+                Engine::WindowRenderView {
+                    .id         = id,
+                    .target     = other_target,
+                    .size       = size,
+                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                },
+                gpuFrame
+            );
         }
     }
 
@@ -653,7 +649,7 @@ void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats,
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
                 float b = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
                 float a = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
-                return FVec4{r, g, b, a};
+                return FVec4 {r, g, b, a};
             };
 
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {
@@ -676,4 +672,4 @@ void RenderSystem::RenderDebug(Engine& engine, const CullingStats& cullingStats,
     }
 }
 
-}
+} // namespace ZHLN

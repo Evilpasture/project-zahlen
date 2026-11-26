@@ -12,21 +12,6 @@ namespace ZHLN::Vk {
 
 namespace {
 
-[[nodiscard]] auto DeviceTypeName(const VkPhysicalDeviceType type) noexcept -> std::string_view {
-    switch (type) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-            return "discrete GPU";
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-            return "integrated GPU";
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-            return "virtual GPU";
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:
-            return "CPU Vulkan device";
-        default:
-            return "other Vulkan device";
-    }
-}
-
 [[nodiscard]] auto DefaultScore(const PhysicalDeviceInfo& info) noexcept -> int32_t {
     if (!info.hasGraphics || (!info.hasPresent && info.presentFamily == UINT32_MAX)) {
         return -1;
@@ -228,9 +213,9 @@ auto QueryAccelerationStructureScratchAlignment(const VkPhysicalDevice physical)
     };
     vkGetPhysicalDeviceProperties2(physical, &properties);
 
-    return accel_properties.minAccelerationStructureScratchOffsetAlignment != 0
-               ? static_cast<VkDeviceSize>(accel_properties.minAccelerationStructureScratchOffsetAlignment)
-               : kFallbackAlignment;
+    return accel_properties.minAccelerationStructureScratchOffsetAlignment != 0 ?
+               static_cast<VkDeviceSize>(accel_properties.minAccelerationStructureScratchOffsetAlignment) :
+               kFallbackAlignment;
 }
 
 auto QueryMeshShaderLimits(const VkPhysicalDevice physical) noexcept -> MeshShaderLimits {

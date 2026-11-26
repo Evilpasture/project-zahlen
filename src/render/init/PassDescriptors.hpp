@@ -3,9 +3,8 @@
 
 #pragma once
 
-#include "vulkan/VulkanHeader.hpp"
-
 #include "render/RenderInternal.hpp"
+#include "vulkan/VulkanHeader.hpp"
 #include "vulkan/pipeline/FullscreenPass.hpp"
 #include <initializer_list>
 #include <span>
@@ -28,17 +27,17 @@ GraphicsPassDesc(PassT&, const char*, Vk::VertexStageSource, Vk::FragmentStageSo
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
     RenderContext::Impl*            self,
-    Vk::FullscreenPass<LayoutT>&   pass,
+    Vk::FullscreenPass<LayoutT>&    pass,
     Vk::VertexStageSource           vs,
     Vk::FragmentStageSource         ps,
     std::initializer_list<VkFormat> colorFormats,
-    bool                            additive = false,
+    bool                            additive      = false,
     const Vk::HeapMappingTable*     extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeap(
-            self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-            additive, &self->pipelineBinaries, extraMappings
+            self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, additive,
+            &self->pipelineBinaries, extraMappings
         );
     });
 }
@@ -46,18 +45,18 @@ template <typename LayoutT>
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
     RenderContext::Impl*                  self,
-    Vk::FullscreenPass<LayoutT>&         pass,
+    Vk::FullscreenPass<LayoutT>&          pass,
     Vk::VertexStageSource                 vs,
     Vk::FragmentStageSource               ps,
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
-    bool                                  additive = false,
+    bool                                  additive      = false,
     const Vk::HeapMappingTable*           extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeapVariants(
-            self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
-            Vk::HeapLifecycle::Frame, additive, &self->pipelineBinaries, extraMappings
+            self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+            additive, &self->pipelineBinaries, extraMappings
         );
     });
 }
@@ -77,7 +76,8 @@ template <typename PassT>
             } else {
                 Log("Pipeline '{}' hot-reloaded successfully.", name);
             }
-        });
+        }
+    );
     return {};
 }
 
@@ -90,7 +90,7 @@ template <typename BuildFn>
         return std::unexpected(res.error());
     }
     if constexpr (isDev) {
-        self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn, self]() -> auto {
+        self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
                 kLog.Error("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
@@ -102,4 +102,4 @@ template <typename BuildFn>
     return {};
 }
 
-}
+} // namespace ZHLN

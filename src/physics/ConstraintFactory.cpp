@@ -16,6 +16,9 @@ namespace ZHLN {
 namespace Physics {
 
 auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint* {
+    const auto CastToRVec3 = [](ZHLN::FVec3 vec) {
+        return JPH::RVec3(static_cast<JPH::Real>(vec.x), static_cast<JPH::Real>(vec.y), static_cast<JPH::Real>(vec.z));
+    };
     switch (type) {
         case ConstraintType::Fixed: {
             JPH::FixedConstraintSettings settings;
@@ -25,17 +28,17 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
         case ConstraintType::Point: {
             JPH::PointConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mPoint1 = settings.mPoint2 = CastToRVec3(p.pivot);
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Hinge: {
             JPH::HingeConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mPoint1 = settings.mPoint2 = CastToRVec3(p.pivot);
             settings.mHingeAxis1 = settings.mHingeAxis2 = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
 
-            const auto normal = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z).GetNormalizedPerpendicular();
-            settings.mNormalAxis1  = settings.mNormalAxis2 = normal;
+            const auto normal     = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z).GetNormalizedPerpendicular();
+            settings.mNormalAxis1 = settings.mNormalAxis2 = normal;
 
             settings.mLimitsMin = p.limitMin;
             settings.mLimitsMax = p.limitMax;
@@ -50,19 +53,19 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
         }
         case ConstraintType::Slider: {
             JPH::SliderConstraintSettings settings;
-            settings.mSpace       = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
+            settings.mPoint1 = settings.mPoint2 = CastToRVec3(p.pivot);
             settings.mSliderAxis1 = settings.mSliderAxis2 = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
-            settings.mLimitsMin                          = p.limitMin;
-            settings.mLimitsMax                          = p.limitMax;
+            settings.mLimitsMin                           = p.limitMin;
+            settings.mLimitsMax                           = p.limitMax;
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Cone: {
             JPH::ConeConstraintSettings settings;
             settings.mSpace  = JPH::EConstraintSpace::WorldSpace;
-            settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+            settings.mPoint1 = settings.mPoint2 = CastToRVec3(p.pivot);
 
-            auto axis = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
+            auto        axis  = JPH::Vec3(p.axis.x, p.axis.y, p.axis.z);
             const float lenSq = axis.LengthSq();
             if (lenSq < 1e-6f) {
                 axis = JPH::Vec3::sAxisY();
@@ -70,8 +73,8 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
                 axis /= JPH::Sqrt(lenSq);
             }
 
-            settings.mTwistAxis1    = settings.mTwistAxis2 = axis;
-            settings.mHalfConeAngle = p.limitMax;
+            settings.mTwistAxis1 = settings.mTwistAxis2 = axis;
+            settings.mHalfConeAngle                     = p.limitMax;
             return settings.Create(*b1, *b2);
         }
         case ConstraintType::Distance: {
@@ -79,7 +82,7 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
             settings.mSpace = JPH::EConstraintSpace::WorldSpace;
 
             if (JPH::Vec3(p.pivot.x, p.pivot.y, p.pivot.z).LengthSq() > 1e-6f) {
-                settings.mPoint1 = settings.mPoint2 = JPH::RVec3(p.pivot.x, p.pivot.y, p.pivot.z);
+                settings.mPoint1 = settings.mPoint2 = CastToRVec3(p.pivot);
             } else {
                 settings.mPoint1 = b1->GetPosition();
                 settings.mPoint2 = b2->GetPosition();
@@ -96,23 +99,19 @@ auto CreateNativeConstraint(const ConstraintType type, JPH::Body* b1, JPH::Body*
 
 } // namespace Physics
 
-auto PhysicsContext::CreateConstraint(
-    Physics::ConstraintType          type,
-    Physics::BodyID              b1,
-    Physics::BodyID              b2,
-    const Physics::ConstraintParams& params
-) -> Physics::ConstraintID {
-    auto&                           world  = GetInternalWorld();
+auto PhysicsContext::CreateConstraint(Physics::ConstraintType type, Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintParams& params)
+    -> Physics::ConstraintID {
+    auto&                       world  = GetInternalWorld();
     const Physics::ConstraintID handle = world.AllocateConstraintID();
 
     Physics::Command cmd {};
     cmd.type                     = Physics::CommandType::CreateConstraint;
     cmd.payload.createConstraint = Physics::CreateConstraintPayload {
         .constraintID = handle,
-        .b1      = b1,
-        .b2      = b2,
-        .cType   = type,
-        .params  = params,
+        .b1           = b1,
+        .b2           = b2,
+        .cType        = type,
+        .params       = params,
     };
     world.mailbox.Enqueue(std::move(cmd));
     return handle;
@@ -124,7 +123,7 @@ void PhysicsContext::SetConstraintTarget(Physics::ConstraintID handle, float val
     cmd.type                        = Physics::CommandType::SetConstraintTarget;
     cmd.payload.setConstraintTarget = Physics::SetConstraintTargetPayload {
         .targetConstraintID = handle,
-        .targetValue   = value,
+        .targetValue        = value,
     };
     world.mailbox.Enqueue(std::move(cmd));
 }

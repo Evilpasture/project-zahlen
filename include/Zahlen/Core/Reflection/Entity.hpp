@@ -339,8 +339,7 @@ template <typename T>
 // Describes the unqualified type entity T (class, union, enum, or Other).
 template <typename T>
 [[nodiscard]] consteval auto DescribeEntity() noexcept -> EntityDescriptor {
-    using Bare = std::remove_cv_t<T>;
-    return TemplatedDetail::DescribeEntityInfo<^^Bare>();
+    return TemplatedDetail::DescribeEntityInfo<^^std::remove_cv_t<T>>();
 }
 
 template <typename T>
@@ -378,8 +377,7 @@ template <typename T>
 // class/union/enum owners and `visitor(Scope<void>{desc})` otherwise.
 template <typename T, typename Visitor>
 constexpr void ForEachEnclosingScope(Visitor&& visitor) {
-    using Bare = std::remove_cv_t<T>;
-    TemplatedDetail::WalkEnclosingScopes<^^Bare>(visitor);
+    TemplatedDetail::WalkEnclosingScopes<^^std::remove_cv_t<T>>(visitor);
 }
 
 // Visits each template argument of T in declaration order (including defaulted
@@ -391,8 +389,7 @@ constexpr void ForEachEnclosingScope(Visitor&& visitor) {
 // No-op if T is not a template specialization.
 template <typename T, typename Visitor>
 constexpr void ForEachTemplateArgument(Visitor&& visitor) {
-    using Bare                      = std::remove_cv_t<T>;
-    constexpr std::meta::info kInfo = std::meta::dealias(^^Bare);
+    constexpr std::meta::info kInfo = std::meta::dealias(^^std::remove_cv_t<T>);
     if constexpr (std::meta::is_type(kInfo) && std::meta::has_template_arguments(kInfo)) {
         constexpr auto kArgs = TemplatedDetail::TemplateArgumentsArray<kInfo>();
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {

@@ -1,20 +1,19 @@
 // Copyright (C) 2026 Evilpasture | housemaster@evilpasture.org
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "render/RenderInternal.hpp"
-#include <Zahlen/Math/Matrix.hpp>
-#include "Zahlen/Math/Math3D.hpp"
 #include "Zahlen/Core/Profiler.hpp"
-#include "vulkan/diagnostics/GpuProfiler.hpp"
+#include "Zahlen/Math/Math3D.hpp"
+#include "render/RenderInternal.hpp"
 #include "render/pipelines/ComputeSimPipeline.hpp"
 #include "render/pipelines/DeferredPbrPipeline.hpp"
 #include "render/pipelines/UIPipeline.hpp"
+#include "vulkan/diagnostics/GpuProfiler.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Math/Camera.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/BatchResult.hpp>
 #include <Zahlen/Log.hpp>
-#include <render/SceneData.hpp>
+#include <Zahlen/Math/Camera.hpp>
+#include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -22,6 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <render/SceneData.hpp>
 #include <span>
 #include <utility>
 
@@ -434,7 +434,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         // failed slot sinks the whole fork -- which is why the batch reports all
         // of them: one message per broken slot says whether the command pool ran
         // dry once or whether the fork is simply too wide for this frame.
-        recorded.ForEachError([this](const Vk::RecordingFailure& failure) {
+        recorded.ForEachError([](const Vk::RecordingFailure& failure) {
             kLog.Warn("Fork secondary {} failed to record ({}); skipping this fork.", failure.index, failure.error);
         });
         return;
@@ -657,29 +657,40 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
 }
 
 void RenderContext::SubmitUI(WindowID window, const UIDrawData& data, bool append) {
-    if (!append) std::erase_if(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
-    if (data.Empty() || data.positions.size() != data.surfaces.size()) return;
+    if (!append)
+        std::erase_if(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
+    if (data.Empty() || data.positions.size() != data.surfaces.size())
+        return;
     for (const auto& batch: data.batches) {
-        if (batch.vertexStart > data.positions.size() || batch.vertexCount > data.positions.size() - batch.vertexStart) return;
+        if (batch.vertexStart > data.positions.size() || batch.vertexCount > data.positions.size() - batch.vertexStart)
+            return;
     }
-    _impl->submittedUI.push_back({window, {data.batches.begin(), data.batches.end()},
-                                 {data.positions.begin(), data.positions.end()}, {data.surfaces.begin(), data.surfaces.end()}});
+    _impl->submittedUI.push_back(
+        {window, {data.batches.begin(), data.batches.end()}, {data.positions.begin(), data.positions.end()}, {data.surfaces.begin(), data.surfaces.end()}}
+    );
 }
 bool RenderContext::HasSubmittedUI(WindowID window) const noexcept {
     return std::ranges::any_of(_impl->submittedUI, [window](const auto& value) { return value.window == window; });
 }
-void RenderContext::ClearSubmittedUI() noexcept { _impl->submittedUI.clear(); }
+void RenderContext::ClearSubmittedUI() noexcept {
+    _impl->submittedUI.clear();
+}
 auto RenderContext::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
     for (const auto& data: _impl->submittedUI) {
-        if (data.window != window) continue;
-        const auto drawn = RenderUI(UIView {.viewport = {}, .target = target, .frameIndex = GetFrameIndex()},
-                                    UIDrawData {.batches = data.batches, .positions = data.positions, .surfaces = data.surfaces});
-        if (!drawn) return std::unexpected(drawn.error());
+        if (data.window != window)
+            continue;
+        const auto drawn = RenderUI(
+            UIView {.viewport = {}, .target = target, .frameIndex = GetFrameIndex()},
+            UIDrawData {.batches = data.batches, .positions = data.positions, .surfaces = data.surfaces}
+        );
+        if (!drawn)
+            return std::unexpected(drawn.error());
     }
     return std::optional<FrameSkipped> {};
 }
 auto FrameScope::RenderSubmittedUI(WindowID window, const FrameTarget& target) noexcept -> FrameOutcome<FrameSkipped> {
-    if (_rc == nullptr) return std::optional<FrameSkipped> {};
+    if (_rc == nullptr)
+        return std::optional<FrameSkipped> {};
     return _rc->RenderSubmittedUI(window, target);
 }
 
@@ -807,9 +818,7 @@ auto RenderContext::Impl::ProvokeDeviceLostInternal() const -> std::expected<voi
     }
 
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
-        Log(
-            "Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName
-        );
+        Log("Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName);
         return {};
     }
 

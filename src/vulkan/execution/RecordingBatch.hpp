@@ -20,7 +20,7 @@ namespace ZHLN::Vk {
 struct RecordingFailure {
     //: The item's ordinal in the batch: a parallel slot, or a draw chunk.
     uint32_t  index = 0;
-    ErrorCode error {};
+    ErrorCode error;
 };
 
 /// The recordings a batch produced: the ordinals that came back executable, and
