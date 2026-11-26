@@ -48,6 +48,7 @@
 #include "ZShader.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <iterator>
 #include <limits>
