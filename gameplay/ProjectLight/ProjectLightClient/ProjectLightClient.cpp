@@ -11,6 +11,7 @@
 #include <Zahlen/COM/IEngine.hpp>
 #include <Zahlen/COM/IEntities.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
+#include <Zahlen/ECS/ComponentPolicy.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Input/Input.hpp>
@@ -1210,16 +1211,12 @@ void ClientSession::SendRealtimeFrame(COM::IEngine& engine) {
     MsgPackValue owned = MsgPackValue::Map();
     MsgPackValue ownedTransforms = MsgPackValue::Map();
     auto& physics = *engine.Simulation();
-    if (m_localController != Entity::Null() && m_localControllerBody != Physics::BodyID::Null()) {
+    if (m_localController != Entity::Null() && m_localControllerBody != Physics::CharacterID::Null()) {
         const auto movement = entities.Get<Character::MovementComponent>(m_localController);
         if (const auto bodyState = physics.BodyState(m_localControllerBody); bodyState.HasValue() && bodyState.value.valid) {
             const auto& state    = bodyState.value;
             const Quat  rotation = (movement != nullptr ? movement->orientation : Quat {state.currentRotation}).Normalized();
-
-            FVec3       velocity = FVec3::Zero();
-            if (const auto charBody = physics.AsCharacter(m_localControllerBody)) {
-                velocity = physics.CharacterVelocity(*charBody);
-            }
+            const FVec3 velocity = physics.CharacterVelocity(m_localControllerBody);
             owned.Set("controllerState", FloatArray({
                 state.currentPosition.x, state.currentPosition.y, state.currentPosition.z,
                 rotation.x, rotation.y, rotation.z, rotation.w,
@@ -1242,13 +1239,12 @@ void ClientSession::SendRealtimeFrame(COM::IEngine& engine) {
         if (IsLocalCharacterPart(uid)) {
             haveState = true;
         } else if (const Entity entity = m_index.Find(uid); entity != Entity::Null() && entities.IsAlive(entity)) {
-            const auto body = entities.Get<Components::PhysicsComponent>(entity);
-            if (body != nullptr) {
-                if (const auto bodyState = physics.BodyState(body->physicsID); bodyState.HasValue() && bodyState.value.valid) {
+            if (const Physics::BodyID bodyID = EntityPhysicsBodyID(entities, entity); bodyID != Physics::BodyID::Null()) {
+                if (const auto bodyState = physics.BodyState(bodyID); bodyState.HasValue() && bodyState.value.valid) {
                     const auto& snapshot = bodyState.value;
                     transform.position   = snapshot.currentPosition.Cast<float>();
                     transform.rotation   = Quat {snapshot.currentRotation};
-                    if (const auto vel = physics.BodyLinearVelocity(body->physicsID); vel.HasValue()) {
+                    if (const auto vel = physics.BodyLinearVelocity(bodyID); vel.HasValue()) {
                         transform.linearVelocity = vel.value;
                     }
                     haveState = true;
@@ -1311,9 +1307,9 @@ void ClientSession::ResetSceneBindings(COM::IEngine& engine) noexcept {
         object.transformDirty = true;
     }
     m_index.Clear();
-    if (m_localControllerBody != Physics::BodyID::Null()) {
+    if (m_localControllerBody != Physics::CharacterID::Null()) {
         engine.Simulation()->DestroyBody(m_localControllerBody);
-        m_localControllerBody = Physics::BodyID::Null();
+        m_localControllerBody = Physics::CharacterID::Null();
     }
     m_localController = Entity::Null();
     m_controllerForRootUid = 0;

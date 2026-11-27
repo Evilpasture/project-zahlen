@@ -3,15 +3,18 @@
 #include <engine/Hierarchy.hpp>
 #include <Zahlen/COM/LogicWorldFactory.hpp>
 #include <Zahlen/Core/COM/Reflect.hpp>
+#include <Zahlen/ECS/ComponentPolicy.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include "LogBridge.hpp"
 #include <ecs/ECS.hpp>
+#include <engine/SceneResources.hpp>
 #include <engine/World.hpp>
 #include <physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <new>
+#include <optional>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -25,7 +28,22 @@ struct LogicComponent {
     uint32_t (*family)() noexcept;
     void* (*ensure)(ECS::Registry&, Entity) noexcept;
     void (*remove)(ECS::Registry&, Entity) noexcept;
+    void (*releasePhysics)(PhysicsContext&, ECS::Registry&, Entity) noexcept;
 };
+template <class T>
+consteval auto ReleasePhysicsHook() -> void (*)(PhysicsContext&, ECS::Registry&, Entity) noexcept {
+    if constexpr (SceneResources::IsPhysicsBodyComponent<T> || std::is_same_v<T, Components::RagdollComponent>) {
+        return +[](PhysicsContext& sim, ECS::Registry& r, Entity e) noexcept {
+            if (auto p = r.Get<T>(e)) {
+                SceneResources::Release(sim, *p);
+                *p = T {};
+            }
+        };
+    } else {
+        return nullptr;
+    }
+}
+
 template <class T>
 consteval auto PublishLogic() -> LogicComponent {
     return {
@@ -39,7 +57,8 @@ consteval auto PublishLogic() -> LogicComponent {
                 return &*p;
             return &r.Add<T>(e);
         },
-        +[](ECS::Registry& r, Entity e) noexcept { r.Remove<T>(e); }
+        +[](ECS::Registry& r, Entity e) noexcept { r.Remove<T>(e); },
+        ReleasePhysicsHook<T>()
     };
 }
 constexpr std::array kLogicComponents {
@@ -63,7 +82,10 @@ constexpr std::array kLogicComponents {
     PublishLogic<Components::SunTagComponent>(),
     PublishLogic<Components::CharacterMotorComponent>(),
     PublishLogic<Components::CharacterMotorStateComponent>(),
-    PublishLogic<Components::PhysicsComponent>(),
+    PublishLogic<Components::StaticBodyComponent>(),
+    PublishLogic<Components::KinematicBodyComponent>(),
+    PublishLogic<Components::DynamicBodyComponent>(),
+    PublishLogic<Components::CharacterBodyComponent>(),
     PublishLogic<Components::ImpulseCommand>(),
     PublishLogic<Components::RagdollComponent>(),
     PublishLogic<Components::RagdollHitReactionCommand>(),
@@ -73,7 +95,7 @@ constexpr std::array kLogicComponents {
     PublishLogic<Components::PlayerTagComponent>(),
     PublishLogic<Components::PlayerSeatComponent>(),
 };
-auto                 FindLogic(StringView name) noexcept -> const LogicComponent* {
+auto FindLogic(StringView name) noexcept -> const LogicComponent* {
     if (!name.data && name.size)
         return nullptr;
     auto text = name.size ? std::string_view(name) : std::string_view {};
@@ -86,8 +108,8 @@ auto                 FindLogic(StringView name) noexcept -> const LogicComponent
 // Parses one shape node of a creation chain into `built`, applying the
 // validation the creation path used to perform inline. Exactly one
 // shape node must succeed across the whole chain (checked by the caller).
-// A standalone logic world binds no asset resolver, so MeshAsset nodes fail
-// here with AssetNotCached.
+// A standalone logic world binds no asset resolver, so valid MeshAsset nodes
+// fail here with AssetNotCached.
 template <typename NodeT>
 [[nodiscard]] auto ParseShapeNode(const NodeT& node, std::optional<Physics::ShapeVariant>& built) -> Result<void> {
     if constexpr (std::is_same_v<NodeT, Physics::Box>) {
@@ -115,6 +137,7 @@ template <typename NodeT>
         }
         built = node;
     } else if constexpr (std::is_same_v<NodeT, Physics::MeshAsset>) {
+        if (node.id == CollisionAssetID::Invalid) return Error::InvalidArgument;
         // A standalone logic world binds no asset resolver, so a
         // cached-collider node can never resolve here.
         return Error::AssetNotCached;
@@ -130,6 +153,95 @@ template <typename NodeT>
         built = node;
     }
     return {};
+}
+
+[[nodiscard]] auto VerifyCompoundAssets(const Physics::Compound& compound, uint32_t depth = 0U) noexcept -> Result<void> {
+    if (depth >= Physics::kMaxCompoundDepth) return Error::InvalidArgument;
+    for (size_t index = 0; index < compound.children.size; ++index) {
+        Result<void> childRes {};
+        (void)Physics::VisitCompoundChild<Physics::MeshAsset, Physics::Compound>(
+            compound.children[index], [&]<typename S>(const Physics::Placed<S>& child) {
+                if constexpr (std::is_same_v<S, Physics::MeshAsset>) {
+                    childRes = Error::AssetNotCached;
+                } else if constexpr (std::is_same_v<S, Physics::Compound>) {
+                    childRes = VerifyCompoundAssets(child.shape, depth + 1U);
+                }
+            });
+        if (!childRes.HasValue()) return childRes;
+    }
+    return {};
+}
+
+[[nodiscard]] auto ParseConvexShapeChain(const ChainInNode* shapeChain) noexcept -> Result<Physics::ConvexShapeVariant> {
+    if (shapeChain == nullptr) return Error::NullArgument;
+
+    uint32_t                                   shapeNodeCount = 0;
+    std::optional<Physics::ConvexShapeVariant> built;
+
+    const Result<void> chainRes = DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder>(
+        shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+            ++shapeNodeCount;
+            if constexpr (std::is_same_v<NodeT, Physics::Box>) {
+                if (!(node.halfExtents.x > 0.0F) || !(node.halfExtents.y > 0.0F) || !(node.halfExtents.z > 0.0F) ||
+                    !std::isfinite(node.halfExtents.x) || !std::isfinite(node.halfExtents.y) ||
+                    !std::isfinite(node.halfExtents.z)) {
+                    return Error::InvalidArgument;
+                }
+                built = node;
+            } else if constexpr (std::is_same_v<NodeT, Physics::Sphere>) {
+                if (!(node.radius > 0.0F) || !std::isfinite(node.radius)) return Error::InvalidArgument;
+                built = node;
+            } else if constexpr (std::is_same_v<NodeT, Physics::Capsule> || std::is_same_v<NodeT, Physics::Cylinder>) {
+                if (!(node.halfHeight > 0.0F) || !(node.radius > 0.0F) ||
+                    !std::isfinite(node.halfHeight) || !std::isfinite(node.radius)) {
+                    return Error::InvalidArgument;
+                }
+                built = node;
+            }
+            return {};
+        });
+    if (!chainRes.HasValue()) return chainRes.error;
+    if (shapeNodeCount != 1U || !built.has_value()) return Error::InvalidArgument;
+    return *built;
+}
+
+[[nodiscard]] auto ParseConstraintChain(const ChainInNode* constraintChain) noexcept -> Result<Physics::ConstraintVariant> {
+    if (constraintChain == nullptr) return Error::NullArgument;
+
+    uint32_t                                  nodeCount = 0;
+    std::optional<Physics::ConstraintVariant> built;
+
+    const Result<void> chainRes = DispatchInChain<
+        Physics::FixedConstraint, Physics::PointConstraint, Physics::DistanceConstraint,
+        Physics::HingeConstraint, Physics::SliderConstraint, Physics::ConeConstraint>(
+        constraintChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+            ++nodeCount;
+            if constexpr (std::is_same_v<NodeT, Physics::DistanceConstraint>) {
+                if (node.minDistance < 0.0F || node.maxDistance < node.minDistance ||
+                    !std::isfinite(node.minDistance) || !std::isfinite(node.maxDistance)) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::HingeConstraint>) {
+                if (node.limitEnabled && (node.minAngle.value > node.maxAngle.value ||
+                                          !std::isfinite(node.minAngle.value) || !std::isfinite(node.maxAngle.value))) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::SliderConstraint>) {
+                if (node.limitEnabled && (node.minPosition > node.maxPosition ||
+                                          !std::isfinite(node.minPosition) || !std::isfinite(node.maxPosition))) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::ConeConstraint>) {
+                if (node.halfAngle.value < 0.0F || !std::isfinite(node.halfAngle.value)) {
+                    return Error::InvalidArgument;
+                }
+            }
+            built = node;
+            return {};
+        });
+    if (!chainRes.HasValue()) return chainRes.error;
+    if (nodeCount != 1U || !built.has_value()) return Error::InvalidArgument;
+    return *built;
 }
 
 } // namespace
@@ -191,9 +303,17 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     void Clear() noexcept override {
         auto&                        r = Registry();
         std::vector<Physics::BodyID> bodies;
-        for (const auto& p: r.GetRawArray<Components::PhysicsComponent>())
-            bodies.push_back(p.physicsID);
-        Sim().DestroyBodies(bodies);
+        for (const auto& p: r.GetRawArray<Components::StaticBodyComponent>())
+            bodies.push_back(p.bodyID);
+        for (const auto& p: r.GetRawArray<Components::KinematicBodyComponent>())
+            bodies.push_back(p.bodyID);
+        for (const auto& p: r.GetRawArray<Components::DynamicBodyComponent>())
+            bodies.push_back(p.bodyID);
+        for (const auto& p: r.GetRawArray<Components::CharacterBodyComponent>())
+            bodies.push_back(p.bodyID);
+        if (!bodies.empty()) {
+            Sim().DestroyBodies(bodies);
+        }
         r.Clear();
     }
     Entity CreateEntity() noexcept override {
@@ -235,16 +355,16 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         const auto* c = FindLogic(name);
         if (!c || c->size != size || c->alignment != alignment || c->hash != hash || !Registry().IsAlive(e))
             return nullptr;
-        if (c->family() == ECS::ComponentFamily::GetTypeID<Components::PhysicsComponent>())
-            ReleasePhysics(e);
+        if (c->releasePhysics != nullptr)
+            c->releasePhysics(Sim(), Registry(), e);
         return c->ensure(Registry(), e);
     }
     bool DetachEngineRaw(Entity e, StringView name) noexcept override {
         const auto* c = FindLogic(name);
         if (!c || !Registry().IsAlive(e) || !Registry().GetRawByFamily(e, c->family()))
             return false;
-        if (c->family() == ECS::ComponentFamily::GetTypeID<Components::PhysicsComponent>())
-            ReleasePhysics(e);
+        if (c->releasePhysics != nullptr)
+            c->releasePhysics(Sim(), Registry(), e);
         c->remove(Registry(), e);
         return true;
     }
@@ -268,12 +388,36 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         return Sim().Raycast(origin, direction, maxDistance, ignore);
     }
 
+    [[nodiscard]] Result<Physics::ShapeCastResult> ShapecastRaw(
+        const ChainInNode* shapeChain, DVec3 position, Quat rotation, FVec3 direction, float maxDistance,
+        Physics::BodyID ignore
+    ) const noexcept override {
+        const auto parsed = ParseConvexShapeChain(shapeChain);
+        if (!parsed.HasValue()) return parsed.error;
+        if (!(maxDistance > 0.0F) || !std::isfinite(maxDistance)) return Error::InvalidArgument;
+        return Sim().ShapecastVariant(parsed.value, position, rotation, direction, maxDistance, ignore);
+    }
+
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
     [[nodiscard]] uint32_t BodiesInSphereRaw(DVec3 center, float radius, Physics::BodyID* bodies, uint32_t capacity) const noexcept override {
         const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
         if (bodies != nullptr && capacity > 0) {
+            std::copy_n(found.begin(), std::min(total, capacity), bodies);
+        }
+        return total;
+    }
+
+    [[nodiscard]] Result<uint32_t> OverlapRaw(
+        const ChainInNode* shapeChain, DVec3 position, Quat rotation, Physics::BodyID* bodies, uint32_t capacity
+    ) const noexcept override {
+        if (bodies == nullptr && capacity > 0U) return Error::NullArgument;
+        const auto parsed = ParseConvexShapeChain(shapeChain);
+        if (!parsed.HasValue()) return parsed.error;
+        const std::vector<Physics::BodyID> found = Sim().OverlapVariant(parsed.value, position, rotation);
+        const auto                         total = static_cast<uint32_t>(found.size());
+        if (bodies != nullptr && capacity > 0U) {
             std::copy_n(found.begin(), std::min(total, capacity), bodies);
         }
         return total;
@@ -343,11 +487,32 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     }
 
     void SetPose(Physics::KinematicBodyID body, DVec3 position, Quat rotation) noexcept override {
-        Sim().SetPose(body, position, rotation.AsVec4());
+        Sim().SetPose(body, position, rotation);
     }
 
     void SetPose(Physics::CharacterID body, DVec3 position) noexcept override {
         Sim().SetPose(body, position);
+    }
+
+    Result<Physics::ConstraintID> CreateConstraintRaw(
+        Physics::BodyID body1, Physics::BodyID body2, const ChainInNode* constraintChain
+    ) noexcept override {
+        const auto parsed = ParseConstraintChain(constraintChain);
+        if (!parsed.HasValue()) return parsed.error;
+        if (body1 == Physics::BodyID::Null() || body2 == Physics::BodyID::Null() || body1 == body2) {
+            return Error::InvalidArgument;
+        }
+        const auto created = Sim().CreateConstraintVariant(body1, body2, parsed.value);
+        if (created == Physics::ConstraintID::Null()) return Error::InvalidArgument;
+        return created;
+    }
+
+    void SetTargetAngle(Physics::HingeConstraintID constraint, RadF angle) noexcept override {
+        Sim().SetTargetAngle(constraint, angle);
+    }
+
+    void SetTargetPosition(Physics::SliderConstraintID constraint, float position) noexcept override {
+        Sim().SetTargetPosition(constraint, position);
     }
 
     void SetCollisionFilter(Physics::BodyID body, Physics::CollisionFilter filter) noexcept override {
@@ -386,21 +551,26 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     Result<Physics::StaticBodyID> CreateStaticBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::StaticBody       role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::StaticBody                  role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes = DispatchInChain<
             Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Plane, Physics::TriangleMesh,
             Physics::MeshAsset, Physics::HeightField, Physics::Compound, Physics::StaticBody,
-            Physics::SurfaceMaterial, Physics::CollisionFilter, Physics::MovingBroadphase>(
+            Physics::SurfaceMaterial, Physics::PhysicsMaterialID, Physics::CollisionFilter, Physics::MovingBroadphase>(
             shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, Physics::StaticBody>) {
                     role = node;
                 } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                    if (mods.hasMaterialID) return Error::DuplicateExtension;
                     mods.surface    = node;
                     mods.hasSurface = true;
+                } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                    if (mods.hasSurface) return Error::DuplicateExtension;
+                    mods.materialID    = node;
+                    mods.hasMaterialID = true;
                 } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                     mods.filter = node;
                 } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
@@ -423,8 +593,12 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
                                                       Physics::MeshAsset, Physics::Compound>(shape)) {
                             return Error::InvalidArgument;
                         }
+                        const auto assetCheck = VerifyCompoundAssets(shape);
+                        if (!assetCheck.HasValue()) return assetCheck.error;
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::StaticBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -436,24 +610,27 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     Result<Physics::KinematicBodyID> CreateKinematicBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::KinematicBody    role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::KinematicBody               role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes = DispatchInChain<
             Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Compound,
-            Physics::KinematicBody, Physics::SurfaceMaterial, Physics::CollisionFilter, Physics::MovingBroadphase>(
+            Physics::KinematicBody, Physics::SurfaceMaterial, Physics::PhysicsMaterialID, Physics::CollisionFilter>(
             shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, Physics::KinematicBody>) {
                     role = node;
                 } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                    if (mods.hasMaterialID) return Error::DuplicateExtension;
                     mods.surface    = node;
                     mods.hasSurface = true;
+                } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                    if (mods.hasSurface) return Error::DuplicateExtension;
+                    mods.materialID    = node;
+                    mods.hasMaterialID = true;
                 } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                     mods.filter = node;
-                } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
-                    mods.movingBroadphase = true;
                 } else {
                     ++shapeNodeCount;
                     return ParseShapeNode(node, builtShape);
@@ -472,7 +649,9 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::KinematicBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -484,24 +663,27 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     Result<Physics::DynamicBodyID> CreateDynamicBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::DynamicBody      role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::DynamicBody                 role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes = DispatchInChain<
             Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Compound,
-            Physics::DynamicBody, Physics::SurfaceMaterial, Physics::CollisionFilter, Physics::MovingBroadphase>(
+            Physics::DynamicBody, Physics::SurfaceMaterial, Physics::PhysicsMaterialID, Physics::CollisionFilter>(
             shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                 if constexpr (std::is_same_v<NodeT, Physics::DynamicBody>) {
                     role = node;
                 } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                    if (mods.hasMaterialID) return Error::DuplicateExtension;
                     mods.surface    = node;
                     mods.hasSurface = true;
+                } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                    if (mods.hasSurface) return Error::DuplicateExtension;
+                    mods.materialID    = node;
+                    mods.hasMaterialID = true;
                 } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                     mods.filter = node;
-                } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
-                    mods.movingBroadphase = true;
                 } else {
                     ++shapeNodeCount;
                     return ParseShapeNode(node, builtShape);
@@ -520,7 +702,9 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::DynamicBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -532,13 +716,15 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
     Result<Physics::CharacterID> CreateCharacterRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) {
             // Historical default: capsule hull at the origin.
-            return Sim().CreateBody(Physics::Capsule {.halfHeight = 0.5F, .radius = 0.3F}, Physics::CharacterBody {},
-                                    Physics::BodyModifiers {});
+            const auto created = Sim().CreateBody(
+                Physics::Capsule {.halfHeight = 0.5F, .radius = 0.3F}, Physics::CharacterBody {}, Physics::BodyModifiers {});
+            if (created == Physics::CharacterID::Null()) return Error::InvalidArgument;
+            return created;
         }
 
-        Physics::CharacterBody    role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::CharacterBody               role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes =
@@ -567,7 +753,9 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::CharacterID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -596,8 +784,19 @@ class LogicWorld final: public Implements<LogicWorld, ILogicWorld, IEntities, IS
         return m_world->GetPhysics();
     }
     void ReleasePhysics(Entity e) noexcept {
-        if (auto p = Registry().Get<Components::PhysicsComponent>(e)) {
-            Sim().DestroyBody(std::exchange(p->physicsID, Physics::BodyID::Null()));
+        auto& r   = Registry();
+        auto& sim = Sim();
+        if (auto p = r.Get<Components::StaticBodyComponent>(e)) {
+            SceneResources::Release(sim, *p);
+        }
+        if (auto p = r.Get<Components::KinematicBodyComponent>(e)) {
+            SceneResources::Release(sim, *p);
+        }
+        if (auto p = r.Get<Components::DynamicBodyComponent>(e)) {
+            SceneResources::Release(sim, *p);
+        }
+        if (auto p = r.Get<Components::CharacterBodyComponent>(e)) {
+            SceneResources::Release(sim, *p);
         }
     }
     std::unique_ptr<World>               m_world;

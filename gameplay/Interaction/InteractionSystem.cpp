@@ -55,8 +55,8 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
     if (destination.empty() || physics == nullptr) {
         return;
     }
-    const auto* playerPhys = entities.Get<Components::PhysicsComponent>(playerEnt);
-    if (playerPhys == nullptr || playerPhys->physicsID == Physics::BodyID::Null()) {
+    const auto* playerPhys = entities.Get<Components::CharacterBodyComponent>(playerEnt);
+    if (playerPhys == nullptr || playerPhys->bodyID == Physics::CharacterID::Null()) {
         return;
     }
 
@@ -76,17 +76,11 @@ void TeleportPlayer(COM::IEntities& entities, COM::ISimulation* physics, Entity 
         return;
     }
 
-    const FVec3 destPos = destTrans->position;
-    const auto  playerCharacter = physics->AsCharacter(playerPhys->physicsID);
-    // A non-character handle behaved like a zero ground offset before (the
-    // old query returned 0 for it), so keep that fallback and skip only the
-    // character-scoped writes.
-    const float groundOffset = playerCharacter ? physics->CharacterGroundOffset(*playerCharacter) : 0.0f;
+    const FVec3 destPos      = destTrans->position;
+    const float groundOffset = physics->CharacterGroundOffset(playerPhys->bodyID);
     const FVec3 center       = destPos + FVec3 {0.0f, groundOffset + 0.05f, 0.0f};
-    if (playerCharacter) {
-        physics->SetPose(*playerCharacter, center.Cast<double>());
-        physics->SetVelocity(*playerCharacter, FVec3 {0.0f, 0.0f, 0.0f});
-    }
+    physics->SetPose(playerPhys->bodyID, center.Cast<double>());
+    physics->SetVelocity(playerPhys->bodyID, FVec3 {0.0f, 0.0f, 0.0f});
 
     if (auto* playerTrans = entities.Get<Components::TransformComponent>(playerEnt)) {
         playerTrans->position = center;
@@ -183,7 +177,9 @@ void InteractionSystem::Update(COM::IEntities& entities, UseIntent useIntent, CO
                                 pickup->isPickedUp                   = 1;
 
                                 // Engine-published Detach releases the physics body via SceneResources.
-                                entities.Detach<Components::PhysicsComponent>(triggerEnt);
+                                entities.Detach<Components::StaticBodyComponent>(triggerEnt);
+                                entities.Detach<Components::KinematicBodyComponent>(triggerEnt);
+                                entities.Detach<Components::DynamicBodyComponent>(triggerEnt);
                                 entities.Detach<Components::MeshComponent>(triggerEnt);
 
                                 trigger->flags &= ~TriggerFlags::Active;
@@ -331,10 +327,9 @@ void DoorMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimula
         }
 
         if (physics != nullptr) {
-            if (const auto* phys = entities.Get<Components::PhysicsComponent>(e); phys != nullptr && phys->physicsID.Pack() != 0) {
-                if (const auto kinematic = physics->AsKinematic(phys->physicsID)) {
-                    physics->SetPose(*kinematic, trans->position.Cast<double>(), trans->rotation);
-                }
+            if (const auto* phys = entities.Get<Components::KinematicBodyComponent>(e);
+                phys != nullptr && phys->bodyID != Physics::KinematicBodyID::Null()) {
+                physics->SetPose(phys->bodyID, trans->position.Cast<double>(), trans->rotation);
             }
         }
     }
@@ -400,10 +395,9 @@ void ButtonMovementSystem::Update(COM::IEntities& entities, float dt, COM::ISimu
         if ((button->flags & ButtonFlags::DontMove) == ButtonFlags::None) {
             trans->position = button->unpressedPosition + (button->pressedPosition - button->unpressedPosition) * button->progress;
             if (physics != nullptr) {
-                if (const auto* phys = entities.Get<Components::PhysicsComponent>(e); phys != nullptr && phys->physicsID.Pack() != 0) {
-                    if (const auto kinematic = physics->AsKinematic(phys->physicsID)) {
-                        physics->SetPose(*kinematic, trans->position.Cast<double>(), trans->rotation);
-                    }
+                if (const auto* phys = entities.Get<Components::KinematicBodyComponent>(e);
+                    phys != nullptr && phys->bodyID != Physics::KinematicBodyID::Null()) {
+                    physics->SetPose(phys->bodyID, trans->position.Cast<double>(), trans->rotation);
                 }
             }
         }

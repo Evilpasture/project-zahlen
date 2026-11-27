@@ -19,22 +19,25 @@ class PhysicsContext;
 struct InterpolationScratch {
     bool                                    invariantVerified = false;
     std::vector<Physics::BodyID>            handles;
-    std::vector<size_t>                     sourceIndex;
+    std::vector<Entity>                     sourceEntities;
     std::vector<Physics::BodyStateSnapshot> snapshots;
 };
 
 class VisualInterpolationSystem {
   public:
+    using InterpolationQuery = ECS::Query<
+        const Components::DynamicBodyComponent,
+        const Components::CharacterBodyComponent,
+        Components::TransformComponent&,
+        const Components::CharacterMotorComponent,
+        const Components::CharacterMotorStateComponent,
+        const Components::RagdollComponent>;
+
     static void Update(
-        ECS::Query<
-            const Components::PhysicsComponent,
-            Components::TransformComponent&,
-            const Components::CharacterMotorComponent,
-            const Components::CharacterMotorStateComponent,
-            const Components::RagdollComponent> query,
-        ECS::Res<PhysicsContext>                physics,
-        FrameAlpha                              alpha,
-        ECS::Local<InterpolationScratch>        scratch
+        InterpolationQuery               query,
+        ECS::Res<PhysicsContext>         physics,
+        FrameAlpha                       alpha,
+        ECS::Local<InterpolationScratch> scratch
     ) noexcept;
 };
 

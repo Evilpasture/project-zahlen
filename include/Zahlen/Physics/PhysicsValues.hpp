@@ -116,9 +116,18 @@ struct MovingBroadphase {};
 // Jolt friction 0.2 / restitution 0.0.
 enum class PhysicsMaterialID : uint32_t { Default = 0 };
 
+// Role-specific modifier policies: characters carry no Jolt rigid-body surface
+// material, and moving bodies already sit in the MOVING broadphase so
+// MovingBroadphase is only meaningful on statics.
 template <typename T>
-concept BodyModifier = std::same_as<T, SurfaceMaterial> || std::same_as<T, CollisionFilter> ||
-                       std::same_as<T, MovingBroadphase>;
+concept CharacterModifier = std::same_as<T, CollisionFilter>;
+
+template <typename T>
+concept RigidBodyModifier =
+    std::same_as<T, SurfaceMaterial> || std::same_as<T, PhysicsMaterialID> || std::same_as<T, CollisionFilter>;
+
+template <typename T>
+concept StaticBodyModifier = RigidBodyModifier<T> || std::same_as<T, MovingBroadphase>;
 
 // --- Jolt-free query results ----------------------------------------------------
 // ZHLN value types only: ISimulation can return these across the boundary.
@@ -170,27 +179,45 @@ struct DistanceConstraint {
 };
 
 struct HingeConstraint {
+    // World-space hinge anchor and rotation axis.
+    ZHLN::FVec3        pivot {};
+    ZHLN::FVec3        axis {0.0f, 1.0f, 0.0f};
     RadF               minAngle {0.0f};
     RadF               maxAngle {0.0f};
-    bool               limitEnabled   = false;
-    COM::Option<RadF>  targetAngle    {};
+    bool               limitEnabled      = false;
+    COM::Option<RadF>  targetAngle {};
     float              maxFrictionTorque = 0.0f;
     MotorSettings      motor {};
 };
 
 struct SliderConstraint {
-    float              minPosition = 0.0f;
-    float              maxPosition = 0.0f;
-    bool               limitEnabled     = false;
-    COM::Option<float> targetPosition   {};
-    float              maxFrictionForce = 0.0f;
-    MotorSettings      motor {};
+    // World-space anchor and travel axis; absent pivot = Jolt auto-detects it
+    // from the bodies' current relative pose.
+    COM::Option<ZHLN::FVec3> pivot {};
+    ZHLN::FVec3              axis {1.0f, 0.0f, 0.0f};
+    float                    minPosition      = 0.0f;
+    float                    maxPosition      = 0.0f;
+    bool                     limitEnabled     = false;
+    COM::Option<float>       targetPosition {};
+    float                    maxFrictionForce = 0.0f;
+    MotorSettings            motor {};
 };
 
 struct ConeConstraint {
-    // Half angle of the free cone, radians.
-    RadF halfAngle {0.0f};
+    // World-space cone apex, twist axis and half-cone angle in radians.
+    ZHLN::FVec3 pivot {};
+    ZHLN::FVec3 axis {0.0f, 1.0f, 0.0f};
+    RadF        halfAngle {0.0f};
 };
+
+template <typename C>
+concept ConstraintDesc =
+    std::same_as<std::remove_cvref_t<C>, FixedConstraint> ||
+    std::same_as<std::remove_cvref_t<C>, PointConstraint> ||
+    std::same_as<std::remove_cvref_t<C>, DistanceConstraint> ||
+    std::same_as<std::remove_cvref_t<C>, HingeConstraint> ||
+    std::same_as<std::remove_cvref_t<C>, SliderConstraint> ||
+    std::same_as<std::remove_cvref_t<C>, ConeConstraint>;
 
 static_assert(std::is_standard_layout_v<StaticBody> && std::is_trivially_copyable_v<StaticBody>);
 static_assert(std::is_standard_layout_v<KinematicBody> && std::is_trivially_copyable_v<KinematicBody>);

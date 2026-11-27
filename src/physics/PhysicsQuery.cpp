@@ -336,14 +336,17 @@ auto PhysicsContext::RaycastPenetration(ZHLN::DVec3 origin, ZHLN::FVec3 directio
     return {};
 }
 
-auto PhysicsContext::Shapecast(
-    const JPH::ShapeRefC& shape,
-    ZHLN::DVec3         pos,
-    ZHLN::FVec4          rot,
-    ZHLN::FVec3          direction,
-    float                 maxDistance,
-    Physics::BodyID   ignore
+auto PhysicsContext::ShapecastVariant(
+    const Physics::ConvexShapeVariant& shape,
+    ZHLN::DVec3                        pos,
+    ZHLN::Quat                         rot,
+    ZHLN::FVec3                        direction,
+    float                              maxDistance,
+    Physics::BodyID                    ignore
 ) const -> Physics::ShapeCastResult {
+    if (!(maxDistance > 0.0f) || !std::isfinite(maxDistance)) {
+        return {};
+    }
     const JPH::Vec3 dir   = JPH::Vec3(direction.x, direction.y, direction.z);
     const auto&     world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
@@ -355,9 +358,15 @@ auto PhysicsContext::Shapecast(
         return {};
     }
 
+    const JPH::ShapeRefC joltShape = ResolveConvexShape(shape);
+    if (joltShape == nullptr) {
+        return {};
+    }
+
     const JPH::Vec3       scaledDir = dir.Normalized() * maxDistance;
     const JPH::RShapeCast cast(
-        shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sRotationTranslation(JPH::Quat(rot.x, rot.y, rot.z, rot.w), JPH::RVec3(pos.x, pos.y, pos.z)), scaledDir
+        joltShape, JPH::Vec3::sReplicate(1.0f),
+        JPH::RMat44::sRotationTranslation(JPH::Quat(rot.x, rot.y, rot.z, rot.w), JPH::RVec3(pos.x, pos.y, pos.z)), scaledDir
     );
 
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
@@ -388,20 +397,30 @@ auto PhysicsContext::Shapecast(
     return result;
 }
 
-auto PhysicsContext::OverlapSphere(ZHLN::DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
+auto PhysicsContext::OverlapVariant(
+    const Physics::ConvexShapeVariant& shape,
+    ZHLN::DVec3                        pos,
+    ZHLN::Quat                         rot
+) const -> std::vector<Physics::BodyID> {
     std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return results;
     }
 
-    const JPH::SphereShapeSettings settings(radius);
-    const JPH::ShapeRefC           shape = settings.Create().Get();
+    const JPH::ShapeRefC joltShape = ResolveConvexShape(shape);
+    if (joltShape == nullptr) {
+        return results;
+    }
 
     JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
     const auto*                                               query = &world.system->GetNarrowPhaseQuery();
 
-    query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(JPH::RVec3(center.x, center.y, center.z)), {}, JPH::RVec3::sZero(), collector);
+    query->CollideShape(
+        joltShape, JPH::Vec3::sReplicate(1.0f),
+        JPH::RMat44::sRotationTranslation(JPH::Quat(rot.x, rot.y, rot.z, rot.w), JPH::RVec3(pos.x, pos.y, pos.z)),
+        {}, JPH::RVec3::sZero(), collector
+    );
 
     for (const auto& hit: collector.mHits) {
         if (const auto handle = FindBodyID(world, hit.mBodyID2)) {
@@ -409,6 +428,10 @@ auto PhysicsContext::OverlapSphere(ZHLN::DVec3 center, float radius) const -> st
         }
     }
     return results;
+}
+
+auto PhysicsContext::OverlapSphere(ZHLN::DVec3 center, float radius) const -> std::vector<Physics::BodyID> {
+    return Overlap(Physics::Sphere {.radius = radius}, center);
 }
 
 auto PhysicsContext::OverlapAABB(ZHLN::DVec3 minBox, ZHLN::DVec3 maxBox) const -> std::vector<Physics::BodyID> {
@@ -432,14 +455,14 @@ auto PhysicsContext::OverlapAABB(ZHLN::DVec3 minBox, ZHLN::DVec3 maxBox) const -
     return results;
 }
 
-auto PhysicsContext::QueryAABB(ZHLN::FVec3 min, ZHLN::FVec3 max) const -> std::vector<Physics::BodyID> {
+auto PhysicsContext::QueryAABB(ZHLN::DVec3 min, ZHLN::DVec3 max) const -> std::vector<Physics::BodyID> {
     std::vector<Physics::BodyID> results;
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::acquire)) {
         return results;
     }
 
-    const JPH::AABox box(JPH::Vec3(min.x, min.y, min.z), JPH::Vec3(max.x, max.y, max.z));
+    const JPH::AABox box {JPH::RVec3(min.x, min.y, min.z), JPH::RVec3(max.x, max.y, max.z)};
 
     struct SimpleCollector final: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld&     worldRef;

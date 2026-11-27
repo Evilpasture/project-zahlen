@@ -31,7 +31,7 @@ namespace ZHLN::Locomotion {
 
 namespace {
 
-[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const DualShape& config) -> Physics::BodyID {
+[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const DualShape& config) -> Physics::CharacterID {
     const Physics::CharacterBody role {
         .position                 = footPosition.Cast<double>(),
         .maxSlopeAngle            = DegF {50.0f}.ToRadians(),
@@ -44,7 +44,7 @@ namespace {
         .supportingVolume = Physics::Plane {{0.0f, 1.0f, 0.0f}, -config.GetLifterOffsetY()},
     };
     const auto res = sim.CreateBody(MakeDualCollider(config), role);
-    return res.HasValue() ? Physics::BodyID(res.value) : Physics::BodyID {};
+    return res.HasValue() ? res.value : Physics::CharacterID::Null();
 }
 
 [[nodiscard]] auto FindActiveCamera(const COM::IEntities& entities) -> Entity {
@@ -120,10 +120,10 @@ auto SpawnCharacter(
     }
     const Entity entity = spawned.front();
 
-    const DualShape shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
-    const Physics::BodyID          physicsID      = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
-    const float                    sprintMult     = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
-    entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});
+    const DualShape            shapeConfig = FitDualShapeToBounds(scaledBounds, setup);
+    const Physics::CharacterID characterID = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
+    const float                sprintMult  = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
+    entities->Attach(entity, Components::CharacterBodyComponent {.bodyID = characterID});
     Character::Attach(
         *entities,
         entity,
@@ -179,10 +179,10 @@ void DestroyCharacter(COM::IEngine& engine, Entity characterEntity) {
         rig != nullptr && rig->target == characterEntity) {
         entities->Detach<CameraRig::TargetComponent>(activeCam);
     }
-    if (const auto* physicsComp = entities->Get<Components::PhysicsComponent>(characterEntity);
-        physicsComp != nullptr && physicsComp->physicsID != Physics::BodyID::Null()) {
+    if (const auto* physicsComp = entities->Get<Components::CharacterBodyComponent>(characterEntity);
+        physicsComp != nullptr && physicsComp->bodyID != Physics::CharacterID::Null()) {
         if (auto* sim = engine.Simulation()) {
-            const Physics::BodyID id = physicsComp->physicsID;
+            const Physics::BodyID id = physicsComp->bodyID;
             sim->DestroyBodies(COM::Span<const Physics::BodyID> {&id, 1});
         }
     }

@@ -212,9 +212,20 @@ struct PBRComponent {
     float metallic  = 0.0F;
 };
 
-struct PhysicsComponent {
-    ZHLN::Physics::BodyID physicsID {};
-    bool                  isStatic = false;
+struct StaticBodyComponent {
+    ZHLN::Physics::StaticBodyID bodyID {};
+};
+
+struct KinematicBodyComponent {
+    ZHLN::Physics::KinematicBodyID bodyID {};
+};
+
+struct DynamicBodyComponent {
+    ZHLN::Physics::DynamicBodyID bodyID {};
+};
+
+struct CharacterBodyComponent {
+    ZHLN::Physics::CharacterID bodyID {};
 };
 
 // Deliberately wrong: one extra field, so size and hash both diverge from the
@@ -356,6 +367,19 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
         ZHLN::Test::ExpectTrue(hit.hasHit);
         ZHLN::Test::ExpectTrue(hit.bodyID == sphereRes.value);
 
+        const auto shapecastHit = simulation.Shapecast(
+            ZHLN::Physics::Sphere {0.25F}, ZHLN::DVec3 {0.0, 10.0, 0.0}, ZHLN::Quat::Identity(),
+            ZHLN::FVec3 {0.0F, -1.0F, 0.0F}, 20.0F);
+        ZHLN::Test::ExpectTrue(shapecastHit.HasValue() && shapecastHit.value.hasHit && shapecastHit.value.bodyID == sphereRes.value);
+
+        const auto overlapHits = simulation.Overlap(
+            ZHLN::Physics::Sphere {1.5F}, ZHLN::DVec3 {0.0, 4.0, 0.0});
+        ZHLN::Test::ExpectTrue(overlapHits.has_value() && !overlapHits->empty());
+
+        const auto weldRes = simulation.CreateConstraint(
+            floorRes.value, compoundRes.value, ZHLN::Physics::FixedConstraint {});
+        ZHLN::Test::ExpectTrue(weldRes.HasValue() && weldRes.value != ZHLN::Physics::FixedConstraintID::Null());
+
         const auto charRes = simulation.CreateCharacterRaw(
             ZHLN::COM::InChain(ZHLN::Physics::Capsule {.halfHeight = 0.85F, .radius = 0.35F}, ZHLN::Physics::CharacterBody {.position = {-3.0, 2.0, 0.0}})
         );
@@ -390,7 +414,7 @@ void CheckAudio(ZHLN::COM::IAudioDevice& audio) {
     ZHLN::Test::ExpectTrue(audio.Initialized() || !audio.Initialized());
 }
 
-void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entities) {
+void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulation& simulation) {
     const uint64_t hash = assets.PrefabHash("zahlen://models/not-here.glb");
     ZHLN::Test::ExpectTrue(hash != 0);
     ZHLN::Test::ExpectEq(assets.PrefabHash("zahlen://models/not-here.glb"), hash);
@@ -415,19 +439,55 @@ void CheckAssets(ZHLN::COM::IAssetLibrary& assets, ZHLN::COM::IEntities& entitie
     ZHLN::Test::ExpectTrue(assets.Instantiate(hash).empty());
     ZHLN::Test::ExpectEq(assets.EnvironmentPixels("no-such-sky").size, size_t {0});
 
-    // Spawn a procedural box primitive with physics over COM and verify its
-    // published components are attached and queryable.
+    // Nested MeshAsset inside a Compound fails with AssetNotCached before caching,
+    // and resolves cleanly once cached in IAssetLibrary.
+    const auto nestedCollisionID = static_cast<ZHLN::CollisionAssetID>(assets.AssetHash("collision/nested_quad"));
+    const auto nestedMeshCompound = ZHLN::Physics::MakeCompound(
+        ZHLN::Physics::Placed {ZHLN::Physics::Box {{0.25F, 0.25F, 0.25F}}, {0.0F, 2.0F, 0.0F}},
+        ZHLN::Physics::Placed {ZHLN::Physics::MeshAsset {.id = nestedCollisionID}});
+    const auto beforeCache = simulation.CreateBody(nestedMeshCompound, ZHLN::Physics::StaticBody {});
+    ZHLN::Test::ExpectTrue(!beforeCache.HasValue() && beforeCache.error == ZHLN::ErrorCode(ZHLN::COM::Error::AssetNotCached));
+
+    const std::array<ZHLN::FVec3, 4> quadVerts {
+        ZHLN::FVec3 {-2.0F, 0.0F, -2.0F}, ZHLN::FVec3 {2.0F, 0.0F, -2.0F},
+        ZHLN::FVec3 {2.0F, 0.0F, 2.0F}, ZHLN::FVec3 {-2.0F, 0.0F, 2.0F}};
+    const std::array<uint32_t, 6> quadIndices {0, 2, 1, 0, 3, 2};
+    ZHLN::Test::ExpectTrue(assets.CacheCollisionMesh(ZHLN::COM::InChain(ZHLN::COM::CollisionMeshInfo {
+        .id       = nestedCollisionID,
+        .vertices = ZHLN::COM::Span<const ZHLN::FVec3>(quadVerts.data(), quadVerts.size()),
+        .indices  = ZHLN::COM::Span<const uint32_t>(quadIndices.data(), quadIndices.size()),
+    })).HasValue());
+
+    const auto afterCache = simulation.CreateBody(nestedMeshCompound, ZHLN::Physics::StaticBody {.position = {25.0, 0.0, 0.0}});
+    if (ZHLN::Test::ExpectTrue(afterCache.HasValue() && afterCache.value != ZHLN::Physics::StaticBodyID::Null())) {
+        const auto hit = simulation.Raycast(ZHLN::DVec3 {25.0, 5.0, 0.0}, ZHLN::FVec3 {0.0F, -1.0F, 0.0F}, 10.0F);
+        ZHLN::Test::ExpectTrue(hit.hasHit && hit.bodyID == afterCache.value);
+        simulation.DestroyBody(afterCache.value);
+    }
+
+    // Spawn procedural box primitives with static and dynamic physics over COM and
+    // verify the exact role-typed body components are attached and queryable.
     ZHLN::PrefabFactory::SpawnParams spawnParams {};
-    spawnParams.position      = {1.0, 3.0, -2.0};
-    spawnParams.color         = {0.2F, 0.7F, 0.9F, 1.0F};
-    spawnParams.createPhysics = true;
-    const ZHLN::Entity boxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
-    if (ZHLN::Test::ExpectTrue(boxEnt != ZHLN::Entity::Null())) {
-        ZHLN::Test::ExpectTrue(entities.IsAlive(boxEnt));
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::MeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::OwnedMeshComponent") != nullptr);
-        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(boxEnt, "ZHLN::Components::PhysicsComponent") != nullptr);
-        entities.Despawn(boxEnt);
+    spawnParams.position        = {1.0, 3.0, -2.0};
+    spawnParams.color           = {0.2F, 0.7F, 0.9F, 1.0F};
+    spawnParams.createPhysics   = true;
+    spawnParams.isStaticPhysics = true;
+    const ZHLN::Entity staticBoxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
+    if (ZHLN::Test::ExpectTrue(staticBoxEnt != ZHLN::Entity::Null())) {
+        ZHLN::Test::ExpectTrue(entities.IsAlive(staticBoxEnt));
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::MeshComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::OwnedMeshComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::StaticBodyComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(staticBoxEnt, "ZHLN::Components::DynamicBodyComponent") == nullptr);
+        entities.Despawn(staticBoxEnt);
+    }
+
+    spawnParams.isStaticPhysics = false;
+    const ZHLN::Entity dynBoxEnt = assets.SpawnBox({0.5F, 0.5F, 0.5F}, spawnParams);
+    if (ZHLN::Test::ExpectTrue(dynBoxEnt != ZHLN::Entity::Null())) {
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(dynBoxEnt, "ZHLN::Components::DynamicBodyComponent") != nullptr);
+        ZHLN::Test::ExpectTrue(entities.GetEngineRaw(dynBoxEnt, "ZHLN::Components::StaticBodyComponent") == nullptr);
+        entities.Despawn(dynBoxEnt);
     }
 }
 
@@ -500,12 +560,17 @@ void CheckActions(ZHLN::COM::IActionContext& actions) {
 void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulation& simulation) {
     const ZHLN::Entity entity = entities.CreateEntity();
 
-    // All 34 fixed-layout engine components are published; CSGComponent (with std::vector) is not.
+    // All fixed-layout engine components (including the four role-typed physics
+    // body components) are published; CSGComponent and legacy PhysicsComponent are not.
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::TransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::WorldTransformComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::PBRComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::LightComponent"));
-    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::PhysicsComponent"));
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::StaticBodyComponent"));
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::KinematicBodyComponent"));
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::DynamicBodyComponent"));
+    ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::CharacterBodyComponent"));
+    ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::PhysicsComponent"));
     ZHLN::Test::ExpectTrue(entities.IsEngineComponent("ZHLN::Components::AudioSourceComponent"));
     ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::CSGComponent"));
     ZHLN::Test::ExpectTrue(!entities.IsEngineComponent("ZHLN::Components::NotAComponentAnywhere"));
@@ -531,17 +596,17 @@ void CheckEngineComponents(ZHLN::COM::IEntities& entities, ZHLN::COM::ISimulatio
         ZHLN::Test::ExpectTrue(!entities.EntitiesWith("ZHLN::Components::WorldTransformComponent").empty());
     }
 
-    // SceneResources ownership safety: detaching PhysicsComponent over COM must
+    // SceneResources ownership safety: detaching DynamicBodyComponent over COM must
     // destroy the underlying Jolt body rather than leaking it.
     const auto sphereBody = simulation.CreateSphereBody(0.5F, ZHLN::Physics::DynamicBody {.position = {0.0, 8.0, 0.0}});
     if (ZHLN::Test::ExpectTrue(sphereBody.HasValue())) {
         void* physSlot = entities.AttachEngineRaw(
-            entity, "ZHLN::Components::PhysicsComponent", sizeof(ConsumerSide::PhysicsComponent), alignof(ConsumerSide::PhysicsComponent),
-            ZHLN::Reflect::LayoutHash<ConsumerSide::PhysicsComponent>()
+            entity, "ZHLN::Components::DynamicBodyComponent", sizeof(ConsumerSide::DynamicBodyComponent), alignof(ConsumerSide::DynamicBodyComponent),
+            ZHLN::Reflect::LayoutHash<ConsumerSide::DynamicBodyComponent>()
         );
         if (ZHLN::Test::ExpectTrue(physSlot != nullptr)) {
-            *static_cast<ConsumerSide::PhysicsComponent*>(physSlot) = ConsumerSide::PhysicsComponent {.physicsID = sphereBody.value, .isStatic = false};
-            ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::PhysicsComponent"));
+            *static_cast<ConsumerSide::DynamicBodyComponent*>(physSlot) = ConsumerSide::DynamicBodyComponent {.bodyID = sphereBody.value};
+            ZHLN::Test::ExpectTrue(entities.DetachEngineRaw(entity, "ZHLN::Components::DynamicBodyComponent"));
             ZHLN::Test::ExpectTrue(!simulation.BodyPosition(sphereBody.value).HasValue());
         }
     }
@@ -679,7 +744,7 @@ struct COMBoundarySuite {
             CheckGraphics(*graphics.Get(), *assets.Get());
             CheckSimulation(*simulation.Get());
             CheckAudio(*audio.Get());
-            CheckAssets(*assets.Get(), *entities.Get());
+            CheckAssets(*assets.Get(), *entities.Get(), *simulation.Get());
             CheckActions(*actions.Get());
 
             auto state = engine.cast<ZHLN::COM::IState>();

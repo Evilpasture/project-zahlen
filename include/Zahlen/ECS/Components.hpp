@@ -117,9 +117,20 @@ struct Components {
         uint8_t                     currentLOD = 0;
     };
 
-    struct PhysicsComponent {
-        Physics::BodyID physicsID = Physics::BodyID::Null();
-        bool                isStatic      = true;
+    struct StaticBodyComponent {
+        Physics::StaticBodyID bodyID = Physics::StaticBodyID::Null();
+    };
+
+    struct KinematicBodyComponent {
+        Physics::KinematicBodyID bodyID = Physics::KinematicBodyID::Null();
+    };
+
+    struct DynamicBodyComponent {
+        Physics::DynamicBodyID bodyID = Physics::DynamicBodyID::Null();
+    };
+
+    struct CharacterBodyComponent {
+        Physics::CharacterID bodyID = Physics::CharacterID::Null();
     };
 
     struct ImpulseCommand {
@@ -149,7 +160,11 @@ struct Components {
 
         bool isAddedToPhysics = false;
     };
-    static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
+    static_assert(std::is_trivially_copyable_v<StaticBodyComponent> &&
+                  std::is_trivially_copyable_v<KinematicBodyComponent> &&
+                  std::is_trivially_copyable_v<DynamicBodyComponent> &&
+                  std::is_trivially_copyable_v<CharacterBodyComponent> &&
+                  std::is_trivially_copyable_v<RagdollComponent>);
 
     // The camera -- pose, optics, and the entity that carries them -- is world
     // data. The engine owns no camera of its own and hands out no accessor for

@@ -427,11 +427,10 @@ struct BSPInteractionTestSuite {
                         .halfExtents = sceneEnt.halfExtents,
                     }}));
                 // Scene::Instantiate hangs the kinematic root collider on the
-                // root entity; both movement systems want a PhysicsComponent.
-                (*reg.Attach(e, ZHLN::Components::PhysicsComponent {ZHLN::Components::PhysicsComponent {
-                        .physicsID = ZHLN::Physics::BodyID {.index = 1, .generation = 1},
-                        .isStatic      = false,
-                    }}));
+                // root entity; both movement systems want a KinematicBodyComponent.
+                (void)reg.Attach(e, ZHLN::Components::KinematicBodyComponent {
+                    .bodyID = ZHLN::Physics::KinematicBodyID::From(ZHLN::Physics::BodyID {.index = 1, .generation = 1}),
+                });
                 inst.entities.push_back(e);
             }
 

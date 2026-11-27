@@ -454,6 +454,9 @@ auto PhysicsWorld::ResolveMaterial(uint32_t id) const -> MaterialData {
 }
 
 auto PhysicsWorld::GetOrRegisterMaterial(float friction, float restitution) -> uint32_t {
+    if (friction == 0.2f && restitution == 0.0f) {
+        return 0u;
+    }
     ZHLN::MutexGuard guard(materialMutex);
     for (size_t i = 0; i < materialCount; ++i) {
         if (materials[i].friction == friction && materials[i].restitution == restitution) {

@@ -165,7 +165,7 @@ struct ComponentKind {
 //
 // This is not every component in ZHLN::Components, and the reason is safety
 // rather than effort: a default-constructed MeshComponent names a GPU mesh that
-// does not exist, a PhysicsComponent names a body the physics world never
+// does not exist, a StaticBodyComponent/DynamicBodyComponent names a body the physics world never
 // created, and an AnimatorComponent names a prefab asset and animation handle
 // that no spawner bound. Conjuring those from "Add Component" would put a
 // dangling handle in the registry on the click.

@@ -110,16 +110,15 @@ auto LogicBenchmark::SpawnFloor() -> void {
         return;
     }
 
-    auto*                  physics = m_world->Simulation();
-    Physics::Box          slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
-    Physics::StaticBody   role {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}};
-    auto                  chain = COM::InChain(slab, role);
-    auto                  body  = physics->CreateStaticBodyRaw(chain.Head());
-    if (!body.HasValue() || body.value == Physics::BodyID::Null())
+    auto*               physics = m_world->Simulation();
+    Physics::Box        slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
+    Physics::StaticBody role {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}};
+    auto                body = physics->CreateBody(slab, role);
+    if (!body.HasValue() || body.value == Physics::StaticBodyID::Null())
         return;
     auto*        entities = m_world->Entities();
     const Entity e        = entities->CreateEntity();
-    entities->Attach(e, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+    entities->Attach(e, Components::StaticBodyComponent {.bodyID = body.value});
     ++m_liveBodies;
 }
 
@@ -128,9 +127,9 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
         return;
     }
 
-    auto*                 registry = m_world->Entities();
-    auto*                 physics  = m_world->Simulation();
-    Physics::Box            cube {.halfExtents = {kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent}};
+    auto*        registry = m_world->Entities();
+    auto*        physics  = m_world->Simulation();
+    Physics::Box cube {.halfExtents = {kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent}};
     size_t spawned = 0;
     for (; spawned < count; ++spawned) {
         if (m_liveBodies >= m_bodyCeiling) {
@@ -141,22 +140,21 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
             break;
         }
 
-        const FVec3    position = LatticePosition(m_spawnedCubes);
+        const FVec3          position = LatticePosition(m_spawnedCubes);
         Physics::DynamicBody role {.position = position.Cast<double>()};
-        auto                  chain = COM::InChain(cube, role);
-        auto                  body  = physics->CreateDynamicBodyRaw(chain.Head());
-        if (!body.HasValue() || body.value == Physics::BodyID::Null())
+        auto                 body = physics->CreateBody(cube, role);
+        if (!body.HasValue() || body.value == Physics::DynamicBodyID::Null())
             break;
         const Entity entity = registry->CreateEntity();
         registry->Attach(entity, Components::TransformComponent {.position = position});
-        registry->Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+        registry->Attach(entity, Components::DynamicBodyComponent {.bodyID = body.value});
         m_entities.push_back(entity);
         ++m_spawnedCubes;
         ++m_liveBodies;
     }
 
     // The workload, not the registry: the floor slab carries a
-    // PhysicsComponent too, and it is not part of what is being timed.
+    // StaticBodyComponent, and it is not part of what is being timed.
     m_metrics.entityCount = m_spawnedCubes;
 }
 
@@ -179,13 +177,13 @@ void LogicBenchmark::Step(float fixedDt) {
     // escape is introduced without profiling.
     size_t bodies = 0;
     for (const Entity entity: m_entities) {
-        const auto physicsComponent = registry->Get<Components::PhysicsComponent>(entity);
-        if (!physicsComponent || physicsComponent->isStatic || physicsComponent->physicsID == Physics::BodyID::Null()) {
+        const auto physicsComponent = registry->Get<Components::DynamicBodyComponent>(entity);
+        if (!physicsComponent || physicsComponent->bodyID == Physics::DynamicBodyID::Null()) {
             continue;
         }
         ++bodies;
 
-        const auto position = physics->BodyPosition(physicsComponent->physicsID);
+        const auto position = physics->BodyPosition(physicsComponent->bodyID);
         if (!position.HasValue()) {
             continue;
         }

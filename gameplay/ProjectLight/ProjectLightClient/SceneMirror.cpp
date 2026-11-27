@@ -15,6 +15,7 @@
 #include <Zahlen/COM/IGraphicsDevice.hpp>
 #include <Zahlen/COM/ISimulation.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
+#include <Zahlen/ECS/ComponentPolicy.hpp>
 #include <Zahlen/ECS/Components.hpp>
 #include <Zahlen/ECS/Entity.hpp>
 #include <Zahlen/Engine/SpawnParams.hpp>
@@ -298,7 +299,7 @@ void SpawnOrUpdatePartEntity(COM::IEngine& engine, SceneMirrorState& state, Repl
             world->previous = matrix;
         }
         if (const auto* mesh = entities.Get<Components::MeshComponent>(entity)) object.materialId = mesh->materialAsset;
-        object.hasPhysicsBody = entities.Has<Components::PhysicsComponent>(entity);
+        object.hasPhysicsBody = HasPhysicsBodyComponent(entities, entity);
         object.spawnedSize     = size;
         object.spawnedShape    = object.shape;
         object.spawnedAnchored = object.anchored;
@@ -623,9 +624,9 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
         }
     };
     auto destroyController = [&]() -> void {
-        if (state.localControllerBody != Physics::BodyID::Null()) {
+        if (state.localControllerBody != Physics::CharacterID::Null()) {
             engine.Simulation()->DestroyBody(state.localControllerBody);
-            state.localControllerBody = Physics::BodyID::Null();
+            state.localControllerBody = Physics::CharacterID::Null();
         }
         if (state.localController != Entity::Null() && entities.IsAlive(state.localController)) {
             DespawnEntity(engine, state.localController);
@@ -635,7 +636,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     };
 
     if (state.serverAuthority) {
-        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyID::Null()) destroyController();
+        if (state.localController != Entity::Null() || state.localControllerBody != Physics::CharacterID::Null()) destroyController();
         // The server drives the character, so the camera follows the root part's
         // entity; the mirror is only consulted for the uid, never for the entity.
         const Entity rootEntity = state.index.Find(state.localRootPartUid);
@@ -643,11 +644,11 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
         return;
     }
     if (state.localRootPartUid == 0) {
-        if (state.localController != Entity::Null() || state.localControllerBody != Physics::BodyID::Null()) destroyController();
+        if (state.localController != Entity::Null() || state.localControllerBody != Physics::CharacterID::Null()) destroyController();
         return;
     }
     if (state.controllerForRootUid == state.localRootPartUid && state.localController != Entity::Null()
-        && entities.IsAlive(state.localController) && state.localControllerBody != Physics::BodyID::Null()) {
+        && entities.IsAlive(state.localController) && state.localControllerBody != Physics::CharacterID::Null()) {
         const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid);
         if (humanoid != nullptr) {
             if (auto* move = entities.Get<Character::MovementComponent>(state.localController)) {
@@ -663,15 +664,15 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     const ReplicatedObject* rootPart = FindObject(state, state.localRootPartUid);
     if (rootPart == nullptr) return;
 
-    auto& sim = *engine.Simulation();
-    const Physics::Capsule      capsule {.halfHeight = 2.0f, .radius = 0.5f};
+    auto&                        sim = *engine.Simulation();
+    const Physics::Capsule       capsule {.halfHeight = 2.0f, .radius = 0.5f};
     const Physics::CharacterBody charRole {
         .position      = rootPart->position.Cast<double>(),
         .maxSlopeAngle = RadF {std::numbers::pi_v<float> / 4.0f},
     };
-    const auto charRes        = sim.CreateCharacterRaw(COM::InChain(capsule, charRole));
-    state.localControllerBody = charRes.HasValue() ? Physics::BodyID(charRes.value) : Physics::BodyID::Null();
-    if (state.localControllerBody == Physics::BodyID::Null()) {
+    const auto charRes        = sim.CreateBody(capsule, charRole);
+    state.localControllerBody = charRes.HasValue() ? charRes.value : Physics::CharacterID::Null();
+    if (state.localControllerBody == Physics::CharacterID::Null()) {
         ZHLN::COM::LoggerView{engine.Logger()}.Warn("Could not create the local player CharacterVirtual body.");
         return;
     }
@@ -681,7 +682,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     entities.Attach(controller, Components::NameComponent {.name = String64("ProjectLightLocalController")});
     entities.Attach(controller, Components::TransformComponent {.position = rootPart->position, .rotation = rootPart->rotationQuat, .scale = FVec3::Splat(1.0f)});
     entities.Attach(controller, Components::WorldTransformComponent {.world = matrix, .previous = matrix});
-    entities.Attach(controller, Components::PhysicsComponent {.physicsID = state.localControllerBody, .isStatic = false});
+    entities.Attach(controller, Components::CharacterBodyComponent {.bodyID = state.localControllerBody});
     Character::MovementComponent moveComp {.orientation = rootPart->rotationQuat, .prevOrientation = rootPart->rotationQuat};
     if (const ReplicatedObject* humanoid = FindObject(state, state.localHumanoidUid); humanoid != nullptr) {
         moveComp.speed     = std::max(0.0f, humanoid->walkSpeed);
@@ -694,7 +695,7 @@ void SceneMirror::UpdateLocalController(COM::IEngine& engine, SceneMirrorState& 
     bindCamera(controller);
 }
 void SceneMirror::UpdateLocalCharacterParts(COM::IEngine& engine, SceneMirrorState& state, float dt) {
-    if (state.localController == Entity::Null() || state.localControllerBody == Physics::BodyID::Null()) return;
+    if (state.localController == Entity::Null() || state.localControllerBody == Physics::CharacterID::Null()) return;
     auto& entities = *engine.Entities();
     auto movement = entities.Get<Character::MovementComponent>(state.localController);
     if (!movement) return;
@@ -706,10 +707,7 @@ void SceneMirror::UpdateLocalCharacterParts(COM::IEngine& engine, SceneMirrorSta
     const auto& bodyState    = bodyStateResult.value;
     const FVec3 rootPosition = bodyState.currentPosition.Cast<float>();
     const Quat  rootRotation = movement->orientation.Normalized();
-    FVec3       velocity     = FVec3::Zero();
-    if (const auto charBody = sim.AsCharacter(state.localControllerBody)) {
-        velocity = sim.CharacterVelocity(*charBody);
-    }
+    const FVec3 velocity     = sim.CharacterVelocity(state.localControllerBody);
     (void)dt;
 
     const auto* actions  = engine.Actions();

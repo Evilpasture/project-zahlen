@@ -280,12 +280,25 @@ auto Session::Pick(COM::IEngine& engine, const Camera& camera, const ViewportRec
     FVec3 origin {near.x / near.w, near.y / near.w, near.z / near.w};
     FVec3 end {far.x / far.w, far.y / far.w, far.z / far.w};
     auto  hit = engine.Simulation()->Raycast(origin.Cast<double>(), (end - origin).Normalized(), 1000, Physics::BodyID::Null());
-    if (hit.hasHit)
-        for (auto entity: engine.Entities()->EntitiesWith<Components::PhysicsComponent>()) {
-            auto* body = engine.Entities()->Get<Components::PhysicsComponent>(entity);
-            if (body && body->physicsID == hit.bodyID && !engine.Entities()->Get<Components::PendingDestroy>(entity))
-                return entity;
-        }
+    if (hit.hasHit) {
+        auto& entities = *engine.Entities();
+        auto  findRole = [&]<typename CompT>() -> Entity {
+            for (auto entity: entities.EntitiesWith<CompT>()) {
+                auto* body = entities.Get<CompT>(entity);
+                if (body && body->bodyID == hit.bodyID && !entities.Get<Components::PendingDestroy>(entity))
+                    return entity;
+            }
+            return Entity::Null();
+        };
+        if (const Entity e = findRole.template operator()<Components::StaticBodyComponent>(); e != Entity::Null())
+            return e;
+        if (const Entity e = findRole.template operator()<Components::KinematicBodyComponent>(); e != Entity::Null())
+            return e;
+        if (const Entity e = findRole.template operator()<Components::DynamicBodyComponent>(); e != Entity::Null())
+            return e;
+        if (const Entity e = findRole.template operator()<Components::CharacterBodyComponent>(); e != Entity::Null())
+            return e;
+    }
     return Entity::Null();
 }
 auto Session::Frame(COM::IEngine& engine, HostUI& hostUI, float dt) -> std::expected<void, ErrorCode> {

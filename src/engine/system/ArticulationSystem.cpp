@@ -49,7 +49,7 @@ namespace {
 }
 } // namespace
 
-void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
+void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const Components::CharacterBodyComponent,
                                             const Components::SkeletalMeshComponent, Components::TransformComponent&,
                                             const Components::RagdollHitReactionCommand, const Components::RagdollImpulseCommand> query,
                                  ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationContext> articulation,
@@ -64,7 +64,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity                        e       = entities[i];
         Components::RagdollComponent& ragComp = ragdolls[i];
-        auto                          phys    = query.Get<Components::PhysicsComponent>(e);
+        auto                          phys    = query.Get<Components::CharacterBodyComponent>(e);
 
         if (ragComp.ragdollID == Physics::RagdollID::Invalid) {
             continue;
@@ -121,8 +121,8 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 
         auto capsuleWorldPos = JPH::RVec3::sZero();
-        if (phys) {
-            if (const auto bodyPos = pc.BodyPosition(phys->physicsID)) {
+        if (phys && phys->bodyID != Physics::CharacterID::Null()) {
+            if (const auto bodyPos = pc.BodyPosition(phys->bodyID)) {
                 capsuleWorldPos = Physics::ToJoltPosition(*bodyPos);
             }
         }
@@ -160,11 +160,9 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
                     auto initialVelocity = FVec3::Zero();
-                    if (phys) {
-                        if (const auto character = pc.AsCharacter(phys->physicsID)) {
-                            const auto velocity = pc.GetCharacterVelocity(*character);
-                            initialVelocity    = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
-                        }
+                    if (phys && phys->bodyID != Physics::CharacterID::Null()) {
+                        const auto velocity = pc.GetCharacterVelocity(phys->bodyID);
+                        initialVelocity     = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
                     }
                     pc.ActivateRagdoll(ragComp.ragdollID, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;

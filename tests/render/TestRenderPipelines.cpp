@@ -54,14 +54,12 @@ struct RenderPipelinesTestSuite {
                 .indices  = ZHLN::COM::Span<const uint32_t>(indices.data(), indices.size()),
             })).HasValue());
             auto& physics = *engine->Simulation();
-            const auto body = physics.CreateStaticBodyRaw(
-                ZHLN::COM::InChain(
-                    ZHLN::Physics::MeshAsset {.id = id},
-                    ZHLN::Physics::StaticBody {
-                        .position = ZHLN::DVec3 {0, 0, 0},
-                        .rotation = ZHLN::Quat::Identity(),
-                    }
-                )
+            const auto body = physics.CreateBody(
+                ZHLN::Physics::MeshAsset {.id = id},
+                ZHLN::Physics::StaticBody {
+                    .position = ZHLN::DVec3 {0, 0, 0},
+                    .rotation = ZHLN::Quat::Identity(),
+                }
             );
             ZHLN::Test::ExpectTrue(body.HasValue() && *body != ZHLN::Physics::BodyID::Null());
             physics.Step(1.0f / 60.0f);
@@ -365,7 +363,7 @@ struct RenderPipelinesTestSuite {
                 handles.push_back(handle);
                 children.push_back(reg.Spawn(
                     ZHLN::Components::HierarchyComponent {.parent = parent},
-                    ZHLN::Components::PhysicsComponent {.physicsID = handle, .isStatic = false}
+                    ZHLN::Components::DynamicBodyComponent {.bodyID = handle}
                 ));
             }
 
@@ -426,10 +424,10 @@ struct RenderPipelinesTestSuite {
             const auto reportFall = [](ZHLN::COM::IEngine& eng, ZHLN::Entity box, const char* which) -> void {
                 auto&       reg   = *eng.Entities();
                 const auto  trans = reg.Get<ZHLN::Components::TransformComponent>(box);
-                const auto  phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
-                const char* body  = (!phys) ?
-                                        "no PhysicsComponent" :
-                                        ((phys->physicsID == ZHLN::Physics::BodyID::Null()) ? "null ID" : (phys->isStatic ? "static" : "dynamic"));
+                const auto  phys  = reg.Get<ZHLN::Components::DynamicBodyComponent>(box);
+                const auto  stat  = reg.Get<ZHLN::Components::StaticBodyComponent>(box);
+                const char* body  = phys ? (phys->bodyID == ZHLN::Physics::DynamicBodyID::Null() ? "null ID" : "dynamic")
+                                         : (stat ? (stat->bodyID == ZHLN::Physics::StaticBodyID::Null() ? "null ID" : "static") : "no body component");
                 const auto  hit   = eng.Simulation()->Raycast(ZHLN::DVec3 {0.0, 15.0, 0.0}, ZHLN::FVec3 {0.0f, -1.0f, 0.0f}, 30.0f, ZHLN::Physics::BodyID {});
 
                 ZHLN::Println(

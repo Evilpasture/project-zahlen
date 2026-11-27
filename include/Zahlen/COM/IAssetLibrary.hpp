@@ -133,7 +133,7 @@ struct IAssetLibrary : IObject {
                                                        uint32_t capacity) noexcept = 0;
 
     // Spawns a scene-owned procedural primitive entity (mesh, material,
-    // transforms, OwnedMeshComponent, and optional PhysicsComponent). Accepts
+    // transforms, OwnedMeshComponent, and optional role-typed body component). Accepts
     // exactly one shape node (BoxMeshDesc, PlaneMeshDesc, SphereMeshDesc,
     // CylinderMeshDesc, or ConeMeshDesc) plus optional PrefabFactory::SpawnParams.
     // Optional MeshBuildOptions explicitly selects BLAS construction (default

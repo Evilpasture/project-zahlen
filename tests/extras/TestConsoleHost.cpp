@@ -68,8 +68,11 @@ struct ConsoleHostSuite {
             ExpectTrue(engine->Entities()->GetRaw(target, canonical) == nullptr);
             ExpectTrue(engine->Entities()->GetRaw(target, "PBRComponent") == nullptr);
             ExpectTrue(engine->Entities()->Get<Components::PBRComponent>(target) != nullptr);
-            const auto body = engine->Entities()->Get<Components::PhysicsComponent>(target)->physicsID;
-            ExpectTrue(!bridge.SetProperty(target, "PhysicsComponent", "isStatic", ScriptVal {true}));
+            const auto body = engine->Entities()->Get<Components::DynamicBodyComponent>(target)->bodyID;
+            auto       readBody = bridge.GetProperty(target, "DynamicBodyComponent", "bodyID");
+            ExpectTrue(readBody.has_value());
+            if (readBody)
+                ExpectTrue(!bridge.SetProperty(target, "DynamicBodyComponent", "bodyID", *readBody));
             ExpectTrue(engine->Simulation()->BodyPosition(body).HasValue());
             HostUI host(*engine.Get());
             host.BeginFrame();

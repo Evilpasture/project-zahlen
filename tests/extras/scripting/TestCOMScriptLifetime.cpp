@@ -151,9 +151,11 @@ struct COMScriptLifetimeSuite {
             ExpectTrue(bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string("renamed")}).has_value());
             ExpectEq(std::string_view(entities.Get<ConsolePOD>(e)->label), std::string_view("renamed"));
             ExpectTrue(!bridge.SetProperty(e, "ConsolePOD", "label", ScriptVal {std::string(100, 'x')}));
-            entities.Attach(e, ZHLN::Components::PhysicsComponent {});
-            ExpectTrue(!bridge.SetProperty(e, "PhysicsComponent", "isStatic", ScriptVal {true}));
-            ExpectTrue(bridge.GetProperty(e, "PhysicsComponent", "isStatic").has_value());
+            entities.Attach(e, ZHLN::Components::DynamicBodyComponent {});
+            auto readBody = bridge.GetProperty(e, "DynamicBodyComponent", "bodyID");
+            ExpectTrue(readBody.has_value());
+            if (readBody)
+                ExpectTrue(!bridge.SetProperty(e, "DynamicBodyComponent", "bodyID", *readBody));
             return {};
         }
         std::expected<void, ErrorCode> host_owned_stl_values_keep_reflection_without_becoming_com_components() {

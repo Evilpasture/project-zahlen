@@ -58,9 +58,9 @@ struct SceneMirrorState {
     const bool&     snapshotComplete;
     const float&    time;
 
-    Entity&              localController;
-    Physics::BodyID& localControllerBody;
-    uint64_t&            controllerForRootUid;
+    Entity&               localController;
+    Physics::CharacterID& localControllerBody;
+    uint64_t&             controllerForRootUid;
     float&               jumpRemaining;
     bool&                wasJumpDown;
 

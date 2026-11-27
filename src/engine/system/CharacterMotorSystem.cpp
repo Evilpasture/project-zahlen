@@ -24,8 +24,8 @@ void PreStep(Engine& engine, float dt) {
     auto& physics = engine.Physics();
     for (const Entity entity: registry.GetEntitiesWith<Components::CharacterMotorComponent>()) {
         auto motor = registry.Get<Components::CharacterMotorComponent>(entity);
-        auto body  = registry.Get<Components::PhysicsComponent>(entity);
-        if (!motor || !body || body->isStatic || registry.Get<Components::PendingDestroy>(entity))
+        auto body  = registry.Get<Components::CharacterBodyComponent>(entity);
+        if (!motor || !body || body->bodyID == Physics::CharacterID::Null() || registry.Get<Components::PendingDestroy>(entity))
             continue;
         auto ragdoll = registry.Get<Components::RagdollComponent>(entity);
         if (ragdoll && ragdoll->state != RagdollState::Inactive)
@@ -39,8 +39,8 @@ void PreStep(Engine& engine, float dt) {
         state.previousFacing = state.facing;
         if (motor->driveFacing && std::isfinite(motor->desiredFacing.LengthSquared()) && motor->desiredFacing.LengthSquared() > 0.0001f)
             state.facing = motor->desiredFacing.Normalized();
-        const auto character = physics.AsCharacter(body->physicsID);
-        state.grounded       = character ? physics.IsCharacterOnGround(*character) : false;
+        const auto characterID = body->bodyID;
+        state.grounded         = physics.IsCharacterOnGround(characterID);
         const float x      = Finite(motor->desiredVelocity.x);
         const float z      = Finite(motor->desiredVelocity.z);
         const float dx     = x - state.velocity.x;
@@ -56,24 +56,21 @@ void PreStep(Engine& engine, float dt) {
             state.velocity.y -= NonNegative(motor->gravity) * dt;
         registry.Patch<Components::CharacterMotorComponent>(entity, [](auto& command) { command.jumpRequested = false; });
         registry.Patch<Components::CharacterMotorStateComponent>(entity, [&](auto& output) { output = state; });
-        if (character) {
-            physics.SetVelocity(*character, state.velocity);
-        }
+        physics.SetVelocity(characterID, state.velocity);
     }
 }
 void PostStep(Engine& engine) {
     auto& registry = engine.Registry();
     auto& physics = engine.Physics();
     for (const Entity entity: registry.GetEntitiesWith<Components::CharacterMotorComponent>()) {
-        auto body  = registry.Get<Components::PhysicsComponent>(entity);
+        auto body  = registry.Get<Components::CharacterBodyComponent>(entity);
         auto state = registry.Get<Components::CharacterMotorStateComponent>(entity);
-        if (!body || !state || registry.Get<Components::PendingDestroy>(entity))
+        if (!body || body->bodyID == Physics::CharacterID::Null() || !state || registry.Get<Components::PendingDestroy>(entity))
             continue;
+        const auto characterID = body->bodyID;
         registry.Patch<Components::CharacterMotorStateComponent>(entity, [&](auto& output) {
-            if (const auto character = physics.AsCharacter(body->physicsID)) {
-                output.grounded = physics.IsCharacterOnGround(*character);
-                output.velocity = physics.CharacterVelocity(*character);
-            }
+            output.grounded = physics.IsCharacterOnGround(characterID);
+            output.velocity = physics.CharacterVelocity(characterID);
         });
     }
 }

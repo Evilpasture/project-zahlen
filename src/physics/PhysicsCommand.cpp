@@ -210,6 +210,9 @@ void PhysicsWorld::ProcessCommands(std::span<Command> commands, CharacterManager
                 const auto&       c   = cmd.payload.createConstraint;
                 const JPH::BodyID id1 = GetBodyID(*this, c.b1);
                 const JPH::BodyID id2 = GetBodyID(*this, c.b2);
+                if (id1.IsInvalid() || id2.IsInvalid() || id1 == id2) {
+                    break;
+                }
 
                 JPH::BodyLockWrite lock1(system->GetBodyLockInterface(), id1);
                 JPH::BodyLockWrite lock2(system->GetBodyLockInterface(), id2);

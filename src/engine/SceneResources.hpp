@@ -15,12 +15,18 @@ namespace ZHLN::SceneResources {
 // handles. These release the old resource before the registry erases or
 // replaces its component; raw Registry::Remove/Add and ECB::AddComponent
 // do not do so.
-void Release(PhysicsContext& physics, Components::PhysicsComponent& component);
+void Release(PhysicsContext& physics, Components::StaticBodyComponent& component);
+void Release(PhysicsContext& physics, Components::KinematicBodyComponent& component);
+void Release(PhysicsContext& physics, Components::DynamicBodyComponent& component);
+void Release(PhysicsContext& physics, Components::CharacterBodyComponent& component);
 void Release(PhysicsContext& physics, Components::RagdollComponent& component);
 void Release(AudioContext& audio, Components::AudioSourceComponent& component);
 void Release(RenderContext& render, Components::OwnedMeshComponent& component);
 
-void Release(Engine& engine, Components::PhysicsComponent& component);
+void Release(Engine& engine, Components::StaticBodyComponent& component);
+void Release(Engine& engine, Components::KinematicBodyComponent& component);
+void Release(Engine& engine, Components::DynamicBodyComponent& component);
+void Release(Engine& engine, Components::CharacterBodyComponent& component);
 void Release(Engine& engine, Components::RagdollComponent& component);
 void Release(Engine& engine, Components::AudioSourceComponent& component);
 void Release(Engine& engine, Components::OwnedMeshComponent& component);

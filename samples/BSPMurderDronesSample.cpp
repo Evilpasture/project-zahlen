@@ -257,17 +257,24 @@ void UpdateCrosshairPick(ZHLN::COM::IEngine& engine) {
     // (it unpacks Jolt's user data and checks the generation), so the mapping
     // is a direct handle comparison. GetEntitiesWith returns a span, not a
     // vector, so this walk allocates nothing.
-    for (const ZHLN::Entity e: reg.EntitiesWith<ZHLN::Components::PhysicsComponent>()) {
-        const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
-        if (!phys || phys->physicsID == ZHLN::Physics::BodyID::Null()) {
-            continue;
+    auto matchRole = [&]<typename CompT>() -> bool {
+        for (const ZHLN::Entity e: reg.EntitiesWith<CompT>()) {
+            const auto phys = reg.Get<CompT>(e);
+            if (!phys || static_cast<ZHLN::Physics::BodyID>(phys->bodyID) == ZHLN::Physics::BodyID::Null()) {
+                continue;
+            }
+            if (phys->bodyID == hit.bodyID) {
+                g_pick.label  = PickLabel(reg, e);
+                g_pick.entity = e;
+                return true;
+            }
         }
-        if (phys->physicsID == hit.bodyID) {
-            g_pick.label  = PickLabel(reg, e);
-            g_pick.entity = e;
-            return;
-        }
-    }
+        return false;
+    };
+    (void)(matchRole.template operator()<ZHLN::Components::StaticBodyComponent>() ||
+           matchRole.template operator()<ZHLN::Components::KinematicBodyComponent>() ||
+           matchRole.template operator()<ZHLN::Components::DynamicBodyComponent>() ||
+           matchRole.template operator()<ZHLN::Components::CharacterBodyComponent>());
 }
 
 // The crosshair and its readout. Registered as the sample's UI callback, which
@@ -1196,10 +1203,10 @@ struct VoidPropTracker {
 
     void Poll(ZHLN::COM::IEntities& reg) {
         if (!armed) return;
-        for (const ZHLN::Entity e : reg.EntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+        for (const ZHLN::Entity e : reg.EntitiesWith<ZHLN::Components::DynamicBodyComponent>()) {
             if (reported.contains(e.index)) continue;
-            const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
-            if (!phys || phys->isStatic || e == g_player) continue;
+            const auto phys = reg.Get<ZHLN::Components::DynamicBodyComponent>(e);
+            if (!phys || phys->bodyID == ZHLN::Physics::DynamicBodyID::Null() || e == g_player) continue;
             const auto tr = reg.Get<ZHLN::Components::TransformComponent>(e);
             if (!tr || tr->position.y > thresholdY) continue;
             reported.insert(e.index);
@@ -1495,11 +1502,11 @@ auto main(int argc, char* argv[]) -> int {
                 .maxSlopeAngle    = ZHLN::RadF {(std::numbers::pi_v<float> / 180.0f) * 50.0f},
                 .supportingVolume = ZHLN::Physics::Plane {{0.0f, 1.0f, 0.0f}, -playerHull.GetLifterOffsetY()},
             });
-        if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::BodyID::Null()) {
+        if (!bodyRes.HasValue() || bodyRes.value == ZHLN::Physics::CharacterID::Null()) {
             ZHLN::Log<ZHLN::LogSeverity::Error>("Failed to create the player CharacterVirtual body.");
             return EXIT_FAILURE;
         }
-        const ZHLN::Physics::BodyID playerBody = bodyRes.value;
+        const ZHLN::Physics::CharacterID playerBody = bodyRes.value;
 
         const ZHLN::Mat4x4 playerWorld = ZHLN::ComposeTransform(spawnCenter, ZHLN::Quat::Identity(), FVec3::One());
         g_player = reg.Spawn(
@@ -1507,7 +1514,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_Procedural")},
             ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = ZHLN::Quat::Identity(), .scale = FVec3::One()},
             ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
-            ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false},
+            ZHLN::Components::CharacterBodyComponent {.bodyID = playerBody},
             ZHLN::Character::InputComponent {},
             ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
         );

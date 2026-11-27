@@ -187,21 +187,18 @@ void PushProps(COM::IEntities& entities, COM::ISimulation& physics, float dt) {
         if (!Usable(entities, entity))
             continue;
         const auto* policy = entities.Get<ControllerComponent>(entity);
-        const auto* body   = entities.Get<Components::PhysicsComponent>(entity);
-        if (!policy || !policy->enabled || !body || body->isStatic)
+        const auto* body   = entities.Get<Components::CharacterBodyComponent>(entity);
+        if (!policy || !policy->enabled || !body || body->bodyID == Physics::CharacterID::Null())
             continue;
-        const auto position = physics.BodyPosition(body->physicsID);
+        const auto position = physics.BodyPosition(body->bodyID);
         if (!position.HasValue())
             continue;
-        const auto character = physics.AsCharacter(body->physicsID);
-        if (!character)
-            continue;
-        const auto velocity = physics.CharacterVelocity(*character);
+        const auto velocity = physics.CharacterVelocity(body->bodyID);
         if (velocity.LengthSquared() < 0.01f)
             continue;
         const auto overlaps = physics.BodiesInSphere(position.value, NonNegative(policy->pushRadius));
         for (const auto other: overlaps) {
-            if (other == body->physicsID || !physics.IsBodyDynamic(other))
+            if (other == body->bodyID || !physics.IsBodyDynamic(other))
                 continue;
             const auto otherPosition = physics.BodyPosition(other);
             if (!otherPosition.HasValue())

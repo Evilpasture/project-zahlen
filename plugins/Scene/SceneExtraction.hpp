@@ -70,11 +70,17 @@ template <typename Reader>
 
 template <typename Reader>
 [[nodiscard]] auto ExtractBodyKind(const Reader& registry, ZHLN::Entity entity) noexcept -> BodyKind {
-    const auto phys = registry.template Get<Components::PhysicsComponent>(entity);
-    if (!phys) {
-        return BodyKind::None;
+    if (registry.template Get<Components::StaticBodyComponent>(entity)) {
+        return BodyKind::Static;
     }
-    return phys->isStatic ? BodyKind::Static : BodyKind::Dynamic;
+    if (registry.template Get<Components::KinematicBodyComponent>(entity)) {
+        return BodyKind::Kinematic;
+    }
+    if (registry.template Get<Components::DynamicBodyComponent>(entity) ||
+        registry.template Get<Components::CharacterBodyComponent>(entity)) {
+        return BodyKind::Dynamic;
+    }
+    return BodyKind::None;
 }
 
 template <typename Reader>

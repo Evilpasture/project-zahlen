@@ -128,15 +128,13 @@ auto System::Create(Geometry geometry, const CreateInfo& info) -> std::expected<
         ))
         return fail(COM::Error::InvalidArgument);
     if (info.createPhysics) {
-        const auto body = engine.Simulation()->CreateStaticBodyRaw(
-            COM::InChain(
-                Physics::HeightField {.heights = tile.geometry.heights, .sampleCount = n, .worldSize = tile.geometry.worldSize},
-                Physics::StaticBody {.position = info.position.Cast<double>()}
-            )
+        const auto body = engine.Simulation()->CreateBody(
+            Physics::HeightField {.heights = tile.geometry.heights, .sampleCount = n, .worldSize = tile.geometry.worldSize},
+            Physics::StaticBody {.position = info.position.Cast<double>()}
         );
         if (!body.HasValue())
             return fail(body.error);
-        if (!entities.Attach(entity, Components::PhysicsComponent {.physicsID = body.value, .isStatic = true})) {
+        if (!entities.Attach(entity, Components::StaticBodyComponent {.bodyID = body.value})) {
             engine.Simulation()->DestroyBody(body.value);
             return fail(COM::Error::InvalidArgument);
         }

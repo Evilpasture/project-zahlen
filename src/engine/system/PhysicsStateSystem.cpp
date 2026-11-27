@@ -13,100 +13,91 @@
 #include <physics/Physics.hpp>
 #include <vector>
 
+namespace ZHLN {
+namespace {
 
-namespace ZHLN::Tests {
+template <typename T>
+void AppendRoleBodies(
+    const VisualInterpolationSystem::InterpolationQuery& query,
+    std::vector<Physics::BodyID>&                        handles,
+    std::vector<Entity>&                                 sourceEntities
+) {
+    const auto entities = query.template Entities<T>();
+    const auto raw      = query.template Raw<T>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        handles.push_back(raw[i].bodyID);
+        sourceEntities.push_back(entities[i]);
+    }
+}
+
+} // namespace
+
+namespace Tests {
 static void VerifyRealVisualInterpolation(
-    ECS::Query<
-        const Components::PhysicsComponent,
-        Components::TransformComponent&,
-        const Components::CharacterMotorComponent,
-        const Components::CharacterMotorStateComponent,
-        const Components::RagdollComponent> query,
-    const PhysicsContext&                   physics,
-    float                                   alpha,
-    bool&                                   verified
+    VisualInterpolationSystem::InterpolationQuery query,
+    const PhysicsContext&                         physics,
+    float                                         alpha,
+    bool&                                         verified
 ) noexcept {
     if (verified) {
         return;
     }
 
-    auto  entities = query.Entities<Components::PhysicsComponent>();
-    if (entities.empty()) {
+    std::vector<Physics::BodyID> handles;
+    std::vector<Entity>          sourceEntities;
+    AppendRoleBodies<Components::DynamicBodyComponent>(query, handles, sourceEntities);
+    AppendRoleBodies<Components::CharacterBodyComponent>(query, handles, sourceEntities);
+    if (handles.empty()) {
         return;
     }
     verified = true;
 
-    auto physComps     = query.Raw<Components::PhysicsComponent>();
     float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
 
-    std::vector<Physics::BodyID>        handles;
-    std::vector<size_t>                     sourceIndex;
-    std::vector<Physics::BodyStateSnapshot> snapshots;
-    handles.reserve(entities.size());
-    sourceIndex.reserve(entities.size());
-    for (size_t i = 0; i < entities.size(); ++i) {
-        if (physComps[i].isStatic) {
-            continue;
-        }
-        handles.push_back(physComps[i].physicsID);
-        sourceIndex.push_back(i);
-    }
-    snapshots.resize(handles.size());
+    std::vector<Physics::BodyStateSnapshot> snapshots(handles.size());
     physics.FillBodyStates(handles, snapshots);
 
     for (size_t j = 0; j < snapshots.size(); ++j) {
         if (!snapshots[j].valid) {
             continue;
         }
-        Entity     e     = entities[sourceIndex[j]];
+        Entity     e     = sourceEntities[j];
         const auto trans = query.Get<Components::TransformComponent>(e);
         if (!trans) {
             continue;
         }
         const auto expected = Lerp(snapshots[j].previousPosition, snapshots[j].currentPosition, clampedAlpha);
-        const auto actual = trans->position;
+        const auto actual   = trans->position;
         if ((actual - expected).LengthSquared() > 1e-3f) {
-            kLog.Warn("Visual interpolation drift on entity {}: expected ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
+            kLog.Warn(
+                "Visual interpolation drift on entity {}: expected ({}, {}, {}), got ({}, {}, {}) at alpha = {}",
                 e.index, expected.x, expected.y, expected.z, actual.x, actual.y, actual.z, clampedAlpha
             );
         }
     }
 }
-}
-
-namespace ZHLN {
+} // namespace Tests
 
 void VisualInterpolationSystem::Update(
-    ECS::Query<
-        const Components::PhysicsComponent,
-        Components::TransformComponent&,
-        const Components::CharacterMotorComponent,
-        const Components::CharacterMotorStateComponent,
-        const Components::RagdollComponent> query,
-    ECS::Res<PhysicsContext>                physics,
-    FrameAlpha                              alpha,
-    ECS::Local<InterpolationScratch>        scratch
+    InterpolationQuery               query,
+    ECS::Res<PhysicsContext>         physics,
+    FrameAlpha                       alpha,
+    ECS::Local<InterpolationScratch> scratch
 ) noexcept {
-    auto entities = query.Entities<Components::PhysicsComponent>();
-    auto phys     = query.Raw<Components::PhysicsComponent>();
-
     float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
 
-    auto& handles     = scratch->handles;
-    auto& sourceIndex = scratch->sourceIndex;
-    auto& snapshots   = scratch->snapshots;
+    auto& handles        = scratch->handles;
+    auto& sourceEntities = scratch->sourceEntities;
+    auto& snapshots      = scratch->snapshots;
     handles.clear();
-    sourceIndex.clear();
-    handles.reserve(entities.size());
-    sourceIndex.reserve(entities.size());
+    sourceEntities.clear();
 
-    for (size_t i = 0; i < entities.size(); ++i) {
-        if (phys[i].isStatic) {
-            continue;
-        }
-        handles.push_back(phys[i].physicsID);
-        sourceIndex.push_back(i);
-    }
+    const size_t total = query.Entities<Components::DynamicBodyComponent>().size() +
+                         query.Entities<Components::CharacterBodyComponent>().size();
+    handles.reserve(total);
+    sourceEntities.reserve(total);
+    AppendRoleBodies<Components::DynamicBodyComponent>(query, handles, sourceEntities);
+    AppendRoleBodies<Components::CharacterBodyComponent>(query, handles, sourceEntities);
 
     snapshots.resize(handles.size());
     physics->FillBodyStates(handles, snapshots);
@@ -115,15 +106,15 @@ void VisualInterpolationSystem::Update(
         if (!snapshots[j].valid) {
             continue;
         }
-        Entity e     = entities[sourceIndex[j]];
+        Entity e     = sourceEntities[j];
         auto   trans = query.Get<Components::TransformComponent>(e);
         if (!trans) {
             continue;
         }
 
         const auto& snap = snapshots[j];
-        trans->position = Lerp(snap.previousPosition, snap.currentPosition, clampedAlpha);
-        trans->rotation = Slerp(Quat{snap.previousRotation}, Quat{snap.currentRotation}, clampedAlpha);
+        trans->position  = Lerp(snap.previousPosition, snap.currentPosition, clampedAlpha);
+        trans->rotation  = Slerp(Quat {snap.previousRotation}, Quat {snap.currentRotation}, clampedAlpha);
         const auto motor      = query.Get<Components::CharacterMotorComponent>(e);
         const auto motorState = query.Get<Components::CharacterMotorStateComponent>(e);
         const auto ragdoll    = query.Get<Components::RagdollComponent>(e);
@@ -135,4 +126,5 @@ void VisualInterpolationSystem::Update(
         ZHLN::Tests::VerifyRealVisualInterpolation(query, *physics, alpha.value, scratch->invariantVerified);
     }
 }
-}
+
+} // namespace ZHLN

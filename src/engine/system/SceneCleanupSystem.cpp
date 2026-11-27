@@ -33,23 +33,40 @@ void ReleaseSelected(Engine& engine, ECS::Query<T&, const Components::PendingDes
     }
 }
 
-using PhysicsCleanupQuery = ECS::Query<Components::PhysicsComponent&, Components::RagdollComponent&, const Components::PendingDestroy>;
+using PhysicsCleanupQuery = ECS::Query<
+    Components::StaticBodyComponent&,
+    Components::KinematicBodyComponent&,
+    Components::DynamicBodyComponent&,
+    Components::CharacterBodyComponent&,
+    Components::RagdollComponent&,
+    const Components::PendingDestroy>;
+
+template <typename T>
+void CollectSelectedBodies(PhysicsCleanupQuery& query, bool all, std::vector<Physics::BodyID>& bodies) {
+    const auto owners = query.template Entities<T>();
+    if (owners.empty()) {
+        return;
+    }
+    auto components = query.template Raw<T>();
+    for (size_t i = 0; i < owners.size(); ++i) {
+        if (all || query.template Get<Components::PendingDestroy>(owners[i]).has_value()) {
+            using Handle = decltype(T::bodyID);
+            bodies.push_back(std::exchange(components[i].bodyID, Handle::Null()));
+        }
+    }
+}
 
 void ReleasePhysics(Engine& engine, PhysicsCleanupQuery query, bool all) {
     auto& physics = engine.Physics();
 
     // Queue all body releases under one physics shadow lock while components
     // remain readable; ragdoll instances are released in a second bulk call.
-    const auto bodyOwners = query.Entities<Components::PhysicsComponent>();
-    if (!bodyOwners.empty()) {
-        std::vector<Physics::BodyID> bodies;
-        bodies.reserve(bodyOwners.size());
-        auto components = query.Raw<Components::PhysicsComponent>();
-        for (size_t i = 0; i < bodyOwners.size(); ++i) {
-            if (all || query.Get<Components::PendingDestroy>(bodyOwners[i]).has_value()) {
-                bodies.push_back(std::exchange(components[i].physicsID, Physics::BodyID::Null()));
-            }
-        }
+    std::vector<Physics::BodyID> bodies;
+    CollectSelectedBodies<Components::StaticBodyComponent>(query, all, bodies);
+    CollectSelectedBodies<Components::KinematicBodyComponent>(query, all, bodies);
+    CollectSelectedBodies<Components::DynamicBodyComponent>(query, all, bodies);
+    CollectSelectedBodies<Components::CharacterBodyComponent>(query, all, bodies);
+    if (!bodies.empty()) {
         physics.DestroyBodies(std::span<const Physics::BodyID> {bodies});
     }
 

@@ -292,7 +292,10 @@ struct BSPWorldAssetsSuite {
                 ExpectTrue(!entities.empty());
                 uint32_t bodies = 0;
                 for (const auto entity: entities) {
-                    if (engine->Entities()->Get<Components::PhysicsComponent>(entity))
+                    if (engine->Entities()->Get<Components::StaticBodyComponent>(entity) ||
+                        engine->Entities()->Get<Components::KinematicBodyComponent>(entity) ||
+                        engine->Entities()->Get<Components::DynamicBodyComponent>(entity) ||
+                        engine->Entities()->Get<Components::CharacterBodyComponent>(entity))
                         ++bodies;
                 }
                 ExpectEq(bodies, 2u); // background skybox has no physics

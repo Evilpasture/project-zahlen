@@ -88,19 +88,23 @@ static_assert(
 // CreateBody<S> so each creation call still names its shape statically.
 using ShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, HeightField, Compound>;
 
+using ConvexShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder>;
+
 // Runtime-held constraint parameters for the mailbox; creation goes through
 // the typed CreateConstraint<C> template, never through this variant directly.
 using ConstraintVariant =
     std::variant<FixedConstraint, PointConstraint, DistanceConstraint, HingeConstraint, SliderConstraint, ConeConstraint>;
 
-// Resolved body-creation modifiers (a chain's SurfaceMaterial / CollisionFilter
-// / MovingBroadphase nodes, or defaults). Not a wire type: chain dispatchers
-// fill one and hand it to CreateBody.
+// Resolved body-creation modifiers (a chain's SurfaceMaterial /
+// PhysicsMaterialID / CollisionFilter / MovingBroadphase nodes, or defaults).
+// Not a wire type: chain dispatchers fill one and hand it to CreateBody.
 struct BodyModifiers {
-    SurfaceMaterial surface {};
-    CollisionFilter filter {};
-    bool            hasSurface       = false;
-    bool            movingBroadphase = false;
+    SurfaceMaterial   surface {};
+    PhysicsMaterialID materialID       = PhysicsMaterialID::Default;
+    CollisionFilter   filter {};
+    bool              hasSurface       = false;
+    bool              hasMaterialID    = false;
+    bool              movingBroadphase = false;
 };
 
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
@@ -144,26 +148,32 @@ class PhysicsContext {
     // so they cannot contradict it at the call site. A FixedCompound converts
     // to a runtime Compound inside WithShapeVariant (its node array lives in
     // this frame); every other shape goes into the variant directly.
-    template <Physics::StaticShape S, Physics::BodyModifier... Mods>
+    template <Physics::StaticShape S, Physics::StaticBodyModifier... Mods>
+        requires (!((std::same_as<Mods, Physics::SurfaceMaterial> || ...) &&
+                    (std::same_as<Mods, Physics::PhysicsMaterialID> || ...)))
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::StaticBody& role, const Mods&... mods) -> Physics::StaticBodyID {
         return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
             return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
         });
     }
-    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    template <Physics::DynamicShape S, Physics::RigidBodyModifier... Mods>
+        requires (!((std::same_as<Mods, Physics::SurfaceMaterial> || ...) &&
+                    (std::same_as<Mods, Physics::PhysicsMaterialID> || ...)))
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::KinematicBody& role, const Mods&... mods)
         -> Physics::KinematicBodyID {
         return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
             return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
         });
     }
-    template <Physics::DynamicShape S, Physics::BodyModifier... Mods>
+    template <Physics::DynamicShape S, Physics::RigidBodyModifier... Mods>
+        requires (!((std::same_as<Mods, Physics::SurfaceMaterial> || ...) &&
+                    (std::same_as<Mods, Physics::PhysicsMaterialID> || ...)))
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::DynamicBody& role, const Mods&... mods) -> Physics::DynamicBodyID {
         return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
             return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
         });
     }
-    template <Physics::CharacterShape S, Physics::BodyModifier... Mods>
+    template <Physics::CharacterShape S, Physics::CharacterModifier... Mods>
     [[nodiscard]] auto CreateBody(const S& shape, const Physics::CharacterBody& role, const Mods&... mods) -> Physics::CharacterID {
         return WithShapeVariant(shape, [&](const Physics::ShapeVariant& variant) {
             return CreateBodyImpl(variant, role, ResolveModifiers(mods...));
@@ -236,7 +246,7 @@ class PhysicsContext {
     // Teleports a kinematic (scripted) rigid body. SetPose(CharacterID) only
     // works on CharacterVirtual bodies; rigid-body handles need this instead.
     // Static bodies cannot be moved in the broadphase and have no setter.
-    void SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation);
+    void SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::Quat rotation = ZHLN::Quat::Identity());
 
     auto               GetCharacterVelocity(Physics::CharacterID handle) const -> JPH::Vec3;
     // Vertical half-extent of a character's collision shape, i.e. the distance
@@ -258,10 +268,11 @@ class PhysicsContext {
     // Typed constraint creation: the parameter struct names the kind, so a
     // hinge's limits can never be fed to a slider. The mailbox re-dispatches
     // through ConstraintVariant; no runtime type enum crosses this API.
-    template <typename C>
+    template <Physics::ConstraintDesc C>
     [[nodiscard]] auto CreateConstraint(Physics::BodyID b1, Physics::BodyID b2, const C& params)
-        -> Physics::TypedConstraintID<C> {
-        return Physics::TypedConstraintID<C>::From(CreateConstraintVariant(b1, b2, Physics::ConstraintVariant {params}));
+        -> Physics::TypedConstraintID<std::remove_cvref_t<C>> {
+        return Physics::TypedConstraintID<std::remove_cvref_t<C>>::From(
+            CreateConstraintVariant(b1, b2, Physics::ConstraintVariant {params}));
     }
     void SetTargetAngle(Physics::TypedConstraintID<Physics::HingeConstraint> handle, ZHLN::RadF angle);
     void SetTargetPosition(Physics::TypedConstraintID<Physics::SliderConstraint> handle, float position);
@@ -290,18 +301,30 @@ class PhysicsContext {
         Physics::BodyID ignore = {}
     ) const -> std::vector<Physics::RaycastPenetrationResult>;
 
+    template <Physics::ConvexShape S>
     [[nodiscard]] auto Shapecast(
-        const JPH::ShapeRefC& shape,
-        ZHLN::DVec3         pos,
-        ZHLN::FVec4          rot,
-        ZHLN::FVec3          direction,
-        float                 maxDistance = 1000.0f,
-        Physics::BodyID   ignore      = {}
-    ) const -> Physics::ShapeCastResult;
+        const S&        shape,
+        ZHLN::DVec3     pos,
+        ZHLN::Quat      rot,
+        ZHLN::FVec3     direction,
+        float           maxDistance = 1000.0f,
+        Physics::BodyID ignore      = {}
+    ) const -> Physics::ShapeCastResult {
+        return ShapecastVariant(Physics::ConvexShapeVariant {shape}, pos, rot, direction, maxDistance, ignore);
+    }
+
+    template <Physics::ConvexShape S>
+    [[nodiscard]] auto Overlap(
+        const S&    shape,
+        ZHLN::DVec3 pos,
+        ZHLN::Quat  rot = ZHLN::Quat::Identity()
+    ) const -> std::vector<Physics::BodyID> {
+        return OverlapVariant(Physics::ConvexShapeVariant {shape}, pos, rot);
+    }
 
     [[nodiscard]] auto OverlapSphere(ZHLN::DVec3 center, float radius) const -> std::vector<Physics::BodyID>;
     [[nodiscard]] auto OverlapAABB(ZHLN::DVec3 minBox, ZHLN::DVec3 maxBox) const -> std::vector<Physics::BodyID>;
-    [[nodiscard]] auto QueryAABB(ZHLN::FVec3 min, ZHLN::FVec3 max) const -> std::vector<Physics::BodyID>;
+    [[nodiscard]] auto QueryAABB(ZHLN::DVec3 min, ZHLN::DVec3 max) const -> std::vector<Physics::BodyID>;
     [[nodiscard]] auto FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum) const -> std::vector<Physics::BodyID>;
 
     [[nodiscard]] auto GetBodyID(JPH::BodyID bodyID) const -> Physics::BodyID;
@@ -311,13 +334,32 @@ class PhysicsContext {
     [[nodiscard]] auto GetInternalWorld() noexcept -> Physics::PhysicsWorld&;
     [[nodiscard]] auto GetInternalWorld() const noexcept -> const Physics::PhysicsWorld&;
 
-  private:
+    // Overloads for chain dispatchers that already parsed variants.
     [[nodiscard]] auto CreateConstraintVariant(Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintVariant& params)
         -> Physics::ConstraintID;
+    [[nodiscard]] auto ShapecastVariant(
+        const Physics::ConvexShapeVariant& shape,
+        ZHLN::DVec3                        pos,
+        ZHLN::Quat                         rot,
+        ZHLN::FVec3                        direction,
+        float                              maxDistance,
+        Physics::BodyID                    ignore
+    ) const -> Physics::ShapeCastResult;
+    [[nodiscard]] auto OverlapVariant(
+        const Physics::ConvexShapeVariant& shape,
+        ZHLN::DVec3                        pos,
+        ZHLN::Quat                         rot
+    ) const -> std::vector<Physics::BodyID>;
+
+  private:
+    [[nodiscard]] auto ResolveConvexShape(const Physics::ConvexShapeVariant& shape) const -> JPH::ShapeRefC;
 
     [[nodiscard]] static auto ResolveModifiers() noexcept -> Physics::BodyModifiers { return {}; }
     [[nodiscard]] static auto ResolveModifiers(const Physics::SurfaceMaterial& m) noexcept -> Physics::BodyModifiers {
         return Physics::BodyModifiers {.surface = m, .hasSurface = true};
+    }
+    [[nodiscard]] static auto ResolveModifiers(Physics::PhysicsMaterialID id) noexcept -> Physics::BodyModifiers {
+        return Physics::BodyModifiers {.materialID = id, .hasMaterialID = true};
     }
     [[nodiscard]] static auto ResolveModifiers(const Physics::CollisionFilter& f) noexcept -> Physics::BodyModifiers {
         return Physics::BodyModifiers {.filter = f};
@@ -325,14 +367,18 @@ class PhysicsContext {
     [[nodiscard]] static auto ResolveModifiers(const Physics::MovingBroadphase&) noexcept -> Physics::BodyModifiers {
         return Physics::BodyModifiers {.movingBroadphase = true};
     }
-    template <Physics::BodyModifier First, Physics::BodyModifier... Rest>
+    template <Physics::StaticBodyModifier First, Physics::StaticBodyModifier... Rest>
     [[nodiscard]] static auto ResolveModifiers(const First& first, const Rest&... rest) noexcept -> Physics::BodyModifiers {
         Physics::BodyModifiers out = ResolveModifiers(first);
         const auto    merge = [&out](const auto& mod) {
-            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(mod)>, Physics::SurfaceMaterial>) {
+            using Mod = std::remove_cvref_t<decltype(mod)>;
+            if constexpr (std::is_same_v<Mod, Physics::SurfaceMaterial>) {
                 out.surface    = mod;
                 out.hasSurface = true;
-            } else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(mod)>, Physics::CollisionFilter>) {
+            } else if constexpr (std::is_same_v<Mod, Physics::PhysicsMaterialID>) {
+                out.materialID    = mod;
+                out.hasMaterialID = true;
+            } else if constexpr (std::is_same_v<Mod, Physics::CollisionFilter>) {
                 out.filter = mod;
             } else {
                 out.movingBroadphase = true;

@@ -167,7 +167,7 @@ auto InstantiateMeshPart(
 
     const auto worldMat = ComposeTransform(prep.translation, prep.rotation, prep.scale);
 
-    auto body = Physics::BodyID::Null();
+    bool hasPhysicsBody = false;
     if (params.createPhysics && prep.shape != nullptr) {
         // Collider -> runtime shape first, then the role decides whether the
         // shape family is allowed (a dynamic model with a mesh collider has
@@ -207,41 +207,53 @@ auto InstantiateMeshPart(
             if (!allowed) colliderShape.reset();
         }
         if (colliderShape.has_value()) {
-            body = std::visit(
-                [&]<typename S>(const S& shape) -> Physics::BodyID {
+            std::visit(
+                [&]<typename S>(const S& shape) {
                     const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
-                    const Physics::StaticBody       staticRole {
+                    const Physics::StaticBody      staticRole {
                         .position = prep.translation.Cast<double>(), .rotation = prep.rotation, .scale = prep.scale};
-                    const Physics::KinematicBody     kinematicRole {
+                    const Physics::KinematicBody   kinematicRole {
                         .position = prep.translation.Cast<double>(), .rotation = prep.rotation, .scale = prep.scale};
-                    const Physics::DynamicBody       dynamicRole {
-                        .position   = prep.translation.Cast<double>(),
-                        .rotation   = prep.rotation,
-                        .scale      = prep.scale,
+                    const Physics::DynamicBody     dynamicRole {
+                        .position    = prep.translation.Cast<double>(),
+                        .rotation    = prep.rotation,
+                        .scale       = prep.scale,
                         .startAsleep = params.startAsleep};
                     if constexpr (Physics::StaticShape<S>) {
                         if (params.isStaticPhysics && !params.isKinematicPhysics) {
-                            return Physics::BodyID(pc.CreateBody(shape, staticRole, filter));
+                            const auto body = pc.CreateBody(shape, staticRole, filter);
+                            if (body != Physics::StaticBodyID::Null()) {
+                                reg.Add(e, Components::StaticBodyComponent {.bodyID = body});
+                                hasPhysicsBody = true;
+                            }
+                            return;
                         }
                     }
                     if constexpr (Physics::DynamicShape<S>) {
                         if (params.isStaticPhysics && params.isKinematicPhysics) {
-                            return Physics::BodyID(pc.CreateBody(shape, kinematicRole, filter));
+                            const auto body = pc.CreateBody(shape, kinematicRole, filter);
+                            if (body != Physics::KinematicBodyID::Null()) {
+                                reg.Add(e, Components::KinematicBodyComponent {.bodyID = body});
+                                hasPhysicsBody = true;
+                            }
+                            return;
                         }
                         if (!params.isStaticPhysics) {
-                            return Physics::BodyID(pc.CreateBody(shape, dynamicRole, filter));
+                            const auto body = pc.CreateBody(shape, dynamicRole, filter);
+                            if (body != Physics::DynamicBodyID::Null()) {
+                                reg.Add(e, Components::DynamicBodyComponent {.bodyID = body});
+                                hasPhysicsBody = true;
+                            }
                         }
                     }
-                    return Physics::BodyID::Null();
                 },
                 *colliderShape
             );
         }
     }
-    if (body != Physics::BodyID::Null()) {
+    if (hasPhysicsBody) {
         reg.Add(e, Components::TransformComponent {.position = prep.translation, .rotation = prep.rotation, .scale = prep.scale});
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     } else if (part.isSkinned && params.isAnimated) {
         reg.Add(e, Components::TransformComponent {});
         reg.Add(e, Components::WorldTransformComponent {.world = baseTransform, .previous = baseTransform});
@@ -391,25 +403,23 @@ auto CreateBoxInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        const Physics::Box          shape {FVec3 {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z}};
+        const Physics::Box             shape {FVec3 {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z}};
         const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
-        Physics::BodyID             body = Physics::BodyID::Null();
         if (params.isStaticPhysics && !params.isKinematicPhysics) {
-            body = Physics::BodyID(pc->CreateBody(shape, Physics::StaticBody {
-                                                              .position = params.position, .rotation = params.rotation},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                shape, Physics::StaticBody {.position = params.position, .rotation = params.rotation}, filter);
+            reg.Add(e, Components::StaticBodyComponent {.bodyID = body});
         } else if (params.isStaticPhysics) {
-            body = Physics::BodyID(pc->CreateBody(shape, Physics::KinematicBody {
-                                                                .position = params.position, .rotation = params.rotation},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                shape, Physics::KinematicBody {.position = params.position, .rotation = params.rotation}, filter);
+            reg.Add(e, Components::KinematicBodyComponent {.bodyID = body});
         } else {
-            body = Physics::BodyID(pc->CreateBody(shape, Physics::DynamicBody {
-                                                              .position    = params.position,
-                                                              .rotation    = params.rotation,
-                                                              .startAsleep = params.startAsleep},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                shape,
+                Physics::DynamicBody {.position = params.position, .rotation = params.rotation, .startAsleep = params.startAsleep},
+                filter);
+            reg.Add(e, Components::DynamicBodyComponent {.bodyID = body});
         }
-        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
 
     return e;
@@ -469,23 +479,21 @@ auto SpawnPrimitive(
 
     if (params.createPhysics && pc) {
         const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
-        Physics::BodyID               body = Physics::BodyID::Null();
         if (params.isStaticPhysics && !params.isKinematicPhysics) {
-            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::StaticBody {
-                                                                     .position = params.position, .rotation = params.rotation},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                physicsShape, Physics::StaticBody {.position = params.position, .rotation = params.rotation}, filter);
+            reg.Add(e, Components::StaticBodyComponent {.bodyID = body});
         } else if (params.isStaticPhysics) {
-            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::KinematicBody {
-                                                                       .position = params.position, .rotation = params.rotation},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                physicsShape, Physics::KinematicBody {.position = params.position, .rotation = params.rotation}, filter);
+            reg.Add(e, Components::KinematicBodyComponent {.bodyID = body});
         } else {
-            body = Physics::BodyID(pc->CreateBody(physicsShape, Physics::DynamicBody {
-                                                                     .position    = params.position,
-                                                                     .rotation    = params.rotation,
-                                                                     .startAsleep = params.startAsleep},
-                                                  filter));
+            const auto body = pc->CreateBody(
+                physicsShape,
+                Physics::DynamicBody {.position = params.position, .rotation = params.rotation, .startAsleep = params.startAsleep},
+                filter);
+            reg.Add(e, Components::DynamicBodyComponent {.bodyID = body});
         }
-        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = params.isStaticPhysics});
     }
     return e;
 }
@@ -615,12 +623,11 @@ auto CreatePlaneInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        const Physics::Plane            shape {};
-        const Physics::CollisionFilter  filter {.category = params.physicsCategory, .mask = params.physicsMask};
-        const Physics::BodyID body = Physics::BodyID(
-            pc->CreateBody(shape, Physics::StaticBody {.position = params.position, .rotation = params.rotation}, filter)
-        );
-        reg.Add(e, Components::PhysicsComponent {.physicsID = body, .isStatic = true});
+        const Physics::Plane           shape {};
+        const Physics::CollisionFilter filter {.category = params.physicsCategory, .mask = params.physicsMask};
+        const auto                     body = pc->CreateBody(
+            shape, Physics::StaticBody {.position = params.position, .rotation = params.rotation}, filter);
+        reg.Add(e, Components::StaticBodyComponent {.bodyID = body});
     }
 
     return e;

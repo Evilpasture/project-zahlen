@@ -1886,7 +1886,7 @@ void ProceduralAnimation::Evaluate(
         auto       itemHandling     = entities.Get<Animation::ItemHandlingComponent>(entity);
         auto       movement         = entities.Get<Character::MovementComponent>(entity);
         auto       transform        = entities.Get<Components::TransformComponent>(entity);
-        auto       physicsComponent = entities.Get<Components::PhysicsComponent>(entity);
+        auto       physicsComponent = entities.Get<Components::CharacterBodyComponent>(entity);
         auto       boneMap          = entities.Get<RigBoneMap>(entity);
         const bool hasRagdoll       = entities.Has<Components::RagdollComponent>(entity);
 
@@ -1941,11 +1941,9 @@ void ProceduralAnimation::Evaluate(
                                            footAttachmentsEnabled;
         const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
-        FVec3       velocityWorld = FVec3::Zero();
-        if (physicsComponent && physics != nullptr) {
-            if (const auto character = physics->AsCharacter(physicsComponent->physicsID)) {
-                velocityWorld = physics->CharacterVelocity(*character);
-            }
+        FVec3 velocityWorld = FVec3::Zero();
+        if (physicsComponent && physicsComponent->bodyID != Physics::CharacterID::Null() && physics != nullptr) {
+            velocityWorld = physics->CharacterVelocity(physicsComponent->bodyID);
         }
         const Quat  entityRotation {transform->rotation};
         const Quat  rootRotation    = entityRotation.Normalized();
@@ -2017,7 +2015,7 @@ void ProceduralAnimation::Evaluate(
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
             ZHLN::ScopedTimer     stageTimer("PA Stage: Leg grounding");
-            const Physics::BodyID ignoredID              = physicsComponent ? physicsComponent->physicsID : Physics::BodyID {};
+            const Physics::BodyID ignoredID              = physicsComponent ? Physics::BodyID(physicsComponent->bodyID) : Physics::BodyID {};
             const float           legIKWeight            = config ? config->legIKWeight : 1.0f;
             const float           pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
             const float           maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
@@ -2088,7 +2086,7 @@ void ProceduralAnimation::Evaluate(
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
             Animation::UpdateItemDynamics(
-                physicsComponent ? physicsComponent->physicsID : Physics::BodyID {}, physics, *itemHandling, transform->position, rootRotation, dt
+                physicsComponent ? Physics::BodyID(physicsComponent->bodyID) : Physics::BodyID {}, physics, *itemHandling, transform->position, rootRotation, dt
             );
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {

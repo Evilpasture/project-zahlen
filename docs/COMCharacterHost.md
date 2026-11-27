@@ -17,10 +17,10 @@ the engine before world transforms are propagated, not patched late through
 renderer internals. The default motor does not drive facing unless requested.
 
 A composition root creates a character body with `ISimulation::CreateCharacter`,
-attaches its PhysicsComponent/TransformComponent to an entity, and calls
+attaches its CharacterBodyComponent/TransformComponent to an entity, and calls
 `Character::Attach(entities, entity)`. Character attachment does not replace or
 retire the body. Explicit `Character::Detach` releases the host's Movement,
-Input, HostCharacter and motor/state components, never the PhysicsComponent.
+Input, HostCharacter and motor/state components, never the CharacterBodyComponent.
 Scene/entity cleanup continues to retire the body's real physics resource.
 
 ```cpp

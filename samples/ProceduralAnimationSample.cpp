@@ -739,7 +739,7 @@ auto main(int argc, char* argv[]) -> int {
         }).value;
     const ZHLN::Entity player = engine->Entities()->Spawn(
         ZHLN::Components::TransformComponent {.position = {0.0f, 1.20f, 0.0f}},
-        ZHLN::Components::PhysicsComponent {.physicsID = playerBody, .isStatic = false}
+        ZHLN::Components::CharacterBodyComponent {.bodyID = playerBody}
     );
     ZHLN::Character::Attach(*engine->Entities(), player, {.speed = kWalkSpeed, .jumpForce = kJumpForce});
     const ZHLN::Entity handgun    = CreateTestHandgun(*engine, player, handgunScale);

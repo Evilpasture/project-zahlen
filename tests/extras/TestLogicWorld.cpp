@@ -11,9 +11,7 @@ using namespace ZHLN;
 using Test::ExpectEq;
 using Test::ExpectTrue;
 auto Body(COM::ISimulation& sim, DVec3 position = {0, 8, 0}) {
-    return sim.CreateDynamicBodyRaw(
-        COM::InChain(Physics::Box {}, Physics::DynamicBody {.position = position})
-    );
+    return sim.CreateBody(Physics::Box {}, Physics::DynamicBody {.position = position});
 }
 struct LogicWorldSuite {
     struct Tests {
@@ -65,15 +63,15 @@ struct LogicWorldSuite {
             auto       b        = Body(*sim);
             if (!ExpectTrue(a.HasValue() && b.HasValue()))
                 return {};
-            ExpectTrue(entities->Attach(e, Components::PhysicsComponent {.physicsID = a.value}) != nullptr);
-            ExpectTrue(entities->Attach(e, Components::PhysicsComponent {.physicsID = b.value}) != nullptr);
+            ExpectTrue(entities->Attach(e, Components::DynamicBodyComponent {.bodyID = a.value}) != nullptr);
+            ExpectTrue(entities->Attach(e, Components::DynamicBodyComponent {.bodyID = b.value}) != nullptr);
             ExpectTrue(!sim->BodyPosition(a.value).HasValue());
-            ExpectTrue(entities->Detach<Components::PhysicsComponent>(e));
+            ExpectTrue(entities->Detach<Components::DynamicBodyComponent>(e));
             ExpectTrue(!sim->BodyPosition(b.value).HasValue());
             auto c = Body(*sim);
             if (!c.HasValue())
                 return {};
-            entities->Attach(e, Components::PhysicsComponent {.physicsID = c.value});
+            entities->Attach(e, Components::DynamicBodyComponent {.bodyID = c.value});
             const auto child = entities->CreateEntity();
             entities->Attach(child, Components::HierarchyComponent {.parent = e});
             entities->Despawn(e);
@@ -90,9 +88,9 @@ struct LogicWorldSuite {
                 return std::unexpected(made.error());
             auto*      e      = (*made)->Entities();
             auto       entity = e->CreateEntity();
-            const auto name   = COM::IEntities::ComponentName<Components::PhysicsComponent>();
-            ExpectTrue(e->AttachEngineRaw(entity, name, sizeof(Components::PhysicsComponent), alignof(Components::PhysicsComponent), 0) == nullptr);
-            ExpectTrue(e->AttachRaw(entity, name, sizeof(Components::PhysicsComponent), alignof(Components::PhysicsComponent)) == nullptr);
+            const auto name   = COM::IEntities::ComponentName<Components::DynamicBodyComponent>();
+            ExpectTrue(e->AttachEngineRaw(entity, name, sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent), 0) == nullptr);
+            ExpectTrue(e->AttachRaw(entity, name, sizeof(Components::DynamicBodyComponent), alignof(Components::DynamicBodyComponent)) == nullptr);
             ExpectTrue(e->Attach(entity, Components::OwnedMeshComponent {}) == nullptr);
             auto* value = static_cast<uint64_t*>(e->AttachRaw(entity, "bench.counter", 8, 8));
             if (ExpectTrue(value != nullptr))

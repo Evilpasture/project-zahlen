@@ -57,8 +57,8 @@ struct PerformanceTestSuite {
             auto& ents  = *world.Entities();
             auto& sim   = *world.Simulation();
 
-            (void) sim.CreateStaticBodyRaw(
-                ZHLN::COM::InChain(ZHLN::Physics::Box {.halfExtents = {50.0f, 0.5f, 50.0f}}, ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}})
+            (void) sim.CreateBody(
+                ZHLN::Physics::Box {.halfExtents = {50.0f, 0.5f, 50.0f}}, ZHLN::Physics::StaticBody {.position = {0.0, -0.5, 0.0}}
             );
             std::vector<ZHLN::Entity> spawned;
             spawned.reserve(128);
@@ -66,7 +66,7 @@ struct PerformanceTestSuite {
                 const auto b = sim.CreateBoxBody({0.25f, 0.25f, 0.25f}, {.position = {static_cast<double>(i % 16) - 8.0, 2.0 + (i / 16), 0.0}});
                 spawned.push_back(ents.Spawn(
                     ZHLN::Components::TransformComponent {.position = {static_cast<float>(i), 1.0f, 0.0f}},
-                    ZHLN::Components::PhysicsComponent {.physicsID = b.HasValue() ? b.value : ZHLN::Physics::BodyID::Null()}
+                    ZHLN::Components::DynamicBodyComponent {.bodyID = b.HasValue() ? b.value : ZHLN::Physics::DynamicBodyID::Null()}
                 ));
             }
             for (int step = 0; step < 15; ++step) {

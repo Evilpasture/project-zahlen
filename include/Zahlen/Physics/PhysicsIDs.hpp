@@ -83,6 +83,9 @@ struct ConstraintID {
     [[nodiscard]] constexpr auto Pack() const noexcept -> uint64_t {
         return (static_cast<uint64_t>(generation) << 32) | index;
     }
+    [[nodiscard]] static constexpr auto Null() noexcept -> ConstraintID {
+        return {.index = UINT32_MAX, .generation = UINT32_MAX};
+    }
     constexpr auto operator==(const ConstraintID&) const noexcept -> bool = default;
 };
 

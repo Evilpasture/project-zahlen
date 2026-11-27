@@ -145,10 +145,10 @@ struct TerrainHostSuite {
             auto tile = host.Create(std::move(*geometry), {.position = {0, 3, 0}, .buildBLAS = false});
             if (!ExpectTrue(tile.has_value()))
                 return {};
-            const auto* physics = engine->Entities()->Get<Components::PhysicsComponent>(*tile);
+            const auto* physics = engine->Entities()->Get<Components::StaticBodyComponent>(*tile);
             if (!ExpectTrue(physics != nullptr))
                 return {};
-            const auto body = physics->physicsID;
+            const auto body = physics->bodyID;
             const auto hit  = engine->Simulation()->Raycast({0, 20, 0}, {0, -1, 0}, 40, Physics::BodyID::Null());
             ExpectTrue(hit.hasHit);
             if (hit.hasHit)

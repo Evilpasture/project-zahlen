@@ -13,12 +13,10 @@ void PhysicsSystem::CommitImpulses(ImpulseQuery query, ECS::EntityCommandBuffer&
     // physics component or with a zero impulse.
     for (size_t i = entities.size(); i > 0; --i) {
         const Entity e = entities[i - 1];
-        const auto cmd = query.Get<Components::ImpulseCommand>(e);
-        const auto phys = query.Get<Components::PhysicsComponent>(e);
-        if (cmd && phys && cmd->linear.LengthSquared() > 0.0f) {
-            if (const auto dynamic = physics->AsDynamic(phys->physicsID)) {
-                physics->AddImpulse(*dynamic, cmd->linear);
-            }
+        const auto cmd  = query.Get<Components::ImpulseCommand>(e);
+        const auto phys = query.Get<Components::DynamicBodyComponent>(e);
+        if (cmd && phys && phys->bodyID != Physics::DynamicBodyID::Null() && cmd->linear.LengthSquared() > 0.0f) {
+            physics->AddImpulse(phys->bodyID, cmd->linear);
         }
         commands.RemoveComponent<Components::ImpulseCommand>(e);
     }

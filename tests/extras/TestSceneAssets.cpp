@@ -272,7 +272,10 @@ struct SceneAssetsSuite {
                 return {};
             size_t bodies = 0, meshes = 0;
             for (auto e: instance->entities) {
-                if (engine->Entities()->Get<Components::PhysicsComponent>(e))
+                if (engine->Entities()->Get<Components::StaticBodyComponent>(e) ||
+                    engine->Entities()->Get<Components::KinematicBodyComponent>(e) ||
+                    engine->Entities()->Get<Components::DynamicBodyComponent>(e) ||
+                    engine->Entities()->Get<Components::CharacterBodyComponent>(e))
                     ++bodies;
                 if (engine->Entities()->Get<Components::MeshComponent>(e)) {
                     ++meshes;
@@ -283,12 +286,12 @@ struct SceneAssetsSuite {
             ExpectEq(bodies, size_t(1));
             ExpectEq(meshes, size_t(2));
             const auto  root    = instance->entities.front();
-            const auto* physics = engine->Entities()->Get<Components::PhysicsComponent>(root);
+            const auto* physics = engine->Entities()->Get<Components::KinematicBodyComponent>(root);
             if (ExpectTrue(physics != nullptr)) {
-                ExpectTrue(!engine->Simulation()->IsBodyDynamic(physics->physicsID));
+                ExpectTrue(!engine->Simulation()->IsBodyDynamic(physics->bodyID));
                 const auto hit = engine->Simulation()->Raycast({1.5, 4, 20}, {0, 0, -1}, 40, Physics::BodyID::Null());
                 // A fallback .5-unit description collider would miss this ray.
-                ExpectTrue(hit.hasHit && hit.bodyID == physics->physicsID);
+                ExpectTrue(hit.hasHit && hit.bodyID == physics->bodyID);
                 ExpectTrue(std::abs(hit.position.z - 6.0) < .05);
             }
             Println("    [scene prefab] extract");

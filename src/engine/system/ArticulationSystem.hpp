@@ -11,7 +11,7 @@ namespace ZHLN {
 namespace ECS { class EntityCommandBuffer; }
 class ArticulationSystem {
   public:
-    static void Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
+    static void Update(ECS::Query<Components::RagdollComponent&, const Components::CharacterBodyComponent,
                                   const Components::SkeletalMeshComponent, Components::TransformComponent&,
                                   const Components::RagdollHitReactionCommand, const Components::RagdollImpulseCommand> query,
                        ECS::EntityCommandBuffer& ecb, ECS::ResMut<ArticulationContext> articulation,

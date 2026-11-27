@@ -12,8 +12,20 @@
 
 namespace ZHLN::SceneResources {
 
-void Release(PhysicsContext& physics, Components::PhysicsComponent& component) {
-    physics.DestroyBody(std::exchange(component.physicsID, Physics::BodyID::Null()));
+void Release(PhysicsContext& physics, Components::StaticBodyComponent& component) {
+    physics.DestroyBody(std::exchange(component.bodyID, Physics::StaticBodyID::Null()));
+}
+
+void Release(PhysicsContext& physics, Components::KinematicBodyComponent& component) {
+    physics.DestroyBody(std::exchange(component.bodyID, Physics::KinematicBodyID::Null()));
+}
+
+void Release(PhysicsContext& physics, Components::DynamicBodyComponent& component) {
+    physics.DestroyBody(std::exchange(component.bodyID, Physics::DynamicBodyID::Null()));
+}
+
+void Release(PhysicsContext& physics, Components::CharacterBodyComponent& component) {
+    physics.DestroyBody(std::exchange(component.bodyID, Physics::CharacterID::Null()));
 }
 
 void Release(PhysicsContext& physics, Components::RagdollComponent& component) {
@@ -29,7 +41,19 @@ void Release(RenderContext& render, Components::OwnedMeshComponent& component) {
     component.meshAsset = InvalidAssetID;
 }
 
-void Release(Engine& engine, Components::PhysicsComponent& component) {
+void Release(Engine& engine, Components::StaticBodyComponent& component) {
+    Release(engine.Physics(), component);
+}
+
+void Release(Engine& engine, Components::KinematicBodyComponent& component) {
+    Release(engine.Physics(), component);
+}
+
+void Release(Engine& engine, Components::DynamicBodyComponent& component) {
+    Release(engine.Physics(), component);
+}
+
+void Release(Engine& engine, Components::CharacterBodyComponent& component) {
     Release(engine.Physics(), component);
 }
 

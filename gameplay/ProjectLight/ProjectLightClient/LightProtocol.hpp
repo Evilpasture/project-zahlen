@@ -295,9 +295,9 @@ class ClientSession {
     float               m_jumpRemaining   = 0.0f;
     bool                m_wasJumpDown     = false;
     InputControls       m_lastControls {};
-    Entity              m_localController      = Entity::Null();
-    uint64_t            m_controllerForRootUid = 0u;
-    Physics::BodyID m_localControllerBody  = Physics::BodyID::Null();
+    Entity               m_localController      = Entity::Null();
+    uint64_t             m_controllerForRootUid = 0u;
+    Physics::CharacterID m_localControllerBody  = Physics::CharacterID::Null();
 
     std::vector<uint8_t>                                  m_tcpRxBuffer;
     std::vector<uint8_t>                                  m_tcpTxBuffer;

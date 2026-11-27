@@ -244,16 +244,14 @@ auto Instantiate(
                     }
                     half = {std::max(half.x, 0.05f), std::max(half.y, 0.05f), std::max(half.z, 0.05f)};
 
-                    const auto body = simulation.CreateKinematicBodyRaw(
-                        COM::InChain(
-                            Physics::Box {half},
-                            Physics::KinematicBody {.position = params.position, .rotation = params.rotation},
-                            Physics::CollisionFilter {.category = params.physicsCategory, .mask = params.physicsMask}
-                        )
+                    const auto body = simulation.CreateBody(
+                        Physics::Box {half},
+                        Physics::KinematicBody {.position = params.position, .rotation = params.rotation},
+                        Physics::CollisionFilter {.category = params.physicsCategory, .mask = params.physicsMask}
                     );
                     if (!body.HasValue())
                         return std::unexpected(body.error);
-                    entities.Attach(parts[0], Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+                    entities.Attach(parts[0], Components::KinematicBodyComponent {.bodyID = body.value});
                 }
 
                 break;

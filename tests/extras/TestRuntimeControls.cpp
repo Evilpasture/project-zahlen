@@ -67,9 +67,9 @@ struct RuntimeControlsSuite {
             auto       engine   = std::move(*made);
             auto&      entities = *engine->Entities();
             const auto body     = engine->Simulation()->CreateCharacter(DVec3 {0, 10, 0});
-            ExpectTrue(body != Physics::BodyID::Null());
+            ExpectTrue(body != Physics::CharacterID::Null());
             const auto entity = entities.Spawn(
-                Components::PhysicsComponent {.physicsID = body, .isStatic = false}, Components::TransformComponent {},
+                Components::CharacterBodyComponent {.bodyID = body}, Components::TransformComponent {},
                 Components::CharacterMotorComponent {.desiredVelocity = {4, 0, 0}}
             );
             for (int i = 0; i < 12; ++i)

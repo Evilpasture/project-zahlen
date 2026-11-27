@@ -25,26 +25,26 @@ auto CharacterEngine() {
 }
 auto Body(COM::IEngine& engine, FVec3 halfSize, DVec3 position, bool isStatic = true, bool isKinematic = false) -> Physics::BodyID {
     if (isStatic && !isKinematic) {
-        const auto body = engine.Simulation()->CreateStaticBodyRaw(
-            COM::InChain(Physics::Box {halfSize}, Physics::StaticBody {.position = position}));
+        const auto body = engine.Simulation()->CreateBody(
+            Physics::Box {halfSize}, Physics::StaticBody {.position = position});
         if (!ExpectTrue(body.HasValue()))
             return Physics::BodyID::Null();
-        engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = true});
+        engine.Entities()->Spawn(Components::StaticBodyComponent {.bodyID = body.value});
         return body.value;
     }
     if (isKinematic) {
-        const auto body = engine.Simulation()->CreateKinematicBodyRaw(
-            COM::InChain(Physics::Box {halfSize}, Physics::KinematicBody {.position = position}));
+        const auto body = engine.Simulation()->CreateBody(
+            Physics::Box {halfSize}, Physics::KinematicBody {.position = position});
         if (!ExpectTrue(body.HasValue()))
             return Physics::BodyID::Null();
-        engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+        engine.Entities()->Spawn(Components::KinematicBodyComponent {.bodyID = body.value});
         return body.value;
     }
-    const auto body = engine.Simulation()->CreateDynamicBodyRaw(
-        COM::InChain(Physics::Box {halfSize}, Physics::DynamicBody {.position = position}));
+    const auto body = engine.Simulation()->CreateBody(
+        Physics::Box {halfSize}, Physics::DynamicBody {.position = position});
     if (!ExpectTrue(body.HasValue()))
         return Physics::BodyID::Null();
-    engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body.value, .isStatic = false});
+    engine.Entities()->Spawn(Components::DynamicBodyComponent {.bodyID = body.value});
     return body.value;
 }
 struct CharacterHostSuite {
@@ -126,8 +126,8 @@ struct CharacterHostSuite {
             Body(*engine.Get(), {20, .5f, 20}, {0, -.5, 0});
             Body(*engine.Get(), {.25f, 3, 12}, {3, 3, 0});
             const auto body = engine->Simulation()->CreateCharacter(DVec3 {0, 1.5, 0});
-            ExpectTrue(body != Physics::BodyID::Null());
-            const auto player = entities.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false}, Components::TransformComponent {});
+            ExpectTrue(body != Physics::CharacterID::Null());
+            const auto player = entities.Spawn(Components::CharacterBodyComponent {.bodyID = body}, Components::TransformComponent {});
             ExpectTrue(Character::Attach(entities, player, Character::MovementComponent {.speed = 4}));
             const auto step = [&](Character::SeatIntent input, float yaw = 0) {
                 Character::Apply(entities, player, input, yaw, 1.0f / 60.0f);
@@ -180,7 +180,7 @@ struct CharacterHostSuite {
                 return {};
             auto&      entities = *engine->Entities();
             const auto body     = engine->Simulation()->CreateCharacter(DVec3 {0, 5, 0});
-            const auto player   = entities.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false});
+            const auto player   = entities.Spawn(Components::CharacterBodyComponent {.bodyID = body});
             ExpectTrue(Character::Attach(entities, player, Character::MovementComponent {.speed = 4}, Character::ControllerComponent {.gravity = 0}));
             const auto advance = [&] {
                 Character::Apply(entities, player, {.moveZ = 1}, 0, 1.0f / 60);
@@ -215,7 +215,7 @@ struct CharacterHostSuite {
                 engine->ClearScene();
                 auto&      entities = *engine->Entities();
                 const auto body     = engine->Simulation()->CreateCharacter(DVec3 {0, 5, 0});
-                const auto player   = entities.Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false});
+                const auto player   = entities.Spawn(Components::CharacterBodyComponent {.bodyID = body});
                 ExpectTrue(Character::Attach(entities, player));
                 for (int i = 0; i < hz; ++i) {
                     Character::Apply(entities, player, {.moveZ = 1}, 0, 1.0f / hz);
@@ -237,7 +237,7 @@ struct CharacterHostSuite {
                 Entity* player;
                 void    Start(COM::IEngine& engine) {
                     const auto body = engine.Simulation()->CreateCharacter(DVec3 {0, 5, 0});
-                    *player         = engine.Entities()->Spawn(Components::PhysicsComponent {.physicsID = body, .isStatic = false});
+                    *player         = engine.Entities()->Spawn(Components::CharacterBodyComponent {.bodyID = body});
                     ExpectTrue(Character::Attach(*engine.Entities(), *player));
                 }
             };

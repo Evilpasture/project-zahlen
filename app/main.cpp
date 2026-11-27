@@ -141,10 +141,9 @@ struct SandboxGame {
              .color           = FVec4 {1.0f, 0.75f, 0.28f, 1.0f}}
         );
         if (cube != ZHLN::Entity::Null()) {
-            if (auto body = reg.Get<ZHLN::Components::PhysicsComponent>(cube)) {
-                if (const auto dynamic = engine.Simulation()->AsDynamic(body->physicsID)) {
-                    engine.Simulation()->AddImpulse(*dynamic, forward * 12.0f);
-                }
+            if (auto body = reg.Get<ZHLN::Components::DynamicBodyComponent>(cube);
+                body && body->bodyID != ZHLN::Physics::DynamicBodyID::Null()) {
+                engine.Simulation()->AddImpulse(body->bodyID, forward * 12.0f);
             }
         }
         if (engine.Audio()->Initialized()) {

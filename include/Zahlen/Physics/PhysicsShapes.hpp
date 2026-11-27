@@ -84,6 +84,9 @@ struct Placed {
     Quat  rotation = Quat::Identity();
 };
 
+template <typename S>
+Placed(S, FVec3 = {}, Quat = Quat::Identity()) -> Placed<S>;
+
 // One node per child, stamped with the payload's own chain identity
 // (ChainTypeID<Placed<S>> + LayoutHash<Placed<S>> + size). The span borrows
 // from the caller (a local array, a builder's vectors, a chain node) and must
@@ -154,11 +157,25 @@ template <typename... Shapes>
                 valid = child.shape.radius > 0.0F;
             } else if constexpr (std::is_same_v<S, Capsule> || std::is_same_v<S, Cylinder>) {
                 valid = child.shape.halfHeight > 0.0F && child.shape.radius > 0.0F;
+            } else if constexpr (std::is_same_v<S, Plane>) {
+                valid = child.shape.normal.LengthSquared() > 0.0F;
+            } else if constexpr (std::is_same_v<S, TriangleMesh>) {
+                valid = child.shape.vertices.data != nullptr && child.shape.indices.data != nullptr &&
+                        child.shape.vertices.size >= 3U && child.shape.indices.size >= 3U &&
+                        (child.shape.indices.size % 3U) == 0U;
+                if (valid) {
+                    for (const uint32_t vertexIndex : child.shape.indices) {
+                        if (vertexIndex >= child.shape.vertices.size) {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+            } else if constexpr (std::is_same_v<S, MeshAsset>) {
+                valid = child.shape.id != CollisionAssetID::Invalid;
             } else if constexpr (std::is_same_v<S, Compound>) {
                 valid = ValidateCompound<Shapes...>(child.shape, depth + 1U);
             }
-            // Plane/TriangleMesh/MeshAsset children carry no local extents;
-            // resolve-time validation covers meshes.
         });
         if (!matched || !valid) return false;
     }
@@ -191,20 +208,95 @@ using CollisionAssetResolver = std::shared_ptr<const MeshGeometry> (*)(void*, Co
 
 // Compile-time compound: the child list lives as a tuple, so CreateBody can
 // stamp a ChainInNode array on the stack and hand Jolt a zero-allocation
-// Compound. This is the fixed-geometry answer to CompoundBuilder -- no
-// vectors to own at runtime. The children's body-kind policy is expressed by
-// the DynamicShape/CharacterShape/StaticShape concepts below.
+// Compound. Nested FixedCompounds materialize their own Placed<Compound> and
+// inner node arrays inside the non-movable FixedCompoundNodes frame. The
+// children's body-kind policy is expressed by the DynamicShape/CharacterShape/
+// StaticShape concepts below.
+template <typename... Children>
+struct FixedCompound;
+
+namespace TemplatedDetail {
+
+template <typename... Children>
+class FixedCompoundNodes;
+
+template <typename S>
+struct FixedCompoundChildStorage {
+    const Placed<S>* placed = nullptr;
+
+    explicit FixedCompoundChildStorage(const Placed<S>& src) noexcept : placed(&src) {}
+    FixedCompoundChildStorage(const FixedCompoundChildStorage&)            = delete;
+    FixedCompoundChildStorage& operator=(const FixedCompoundChildStorage&) = delete;
+
+    [[nodiscard]] auto Stamp() const noexcept -> COM::ChainInNode {
+        return StampChildNode(*placed);
+    }
+};
+
+template <typename... Inner>
+struct FixedCompoundChildStorage<FixedCompound<Inner...>> {
+    FixedCompoundNodes<Inner...> innerNodes;
+    Placed<Compound>             asCompound {};
+
+    explicit FixedCompoundChildStorage(const Placed<FixedCompound<Inner...>>& src) noexcept
+        : innerNodes(src.shape),
+          asCompound {
+              .shape    = Compound {.children = {innerNodes.data(), innerNodes.size()}},
+              .position = src.position,
+              .rotation = src.rotation,
+          } {}
+    FixedCompoundChildStorage(const FixedCompoundChildStorage&)            = delete;
+    FixedCompoundChildStorage& operator=(const FixedCompoundChildStorage&) = delete;
+
+    [[nodiscard]] auto Stamp() const noexcept -> COM::ChainInNode {
+        return StampChildNode(asCompound);
+    }
+};
+
+template <typename... Children>
+class FixedCompoundNodes {
+  public:
+    explicit FixedCompoundNodes(const FixedCompound<Children...>& compound) noexcept
+        : FixedCompoundNodes(compound, std::index_sequence_for<Children...> {}) {}
+
+    FixedCompoundNodes(const FixedCompoundNodes&)            = delete;
+    FixedCompoundNodes& operator=(const FixedCompoundNodes&) = delete;
+    FixedCompoundNodes(FixedCompoundNodes&&)                 = delete;
+    FixedCompoundNodes& operator=(FixedCompoundNodes&&)      = delete;
+
+    [[nodiscard]] constexpr auto data() const noexcept -> const COM::ChainInNode* { return m_nodes.data(); }
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t { return m_nodes.size(); }
+    [[nodiscard]] constexpr auto empty() const noexcept -> bool { return m_nodes.empty(); }
+    [[nodiscard]] constexpr auto begin() const noexcept -> const COM::ChainInNode* { return m_nodes.data(); }
+    [[nodiscard]] constexpr auto end() const noexcept -> const COM::ChainInNode* { return m_nodes.data() + m_nodes.size(); }
+    [[nodiscard]] constexpr auto operator[](std::size_t index) const noexcept -> const COM::ChainInNode& {
+        return m_nodes[index];
+    }
+
+  private:
+    template <std::size_t... Is>
+    explicit FixedCompoundNodes(const FixedCompound<Children...>& compound, std::index_sequence<Is...>) noexcept
+        : m_storage(std::get<Is>(compound.children)...) {
+        ((m_nodes[Is] = std::get<Is>(m_storage).Stamp()), ...);
+    }
+
+    std::tuple<FixedCompoundChildStorage<Children>...> m_storage;
+    std::array<COM::ChainInNode, sizeof...(Children)>  m_nodes {};
+};
+
+} // namespace TemplatedDetail
+
 template <typename... Children>
 struct FixedCompound {
     std::tuple<Placed<Children>...> children;
 
-    [[nodiscard]] auto MakeNodes() const noexcept -> std::array<COM::ChainInNode, sizeof...(Children)> {
-        return std::apply(
-            [](const auto&... placed) {
-                return std::array<COM::ChainInNode, sizeof...(Children)> {StampChildNode(placed)...};
-            },
-            children);
+    // Ref-qualified to lvalues: leaf child stamps borrow directly from
+    // `children`, so calling MakeNodes() on a temporary FixedCompound would
+    // leave dangling ChainInNode::data pointers once the full-expression ends.
+    [[nodiscard]] auto MakeNodes() const & noexcept -> TemplatedDetail::FixedCompoundNodes<Children...> {
+        return TemplatedDetail::FixedCompoundNodes<Children...>(*this);
     }
+    void MakeNodes() const && = delete;
 };
 
 template <typename... Children>
@@ -246,6 +338,10 @@ class CompoundBuilder {
         m_children.emplace_back(Placed<MeshAsset> {shape, position, rotation});
         return *this;
     }
+    auto Add(Compound shape, FVec3 position = {}, Quat rotation = Quat::Identity()) -> CompoundBuilder& {
+        m_children.emplace_back(Placed<Compound> {shape, position, rotation});
+        return *this;
+    }
 
     [[nodiscard]] auto View(std::vector<COM::ChainInNode>& scratch) const -> Compound {
         return StampCompoundNodes(m_children, scratch);
@@ -267,28 +363,33 @@ concept ConvexShape = std::same_as<std::remove_cvref_t<T>, Box> ||
                       std::same_as<std::remove_cvref_t<T>, Capsule> ||
                       std::same_as<std::remove_cvref_t<T>, Cylinder>;
 
-// Compound children are checked against the child kinds a body kind accepts:
-// dynamic, kinematic and character bodies admit convex primitives and nested
-// compounds only, while static bodies additionally admit planes and
-// mesh-backed shapes. The role policy itself is enforced by ValidateCompound
-// at the CreateBody boundary; these concepts gate the type.
-template <typename T>
-concept DynamicCompoundChild = ConvexShape<T> || std::same_as<std::remove_cvref_t<T>, Compound>;
-
-template <typename T>
-concept StaticCompoundChild =
-    DynamicCompoundChild<T> || std::same_as<std::remove_cvref_t<T>, Plane> ||
-    std::same_as<std::remove_cvref_t<T>, TriangleMesh> || std::same_as<std::remove_cvref_t<T>, MeshAsset>;
-
-// FixedCompound<Ts...> is accepted as a body shape exactly when every child
-// is acceptable -- the compile-time half of the same policy.
+// FixedCompound<Ts...> is accepted as a body shape (or nested compound child)
+// exactly when every child is acceptable -- the compile-time half of the same
+// policy.
 template <typename T>
 struct FixedCompoundTraits {
     static constexpr bool dynamicChildren = false;
     static constexpr bool staticChildren  = false;
 };
 
+// Compound children are checked against the child kinds a body kind accepts:
+// dynamic, kinematic and character bodies admit convex primitives and nested
+// compounds only, while static bodies additionally admit planes and
+// mesh-backed shapes. The role policy itself is enforced by ValidateCompound
+// at the CreateBody boundary; these concepts gate the type.
+template <typename T>
+concept DynamicCompoundChild =
+    ConvexShape<T> || std::same_as<std::remove_cvref_t<T>, Compound> ||
+    FixedCompoundTraits<std::remove_cvref_t<T>>::dynamicChildren;
+
+template <typename T>
+concept StaticCompoundChild =
+    DynamicCompoundChild<T> || std::same_as<std::remove_cvref_t<T>, Plane> ||
+    std::same_as<std::remove_cvref_t<T>, TriangleMesh> || std::same_as<std::remove_cvref_t<T>, MeshAsset> ||
+    FixedCompoundTraits<std::remove_cvref_t<T>>::staticChildren;
+
 template <typename... Children>
+    requires (sizeof...(Children) > 0)
 struct FixedCompoundTraits<FixedCompound<Children...>> {
     static constexpr bool dynamicChildren = (DynamicCompoundChild<Children> && ...);
     static constexpr bool staticChildren  = (StaticCompoundChild<Children> && ...);
@@ -326,12 +427,19 @@ static_assert(StaticShape<Box> && DynamicShape<Sphere> && CharacterShape<Capsule
 static_assert(!DynamicShape<Plane> && !DynamicShape<TriangleMesh> && !DynamicShape<HeightField>);
 static_assert(!CharacterShape<Plane> && !CharacterShape<TriangleMesh>);
 
-// FixedCompound follows the child policy at compile time: convex children are
-// accepted by every body kind, a Plane child only by static bodies.
-using ConvexPair = decltype(MakeCompound(Placed<Sphere> {Sphere {0.5F}}, Placed<Capsule> {Capsule {1.0F, 0.3F}}));
-using PlanePair  = decltype(MakeCompound(Placed<Sphere> {Sphere {0.5F}}, Placed<Plane> {Plane {}}));
+// FixedCompound follows the child policy at compile time (recursively across
+// nested FixedCompounds): convex children are accepted by every body kind, a
+// Plane child only by static bodies, and rvalue MakeNodes() is rejected.
+using ConvexPair       = decltype(MakeCompound(Placed {Sphere {0.5F}}, Placed {Capsule {1.0F, 0.3F}}));
+using PlanePair        = decltype(MakeCompound(Placed {Sphere {0.5F}}, Placed {Plane {}}));
+using NestedConvexPair = decltype(MakeCompound(Placed {Box {}}, Placed {ConvexPair {}}));
+using NestedPlanePair  = decltype(MakeCompound(Placed {Box {}}, Placed {PlanePair {}}));
 static_assert(DynamicShape<ConvexPair> && CharacterShape<ConvexPair> && StaticShape<ConvexPair>);
 static_assert(!DynamicShape<PlanePair> && !CharacterShape<PlanePair> && StaticShape<PlanePair>);
+static_assert(DynamicShape<NestedConvexPair> && CharacterShape<NestedConvexPair> && StaticShape<NestedConvexPair>);
+static_assert(!DynamicShape<NestedPlanePair> && !CharacterShape<NestedPlanePair> && StaticShape<NestedPlanePair>);
+static_assert([]<typename T = ConvexPair> { return requires(const T& c) { c.MakeNodes(); }; }());
+static_assert([]<typename T = ConvexPair> { return !requires(T&& c) { std::move(c).MakeNodes(); }; }());
 
 // Wire safety: every shape struct must travel a COM chain unchanged.
 static_assert(std::is_standard_layout_v<Box> && std::is_trivially_copyable_v<Box>);

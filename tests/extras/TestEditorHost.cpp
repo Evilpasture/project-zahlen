@@ -205,7 +205,7 @@ struct EditorHostSuite {
                 ExpectTrue(badSave.error() == Editor::SessionError::WriteFailed);
             for (int kind = 1; kind < 5; ++kind)
                 ExpectTrue(session.SpawnShape(*engine.Get(), kind, {float(kind * 3), 5, 0}).has_value());
-            auto body   = engine->Entities()->Get<Components::PhysicsComponent>(instance->entities[0])->physicsID;
+            auto body   = engine->Entities()->Get<Components::DynamicBodyComponent>(instance->entities[0])->bodyID;
             auto before = engine->Simulation()->BodyPosition(body);
             ExpectTrue(before.HasValue());
             ExpectTrue(session.Frame(*engine.Get(), ui, .1f).has_value());

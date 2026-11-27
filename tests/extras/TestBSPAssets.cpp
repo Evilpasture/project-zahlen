@@ -168,8 +168,12 @@ struct BSPAssetsSuite {
                 ExpectTrue(!instances.empty());
                 bool body = false;
                 for (const auto entity: instances) {
-                    const auto* physics = engine->Entities()->Get<Components::PhysicsComponent>(entity);
-                    if (physics != nullptr) body |= engine->Simulation()->BodyPosition(physics->physicsID).HasValue();
+                    if (const auto* physics = engine->Entities()->Get<Components::StaticBodyComponent>(entity))
+                        body |= engine->Simulation()->BodyPosition(physics->bodyID).HasValue();
+                    if (const auto* physics = engine->Entities()->Get<Components::KinematicBodyComponent>(entity))
+                        body |= engine->Simulation()->BodyPosition(physics->bodyID).HasValue();
+                    if (const auto* physics = engine->Entities()->Get<Components::DynamicBodyComponent>(entity))
+                        body |= engine->Simulation()->BodyPosition(physics->bodyID).HasValue();
                 }
                 ExpectTrue(body);
                 for (const auto entity: instances) engine->Entities()->Despawn(entity);

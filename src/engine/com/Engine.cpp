@@ -225,7 +225,10 @@ constexpr std::array kPublishedComponents {
     Publish<Components::VolumetricVolumeComponent>(),
     Publish<Components::CharacterMotorComponent>(),
     Publish<Components::CharacterMotorStateComponent>(),
-    Publish<Components::PhysicsComponent>(),
+    Publish<Components::StaticBodyComponent>(),
+    Publish<Components::KinematicBodyComponent>(),
+    Publish<Components::DynamicBodyComponent>(),
+    Publish<Components::CharacterBodyComponent>(),
     Publish<Components::ImpulseCommand>(),
     Publish<Components::RagdollComponent>(),
     Publish<Components::RagdollHitReactionCommand>(),
@@ -292,6 +295,99 @@ template <typename NodeT>
         built = node;
     }
     return {};
+}
+
+[[nodiscard]] auto VerifyCompoundAssets(
+    const Physics::Compound& compound, const AssetManager& library, uint32_t depth = 0U
+) noexcept -> Result<void> {
+    if (depth >= Physics::kMaxCompoundDepth) return Error::InvalidArgument;
+    for (size_t index = 0; index < compound.children.size; ++index) {
+        Result<void> childRes {};
+        (void)Physics::VisitCompoundChild<Physics::MeshAsset, Physics::Compound>(
+            compound.children[index], [&]<typename S>(const Physics::Placed<S>& child) {
+                if constexpr (std::is_same_v<S, Physics::MeshAsset>) {
+                    if (!library.FindCollisionMesh(child.shape.id)) {
+                        childRes = Error::AssetNotCached;
+                    }
+                } else if constexpr (std::is_same_v<S, Physics::Compound>) {
+                    childRes = VerifyCompoundAssets(child.shape, library, depth + 1U);
+                }
+            });
+        if (!childRes.HasValue()) return childRes;
+    }
+    return {};
+}
+
+[[nodiscard]] auto ParseConvexShapeChain(const ChainInNode* shapeChain) noexcept -> Result<Physics::ConvexShapeVariant> {
+    if (shapeChain == nullptr) return Error::NullArgument;
+
+    uint32_t                                   shapeNodeCount = 0;
+    std::optional<Physics::ConvexShapeVariant> built;
+
+    const Result<void> chainRes = DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder>(
+        shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+            ++shapeNodeCount;
+            if constexpr (std::is_same_v<NodeT, Physics::Box>) {
+                if (!(node.halfExtents.x > 0.0F) || !(node.halfExtents.y > 0.0F) || !(node.halfExtents.z > 0.0F) ||
+                    !std::isfinite(node.halfExtents.x) || !std::isfinite(node.halfExtents.y) ||
+                    !std::isfinite(node.halfExtents.z)) {
+                    return Error::InvalidArgument;
+                }
+                built = node;
+            } else if constexpr (std::is_same_v<NodeT, Physics::Sphere>) {
+                if (!(node.radius > 0.0F) || !std::isfinite(node.radius)) return Error::InvalidArgument;
+                built = node;
+            } else if constexpr (std::is_same_v<NodeT, Physics::Capsule> || std::is_same_v<NodeT, Physics::Cylinder>) {
+                if (!(node.halfHeight > 0.0F) || !(node.radius > 0.0F) ||
+                    !std::isfinite(node.halfHeight) || !std::isfinite(node.radius)) {
+                    return Error::InvalidArgument;
+                }
+                built = node;
+            }
+            return {};
+        });
+    if (!chainRes.HasValue()) return chainRes.error;
+    if (shapeNodeCount != 1U || !built.has_value()) return Error::InvalidArgument;
+    return *built;
+}
+
+[[nodiscard]] auto ParseConstraintChain(const ChainInNode* constraintChain) noexcept -> Result<Physics::ConstraintVariant> {
+    if (constraintChain == nullptr) return Error::NullArgument;
+
+    uint32_t                                  nodeCount = 0;
+    std::optional<Physics::ConstraintVariant> built;
+
+    const Result<void> chainRes = DispatchInChain<
+        Physics::FixedConstraint, Physics::PointConstraint, Physics::DistanceConstraint,
+        Physics::HingeConstraint, Physics::SliderConstraint, Physics::ConeConstraint>(
+        constraintChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
+            ++nodeCount;
+            if constexpr (std::is_same_v<NodeT, Physics::DistanceConstraint>) {
+                if (node.minDistance < 0.0F || node.maxDistance < node.minDistance ||
+                    !std::isfinite(node.minDistance) || !std::isfinite(node.maxDistance)) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::HingeConstraint>) {
+                if (node.limitEnabled && (node.minAngle.value > node.maxAngle.value ||
+                                          !std::isfinite(node.minAngle.value) || !std::isfinite(node.maxAngle.value))) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::SliderConstraint>) {
+                if (node.limitEnabled && (node.minPosition > node.maxPosition ||
+                                          !std::isfinite(node.minPosition) || !std::isfinite(node.maxPosition))) {
+                    return Error::InvalidArgument;
+                }
+            } else if constexpr (std::is_same_v<NodeT, Physics::ConeConstraint>) {
+                if (node.halfAngle.value < 0.0F || !std::isfinite(node.halfAngle.value)) {
+                    return Error::InvalidArgument;
+                }
+            }
+            built = node;
+            return {};
+        });
+    if (!chainRes.HasValue()) return chainRes.error;
+    if (nodeCount != 1U || !built.has_value()) return Error::InvalidArgument;
+    return *built;
 }
 
 } // namespace
@@ -1254,6 +1350,16 @@ class Engine final:
         return Sim().Raycast(origin, direction, maxDistance, ignore);
     }
 
+    [[nodiscard]] Result<Physics::ShapeCastResult> ShapecastRaw(
+        const ChainInNode* shapeChain, DVec3 position, Quat rotation, FVec3 direction, float maxDistance,
+        Physics::BodyID ignore
+    ) const noexcept override {
+        const auto parsed = ParseConvexShapeChain(shapeChain);
+        if (!parsed.HasValue()) return parsed.error;
+        if (!(maxDistance > 0.0F) || !std::isfinite(maxDistance)) return Error::InvalidArgument;
+        return Sim().ShapecastVariant(parsed.value, position, rotation, direction, maxDistance, ignore);
+    }
+
     // The facade's std::vector is built and destroyed entirely inside this
     // library; what crosses is scalars into the caller's own storage.
     [[nodiscard]] uint32_t BodiesInSphereRaw(DVec3 center, float radius, Physics::BodyID* bodies,
@@ -1261,6 +1367,20 @@ class Engine final:
         const std::vector<Physics::BodyID> found = Sim().OverlapSphere(center, radius);
         const auto                         total = static_cast<uint32_t>(found.size());
         if (bodies != nullptr && capacity > 0) {
+            std::copy_n(found.begin(), std::min(total, capacity), bodies);
+        }
+        return total;
+    }
+
+    [[nodiscard]] Result<uint32_t> OverlapRaw(
+        const ChainInNode* shapeChain, DVec3 position, Quat rotation, Physics::BodyID* bodies, uint32_t capacity
+    ) const noexcept override {
+        if (bodies == nullptr && capacity > 0U) return Error::NullArgument;
+        const auto parsed = ParseConvexShapeChain(shapeChain);
+        if (!parsed.HasValue()) return parsed.error;
+        const std::vector<Physics::BodyID> found = Sim().OverlapVariant(parsed.value, position, rotation);
+        const auto                         total = static_cast<uint32_t>(found.size());
+        if (bodies != nullptr && capacity > 0U) {
             std::copy_n(found.begin(), std::min(total, capacity), bodies);
         }
         return total;
@@ -1331,11 +1451,32 @@ class Engine final:
     }
 
     void SetPose(Physics::KinematicBodyID body, DVec3 position, Quat rotation) noexcept override {
-        Sim().SetPose(body, position, rotation.AsVec4());
+        Sim().SetPose(body, position, rotation);
     }
 
     void SetPose(Physics::CharacterID body, DVec3 position) noexcept override {
         Sim().SetPose(body, position);
+    }
+
+    Result<Physics::ConstraintID> CreateConstraintRaw(
+        Physics::BodyID body1, Physics::BodyID body2, const ChainInNode* constraintChain
+    ) noexcept override {
+        const auto parsed = ParseConstraintChain(constraintChain);
+        if (!parsed.HasValue()) return parsed.error;
+        if (body1 == Physics::BodyID::Null() || body2 == Physics::BodyID::Null() || body1 == body2) {
+            return Error::InvalidArgument;
+        }
+        const auto created = Sim().CreateConstraintVariant(body1, body2, parsed.value);
+        if (created == Physics::ConstraintID::Null()) return Error::InvalidArgument;
+        return created;
+    }
+
+    void SetTargetAngle(Physics::HingeConstraintID constraint, RadF angle) noexcept override {
+        Sim().SetTargetAngle(constraint, angle);
+    }
+
+    void SetTargetPosition(Physics::SliderConstraintID constraint, float position) noexcept override {
+        Sim().SetTargetPosition(constraint, position);
     }
 
     void SetCollisionFilter(Physics::BodyID body, Physics::CollisionFilter filter) noexcept override {
@@ -1374,22 +1515,27 @@ class Engine final:
     Result<Physics::StaticBodyID> CreateStaticBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::StaticBody       role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::StaticBody                  role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes =
             DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Plane,
                             Physics::TriangleMesh, Physics::MeshAsset, Physics::HeightField, Physics::Compound,
-                            Physics::StaticBody, Physics::SurfaceMaterial, Physics::CollisionFilter,
-                            Physics::MovingBroadphase>(
+                            Physics::StaticBody, Physics::SurfaceMaterial, Physics::PhysicsMaterialID,
+                            Physics::CollisionFilter, Physics::MovingBroadphase>(
                 shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                     if constexpr (std::is_same_v<NodeT, Physics::StaticBody>) {
                         role = node;
                     } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                        if (mods.hasMaterialID) return Error::DuplicateExtension;
                         mods.surface    = node;
                         mods.hasSurface = true;
+                    } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                        if (mods.hasSurface) return Error::DuplicateExtension;
+                        mods.materialID    = node;
+                        mods.hasMaterialID = true;
                     } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                         mods.filter = node;
                     } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
@@ -1419,8 +1565,12 @@ class Engine final:
                                                       Physics::MeshAsset, Physics::Compound>(shape)) {
                             return Error::InvalidArgument;
                         }
+                        const auto assetCheck = VerifyCompoundAssets(shape, Library());
+                        if (!assetCheck.HasValue()) return assetCheck.error;
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::StaticBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -1432,25 +1582,28 @@ class Engine final:
     Result<Physics::KinematicBodyID> CreateKinematicBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::KinematicBody    role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::KinematicBody               role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes =
             DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Compound,
-                            Physics::KinematicBody, Physics::SurfaceMaterial, Physics::CollisionFilter,
-                            Physics::MovingBroadphase>(
+                            Physics::KinematicBody, Physics::SurfaceMaterial, Physics::PhysicsMaterialID,
+                            Physics::CollisionFilter>(
                 shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                     if constexpr (std::is_same_v<NodeT, Physics::KinematicBody>) {
                         role = node;
                     } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                        if (mods.hasMaterialID) return Error::DuplicateExtension;
                         mods.surface    = node;
                         mods.hasSurface = true;
+                    } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                        if (mods.hasSurface) return Error::DuplicateExtension;
+                        mods.materialID    = node;
+                        mods.hasMaterialID = true;
                     } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                         mods.filter = node;
-                    } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
-                        mods.movingBroadphase = true;
                     } else {
                         ++shapeNodeCount;
                         return ParseShapeNode(node, builtShape);
@@ -1469,7 +1622,9 @@ class Engine final:
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::KinematicBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -1481,25 +1636,28 @@ class Engine final:
     Result<Physics::DynamicBodyID> CreateDynamicBodyRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) return Error::NullArgument;
 
-        Physics::DynamicBody      role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::DynamicBody                 role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes =
             DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Compound,
-                            Physics::DynamicBody, Physics::SurfaceMaterial, Physics::CollisionFilter,
-                            Physics::MovingBroadphase>(
+                            Physics::DynamicBody, Physics::SurfaceMaterial, Physics::PhysicsMaterialID,
+                            Physics::CollisionFilter>(
                 shapeChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                     if constexpr (std::is_same_v<NodeT, Physics::DynamicBody>) {
                         role = node;
                     } else if constexpr (std::is_same_v<NodeT, Physics::SurfaceMaterial>) {
+                        if (mods.hasMaterialID) return Error::DuplicateExtension;
                         mods.surface    = node;
                         mods.hasSurface = true;
+                    } else if constexpr (std::is_same_v<NodeT, Physics::PhysicsMaterialID>) {
+                        if (mods.hasSurface) return Error::DuplicateExtension;
+                        mods.materialID    = node;
+                        mods.hasMaterialID = true;
                     } else if constexpr (std::is_same_v<NodeT, Physics::CollisionFilter>) {
                         mods.filter = node;
-                    } else if constexpr (std::is_same_v<NodeT, Physics::MovingBroadphase>) {
-                        mods.movingBroadphase = true;
                     } else {
                         ++shapeNodeCount;
                         return ParseShapeNode(node, builtShape);
@@ -1518,7 +1676,9 @@ class Engine final:
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::DynamicBodyID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }
@@ -1530,13 +1690,15 @@ class Engine final:
     Result<Physics::CharacterID> CreateCharacterRaw(const ChainInNode* shapeChain) noexcept override {
         if (shapeChain == nullptr) {
             // Historical default: capsule hull at the origin.
-            return Sim().CreateBody(Physics::Capsule {.halfHeight = 0.5F, .radius = 0.3F}, Physics::CharacterBody {},
-                                    Physics::BodyModifiers {});
+            const auto created = Sim().CreateBody(
+                Physics::Capsule {.halfHeight = 0.5F, .radius = 0.3F}, Physics::CharacterBody {}, Physics::BodyModifiers {});
+            if (created == Physics::CharacterID::Null()) return Error::InvalidArgument;
+            return created;
         }
 
-        Physics::CharacterBody    role {};
-        Physics::BodyModifiers    mods {};
-        uint32_t                  shapeNodeCount = 0;
+        Physics::CharacterBody               role {};
+        Physics::BodyModifiers               mods {};
+        uint32_t                             shapeNodeCount = 0;
         std::optional<Physics::ShapeVariant> builtShape;
 
         const Result<void> chainRes =
@@ -1565,7 +1727,9 @@ class Engine final:
                             return Error::InvalidArgument;
                         }
                     }
-                    return Sim().CreateBody(shape, role, mods);
+                    const auto created = Sim().CreateBody(shape, role, mods);
+                    if (created == Physics::CharacterID::Null()) return Error::InvalidArgument;
+                    return created;
                 } else {
                     return Error::InvalidArgument;
                 }

@@ -77,12 +77,23 @@ World::~World() {
         }
         _impl->physicsContext->DestroyRagdolls(ragdolls);
     }
-    if (!registry.GetEntitiesWith<Components::PhysicsComponent>().empty()) {
+    {
         std::vector<Physics::BodyID> bodies;
-        for (auto& component: registry.GetRawArray<Components::PhysicsComponent>()) {
-            bodies.push_back(std::exchange(component.physicsID, Physics::BodyID::Null()));
+        for (auto& component: registry.GetRawArray<Components::StaticBodyComponent>()) {
+            bodies.push_back(std::exchange(component.bodyID, Physics::StaticBodyID::Null()));
         }
-        _impl->physicsContext->DestroyBodies(bodies);
+        for (auto& component: registry.GetRawArray<Components::KinematicBodyComponent>()) {
+            bodies.push_back(std::exchange(component.bodyID, Physics::KinematicBodyID::Null()));
+        }
+        for (auto& component: registry.GetRawArray<Components::DynamicBodyComponent>()) {
+            bodies.push_back(std::exchange(component.bodyID, Physics::DynamicBodyID::Null()));
+        }
+        for (auto& component: registry.GetRawArray<Components::CharacterBodyComponent>()) {
+            bodies.push_back(std::exchange(component.bodyID, Physics::CharacterID::Null()));
+        }
+        if (!bodies.empty()) {
+            _impl->physicsContext->DestroyBodies(bodies);
+        }
     }
     registry.Clear();
     _impl->physicsContext.reset();

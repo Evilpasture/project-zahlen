@@ -22,6 +22,15 @@ auto ToWorldPoint(ZHLN::FVec3 vec) {
     return JPH::RVec3(static_cast<JPH::Real>(vec.x), static_cast<JPH::Real>(vec.y), static_cast<JPH::Real>(vec.z));
 }
 
+auto NormalizeAxisOr(ZHLN::FVec3 axis, JPH::Vec3 fallback) -> JPH::Vec3 {
+    const float lenSq = axis.LengthSquared();
+    if (!std::isfinite(lenSq) || lenSq < 1e-12f) {
+        return fallback;
+    }
+    const ZHLN::FVec3 normalized = axis / std::sqrt(lenSq);
+    return JPH::Vec3(normalized.x, normalized.y, normalized.z);
+}
+
 } // namespace
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const FixedConstraint& p) -> JPH::Constraint* {
@@ -57,14 +66,12 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const DistanceConstrai
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint& p) -> JPH::Constraint* {
     JPH::HingeConstraintSettings settings;
-    // Local frames (Jolt: LocalToBodyCOM): the joint sits at each body's
-    // local zero -- its centre of mass, equal to the origin for the centred
-    // shapes we spawn -- around its local Y.
-    settings.mSpace     = JPH::EConstraintSpace::LocalToBodyCOM;
-    settings.mPoint1    = JPH::RVec3::sZero();
-    settings.mPoint2    = JPH::RVec3::sZero();
-    settings.mHingeAxis1 = settings.mHingeAxis2 = JPH::Vec3::sAxisY();
-    settings.mNormalAxis1 = settings.mNormalAxis2 = JPH::Vec3::sAxisX();
+    settings.mSpace       = JPH::EConstraintSpace::WorldSpace;
+    settings.mPoint1      = settings.mPoint2 = ToWorldPoint(p.pivot);
+    const JPH::Vec3 axis  = NormalizeAxisOr(p.axis, JPH::Vec3::sAxisY());
+    const JPH::Vec3 norm  = axis.GetNormalizedPerpendicular();
+    settings.mHingeAxis1  = settings.mHingeAxis2  = axis;
+    settings.mNormalAxis1 = settings.mNormalAxis2 = norm;
 
     if (p.limitEnabled) {
         settings.mLimitsMin = p.minAngle.value;
@@ -87,11 +94,14 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const HingeConstraint&
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint& p) -> JPH::Constraint* {
     JPH::SliderConstraintSettings settings;
-    settings.mSpace     = JPH::EConstraintSpace::LocalToBodyCOM;
-    settings.mPoint1    = JPH::RVec3::sZero();
-    settings.mPoint2    = JPH::RVec3::sZero();
-    settings.mSliderAxis1 = settings.mSliderAxis2 = JPH::Vec3::sAxisX();
-    settings.mNormalAxis1 = settings.mNormalAxis2 = JPH::Vec3::sAxisY();
+    settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+    if (p.pivot.HasValue()) {
+        settings.mAutoDetectPoint = false;
+        settings.mPoint1          = settings.mPoint2 = ToWorldPoint(p.pivot.value);
+    } else {
+        settings.mAutoDetectPoint = true;
+    }
+    settings.SetSliderAxis(NormalizeAxisOr(p.axis, JPH::Vec3::sAxisX()));
 
     if (p.limitEnabled) {
         settings.mLimitsMin = p.minPosition;
@@ -114,10 +124,9 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const SliderConstraint
 
 auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const ConeConstraint& p) -> JPH::Constraint* {
     JPH::ConeConstraintSettings settings;
-    settings.mSpace        = JPH::EConstraintSpace::LocalToBodyCOM;
-    settings.mPoint1       = JPH::RVec3::sZero();
-    settings.mPoint2       = JPH::RVec3::sZero();
-    settings.mTwistAxis1   = settings.mTwistAxis2 = JPH::Vec3::sAxisY();
+    settings.mSpace         = JPH::EConstraintSpace::WorldSpace;
+    settings.mPoint1        = settings.mPoint2 = ToWorldPoint(p.pivot);
+    settings.mTwistAxis1    = settings.mTwistAxis2 = NormalizeAxisOr(p.axis, JPH::Vec3::sAxisY());
     settings.mHalfConeAngle = p.halfAngle.value;
     return settings.Create(*b1, *b2);
 }
@@ -126,7 +135,10 @@ auto CreateNativeConstraint(JPH::Body* b1, JPH::Body* b2, const ConeConstraint& 
 
 auto PhysicsContext::CreateConstraintVariant(Physics::BodyID b1, Physics::BodyID b2, const Physics::ConstraintVariant& params)
     -> Physics::ConstraintID {
-    auto&                        world  = GetInternalWorld();
+    if (b1 == Physics::BodyID::Null() || b2 == Physics::BodyID::Null() || b1 == b2) {
+        return Physics::ConstraintID::Null();
+    }
+    auto&                       world  = GetInternalWorld();
     const Physics::ConstraintID handle = world.AllocateConstraintID();
 
     Physics::Command cmd {};

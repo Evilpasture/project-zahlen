@@ -188,7 +188,7 @@ struct FramePipelineSuite {
                 return {};
             const auto target = entities.Spawn(
                 Components::TransformComponent {.position = {0, 10, 0}}, Components::WorldTransformComponent {},
-                Components::PhysicsComponent {.physicsID = body.value, .isStatic = false}
+                Components::DynamicBodyComponent {.bodyID = body.value}
             );
             const auto cameraID = entities.SingletonEntity<Components::MainCameraTagComponent>();
             if (!ExpectTrue(cameraID.HasValue()))

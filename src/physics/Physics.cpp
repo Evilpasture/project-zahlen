@@ -374,6 +374,10 @@ auto PhysicsContext::ResolveShape(const Physics::ShapeVariant& shape, FVec3 scal
     return pinned;
 }
 
+auto PhysicsContext::ResolveConvexShape(const Physics::ConvexShapeVariant& shape) const -> JPH::ShapeRefC {
+    return std::visit([this](const auto& s) -> JPH::ShapeRefC { return _impl->shapeCache.Resolve(s); }, shape);
+}
+
 auto PhysicsContext::CreateRigidBodyCore(const JPH::ShapeRefC& pinnedShape, DVec3 pos, FVec4 rot, JPH::EMotionType jm,
                                           Layers::ID jl, JPH::EActivation activation, FVec3 velocity, uint32_t materialID,
                                           uint32_t category, uint32_t mask) -> Physics::BodyID {
@@ -445,7 +449,8 @@ auto PhysicsContext::CreateRigidBodyCore(const JPH::ShapeRefC& pinnedShape, DVec
 
 auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::StaticBody& role, const Physics::BodyModifiers& mods)
     -> Physics::StaticBodyID {
-    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const uint32_t materialID = mods.hasMaterialID ? static_cast<uint32_t>(mods.materialID) :
+                                (mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u);
     const auto     layer = mods.movingBroadphase ? Layers::ID::MOVING : Layers::ID::NON_MOVING;
     const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
     const Physics::BodyID body =
@@ -457,7 +462,8 @@ auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Ph
 
 auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::KinematicBody& role, const Physics::BodyModifiers& mods)
     -> Physics::KinematicBodyID {
-    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const uint32_t materialID = mods.hasMaterialID ? static_cast<uint32_t>(mods.materialID) :
+                                (mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u);
     const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
     const Physics::BodyID body =
         CreateRigidBodyCore(pinned, role.position, FVec4 {role.rotation.x, role.rotation.y, role.rotation.z, role.rotation.w},
@@ -468,7 +474,8 @@ auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Ph
 
 auto PhysicsContext::CreateBodyImpl(const Physics::ShapeVariant& shape, const Physics::DynamicBody& role, const Physics::BodyModifiers& mods)
     -> Physics::DynamicBodyID {
-    const uint32_t materialID = mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u;
+    const uint32_t materialID = mods.hasMaterialID ? static_cast<uint32_t>(mods.materialID) :
+                                (mods.hasSurface ? static_cast<uint32_t>(RegisterMaterial(mods.surface)) : 0u);
     const JPH::EActivation activation = role.startAsleep ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
     const JPH::ShapeRefC pinned = ResolveShape(shape, role.scale);
     const Physics::BodyID body =
@@ -687,7 +694,7 @@ void PhysicsContext::SetPose(Physics::CharacterID handle, ZHLN::DVec3 position) 
     _impl->world.mailbox.Enqueue(std::move(cmd));
 }
 
-void PhysicsContext::SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::FVec4 rotation) {
+void PhysicsContext::SetPose(Physics::KinematicBodyID handle, ZHLN::DVec3 position, ZHLN::Quat rotation) {
     auto& bt = _impl->world.bodyTable;
     if (handle.index >= bt.slotCapacity || bt.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         return;
