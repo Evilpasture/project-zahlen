@@ -12,7 +12,7 @@ using Test::ExpectEq;
 using Test::ExpectTrue;
 auto Body(COM::ISimulation& sim, DVec3 position = {0, 8, 0}) {
     return sim.CreateRigidBody(
-        COM::InChain(Physics::BoxShapeDesc {}, Physics::RigidBodyPose {.position = position, .motionType = Physics::MotionType::Dynamic})
+        COM::InChain(Physics::Box {}, Physics::RigidBodyPose {.position = position, .motionType = Physics::MotionType::Dynamic})
     );
 }
 struct LogicWorldSuite {

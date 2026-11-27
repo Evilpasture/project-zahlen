@@ -53,96 +53,8 @@ struct RaycastResult {
     bool        hasHit;
 };
 
-// --- Chainable fixed-layout shape & rigid-body descriptors -------------------
-
-struct BoxShapeDesc {
-    ZHLN::FVec3 halfExtents {0.5f, 0.5f, 0.5f};
-};
-
-struct SphereShapeDesc {
-    float radius = 0.5f;
-};
-
-struct CapsuleShapeDesc {
-    float halfHeight = 0.5f;
-    float radius     = 0.25f;
-};
-
-struct CylinderShapeDesc {
-    float halfHeight = 0.5f;
-    float radius     = 0.25f;
-};
-
-struct PlaneShapeDesc {
-    ZHLN::FVec3 normal {0.0f, 1.0f, 0.0f};
-    float       constant = 0.0f;
-};
-
-// Borrows `vertices` and `indices` only for the duration of CreateRigidBody, or
-// resolves a pre-cached collision mesh by `asset` when non-Invalid.
-struct MeshShapeDesc {
-    CollisionAssetID   asset       = CollisionAssetID::Invalid;
-    const ZHLN::FVec3* vertices    = nullptr;
-    size_t             vertexCount = 0;
-    const uint32_t*    indices     = nullptr;
-    size_t             indexCount  = 0;
-};
-
-struct HeightFieldShapeDesc {
-    const float* heights     = nullptr;
-    uint32_t     sampleCount = 0;
-    float        worldSize   = 0.0f;
-};
-
-enum class PrimitiveColliderKind : uint8_t {
-    Box      = 0,
-    Sphere   = 1,
-    Capsule  = 2,
-    Cylinder = 3,
-    Plane    = 4,
-};
-
-struct CompoundChildDesc {
-    PrimitiveColliderKind kind       = PrimitiveColliderKind::Box;
-    ZHLN::FVec3           position {0.0f, 0.0f, 0.0f};
-    ZHLN::Quat            rotation   = ZHLN::Quat::Identity();
-    ZHLN::FVec3           dimensions {0.5f, 0.5f, 0.5f};
-    float                 constant   = 0.0f;
-
-    [[nodiscard]] static constexpr auto Box(ZHLN::FVec3 halfExtents, ZHLN::FVec3 localPos = {},
-                                            ZHLN::Quat localRot = ZHLN::Quat::Identity()) noexcept -> CompoundChildDesc {
-        return {.kind = PrimitiveColliderKind::Box, .position = localPos, .rotation = localRot, .dimensions = halfExtents};
-    }
-
-    [[nodiscard]] static constexpr auto Sphere(float radius, ZHLN::FVec3 localPos = {},
-                                               ZHLN::Quat localRot = ZHLN::Quat::Identity()) noexcept -> CompoundChildDesc {
-        return {.kind = PrimitiveColliderKind::Sphere, .position = localPos, .rotation = localRot, .dimensions = {radius, 0.0f, 0.0f}};
-    }
-
-    [[nodiscard]] static constexpr auto Capsule(float halfHeight, float radius, ZHLN::FVec3 localPos = {},
-                                                ZHLN::Quat localRot = ZHLN::Quat::Identity()) noexcept -> CompoundChildDesc {
-        return {.kind = PrimitiveColliderKind::Capsule, .position = localPos, .rotation = localRot, .dimensions = {halfHeight, radius, 0.0f}};
-    }
-
-    [[nodiscard]] static constexpr auto Cylinder(float halfHeight, float radius, ZHLN::FVec3 localPos = {},
-                                                 ZHLN::Quat localRot = ZHLN::Quat::Identity()) noexcept -> CompoundChildDesc {
-        return {.kind = PrimitiveColliderKind::Cylinder, .position = localPos, .rotation = localRot, .dimensions = {halfHeight, radius, 0.0f}};
-    }
-
-    [[nodiscard]] static constexpr auto Plane(ZHLN::FVec3 normal, float planeConstant = 0.0f, ZHLN::FVec3 localPos = {},
-                                              ZHLN::Quat localRot = ZHLN::Quat::Identity()) noexcept -> CompoundChildDesc {
-        return {.kind       = PrimitiveColliderKind::Plane,
-                .position   = localPos,
-                .rotation   = localRot,
-                .dimensions = normal,
-                .constant   = planeConstant};
-    }
-};
-
-struct CompoundShapeDesc {
-    const CompoundChildDesc* children   = nullptr;
-    uint32_t                 childCount = 0;
-};
+// --- Chainable fixed-layout rigid-body descriptors ----------------------------
+// Shape vocabulary (Box, Sphere, ... Compound) lives in PhysicsShapes.hpp.
 
 struct RigidBodyPose {
     ZHLN::DVec3 position {};
@@ -167,27 +79,6 @@ struct RigidBodyFilter {
 };
 
 
-// Overgrowth-style dual-shape character collider (lower lifter sphere + upper
-// oval bumper). Pure POD; pass alongside CharacterCreateDesc via COM::InChain.
-struct DualShapeConfig {
-    float lifterRadius   = 0.40F;
-    float bumperRadiusXZ = 0.50F;
-    float bumperRadiusY  = 0.70F;
-
-    [[nodiscard]] constexpr auto GetLifterOffsetY() const noexcept -> float {
-        return lifterRadius;
-    }
-
-    [[nodiscard]] inline auto GetBumperOffsetY() const noexcept -> float {
-        const float ratio = lifterRadius / bumperRadiusXZ;
-        if (ratio >= 1.0F) {
-            return lifterRadius;
-        }
-        return lifterRadius + (bumperRadiusY * std::sqrt(1.0F - (ratio * ratio)));
-    }
-};
-static_assert(std::is_standard_layout_v<DualShapeConfig> && std::is_trivially_copyable_v<DualShapeConfig>);
-
 struct CharacterCreateDesc {
     ZHLN::DVec3 position {};
     float       capsuleHalfHeight        = 0.5f;
@@ -201,15 +92,6 @@ struct CharacterCreateDesc {
     uint32_t    mask                     = 0xFFFFFFFFu;
 };
 
-static_assert(std::is_standard_layout_v<BoxShapeDesc> && std::is_trivially_copyable_v<BoxShapeDesc>);
-static_assert(std::is_standard_layout_v<SphereShapeDesc> && std::is_trivially_copyable_v<SphereShapeDesc>);
-static_assert(std::is_standard_layout_v<CapsuleShapeDesc> && std::is_trivially_copyable_v<CapsuleShapeDesc>);
-static_assert(std::is_standard_layout_v<CylinderShapeDesc> && std::is_trivially_copyable_v<CylinderShapeDesc>);
-static_assert(std::is_standard_layout_v<PlaneShapeDesc> && std::is_trivially_copyable_v<PlaneShapeDesc>);
-static_assert(std::is_standard_layout_v<MeshShapeDesc> && std::is_trivially_copyable_v<MeshShapeDesc>);
-static_assert(std::is_standard_layout_v<HeightFieldShapeDesc> && std::is_trivially_copyable_v<HeightFieldShapeDesc>);
-static_assert(std::is_standard_layout_v<CompoundChildDesc> && std::is_trivially_copyable_v<CompoundChildDesc>);
-static_assert(std::is_standard_layout_v<CompoundShapeDesc> && std::is_trivially_copyable_v<CompoundShapeDesc>);
 static_assert(std::is_standard_layout_v<RigidBodyPose> && std::is_trivially_copyable_v<RigidBodyPose>);
 static_assert(std::is_standard_layout_v<RigidBodySurface> && std::is_trivially_copyable_v<RigidBodySurface>);
 static_assert(std::is_standard_layout_v<RigidBodyFilter> && std::is_trivially_copyable_v<RigidBodyFilter>);

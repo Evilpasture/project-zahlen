@@ -1480,7 +1480,7 @@ auto main(int argc, char* argv[]) -> int {
 
     const ZHLN::Locomotion::PrefabBounds rigBounds =
         rigInfo ? ZHLN::Locomotion::MeasurePrefabBounds(*rigInfo) : ZHLN::Locomotion::PrefabBounds {};
-    const ZHLN::Physics::DualShapeConfig playerHull      = ZHLN::Locomotion::FitDualShapeToBounds(rigBounds);
+    const ZHLN::Physics::DualShape playerHull      = ZHLN::Locomotion::FitDualShapeToBounds(rigBounds);
     const float                          characterHeight = rigBounds.valid ? std::max(rigBounds.GetSize().y, 0.30f) : kEyeHeightMeters;
 
     {

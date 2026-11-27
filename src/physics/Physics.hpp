@@ -30,9 +30,9 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <variant>
 #include <vector>
 #include <type_traits>
-#include <vector>
 
 namespace JPH {
 class SkeletonPose;
@@ -50,8 +50,6 @@ enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 namespace Physics {
 struct PhysicsWorld;
 struct ContactEvent;
-
-enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
 
@@ -137,11 +135,17 @@ static_assert(
     (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>)
 );
 
+// Runtime-held body shape for chain dispatch and prefab colliders. Not a
+// wire type and never an argument to creation: a caller that only knows the
+// shape at runtime holds one of these, then re-dispatches through the typed
+// CreateRigidBody<S> so each creation call still names its shape statically.
+using ShapeVariant = std::variant<Box, Sphere, Capsule, Cylinder, Plane, TriangleMesh, MeshAsset, HeightField, Compound>;
+
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, Physics::BodyID handle) -> JPH::BodyID;
 
-auto CreateDualShape(const DualShapeConfig& config = {}) -> JPH::ShapeRefC;
+auto CreateDualShape(const DualShape& shape = {}) -> JPH::ShapeRefC;
 
 // Character creation owns Jolt shape/plane objects, so it belongs with the
 // physics implementation rather than in the Jolt-free query value types.
@@ -187,42 +191,20 @@ class PhysicsContext {
     // resolver context alive until this PhysicsContext is destroyed or unbound.
     void BindCollisionAssetResolver(Physics::CollisionAssetResolver resolver, void* context) noexcept;
 
+    // Typed creation: the shape travels as its value struct, so a wrong
+    // shape/wrong-argument pairing cannot compile. Runtime-held shapes (a
+    // chain node, a prefab collider) live in ShapeVariant and re-dispatch
+    // through this template; no runtime type enum crosses the API.
+    template <typename S>
     [[nodiscard]] auto CreateRigidBody(
-        const Physics::AnyShape& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
+        const S& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
         uint32_t materialID = 0, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
         Physics::Activation activation = Physics::Activation::Activate, FVec3 scale = {1, 1, 1}
-    ) -> Physics::BodyID;
-
-    auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
-    auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
-    auto CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC;
-    auto CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC;
-
-    auto CreateRigidBody(
-        const JPH::ShapeRefC& shape,
-        ZHLN::DVec3         pos,
-        ZHLN::FVec4          rot,
-        JPH::EMotionType      motion,
-        Layers::ID            layer,
-        uint32_t              materialID = 0,
-        uint32_t              category   = 0xFFFFFFFF,
-        uint32_t              mask       = 0xFFFFFFFF,
-        // Activation for non-static bodies. Pass DontActivate to spawn the
-        // body asleep; it wakes on contact with active bodies or on
-        // impulse/velocity changes.
-        JPH::EActivation activation = JPH::EActivation::Activate
-    ) -> Physics::BodyID;
-
-    auto CreateMeshBody(
-        const VertexPosition* vertices,
-        uint32_t              vertexCount,
-        const uint32_t*       indices,
-        uint32_t              indexCount,
-        ZHLN::DVec3         pos,
-        ZHLN::FVec4          rot,
-        uint32_t              category = 0xFFFFFFFF,
-        uint32_t              mask     = 0xFFFFFFFF
-    ) -> Physics::BodyID;
+    ) -> Physics::BodyID {
+        return CreateRigidBodyFromVariant(
+            ShapeVariant {shape}, pos, rot, motion, layer, materialID, category, mask, activation, scale
+        );
+    }
 
     auto CreateCharacter(ZHLN::DVec3 position, const Physics::CharacterParams& params = {}) -> Physics::BodyID;
     auto CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID;
@@ -331,6 +313,12 @@ class PhysicsContext {
     [[nodiscard]] auto GetInternalWorld() const noexcept -> const Physics::PhysicsWorld&;
 
   private:
+    // Jolt-facing plumbing: resolve a runtime-held shape, then create the
+    // body. The public template is the only door in.
+    [[nodiscard]] auto CreateRigidBodyFromVariant(
+        const ShapeVariant& shape, DVec3 pos, FVec4 rot, Physics::MotionType motion, Physics::ObjectLayer layer,
+        uint32_t materialID, uint32_t category, uint32_t mask, Physics::Activation activation, FVec3 scale
+    ) -> Physics::BodyID;
     auto RegisterRagdoll(JPH::Ref<JPH::Ragdoll> ragdoll) -> Physics::RagdollID;
     std::unique_ptr<Impl> _impl;
 };

@@ -714,7 +714,7 @@ auto main(int argc, char* argv[]) -> int {
 
     const ZHLN::Locomotion::PrefabBounds bounds =
         rigInfo ? ZHLN::Locomotion::MeasurePrefabBounds(*rigInfo) : ZHLN::Locomotion::PrefabBounds {};
-    const ZHLN::Physics::DualShapeConfig dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
+    const ZHLN::Physics::DualShape dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
     if (bounds.valid) {
         const FVec3 size = bounds.GetSize();
         ZHLN::COM::Log(engine->Logger(),

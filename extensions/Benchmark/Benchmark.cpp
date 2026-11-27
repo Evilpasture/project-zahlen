@@ -111,7 +111,7 @@ auto LogicBenchmark::SpawnFloor() -> void {
     }
 
     auto*                  physics = m_world->Simulation();
-    Physics::BoxShapeDesc  slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
+    Physics::Box           slab {.halfExtents = {kFloorHalfExtent, kFloorHalfHeight, kFloorHalfExtent}};
     Physics::RigidBodyPose pose {.position = {0.0, -static_cast<double>(kFloorHalfHeight), 0.0}, .motionType = Physics::MotionType::Static};
     auto                   chain = COM::InChain(slab, pose);
     auto                   body  = physics->CreateRigidBody(chain.Head());
@@ -130,7 +130,7 @@ void LogicBenchmark::SpawnWorkload(size_t count) {
 
     auto*                 registry = m_world->Entities();
     auto*                 physics  = m_world->Simulation();
-    Physics::BoxShapeDesc cube {.halfExtents = {kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent}};
+    Physics::Box            cube {.halfExtents = {kCubeHalfExtent, kCubeHalfExtent, kCubeHalfExtent}};
     size_t spawned = 0;
     for (; spawned < count; ++spawned) {
         if (m_liveBodies >= m_bodyCeiling) {

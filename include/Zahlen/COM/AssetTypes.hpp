@@ -64,7 +64,8 @@ struct PrefabPartInfo {
     FVec3 boxCenter {};
     // Some importers intentionally use the same simplified box for both the
     // static/mesh and dynamic/box collider choices. Preserve that shape kind
-    // without a native Physics::AnyShape or a triangulated-box approximation.
+    // without a native Physics collider variant or a triangulated-box
+    // approximation.
     bool useBoxForMeshCollider = false;
     // Optional second mesh child, e.g. BSP invisible-but-solid tool faces.
     // Combined with the selected mesh/box fallback as an engine-owned compound;

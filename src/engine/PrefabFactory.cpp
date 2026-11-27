@@ -76,7 +76,7 @@ struct PreparedPart {
     Quat                     rotation = Quat::Identity();
     FVec3                    scale {};
     float                    maxScale = 1.0f;
-    const Physics::AnyShape* shape    = nullptr;
+    const ModelCollider*    shape    = nullptr;
 };
 
 auto PreparePrefabPhysics(const ModelPrefab& prefab, const Mat4x4& baseTransform, bool createPhysics, bool useBoxColliders) -> std::vector<PreparedPart> {
@@ -169,11 +169,37 @@ auto InstantiateMeshPart(
 
     auto body = Physics::BodyID::Null();
     if (params.createPhysics && prep.shape != nullptr) {
-        body = pc.CreateRigidBody(
-            *prep.shape, prep.translation.Cast<double>(), prep.rotation.AsVec4(),
-            params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
-            params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate, prep.scale
+        const auto motion = params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static)
+                                                   : Physics::MotionType::Dynamic;
+        const auto layer = (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving
+                                                                                  : Physics::ObjectLayer::Moving;
+        const auto activation = (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate
+                                                                               : Physics::Activation::Activate;
+        body = std::visit(
+            [&](const auto& collider) -> Physics::BodyID {
+                using C = std::remove_cvref_t<decltype(collider)>;
+                if constexpr (std::is_same_v<C, std::monostate>) {
+                    return Physics::BodyID::Null();
+                } else if constexpr (std::is_same_v<C, OwnedMesh>) {
+                    if (!collider.geometry) return Physics::BodyID::Null();
+                    return pc.CreateRigidBody(
+                        Physics::TriangleMesh {collider.geometry->vertices, collider.geometry->indices},
+                        prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
+                        params.physicsCategory, params.physicsMask, activation, prep.scale
+                    );
+                } else if constexpr (std::is_same_v<C, OwnedCompound>) {
+                    return pc.CreateRigidBody(
+                        collider.View(), prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
+                        params.physicsCategory, params.physicsMask, activation, prep.scale
+                    );
+                } else {
+                    return pc.CreateRigidBody(
+                        collider, prep.translation.Cast<double>(), prep.rotation.AsVec4(), motion, layer, 0,
+                        params.physicsCategory, params.physicsMask, activation, prep.scale
+                    );
+                }
+            },
+            *prep.shape
         );
     }
     if (body != Physics::BodyID::Null()) {
@@ -329,8 +355,8 @@ auto CreateBoxInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        Physics::AnyShape shape = Physics::Shape<Physics::Box> {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z};
-        auto              body  = pc->CreateRigidBody(
+        const Physics::Box shape {FVec3 {halfExtents.x * params.scale.x, halfExtents.y * params.scale.y, halfExtents.z * params.scale.z}};
+        auto               body = pc->CreateRigidBody(
             shape, params.position, params.rotation.AsVec4(),
             params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
             (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
@@ -344,6 +370,7 @@ auto CreateBoxInternal(
 
 namespace {
 
+template <typename ShapeT>
 auto SpawnPrimitive(
     RenderContext&                        gfx,
     ECS::Registry&                        reg,
@@ -353,9 +380,7 @@ auto SpawnPrimitive(
     Components::OwnedMeshComponent::Shape shape,
     FVec3                                 dimensions,
     float                                 cullRadius,
-    Physics::ShapeType                    physicsShape,
-    float                                 physP1,
-    float                                 physP2,
+    const ShapeT&                         physicsShape,
     const SpawnParams&                    params,
     bool                                  buildBLAS
 ) -> Entity {
@@ -396,10 +421,8 @@ auto SpawnPrimitive(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        Physics::AnyShape bodyShape = physicsShape == Physics::ShapeType::Sphere ? Physics::AnyShape(Physics::Shape<Physics::Sphere> {physP1}) :
-                                                                                   Physics::AnyShape(Physics::Shape<Physics::Cylinder> {physP1, physP2});
-        auto              body      = pc->CreateRigidBody(
-            bodyShape, params.position, params.rotation.AsVec4(),
+        auto body = pc->CreateRigidBody(
+            physicsShape, params.position, params.rotation.AsVec4(),
             params.isStaticPhysics ? (params.isKinematicPhysics ? Physics::MotionType::Kinematic : Physics::MotionType::Static) : Physics::MotionType::Dynamic,
             (params.isStaticPhysics && !params.isKinematicPhysics) ? Physics::ObjectLayer::NonMoving : Physics::ObjectLayer::Moving, 0, params.physicsCategory,
             params.physicsMask, (params.isStaticPhysics || params.startAsleep) ? Physics::Activation::DontActivate : Physics::Activation::Activate
@@ -425,7 +448,7 @@ auto CreateSphereInternal(RenderContext& gfx, ECS::Registry& reg, ZHLN::Optional
 
     return SpawnPrimitive(
         gfx, reg, pc, "Sphere", std::move(*built), Components::OwnedMeshComponent::Shape::Sphere,
-        FVec3 {radius, 0.0f, 0.0f}, radius * maxScale * 2.0f, Physics::ShapeType::Sphere, radius * maxScale, 0.0f, resolved, buildBLAS
+        FVec3 {radius, 0.0f, 0.0f}, radius * maxScale * 2.0f, Physics::Sphere {radius * maxScale}, resolved, buildBLAS
     );
 }
 
@@ -450,8 +473,8 @@ auto CreateCylinderInternal(
 
     return SpawnPrimitive(
         gfx, reg, pc, "Cylinder", std::move(*built), Components::OwnedMeshComponent::Shape::Cylinder,
-        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * maxScale,
-        height * 0.5f * maxScale, resolved, buildBLAS
+        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::Cylinder {height * 0.5f * maxScale, radius * maxScale}, resolved, buildBLAS
     );
 }
 
@@ -476,8 +499,8 @@ auto CreateConeInternal(
 
     return SpawnPrimitive(
         gfx, reg, pc, "Cone", std::move(*built), Components::OwnedMeshComponent::Shape::Cone,
-        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f, Physics::ShapeType::Cylinder, radius * 0.5f * maxScale,
-        height * 0.5f * maxScale, resolved, buildBLAS
+        FVec3 {radius, height, 0.0f}, std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::Cylinder {height * 0.5f * maxScale, radius * 0.5f * maxScale}, resolved, buildBLAS
     );
 }
 
@@ -534,8 +557,8 @@ auto CreatePlaneInternal(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc) {
-        Physics::AnyShape shape = Physics::Shape<Physics::Plane> {};
-        auto              body  = pc->CreateRigidBody(
+        const Physics::Plane shape {};
+        auto                 body = pc->CreateRigidBody(
             shape, params.position, params.rotation.AsVec4(), Physics::MotionType::Static, Physics::ObjectLayer::NonMoving, 0, params.physicsCategory,
             params.physicsMask
         );

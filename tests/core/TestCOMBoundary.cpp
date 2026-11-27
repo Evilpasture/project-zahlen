@@ -308,7 +308,7 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
 
     // Chained rigid bodies: static floor box, dynamic sphere, and compound shape.
     const auto floorRes = simulation.CreateRigidBody(ZHLN::COM::InChain(
-        ZHLN::Physics::BoxShapeDesc {.halfExtents = {10.0F, 0.5F, 10.0F}},
+        ZHLN::Physics::Box {.halfExtents = {10.0F, 0.5F, 10.0F}},
         ZHLN::Physics::RigidBodyPose {
             .position   = {0.0, -0.5, 0.0},
             .motionType = ZHLN::Physics::MotionType::Static,
@@ -321,14 +321,16 @@ void CheckSimulation(ZHLN::COM::ISimulation& simulation) {
     const auto sphereRes = simulation.CreateSphereBody(0.5F, ZHLN::Physics::RigidBodyPose {.position = {0.0, 4.0, 0.0}});
     ZHLN::Test::ExpectTrue(sphereRes.HasValue());
 
-    const std::array<ZHLN::Physics::CompoundChildDesc, 2> compoundParts {
-        ZHLN::Physics::CompoundChildDesc::Box({0.25F, 0.25F, 0.25F}, {-0.5F, 0.0F, 0.0F}),
-        ZHLN::Physics::CompoundChildDesc::Sphere(0.25F, {0.5F, 0.0F, 0.0F}),
+    const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Box>, 1> compoundBoxes {
+        ZHLN::Physics::Placed<ZHLN::Physics::Box> {{0.25F, 0.25F, 0.25F}, {-0.5F, 0.0F, 0.0F}},
+    };
+    const std::array<ZHLN::Physics::Placed<ZHLN::Physics::Sphere>, 1> compoundSpheres {
+        ZHLN::Physics::Placed<ZHLN::Physics::Sphere> {0.25F, {0.5F, 0.0F, 0.0F}},
     };
     const auto compoundRes = simulation.CreateRigidBody(ZHLN::COM::InChain(
-        ZHLN::Physics::CompoundShapeDesc {
-            .children   = compoundParts.data(),
-            .childCount = static_cast<uint32_t>(compoundParts.size()),
+        ZHLN::Physics::Compound {
+            .boxes   = compoundBoxes,
+            .spheres = compoundSpheres,
         },
         ZHLN::Physics::RigidBodyPose {.position = {3.0, 2.0, 0.0}}));
     ZHLN::Test::ExpectTrue(compoundRes.HasValue());

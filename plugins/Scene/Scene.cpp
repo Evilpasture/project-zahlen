@@ -246,7 +246,7 @@ auto Instantiate(
 
                     const auto body = simulation.CreateRigidBody(
                         COM::InChain(
-                            Physics::BoxShapeDesc {half},
+                            Physics::Box {half},
                             Physics::RigidBodyPose {.position = params.position, .rotation = params.rotation, .motionType = Physics::MotionType::Kinematic},
                             Physics::RigidBodyFilter {
                                 .layer = Physics::ObjectLayer::Moving, .hasExplicitLayer = true, .category = params.physicsCategory, .mask = params.physicsMask

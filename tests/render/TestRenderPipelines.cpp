@@ -56,7 +56,7 @@ struct RenderPipelinesTestSuite {
             auto& physics = *engine->Simulation();
             const auto body = physics.CreateRigidBody(
                 ZHLN::COM::InChain(
-                    ZHLN::Physics::MeshShapeDesc {.asset = id},
+                    ZHLN::Physics::MeshAsset {.id = id},
                     ZHLN::Physics::RigidBodyPose {
                         .position   = ZHLN::DVec3 {0, 0, 0},
                         .rotation   = ZHLN::Quat::Identity(),

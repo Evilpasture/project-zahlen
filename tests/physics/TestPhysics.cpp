@@ -82,7 +82,7 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectTrue(afterImpulse.HasValue() && afterImpulse.value.z > 0.0f);
 
             const auto kinematic = sim.CreateRigidBody(ZHLN::COM::InChain(
-                ZHLN::Physics::BoxShapeDesc {.halfExtents = {1.0f, 1.0f, 1.0f}},
+                ZHLN::Physics::Box {.halfExtents = {1.0f, 1.0f, 1.0f}},
                 ZHLN::Physics::RigidBodyPose {.position = DVec3 {0.0, 0.0, 0.0}, .motionType = ZHLN::Physics::MotionType::Kinematic}
             ));
             ZHLN::Test::ExpectTrue(kinematic.HasValue());
@@ -131,7 +131,7 @@ struct PhysicsTestSuite {
             );
             ZHLN::Test::ExpectTrue(floor.HasValue());
 
-            const ZHLN::Physics::DualShapeConfig hull {};
+            const ZHLN::Physics::DualShape hull {};
             const auto character = sim.CreateCharacter(ZHLN::COM::InChain(
                 ZHLN::Physics::CharacterCreateDesc {.position = DVec3 {0.0, 0.15, 0.0}},
                 hull
@@ -169,11 +169,9 @@ struct PhysicsTestSuite {
             const std::array<uint32_t, 6> indices {0, 2, 1, 0, 3, 2};
             const ZHLN::FVec3 v[] = {{-5.0f, 0.0f, -5.0f}, {5.0f, 0.0f, -5.0f}, {5.0f, 0.0f, 5.0f}, {-5.0f, 0.0f, 5.0f}};
             const uint32_t idx[]  = {0, 2, 1, 0, 3, 2};
-            ZHLN::Physics::MeshShapeDesc meshDesc {};
-            meshDesc.vertices    = v;
-            meshDesc.vertexCount = 4;
-            meshDesc.indices     = idx;
-            meshDesc.indexCount  = 6;
+            ZHLN::Physics::TriangleMesh meshDesc {};
+            meshDesc.vertices = {v, 4};
+            meshDesc.indices  = {idx, 6};
             const auto meshBody = sim.CreateRigidBody(ZHLN::COM::InChain(
                 meshDesc,
                 ZHLN::Physics::RigidBodyPose {.motionType = ZHLN::Physics::MotionType::Static}

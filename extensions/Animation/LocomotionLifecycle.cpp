@@ -31,7 +31,7 @@ namespace ZHLN::Locomotion {
 
 namespace {
 
-[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const Physics::DualShapeConfig& config) -> Physics::BodyID {
+[[nodiscard]] auto CreateCharacterBody(COM::ISimulation& sim, FVec3 footPosition, const Physics::DualShape& config) -> Physics::BodyID {
     const Physics::CharacterCreateDesc desc {
         .position                 = footPosition.Cast<double>(),
         .maxSlopeRadians     = DegF {50.0f}.ToRadians().value,
@@ -116,7 +116,7 @@ auto SpawnCharacter(
     }
     const Entity entity = spawned.front();
 
-    const Physics::DualShapeConfig shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
+    const Physics::DualShape shapeConfig    = FitDualShapeToBounds(scaledBounds, setup);
     const Physics::BodyID          physicsID      = CreateCharacterBody(*sim, spawnFootPosition, shapeConfig);
     const float                    sprintMult     = setup.walkSpeed > 1.0e-4f ? setup.sprintSpeed / setup.walkSpeed : 1.65f;
     entities->Attach(entity, Components::PhysicsComponent {.physicsID = physicsID, .isStatic = false});

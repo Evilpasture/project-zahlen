@@ -43,7 +43,7 @@ struct CharacterSetup {
     float                    cameraLookSensitivity   = 0.12f;
     float                    cameraPositionSmoothing = 14.0f;
     bool                     cameraAlignYawToTarget  = true;
-    Physics::DualShapeConfig colliderShape {};
+    Physics::DualShape colliderShape {};
 };
 
 struct CharacterSpawnResult {
@@ -52,7 +52,7 @@ struct CharacterSpawnResult {
     FVec3                    boundsSize    = FVec3::Zero();
     float                    height        = 0.0f;
     float                    groundOffset  = 0.0f;
-    Physics::DualShapeConfig colliderShape {};
+    Physics::DualShape colliderShape {};
     bool                     valid         = false;
 };
 
@@ -108,7 +108,7 @@ struct PrefabBounds {
     return bounds;
 }
 
-[[nodiscard]] auto FitDualShapeToBounds(const PrefabBounds& bounds, const CharacterSetup& setup = {}) noexcept -> Physics::DualShapeConfig {
+[[nodiscard]] auto FitDualShapeToBounds(const PrefabBounds& bounds, const CharacterSetup& setup = {}) noexcept -> Physics::DualShape {
     if (!bounds.valid) return setup.colliderShape;
     const FVec3 size             = bounds.GetSize();
     const float horizontalExtent = std::max(size.x, size.z) * 0.5f;
@@ -122,10 +122,10 @@ struct PrefabBounds {
     const float blendFactor   = 1.0f + std::sqrt(std::max(0.0f, 1.0f - (ratio * ratio)));
     const float desiredTop    = std::max(height - setup.colliderBottomMargin, lifterRadius * 2.1f);
     const float bumperRadiusY = std::max((desiredTop - lifterRadius) / blendFactor, lifterRadius * 0.65f);
-    return Physics::DualShapeConfig {.lifterRadius = lifterRadius, .bumperRadiusXZ = bumperRadiusXZ, .bumperRadiusY = bumperRadiusY};
+    return Physics::DualShape {.lifterRadius = lifterRadius, .bumperRadiusXZ = bumperRadiusXZ, .bumperRadiusY = bumperRadiusY};
 }
 
-void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const Physics::DualShapeConfig& config) {
+void DrawDualShapeDebug(COM::IDebugDraw& debug, FVec3 footPosition, const Physics::DualShape& config) {
     constexpr int   segments    = 28;
     constexpr FVec4 lifterColor = {0.15f, 0.90f, 1.00f, 1.0f};
     constexpr FVec4 bumperColor = {1.00f, 0.72f, 0.15f, 1.0f};

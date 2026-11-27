@@ -6,11 +6,10 @@
 // Zahlen/COM/ISimulation.hpp
 //
 // Physics as the public API sees it. Creation descriptors travel via reflected
-// ChainInNode lists (Physics::BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc,
-// CylinderShapeDesc, PlaneShapeDesc, MeshShapeDesc, HeightFieldShapeDesc,
-// CompoundShapeDesc + optional RigidBodyPose, RigidBodySurface, RigidBodyFilter)
-// so new body properties or shape families never shift the vtable or read past
-// caller-owned structs.
+// ChainInNode lists (Physics::Box, Sphere, Capsule, Cylinder, Plane,
+// TriangleMesh, MeshAsset, HeightField, Compound + optional RigidBodyPose,
+// RigidBodySurface, RigidBodyFilter) so new body properties or shape families
+// never shift the vtable or read past caller-owned structs.
 
 #include <Zahlen/COM/Types.hpp>
 #include <Zahlen/Core/COM/Chain.hpp>
@@ -19,6 +18,7 @@
 #include <Zahlen/Math/Quat.hpp>
 #include <Zahlen/Math/Matrix.hpp>
 #include <Zahlen/Math/Vec3.hpp>
+#include <Zahlen/Physics/PhysicsShapes.hpp>
 #include <Zahlen/Physics/PhysicsValues.hpp>
 
 #include <cstdint>
@@ -78,10 +78,10 @@ struct ISimulation : IObject {
     // physics yourself.
     virtual void Step(float deltaTime) noexcept = 0;
 
-    // Requires exactly one shape node (BoxShapeDesc, SphereShapeDesc,
-    // CapsuleShapeDesc, CylinderShapeDesc, PlaneShapeDesc, MeshShapeDesc,
-    // HeightFieldShapeDesc, or CompoundShapeDesc) plus any subset of
-    // RigidBodyPose, RigidBodySurface and RigidBodyFilter.
+    // Requires exactly one shape node (Physics::Box, Sphere, Capsule,
+    // Cylinder, Plane, TriangleMesh, MeshAsset, HeightField or Compound)
+    // plus any subset of RigidBodyPose, RigidBodySurface and
+    // RigidBodyFilter.
     virtual Result<Physics::BodyID> CreateRigidBody(const ChainInNode* descChain) noexcept = 0;
 
     // Accepts Physics::CharacterCreateDesc in `descChain` (nullptr uses defaults
@@ -103,12 +103,12 @@ struct ISimulation : IObject {
 
     auto CreateBoxBody(FVec3 halfExtents, const Physics::RigidBodyPose& pose = {}) noexcept
         -> Result<Physics::BodyID> {
-        return CreateRigidBody(InChain(Physics::BoxShapeDesc {.halfExtents = halfExtents}, pose));
+        return CreateRigidBody(InChain(Physics::Box {.halfExtents = halfExtents}, pose));
     }
 
     auto CreateSphereBody(float radius, const Physics::RigidBodyPose& pose = {}) noexcept
         -> Result<Physics::BodyID> {
-        return CreateRigidBody(InChain(Physics::SphereShapeDesc {.radius = radius}, pose));
+        return CreateRigidBody(InChain(Physics::Sphere {.radius = radius}, pose));
     }
 
     [[nodiscard]] auto Raycast(DVec3 origin, FVec3 direction) const noexcept -> Physics::RaycastResult {

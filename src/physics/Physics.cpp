@@ -358,21 +358,22 @@ void PhysicsContext::OptimizeBroadphase() {
     _impl->physicsSystem.OptimizeBroadPhase();
 }
 
-auto PhysicsContext::CreateRigidBody(
-    const Physics::AnyShape& shape,
-    DVec3                    pos,
-    FVec4                    rot,
-    Physics::MotionType      motion,
-    Physics::ObjectLayer     layer,
-    uint32_t                 materialID,
-    uint32_t                 category,
-    uint32_t                 mask,
-    Physics::Activation      activation,
-    FVec3                    scale
+auto PhysicsContext::CreateRigidBodyFromVariant(
+    const ShapeVariant&   shape,
+    DVec3                 pos,
+    FVec4                 rot,
+    Physics::MotionType   motion,
+    Physics::ObjectLayer  layer,
+    uint32_t              materialID,
+    uint32_t              category,
+    uint32_t              mask,
+    Physics::Activation   activation,
+    FVec3                 scale
 ) -> Physics::BodyID {
-    auto pinned = _impl->shapeCache.Resolve(shape);
-    if (!pinned)
+    auto pinned = std::visit([this](const auto& s) -> JPH::ShapeRefC { return _impl->shapeCache.Resolve(s); }, shape);
+    if (pinned == nullptr) {
         return Physics::BodyID::Null();
+    }
     const JPH::Vec3 joltScale(scale.x, scale.y, scale.z);
     if (!joltScale.IsClose(JPH::Vec3::sReplicate(1.0f), 1e-5f)) {
         JPH::ScaledShapeSettings settings(pinned, joltScale);
@@ -417,70 +418,33 @@ auto PhysicsContext::CreateRigidBody(
         default:
             return Physics::BodyID::Null();
     }
-    return CreateRigidBody(pinned, pos, rot, jm, jl, materialID, category, mask, ja);
-}
 
-auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p2, float p3, float p4) -> JPH::ShapeRefC {
-    return _impl->shapeCache.GetOrCreate(type, p1, p2, p3, p4);
-}
-
-auto PhysicsContext::CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC {
-    return Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
-}
-
-auto PhysicsContext::CreateTranslatedShape(const JPH::ShapeRefC& shape, FVec3 offset) -> JPH::ShapeRefC {
-    if (!shape)
-        return nullptr;
-    return new JPH::RotatedTranslatedShape(JPH::Vec3(offset.x, offset.y, offset.z), JPH::Quat::sIdentity(), shape);
-}
-
-auto PhysicsContext::CreateCompoundShape(const JPH::ShapeRefC& first, const JPH::ShapeRefC& second) -> JPH::ShapeRefC {
-    if (!first || !second)
-        return nullptr;
-    JPH::StaticCompoundShapeSettings settings;
-    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), first);
-    settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), second);
-    const auto result = settings.Create();
-    return result.IsValid() ? result.Get() : nullptr;
-}
-
-auto PhysicsContext::CreateRigidBody(
-    const JPH::ShapeRefC& shape,
-    ZHLN::DVec3           pos,
-    ZHLN::FVec4           rot,
-    JPH::EMotionType      motion,
-    Layers::ID            layer,
-    uint32_t              materialID,
-    uint32_t              category,
-    uint32_t              mask,
-    JPH::EActivation      activation
-) -> Physics::BodyID {
-    if (shape == nullptr) {
+    if (pinned == nullptr) {
         return Physics::BodyID::Null();
     }
 
     auto&                 world = _impl->world;
     auto&                 bt    = world.bodyTable;
     const Physics::BodyID handle =
-        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, motion, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
+        bt.ReserveSlot(Physics::SlotState::PendingCreateRigid, jm, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w));
 
     uint32_t precreatedBodyID = JPH::BodyID::cInvalidBodyID;
     if (world.EnterIdleJoltMutation()) {
         const Physics::MaterialData mat = world.ResolveMaterial(materialID);
         JPH::BodyCreationSettings   settings(
-            shape, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), motion, static_cast<JPH::ObjectLayer>(layer)
+            pinned, JPH::RVec3(pos.x, pos.y, pos.z), JPH::Quat(rot.x, rot.y, rot.z, rot.w), jm, static_cast<JPH::ObjectLayer>(jl)
         );
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
 
-        if (motion == JPH::EMotionType::Dynamic) {
+        if (jm == JPH::EMotionType::Dynamic) {
             settings.mAllowSleeping = true;
             settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
         }
 
         const JPH::BodyID id =
-            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
+            world.bodyInterface->CreateAndAddBody(settings, (jm == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : ja);
         precreatedBodyID = id.GetIndexAndSequenceNumber();
 
         bt.slotBodyIDs[handle.index].store(precreatedBodyID, std::memory_order::release);
@@ -495,7 +459,7 @@ auto PhysicsContext::CreateRigidBody(
 
     Physics::Command cmd {};
     cmd.type                = Physics::CommandType::CreateRigidBody;
-    cmd.shape               = shape;
+    cmd.shape               = pinned;
     cmd.payload.createRigid = Physics::CreateRigidPayload {
         .bodyID           = handle,
         .px               = static_cast<JPH::Real>(pos.x),
@@ -509,9 +473,9 @@ auto PhysicsContext::CreateRigidBody(
         .materialID       = materialID,
         .category         = category,
         .mask             = mask,
-        .motion           = motion,
-        .layer            = layer,
-        .activation       = activation,
+        .motion           = jm,
+        .layer            = jl,
+        .activation       = ja,
     };
     world.mailbox.Enqueue(std::move(cmd));
     return handle;
@@ -585,7 +549,7 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
     return result.HasError() ? nullptr : result.Get();
 }
 
-auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
+auto CreateDualShape(const DualShape& config) -> JPH::ShapeRefC {
     JPH::StaticCompoundShapeSettings compound;
 
     const JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
@@ -604,27 +568,10 @@ auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
 
 } // namespace Physics
 
-auto PhysicsContext::CreateMeshBody(
-    const VertexPosition* vertices,
-    uint32_t              vertexCount,
-    const uint32_t*       indices,
-    uint32_t              indexCount,
-    ZHLN::DVec3           pos,
-    ZHLN::FVec4           rot,
-    uint32_t              category,
-    uint32_t              mask
-) -> Physics::BodyID {
-    const JPH::ShapeRefC shape = Physics::CreateMeshShape(vertices, vertexCount, indices, indexCount);
-    if (shape == nullptr) {
-        return Physics::BodyID::Null();
-    }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask);
-}
-
 auto PhysicsContext::CreateCustomCharacter(const Physics::CharacterCreateDesc& desc) -> Physics::BodyID {
     Physics::CharacterParams params {};
     if (desc.useCustomCapsule && desc.capsuleRadius > 0.0F && desc.capsuleHalfHeight > 0.0F) {
-        params.shape = GetOrCreateShape(Physics::ShapeType::Capsule, desc.capsuleRadius, desc.capsuleHalfHeight);
+        params.shape = _impl->shapeCache.Resolve(Physics::Capsule {desc.capsuleHalfHeight, desc.capsuleRadius});
     }
     params.maxSlopeAngle            = desc.maxSlopeRadians;
     params.maxStrength              = desc.maxStrength;
@@ -645,7 +592,7 @@ auto PhysicsContext::CreateCharacter(ZHLN::DVec3 position, const Physics::Charac
 
     JPH::ShapeRefC charShape = params.shape;
     if (charShape == nullptr) {
-        charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
+        charShape = _impl->shapeCache.Resolve(Physics::Capsule {0.5f, 0.3f});
     }
     if (charShape == nullptr) {
         return Physics::BodyID::Null();

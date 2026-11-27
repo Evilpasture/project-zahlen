@@ -246,44 +246,6 @@ constexpr std::array kPublishedComponents {
 
 constexpr uint32_t kInvalidFamily = 0xFFFFFFFFu;
 
-[[nodiscard]] auto MakePrimitiveSubShape(const Physics::CompoundChildDesc& child) noexcept
-    -> std::optional<Physics::AnyPrimitiveShape> {
-    switch (child.kind) {
-        case Physics::PrimitiveColliderKind::Box:
-            if (child.dimensions.x <= 0.0F || child.dimensions.y <= 0.0F || child.dimensions.z <= 0.0F) {
-                return std::nullopt;
-            }
-            return Physics::AnyPrimitiveShape {Physics::Shape<Physics::Box>(child.dimensions)};
-        case Physics::PrimitiveColliderKind::Sphere:
-            if (child.dimensions.x <= 0.0F) return std::nullopt;
-            return Physics::AnyPrimitiveShape {Physics::Shape<Physics::Sphere>(child.dimensions.x)};
-        case Physics::PrimitiveColliderKind::Capsule:
-            if (child.dimensions.x <= 0.0F || child.dimensions.y <= 0.0F) return std::nullopt;
-            return Physics::AnyPrimitiveShape {Physics::Shape<Physics::Capsule>(child.dimensions.x, child.dimensions.y)};
-        case Physics::PrimitiveColliderKind::Cylinder:
-            if (child.dimensions.x <= 0.0F || child.dimensions.y <= 0.0F) return std::nullopt;
-            return Physics::AnyPrimitiveShape {
-                Physics::Shape<Physics::Cylinder>(child.dimensions.x, child.dimensions.y)};
-        case Physics::PrimitiveColliderKind::Plane:
-            return Physics::AnyPrimitiveShape {Physics::Shape<Physics::Plane>(child.dimensions, child.constant)};
-    }
-    return std::nullopt;
-}
-
-[[nodiscard]] auto ValidateAndBuildMeshGeometry(const FVec3* vertices, size_t vertexCount, const uint32_t* indices,
-                                                size_t indexCount) -> std::optional<Physics::MeshGeometry> {
-    if (vertices == nullptr || vertexCount == 0 || indices == nullptr || indexCount < 3 || (indexCount % 3U) != 0U) {
-        return std::nullopt;
-    }
-    for (size_t i = 0; i < indexCount; ++i) {
-        if (indices[i] >= vertexCount) return std::nullopt;
-    }
-    Physics::MeshGeometry geom {};
-    geom.vertices.assign(vertices, vertices + vertexCount);
-    geom.indices.assign(indices, indices + indexCount);
-    return geom;
-}
-
 } // namespace
 
 class Engine final:
@@ -1351,14 +1313,12 @@ class Engine final:
         Physics::RigidBodyFilter                     filter {};
         bool                                         hasSurface     = false;
         uint32_t                                     shapeNodeCount = 0;
-        std::optional<Physics::AnyShape>             builtShape;
-        std::shared_ptr<const Physics::MeshGeometry> pinnedMesh;
+        std::optional<Physics::ShapeVariant>         builtShape;
 
         const Result<void> chainRes =
-            DispatchInChain<Physics::BoxShapeDesc, Physics::SphereShapeDesc, Physics::CapsuleShapeDesc,
-                            Physics::CylinderShapeDesc, Physics::PlaneShapeDesc, Physics::MeshShapeDesc,
-                            Physics::HeightFieldShapeDesc, Physics::CompoundShapeDesc, Physics::RigidBodyPose,
-                            Physics::RigidBodySurface, Physics::RigidBodyFilter>(
+            DispatchInChain<Physics::Box, Physics::Sphere, Physics::Capsule, Physics::Cylinder, Physics::Plane,
+                            Physics::TriangleMesh, Physics::MeshAsset, Physics::HeightField, Physics::Compound,
+                            Physics::RigidBodyPose, Physics::RigidBodySurface, Physics::RigidBodyFilter>(
                 descChain, [&]<typename NodeT>(const NodeT& node) -> Result<void> {
                     if constexpr (std::is_same_v<NodeT, Physics::RigidBodyPose>) {
                         pose = node;
@@ -1369,67 +1329,59 @@ class Engine final:
                         filter = node;
                     } else {
                         ++shapeNodeCount;
-                        if constexpr (std::is_same_v<NodeT, Physics::BoxShapeDesc>) {
+                        if constexpr (std::is_same_v<NodeT, Physics::Box>) {
                             if (node.halfExtents.x <= 0.0F || node.halfExtents.y <= 0.0F || node.halfExtents.z <= 0.0F) {
                                 return Error::InvalidArgument;
                             }
-                            builtShape = Physics::AnyShape {Physics::Shape<Physics::Box>(node.halfExtents)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::SphereShapeDesc>) {
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::Sphere>) {
                             if (node.radius <= 0.0F) return Error::InvalidArgument;
-                            builtShape = Physics::AnyShape {Physics::Shape<Physics::Sphere>(node.radius)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::CapsuleShapeDesc>) {
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::Capsule>) {
                             if (node.halfHeight <= 0.0F || node.radius <= 0.0F) return Error::InvalidArgument;
-                            builtShape =
-                                Physics::AnyShape {Physics::Shape<Physics::Capsule>(node.halfHeight, node.radius)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::CylinderShapeDesc>) {
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::Cylinder>) {
                             if (node.halfHeight <= 0.0F || node.radius <= 0.0F) return Error::InvalidArgument;
-                            builtShape =
-                                Physics::AnyShape {Physics::Shape<Physics::Cylinder>(node.halfHeight, node.radius)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::PlaneShapeDesc>) {
-                            builtShape = Physics::AnyShape {Physics::Shape<Physics::Plane>(node.normal, node.constant)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::MeshShapeDesc>) {
-                            if (node.asset != CollisionAssetID::Invalid) {
-                                pinnedMesh = Library().FindCollisionMesh(node.asset);
-                                if (!pinnedMesh && node.vertices != nullptr && node.indices != nullptr) {
-                                    auto geom = ValidateAndBuildMeshGeometry(node.vertices, node.vertexCount,
-                                                                             node.indices, node.indexCount);
-                                    if (!geom.has_value()) return Error::InvalidArgument;
-                                    (void)Library().CacheCollisionMesh(node.asset, std::move(*geom));
-                                    pinnedMesh = Library().FindCollisionMesh(node.asset);
-                                }
-                                if (!pinnedMesh) return Error::AssetNotCached;
-                                Physics::Shape<Physics::Mesh> meshShape(pinnedMesh);
-                                meshShape.asset = node.asset;
-                                builtShape      = Physics::AnyShape {std::move(meshShape)};
-                            } else {
-                                auto geom = ValidateAndBuildMeshGeometry(node.vertices, node.vertexCount, node.indices,
-                                                                         node.indexCount);
-                                if (!geom.has_value()) return Error::InvalidArgument;
-                                pinnedMesh = std::make_shared<Physics::MeshGeometry>(std::move(*geom));
-                                builtShape = Physics::AnyShape {Physics::Shape<Physics::Mesh>(pinnedMesh)};
-                            }
-                        } else if constexpr (std::is_same_v<NodeT, Physics::HeightFieldShapeDesc>) {
-                            if (node.heights == nullptr || node.sampleCount < 2U || node.worldSize <= 0.0F) {
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::Plane>) {
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::TriangleMesh>) {
+                            if (node.vertices.size() < 3U || node.indices.size() < 3U || (node.indices.size() % 3U) != 0U) {
                                 return Error::InvalidArgument;
                             }
-                            const size_t totalSamples = static_cast<size_t>(node.sampleCount) * node.sampleCount;
-                            builtShape                = Physics::AnyShape {Physics::Shape<Physics::HeightField>(
-                                std::span<const float>(node.heights, totalSamples), node.sampleCount, node.worldSize)};
-                        } else if constexpr (std::is_same_v<NodeT, Physics::CompoundShapeDesc>) {
-                            if (node.children == nullptr || node.childCount == 0U) return Error::InvalidArgument;
-                            Physics::Shape<Physics::Compound> comp {};
-                            comp.children.reserve(node.childCount);
-                            for (uint32_t i = 0; i < node.childCount; ++i) {
-                                const Physics::CompoundChildDesc& child = node.children[i];
-                                auto                              sub   = MakePrimitiveSubShape(child);
-                                if (!sub.has_value()) return Error::InvalidArgument;
-                                comp.children.push_back(Physics::Shape<Physics::Compound>::Child {
-                                    .position = child.position,
-                                    .rotation = child.rotation,
-                                    .shape    = std::move(*sub),
-                                });
+                            for (const uint32_t index: node.indices) {
+                                if (index >= node.vertices.size()) return Error::InvalidArgument;
                             }
-                            builtShape = Physics::AnyShape {std::move(comp)};
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::MeshAsset>) {
+                            if (node.id == CollisionAssetID::Invalid) return Error::InvalidArgument;
+                            // Fail early with a precise error instead of a
+                            // Null body at resolve time; the resolve path
+                            // looks the snapshot up again through the bound
+                            // resolver, exactly as before.
+                            if (!Library().FindCollisionMesh(node.id)) return Error::AssetNotCached;
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::HeightField>) {
+                            if (node.sampleCount < 2U || node.worldSize <= 0.0F) return Error::InvalidArgument;
+                            const size_t totalSamples = static_cast<size_t>(node.sampleCount) * node.sampleCount;
+                            if (node.heights.size() < totalSamples) return Error::InvalidArgument;
+                            builtShape = node;
+                        } else if constexpr (std::is_same_v<NodeT, Physics::Compound>) {
+                            const size_t childCount = node.boxes.size() + node.spheres.size() + node.capsules.size() +
+                                                      node.cylinders.size() + node.planes.size() + node.meshes.size() +
+                                                      node.meshAssets.size();
+                            if (childCount == 0U) return Error::InvalidArgument;
+                            for (const auto& child: node.boxes)
+                                if (child.shape.halfExtents.x <= 0.0F || child.shape.halfExtents.y <= 0.0F ||
+                                    child.shape.halfExtents.z <= 0.0F)
+                                    return Error::InvalidArgument;
+                            for (const auto& child: node.spheres)
+                                if (child.shape.radius <= 0.0F) return Error::InvalidArgument;
+                            for (const auto& child: node.capsules)
+                                if (child.shape.halfHeight <= 0.0F || child.shape.radius <= 0.0F) return Error::InvalidArgument;
+                            for (const auto& child: node.cylinders)
+                                if (child.shape.halfHeight <= 0.0F || child.shape.radius <= 0.0F) return Error::InvalidArgument;
+                            builtShape = node;
                         }
                     }
                     return {};
@@ -1446,15 +1398,20 @@ class Engine final:
                                     : (pose.motionType == Physics::MotionType::Static ? Physics::ObjectLayer::NonMoving
                                                                                       : Physics::ObjectLayer::Moving);
 
-        return Sim().CreateRigidBody(*builtShape, pose.position, pose.rotation.AsVec4(), pose.motionType, resolvedLayer,
-                                     surface.materialID, filter.category, filter.mask, pose.activation, pose.scale);
+        return std::visit(
+            [&]<typename S>(const S& shape) -> Result<Physics::BodyID> {
+                return Sim().CreateRigidBody(shape, pose.position, pose.rotation.AsVec4(), pose.motionType, resolvedLayer,
+                                             surface.materialID, filter.category, filter.mask, pose.activation, pose.scale);
+            },
+            *builtShape
+        );
     }
 
     Result<Physics::BodyID> CreateCharacter(const ChainInNode* descChain) noexcept override {
         Physics::CharacterCreateDesc           desc {};
-        std::optional<Physics::DualShapeConfig> dual {};
+        std::optional<Physics::DualShape> dual {};
         if (descChain != nullptr) {
-            const Result<void> chainRes = DispatchInChain<Physics::CharacterCreateDesc, Physics::DualShapeConfig>(
+            const Result<void> chainRes = DispatchInChain<Physics::CharacterCreateDesc, Physics::DualShape>(
                 descChain, [&]<typename Node>(const Node& node) -> Result<void> {
                     if constexpr (std::is_same_v<Node, Physics::CharacterCreateDesc>) desc = node;
                     else dual = node;
@@ -2051,14 +2008,21 @@ class Engine final:
                     part.csgModifiers.push_back({first[k].operation, std::string(std::string_view(first[k].operandName))});
             }
             if (authored.collision != CollisionAssetID::Invalid)
-                part.meshCollider = Physics::AnyShape(Physics::Shape<Physics::Mesh>(Library().FindCollisionMesh(authored.collision)));
+                part.meshCollider = OwnedMesh {Library().FindCollisionMesh(authored.collision)};
             if (authored.hasBoxCollider) part.boxCollider = MakePrefabBoxCollider(authored.boxHalfExtents, authored.boxCenter);
             if (authored.useBoxForMeshCollider) part.meshCollider = part.boxCollider;
             if (authored.additionalMeshCollision != CollisionAssetID::Invalid) {
-                Physics::Shape<Physics::Compound> combined;
-                AppendPrefabCollider(combined, *part.meshCollider);
-                combined.Add(Physics::Shape<Physics::Mesh>(Library().FindCollisionMesh(authored.additionalMeshCollision)));
-                part.meshCollider = Physics::AnyShape(std::move(combined));
+                OwnedCompound combined;
+                if (part.meshCollider) AppendPrefabCollider(combined, *part.meshCollider);
+                const auto extra = Library().FindCollisionMesh(authored.additionalMeshCollision);
+                if (extra) combined.meshOwners.push_back(extra);
+                // A missing snapshot keeps the old semantics: an unresolvable
+                // mesh child makes the whole compound fail to build, so the
+                // body is never created.
+                combined.meshes.push_back(
+                    {extra ? Physics::TriangleMesh {extra->vertices, extra->indices} : Physics::TriangleMesh {}, {}}
+                );
+                part.meshCollider = std::move(combined);
             }
             prefab->parts.push_back(std::move(part));
         }
